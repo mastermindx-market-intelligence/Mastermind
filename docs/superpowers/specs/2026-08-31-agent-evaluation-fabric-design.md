@@ -34,9 +34,9 @@ optional pinned orchestration/adversarial adapters after native proof
 existing owners for organizational learning and policy promotion
 ```
 
-Mastermind owns immutable evaluation inputs/receipts, canonical bytes, deterministic technical validity, append-only scorer passes, bounded evidence references, privacy, and no-authority law.
+Mastermind owns immutable evaluation inputs and receipts, canonical bytes, technical-validity law, append-only scorer passes, bounded evidence references, privacy, and the no-authority boundary.
 
-OHF owns fresh App Server process/workspace/thread mechanics. Inspect AI may later orchestrate batches and expose framework logs through a subordinate adapter. Promptfoo may later generate/execute bounded public-safe adversarial cases. Parquet/DuckDB may later provide rebuildable analysis.
+OHF owns fresh App Server process/workspace/thread mechanics. Inspect AI may later orchestrate batches and expose framework logs through a subordinate adapter. Promptfoo may later generate and execute bounded public-safe adversarial cases. Parquet/DuckDB may later provide rebuildable analysis.
 
 None owns Executive lifecycle, Agent OS memory, routing, capacity, session authority, acceptance, policy, release, or promotion.
 
@@ -44,31 +44,37 @@ None owns Executive lifecycle, Agent OS memory, routing, capacity, session autho
 
 ### 1.1 Binding adversarial-review corrections
 
-The initial draft was rejected where it:
+The initial drafts were rejected where they:
 
 1. fused runner-asserted task outcome with technical validity;
 2. put future scorer references inside an immutable run;
-3. omitted exact experiment arm/pair identity;
-4. failed to store all validity inputs;
-5. lacked a canonical configuration manifest against which runner claims could be verified;
-6. trusted a runner-supplied “unexpected capability” label instead of raw observed capability IDs;
+3. omitted experiment arm/pair identity;
+4. relied on unstored validity inputs;
+5. lacked an immutable configuration manifest;
+6. trusted a runner-supplied “unexpected capability” label instead of raw observations;
 7. lacked explicit scenario effect authorization;
-8. allowed structural parsing to be confused with authoritative cross-reference verification;
-9. mapped colon-bearing IDs directly into filesystem paths.
+8. allowed shape validation to be confused with authoritative verification;
+9. mapped colon-bearing IDs directly to filesystem paths;
+10. left corpus revision outside the canonical scenario;
+11. separated evidence references from digests so association was ambiguous;
+12. used commit hashes without repository/source identity;
+13. omitted exact runner/validator/scorer code provenance;
+14. made run lookup depend on an unstated mutable index.
 
-The binding V1 law is:
+The binding V1 law is now:
 
-- runners report bounded raw execution observations, never accepted correctness or technical validity;
-- immutable configuration documents state the intended execution/procedure/context/capability/randomness configuration;
-- experiments bind exact configuration IDs/digests per arm;
-- runs bind scenario, configuration, arm, pair, replicate, raw observations, effect, cleanup, evidence, resources, timing, and derived technical validity;
-- technical validity is recomputable from stored artifacts only;
-- raw observed capability IDs/tools/sources/network destinations are stored and compared deterministically;
-- known effects are valid only when explicitly allowed by the scenario; unknown effects always invalidate;
-- scorer passes append outside runs;
-- task result projections arise only from required scorer evidence;
-- structural validation is never called authoritative verification;
-- IDs are schema-parsed into safe path segments.
+- runners report raw bounded observations and execution completion only;
+- scenarios bind exact corpus revision, source artifacts/digests, capabilities, network, effects, scoring, privacy, and authorship;
+- immutable configurations bind exact source-qualified procedure/context/capability/randomness inputs;
+- experiments bind exact scenario/configuration artifacts per arm;
+- runs bind scenario, configuration, arm, pair, replicate, source-qualified runner code, raw source/capability/tool/network observations, effect, cleanup, evidence artifacts/digests, resources, timing, and derived technical validity;
+- technical validity is recomputable from stored evaluation artifacts only;
+- known effects are valid only under exact scenario authorization; effect unknown always invalidates;
+- scorer passes append outside runs and bind exact scorer code;
+- task pass/fail projections arise only from required scorer evidence;
+- structural validation is never called verification;
+- evaluation-graph verification is explicit and does not overclaim external evidence-content verification;
+- canonical IDs map directly to safe, globally resolvable paths without a mutable registry.
 
 ---
 
@@ -79,7 +85,7 @@ The binding V1 law is:
 The first useful product is not a leaderboard or dashboard. It is an auditable journey:
 
 ```text
-versioned scenario
+versioned scenario + corpus revision
 -> immutable candidate configurations
 -> frozen experiment arms
 -> closed runner draft
@@ -89,14 +95,14 @@ versioned scenario
 -> sanitized comparison evidence reference
 ```
 
-A reviewer can reproduce why a run was valid, invalid, degraded, scored, unscored, or incomparable without chat history or narrative trust.
+A reviewer can reproduce why a run was technically valid, invalid, degraded, scored, unscored, or incomparable without chat history or narrative trust.
 
 ### 2.2 Chairman job
 
 The Chairman can ask:
 
 - Are agents actually improving?
-- Which tools/procedures repay complexity?
+- Which tools and procedures repay complexity?
 - Which lower-scarcity routes safely match stronger routes for a defined class?
 - Where do failures cluster and can one be reproduced?
 - What is retrospective, replayed, prospectively shadowed, canaried, or promoted?
@@ -111,7 +117,7 @@ Sol defines scenarios, freezes source visibility, detects leakage, compares exac
 
 ### 2.4 Platform-owner job
 
-An owner needs exact scenario/configuration/run IDs and digests, raw source/tool/capability/network observations, effect/cleanup evidence, scorer versions, trace/artifact refs, reproduction commands, and paired comparator—not “score 0.78.”
+An owner needs exact scenario/configuration/experiment/run IDs and digests; source/tool/capability/network/effect/cleanup observations; scorer versions/code; trace/output/event artifacts; reproduction commands; and paired comparator—not “score 0.78.”
 
 ### 2.5 Auditor job
 
@@ -133,8 +139,8 @@ An independent auditor attacks leakage, hidden solution access, configuration dr
 
 A complete system can:
 
-1. freeze versioned task classes and hidden holdouts;
-2. bind every arm to an immutable configuration;
+1. freeze versioned task classes, corpus revisions, and hidden holdouts;
+2. bind every arm to immutable source-qualified configuration inputs;
 3. execute with exact requested/served model and observed source/tool/capability/network/effect/cleanup evidence;
 4. recompute technical validity from stored artifacts;
 5. append deterministic/statistical/model/human scorer passes without rewriting runs;
@@ -151,11 +157,11 @@ A complete system can:
 
 | Fact/effect | Canonical owner | Evaluation use |
 |---|---|---|
-| Job/Attempt/Worker/Event lifecycle, effects, retry/requeue, CEO admission | Executive OS | Read refs only; never schedule/mutate |
-| Durable WS/DEC/DSC/handoff/`do_not_redo` | Agent OS | Receive only Sol-adjudicated conclusions; no raw run events |
+| Job/Attempt/Worker/Event lifecycle, effects, retry/requeue, CEO admission | Executive OS | Read exact refs only; never schedule/mutate |
+| Durable WS/DEC/DSC/handoff/`do_not_redo` | Agent OS | Receive Sol-adjudicated conclusions; no raw run events |
 | Code/PR/CI/merge/production proof | GitHub | Implementation and immutable source truth |
 | Provider/account/host capacity | Provider Control + Capacity Fabric | Context only; quality cannot manufacture capacity |
-| Accepted suitability/route policy | Model Router/RF1 | Later evidence consumer; no automatic route |
+| Accepted suitability/route policy | Model Router/RF1 | Evidence consumer; no automatic route |
 | Fresh process/workspace/thread mechanics | OHF / PR #162 | First runner; not duplicated |
 | Exact execution surface | RuntimeBinding/SessionTarget | Optional reference; no binding transfer |
 | Dialogue/attention | Dialogue/Relay/Wake | Optional evidence; no evaluator watcher/queue |
@@ -195,7 +201,7 @@ Macro `main` lacks accepted `organizational-learning` registration. EVAL-F0 writ
 
 ## 4. Capability ledger
 
-Only `PROVEN_LIVE`, `BUILT_NOT_PROVEN`, `PARTIAL`, `DARK_OR_DISCONNECTED`, `BROKEN`, `SPEC_ONLY`, `NOT_BUILT`, `REJECTED_BY_DESIGN` are valid.
+Only `PROVEN_LIVE`, `BUILT_NOT_PROVEN`, `PARTIAL`, `DARK_OR_DISCONNECTED`, `BROKEN`, `SPEC_ONLY`, `NOT_BUILT`, and `REJECTED_BY_DESIGN` are valid.
 
 | Capability | State | Consequence |
 |---|---|---|
@@ -225,7 +231,7 @@ Only `PROVEN_LIVE`, `BUILT_NOT_PROVEN`, `PARTIAL`, `DARK_OR_DISCONNECTED`, `BROK
 
 Use `mastermind.<task_family>.v<integer>` contracts for executive cold start, architecture recovery, authority adjudication, collision detection, bounded implementation, debugging, PR review, product design, research synthesis, handoff execution, dialogue continuation, effect reconciliation, tool use, retrieval, security adversarial, and production diagnosis.
 
-Each binds risk, expected output, source/authority behavior, configurations/capabilities, effect policy, invalidation, and scoring dimensions.
+Each binds risk, expected output, corpus/source/authority behavior, configurations/capabilities, effect policy, invalidation, and scoring dimensions.
 
 ### 5.2 Dimensions
 
@@ -262,9 +268,11 @@ INVALID_CLEANUP | DEGRADED_DEPENDENCY
 
 `INSUFFICIENT_EVIDENCE` is an evidence-set grade. Invalid samples remain visible and outside valid denominators. A runner cannot assert `VALID_PASS`.
 
+`VALID` means the run is admissible under the frozen technical configuration/source/effect/cleanup policy. It does not assert task correctness, external artifact content, or production acceptance.
+
 ---
 
-## 6. Canonical bytes, IDs, and verification layers
+## 6. Canonical bytes, IDs, references, and verification scopes
 
 ### 6.1 Canonical JSON
 
@@ -277,7 +285,7 @@ INVALID_CLEANUP | DEGRADED_DEPENDENCY
 - Set-like arrays sorted/unique.
 - Canonical bytes equal compact sorted UTF-8 JSON with `ensure_ascii=False`, `allow_nan=False` after strict type validation.
 - Digest is lower-case `sha256:<64 hex>` over object without its own digest field.
-- Verification never normalizes/repairs accepted input.
+- Verification never normalizes or repairs accepted input.
 
 ### 6.2 IDs
 
@@ -290,16 +298,34 @@ scorer-pass:<uuid4>
 evidence-ref:<uuid4>
 ```
 
-Reruns create new IDs. Same ID + identical canonical bytes is idempotent import; same ID + changed bytes is conflict.
+Reruns create new IDs. Same ID + identical canonical bytes is idempotent import; same ID + changed bytes is a conflict.
 
-### 6.3 Validation is not verification
+### 6.3 Source-qualified references
 
-V1 exposes two conceptual layers:
+A source/code reference is an immutable string containing owner/repository and immutable revision, for example:
 
-1. **Shape validation:** closed fields, primitive types, enums, local invariants, canonical bytes, own digest.
-2. **Authoritative verification:** shape validation plus resolution of every referenced scenario/configuration/experiment/run/scorer artifact, digest equality, cross-reference equality, and run-validity recomputation.
+```text
+git:mastermindx-market-intelligence/Mastermind@<40-hex-sha>
+```
 
-Only authoritative verification may produce `VERIFIED`. Public CLI/store commands called `verify` require a read-only local resolver. A shape-only helper is named `validate_*_shape` and must never return/print `VERIFIED`, `VALID`, `accepted`, or `approved`.
+A generic evidence artifact reference is always paired with its digest:
+
+```yaml
+artifact_ref: immutable owner-native reference
+digest: sha256:...
+```
+
+Optional artifact references are null as a whole object; ref and digest never vary independently. Lists of artifact records sort by `artifact_ref` and reject duplicate refs or digests where uniqueness is required.
+
+### 6.4 Verification scopes
+
+V1 exposes three separate claims:
+
+1. `SHAPE_VALID`: closed fields, types, local invariants, canonical bytes, own digest.
+2. `EVALUATION_GRAPH_VERIFIED`: every referenced scenario/configuration/experiment/run/scorer/evidence artifact resolves locally, IDs/digests/cross-links match, and run validity/evidence summaries recompute.
+3. `EVIDENCE_CONTENT_VERIFIED`: owner-native input/output/event/trace artifact bytes were resolved and matched their digests.
+
+EVAL-R0 implements the first two. It does **not** claim the third. Corpus and runner waves add content verification. Public APIs and evidence refs must state the scope; a graph-verified artifact with externally sealed refs is not called content-verified.
 
 ---
 
@@ -312,13 +338,14 @@ schema:
 scenario_id:
 scenario_version:
 scenario_family:
+corpus_revision:
 risk_tier: LOW | MEDIUM | HIGH | CRITICAL
 objective:
 input_fixture: {artifact_ref, digest}
 expected_contract: {artifact_ref, digest}
 temporal: {cutoff_at, authored_at}
 source_policy:
-  allowlist_refs:
+  allowlist_artifacts: [{artifact_ref, digest}, ...]
   denylist_refs:
   solution_refs_hidden:
 capability_policy:
@@ -346,14 +373,14 @@ scoring_policy:
   required_dimensions:
 privacy:
   classification: PUBLIC_SAFE | PRIVATE_RESTRICTED
-  model_visible_artifacts:
+  model_visible_artifact_refs:
   retention_class: EPHEMERAL | BOUNDED | DURABLE_SANITIZED
 authorship: {author_ref, independent_reviewer_ref}
 supersedes:
 scenario_digest:
 ```
 
-`NO_EFFECT_ONLY` requires an empty operation allowlist. `DECLARED_EFFECT_ALLOWED` requires a non-empty exact sorted allowlist. Source/capability/tool/network/effect sets are immutable per scenario version.
+`corpus_revision` is immutable and source-qualified. `NO_EFFECT_ONLY` requires an empty operation allowlist. `DECLARED_EFFECT_ALLOWED` requires a nonempty exact allowlist. Source/capability/tool/network/effect sets are immutable per scenario version.
 
 ### 7.2 Configuration — `mastermind.agent_evaluation_configuration.v1`
 
@@ -361,22 +388,23 @@ A configuration is an immutable evaluation input, not routing policy:
 
 ```yaml
 schema:
-configuration_id: configuration:<uuid4>
+configuration_id:
 execution:
   execution_surface:
+  execution_surface_version:
   provider:
   model_requested:
   reasoning_effort:
   auth_realm_class:
 procedure:
-  protected_source_commit:
-  skillpack_commit:
+  protected_source_ref:
+  skillpack_source_ref:
   skillpack_version:
-  instruction_bundle_digest:
-  handoff_digest:
+  instruction_bundle: {artifact_ref, digest}
+  handoff: {artifact_ref, digest} | null
 context:
-  context_packet_digest:
-  retrieval_configuration_digest:
+  context_packet: {artifact_ref, digest}
+  retrieval_configuration: {artifact_ref, digest} | null
 capabilities:
   profile_id:
   profile_digest:
@@ -388,11 +416,13 @@ capabilities:
 randomness:
   seed:
   sampling_parameters_digest:
+authorship: {author_ref, independent_reviewer_ref}
 created_at:
+supersedes:
 configuration_digest:
 ```
 
-Scenario profile, allowed capabilities/tools, and network policy must be compatible with each configuration before execution. Configuration documents cannot assert capacity, route suitability, policy, authority, or served model.
+Scenario profile, allowed capabilities/tools, and network policy must be compatible before execution. Configuration cannot assert capacity, route suitability, policy, authority, served model, winner, or acceptance.
 
 ### 7.3 Experiment — `mastermind.agent_evaluation_experiment.v1`
 
@@ -400,6 +430,10 @@ Scenario profile, allowed capabilities/tools, and network policy must be compati
 schema:
 experiment_id:
 scenario_refs:
+  - scenario_id:
+    scenario_version:
+    scenario_digest:
+    corpus_revision:
 arms:
   - arm_id:
     configuration_id:
@@ -418,13 +452,13 @@ created_at:
 experiment_digest:
 ```
 
-Authoritative verification resolves every scenario/configuration and checks digests. The manifest schedules nothing and authorizes no canary/promotion.
+Graph verification resolves every scenario/configuration and checks digests/compatibility. The manifest schedules nothing and authorizes no canary/promotion.
 
 ### 7.4 Run draft — `mastermind.agent_evaluation_run_draft.v1`
 
 A runner emits a closed transient draft. It is never stored in the canonical artifact tree. It contains all run fields except `validity`, `created_at`, and `run_digest`, and uses the draft schema name.
 
-The finalizer receives exact scenario, configuration, optional experiment, and draft; it shape-validates, verifies cross references, derives validity, changes schema to the run schema, inserts validity/creation/digest, verifies the final run, then permits create-only publication.
+The finalizer receives exact scenario, configuration, optional experiment, and draft; shape-validates, graph-verifies inputs, derives validity, changes schema, inserts validity/creation/digest, graph-verifies the final run, then permits create-only publication.
 
 No parallel unstored facts, runner score, pass/fail, winner, policy, or acceptance field is allowed.
 
@@ -449,7 +483,9 @@ comparison:
   replicate_index:
 execution:
   runner_id:
+  runner_code_ref:
   execution_surface:
+  execution_surface_version:
   provider:
   model_requested:
   model_served:
@@ -464,17 +500,17 @@ execution:
   fresh_session_observed:
   resume_used:
 procedure:
-  protected_source_commit:
-  skillpack_commit:
+  protected_source_ref:
+  skillpack_source_ref:
   skillpack_version:
-  instruction_bundle_digest:
-  handoff_digest:
+  instruction_bundle: {artifact_ref, digest}
+  handoff: {artifact_ref, digest} | null
 context:
-  source_allowlist_digest:
-  context_packet_digest:
-  retrieval_configuration_digest:
+  source_policy_digest:
+  context_packet: {artifact_ref, digest}
+  retrieval_configuration: {artifact_ref, digest} | null
 observations:
-  observed_source_refs:
+  observed_sources: [{artifact_ref, digest}, ...]
   observed_capability_ids:
   observed_tool_schema_digests:
   observed_network_destinations:
@@ -495,13 +531,12 @@ effect:
   reconciliation_ref:
 cleanup:
   status: PROVEN | UNPROVEN | NOT_REQUIRED
-  proof_ref:
-  proof_digest:
+  proof: {artifact_ref, digest} | null
 evidence:
-  output_digest:
-  tool_event_digest:
-  trace_ref:
-  artifact_refs:
+  output: {artifact_ref, digest}
+  tool_events: {artifact_ref, digest}
+  trace: {artifact_ref, digest} | null
+  artifacts: [{artifact_ref, digest, kind}, ...]
 resources:
   input_tokens:
   output_tokens:
@@ -517,13 +552,15 @@ timing:
 validity:
   status:
   reason_codes:
+  validator_id:
   validator_version:
+  validator_code_ref:
   validated_at:
 created_at:
 run_digest:
 ```
 
-If experiment ID is non-null, scenario/configuration/arm/pair/replicate must match the manifest. If null, arm/pair are null. The run contains no scorer list and no task outcome.
+If experiment ID is nonnull, scenario/configuration/arm/pair/replicate must match the manifest. If null, arm/pair are null. The run contains no scorer list and no task outcome.
 
 ### 7.6 Deterministic validity
 
@@ -536,6 +573,7 @@ TOOL_SCHEMA_DRIFT
 CAPABILITY_DRIFT
 FORBIDDEN_CAPABILITY
 UNAUTHORIZED_SOURCE
+SOURCE_DIGEST_MISMATCH
 HIDDEN_SOLUTION_SOURCE
 UNEXPECTED_NETWORK_DESTINATION
 FRESH_PROCESS_UNPROVEN
@@ -554,6 +592,7 @@ SCENARIO_NOT_IN_EXPERIMENT
 CONFIGURATION_NOT_IN_EXPERIMENT
 REPLICATE_OUT_OF_RANGE
 TEMPORAL_CUTOFF_MISMATCH
+CORPUS_REVISION_MISMATCH
 SOURCE_POLICY_DIGEST_MISMATCH
 ```
 
@@ -564,23 +603,34 @@ EFFECT_UNKNOWN                     -> INVALID_EFFECT_UNKNOWN
 else unauthorized/hidden source   -> INVALID_LEAKAGE
 else required cleanup unproven    -> INVALID_CLEANUP
 else config/capability/tool/
-     network/effect/arm/cutoff
-     mismatch                      -> INVALID_CONFIGURATION
+     network/effect/arm/cutoff/
+     corpus/source-digest mismatch -> INVALID_CONFIGURATION
 else allowed degradation present  -> DEGRADED_DEPENDENCY
 else                               -> VALID
 ```
 
-All reasons remain visible even when lower priority. Authoritative run verification recomputes and requires exact equality.
+All reasons remain visible even when lower priority. Graph verification recomputes and requires exact equality.
 
 ### 7.7 Scorer pass — `mastermind.agent_evaluation_scorer_pass.v1`
 
-A scorer pass binds ID; exact run/digest; scorer ID/version/code/config; method `DETERMINISTIC|STATISTICAL|MODEL_GENERATED|HUMAN`; exact input evidence; sorted dimension results; grader/human identity where applicable; creation; supersession; own digest.
+A scorer pass binds:
 
-Dimension status is `PASS|FAIL|PARTIAL|UNKNOWN|NOT_APPLICABLE` with reasons/evidence. No universal aggregate or winner. Changed scoring appends; never rewrites.
+- ID;
+- exact run ID/digest;
+- scorer ID/version/source-qualified code ref/configuration digest;
+- method `DETERMINISTIC | STATISTICAL | MODEL_GENERATED | HUMAN`;
+- exact input evidence artifact/digest pairs;
+- sorted dimension results;
+- grader/human identity where applicable;
+- creation time;
+- superseded pass or null;
+- own digest.
+
+Dimension status is `PASS | FAIL | PARTIAL | UNKNOWN | NOT_APPLICABLE` with reasons/evidence. No universal aggregate or winner. Changed scoring appends; never rewrites.
 
 ### 7.8 Evidence reference — `mastermind.agent_evaluation_evidence_ref.v1`
 
-A sanitized reference binds task/scenarios/corpus; experiment; exact configurations; per-run arm/pair/technical validity/scored projection; dimension gate matrix; valid/invalid/degraded/unscored counts; uncertainty/sample size/limitations; receipt/scorer/analysis refs; phase; intended owner/review time; non-authority statement; own digest.
+A sanitized reference binds task/scenarios/corpus; experiment; exact configurations; per-run arm/pair/replicate/technical-validity/scored projection; dimension gate matrix; valid/invalid/degraded/unscored counts; uncertainty/sample size/limitations; receipt/scorer/analysis artifact/digest refs; phase; verification scopes; intended owner/review time; non-authority statement; own digest.
 
 For technically valid runs, all required accepted dimensions pass => `VALID_PASS`; any fail => `VALID_FAIL`; no fail plus partial => `VALID_PARTIAL`; missing/unknown => `UNSCORED`. Invalid/degraded states pass through. No invalid run enters valid denominators.
 
@@ -588,46 +638,46 @@ This is evidence, not a policy candidate.
 
 ---
 
-## 8. Identity, time, correction, storage
+## 8. Identity, time, correction, and storage
 
 ### 8.1 Time/null
 
 - `started_at <= completed_at <= validated_at <= created_at`.
 - monotonic duration equals resource elapsed ms.
-- scenario cutoff exactly matches run cutoff.
+- scenario cutoff and corpus revision exactly match the run.
 - unknown is explicit null only where allowed; missing cost/trace/tokens/usage/session never becomes zero.
 - required unknown yields invalid/unscored/insufficient evidence; no model imputation.
 
 ### 8.2 Correction
 
-Scenario/configuration changes create new versions/IDs. Experiments/runs are immutable. Scorer passes/analysis/evidence refs append or supersede. Corrupt/private artifacts are quarantined with tombstones, never rewritten. Production contradiction remains visible and routes to Outcome Learning/current owner.
+Scenario changes create versions. Configuration changes create new IDs and optional supersession. Experiments/runs are immutable. Scorer passes, analysis, and evidence refs append or supersede. Corrupt/private artifacts are quarantined with tombstones, never rewritten. Production contradiction remains visible and routes to Outcome Learning/current owner.
 
-### 8.3 Safe paths
+### 8.3 Globally resolvable safe paths
 
 ```text
-configuration:<uuid> -> configurations/<uuid>/configuration.json
 scenario:<family>:<case> -> scenarios/<family>/<case>/v<version>/scenario.json
-experiment:<uuid> -> experiments/<uuid>/manifest.json
-run:<uuid> -> experiments/<experiment-uuid-or-standalone>/runs/<uuid>/receipt.json
-scorer-pass:<uuid> -> .../runs/<run-uuid>/scorer-passes/<uuid>.json
-evidence-ref:<uuid> -> evidence-refs/<uuid>.json
+configuration:<uuid>     -> configurations/<uuid>/configuration.json
+experiment:<uuid>        -> experiments/<uuid>/manifest.json
+run:<uuid>               -> runs/<uuid>/receipt.json
+scorer-pass:<uuid>       -> runs/<run-uuid>/scorer-passes/<uuid>.json
+evidence-ref:<uuid>      -> evidence-refs/<uuid>.json
 ```
 
-Segments are validated safe ASCII, with no colon/slash/backslash/dot segment/device name/control/trailing dot-space.
+Segments are validated safe ASCII, with no colon/slash/backslash/dot segment/device name/control/trailing dot-space. Experiment grouping remains a contract relation, not a filesystem identity or mutable index.
 
 ### 8.4 Create-only publication
 
 V1 stores immutable JSON in approved private roots; repositories contain public-safe schemas/fixtures/sanitized receipts.
 
 1. shape-validate and secret-scan;
-2. resolve all referenced artifacts and authoritatively verify;
-3. derive safe path below resolved root; refuse parent symlinks;
+2. resolve evaluation references and graph-verify;
+3. derive safe path below resolved private root; refuse parent symlinks;
 4. write canonical bytes to same-directory private temp file; flush/fsync;
 5. hard-link to absent final path; fsync directory; unlink temp;
-6. read back, resolve, verify, compare bytes/digest;
+6. read back, resolve, graph-verify, compare bytes/digest;
 7. existing exact bytes => idempotent; different/corrupt => conflict.
 
-Unsupported create-only hard-link semantics fail closed. Any index/Parquet/DuckDB projection is rebuildable and noncanonical. No mutable DB/service owns experiment truth.
+Unsupported create-only hard-link semantics fail closed. The root is private and trusted; V1 does not claim protection against a hostile same-user process racing directory replacement. Any index/Parquet/DuckDB projection is rebuildable and noncanonical. No mutable DB/service owns experiment truth.
 
 ---
 
@@ -639,7 +689,7 @@ EVAL-R0 uses Python standard library plus a narrow existing text-redaction helpe
 
 ### 9.2 OHF first real runner
 
-PR #162 remains sole fresh runner. Valid fresh constitutional samples prove isolated workspace/process, one new thread/no resume, exact Skillpack/configuration, requested/served model, observed capability/tool/source/network facts, read-only realm, effect state, cleanup, and zero organizational/production mutation.
+PR #162 remains sole fresh runner. Valid fresh constitutional samples prove isolated workspace/process, one new thread/no resume, exact scenario/configuration/Skillpack, requested/served model, raw capability/tool/source/network facts, read-only realm, effect state, cleanup, content-evidence refs, and zero organizational/production mutation.
 
 Crash rerun waits for effect/cleanup reconciliation. Fresh-start samples never checkpoint/resume/fail over.
 
@@ -669,7 +719,7 @@ Synthetic invariants; cutoff-safe historical replay; mutations from defects; com
 
 ### 10.2 Leakage
 
-Pin immutable refs; hide final branches/PRs/commits/reviews/outcomes/post-cutoff records; record exposed sources; detect solution strings/IDs; prohibit unrestricted current search unless tested; keep holdouts inaccessible; separate authors/builders/evaluators where needed; invalidate unauthorized access.
+Pin immutable artifact/digest pairs; hide final branches/PRs/commits/reviews/outcomes/post-cutoff records; record every exposed source; detect solution strings/IDs; prohibit unrestricted current search unless tested; keep holdouts inaccessible; separate authors/builders/evaluators where needed; invalidate unauthorized access.
 
 If solutions cannot be hidden, call it post-hoc comprehension or discard it.
 
@@ -692,9 +742,11 @@ Never ingest by default raw Chairman chats, chain of thought, credentials/tokens
 | Failure | Behavior |
 |---|---|
 | Invalid shape/draft | Refuse before canonical run |
-| Missing verification context/ref | Refuse; never downgrade to structural “verified” |
-| Cutoff/source unavailable | Refuse/invalid; no current substitution |
+| Missing graph context/ref | Refuse; never relabel shape-valid as graph-verified |
+| Missing external content | Preserve sealed ref and mark content scope unverified |
+| Cutoff/corpus/source unavailable | Refuse/invalid; no current substitution |
 | Unauthorized/solution source | `INVALID_LEAKAGE` |
+| Source digest mismatch | `INVALID_CONFIGURATION` and preserve evidence |
 | Model/config/tool/capability/network/arm/effect mismatch | `INVALID_CONFIGURATION` |
 | Sandbox unavailable | Refuse; no silent host execution |
 | Timeout before effect | Preserve partial; rerun under scenario law |
@@ -729,9 +781,9 @@ Architecture is falsified if the first scenario-to-evidence-reference vertical n
 ```text
 EVAL-F0 architecture/source law (this PR)
   -> EVAL-R0 closed scenario/configuration/experiment/run/scorer/evidence core
-  -> EVAL-C0 governed corpus/holdouts
+  -> EVAL-C0 governed corpus/holdouts + evidence-content verification
   -> EVAL-OHF1 implement existing PR #162 runner
-       -> EVAL-OHF2 emit canonical run drafts/receipts
+       -> EVAL-OHF2 emit canonical run drafts/receipts + content evidence
             -> EVAL-S1 task scorers
             -> EVAL-E1 first paired real experiment
                  -> EVAL-I1 Inspect spike
@@ -744,7 +796,7 @@ EVAL-F0 architecture/source law (this PR)
 
 R0/C0 may proceed after F0 protection. OHF1 stays #162. No framework/UI/policy wave starts before native real-run evidence.
 
-R0 CLI must validate/verify one scenario, two configurations, one experiment; finalize one `VALID` and one model-mismatched `INVALID_CONFIGURATION` draft; recompute validity; append integrity scorers; emit one evidence ref preserving arm/pair/invalid counts and `INSUFFICIENT_EVIDENCE`; contain no runner outcome/winner/aggregate/policy; and verify all digests.
+R0 must shape-validate and graph-verify one scenario, two configurations, one experiment; finalize one `VALID` and one model-mismatched `INVALID_CONFIGURATION` draft; recompute validity; append integrity scorers; emit one evidence ref preserving configuration/arm/pair/invalid counts and `INSUFFICIENT_EVIDENCE`; state content-verification scope honestly; contain no runner outcome/winner/aggregate/policy; and verify all evaluation artifact digests.
 
 ---
 
@@ -752,13 +804,13 @@ R0 CLI must validate/verify one scenario, two configurations, one experiment; fi
 
 ### 14.1 F0 acceptance
 
-Require exact current base, three-record delta, current Skillpack, exact-head required checks, independent architecture/source-law review, collision review, and final Sol review of configuration/effect/raw-observation/verification/immutability/privacy/no-duplicate boundaries.
+Require exact current base, three-record delta, current Skillpack, exact-head required checks, independent architecture/source-law review, collision review, and final Sol review of corpus/configuration/source-evidence/effect/raw-observation/verification-scope/immutability/privacy/no-duplicate boundaries.
 
 Merge proves only `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`.
 
 ### 14.2 Meaningful system proof
 
-Require three task classes, two configs, exact identities, private holdout, prospectively sealed task, independent leakage/scorer audit, reproduced failure, owner-accepted evidence ref, forward improvement, complete invalid/degraded reporting, no authority/privacy violation, and no offline=production claim.
+Require three task classes, two configurations, exact identities, private holdout, prospectively sealed task, independent leakage/scorer audit, reproduced failure, owner-accepted evidence ref, forward improvement, complete invalid/degraded reporting, no authority/privacy violation, and no offline=production claim.
 
 ### 14.3 Value gate
 
@@ -767,7 +819,7 @@ Show material forward improvement—such as 30% fewer broad reads/tool calls, ma
 ### 14.4 Falsifiers
 
 - Native core recreates runners/scheduling/UI/general orchestration.
-- OHF cannot expose exact configuration/observations/effect/cleanup without duplicate authority.
+- OHF cannot expose exact configuration/observations/effect/cleanup/content evidence without duplicate authority.
 - Inspect cannot prevent/attest provider-side widening or preserve Mastermind verification.
 - Promptfoo requires restricted export/uncontrolled network.
 - Replay cannot hide solutions.
@@ -778,6 +830,6 @@ Show material forward improvement—such as 30% fewer broad reads/tool calls, ma
 
 ## 15. Exact next action
 
-Update the executable R0 plan to this contract; run exact-head checks; obtain independent architecture/source-law review; reconcile new protected-base movement; then make a separate hold-removal/merge decision.
+Update the executable R0 plan to this final contract; run exact-head checks; obtain independent architecture/source-law review; reconcile new protected-base movement; then make a separate hold-removal/merge decision.
 
 After F0 protection, commission R0 on a new implementation carrier and separately resume OHF1 on existing PR #162. No other wave starts merely because architecture exists.
