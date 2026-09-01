@@ -103,15 +103,18 @@ class MastermindTokenVerifier(TokenVerifier):
             raise TypeError("now must be callable")
         if not callable(getattr(audit_sink, "emit", None)):
             raise TypeError("audit_sink must provide emit")
+        validated_policy = validate_resource_policy(policy)
+        validate_resource_policy(authenticator.policy)
         self._authenticator = authenticator
-        self._policy = validate_resource_policy(policy)
+        self._policy = validated_policy
+        self._audit_policy_id = validated_policy.policy_id
         self._now = now
         self._audit_sink = audit_sink
 
     def _emit(self, *, code: str, accepted: bool) -> bool:
         event = AuthAuditEvent(
             schema=AUTH_AUDIT_SCHEMA,
-            policy_id=self._policy.policy_id,
+            policy_id=self._audit_policy_id,
             code=code,
             accepted=accepted,
         )

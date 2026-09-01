@@ -46,7 +46,7 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _PERCENT_RE = re.compile(r"%[0-9A-Fa-f]{2}")
 _PATH_ATOM_RE = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:@/-]")
 _URI_DANGEROUS = frozenset('"<> {}\\^|`')
-_NON_AUTHORIZING_OAUTH_SCOPES = frozenset({"offline_access"})
+NON_AUTHORIZING_OAUTH_SCOPES = frozenset({"offline_access"})
 
 
 class AuthErrorCode(str, enum.Enum):
@@ -304,7 +304,7 @@ def load_resource_policy(value: object) -> ResourcePolicy:
             pattern=_SCOPE_RE,
             maximum_items=32,
         )
-        if set(required_scopes) & _NON_AUTHORIZING_OAUTH_SCOPES:
+        if set(required_scopes) & NON_AUTHORIZING_OAUTH_SCOPES:
             _refuse()
         allowed_subject_digests = _sorted_unique_strings(
             value.get("allowed_subject_digests"),
@@ -407,6 +407,7 @@ def validate_resource_policy(value: object) -> ResourcePolicy:
 __all__ = [
     "AUTH_AUDIT_SCHEMA",
     "AUTH_POLICY_SCHEMA",
+    "NON_AUTHORIZING_OAUTH_SCOPES",
     "POLICY_KEYS",
     "AuthAuditEvent",
     "AuthAuditSink",
