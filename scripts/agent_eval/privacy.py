@@ -22,6 +22,8 @@ that set is supplied-value territory and is scanned/rejected normally.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from dataclasses import dataclass
 from ipaddress import ip_address
@@ -87,7 +89,8 @@ FORBIDDEN_FIELD_NAMES = frozenset(
     }
 )
 
-_JWT_RE = re.compile(r"^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*$")
+_JWT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]{8,}$")
+_JWT_SIGNATURE_RE = re.compile(r"^[A-Za-z0-9_-]*$")
 
 _KNOWN_SECRET_PREFIXES = (
     "sk-ant-",
@@ -115,16 +118,55 @@ _IPV4_RE = re.compile(
 )
 
 
+def _b64url_decode(segment: str) -> bytes:
+    padded = segment + "=" * (-len(segment) % 4)
+    return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def _looks_like_jwt(text: str) -> bool:
+    """Precise JWT detection: three dot-separated base64url segments whose
+    HEADER decodes to a JSON object (real JWT headers are ``{"alg":...}``,
+    so their base64url form reliably decodes to bytes starting with ``{``).
+
+    A shape-only "N.N.N with base64url charset" rule would false-positive
+    on ordinary ``mastermind.<name>.v<int>`` scorer/schema identifiers used
+    throughout this package (amendment §3.5: R0 deliberately avoids a
+    generic long-token rule for exactly this reason) -- this decode-based
+    check does not.
+    """
+    parts = text.split(".")
+    if len(parts) != 3:
+        return False
+    header, payload, signature = parts
+    if not (_JWT_SEGMENT_RE.match(header) and _JWT_SEGMENT_RE.match(payload) and _JWT_SIGNATURE_RE.match(signature)):
+        return False
+    try:
+        decoded_header = _b64url_decode(header)
+    except (binascii.Error, ValueError):
+        return False
+    stripped = decoded_header.lstrip()
+    return stripped[:1] == b"{"
+
+
 def _known_prefix_finding(text: str) -> bool:
     for prefix in _KNOWN_SECRET_PREFIXES:
-        idx = text.find(prefix)
-        if idx == -1:
-            continue
-        rest = text[idx + len(prefix):]
-        # require a nontrivial token body immediately following the prefix
-        body_match = re.match(r"[A-Za-z0-9_-]{8,}", rest)
-        if body_match:
-            return True
+        start = 0
+        while True:
+            idx = text.find(prefix, start)
+            if idx == -1:
+                break
+            # require a word boundary before the prefix so an ordinary
+            # hyphenated English word (e.g. "task-correctness" contains the
+            # literal substring "sk-") never false-positives; a real
+            # credential prefix is preceded by start-of-string or a
+            # non-alnum/underscore separator (space, "=", ":", quote, ...).
+            preceding_ok = idx == 0 or not (text[idx - 1].isalnum() or text[idx - 1] == "_")
+            if preceding_ok:
+                rest = text[idx + len(prefix):]
+                # require a nontrivial token body immediately following the prefix
+                if re.match(r"[A-Za-z0-9_-]{8,}", rest):
+                    return True
+            start = idx + 1
     return False
 
 
@@ -144,7 +186,7 @@ def _private_host_finding(text: str) -> bool:
 
 def _string_findings(text: str, path: str) -> list[SecretShapeFinding]:
     found: list[SecretShapeFinding] = []
-    if text.count(".") == 2 and _JWT_RE.match(text):
+    if _looks_like_jwt(text):
         found.append(SecretShapeFinding(path, "JWT_SHAPE", "jwt_shape"))
     if _known_prefix_finding(text):
         found.append(SecretShapeFinding(path, "KNOWN_SECRET_PREFIX", "known_secret_prefix"))

@@ -219,6 +219,44 @@ def test_arbitrary_long_hex_run_without_other_prohibited_shape_is_not_rejected()
     assert findings == ()
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "mastermind.agent_evaluation_scenario.v1",
+        "mastermind.agent_evaluation_configuration.v1",
+        "mastermind.agent_evaluation_experiment.v1",
+        "mastermind.agent_evaluation_run.v1",
+        "mastermind.agent_evaluation_scorer_pass.v1",
+        "mastermind.agent_evaluation_evidence_ref.v1",
+        "mastermind.technical_integrity.v1",
+        "mastermind.evaluation_contract_integrity.v1",
+    ],
+)
+def test_mastermind_dotted_schema_and_scorer_ids_are_not_jwt_shaped(value: str) -> None:
+    # regression: a naive "N.N.N base64url-charset" JWT heuristic
+    # false-positives on every mastermind.<name>.v<int> identifier used
+    # throughout this package's own schema/scorer/scenario_family grammar.
+    # The precise decode-the-header check must not flag these.
+    findings = detect_secret_shapes({"schema": value})
+    assert findings == ()
+
+
+def test_hyphenated_word_containing_known_prefix_substring_is_not_rejected() -> None:
+    # regression: "sk-" is a known credential prefix, but it also appears as
+    # a literal substring inside ordinary hyphenated English words (e.g.
+    # "task-correctness"). A prefix match must require a word boundary, not
+    # just substring containment.
+    findings = detect_secret_shapes(
+        {"note": "R0 has no independent task-correctness scorer beyond technical_integrity."}
+    )
+    assert findings == ()
+
+
+def test_known_prefix_at_word_boundary_still_detected_after_boundary_fix() -> None:
+    findings = detect_secret_shapes({"note": "leaked credential: sk-ant-abcdefgh12345678 in the logs"})
+    assert any(f.code == "KNOWN_SECRET_PREFIX" for f in findings)
+
+
 # ---------------------------------------------------------------------------
 # R-B1-4: closed observed-evidence exempt set
 # ---------------------------------------------------------------------------
