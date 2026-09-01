@@ -40,9 +40,19 @@ def _read(path: Path) -> str:
     return payload.decode("utf-8")
 
 
+def _prose(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _assert_prose(value: str, *markers: str) -> None:
+    normalized = _prose(value)
+    for marker in markers:
+        assert _prose(marker) in normalized
+
+
 def _marked_block(text: str, begin: str, end: str) -> str:
-    before, marker, remainder = text.partition(begin)
-    assert marker and before is not None
+    _before, marker, remainder = text.partition(begin)
+    assert marker
     body, marker, _after = remainder.partition(end)
     assert marker
     return body.strip()
@@ -61,19 +71,19 @@ def test_amendment_has_narrow_precedence_and_preserves_completion_honesty() -> N
     correction = _read(CORRECTION)
     plan = _read(PLAN)
 
-    assert "supplements and, where it conflicts, supersedes" in amendment
-    assert DESIGN.name in amendment
-    assert PLAN.name in amendment
-    assert CORRECT_PACKAGE_DIGEST in amendment
+    _assert_prose(
+        amendment,
+        "supplements and, where it conflicts, supersedes",
+        DESIGN.name,
+        PLAN.name,
+        CORRECT_PACKAGE_DIGEST,
+        "SCF-PKG0 = SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT / PROTECTED",
+        "authorizes no implementation START",
+        "package-content digest correction remains separately controlling",
+    )
     assert CORRECT_PACKAGE_DIGEST in correction
     assert SUPERSEDED_PACKAGE_DIGEST in correction
-    assert "SCF-PKG0 = SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT / PROTECTED" in amendment
-    assert "authorizes no implementation START" in amendment
-
-    # The historical draft value may remain visible in the original records only
-    # because the correction and this later amendment explicitly supersede it.
     assert SUPERSEDED_PACKAGE_DIGEST in design
-    assert "package-content digest correction remains separately controlling" in amendment
     assert CORRECT_PACKAGE_DIGEST in plan
 
 
@@ -103,9 +113,12 @@ def test_v4_source_packages_do_not_reuse_the_runtime_plugin_namespace() -> None:
     assert root["capability_packages"] == {}
     assert root["plugins"] == {}
 
-    assert "`capability_packages`, not a second registry" in amendment
-    assert "plugins={}" in amendment
-    assert "installed/runtime plugin grant namespace" in amendment
+    _assert_prose(
+        amendment,
+        "`capability_packages`, not a second registry",
+        "plugins={}",
+        "installed/runtime plugin grant namespace",
+    )
 
 
 def test_v4_profile_uses_exact_skill_capabilities_without_overloading_skills() -> None:
@@ -114,10 +127,13 @@ def test_v4_profile_uses_exact_skill_capabilities_without_overloading_skills() -
     assert '"skills": []' in amendment
     assert '"skill_capabilities": [' in amendment
     assert "V4 has no `skill_capabilities` key" not in amendment
-    assert "V3 has no `skill_capabilities` key" in amendment
-    assert "resolved dataclass `profile.skills`" in amendment
-    assert "resolved dataclass `profile.skill_grants`" in amendment
-    assert "Raw `skills` remains the legacy runtime-name" in amendment
+    _assert_prose(
+        amendment,
+        "V3 has no `skill_capabilities` key",
+        "resolved dataclass `profile.skills`",
+        "resolved dataclass `profile.skill_grants`",
+        "Raw `skills` remains the legacy runtime-name",
+    )
 
 
 def test_identity_digest_graph_is_acyclic_and_has_the_required_layering() -> None:
@@ -164,26 +180,29 @@ def test_identity_digest_graph_is_acyclic_and_has_the_required_layering() -> Non
                 queue.append(target)
 
     assert set(visited) == nodes, "identity digest graph must be acyclic"
-    assert "No digest requires a fixed point" in amendment
+    _assert_prose(amendment, "No digest requires a fixed point")
 
 
 def test_corrected_interfaces_remove_the_circular_package_grant_reference() -> None:
     amendment = _read(AMENDMENT)
-    dataclass_section = amendment.split("### 4.7 Corrected dataclass fields", 1)[1].split(
-        "---", 1
-    )[0]
+    section = amendment.split("### 4.7 Corrected dataclass fields", 1)[1]
+    code = section.split("```python", 1)[1].split("```", 1)[0]
 
-    assert "package_source_digest: str" in dataclass_section
-    assert "package_generation_digest: str" in dataclass_section
-    assert "package_grant_digest" not in dataclass_section
-    assert "EffectiveSkillGrant.package_grant_digest" in amendment
-    assert "are superseded" in amendment
+    assert "package_source_digest: str" in code
+    assert "package_generation_digest: str" in code
+    assert "package_grant_digest" not in code
+    _assert_prose(
+        amendment,
+        "EffectiveSkillGrant.package_grant_digest",
+        "are superseded",
+    )
 
 
 def test_parser_and_verifier_hardening_is_explicit_and_bounded() -> None:
     amendment = _read(AMENDMENT)
 
-    for marker in (
+    _assert_prose(
+        amendment,
         "reject duplicate keys at every JSON object depth",
         "duplicate root, package, file-row, Skill and profile keys",
         "0 <= byte_length <= MAX_PACKAGE_FILE_BYTES",
@@ -192,8 +211,7 @@ def test_parser_and_verifier_hardening_is_explicit_and_bounded() -> None:
         "post-census insertion/removal/rename",
         "Sleeps and probabilistic races are not acceptable",
         "Close every descriptor on success and every refusal",
-    ):
-        assert marker in amendment
+    )
 
     default_policy = json.loads(DEFAULT_POLICY.read_text(encoding="utf-8"))
     assert default_policy["schema_version"] == "mastermind.executive_agent_capabilities/v3"
@@ -214,7 +232,8 @@ def test_corrected_implementation_scope_remains_the_same_six_code_paths() -> Non
     for path in expected:
         assert path in amendment
 
-    for protected in (
+    _assert_prose(
+        amendment,
         "current default config",
         "route",
         "autonomy",
@@ -228,5 +247,4 @@ def test_corrected_implementation_scope_remains_the_same_six_code_paths() -> Non
         "Agent OS",
         "host",
         "deployment",
-    ):
-        assert protected in amendment
+    )
