@@ -665,6 +665,20 @@ ALLOWED_PATHS = frozenset(
         "scripts/agent_eval/tc3_protocol_compliance.py",
         "tests/test_agent_eval_s1_scorers.py",
         "tests/test_agent_eval_s1_multi_scenario_summarize.py",
+        # --- EVAL-OHF2 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-ohf2-integration-20260901-
+        # fable-001): the OHF-to-R0 bridge. Additive; imports nothing from
+        # scripts.ohf.* (verified by this same file's AST fence, which
+        # parametrizes over scripts/agent_eval/*.py automatically -- no
+        # separate fence edit needed for ohf_bridge.py itself).
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-ohf2-integration.md",
+        "scripts/agent_eval/ohf_bridge.py",
+        "tests/test_agent_eval_ohf_bridge.py",
+        # review repair MAJOR-2 (same operation key): one committed,
+        # harness-written real-bytes fixture (plan record §9/§11).
+        "tests/fixtures/agent_eval_ohf_bridge/README.md",
+        "tests/fixtures/agent_eval_ohf_bridge/MANIFEST.json",
+        "tests/fixtures/agent_eval_ohf_bridge/runs/control-1.0.0/S2/1cdaa1b19b584d50ba012dc3910637eb.md",
     }
 )
 
