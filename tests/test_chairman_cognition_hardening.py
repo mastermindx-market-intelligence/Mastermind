@@ -32,12 +32,50 @@ def _classification_payload(option: dict) -> dict:
     }
 
 
+def _envelope_payload(envelope: dict) -> dict:
+    return {
+        "schema": envelope["schema"],
+        "envelope_id": envelope["envelope_id"],
+        "authority_source_refs": sorted(envelope["authority_source_refs"]),
+        "mode": envelope["mode"],
+        "allowed_actions": sorted(envelope["allowed_actions"]),
+        "allowed_reversibility": sorted(envelope["allowed_reversibility"]),
+        "allowed_repositories": sorted(envelope["allowed_repositories"]),
+        "allowed_path_prefixes": {
+            repository: sorted(envelope["allowed_path_prefixes"][repository])
+            for repository in sorted(envelope["allowed_path_prefixes"])
+        },
+        "allowed_scope_prefixes": sorted(envelope["allowed_scope_prefixes"]),
+        "allowed_carrier_prefixes": sorted(envelope["allowed_carrier_prefixes"]),
+        "max_budget_units": envelope["max_budget_units"],
+        "max_active_children": envelope["max_active_children"],
+        "require_exact_carrier": envelope["require_exact_carrier"],
+        "expires_at": envelope["expires_at"],
+    }
+
+
+def _set_binding(receipt: dict, label: str, digest: str) -> None:
+    prefix = f"{label}:"
+    fields = [
+        field for field in receipt["revision"].split(";") if not field.startswith(prefix)
+    ]
+    receipt["revision"] = ";".join([*fields, f"{label}:{digest}"])
+
+
 def _bind_document(document: dict) -> dict:
     receipts = {item["source_ref"]: item for item in document["source_receipts"]}
     strategy_ref = document["strategic_constraints_source_ref"]
-    receipts[strategy_ref]["revision"] = (
-        f"constraints-sha256:{_digest(document['strategic_constraints'])}"
+    _set_binding(
+        receipts[strategy_ref],
+        "constraints-sha256",
+        _digest(document["strategic_constraints"]),
     )
+    envelope = document["delegation_envelope"]
+    if envelope is not None:
+        envelope_digest = _digest(_envelope_payload(envelope))
+        for ref in envelope["authority_source_refs"]:
+            if ref in receipts:
+                _set_binding(receipts[ref], "envelope-sha256", envelope_digest)
     bindings: dict[str, set[str]] = {}
     for option in document["options"]:
         ref = option["classification_source_ref"]
@@ -45,8 +83,9 @@ def _bind_document(document: dict) -> dict:
             f"classification-sha256:{_digest(_classification_payload(option))}"
         )
     for ref, tokens in bindings.items():
-        base = receipts[ref]["revision"].split(";classification-sha256:", 1)[0]
-        receipts[ref]["revision"] = ";".join([base, *sorted(tokens)])
+        for token in sorted(tokens):
+            label, digest = token.split(":", 1)
+            _set_binding(receipts[ref], label, digest)
     return document
 
 
