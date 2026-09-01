@@ -699,6 +699,43 @@ def _changed_path_is_allowed(path: str) -> bool:
     return False
 
 
+def _path_is_eval_owned_surface(path: str) -> bool:
+    """True iff this path is on the EVAL-R0/C0 owned tree, listed or not.
+
+    The changed-path fence is a same-wave ratchet for eval-lineage deltas.
+    It is not a repository-wide merge gate. Detect ownership by the eval
+    trees themselves so a newly added unlisted ``scripts/agent_eval/`` file
+    still subjects the delta to the fence, while an unrelated product PR
+    does not.
+    """
+    if path in ALLOWED_PATHS:
+        return True
+    if path in {"scripts/agent_evaluation.py", "tests/agent_eval_factories.py"}:
+        return True
+    prefixes = (
+        "scripts/agent_eval/",
+        "tests/test_agent_eval_",
+        "tests/fixtures/agent_eval/",
+        "corpus/agent_eval/",
+    )
+    if any(path.startswith(prefix) for prefix in prefixes):
+        return True
+    return "agent-evaluation" in path or "agent_eval" in path
+
+
+def unexpected_eval_surface_paths(changed: set[str]) -> set[str] | None:
+    """Unexpected paths if the eval fence applies; ``None`` if it does not.
+
+    An empty delta (protected-base push) and any delta that does not touch
+    eval-owned files are not applicable. Hosted evidence: master push
+    ``test`` run 33527881913 failed on an empty diff after #332, and
+    unrelated heads #325 / #322 failed the same fence for non-eval files.
+    """
+    if not any(_path_is_eval_owned_surface(path) for path in changed):
+        return None
+    return {path for path in changed if not _changed_path_is_allowed(path)}
+
+
 def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], capture_output=True, text=True, cwd=str(cwd), timeout=30)
 
@@ -744,16 +781,56 @@ def compute_pr_diff_paths(repo_dir: Path, *, head: str = "HEAD", upstream: str =
 
 def test_changed_paths_are_within_the_allowed_r0_surface() -> None:
     changed = compute_pr_diff_paths(ROOT)
-    assert changed, "expected at least one changed file relative to the effective PR base"
-    unexpected = {path for path in changed if not _changed_path_is_allowed(path)}
+    unexpected = unexpected_eval_surface_paths(changed)
+    if unexpected is None:
+        return
     assert not unexpected, f"changed path(s) outside the allowed R0 surface: {sorted(unexpected)}"
 
 
 def test_no_control_plane_config_dependency_or_workflow_file_touched() -> None:
     changed = compute_pr_diff_paths(ROOT)
+    if unexpected_eval_surface_paths(changed) is None:
+        return
     forbidden_prefixes = ("control_plane/", ".github/workflows/", "config/", "pyproject.toml", "requirements")
     for path in changed:
         assert not path.startswith(forbidden_prefixes), f"unexpected control-plane/config/workflow change: {path}"
+
+
+def test_eval_surface_fence_empty_delta_is_not_applicable() -> None:
+    assert unexpected_eval_surface_paths(set()) is None
+
+
+def test_eval_surface_fence_unrelated_product_delta_is_not_applicable() -> None:
+    assert unexpected_eval_surface_paths(
+        {
+            "docs/superpowers/plans/2026-09-01-sol-capability-fabric-package-generation.md",
+            "control_plane/wake_ack_ingress.py",
+        }
+    ) is None
+
+
+def test_eval_surface_fence_eval_plus_foreign_path_is_refused() -> None:
+    assert unexpected_eval_surface_paths(
+        {
+            "scripts/agent_eval/corpus.py",
+            "control_plane/wake_ack_ingress.py",
+        }
+    ) == {"control_plane/wake_ack_ingress.py"}
+
+
+def test_eval_surface_fence_new_unlisted_eval_module_is_refused() -> None:
+    assert unexpected_eval_surface_paths({"scripts/agent_eval/brand_new_unratified.py"}) == {
+        "scripts/agent_eval/brand_new_unratified.py"
+    }
+
+
+def test_eval_surface_fence_authorized_only_delta_passes() -> None:
+    assert unexpected_eval_surface_paths(
+        {
+            "scripts/agent_eval/corpus.py",
+            "tests/test_agent_eval_inertness.py",
+        }
+    ) == set()
 
 
 # ---------------------------------------------------------------------------
@@ -829,3 +906,15 @@ def test_compute_pr_diff_paths_merge_ref_excludes_base_side_changes_after_fork(t
 
     assert changed == {"scripts/agent_eval/pr_only_file.py"}  # only the PR's own change
     assert "docs/LATER_RELEASE.md" not in changed  # NOT flagged: base-side movement after fork
+
+
+def test_eval_surface_fence_live_repo_empty_or_unrelated_delta_is_safe() -> None:
+    # On this heal branch the live delta includes this file (eval-owned) only
+    # plus whatever else landed with it. The important contract is: an empty
+    # or non-eval delta must not raise. The dedicated unit tests above cover
+    # those cases; this asserts the helper stays importable on the real repo.
+    changed = compute_pr_diff_paths(ROOT)
+    verdict = unexpected_eval_surface_paths(changed)
+    if verdict is None:
+        return
+    assert not verdict, f"heal delta left the authorized eval surface: {sorted(verdict)}"
