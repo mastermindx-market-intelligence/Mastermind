@@ -147,7 +147,7 @@ const chrome = {
     onRemoved: event((callback) => { removedListener = callback; }),
     onReplaced: event((callback) => { replacedListener = callback; }),
     async query(query) {
-      queryCalls.push(query);
+      queryCalls.push(JSON.parse(JSON.stringify(query)));
       return Array.from(tabs.values()).map((tab) => ({...tab}));
     },
     async sendMessage(tabId, request) {
@@ -202,10 +202,10 @@ async function flush() {
 }
 
 function targetSnapshot() {
-  return vm.runInContext(
-    "Array.from(targets.entries(), ([fingerprint, entries]) => [fingerprint, Array.from(entries.entries())])",
+  return JSON.parse(vm.runInContext(
+    "JSON.stringify(Array.from(targets.entries(), ([fingerprint, entries]) => [fingerprint, Array.from(entries.entries())]))",
     context,
-  );
+  ));
 }
 
 function completeHandshake(port) {
@@ -380,9 +380,7 @@ vm.createContext(context);
 vm.runInContext(source, context, {filename: "content.js"});
 
 (async () => {
-  for (let index = 0; index < 4; index += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
+  await new Promise((resolve) => setTimeout(resolve, 25));
   assert.equal(typeof listener, "function");
   assert.equal(initialProbe.kind, "MMX_WEB_SOL_PROBE");
 
@@ -396,9 +394,7 @@ vm.runInContext(source, context, {filename: "content.js"});
     (value) => { response = value; },
   );
   assert.equal(accepted, true);
-  for (let index = 0; index < 4; index += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
+  await new Promise((resolve) => setTimeout(resolve, 25));
   assert.equal(response.kind, "MMX_WEB_SOL_PROBE");
   assert.equal(response.observation.target_present, true);
   assert.equal(response.observation.exact_conversation_loaded, false);
