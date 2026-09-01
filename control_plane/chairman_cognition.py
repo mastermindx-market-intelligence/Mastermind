@@ -965,6 +965,9 @@ def _adjudicate(
         option, strategic_constraints, envelope
     )
     constraint_blocker = _blocking_constraint(constraint_results)
+    constraint_ref = (
+        constraint_blocker.constraint_id if constraint_blocker is not None else None
+    )
 
     def decide(
         disposition: Disposition,
@@ -1002,15 +1005,89 @@ def _adjudicate(
             _constraint_reason(constraint_blocker),
             blocking_constraint=constraint_blocker.constraint_id,
         )
+
+    if option.action in READ_ONLY_ACTIONS:
+        return decide(
+            Disposition.READ_ONLY_ELIGIBLE,
+            ReasonCode.READ_ONLY_INHERENT,
+            serviceable=True,
+        )
+
+    if envelope_state is EnvelopeState.SOURCE_NOT_CURRENT:
+        return decide(
+            Disposition.REFUSED,
+            ReasonCode.ENVELOPE_SOURCE_NOT_CURRENT,
+            blocking_constraint=constraint_ref,
+        )
+    if (
+        envelope is not None
+        and option.active_children_after > envelope.max_active_children
+    ):
+        return decide(
+            Disposition.REFUSED,
+            ReasonCode.ACTIVE_CHILDREN_EXCEED_ENVELOPE,
+            blocking_constraint=constraint_ref,
+        )
+    if option.operation_key is None:
+        return decide(
+            Disposition.REFUSED,
+            ReasonCode.STABLE_OPERATION_REQUIRED,
+            blocking_constraint=constraint_ref,
+        )
+    if (
+        option.action in {"SOURCE_BRANCH_WRITE", "SOURCE_MERGE"}
+        and option.expected_head_sha is None
+    ):
+        return decide(
+            Disposition.REFUSED,
+            ReasonCode.EXPECTED_HEAD_REQUIRED,
+            blocking_constraint=constraint_ref,
+        )
+    if (
+        option.action in NEW_CHILD_ACTIONS
+        and option.carrier_state is not CarrierState.NEW_CHILD
+    ):
+        return decide(
+            Disposition.REFUSED,
+            ReasonCode.NEW_CHILD_CARRIER_REQUIRED,
+            blocking_constraint=constraint_ref,
+        )
+    if (
+        option.action not in NEW_CHILD_ACTIONS
+        and option.carrier_state is not CarrierState.EXACT_EXISTING
+    ):
+        return decide(
+            Disposition.REFUSED,
+            ReasonCode.EXACT_CARRIER_REQUIRED,
+            blocking_constraint=constraint_ref,
+        )
+    requires_canary_controls = (
+        option.action == "REVERSIBLE_RUNTIME_CANARY"
+        or (
+            envelope is not None
+            and envelope.mode is EnvelopeMode.SUPERVISED_LIVE_CANARY
+        )
+    )
+    if requires_canary_controls and not all(
+        (option.stop_condition, option.rollback_plan, option.falsifier)
+    ):
+        return decide(
+            Disposition.REFUSED,
+            ReasonCode.CANARY_CONTROLS_REQUIRED,
+            blocking_constraint=constraint_ref,
+        )
+
     if option.action in ALWAYS_CHAIRMAN_ACTIONS:
         return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.CONSTITUTIONAL_CHAIRMAN_BOUNDARY,
+            blocking_constraint=constraint_ref,
         )
     if option.reversibility in {Reversibility.IRREVERSIBLE, Reversibility.UNKNOWN}:
         return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.IRREVERSIBLE_REQUIRES_CHAIRMAN,
+            blocking_constraint=constraint_ref,
         )
     if (
         constraint_blocker is not None
@@ -1021,22 +1098,11 @@ def _adjudicate(
             _constraint_reason(constraint_blocker),
             blocking_constraint=constraint_blocker.constraint_id,
         )
-    if option.action in READ_ONLY_ACTIONS:
-        return decide(
-            Disposition.READ_ONLY_ELIGIBLE,
-            ReasonCode.READ_ONLY_INHERENT,
-            serviceable=True,
-        )
 
     if envelope is None or envelope_state is EnvelopeState.MISSING:
         return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.MISSING_DELEGATION_ENVELOPE,
-        )
-    if envelope_state is EnvelopeState.SOURCE_NOT_CURRENT:
-        return decide(
-            Disposition.REFUSED,
-            ReasonCode.ENVELOPE_SOURCE_NOT_CURRENT,
         )
     if envelope_state is EnvelopeState.EXPIRED:
         return decide(
@@ -1063,44 +1129,10 @@ def _adjudicate(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.BUDGET_EXCEEDS_ENVELOPE,
         )
-    if option.active_children_after > envelope.max_active_children:
-        return decide(
-            Disposition.REFUSED,
-            ReasonCode.ACTIVE_CHILDREN_EXCEED_ENVELOPE,
-        )
     if not _scope_allowed(option, envelope):
         return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.SCOPE_OUTSIDE_ENVELOPE,
-        )
-    if option.operation_key is None:
-        return decide(
-            Disposition.REFUSED,
-            ReasonCode.STABLE_OPERATION_REQUIRED,
-        )
-    if (
-        option.action in {"SOURCE_BRANCH_WRITE", "SOURCE_MERGE"}
-        and option.expected_head_sha is None
-    ):
-        return decide(
-            Disposition.REFUSED,
-            ReasonCode.EXPECTED_HEAD_REQUIRED,
-        )
-    if (
-        option.action in NEW_CHILD_ACTIONS
-        and option.carrier_state is not CarrierState.NEW_CHILD
-    ):
-        return decide(
-            Disposition.REFUSED,
-            ReasonCode.NEW_CHILD_CARRIER_REQUIRED,
-        )
-    if (
-        option.action not in NEW_CHILD_ACTIONS
-        and option.carrier_state is not CarrierState.EXACT_EXISTING
-    ):
-        return decide(
-            Disposition.REFUSED,
-            ReasonCode.EXACT_CARRIER_REQUIRED,
         )
     if (
         option.carrier_ref is not None
@@ -1111,22 +1143,6 @@ def _adjudicate(
         return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.SCOPE_OUTSIDE_ENVELOPE,
-        )
-    if option.carrier_state is CarrierState.AMBIGUOUS:
-        return decide(
-            Disposition.REFUSED,
-            ReasonCode.EXACT_CARRIER_REQUIRED,
-        )
-    requires_canary_controls = (
-        option.action == "REVERSIBLE_RUNTIME_CANARY"
-        or envelope.mode is EnvelopeMode.SUPERVISED_LIVE_CANARY
-    )
-    if requires_canary_controls and not all(
-        (option.stop_condition, option.rollback_plan, option.falsifier)
-    ):
-        return decide(
-            Disposition.REFUSED,
-            ReasonCode.CANARY_CONTROLS_REQUIRED,
         )
     return decide(
         Disposition.ELIGIBLE_WITHIN_DELEGATION,
@@ -1296,6 +1312,12 @@ def _constraint_result_payload(result: ConstraintResult) -> dict[str, str]:
 
 def _classification_payload(option: StrategicOption) -> dict[str, Any]:
     return {
+        "option_id": option.option_id,
+        "action": option.action,
+        "scope_refs": sorted(option.scope_refs),
+        "repositories": sorted(option.repositories),
+        "paths": sorted(option.paths),
+        "creates_duplicate_control_plane": option.creates_duplicate_control_plane,
         "change_classes": sorted(option.change_classes),
         "affected_departments": sorted(option.affected_departments),
     }
