@@ -35,10 +35,14 @@ def _prose(path: Path) -> str:
     return " ".join(_read(path).split())
 
 
+def _assert_production_inert(text: str) -> None:
+    assert "PRODUCTION INERT" in text.replace("_", " ")
+
+
 def test_records_are_present_and_explicitly_production_inert() -> None:
     records = {path: _read(path) for path in (SPEC, PLAN, AMENDMENT)}
     for text in records.values():
-        assert "PRODUCTION INERT" in text
+        _assert_production_inert(text)
         assert "TODO" not in text
         assert "TBD" not in text
 
@@ -48,7 +52,7 @@ def test_records_are_present_and_explicitly_production_inert() -> None:
 
     for path in (CLOSURE, EXPOSURE):
         text = _read(path)
-        assert "PRODUCTION_INERT" in text
+        _assert_production_inert(text)
         assert "TODO" not in text
         assert "TBD" not in text
 
