@@ -15,10 +15,12 @@ from integrations.slack_agent_dialogue.contract import (
 )
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_SCHEMA_V2,
+    PARENT_DISCRIMINATOR_V2,
     PARENT_SCHEMA_V2,
     TURN_WATCH_MODE_V1,
     build_message_v2,
     build_parent_v2,
+    parse_parent_frame_v2,
     render_message_v2,
     render_parent_v2,
 )
@@ -316,6 +318,364 @@ def test_v2_binds_exactly_one_v2_parent() -> None:
     assert bound.parent_fingerprint == parent_value()["fingerprint"]
 
 
+def test_v2_ensure_thread_reuses_one_exact_relay_parent_without_post() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(parent_message(author=BOT))
+
+    receipt = run(
+        make_engine(client).ensure_thread(
+            context(), created_at="2026-08-27T13:00:00Z"
+        )
+    )
+
+    assert receipt.action == "REUSED"
+    assert receipt.thread_ts == THREAD_TS
+    assert receipt.parent_author_user_id == BOT
+    assert receipt.parent_fingerprint == parent_value()["fingerprint"]
+    assert client.parent_post_call_count == 0
+    assert client.channel_history_call_count == 1
+
+
+def test_v2_ensure_thread_posts_one_parent_then_rereads() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+
+    receipt = run(
+        make_engine(client).ensure_thread(
+            context(), created_at="2026-08-27T13:00:00Z"
+        )
+    )
+
+    assert receipt.action == "POSTED"
+    assert receipt.parent_author_user_id == BOT
+    assert receipt.parent_fingerprint == parent_value()["fingerprint"]
+    assert client.parent_post_call_count == 1
+    assert client.channel_history_call_count == 2
+    assert len(client.channel_messages) == 1
+    assert client.channel_messages[0].thread_ts is None
+    assert parse_parent_frame_v2(client.channel_messages[0].text) == parent_value()
+
+
+@pytest.mark.parametrize("behavior", ["commit_unknown", "wrong_author", "wrong_text"])
+def test_v2_ensure_thread_recovers_committed_parent_from_untrusted_receipt(
+    behavior: str,
+) -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.parent_post_behaviors = [behavior]
+
+    receipt = run(
+        make_engine(client).ensure_thread(
+            context(), created_at="2026-08-27T13:00:00Z"
+        )
+    )
+
+    assert receipt.action == "RECOVERED"
+    assert receipt.parent_author_user_id == BOT
+    assert client.parent_post_call_count == 1
+    assert client.channel_history_call_count == 2
+    assert len(client.channel_messages) == 1
+
+
+def test_v2_ensure_thread_refuses_trusted_receipt_missing_from_complete_reread() -> None:
+    class ContradictoryReceiptClient(InMemorySlackClient):
+        async def post_parent(self, *, channel_id: str, text: str) -> SlackMessage:
+            self.parent_post_call_count += 1
+            self.add_parent(
+                SlackMessage(
+                    ts="1787472000.000002",
+                    author_user_id=self.relay_bot_user_id,
+                    text=text,
+                )
+            )
+            return SlackMessage(
+                ts="1787472000.000003",
+                author_user_id=self.relay_bot_user_id,
+                text=text,
+            )
+
+    client = ContradictoryReceiptClient(relay_bot_user_id=BOT)
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).ensure_thread(
+                context(), created_at="2026-08-27T13:00:00Z"
+            )
+        )
+
+    assert code(exc) == "PARENT_SEND_EFFECT_UNKNOWN"
+    assert client.parent_post_call_count == 1
+    assert client.channel_history_call_count == 2
+    assert len(client.channel_messages) == 1
+
+
+def test_v2_ensure_thread_holds_after_one_ambiguous_unreconciled_post() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.parent_post_behaviors = ["unknown_no_commit"]
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).ensure_thread(
+                context(), created_at="2026-08-27T13:00:00Z"
+            )
+        )
+
+    assert code(exc) == "PARENT_SEND_EFFECT_UNKNOWN"
+    assert client.parent_post_call_count == 1
+    assert client.channel_history_call_count == 2
+    assert client.channel_messages == []
+
+
+def test_v2_ensure_thread_refuses_legacy_author_and_relay_duplicate() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(parent_message(author=SOL1))
+    client.add_parent(parent_message(ts="1787471000.000002", author=BOT))
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).ensure_thread(
+                context(), created_at="2026-08-27T13:00:00Z"
+            )
+        )
+
+    assert code(exc) == "THREAD_BINDING_AMBIGUOUS"
+    assert client.parent_post_call_count == 0
+
+
+def test_v2_ensure_thread_refuses_exact_parent_from_unknown_transport_author() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(parent_message(author="U0000000001"))
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).ensure_thread(
+                context(), created_at="2026-08-27T13:00:00Z"
+            )
+        )
+
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+    assert client.parent_post_call_count == 0
+
+
+def test_v2_ensure_thread_refuses_near_or_malformed_parent_without_post() -> None:
+    near = InMemorySlackClient(relay_bot_user_id=BOT)
+    near.add_parent(parent_message(author=BOT, operation_key=OPERATION + "-near"))
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(near).ensure_thread(
+                context(), created_at="2026-08-27T13:00:00Z"
+            )
+        )
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+    assert near.parent_post_call_count == 0
+
+    malformed = InMemorySlackClient(relay_bot_user_id=BOT)
+    malformed.add_parent(
+        SlackMessage(
+            ts=THREAD_TS,
+            author_user_id=BOT,
+            text=PARENT_DISCRIMINATOR_V2 + "\n{}",
+        )
+    )
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(malformed).ensure_thread(
+                context(), created_at="2026-08-27T13:00:00Z"
+            )
+        )
+    assert code(exc) == "PARENT_MESSAGE_INVALID"
+    assert malformed.parent_post_call_count == 0
+
+
+def test_v2_ensure_thread_refuses_exact_parent_plus_near_context_parent() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(parent_message(author=BOT))
+    client.add_parent(
+        parent_message(
+            ts="1787471000.000002",
+            author=BOT,
+            operation_key=OPERATION + "-near",
+        )
+    )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).ensure_thread(
+                context(), created_at="2026-08-27T13:00:00Z"
+            )
+        )
+
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+    assert client.parent_post_call_count == 0
+
+
+def test_v2_ensure_thread_refuses_incomplete_history_without_post() -> None:
+    client = InMemorySlackClient(
+        relay_bot_user_id=BOT,
+        channel_history_complete=False,
+    )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).ensure_thread(
+                context(), created_at="2026-08-27T13:00:00Z"
+            )
+        )
+
+    assert code(exc) == "THREAD_HISTORY_INCOMPLETE"
+    assert client.parent_post_call_count == 0
+
+
+def test_v2_ensure_thread_refuses_mutated_parent_with_creation_bytes() -> None:
+    frame = render_parent_v2(parent_value())
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(
+        SlackMessage(
+            ts=THREAD_TS,
+            author_user_id=BOT,
+            text="edited transport text",
+            edited=True,
+            created_text=frame,
+        )
+    )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).ensure_thread(
+                context(), created_at="2026-08-27T13:00:00Z"
+            )
+        )
+
+    assert code(exc) == "THREAD_RECONCILIATION_INCOMPLETE"
+    assert client.parent_post_call_count == 0
+
+
+def test_v2_concurrent_ensure_thread_calls_create_only_one_parent() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    engine = make_engine(client)
+
+    async def scenario():
+        return await asyncio.gather(
+            engine.ensure_thread(context(), created_at="2026-08-27T13:00:00Z"),
+            engine.ensure_thread(context(), created_at="2026-08-27T13:00:00Z"),
+        )
+
+    receipts = run(scenario())
+
+    assert {receipt.action for receipt in receipts} == {"POSTED"}
+    assert len({receipt.thread_ts for receipt in receipts}) == 1
+    assert client.parent_post_call_count == 1
+    assert len(client.channel_messages) == 1
+
+
+def test_v2_concurrent_ensure_thread_calls_share_ambiguous_post_outcome() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.parent_post_behaviors = ["unknown_no_commit", "success"]
+    engine = make_engine(client)
+
+    async def scenario():
+        return await asyncio.gather(
+            engine.ensure_thread(context(), created_at="2026-08-27T13:00:00Z"),
+            engine.ensure_thread(context(), created_at="2026-08-27T13:00:00Z"),
+            return_exceptions=True,
+        )
+
+    results = run(scenario())
+
+    assert all(isinstance(result, DialogueEngineError) for result in results)
+    assert {result.code for result in results} == {"PARENT_SEND_EFFECT_UNKNOWN"}
+    assert client.parent_post_call_count == 1
+    assert client.channel_messages == []
+
+
+def test_v2_concurrent_near_context_ensures_do_not_both_post() -> None:
+    class CoordinatedPostClient(InMemorySlackClient):
+        def __init__(self) -> None:
+            super().__init__(relay_bot_user_id=BOT)
+            self.post_entries = 0
+            self.first_post_started = asyncio.Event()
+            self.release_first_post = asyncio.Event()
+
+        async def post_parent(self, *, channel_id: str, text: str):
+            self.post_entries += 1
+            if self.post_entries == 1:
+                self.first_post_started.set()
+                await self.release_first_post.wait()
+            return await super().post_parent(channel_id=channel_id, text=text)
+
+    client = CoordinatedPostClient()
+    engine = make_engine(client)
+
+    async def scenario():
+        first = asyncio.create_task(
+            engine.ensure_thread(context(), created_at="2026-08-27T13:00:00Z")
+        )
+        await client.first_post_started.wait()
+        second = asyncio.create_task(
+            engine.ensure_thread(
+                context(operation_key=OPERATION + "-near"),
+                created_at="2026-08-27T13:00:01Z",
+            )
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        client.release_first_post.set()
+        return await asyncio.gather(first, second, return_exceptions=True)
+
+    results = run(scenario())
+
+    receipts = [result for result in results if not isinstance(result, Exception)]
+    errors = [result for result in results if isinstance(result, DialogueEngineError)]
+    assert len(receipts) == 1
+    assert receipts[0].action == "POSTED"
+    assert [error.code for error in errors] == ["THREAD_CONTEXT_MISMATCH"]
+    assert client.parent_post_call_count == 1
+    assert len(client.channel_messages) == 1
+
+
+def test_v2_ambiguous_parent_post_holds_already_queued_near_context_ensure() -> None:
+    class CoordinatedAmbiguousClient(InMemorySlackClient):
+        def __init__(self) -> None:
+            super().__init__(relay_bot_user_id=BOT)
+            self.parent_post_behaviors = ["unknown_no_commit", "success"]
+            self.first_post_started = asyncio.Event()
+            self.release_first_post = asyncio.Event()
+
+        async def post_parent(self, *, channel_id: str, text: str):
+            if self.parent_post_call_count == 0:
+                self.first_post_started.set()
+                await self.release_first_post.wait()
+            return await super().post_parent(channel_id=channel_id, text=text)
+
+    client = CoordinatedAmbiguousClient()
+    engine = make_engine(client)
+
+    async def scenario():
+        first = asyncio.create_task(
+            engine.ensure_thread(context(), created_at="2026-08-27T13:00:00Z")
+        )
+        await client.first_post_started.wait()
+        second = asyncio.create_task(
+            engine.ensure_thread(
+                context(operation_key=OPERATION + "-near"),
+                created_at="2026-08-27T13:00:01Z",
+            )
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        client.release_first_post.set()
+        return await asyncio.gather(first, second, return_exceptions=True)
+
+    results = run(scenario())
+
+    assert all(isinstance(result, DialogueEngineError) for result in results)
+    assert [result.code for result in results] == [
+        "PARENT_SEND_EFFECT_UNKNOWN",
+        "PARENT_SEND_EFFECT_UNKNOWN",
+    ]
+    assert client.parent_post_call_count == 1
+    assert client.channel_messages == []
+
+
 def test_v2_zero_or_multiple_matching_parents_are_ambiguous() -> None:
     empty = InMemorySlackClient(relay_bot_user_id=BOT)
     with pytest.raises(DialogueEngineError) as exc:
@@ -392,9 +752,8 @@ def test_v2_mutated_parent_without_creation_evidence_refuses() -> None:
 def test_v2_parent_transport_identity_cannot_supply_actor_ref() -> None:
     client = InMemorySlackClient(relay_bot_user_id=BOT)
     client.add_parent(parent_message(author=BOT))
-    with pytest.raises(DialogueEngineError) as exc:
-        run(make_engine(client).bind_or_verify_thread(context()))
-    assert code(exc) == "THREAD_BINDING_AMBIGUOUS"
+    bound = run(make_engine(client).bind_or_verify_thread(context()))
+    assert bound.parent_author_user_id == BOT
 
     forged = copy.deepcopy(actor())
     forged["seat"] = "ceo"
@@ -454,7 +813,7 @@ def test_v2_history_reads_only_v2_frames_and_accepts_opposite_actor() -> None:
     assert read.ineligible_count == 0
 
 
-@pytest.mark.parametrize("mutation", ["work", "commission", "session", "applicability"])
+@pytest.mark.parametrize("mutation", ["work", "commission", "session"])
 def test_v2_history_wrong_bound_context_fails_closed(mutation: str) -> None:
     client = setup_client()
     kwargs: dict[str, object] = {}
@@ -469,14 +828,44 @@ def test_v2_history_wrong_bound_context_fails_closed(mutation: str) -> None:
         }
     elif mutation == "session":
         kwargs["session_ref"] = "asd-session-fable0002"
-    else:
-        kwargs["applies_to"] = applies("d" * 40)
-
     changed = v2_message("ACK", message_key=f"asd-ack-v2-wrong-{mutation}", **kwargs)
     add_v2_reply(client, changed, author=BOT, ts="1787471000.000020")
     with pytest.raises(DialogueEngineError) as exc:
         run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
     assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+
+
+def test_v2_history_accepts_same_parent_applicability_advancement() -> None:
+    client = setup_client()
+    progress = v2_message(
+        "PROGRESS",
+        message_key="asd-progress-v2-applicability-p1",
+        applies_to=applies("c" * 40),
+    )
+    result = v2_message(
+        "RESULT",
+        message_key="asd-result-v2-applicability-p2",
+        applies_to=applies("d" * 40),
+        reply_to_message_key=progress["message_key"],
+    )
+    add_v2_reply(client, progress, author=BOT, ts="1787471000.000021")
+    add_v2_reply(client, result, author=BOT, ts="1787471000.000022")
+
+    read = run(
+        make_engine(client).read_thread(
+            thread_ts=THREAD_TS,
+            context=context(applies_to=applies("d" * 40)),
+        )
+    )
+
+    assert [item.message["message_key"] for item in read.messages] == [
+        progress["message_key"],
+        result["message_key"],
+    ]
+    assert [item.message["applies_to"] for item in read.messages] == [
+        applies("c" * 40),
+        applies("d" * 40),
+    ]
 
 
 def test_v2_history_mutation_requires_creation_evidence() -> None:
@@ -805,6 +1194,55 @@ def test_v2_wait_continue_preserves_injected_continuation_policy() -> None:
     }
 
 
+def test_v2_wait_continue_accepts_exact_lineage_worker_result() -> None:
+    client = setup_client()
+    worker = {
+        "kind": "worker_attempt",
+        "job_id": "job-wp1r-result",
+        "attempt_id": "attempt-wp1r-result",
+        "worker_id": "worker-wp1r-result",
+    }
+    attempt = {
+        "kind": "executive_attempt",
+        "job_id": worker["job_id"],
+        "attempt_id": worker["attempt_id"],
+        "worker_id": worker["worker_id"],
+    }
+    request = v2_message(
+        "RESULT",
+        message_key="asd-result-v2-engine-continue",
+        actor_ref=worker,
+        applies_to=attempt,
+    )
+    reply = v2_message(
+        "CONTINUE",
+        message_key="asd-continue-v2-engine-from-result",
+        actor_ref=ceo_actor(),
+        applies_to=attempt,
+        reply_to_message_key=request["message_key"],
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000074")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000075")
+
+    result = run(
+        make_engine(client).wait_for_reply(
+            thread_ts=THREAD_TS,
+            context=context(actor_ref=worker, applies_to=attempt),
+            request_message_key=request["message_key"],
+            expected_types=("CONTINUE",),
+            max_attempts=1,
+        )
+    )
+
+    assert result["reply"] == reply
+    assert result["authority"] == {
+        "disposition": "CONTINUE",
+        "executable": True,
+        "selected_option": None,
+        "canonical_ref": None,
+    }
+
+
 def test_v2_wait_continue_refuses_when_injected_policy_denies() -> None:
     client = setup_client()
     request = v2_message("PROGRESS", message_key="asd-progress-v2-engine-denied")
@@ -829,7 +1267,7 @@ def test_v2_wait_continue_refuses_when_injected_policy_denies() -> None:
     assert code(exc) == "THREAD_CONTEXT_MISMATCH"
 
 
-@pytest.mark.parametrize("request_type", ["DECISION_REQUEST", "RESULT"])
+@pytest.mark.parametrize("request_type", ["DECISION_REQUEST"])
 def test_v2_wait_continue_refuses_noncontinuable_request_family(request_type: str) -> None:
     client = setup_client()
     key_suffix = request_type.lower().replace("_", "-")
