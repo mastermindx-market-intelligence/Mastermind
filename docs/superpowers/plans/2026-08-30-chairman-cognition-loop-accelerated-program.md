@@ -4,7 +4,7 @@
 **Owner:** `SOL:META-CEO:MASTERMIND`  
 **Parent:** existing `WS:CHAIRMAN-CONTROL-ROOM`  
 **Cognition route:** `CHAT_PRO_DEFAULT`  
-**Current wave:** CCL-A1 R2
+**Current wave:** CCL-A1 R3
 
 ## Mission
 
@@ -120,6 +120,53 @@ One exact PR #284 head, still inside the original nine paths, with terminal-gree
 proof and a fresh independent exact-head audit. R2 remains `BUILT_NOT_PROVEN / PRODUCTION_INERT`; it
 creates no Job, canary effect, deployment, trade, delegation expansion or product completion.
 
+## R3 — exact Chairman delegation-envelope binding
+
+R3 is the final same-carrier authority-integrity repair discovered during adversarial release review.
+It prevents an unrelated current Chairman receipt from blessing a caller-mutated delegation
+envelope.
+
+### R3 ordered implementation
+
+1. Commit hostile RED tests before core changes.
+2. Canonicalize every authority-bearing envelope field, sorting semantic sets and repository/path
+   mappings.
+3. Bind the exact canonical payload to at least one cited Chairman receipt with:
+
+   ```text
+   envelope-sha256:<sha256(canonical delegation envelope)>
+   ```
+
+4. Continue requiring every cited authority source to be load-bearing and Chairman-owned; preserve
+   aggregate freshness/conflict behavior.
+5. Reject a missing or mismatched envelope binding as malformed before the envelope can become
+   `ACCEPTED`.
+6. Expose the verified envelope digest in deterministic packet evidence.
+7. Preserve `execution_authority_granted=false`, effect-owner revalidation, exact carrier/head,
+   constitutional constraints, Pareto semantics and the no-I/O boundary.
+8. Update the law, architecture and program records without creating a new owner or schema family.
+9. Re-run focused A1 tests, full repository CI and security analysis on one immutable exact head.
+10. Obtain a fresh independent exact-head audit before Ready or expected-head merge.
+
+### R3 acceptance tests
+
+- mutating envelope identity, mode, action set, reversibility, repositories, path scope, affected
+  scope, carrier scope, budget, active-child ceiling or expiry without rebinding is rejected;
+- changing the authority-source-reference set without rebinding is rejected;
+- a current Chairman receipt with no matching envelope token is insufficient;
+- one of multiple cited current Chairman receipts may carry the exact token, while all cited receipts
+  still participate in source-state evaluation;
+- semantic permutation of set-like fields and path-prefix mappings preserves the digest;
+- packet evidence exposes `sha256:<digest>`;
+- stale, conflicted, wrong-owner and non-load-bearing authority receipts still fail closed;
+- no action, runtime, connector, lifecycle or reusable authority is introduced.
+
+### R3 stop condition
+
+One exact PR #284 head containing only the existing nine A1 paths, with the R3 RED→GREEN history,
+terminal-green hosted test/security proof and a fresh independent exact-head audit. Capability remains
+`BUILT_NOT_PROVEN / PRODUCTION_INERT` until protected.
+
 ## CCL-A2 — owner-preserving source composer and trusted bindings
 
 Migrate A2 on its existing carrier after A1 protection. It must:
@@ -128,6 +175,8 @@ Migrate A2 on its existing carrier after A1 protection. It must:
 - emit all six current constraints;
 - emit `strategic_constraints_source_ref` and exact constraint content binding;
 - emit classification facts and source bindings for every option;
+- emit the complete Chairman delegation envelope and exact `envelope-sha256` binding from current
+  canonical Chairman evidence;
 - preserve owner, revision, observation time, freshness and conflicts;
 - keep missing/degraded sources UNKNOWN or CONFLICT;
 - create no second Steward, strategy store, lifecycle, queue or authority plane.
@@ -182,6 +231,7 @@ Production acceptance requires a representative interval with **zero routine** C
 
 ## Exact next action
 
-Protect A1 R2 only after current exact-head CI, independent audit and release gates pass. Then migrate
-A2 on its existing carrier. Do not start another implementation branch, runtime canary or A6 portfolio
-autonomy wave before A1/A2 current-source integrity is protected.
+Protect A1 R3 only after current exact-head CI, independent audit and release gates pass. Then migrate
+A2 on its existing carrier to all R2/R3 bindings. Do not start another implementation branch, runtime
+canary or A6 portfolio-autonomy wave before A1/A2 current-source and delegation integrity is
+protected.
