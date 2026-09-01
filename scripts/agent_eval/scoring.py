@@ -738,8 +738,598 @@ def verify_evidence_ref_graph(document: dict, resolver: ArtifactResolver) -> Ver
     )
 
 
+# ---------------------------------------------------------------------------
+# EVAL-S1 additions (docs/superpowers/plans/2026-09-01-agent-evaluation-s1-
+# scorers.md): a generic, scorer_id-agnostic scorer-pass assembler shared by
+# task-class scorer modules, and a multi-scenario evidence reference. Purely
+# additive -- no existing function's behavior above this line changes.
+# ---------------------------------------------------------------------------
+
+
+def build_scorer_pass_document(
+    run: dict,
+    *,
+    scorer_pass_id: str,
+    scorer_id: str,
+    scorer_version: str,
+    scorer_code_ref: str,
+    method: str,
+    dimension_results: list[dict],
+    input_evidence: list[dict] | None = None,
+    created_at: str,
+    grader_identity: str | None = None,
+    supersedes: str | None = None,
+) -> dict:
+    """Generic ``mastermind.agent_evaluation_scorer_pass.v1`` assembler for
+    ANY ``scorer_id`` (S1): shape-validates, cross-field-checks, and digests
+    exactly like :func:`build_technical_integrity_scorer_pass`, but does not
+    hardcode which scorer produced ``dimension_results`` -- callers (the S1
+    task-class scorer modules) own deriving those results deterministically
+    from a run + an expected contract + a submission; this function only
+    assembles and validates the closed document. ``build_technical_integrity_
+    scorer_pass`` is left untouched above and does not use this helper, to
+    keep this an additive change with zero risk to its existing behavior."""
+    input_evidence = input_evidence if input_evidence is not None else [dict(run["evidence"]["output"])]
+    fields = {
+        "scorer_pass_id": scorer_pass_id,
+        "run_id": run["run_id"],
+        "run_digest": run["run_digest"],
+        "scorer_id": scorer_id,
+        "scorer_version": scorer_version,
+        "scorer_code_ref": scorer_code_ref,
+        "scorer_configuration_digest": contracts.digest_value({"scorer_id": scorer_id, "scorer_version": scorer_version}),
+        "method": method,
+        "input_evidence": sorted(input_evidence, key=lambda item: item["artifact_ref"]),
+        "dimension_results": sorted(dimension_results, key=lambda item: item["dimension"]),
+        "grader_identity": grader_identity,
+        "created_at": created_at,
+        "supersedes": supersedes,
+    }
+    document = {"schema": SCORER_PASS_SCHEMA, **fields}
+    _check_scorer_pass_fields(document, require_digest=False)
+    return add_document_digest(document, "scorer_pass_digest")
+
+
+# ---------------------------------------------------------------------------
+# EVAL-S1 multi-scenario evidence reference
+# (mastermind.agent_evaluation_evidence_ref_multi_scenario.v1)
+#
+# R0's summarize_experiment/EVIDENCE_REF_SCHEMA above take exactly ONE
+# scenario and apply its required_dimensions to every matching run -- correct
+# only because R0's own synthetic proof used single-scenario experiments.
+# E1 pairs 3 scenarios x 2 arms x 2 replicates in ONE experiment, so the
+# CLI's prior scenario_refs[0] shortcut silently applied the WRONG scenario's
+# required_dimensions to 2 of 3 scenarios' runs. This section generalizes
+# summarization to N scenarios without touching the single-scenario schema,
+# builder, or verifier above -- every existing single-scenario call keeps
+# its exact current behavior and output bytes.
+#
+# This is a DISTINCT schema, not a v2 of EVIDENCE_REF_SCHEMA (a genuinely
+# different field set -- plural scenario_refs + per-scenario scenario_
+# groups -- sharing only the evidence_ref_id field name and safe-path
+# scheme with the single-scenario schema). A multi-scenario evidence
+# reference is built, shape-validated, and graph-verified by the functions
+# below, and IS fully wired into scripts/agent_eval/store.py's create-only
+# publication path (store-integration wave, same operation key):
+# ArtifactStore.create()/verify_graph()/verify_tree_graph() all dispatch on
+# this schema exactly as they already do for the single-scenario one, with
+# the same enumeration-equality anti-laundering guarantee
+# (ArtifactStore._require_multi_scenario_evidence_ref_population_complete).
+# ---------------------------------------------------------------------------
+
+EVIDENCE_REF_MULTI_SCENARIO_SCHEMA = "mastermind.agent_evaluation_evidence_ref_multi_scenario.v1"
+
+
+def _v_multi_scenario_ref_list(value: Any, path: str) -> list[dict]:
+    items = contracts.v_list_of(_v_evidence_scenario_ref)(value, path)
+    keys = [(item["scenario_id"], item["scenario_version"]) for item in items]
+    if keys != sorted(keys):
+        raise ContractError([ContractDefect(path, "LIST_NOT_SORTED", "scenario_refs must be sorted by (scenario_id, scenario_version)")])
+    if len(set(keys)) != len(keys):
+        raise ContractError([ContractDefect(path, "LIST_HAS_DUPLICATES", "scenario_refs must not repeat a (scenario_id, scenario_version)")])
+    return items
+
+
+def _v_multi_run_entry(value: Any, path: str) -> dict:
+    return contracts.validate_closed_object(
+        value,
+        path,
+        {
+            "run_id": contracts.v_run_id,
+            "run_digest": contracts.v_digest,
+            "scenario_id": contracts.v_scenario_id,
+            "scenario_version": contracts.v_pos_int,
+            "arm_id": contracts.v_optional(contracts.v_arm_id),
+            "pair_key": contracts.v_pair_key,
+            "replicate_index": contracts.v_optional(contracts.v_pos_int),
+            "technical_validity": contracts.v_enum(
+                frozenset(
+                    {
+                        "VALID",
+                        "INVALID_CONFIGURATION",
+                        "INVALID_LEAKAGE",
+                        "INVALID_EFFECT_UNKNOWN",
+                        "INVALID_CLEANUP",
+                        "DEGRADED_DEPENDENCY",
+                    }
+                )
+            ),
+            "scored_projection": contracts.v_enum(_SCORED_PROJECTIONS),
+        },
+    )
+
+
+def _v_multi_run_entries(value: Any, path: str) -> list[dict]:
+    items = contracts.v_list_of(_v_multi_run_entry)(value, path)
+    run_ids = [item["run_id"] for item in items]
+    if run_ids != sorted(run_ids):
+        raise ContractError([ContractDefect(path, "LIST_NOT_SORTED", "run_entries must be sorted by run_id")])
+    if len(set(run_ids)) != len(run_ids):
+        raise ContractError([ContractDefect(path, "LIST_HAS_DUPLICATES", "run_entries must not repeat a run_id")])
+    return items
+
+
+def _v_dimension_gate_ext(value: Any, path: str) -> dict:
+    """MAJOR-2 review repair (adversarial review of PR #333): a SEPARATE
+    dimension-gate shape used ONLY inside multi-scenario ``scenario_
+    groups`` -- adds a required ``unknown_count`` bucket alongside R0's
+    original four. R0's single-scenario ``_v_dimension_gate``/``_v_
+    dimension_gates`` above are left COMPLETELY UNTOUCHED (not reused
+    here) to guarantee zero byte-stability risk to the single-scenario
+    evidence-ref schema/journey: R0's own untouched ``summarize_
+    experiment`` never populates ``unknown_count`` and must never be
+    required to. Without this bucket, a dimension result whose status is
+    literally ``UNKNOWN`` (e.g. every S1 scorer's permanent ``rubric_
+    residue`` dimension) fell into NONE of ``valid_pass_count``/``valid_
+    fail_count``/``valid_partial_count``/``unscored_count`` -- silently
+    disappearing from the gate matrix a reviewer reads, rather than being
+    visibly counted. E1 needs that residue visible, not vanished."""
+    return contracts.validate_closed_object(
+        value,
+        path,
+        {
+            "dimension": contracts.v_str,
+            "required": contracts.v_bool,
+            "valid_pass_count": contracts.v_nonneg_int,
+            "valid_fail_count": contracts.v_nonneg_int,
+            "valid_partial_count": contracts.v_nonneg_int,
+            "unscored_count": contracts.v_nonneg_int,
+            "unknown_count": contracts.v_nonneg_int,
+        },
+    )
+
+
+def _v_dimension_gates_ext(value: Any, path: str) -> list[dict]:
+    items = contracts.v_list_of(_v_dimension_gate_ext)(value, path)
+    dims = [item["dimension"] for item in items]
+    if dims != sorted(dims):
+        raise ContractError([ContractDefect(path, "LIST_NOT_SORTED", "dimension_gates must be sorted by dimension")])
+    if len(set(dims)) != len(dims):
+        raise ContractError([ContractDefect(path, "LIST_HAS_DUPLICATES", "dimension_gates must not repeat a dimension")])
+    return items
+
+
+def _v_scenario_group(value: Any, path: str) -> dict:
+    return contracts.validate_closed_object(
+        value,
+        path,
+        {
+            "scenario_id": contracts.v_scenario_id,
+            "scenario_version": contracts.v_pos_int,
+            "dimension_gates": _v_dimension_gates_ext,
+            "counts": _v_counts,
+            "sample_size": contracts.v_nonneg_int,
+        },
+    )
+
+
+def _v_scenario_groups(value: Any, path: str) -> list[dict]:
+    items = contracts.v_list_of(_v_scenario_group)(value, path)
+    keys = [(item["scenario_id"], item["scenario_version"]) for item in items]
+    if keys != sorted(keys):
+        raise ContractError([ContractDefect(path, "LIST_NOT_SORTED", "scenario_groups must be sorted by (scenario_id, scenario_version)")])
+    if len(set(keys)) != len(keys):
+        raise ContractError([ContractDefect(path, "LIST_HAS_DUPLICATES", "scenario_groups must not repeat a (scenario_id, scenario_version)")])
+    return items
+
+
+_MULTI_SCENARIO_EVIDENCE_REF_FIELDS = {
+    "schema": contracts.v_enum(frozenset({EVIDENCE_REF_MULTI_SCENARIO_SCHEMA})),
+    "evidence_ref_id": v_evidence_ref_id,
+    "experiment_ref": _v_evidence_experiment_ref,
+    "scenario_refs": _v_multi_scenario_ref_list,
+    "configuration_refs": _v_configuration_ref_list,
+    "run_entries": _v_multi_run_entries,
+    "scorer_refs": _v_scorer_ref_list,
+    "scenario_groups": _v_scenario_groups,
+    "counts": _v_counts,
+    "sample_size": contracts.v_nonneg_int,
+    "uncertainty": contracts.v_enum(frozenset({"NOT_ESTIMATED"})),
+    "limitations": contracts.v_sorted_unique_str_list,
+    "evidence_grade": contracts.v_enum(frozenset({"INSUFFICIENT_EVIDENCE"})),
+    "verification_scopes": _v_verification_scopes,
+    "phase": contracts.v_enum(
+        frozenset({"RETROSPECTIVE", "REPLAY", "PROSPECTIVE_SHADOW", "CANARY", "PROMOTED"})
+    ),
+    "intended_owner": contracts.v_str,
+    "review_at": contracts.v_timestamp,
+    "non_authority_statement": contracts.v_enum(frozenset({REQUIRED_NON_AUTHORITY_STATEMENT})),
+    "created_at": contracts.v_timestamp,
+    "analysis_version": contracts.v_str,
+    "evidence_ref_digest": contracts.v_digest,
+}
+
+
+def _multi_scenario_evidence_ref_cross_field_defects(document: dict) -> list[ContractDefect]:
+    defects: list[ContractDefect] = []
+    entries = document.get("run_entries")
+    scenario_refs = document.get("scenario_refs")
+    counts = document.get("counts")
+    if isinstance(entries, list) and isinstance(counts, dict):
+        valid = sum(1 for e in entries if isinstance(e, dict) and e.get("technical_validity") == "VALID")
+        degraded = sum(1 for e in entries if isinstance(e, dict) and e.get("technical_validity") == "DEGRADED_DEPENDENCY")
+        invalid = sum(
+            1
+            for e in entries
+            if isinstance(e, dict) and isinstance(e.get("technical_validity"), str) and e["technical_validity"].startswith("INVALID_")
+        )
+        unscored = sum(1 for e in entries if isinstance(e, dict) and e.get("scored_projection") == "UNSCORED")
+        expectations = {
+            "valid_count": valid,
+            "invalid_count": invalid,
+            "degraded_count": degraded,
+            "unscored_count": unscored,
+            "total_count": len(entries),
+        }
+        for key, expected in expectations.items():
+            if counts.get(key) != expected:
+                defects.append(ContractDefect(f"$.counts.{key}", "COUNT_MISMATCH", f"{key} does not match run_entries"))
+    if isinstance(entries, list) and document.get("sample_size") != len(entries):
+        defects.append(
+            ContractDefect("$.sample_size", "SAMPLE_SIZE_MISMATCH", "sample_size must equal the number of run_entries")
+        )
+    if isinstance(entries, list) and isinstance(scenario_refs, list):
+        declared = {
+            (ref["scenario_id"], ref["scenario_version"])
+            for ref in scenario_refs
+            if isinstance(ref, dict) and "scenario_id" in ref and "scenario_version" in ref
+        }
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            key = (entry.get("scenario_id"), entry.get("scenario_version"))
+            if key not in declared:
+                defects.append(
+                    ContractDefect(
+                        f"$.run_entries[{entry.get('run_id')}]",
+                        "SCENARIO_NOT_IN_EXPERIMENT",
+                        "run_entry's scenario is not declared in this evidence reference's own scenario_refs",
+                    )
+                )
+    return defects
+
+
+def _check_multi_scenario_evidence_ref_fields(document: Any, *, require_digest: bool) -> dict:
+    optional = frozenset({"evidence_ref_digest"}) if not require_digest else frozenset()
+    validated = contracts.validate_closed_object(document, "$", _MULTI_SCENARIO_EVIDENCE_REF_FIELDS, optional=optional)
+    cross_defects = _multi_scenario_evidence_ref_cross_field_defects(document if isinstance(document, dict) else {})
+    if cross_defects:
+        raise ContractError(cross_defects)
+    if require_digest:
+        contracts.verify_document_digest(document, "evidence_ref_digest")
+    return validated
+
+
+def validate_multi_scenario_evidence_ref_shape(document: Any) -> str:
+    _check_multi_scenario_evidence_ref_fields(document, require_digest=True)
+    return "SHAPE_VALID"
+
+
+def summarize_multi_scenario_experiment(
+    experiment: dict,
+    scenarios: tuple[dict, ...],
+    runs: tuple[dict, ...],
+    scorer_passes: tuple[dict, ...],
+    *,
+    evidence_ref_id: str,
+    intended_owner: str,
+    review_at: str,
+    created_at: str,
+    analysis_version: str,
+) -> dict:
+    """Multi-scenario generalization of :func:`summarize_experiment`. Every
+    matching run is grouped by ITS OWN scenario (``run["scenario"]``), and
+    each scenario's ``required_dimensions`` is resolved from THAT scenario's
+    own ``scoring_policy`` -- never one scenario applied to every run (the
+    prior ``scenario_refs[0]`` CLI limitation this function replaces for
+    multi-scenario experiments). ``scenarios`` must supply exactly the
+    experiment's own declared ``scenario_refs`` (by (scenario_id,
+    scenario_version)); a run whose scenario is not declared by the
+    experiment is a structural anomaly and FAILS the summary rather than
+    silently being included or dropped (plan §5.6: corrupt/unreadable/
+    ambiguous candidates fail the summary rather than disappear)."""
+    declared_keys = {(ref["scenario_id"], ref["scenario_version"]) for ref in experiment["scenario_refs"]}
+    scenario_by_key = {(s["scenario_id"], s["scenario_version"]): s for s in scenarios}
+    if set(scenario_by_key) != declared_keys:
+        missing = sorted(declared_keys - set(scenario_by_key))
+        extra = sorted(set(scenario_by_key) - declared_keys)
+        raise ContractError(
+            [
+                ContractDefect(
+                    "$.scenario_refs",
+                    "SCENARIO_NOT_IN_EXPERIMENT",
+                    f"supplied scenarios do not exactly match the experiment's declared scenario_refs (missing={missing}, extra={extra})",
+                )
+            ]
+        )
+
+    matching_runs = tuple(
+        sorted(
+            (run for run in runs if run["comparison"]["experiment_id"] == experiment["experiment_id"]),
+            key=lambda run: run["run_id"],
+        )
+    )
+    bad_runs = [
+        run
+        for run in matching_runs
+        if (run["scenario"]["scenario_id"], run["scenario"]["scenario_version"]) not in declared_keys
+    ]
+    if bad_runs:
+        raise ContractError(
+            [
+                ContractDefect(
+                    f"$.run_entries[{run['run_id']}]",
+                    "SCENARIO_NOT_IN_EXPERIMENT",
+                    "run's scenario is not declared in the target experiment's own scenario_refs",
+                )
+                for run in bad_runs
+            ]
+        )
+
+    matching_ids = {run["run_id"] for run in matching_runs}
+    scorer_passes_by_run: dict[str, list[dict]] = {run_id: [] for run_id in matching_ids}
+    for pass_doc in scorer_passes:
+        if pass_doc["run_id"] in scorer_passes_by_run:
+            scorer_passes_by_run[pass_doc["run_id"]].append(pass_doc)
+
+    run_entries: list[dict] = []
+    runs_by_key: dict[tuple, list[dict]] = {key: [] for key in declared_keys}
+    dim_status_by_key: dict[tuple, dict[str, list[str]]] = {
+        key: {d: [] for d in scenario_by_key[key]["scoring_policy"]["required_dimensions"]} for key in declared_keys
+    }
+    for run in matching_runs:
+        key = (run["scenario"]["scenario_id"], run["scenario"]["scenario_version"])
+        scenario = scenario_by_key[key]
+        required_dimensions = set(scenario["scoring_policy"]["required_dimensions"])
+        projection = _scored_projection(run, required_dimensions, scorer_passes_by_run[run["run_id"]])
+        entry = {
+            "run_id": run["run_id"],
+            "run_digest": run["run_digest"],
+            "scenario_id": key[0],
+            "scenario_version": key[1],
+            "arm_id": run["comparison"]["arm_id"],
+            "pair_key": run["comparison"]["pair_key"],
+            "replicate_index": run["comparison"]["replicate_index"],
+            "technical_validity": run["validity"]["status"],
+            "scored_projection": projection,
+        }
+        run_entries.append(entry)
+        runs_by_key[key].append(entry)
+        if run["validity"]["status"] == "VALID":
+            dim_status: dict[str, str] = {}
+            for pass_doc in scorer_passes_by_run[run["run_id"]]:
+                for result in pass_doc["dimension_results"]:
+                    if result["dimension"] in required_dimensions:
+                        dim_status[result["dimension"]] = result["status"]
+            for dimension in required_dimensions:
+                dim_status_by_key[key][dimension].append(dim_status.get(dimension, "UNSCORED"))
+
+    scenario_refs = sorted(
+        (
+            {
+                "scenario_id": scenario_by_key[key]["scenario_id"],
+                "scenario_version": scenario_by_key[key]["scenario_version"],
+                "scenario_digest": scenario_by_key[key]["scenario_digest"],
+                "corpus_revision": scenario_by_key[key]["corpus_revision"],
+            }
+            for key in declared_keys
+        ),
+        key=lambda item: (item["scenario_id"], item["scenario_version"]),
+    )
+
+    scenario_groups = []
+    for key in sorted(declared_keys):
+        entries_for_scenario = runs_by_key[key]
+        dimension_gates = []
+        for dimension in sorted(dim_status_by_key[key]):
+            statuses = dim_status_by_key[key][dimension]
+            dimension_gates.append(
+                {
+                    "dimension": dimension,
+                    "required": True,
+                    "valid_pass_count": statuses.count("PASS"),
+                    "valid_fail_count": statuses.count("FAIL"),
+                    "valid_partial_count": statuses.count("PARTIAL"),
+                    "unscored_count": statuses.count("UNSCORED"),
+                    # MAJOR-2 review repair: a dimension result whose
+                    # status is literally "UNKNOWN" (e.g. every S1
+                    # scorer's permanent rubric_residue dimension) used to
+                    # fall into NONE of the four buckets above -- silently
+                    # vanishing from the gate matrix. Counted explicitly
+                    # here so residue is visible, never dropped.
+                    "unknown_count": statuses.count("UNKNOWN"),
+                }
+            )
+        valid_count = sum(1 for e in entries_for_scenario if e["technical_validity"] == "VALID")
+        degraded_count = sum(1 for e in entries_for_scenario if e["technical_validity"] == "DEGRADED_DEPENDENCY")
+        invalid_count = sum(1 for e in entries_for_scenario if e["technical_validity"].startswith("INVALID_"))
+        unscored_count = sum(1 for e in entries_for_scenario if e["scored_projection"] == "UNSCORED")
+        scenario_groups.append(
+            {
+                "scenario_id": key[0],
+                "scenario_version": key[1],
+                "dimension_gates": dimension_gates,
+                "counts": {
+                    "valid_count": valid_count,
+                    "invalid_count": invalid_count,
+                    "degraded_count": degraded_count,
+                    "unscored_count": unscored_count,
+                    "total_count": len(entries_for_scenario),
+                },
+                "sample_size": len(entries_for_scenario),
+            }
+        )
+
+    configuration_refs = sorted(
+        (
+            {
+                "configuration_id": arm["configuration_id"],
+                "configuration_digest": arm["configuration_digest"],
+                "arm_id": arm["arm_id"],
+            }
+            for arm in experiment["arms"]
+        ),
+        key=lambda item: item["arm_id"],
+    )
+
+    scorer_ref_pairs = sorted(
+        {
+            (pass_doc["scorer_pass_id"], pass_doc["scorer_pass_digest"])
+            for run_id in matching_ids
+            for pass_doc in scorer_passes_by_run[run_id]
+        }
+    )
+    scorer_refs = [{"scorer_pass_id": sid, "scorer_pass_digest": sdigest} for sid, sdigest in scorer_ref_pairs]
+
+    valid_count = sum(1 for e in run_entries if e["technical_validity"] == "VALID")
+    degraded_count = sum(1 for e in run_entries if e["technical_validity"] == "DEGRADED_DEPENDENCY")
+    invalid_count = sum(1 for e in run_entries if e["technical_validity"].startswith("INVALID_"))
+    unscored_count = sum(1 for e in run_entries if e["scored_projection"] == "UNSCORED")
+
+    fields = {
+        "evidence_ref_id": evidence_ref_id,
+        "experiment_ref": {"experiment_id": experiment["experiment_id"], "experiment_digest": experiment["experiment_digest"]},
+        "scenario_refs": scenario_refs,
+        "configuration_refs": configuration_refs,
+        "run_entries": sorted(run_entries, key=lambda item: item["run_id"]),
+        "scorer_refs": scorer_refs,
+        "scenario_groups": scenario_groups,
+        "counts": {
+            "valid_count": valid_count,
+            "invalid_count": invalid_count,
+            "degraded_count": degraded_count,
+            "unscored_count": unscored_count,
+            "total_count": len(run_entries),
+        },
+        "sample_size": len(run_entries),
+        "uncertainty": "NOT_ESTIMATED",
+        "limitations": sorted(
+            {
+                "R0/S1 implement SHAPE_VALID and EVALUATION_GRAPH_VERIFIED only; EVIDENCE_CONTENT_VERIFIED is not claimed.",
+                "S1's task-class scorers cover TC1/TC2/TC3 outcome dimensions only; scored_projection reflects each run's scenario's own required_dimensions.",
+            }
+        ),
+        "evidence_grade": "INSUFFICIENT_EVIDENCE",
+        "verification_scopes": sorted(["EVALUATION_GRAPH_VERIFIED", "SHAPE_VALID"]),
+        "phase": experiment["phase"],
+        "intended_owner": intended_owner,
+        "review_at": review_at,
+        "non_authority_statement": REQUIRED_NON_AUTHORITY_STATEMENT,
+        "created_at": created_at,
+        "analysis_version": analysis_version,
+    }
+    document = {"schema": EVIDENCE_REF_MULTI_SCENARIO_SCHEMA, **fields}
+    _check_multi_scenario_evidence_ref_fields(document, require_digest=False)
+    return add_document_digest(document, "evidence_ref_digest")
+
+
+def verify_multi_scenario_evidence_ref_graph(document: dict, resolver: ArtifactResolver) -> VerificationResult:
+    validate_multi_scenario_evidence_ref_shape(document)
+    experiment = resolver.resolve_experiment(document["experiment_ref"]["experiment_id"])
+    defects: list[ContractDefect] = []
+    if experiment is None:
+        defects.append(
+            ContractDefect("$.experiment_ref", "EXPERIMENT_NOT_RESOLVED", "referenced experiment could not be resolved")
+        )
+    scenarios: list[dict] = []
+    for ref in document["scenario_refs"]:
+        scenario = resolver.resolve_scenario(ref["scenario_id"], ref["scenario_version"])
+        if scenario is None:
+            defects.append(
+                ContractDefect(f"$.scenario_refs[{ref['scenario_id']}]", "SCENARIO_NOT_RESOLVED", "referenced scenario could not be resolved")
+            )
+            continue
+        scenarios.append(scenario)
+    if defects:
+        raise VerificationContextError(sorted(set(defects)))
+
+    runs: list[dict] = []
+    for entry in document["run_entries"]:
+        run = resolver.resolve_run(entry["run_id"])
+        if run is None:
+            defects.append(ContractDefect(f"$.run_entries[{entry['run_id']}]", "RUN_NOT_RESOLVED", "referenced run could not be resolved"))
+            continue
+        runs.append(run)
+    scorer_passes: list[dict] = []
+    for ref in document["scorer_refs"]:
+        pass_doc = resolver.resolve_scorer_pass(ref["scorer_pass_id"])
+        if pass_doc is None:
+            defects.append(
+                ContractDefect(
+                    f"$.scorer_refs[{ref['scorer_pass_id']}]", "SCORER_PASS_NOT_RESOLVED", "referenced scorer pass could not be resolved"
+                )
+            )
+            continue
+        scorer_passes.append(pass_doc)
+    if defects:
+        raise VerificationContextError(sorted(set(defects)))
+
+    recomputed = summarize_multi_scenario_experiment(
+        experiment,
+        tuple(scenarios),
+        tuple(runs),
+        tuple(scorer_passes),
+        evidence_ref_id=document["evidence_ref_id"],
+        intended_owner=document["intended_owner"],
+        review_at=document["review_at"],
+        created_at=document["created_at"],
+        analysis_version=document["analysis_version"],
+    )
+    for field_name in (
+        "run_entries",
+        "counts",
+        "scenario_groups",
+        "scorer_refs",
+        "configuration_refs",
+        "scenario_refs",
+        "sample_size",
+    ):
+        if recomputed[field_name] != document[field_name]:
+            raise VerificationContextError(
+                [
+                    ContractDefect(
+                        f"$.{field_name}",
+                        "EVIDENCE_NOT_RECOMPUTABLE",
+                        f"recomputed {field_name} does not match the stored multi-scenario evidence reference",
+                    )
+                ]
+            )
+
+    external_refs: set[str] = set()
+    for run in runs:
+        external_refs |= collect_run_evidence_refs(run)
+
+    return VerificationResult(
+        scope=GRAPH_VERIFIED_SCOPE,
+        artifact_id=document["evidence_ref_id"],
+        artifact_digest=document["evidence_ref_digest"],
+        external_content_unverified_refs=tuple(sorted(external_refs)),
+    )
+
+
 # Register this module's shape validators with the generic contracts
 # dispatcher (contracts.validate_document_shape imports this module lazily
 # to avoid a circular import at load time; see contracts.py).
 contracts.register_shape_validator(SCORER_PASS_SCHEMA, validate_scorer_pass_shape)
 contracts.register_shape_validator(EVIDENCE_REF_SCHEMA, validate_evidence_ref_shape)
+contracts.register_shape_validator(EVIDENCE_REF_MULTI_SCENARIO_SCHEMA, validate_multi_scenario_evidence_ref_shape)
