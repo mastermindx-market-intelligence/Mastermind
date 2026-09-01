@@ -20,7 +20,9 @@ const CHATGPT_TAB_PATTERNS = Object.freeze([
   "https://chatgpt.com/*",
 ]);
 const RECONNECT_ALARM_PREFIX = "mmx-web-sol-native-reconnect-v1-";
+const HANDSHAKE_ALARM_PREFIX = "mmx-web-sol-native-handshake-v1-";
 const RECONNECT_DELAYS_MINUTES = Object.freeze([1, 5, 15]);
+const HANDSHAKE_TIMEOUT_MINUTES = 0.5;
 
 const OBSERVATION_KEYS = new Set([
   "schema", "target_present", "exact_conversation_loaded", "page_responsive",
@@ -49,6 +51,13 @@ let transportHandshakeReady = false;
 let transportBootNonce = null;
 let transportChallengeNonce = null;
 let transportStage = "DISCONNECTED";
+let reconnectEpoch = null;
+let reconnectGenerationOpen = false;
+let nativePortEpoch = null;
+let nativePortReconnectAttempt = null;
+let nativePortToken = null;
+let nextNativePortToken = 0;
+let activeHandshakeAlarmName = null;
 
 function exactKeys(object, allowed) {
   if (!object || typeof object !== "object" || Array.isArray(object)) return false;
@@ -347,65 +356,123 @@ function validTransportAck(message) {
   return isNonce(message.boot_nonce) && isNonce(message.challenge_nonce);
 }
 
-function reconnectAlarmName(index) {
-  return `${RECONNECT_ALARM_PREFIX}${index}`;
+function validReconnectEpoch(value) {
+  return typeof value === "string" && /^[0-9a-f]{48}$/.test(value);
 }
 
-function reconnectAlarmIndex(name) {
+function beginReconnectGeneration() {
+  reconnectEpoch = randomChallengeNonce();
+  reconnectGenerationOpen = true;
+  return reconnectEpoch;
+}
+
+function reconnectAlarmName(epoch, index) {
+  return `${RECONNECT_ALARM_PREFIX}${epoch}-${index}`;
+}
+
+function reconnectAlarmIdentity(name) {
   if (typeof name !== "string" || !name.startsWith(RECONNECT_ALARM_PREFIX)) return null;
   const suffix = name.slice(RECONNECT_ALARM_PREFIX.length);
-  if (!/^[0-9]+$/.test(suffix)) return null;
-  const index = Number(suffix);
-  return Number.isSafeInteger(index) && index < RECONNECT_DELAYS_MINUTES.length ? index : null;
+  const match = /^([0-9a-f]{48})-([0-9]+)$/.exec(suffix);
+  if (!match) return null;
+  const index = Number(match[2]);
+  if (!validReconnectEpoch(match[1]) || !Number.isSafeInteger(index) ||
+      index < 0 || index >= RECONNECT_DELAYS_MINUTES.length) return null;
+  return {epoch: match[1], index};
 }
 
-function scheduleReconnect(index) {
+function handshakeAlarmName(epoch, token) {
+  return `${HANDSHAKE_ALARM_PREFIX}${epoch}-${token}`;
+}
+
+function handshakeAlarmIdentity(name) {
+  if (typeof name !== "string" || !name.startsWith(HANDSHAKE_ALARM_PREFIX)) return null;
+  const suffix = name.slice(HANDSHAKE_ALARM_PREFIX.length);
+  const match = /^([0-9a-f]{48})-([0-9]+)$/.exec(suffix);
+  if (!match) return null;
+  const token = Number(match[2]);
+  if (!validReconnectEpoch(match[1]) || !Number.isSafeInteger(token) || token < 1) return null;
+  return {epoch: match[1], token};
+}
+
+function scheduleReconnect(epoch, index) {
   if (!INSTANCE_CONFIG || !chrome.alarms || typeof chrome.alarms.create !== "function") return;
-  if (!Number.isSafeInteger(index) || index < 0 || index >= RECONNECT_DELAYS_MINUTES.length) return;
-  chrome.alarms.create(reconnectAlarmName(index), {
+  if (epoch !== reconnectEpoch || !reconnectGenerationOpen) return;
+  if (!Number.isSafeInteger(index) || index < 0) return;
+  if (index >= RECONNECT_DELAYS_MINUTES.length) {
+    reconnectGenerationOpen = false;
+    return;
+  }
+  chrome.alarms.create(reconnectAlarmName(epoch, index), {
     delayInMinutes: RECONNECT_DELAYS_MINUTES[index],
   });
 }
 
-async function clearReconnectAlarms() {
+async function clearReconnectAlarms(epoch) {
   if (!chrome.alarms || typeof chrome.alarms.clear !== "function") return;
   await Promise.all(
     RECONNECT_DELAYS_MINUTES.map((_delay, index) =>
-      chrome.alarms.clear(reconnectAlarmName(index)).catch(() => false),
+      chrome.alarms.clear(reconnectAlarmName(epoch, index)).catch(() => false),
     ),
   );
 }
 
+function armHandshakeTimeout(epoch, token) {
+  if (!chrome.alarms || typeof chrome.alarms.create !== "function") return;
+  const name = handshakeAlarmName(epoch, token);
+  activeHandshakeAlarmName = name;
+  chrome.alarms.create(name, {delayInMinutes: HANDSHAKE_TIMEOUT_MINUTES});
+}
+
+function clearHandshakeTimeout(epoch, token) {
+  const name = handshakeAlarmName(epoch, token);
+  if (activeHandshakeAlarmName === name) activeHandshakeAlarmName = null;
+  if (!chrome.alarms || typeof chrome.alarms.clear !== "function") return;
+  chrome.alarms.clear(name).catch(() => false);
+}
+
 function resetTransport(port) {
   if (nativePort !== port) return false;
+  const epoch = nativePortEpoch;
+  const token = nativePortToken;
   nativePort = null;
   transportHandshakeReady = false;
   transportBootNonce = null;
   transportChallengeNonce = null;
   transportStage = "DISCONNECTED";
+  nativePortEpoch = null;
+  nativePortReconnectAttempt = null;
+  nativePortToken = null;
+  if (validReconnectEpoch(epoch) && Number.isSafeInteger(token)) {
+    clearHandshakeTimeout(epoch, token);
+  } else {
+    activeHandshakeAlarmName = null;
+  }
   return true;
 }
 
-function rejectTransport(port, reconnectAttempt) {
-  const wasCurrent = resetTransport(port);
+function rejectTransport(port, epoch, reconnectAttempt) {
+  const wasCurrent = nativePort === port && nativePortEpoch === epoch;
+  if (!wasCurrent || !resetTransport(port)) return;
   try {
     port.disconnect();
   } catch (_error) {
     // The state is already reset; reconnect remains bounded below.
   }
-  if (wasCurrent) scheduleReconnect(reconnectAttempt + 1);
+  scheduleReconnect(epoch, reconnectAttempt + 1);
 }
 
-function handleTransportAck(message, port, reconnectAttempt) {
+function handleTransportAck(message, port, epoch, reconnectAttempt, token) {
+  if (nativePort !== port || nativePortEpoch !== epoch || nativePortToken !== token) return;
   if (!validTransportAck(message) || message.challenge_nonce !== transportChallengeNonce) {
-    rejectTransport(port, reconnectAttempt);
+    rejectTransport(port, epoch, reconnectAttempt);
     return;
   }
   if (transportStage === "AWAITING_FIRST_ACK") {
     transportBootNonce = message.boot_nonce;
     const secondChallenge = randomChallengeNonce();
     if (secondChallenge === transportChallengeNonce) {
-      rejectTransport(port, reconnectAttempt);
+      rejectTransport(port, epoch, reconnectAttempt);
       return;
     }
     transportChallengeNonce = secondChallenge;
@@ -414,50 +481,68 @@ function handleTransportAck(message, port, reconnectAttempt) {
     return;
   }
   if (transportStage !== "AWAITING_FINAL_ACK" || message.boot_nonce !== transportBootNonce) {
-    rejectTransport(port, reconnectAttempt);
+    rejectTransport(port, epoch, reconnectAttempt);
     return;
   }
+  clearHandshakeTimeout(epoch, token);
   transportStage = "READY";
   transportChallengeNonce = null;
   transportHandshakeReady = true;
-  clearReconnectAlarms().catch(() => undefined);
+  reconnectGenerationOpen = false;
+  clearReconnectAlarms(epoch).catch(() => undefined);
 }
 
-function getNativePort(reconnectAttempt = -1) {
+function getNativePort(epoch, reconnectAttempt = -1) {
   if (!INSTANCE_CONFIG) return null;
   if (nativePort) return nativePort;
+  if (epoch !== reconnectEpoch || !reconnectGenerationOpen) return null;
   try {
     nativePort = chrome.runtime.connectNative(INSTANCE_CONFIG.nativeHost);
   } catch (_error) {
     nativePort = null;
-    scheduleReconnect(reconnectAttempt + 1);
+    scheduleReconnect(epoch, reconnectAttempt + 1);
     return null;
   }
   const port = nativePort;
+  const token = ++nextNativePortToken;
+  nativePortEpoch = epoch;
+  nativePortReconnectAttempt = reconnectAttempt;
+  nativePortToken = token;
   transportHandshakeReady = false;
   transportBootNonce = null;
   transportChallengeNonce = randomChallengeNonce();
   transportStage = "AWAITING_FIRST_ACK";
   port.onDisconnect.addListener(() => {
-    const wasReady = nativePort === port && transportHandshakeReady;
-    if (resetTransport(port)) {
-      scheduleReconnect(wasReady ? 0 : reconnectAttempt + 1);
+    const wasReady = nativePort === port && nativePortEpoch === epoch && transportHandshakeReady;
+    if (!resetTransport(port)) return;
+    if (wasReady) {
+      const nextEpoch = beginReconnectGeneration();
+      scheduleReconnect(nextEpoch, 0);
+    } else {
+      scheduleReconnect(epoch, reconnectAttempt + 1);
     }
   });
   port.onMessage.addListener((request) => {
+    if (nativePort !== port || nativePortEpoch !== epoch || nativePortToken !== token) return;
     if (!transportHandshakeReady) {
-      handleTransportAck(request, port, reconnectAttempt);
+      handleTransportAck(request, port, epoch, reconnectAttempt, token);
       return;
     }
     handleNativeRequest(request, port).catch(() => undefined);
   });
-  port.postMessage(transportHello(null, transportChallengeNonce));
+  armHandshakeTimeout(epoch, token);
+  try {
+    port.postMessage(transportHello(null, transportChallengeNonce));
+  } catch (_error) {
+    rejectTransport(port, epoch, reconnectAttempt);
+    return null;
+  }
   return nativePort;
 }
 
 chrome.runtime.onMessage.addListener((event, sender) => {
   if (!recordProbe(event, sender)) return;
-  const port = getNativePort(-1);
+  const port = nativePort;
   if (!port || !transportHandshakeReady) return;
   port.postMessage({
     kind: PROBE_KIND,
@@ -500,13 +585,27 @@ if (chrome.tabs) {
 
 if (chrome.alarms && chrome.alarms.onAlarm) {
   chrome.alarms.onAlarm.addListener((alarm) => {
-    const index = reconnectAlarmIndex(alarm && alarm.name);
-    if (index === null || nativePort) return;
-    getNativePort(index);
+    const name = alarm && alarm.name;
+    const handshake = handshakeAlarmIdentity(name);
+    if (handshake) {
+      if (name !== activeHandshakeAlarmName || !nativePort || transportHandshakeReady ||
+          handshake.epoch !== nativePortEpoch || handshake.token !== nativePortToken) return;
+      const port = nativePort;
+      const epoch = nativePortEpoch;
+      const reconnectAttempt = nativePortReconnectAttempt;
+      rejectTransport(port, epoch, reconnectAttempt);
+      return;
+    }
+
+    const reconnect = reconnectAlarmIdentity(name);
+    if (!reconnect || nativePort || !reconnectGenerationOpen ||
+        reconnect.epoch !== reconnectEpoch) return;
+    getNativePort(reconnect.epoch, reconnect.index);
   });
 }
 
-getNativePort(-1);
+const initialReconnectEpoch = beginReconnectGeneration();
+getNativePort(initialReconnectEpoch, -1);
 hydrateTargets().catch(() => {
   targets.clear();
   tabFingerprints.clear();
