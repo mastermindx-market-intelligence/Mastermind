@@ -30,11 +30,8 @@ const INSTANCE = "a".repeat(64);
 const EXPECTED_HOST = `com.mastermind.web_sol_surface.${INSTANCE.slice(0, 24)}`;
 const BOOT = "boot-nonce-0000000000000001";
 const HOST_PATTERNS = ["https://chat.openai.com/*", "https://chatgpt.com/*"];
-const RECONNECT_NAMES = [
-  "mmx-web-sol-native-reconnect-v1-0",
-  "mmx-web-sol-native-reconnect-v1-1",
-  "mmx-web-sol-native-reconnect-v1-2",
-];
+const RECONNECT_PREFIX = "mmx-web-sol-native-reconnect-v1-";
+const HANDSHAKE_PREFIX = "mmx-web-sol-native-handshake-v1-";
 
 const config = {
   schema: "mastermind.web_sol_instance_config.v1",
@@ -208,6 +205,16 @@ function targetSnapshot() {
   ));
 }
 
+function reconnectAlarms() {
+  return alarmCreates.filter((item) => item.name.startsWith(RECONNECT_PREFIX));
+}
+
+function reconnectIndex(name) {
+  const match = /^mmx-web-sol-native-reconnect-v1-[0-9a-f]{48}-([0-9]+)$/.exec(name);
+  assert.ok(match, `invalid reconnect alarm name: ${name}`);
+  return Number(match[1]);
+}
+
 function completeHandshake(port) {
   assert.equal(port.messages.length, 1);
   const first = port.messages[0];
@@ -299,31 +306,30 @@ function completeHandshake(port) {
     const firstPort = nativePorts[0];
     completeHandshake(firstPort);
     await flush();
-    assert.deepEqual(alarmClears.sort(), [...RECONNECT_NAMES].sort());
+    const clearedReconnect = alarmClears.filter((name) => name.startsWith(RECONNECT_PREFIX));
+    assert.deepEqual(clearedReconnect.map(reconnectIndex).sort(), [0, 1, 2]);
+    assert.equal(alarmClears.filter((name) => name.startsWith(HANDSHAKE_PREFIX)).length, 1);
 
     connectFailuresRemaining = 3;
     firstPort.nativeDisconnect();
-    assert.deepEqual(alarmCreates.at(-1), {
-      name: RECONNECT_NAMES[0],
-      delayInMinutes: 1,
-    });
+    let scheduled = reconnectAlarms().at(-1);
+    assert.equal(reconnectIndex(scheduled.name), 0);
+    assert.equal(scheduled.delayInMinutes, 1);
 
-    alarmListener({name: RECONNECT_NAMES[0]});
+    alarmListener({name: scheduled.name});
     await flush();
-    assert.deepEqual(alarmCreates.at(-1), {
-      name: RECONNECT_NAMES[1],
-      delayInMinutes: 5,
-    });
+    scheduled = reconnectAlarms().at(-1);
+    assert.equal(reconnectIndex(scheduled.name), 1);
+    assert.equal(scheduled.delayInMinutes, 5);
 
-    alarmListener({name: RECONNECT_NAMES[1]});
+    alarmListener({name: scheduled.name});
     await flush();
-    assert.deepEqual(alarmCreates.at(-1), {
-      name: RECONNECT_NAMES[2],
-      delayInMinutes: 15,
-    });
+    scheduled = reconnectAlarms().at(-1);
+    assert.equal(reconnectIndex(scheduled.name), 2);
+    assert.equal(scheduled.delayInMinutes, 15);
 
     const beforeFinal = alarmCreates.length;
-    alarmListener({name: RECONNECT_NAMES[2]});
+    alarmListener({name: scheduled.name});
     await flush();
     assert.equal(alarmCreates.length, beforeFinal);
     assert.equal(nativePorts.length, 1);
