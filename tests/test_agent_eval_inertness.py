@@ -649,8 +649,33 @@ ALLOWED_PATHS = frozenset(
         "tests/test_agent_eval_inertness.py",
         "tests/test_agent_eval_privacy.py",  # amendment §4.2 addition
         "tests/fixtures/agent_eval/README.md",
+        # --- EVAL-C0 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-c0-corpus-20260901-fable-001)
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-c0-corpus.md",
+        "scripts/agent_eval/corpus.py",
+        "tests/test_agent_eval_corpus.py",
     }
 )
+
+# EVAL-C0 fence ratchet (principal-authorized 2026-09-01, operation
+# mastermind-agent-evaluation-c0-corpus-20260901-fable-001): this is the
+# deliberate per-wave surface ratchet -- each wave's OWNED paths are added
+# to this fence only by explicit principal authorization, never by the
+# wave's own worker unilaterally widening its own gate. C0's corpus tree
+# (``corpus/agent_eval/``) grows case-by-case across this and future
+# C0-lineage waves without renaming any script or test, so it is the one
+# path allowed as a PREFIX rather than an ever-growing enumerated file
+# list -- every other wave's surface (R0's own paths above, and C0's three
+# new exact files above) stays exact-path-only. A future wave widening
+# this ratchet further still needs its own explicit principal
+# authorization and its own operation-key citation, exactly like this one.
+ALLOWED_PATH_PREFIXES = frozenset({"corpus/agent_eval/"})
+
+
+def _changed_path_is_allowed(path: str) -> bool:
+    if path in ALLOWED_PATHS:
+        return True
+    return any(path.startswith(prefix) for prefix in ALLOWED_PATH_PREFIXES)
 
 
 def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -699,7 +724,7 @@ def compute_pr_diff_paths(repo_dir: Path, *, head: str = "HEAD", upstream: str =
 def test_changed_paths_are_within_the_allowed_r0_surface() -> None:
     changed = compute_pr_diff_paths(ROOT)
     assert changed, "expected at least one changed file relative to the effective PR base"
-    unexpected = changed - ALLOWED_PATHS
+    unexpected = {path for path in changed if not _changed_path_is_allowed(path)}
     assert not unexpected, f"changed path(s) outside the allowed R0 surface: {sorted(unexpected)}"
 
 
