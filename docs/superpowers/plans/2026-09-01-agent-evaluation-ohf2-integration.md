@@ -140,7 +140,7 @@ explicitly rather than inventing a value.
 
 | R0 field | Source | Note |
 |---|---|---|
-| `run_id` | `run:<frontmatter.run_id>` | Fails closed (`OHF_RUN_ID_NOT_UUID4`) if `run_id` does not parse as uuid4. |
+| `run_id` | `run:<canonical dashed str of frontmatter.run_id>` | **Review repair BLOCKER-1 (post-merge correction):** the real harness emits `uuid.uuid4().hex` -- 32 lower-case hex characters, NO dashes -- never the dashed canonical string form this record originally assumed. Accepted shape is exactly `^[0-9a-f]{32}$`; normalized via `uuid.UUID(hex=...)`, version required `== 4`; the canonical **dashed** `str()` of that UUID is what R0's own `run_id` grammar expects and is what this bridge uses downstream (digest inputs, the `run:<uuid>` field). Fails closed (`OHF_RUN_ID_NOT_UUID4`) on any other shape, including a syntactically dashed uuid string (OHF F0 never emits one) or a valid-looking 32-hex value whose version nibble isn't 4. Confirmed against a real harness-written fixture (§9/MAJOR-2): its `run_id` is `1cdaa1b19b584d50ba012dc3910637eb`. |
 | `scenario.*` | caller-supplied `scenario` document | Bridge asserts `frontmatter.scenario_id == expected_ohf_scenario_code` when the caller passes that check value (§5). |
 | `configuration.*` | caller-supplied `configuration` document | Built via `build_ohf_arm_configuration_fields` (§4.1) or supplied directly. |
 | `comparison.arm_id` | `slugify(frontmatter.arm)` | `.` -> `-` (R0 `arm_id` grammar forbids `.`; `control-1.0.0` -> `control-1-0-0`). Caller still names the experiment/arm/pair/replicate explicitly — the bridge does not invent experiment membership. |
@@ -156,7 +156,7 @@ explicitly rather than inventing a value.
 | `procedure.*` | copied verbatim from `configuration.procedure` | Required equal to configuration by validity law regardless. Bridge additionally cross-checks `configuration.procedure.instruction_bundle.digest == digest_value({procedure_source_blobs, procedure_context_sha256})` before proceeding — a real mismatch here means the configuration document does not actually describe what OHF ran, so it fails closed (`OHF_PROCEDURE_BINDING_MISMATCH`) rather than silently publishing a run bound to the wrong configuration. |
 | `context.*` | copied verbatim from `configuration.context` | Same equality law as `procedure`. |
 | `context.source_policy_digest` | `digest_value(scenario.source_policy)` | Computed the same way the finalizer itself expects (matches `validity._gather_reason_codes`'s own recomputation). |
-| `observations.observed_sources` | **caller-supplied, required** | **Genuine gap (§5.1):** OHF F0's persisted artifact records no file-level "what did the model read" evidence stream at all. Caller must supply the real observation (possibly empty); the bridge never invents one. |
+| `observations.observed_sources` | **caller-supplied, required** | **Genuine gap (§5.1).** OHF F0's persisted artifact records no file-level "what did the model read" evidence stream at all. **Review repair MAJOR-3:** an EMPTY `observed_sources` now requires the caller to pass `observations_are_absent=True` -- `build_run_draft_from_ohf` refuses (`OHF_OBSERVATION_FIELD_REQUIRED`) otherwise. Acknowledging records `OHF_NO_SOURCE_OBSERVATION_DEGRADATION` (`"OHF_F0_NO_SOURCE_OBSERVATION_STREAM"`) in `observations.dependency_degradations`, so the absence lives ON the artifact rather than silently and invisibly satisfying R0's leakage checks. See §5.3 for the resulting-state report. |
 | `observations.observed_capability_ids`, `observed_tool_schema_digests` | **caller-supplied, required** | **Genuine gap (§5.1):** `CapabilityReceipt.mcp_names/plugin_names/skill_names` exist only transiently during the OHF run and are never written into `_EVIDENCE_METADATA_KEYS`. Default `()` is explicit, never silent. |
 | `observations.observed_network_destinations` | `()` (structural default) | OHF F0's capability policy structurally asserts zero MCP/plugin names (`_assert_empty_capability_surface`) before any turn runs, so no externally-callable network surface exists to observe from. Documented inference, not a literal field; overridable by the caller. |
 | `observations.dependency_degradations` | `()` (structural default) | OHF F0 has no degradation-reporting path. Overridable by the caller. |
@@ -171,7 +171,7 @@ explicitly rather than inventing a value.
 | `evidence.trace` | `None` | OHF F0 persists no trace stream. |
 | `evidence.artifacts` | `[]` | |
 | `resources.*` | `input_tokens/output_tokens/tool_calls/provider_usage_ref/estimated_marginal_cost/cost_currency = None`; `elapsed_ms` = computed duration | OHF F0's frontmatter carries none of the token/cost fields; explicit null, never fabricated zero (design §8.1). |
-| `timing.started_at`/`completed_at` | `frontmatter.started_at`/`completed_at` truncated to whole seconds | R0's `v_timestamp` requires strict whole-second `...SSZ`; OHF emits fractional-second timestamps. Truncated (never rounded) for determinism; the precise fractional delta is preserved in `monotonic_duration_ms`/`resources.elapsed_ms` before truncation. |
+| `timing.started_at`/`completed_at` | `frontmatter.started_at`/`completed_at` truncated to whole seconds | R0's `v_timestamp` requires strict whole-second `...SSZ`; OHF emits fractional-second timestamps. Truncated (never rounded) for determinism; the precise fractional delta is preserved in `monotonic_duration_ms`/`resources.elapsed_ms` before truncation. **Review repair NB-6:** for a sub-second-duration run, truncation can collapse `started_at == completed_at` in the stored R0 document even though `monotonic_duration_ms`/`resources.elapsed_ms` are nonzero (computed from the untruncated fractional values) -- this is not a validation defect (R0's own time-order check only requires `started_at <= completed_at`, and the duration/elapsed-ms cross-check compares those two fields to each other, not to the truncated boundary timestamps), but a reader should not infer "zero duration" from equal whole-second boundaries; the nonzero `monotonic_duration_ms` is the accurate signal. |
 | `timing.monotonic_duration_ms` | `round((completed - started).total_seconds() * 1000)` computed from the **fractional** timestamps | Set equal to `resources.elapsed_ms` so the cross-field `DURATION_ELAPSED_MISMATCH` check is trivially satisfied. |
 
 Fields with no R0 home (observed but genuinely unmapped, dropped from the
@@ -226,17 +226,52 @@ observed tool-call evidence anywhere in code or documentation. A future
 OHF wave that persists a real tool-events log should replace this
 placeholder wholesale — it is a single named constant/function.
 
-### 5.3 `observed_sources` is empty by default — leakage detection is not yet load-bearing for bridged runs
+### 5.3 `observed_sources` absence must be acknowledged, not silently vacuous (review repair MAJOR-3)
 
-Because `observations.observed_sources` has no OHF-native source and
-defaults to an empty list when the caller does not supply one, R0's
+Because `observations.observed_sources` has no OHF-native source, R0's
 leakage reasons (`UNAUTHORIZED_SOURCE`, `SOURCE_DIGEST_MISMATCH`,
-`HIDDEN_SOLUTION_SOURCE`) are **vacuously satisfied** for a bridged run
-unless the caller supplies real per-run source observations. This is
-disclosed, not hidden: a scenario whose safety case depends on catching
-solution-source leakage from an OHF-bridged run is not yet covered by
-this integration and needs either (a) the caller to supply genuine
-observed-source data, or (b) a future OHF wave that emits one.
+`HIDDEN_SOLUTION_SOURCE`) would be **vacuously satisfied** for a bridged
+run with an empty `observed_sources` -- the review's finding was that this
+produced an *unearned* `source_integrity` `PASS` from S1's
+`technical_integrity` scorer with no real observation behind it.
+
+**Repair:** `build_run_draft_from_ohf` now REFUSES
+(`OHF_OBSERVATION_FIELD_REQUIRED`) an empty `observed_sources` unless the
+caller passes `observations_are_absent=True`. Acknowledging records
+`OHF_NO_SOURCE_OBSERVATION_DEGRADATION`
+(`"OHF_F0_NO_SOURCE_OBSERVATION_STREAM"`) in the run's own
+`observations.dependency_degradations` -- the gap lives ON the artifact,
+visible to every downstream reader (scorer, evidence-ref summary, tree
+verification), rather than silently and invisibly satisfying the leakage
+checks.
+
+**Resulting state, reported honestly (not special-cased):** whichever
+technical-validity status R0's own unmodified validity engine computes is
+the outcome this bridge accepts. Tested (`tests/test_agent_eval_ohf_bridge.py::
+test_major3_resulting_state_is_degraded_dependency_not_special_cased`)
+against a scenario that explicitly allows the degradation: the result is
+`DEGRADED_DEPENDENCY` (not `VALID` -- the run correctly stays OUT of the
+`VALID` bucket), and the run remains fully visible in evidence-ref
+denominators (`degraded_count`, never folded into `valid_count`). A
+scenario that does NOT allow the degradation would instead correctly
+produce `INVALID_CONFIGURATION`/`DEGRADATION_NOT_ALLOWED` -- also not
+special-cased, just not the path this record's own test scenario
+exercises.
+
+**A narrower, disclosed limit inside this fix:** the technical_integrity
+scorer's `source_integrity` dimension (owned by EVAL-S1, `scoring.py`,
+NOT modified by this wave) derives its PASS/FAIL purely from the run's
+`validity.reason_codes`, and `DEGRADED_DEPENDENCY` alone adds no
+LEAKAGE-bucket reason code -- so `source_integrity` still evaluates
+`PASS` even on a `DEGRADED_DEPENDENCY` run with an empty
+`observed_sources`. This is reported explicitly, pinned by the same test
+above, not hidden: the RUN's own technical-validity status is no longer
+unearned (that was the review's actual finding), but S1's existing
+scorer dimension is a separate, narrower gap this wave does not own and
+does not silently patch. `observed_capability_ids`/
+`observed_tool_schema_digests` still default to empty with no separate
+acknowledgment gate -- that narrower gap was out of scope for this
+repair wave.
 
 ## 6. The #162-merge-gated seam
 
@@ -300,6 +335,16 @@ scripts/agent_eval/ohf_bridge.py
 tests/test_agent_eval_ohf_bridge.py
 ```
 
+**Review repair MAJOR-2 addition:** the harness-written real-bytes fixture
+(§9) adds three more exact paths to the same ratchet, under the same
+operation key:
+
+```text
+tests/fixtures/agent_eval_ohf_bridge/README.md
+tests/fixtures/agent_eval_ohf_bridge/MANIFEST.json
+tests/fixtures/agent_eval_ohf_bridge/runs/control-1.0.0/S2/1cdaa1b19b584d50ba012dc3910637eb.md
+```
+
 `scripts/agent_eval/ohf_bridge.py` also falls under the existing
 `scripts/agent_eval/` AST-fence parametrization automatically (no fence
 edit needed there) — it is swept by
@@ -314,26 +359,41 @@ moment the file exists on disk.
 
 - **BUILT_SYNTHETIC_PROVEN** — the adapter is fully implemented and the
   complete OHF-artifact -> R0-run-receipt -> store -> scorer -> evidence-ref
-  pipeline is proven end-to-end against synthetic fake-client OHF
-  artifacts built to the exact §2 documented format, including every
-  fail-closed path this record names.
+  pipeline is proven end-to-end, including every fail-closed path this
+  record names. Proven against BOTH: (a) synthetic, hand-rendered OHF
+  artifacts built to the exact §2 documented format (the majority of
+  `tests/test_agent_eval_ohf_bridge.py`), used because they let each
+  fail-closed path be tested with one deliberately-broken field in
+  isolation; and (b) **review repair MAJOR-2** — one REAL harness-written
+  artifact + manifest, produced by calling PR #162's own
+  `write_run_artifact()` directly (real `yaml.safe_dump`, real backtick
+  fencing, real manifest bookkeeping; no live App Server or provider
+  call), committed verbatim under
+  `tests/fixtures/agent_eval_ohf_bridge/` and bridged end-to-end by
+  `test_bridges_harness_written_real_bytes_fixture_end_to_end`. The
+  hand-rendered fixtures remain supplementary evidence for the isolated
+  fail-closed paths; they are no longer the ONLY evidence the parser
+  matches the harness's real byte shape.
 - **PRODUCTION_INERT** — `ohf_bridge.py` performs no network, process,
   provider, or credential operation; verified by the same AST/subprocess
   inertness fence R0 already runs (§8). It has never run against a real
-  OHF live-canary artifact because none exists yet (OHF1's canary is
-  parked pending a human go/no-go).
-  - Because it operates on OHF F0's frontmatter as **data** (a
-    hand-written parser, §2), it has not been validated against the
-    literal byte output of `yaml.safe_dump` for every possible value
-    shape OHF could produce (e.g. a value PyYAML would need to quote).
-    The parser handles the closed field set's known shapes (hex digests,
-    uuid4 strings, ISO timestamps, short tokens) and fails closed
-    (`OHF_ARTIFACT_SHAPE_INVALID`) rather than silently misparsing
-    anything else — but this has not been cross-checked against a real
-    `yaml.safe_dump` byte stream, only against this record's own
-    synthetic fixtures. A follow-up wave should feed one real (or
-    OHF-team-produced) artifact byte-for-byte through the parser before
-    the pipeline is trusted against live output.
+  OHF live-canary artifact (a genuine fresh-Sol turn) because none exists
+  yet (OHF1's canary is parked pending a human go/no-go) — MAJOR-2's
+  fixture proves the SERIALIZATION format, not a live model turn.
+  - The frontmatter parser IS now cross-checked against one real
+    `yaml.safe_dump` byte stream (MAJOR-2's fixture) — this record no
+    longer makes a "byte-for-byte, never checked against real output"
+    claim. What remains open: that ONE fixture does not exercise every
+    possible value shape PyYAML could quote/fold across the full field
+    set (e.g. a `harness_version` PyYAML would need to quote as a
+    float-ambiguous string); the closest such case found during this
+    repair — a long, space-containing `procedure_source_blobs` value
+    that PyYAML line-folds past its default 80-column width — was tested
+    directly against real `yaml.safe_dump` output too (§7 item 7a
+    regression) and confirmed to fail closed correctly, but a follow-up
+    wave should still feed a WIDER range of real (or OHF-team-produced)
+    artifact shapes through the parser before the pipeline is trusted
+    unconditionally against live output.
 - **RUNNER_SEAM_HELD_ON_162** — the bridge cannot be exercised against a
   real fresh-Sol run until PR #162 merges and its canary is approved. The
   seam (§6) is the only work remaining once that happens.
@@ -343,3 +403,21 @@ moment the file exists on disk.
 No live turns. No modification to PR #162 or `scripts/ohf/**`. No second
 runner. No E1 preregistration. No corpus content changes. No merge/ready/
 label action. No Slack/Linear posting.
+
+## 11. Review repair log (principal adjudication, 2026-09-01)
+
+A review of the first PR revision found one blocker, two majors, and
+several minor/nit items, all addressed in a follow-up commit on the same
+branch (`EVAL-OHF2: review repair —` prefix). Summary (detail lives at
+each item's own section above):
+
+| Item | Fix | Where |
+|---|---|---|
+| BLOCKER-1 | Accept the real harness's `uuid.uuid4().hex` (32-hex, no dashes) `run_id` shape, not dashed-only | §4 `run_id` row |
+| MAJOR-2 | Committed one REAL harness-written artifact+manifest fixture; bridged end-to-end | §9, `tests/fixtures/agent_eval_ohf_bridge/` |
+| MAJOR-3 | `observed_sources` absence now requires explicit acknowledgment, recorded as a dependency degradation on the run itself | §5.3 |
+| NB-4 | Duplicate frontmatter keys, inline `[]` list form, and a second injected output section all fail closed; `build_run_draft_from_ohf`/`finalize_and_publish_ohf_run` take `artifact_bytes`+`manifest` directly (structural tamper check, not a separate conventional step) | `ohf_bridge.py` parsing + function signatures |
+| NB-5 | Manifest entry identity (`run_id`/`arm`/`scenario_id`) cross-checked against the artifact's own frontmatter, reusing `OHF_ARTIFACT_DIGEST_TAMPERED` | `ohf_bridge._verify_manifest_frontmatter_identity` |
+| NB-6 | Disclosed that whole-second timestamp truncation can collapse `started_at == completed_at` alongside nonzero `monotonic_duration_ms` | §4 timing row |
+| 7a | Confirmed (with real `yaml.safe_dump`) that a YAML-folded long `procedure_source_blobs` item already fails closed; pinned as a regression | `tests/test_agent_eval_ohf_bridge.py::test_yaml_folded_list_item_fails_closed_regression` |
+| 7b | Inline empty-list form (`key: []`) now refused rather than misread as a literal string | `ohf_bridge._parse_ohf_frontmatter` |

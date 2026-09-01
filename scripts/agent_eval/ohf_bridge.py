@@ -20,27 +20,51 @@ credential access. Swept automatically by the same AST/subprocess
 inertness fence that already covers every ``scripts/agent_eval/*.py``
 file (``tests/test_agent_eval_inertness.py``).
 
+**Structural, not conventional, integrity checks (review repair NB-4):**
+:func:`build_run_draft_from_ohf` and :func:`finalize_and_publish_ohf_run`
+take the raw ``artifact_bytes`` and the OHF ``manifest`` dict directly --
+never a pre-parsed/pre-verified object -- so the manifest tamper check
+(:func:`verify_ohf_manifest_entry`) and the manifest/frontmatter identity
+cross-check (:func:`_verify_manifest_frontmatter_identity`, review repair
+NB-5) always run before anything else. There is no call path that skips
+them.
+
 **Known, disclosed limitations** (plan record §5 for detail — not hidden
 here or anywhere else in this module):
 
 - ``evidence.tool_events`` is a documented PLACEHOLDER, not real observed
   evidence — OHF F0 persists no distinct tool-call event log.
-- ``observations.observed_sources`` / ``observed_capability_ids`` /
-  ``observed_tool_schema_digests`` default to empty when the caller does
-  not supply real per-run observations, because OHF F0's persisted
-  artifact carries none of them. R0's leakage/capability-drift detection
-  is not yet load-bearing for a bridged run unless the caller supplies
-  genuine observation data.
+- ``observations.observed_sources`` has no OHF-native source. Review
+  repair MAJOR-3: :func:`build_run_draft_from_ohf` REFUSES
+  (``OHF_OBSERVATION_FIELD_REQUIRED``) to proceed with an empty
+  ``observed_sources`` unless the caller explicitly acknowledges the
+  absence via ``observations_are_absent=True`` -- which then records
+  :data:`OHF_NO_SOURCE_OBSERVATION_DEGRADATION` in the run's own
+  ``observations.dependency_degradations`` so the gap lives ON the
+  artifact, visible to every downstream reader, rather than silently and
+  invisibly satisfying R0's leakage checks. Whichever technical-validity
+  status R0's own unmodified validity engine then computes (``VALID``,
+  ``DEGRADED_DEPENDENCY``, or ``INVALID_CONFIGURATION`` if the scenario
+  does not list the degradation as allowed) is the honest result; this
+  module never special-cases it. ``observed_capability_ids`` /
+  ``observed_tool_schema_digests`` still default to empty for the same
+  underlying reason (OHF F0's ``CapabilityReceipt`` names exist only
+  transiently in-process) without a separate acknowledgment gate -- that
+  narrower gap was not in scope for this repair wave.
 - The frontmatter parser below handles OHF F0's known closed field
-  shapes (hex digests, uuid4 strings, ISO timestamps, short tokens) and
-  fails closed on anything else; it has not been cross-checked against a
-  real ``yaml.safe_dump`` byte stream (capability claim
-  ``PRODUCTION_INERT``, plan record §9).
+  shapes (hex digests, uuid4.hex strings, ISO timestamps, short tokens)
+  and fails closed on anything else, including duplicate keys, an inline
+  (``[]``) list form, and a YAML-folded (line-wrapped) list item --
+  verified against real ``yaml.safe_dump`` output in
+  ``tests/fixtures/agent_eval_ohf_bridge/`` (review repair MAJOR-2), not
+  only hand-rendered fixtures (capability claim ``PRODUCTION_INERT``,
+  plan record §9).
 """
 from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -204,7 +228,15 @@ def _coerce_scalar(key: str, raw: str) -> Any:
 
 def _parse_ohf_frontmatter(body: str) -> dict[str, Any]:
     """Parse the closed, ordered OHF F0 frontmatter field set only (module
-    docstring: not a general YAML parser)."""
+    docstring: not a general YAML parser). Review repair NB-4: refuses a
+    duplicate key and an inline (``[]``) list form rather than silently
+    accepting the last value or misreading a flow-style empty list as a
+    scalar string. A YAML-FOLDED (line-wrapped) block-list item -- which
+    PyYAML's default emitter produces for a plain scalar containing
+    whitespace once it exceeds its line-width budget -- is refused too:
+    the continuation line matches neither a ``key:`` line nor a fresh
+    ``- item`` line, so parsing already stops and fails closed on it
+    (pinned by a regression test, review repair item 7a)."""
     lines = body.split("\n")
     result: dict[str, Any] = {}
     index = 0
@@ -217,7 +249,15 @@ def _parse_ohf_frontmatter(body: str) -> dict[str, Any]:
         if not match:
             raise OhfBridgeError("OHF_ARTIFACT_SHAPE_INVALID", f"unparseable frontmatter line: {line!r}")
         key, rest = match.group(1), match.group(2)
-        if key in _OHF_LIST_FIELDS and rest == "":
+        if key in result:
+            raise OhfBridgeError("OHF_ARTIFACT_SHAPE_INVALID", f"duplicate frontmatter key: {key!r}")
+        if key in _OHF_LIST_FIELDS:
+            if rest != "":
+                raise OhfBridgeError(
+                    "OHF_ARTIFACT_SHAPE_INVALID",
+                    f"list field {key!r} must use YAML block style ('key:' then '- item' lines), not an inline "
+                    f"form: {rest!r}",
+                )
             items: list[str] = []
             index += 1
             while index < len(lines) and _LIST_ITEM_RE.match(lines[index]):
@@ -240,7 +280,11 @@ def parse_ohf_artifact_text(text: str) -> OhfArtifact:
     """Parse one OHF F0 evidence-artifact Markdown file's exact text into
     its closed frontmatter dict plus the two verbatim fenced sections.
     Fails closed (:class:`OhfBridgeError`) on any shape deviation; never
-    guesses."""
+    guesses. Review repair NB-4: requires EXACTLY one of each section
+    header -- a second, injected ``## Exact model output`` header (e.g.
+    appended after the real one to smuggle extra "output" text past a
+    naive first-match parser) is refused rather than silently accepted
+    via the first match."""
     if not text.startswith(_FRONTMATTER_DELIM):
         raise OhfBridgeError("OHF_ARTIFACT_SHAPE_INVALID", "artifact does not open with a '---' frontmatter fence")
     end_index = text.find("\n---\n", len(_FRONTMATTER_DELIM))
@@ -253,6 +297,17 @@ def parse_ohf_artifact_text(text: str) -> OhfArtifact:
         raise OhfBridgeError(
             "OHF_ARTIFACT_SCHEMA_MISMATCH",
             f"expected schema {OHF_ARTIFACT_SCHEMA!r}, found {frontmatter['schema']!r}",
+        )
+    prompt_header_count = remainder.count("## Exact prompt\n")
+    output_header_count = remainder.count("## Exact model output\n")
+    if prompt_header_count != 1:
+        raise OhfBridgeError(
+            "OHF_ARTIFACT_SHAPE_INVALID", f"expected exactly one '## Exact prompt' section, found {prompt_header_count}"
+        )
+    if output_header_count != 1:
+        raise OhfBridgeError(
+            "OHF_ARTIFACT_SHAPE_INVALID",
+            f"expected exactly one '## Exact model output' section, found {output_header_count}",
         )
     sections = _SECTIONS_RE.search(remainder)
     if not sections:
@@ -269,7 +324,8 @@ def parse_ohf_artifact_text(text: str) -> OhfArtifact:
 
 
 # ---------------------------------------------------------------------------
-# Manifest tamper detection (plan record §7 step 2)
+# Manifest tamper + identity detection (plan record §7 step 2; review
+# repair NB-5 for the identity cross-check)
 # ---------------------------------------------------------------------------
 
 
@@ -294,6 +350,25 @@ def verify_ohf_manifest_entry(manifest: dict[str, Any], *, run_id: str, artifact
     return entry
 
 
+def _verify_manifest_frontmatter_identity(entry: dict[str, Any], frontmatter: dict[str, Any]) -> None:
+    """Review repair NB-5: the manifest entry's own claimed identity
+    (``run_id``/``arm``/``scenario_id``) must match what the artifact's
+    OWN frontmatter says about itself. A byte-identical artifact whose
+    manifest entry was relabeled (wrong arm/scenario_id, or points at the
+    wrong run_id) is a tamper class the digest check alone cannot catch --
+    the digest only proves the bytes are what was recorded, not that the
+    recorded metadata correctly describes those bytes' own content.
+    Reuses ``OHF_ARTIFACT_DIGEST_TAMPERED`` (an existing code) rather than
+    minting a new one, per the repair packet."""
+    mismatched = sorted(field for field in ("run_id", "arm", "scenario_id") if entry.get(field) != frontmatter.get(field))
+    if mismatched:
+        raise OhfBridgeError(
+            "OHF_ARTIFACT_DIGEST_TAMPERED",
+            f"manifest entry identity field(s) {mismatched} do not match the artifact's own frontmatter -- "
+            "possible relabeled or substituted manifest entry",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Small deterministic transforms
 # ---------------------------------------------------------------------------
@@ -305,8 +380,30 @@ def slugify_ohf_arm(arm_name: str) -> str:
     return arm_name.replace(".", "-")
 
 
-_UUID4_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+#: Review repair BLOCKER-1: OHF F0 emits ``uuid.uuid4().hex`` -- 32
+#: lower-case hex characters, NO dashes -- never the dashed canonical
+#: string form. The prior dashed-only regex here rejected 100% of real
+#: harness output.
+_OHF_RUN_ID_HEX_RE = re.compile(r"^[0-9a-f]{32}$")
 _OHF_TIMESTAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{1,6})Z$")
+
+
+def _parse_ohf_run_id(raw_run_id: str) -> uuid.UUID:
+    """Accept exactly the shape OHF F0 emits (32-hex ``uuid4().hex``),
+    normalize via ``uuid.UUID(hex=...)``, and require version 4. The
+    canonical dashed ``str()`` of the returned UUID is what R0's own
+    ``run_id`` grammar expects downstream -- OHF's bare-hex form and a
+    syntactically dashed uuid string are both rejected here up front so
+    every caller of this function gets the SAME canonical identity, never
+    two differently-shaped strings for the same run. A genuinely
+    non-uuid4 value (wrong shape, or a valid-looking hex string whose
+    version nibble isn't 4) still fails with this same code."""
+    if not isinstance(raw_run_id, str) or not _OHF_RUN_ID_HEX_RE.match(raw_run_id):
+        raise OhfBridgeError("OHF_RUN_ID_NOT_UUID4", f"OHF run_id is not a bare 32-hex uuid4().hex string: {raw_run_id!r}")
+    parsed = uuid.UUID(hex=raw_run_id)
+    if parsed.version != 4:
+        raise OhfBridgeError("OHF_RUN_ID_NOT_UUID4", f"OHF run_id is not uuid version 4: {raw_run_id!r}")
+    return parsed
 
 
 def _parse_ohf_timestamp(value: str) -> datetime:
@@ -343,6 +440,13 @@ def _parse_cleanup_proof(cleanup_proof: str) -> bool:
     if not match:
         raise OhfBridgeError("OHF_CLEANUP_PROOF_UNPARSEABLE", f"cleanup_proof is not the expected shape: {cleanup_proof!r}")
     return match.group("empty") == "True"
+
+
+#: Review repair MAJOR-3: the closed dependency-degradation marker
+#: recorded when a caller acknowledges (``observations_are_absent=True``)
+#: that OHF F0 has no source-observation stream to supply. See the module
+#: docstring and plan record §5.3/MAJOR-3.
+OHF_NO_SOURCE_OBSERVATION_DEGRADATION = "OHF_F0_NO_SOURCE_OBSERVATION_STREAM"
 
 
 # ---------------------------------------------------------------------------
@@ -422,13 +526,17 @@ def build_ohf_arm_configuration_fields(
 
 
 # ---------------------------------------------------------------------------
-# Run-draft construction (plan record §4)
+# Run-draft construction (plan record §4; review repairs BLOCKER-1,
+# MAJOR-3, NB-4, NB-5 all land inside this function and the two it opens
+# with)
 # ---------------------------------------------------------------------------
 
 
 def build_run_draft_from_ohf(
-    artifact: OhfArtifact,
+    artifact_bytes: bytes,
+    manifest: dict[str, Any],
     *,
+    run_id: str,
     scenario: dict[str, Any],
     configuration: dict[str, Any],
     experiment: dict[str, Any] | None,
@@ -437,6 +545,7 @@ def build_run_draft_from_ohf(
     replicate_index: int,
     pair_key: str | None,
     observed_sources: tuple[dict[str, str], ...] = (),
+    observations_are_absent: bool = False,
     observed_capability_ids: tuple[str, ...] = (),
     observed_tool_schema_digests: tuple[str, ...] = (),
     observed_network_destinations: tuple[dict[str, Any], ...] = (),
@@ -449,12 +558,31 @@ def build_run_draft_from_ohf(
     resources_cost_currency: str | None = None,
     expected_ohf_scenario_code: str | None = None,
 ) -> dict[str, Any]:
-    """Build one EVAL-R0 run-draft dict from a parsed :class:`OhfArtifact`
+    """Build one EVAL-R0 run-draft dict from a raw OHF F0 artifact,
     bound to caller-supplied ``scenario``/``configuration``/``experiment``
     documents. Never publishes anything itself -- see
     :func:`finalize_and_publish_ohf_run` for the full pipeline. Fails
     closed (:class:`OhfBridgeError`) on any binding mismatch; see the plan
-    record §4 mapping table for the full field-by-field rationale."""
+    record §4 mapping table for the full field-by-field rationale.
+
+    Review repair NB-4: takes ``artifact_bytes``/``manifest`` directly (not
+    a pre-verified :class:`OhfArtifact`) so the manifest tamper check and
+    the manifest/frontmatter identity cross-check (NB-5) are structural --
+    every call path runs them, none can skip straight to a hand-built
+    draft.
+
+    Review repair MAJOR-3: when ``observed_sources`` is empty, the caller
+    MUST pass ``observations_are_absent=True`` to proceed -- this records
+    :data:`OHF_NO_SOURCE_OBSERVATION_DEGRADATION` in the run's own
+    ``observations.dependency_degradations`` rather than letting the
+    absence silently and invisibly satisfy R0's leakage checks."""
+    entry = verify_ohf_manifest_entry(manifest, run_id=run_id, artifact_bytes=artifact_bytes)
+    try:
+        text = artifact_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise OhfBridgeError("OHF_ARTIFACT_SHAPE_INVALID", f"artifact bytes are not valid utf-8: {exc}") from exc
+    artifact = parse_ohf_artifact_text(text)
+    _verify_manifest_frontmatter_identity(entry, artifact.frontmatter)
     frontmatter = artifact.frontmatter
 
     if expected_ohf_scenario_code is not None and frontmatter["scenario_id"] != expected_ohf_scenario_code:
@@ -463,9 +591,8 @@ def build_run_draft_from_ohf(
             f"artifact scenario_id {frontmatter['scenario_id']!r} != expected {expected_ohf_scenario_code!r}",
         )
 
-    run_id = frontmatter["run_id"]
-    if not _UUID4_RE.match(run_id):
-        raise OhfBridgeError("OHF_RUN_ID_NOT_UUID4", f"OHF run_id is not a bare uuid4: {run_id!r}")
+    canonical_run_uuid = _parse_ohf_run_id(frontmatter["run_id"])
+    canonical_run_id = str(canonical_run_uuid)
 
     expected_instruction_digest = digest_value(
         {
@@ -485,6 +612,17 @@ def build_run_draft_from_ohf(
     if not private_group_empty:
         raise OhfBridgeError("OHF_CLEANUP_PROOF_NOT_EMPTY", "OHF cleanup_proof reports private_group_empty=False")
 
+    effective_degradations = set(dependency_degradations)
+    if not observed_sources:
+        if not observations_are_absent:
+            raise OhfBridgeError(
+                "OHF_OBSERVATION_FIELD_REQUIRED",
+                "observed_sources is empty and OHF F0 has no source-observation stream (plan record §5.3) -- pass "
+                "observations_are_absent=True to acknowledge this explicitly (recorded as the "
+                f"{OHF_NO_SOURCE_OBSERVATION_DEGRADATION!r} dependency degradation), or supply real observed_sources",
+            )
+        effective_degradations.add(OHF_NO_SOURCE_OBSERVATION_DEGRADATION)
+
     arm_id = slugify_ohf_arm(frontmatter["arm"])
     started_at = _truncate_to_whole_second(frontmatter["started_at"])
     completed_at = _truncate_to_whole_second(frontmatter["completed_at"])
@@ -497,12 +635,12 @@ def build_run_draft_from_ohf(
 
     output_digest = "sha256:" + hashlib.sha256(artifact.output.encode("utf-8")).hexdigest()
     cleanup_digest = digest_value(frontmatter["cleanup_proof"])
-    tool_events_digest = digest_value({"ohf_f0_tool_events_not_emitted": True, "run_id": run_id})
+    tool_events_digest = digest_value({"ohf_f0_tool_events_not_emitted": True, "run_id": canonical_run_id})
 
     execution_config = configuration["execution"]
     draft = {
         "schema": contracts.RUN_DRAFT_SCHEMA,
-        "run_id": f"run:{run_id}",
+        "run_id": f"run:{canonical_run_id}",
         "scenario": {
             "scenario_id": scenario["scenario_id"],
             "scenario_version": scenario["scenario_version"],
@@ -538,7 +676,7 @@ def build_run_draft_from_ohf(
                 }
             ),
             "native_session_fingerprint": digest_value(
-                {"native_thread_id": frontmatter["native_thread_id"], "run_id": run_id}
+                {"native_thread_id": frontmatter["native_thread_id"], "run_id": canonical_run_id}
             ),
             "completion_status": "COMPLETED",
             "termination_reason": "COMPLETED_NORMALLY",
@@ -558,14 +696,16 @@ def build_run_draft_from_ohf(
             "observed_capability_ids": sorted(set(observed_capability_ids)),
             "observed_tool_schema_digests": sorted(set(observed_tool_schema_digests)),
             "observed_network_destinations": [dict(item) for item in observed_network_destinations],
-            "dependency_degradations": sorted(set(dependency_degradations)),
+            "dependency_degradations": sorted(effective_degradations),
         },
         "capabilities": {
             "profile_id": configuration["capabilities"]["profile_id"],
             "profile_digest": configuration["capabilities"]["profile_digest"],
             "sandbox_digest": configuration["capabilities"]["sandbox_digest"],
             "network_policy_digest": configuration["capabilities"]["network_policy_digest"],
-            "workspace_digest": digest_value({"run_id": run_id, "process_start_identity": frontmatter["process_start_identity"]}),
+            "workspace_digest": digest_value(
+                {"run_id": canonical_run_id, "process_start_identity": frontmatter["process_start_identity"]}
+            ),
             "environment_digest": configuration["capabilities"]["environment_digest"],
         },
         "randomness": dict(configuration["randomness"]),
@@ -605,25 +745,33 @@ def build_run_draft_from_ohf(
 
 def finalize_and_publish_ohf_run(
     artifact_store: "store.ArtifactStore",
-    scenario: dict[str, Any],
-    configuration: dict[str, Any],
-    experiment: dict[str, Any] | None,
-    draft: dict[str, Any],
+    artifact_bytes: bytes,
+    manifest: dict[str, Any],
     *,
+    run_id: str,
     validator_id: str,
     validator_version: str,
     validator_code_ref: str,
     validated_at: str,
     created_at: str,
+    **draft_kwargs: Any,
 ) -> dict[str, Any]:
     """Drive R0's existing, unmodified finalizer and create-only store for
     one bridged run draft. Thin by design -- all validity/graph-
     verification logic stays in :mod:`scripts.agent_eval.validity` and
-    :mod:`scripts.agent_eval.store`; this function adds nothing to it."""
+    :mod:`scripts.agent_eval.store`; this function adds nothing to it.
+
+    Review repair NB-4: takes the same raw ``artifact_bytes``/``manifest``
+    as :func:`build_run_draft_from_ohf` (every other keyword is forwarded
+    verbatim via ``**draft_kwargs`` -- ``scenario``/``configuration`` are
+    required there) so the manifest tamper/identity checks are structural
+    at this entry point too: there is no way to reach the store without
+    them having run first."""
+    draft = build_run_draft_from_ohf(artifact_bytes, manifest, run_id=run_id, **draft_kwargs)
     run = validity.finalize_run_receipt(
-        scenario,
-        configuration,
-        experiment,
+        draft_kwargs["scenario"],
+        draft_kwargs["configuration"],
+        draft_kwargs.get("experiment"),
         draft,
         validator_id=validator_id,
         validator_version=validator_version,
