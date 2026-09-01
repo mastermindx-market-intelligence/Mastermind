@@ -21,7 +21,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -116,6 +115,29 @@ class FreshSolEvalError(RuntimeError):
             raise ValueError("unknown fresh-Sol failure code")
         super().__init__(message)
         self.code = code
+
+
+# Absolute filesystem paths that can legitimately appear in a provider/
+# harness exception message (codex_home, workspace, repo_root) are not
+# secrets, but design §10's error-hygiene clause still doesn't want host
+# filesystem layout leaking into evidence-adjacent surfaces (review repair
+# round 2, NB-C). Applied AFTER scripts.ohf.redaction.redact_untrusted, so
+# an already-redacted digest/hex string is not double-mangled. Kept local
+# to this module rather than added to scripts/ohf/redaction.py, which is
+# shared house infrastructure this wave does not own.
+_ABS_PATH_RE = re.compile(r"/(?:Users|private|var|tmp|home)/\S*")
+_HOME_TILDE_RE = re.compile(r"~/\S*")
+
+
+def _launder_paths(text: str) -> str:
+    text = _ABS_PATH_RE.sub("<path>", text)
+    return _HOME_TILDE_RE.sub("<path>", text)
+
+
+def _redact_exception_text(exc: BaseException) -> str:
+    """Secret-shape redaction, then path laundering, for one exception's text."""
+
+    return _launder_paths(redact_untrusted(str(exc)))
 
 
 # ---------------------------------------------------------------------------
@@ -591,7 +613,7 @@ def _attest_capability(
     except Exception as exc:  # noqa: BLE001 - any transport failure invalidates the run
         raise FreshSolEvalError(
             "CAPABILITY_ATTESTATION_INVALID",
-            f"account/read was unavailable: {redact_untrusted(str(exc))}",
+            f"account/read was unavailable: {_redact_exception_text(exc)}",
         ) from exc
     parsed_account = parse_account_read(account_raw)
 
@@ -600,7 +622,7 @@ def _attest_capability(
     except Exception as exc:  # noqa: BLE001
         raise FreshSolEvalError(
             "CAPABILITY_ATTESTATION_INVALID",
-            f"config/read was unavailable: {redact_untrusted(str(exc))}",
+            f"config/read was unavailable: {_redact_exception_text(exc)}",
         ) from exc
     config_obj = parse_config_read(config_raw)
     if "model" not in config_obj:
@@ -634,7 +656,7 @@ def _attest_capability(
     except Exception as exc:  # noqa: BLE001
         raise FreshSolEvalError(
             "CAPABILITY_ATTESTATION_INVALID",
-            f"skills/list was unavailable: {redact_untrusted(str(exc))}",
+            f"skills/list was unavailable: {_redact_exception_text(exc)}",
         ) from exc
     discovered_skills = tuple(skill_names(skills_raw))
 
@@ -643,7 +665,7 @@ def _attest_capability(
     except Exception as exc:  # noqa: BLE001
         raise FreshSolEvalError(
             "CAPABILITY_ATTESTATION_INVALID",
-            f"mcpServerStatus/list was unavailable: {redact_untrusted(str(exc))}",
+            f"mcpServerStatus/list was unavailable: {_redact_exception_text(exc)}",
         ) from exc
     mcp_observed = tuple(
         str(row.get("name"))
@@ -811,6 +833,17 @@ def run_one(
     output = ""
     completed_at = ""
     cleanup: CleanupReceipt | None = None
+    # A local flag, not sys.exc_info() (review repair round 2, MAJOR-B):
+    # sys.exc_info() reflects the exception CURRENTLY BEING HANDLED
+    # anywhere on the call stack for the whole dynamic extent of an active
+    # except block -- if run_one() is invoked from inside a CALLER's own
+    # unrelated `except SomeError:` handler, sys.exc_info() inside this
+    # finally would see that caller's exception even though run_one()'s own
+    # try body succeeded, wrongly swallowing a genuine local cleanup
+    # failure into cleanup=None instead of raising CLEANUP_UNPROVEN. A
+    # plain local bool set via try/except is scoped correctly to this
+    # function's own try block regardless of caller context.
+    primary_failed = False
     try:
         try:
             client.request(
@@ -820,7 +853,7 @@ def run_one(
         except Exception as exc:  # noqa: BLE001
             raise FreshSolEvalError(
                 "HARNESS_INITIALIZE_FAILED",
-                f"initialize failed: {redact_untrusted(str(exc))}",
+                f"initialize failed: {_redact_exception_text(exc)}",
             ) from exc
         client.notify("initialized", {})
 
@@ -841,7 +874,7 @@ def run_one(
         except Exception as exc:  # noqa: BLE001
             raise FreshSolEvalError(
                 "THREAD_START_FAILED",
-                f"thread/start failed: {redact_untrusted(str(exc))}",
+                f"thread/start failed: {_redact_exception_text(exc)}",
             ) from exc
         thread_id = _thread_id_from(started)
         if not thread_id:
@@ -865,7 +898,7 @@ def run_one(
             raise FreshSolEvalError(
                 "TURN_EFFECT_UNKNOWN",
                 "the scenario turn dispatch/completion is effect-unknown: "
-                f"{redact_untrusted(str(exc))}",
+                f"{_redact_exception_text(exc)}",
             ) from exc
 
         try:
@@ -874,16 +907,18 @@ def run_one(
             )
         except Exception as exc:  # noqa: BLE001
             raise FreshSolEvalError(
-                "THREAD_READ_FAILED", f"thread/read failed: {redact_untrusted(str(exc))}"
+                "THREAD_READ_FAILED", f"thread/read failed: {_redact_exception_text(exc)}"
             ) from exc
         output = _extract_final_output(read_result, thread_id=thread_id)
         completed_at = _utc_now()
+    except BaseException:
+        primary_failed = True
+        raise
     finally:
-        in_flight_exc = sys.exc_info()[1]
         try:
             cleanup = _terminate_and_prove(client)
         except FreshSolEvalError:
-            if in_flight_exc is None:
+            if not primary_failed:
                 # No prior failure -- an unproven cleanup on an otherwise
                 # successful run IS the failure; let it propagate.
                 raise
@@ -891,13 +926,23 @@ def run_one(
             # Do not let a secondary cleanup failure mask the original
             # cause; the caller still learns cleanup was attempted exactly
             # once via the CLEANUP_UNPROVEN-shaped situation being swallowed
-            # here rather than silently skipped.
+            # here rather than silently skipped. Note the `except
+            # BaseException: ... raise` above has already re-raised the
+            # original exception by the time this branch runs, so this
+            # cleanup=None assignment is never actually observed by the
+            # caller -- it exists only so nothing below reads a stale value.
             cleanup = None
 
-    # Reached only when the try block above completed without raising.
-    assert cleanup is not None
+    # Reached only when the try block above completed without raising
+    # (primary_failed stayed False) -- cleanup is guaranteed non-None here
+    # because the only path that could leave it None also re-raises via the
+    # except-clause above. Checked explicitly (not `assert`) so the
+    # invariant still holds under `python -O`.
+    if cleanup is None:
+        raise FreshSolEvalError("CLEANUP_UNPROVEN", "cleanup was not recorded")
     process_pid = client.pid
-    assert process_pid is not None
+    if process_pid is None:
+        raise FreshSolEvalError("HARNESS_INITIALIZE_FAILED", "process pid was lost after cleanup")
     return RunObservation(
         run_id=run_id,
         arm=arm.name,
@@ -946,7 +991,7 @@ def build_live_client_factory(
     try:
         validate_live_codex_home(codex_home)
     except RuntimeError as exc:
-        raise FreshSolEvalError("AUTH_REALM_INVALID", redact_untrusted(str(exc))) from exc
+        raise FreshSolEvalError("AUTH_REALM_INVALID", _redact_exception_text(exc)) from exc
 
     def factory(workspace: Path, config_dir: Path, home: Path) -> "EvalClient":
         exe = codex_binary or shutil.which("codex")
@@ -1483,7 +1528,13 @@ def main(argv: list[str] | None = None) -> int:
                     repo_root=args.repo_root,
                     arm=arm,
                     scenario=scenario,
-                    run_root=Path(tmp),
+                    # A fresh SUBDIRECTORY, not `tmp` itself: `tmp` already
+                    # exists (TemporaryDirectory created it), and
+                    # _prepare_run_root's N2 freshness check (review repair
+                    # round 1) refuses an already-existing run_root. Mirrors
+                    # run_matrix's per-sample subdirectory pattern below
+                    # (review repair round 2, BLOCKER-A).
+                    run_root=Path(tmp) / "run",
                     client_factory=client_factory,
                     harness_version=harness_binary_sha256[:12] or "unknown",
                 )
@@ -1524,7 +1575,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2))
             return 0 if result["ok"] else 1
     except FreshSolEvalError as exc:
-        print(f"::error title={exc.code}::{redact_untrusted(str(exc))}", flush=True)
+        print(f"::error title={exc.code}::{_redact_exception_text(exc)}", flush=True)
         return 2
     return 1
 

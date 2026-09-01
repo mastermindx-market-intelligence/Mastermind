@@ -1832,3 +1832,178 @@ def test_run_matrix_materializes_each_arm_commit_once_per_sample(
     # exactly once (16 calls), never twice (32 calls, the pre-repair count).
     assert len(calls) == 16
 
+
+# ---------------------------------------------------------------------------
+# Review repair round 2 (2026-09-01, preflight vs
+# a0d70cdb05c5520a3ffcd1b9d9db002b9c57e5a8).
+# ---------------------------------------------------------------------------
+
+
+def _fake_build_live_client_factory_for_cli(*args: Any, **kwargs: Any):
+    """Drop-in replacement for build_live_client_factory in CLI-level tests.
+
+    Ignores codex_home/model/codex_binary entirely and returns the same
+    injectable fake factory every other test in this file uses -- so
+    main()'s run-one/run-matrix branches can be driven end-to-end with zero
+    provider calls and zero real --codex-home validation.
+    """
+
+    del args, kwargs
+    return _fake_factory()
+
+
+def _prepared_codex_home(tmp_path: Path) -> Path:
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text("{}", encoding="utf-8")
+    return codex_home
+
+
+# --- BLOCKER-A: main()'s run-one branch vs. N2's freshness check ---------
+
+
+def test_cli_run_one_end_to_end_with_injected_fake_factory(
+    mastermind_repo_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The exact defect: main()'s run-one branch passed the already-existing
+    TemporaryDirectory itself as run_root, which _prepare_run_root's N2
+    freshness check (review repair round 1) now refuses on sight -- every
+    real `run-one` CLI invocation would have failed HARNESS_INITIALIZE_FAILED
+    before this fix, with zero test coverage catching it (no prior test
+    drove main() end to end for run-one or run-matrix at all).
+    """
+
+    import scripts.ohf.fresh_sol_eval as fresh_sol_eval_module
+
+    monkeypatch.setattr(
+        fresh_sol_eval_module,
+        "build_live_client_factory",
+        _fake_build_live_client_factory_for_cli,
+    )
+    codex_home = _prepared_codex_home(tmp_path)
+    evidence_root = tmp_path / "evidence"
+    protocol_path = _protocol_path(tmp_path)
+
+    exit_code = fresh_sol_eval_main(
+        [
+            "run-one",
+            "--repo-root", str(mastermind_repo_root),
+            "--protocol-path", str(protocol_path),
+            "--codex-home", str(codex_home),
+            "--evidence-root", str(evidence_root),
+            "--arm", "control-1.0.0",
+            "--scenario", "S8",
+        ]
+    )
+    assert exit_code == 0
+    written = list((evidence_root / "runs" / "control-1.0.0" / "S8").glob("*.md"))
+    assert len(written) == 1
+
+
+def test_cli_run_matrix_end_to_end_with_injected_fake_factory(
+    mastermind_repo_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import scripts.ohf.fresh_sol_eval as fresh_sol_eval_module
+
+    monkeypatch.setattr(
+        fresh_sol_eval_module,
+        "build_live_client_factory",
+        _fake_build_live_client_factory_for_cli,
+    )
+    codex_home = _prepared_codex_home(tmp_path)
+    evidence_root = tmp_path / "evidence"
+    protocol_path = _protocol_path(tmp_path)
+
+    exit_code = fresh_sol_eval_main(
+        [
+            "run-matrix",
+            "--repo-root", str(mastermind_repo_root),
+            "--protocol-path", str(protocol_path),
+            "--codex-home", str(codex_home),
+            "--evidence-root", str(evidence_root),
+            "--mode", "mas-136",
+        ]
+    )
+    assert exit_code == 0
+    manifest = json.loads((evidence_root / "MANIFEST.json").read_text(encoding="utf-8"))
+    assert len(manifest["entries"]) == 16
+
+
+# --- MAJOR-B: sys.exc_info() cross-context leak ----------------------------
+
+
+def test_run_one_cleanup_failure_is_not_masked_by_callers_own_exception_handler(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    """The exact defect: sys.exc_info() inside run_one()'s own finally block
+    reflects the exception currently being handled ANYWHERE on the call
+    stack for the whole dynamic extent of an active except block -- not
+    only exceptions raised inside run_one() itself. A caller that invokes
+    run_one() from inside its OWN unrelated `except ValueError:` handler
+    would make run_one() wrongly believe a prior failure already occurred,
+    swallowing a genuine local cleanup failure into a bare AssertionError
+    (or, under `python -O` where asserts are stripped, a RunObservation
+    with cleanup=None) instead of raising CLEANUP_UNPROVEN.
+    """
+
+    factory = _fake_factory(cleanup_ok=False)
+    try:
+        raise ValueError("unrelated caller-side error, already being handled")
+    except ValueError:
+        with pytest.raises(FreshSolEvalError) as excinfo:
+            run_one(
+                repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+                run_root=tmp_path / "run", client_factory=factory,
+            )
+    assert excinfo.value.code == "CLEANUP_UNPROVEN"
+
+
+# --- NB-C: path laundering on the error surface ----------------------------
+
+
+def test_turn_effect_unknown_message_redacts_secret_and_launders_path(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    sentinel = "sk-testFixtureSecretShape1234567890"
+    leaky_path = "/Users/fixture-operator/.codex/auth.json"
+
+    class _LeakyDisconnectClient(_FakeEvalClient):
+        def request(self, method, params=None, timeout=15.0):
+            if method == "turn/start":
+                self.turn_start_calls += 1
+                raise ConnectionError(f"dropped near {leaky_path} leaking {sentinel}")
+            return super().request(method, params, timeout)
+
+    def factory(workspace: Path, config_dir: Path, home: Path) -> _LeakyDisconnectClient:
+        return _LeakyDisconnectClient(workspace, config_dir, home)
+
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+            run_root=tmp_path / "run", client_factory=factory,
+        )
+    assert excinfo.value.code == "TURN_EFFECT_UNKNOWN"
+    message = str(excinfo.value)
+    assert sentinel not in message
+    assert "/Users/" not in message
+    assert "<path>" in message
+
+
+def test_auth_json_home_tilde_path_is_laundered(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """A ~/-prefixed path in an exception message is laundered too, not
+    only /Users|/private|/var|/tmp|/home absolute paths."""
+
+    def fake_validate(codex_home):
+        raise RuntimeError(f"dedicated CODEX_HOME is not authenticated: ~/fixture-codex-home")
+
+    import scripts.ohf.fresh_sol_eval as fresh_sol_eval_module
+
+    monkeypatch.setattr(fresh_sol_eval_module, "validate_live_codex_home", fake_validate)
+    dedicated = tmp_path / "dedicated_realm"
+    dedicated.mkdir()
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        build_live_client_factory(codex_home=dedicated, model="gpt-5.6-sol")
+    assert excinfo.value.code == "AUTH_REALM_INVALID"
+    assert "~/fixture-codex-home" not in str(excinfo.value)
+    assert "<path>" in str(excinfo.value)
+
