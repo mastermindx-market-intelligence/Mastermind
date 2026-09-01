@@ -47,8 +47,6 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = ROOT / "scripts" / "agent_eval"
 PRODUCTION_FILES = tuple(sorted(PACKAGE_DIR.glob("*.py"))) + (ROOT / "scripts" / "agent_evaluation.py",)
 
-PROTECTED_BASE_SHA = "8ddd64a16d17b38ccf6f131d0a2a5848cf944e30"
-
 VALIDATOR_KW = dict(
     validator_id="mastermind.eval_r0_finalizer.v1",
     validator_version="1",
@@ -655,31 +653,133 @@ ALLOWED_PATHS = frozenset(
 )
 
 
+def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], capture_output=True, text=True, cwd=str(cwd), timeout=30)
+
+
+def compute_pr_diff_paths(repo_dir: Path, *, head: str = "HEAD", upstream: str = "origin/master") -> set[str]:
+    """The effective PR delta, merge-ref-safe -- never a pinned base SHA.
+
+    A pinned base SHA goes stale the moment the real base branch moves past
+    it: hosted CI checks out a synthetic MERGE commit (the PR branch merged
+    with the CURRENT base), so diffing against a base captured at pickup
+    time counts every commit the base gained afterward as "PR changes" --
+    this is exactly what broke CI run 33509507599 (a same-day master
+    release landed docs/records the pinned-base diff then blamed on this
+    PR).
+
+    Fixed rule: if HEAD is a merge commit (has 2+ parents), the effective
+    delta is what the merge introduced relative to its FIRST parent
+    (``HEAD^1..HEAD``) -- under a hosted merge-ref checkout, parent 1 is the
+    base branch tip at merge time and parent 2 is this PR's own tip, so this
+    diff is exactly the PR's own changes regardless of how far the base has
+    moved. Otherwise (an ordinary linear branch head, e.g. local dev) the
+    delta is ``merge-base(upstream, head)..head``, which still finds
+    whatever the branch itself changed since it forked, no matter how far
+    upstream has since moved -- never a hardcoded commit.
+    """
+    parents_result = _run_git(["rev-list", "--parents", "-n", "1", head], repo_dir)
+    if parents_result.returncode != 0:
+        raise AssertionError(f"git rev-list failed: {parents_result.stderr}")
+    tokens = parents_result.stdout.split()
+    parent_shas = tokens[1:]  # tokens[0] is `head` itself
+    if len(parent_shas) >= 2:
+        base_ref = f"{head}^1"
+    else:
+        merge_base_result = _run_git(["merge-base", upstream, head], repo_dir)
+        if merge_base_result.returncode != 0:
+            raise AssertionError(f"git merge-base failed: {merge_base_result.stderr}")
+        base_ref = merge_base_result.stdout.strip()
+    diff_result = _run_git(["diff", "--name-only", base_ref, head], repo_dir)
+    if diff_result.returncode != 0:
+        raise AssertionError(f"git diff failed: {diff_result.stderr}")
+    return {line.strip() for line in diff_result.stdout.splitlines() if line.strip()}
+
+
 def test_changed_paths_are_within_the_allowed_r0_surface() -> None:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", PROTECTED_BASE_SHA, "HEAD"],
-        capture_output=True,
-        text=True,
-        cwd=str(ROOT),
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stderr
-    changed = {line.strip() for line in result.stdout.splitlines() if line.strip()}
-    assert changed, "expected at least one changed file relative to the protected base"
+    changed = compute_pr_diff_paths(ROOT)
+    assert changed, "expected at least one changed file relative to the effective PR base"
     unexpected = changed - ALLOWED_PATHS
     assert not unexpected, f"changed path(s) outside the allowed R0 surface: {sorted(unexpected)}"
 
 
 def test_no_control_plane_config_dependency_or_workflow_file_touched() -> None:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", PROTECTED_BASE_SHA, "HEAD"],
-        capture_output=True,
-        text=True,
-        cwd=str(ROOT),
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stderr
-    changed = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    changed = compute_pr_diff_paths(ROOT)
     forbidden_prefixes = ("control_plane/", ".github/workflows/", "config/", "pyproject.toml", "requirements")
     for path in changed:
         assert not path.startswith(forbidden_prefixes), f"unexpected control-plane/config/workflow change: {path}"
+
+
+# ---------------------------------------------------------------------------
+# 4a. Test-of-the-test: compute_pr_diff_paths is merge-ref-safe
+# ---------------------------------------------------------------------------
+#
+# Built entirely inside a synthetic temp git repo (never the real repo
+# state) so both branches of the fence's own logic are exercised
+# deterministically: the merge-ref case (a hosted-CI-style synthetic merge
+# commit) must exclude base-side changes that landed after the PR forked,
+# and the ordinary linear-branch case must still catch a real branch-side
+# change via merge-base -- proving the repair didn't just make the fence
+# permissive.
+
+
+def _git_init(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    _run_git(["init", "-q", "-b", "master"], repo)
+    _run_git(["config", "user.email", "test@example.invalid"], repo)
+    _run_git(["config", "user.name", "EVAL-R0 Fence Test"], repo)
+
+
+def _git_commit_file(repo: Path, relative_path: str, content: str, message: str) -> str:
+    target = repo / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    _run_git(["add", relative_path], repo)
+    result = _run_git(["commit", "-q", "-m", message], repo)
+    assert result.returncode == 0, result.stderr
+    return _run_git(["rev-parse", "HEAD"], repo).stdout.strip()
+
+
+def test_compute_pr_diff_paths_linear_branch_still_flags_a_branch_side_file(tmp_path: Path) -> None:
+    # the ordinary (non-merge-ref) case: a ordinary feature branch head must
+    # still be diffed correctly via merge-base against the upstream ref,
+    # finding exactly what the branch itself added.
+    repo = tmp_path / "linear_repo"
+    _git_init(repo)
+    _git_commit_file(repo, "README.md", "base\n", "base commit")
+    _run_git(["update-ref", "refs/remotes/origin/master", "master"], repo)
+    _run_git(["checkout", "-q", "-b", "feature"], repo)
+    _git_commit_file(repo, "docs/OUT_OF_SURFACE.md", "not allowed\n", "branch-side out-of-surface file")
+
+    changed = compute_pr_diff_paths(repo, head="HEAD", upstream="origin/master")
+
+    assert changed == {"docs/OUT_OF_SURFACE.md"}  # IS flagged: this is a genuine branch-side change
+
+
+def test_compute_pr_diff_paths_merge_ref_excludes_base_side_changes_after_fork(tmp_path: Path) -> None:
+    # the hosted-CI merge-ref case: base (master) gains an unrelated file
+    # AFTER the PR branch forked, then a synthetic merge commit (parent 1 =
+    # advanced master, parent 2 = PR branch tip) is built exactly the way a
+    # hosted CI merge-ref checkout does it. The fence must NOT blame this PR
+    # for the base-side file.
+    repo = tmp_path / "merge_repo"
+    _git_init(repo)
+    _git_commit_file(repo, "README.md", "base\n", "base commit")
+
+    _run_git(["checkout", "-q", "-b", "feature"], repo)
+    _git_commit_file(repo, "scripts/agent_eval/pr_only_file.py", "x = 1\n", "the PR's own change")
+
+    _run_git(["checkout", "-q", "master"], repo)
+    _git_commit_file(repo, "docs/LATER_RELEASE.md", "landed after PR forked\n", "unrelated same-day master release")
+    _run_git(["update-ref", "refs/remotes/origin/master", "master"], repo)
+
+    merge_result = _run_git(["merge", "--no-ff", "-q", "-m", "synthetic hosted-CI merge ref", "feature"], repo)
+    assert merge_result.returncode == 0, merge_result.stderr
+    merge_head = _run_git(["rev-parse", "HEAD"], repo).stdout.strip()
+    parent_count = len(_run_git(["rev-list", "--parents", "-n", "1", merge_head], repo).stdout.split()) - 1
+    assert parent_count == 2  # sanity: this really is a 2-parent merge commit
+
+    changed = compute_pr_diff_paths(repo, head=merge_head, upstream="origin/master")
+
+    assert changed == {"scripts/agent_eval/pr_only_file.py"}  # only the PR's own change
+    assert "docs/LATER_RELEASE.md" not in changed  # NOT flagged: base-side movement after fork
