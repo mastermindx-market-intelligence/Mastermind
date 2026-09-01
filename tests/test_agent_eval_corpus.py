@@ -683,3 +683,65 @@ def test_bare_package_import_does_not_import_corpus_or_scoring_submodules() -> N
     assert result.returncode == 0, result.stderr
     lines = result.stdout.strip().splitlines()
     assert lines == ["False", "False", "False"], f"bare `import scripts.agent_eval` unexpectedly pulled in a submodule: {result.stdout!r}"
+
+
+# ---------------------------------------------------------------------------
+# 10. Third adversarial-review repair: MAJOR-R1 (orphaned holdout bodies)
+# ---------------------------------------------------------------------------
+
+
+def test_majorR1_orphan_case_dir_with_input_expected_json_is_refused(tmp_path: Path) -> None:
+    """B7 regression: a case directory under holdouts/ that never received a
+    holdout_seal.json in the first place (no seal to anchor a per-seal
+    allowlist to) must still be refused -- the wholesale holdouts/ walk
+    catches it because the file's OWN path shape is wrong, independent of
+    whether any sibling seal exists."""
+    corpus_root = tmp_path / "corpus" / "agent_eval"
+    _write_holdout_case(corpus_root, family="alpha_family", case="case_one")
+    orphan_dir = corpus_root / "holdouts" / "alpha_family" / "__orphan_case_b7"
+    orphan_dir.mkdir(parents=True)
+    (orphan_dir / "input.json").write_bytes(b'{"leaked": "b7"}')
+    (orphan_dir / "expected.json").write_bytes(b'{"leaked": "b7"}')
+    _write_manifest(corpus_root)
+    report = corpus.verify_corpus_tree_consistency(corpus_root, tmp_path)
+    assert report.result == "INCONSISTENT"
+    assert any(d.code == "UNSEALED_HOLDOUT_BODY_IN_REPO" for d in report.defects)
+
+
+def test_majorR1_stray_file_at_family_level_is_refused(tmp_path: Path) -> None:
+    """B8 regression: a stray file directly under holdouts/<family>/ (one
+    level ABOVE any case directory, so no per-seal directory check would
+    ever have visited it) must be refused."""
+    corpus_root = tmp_path / "corpus" / "agent_eval"
+    _write_holdout_case(corpus_root, family="alpha_family", case="case_one")
+    stray = corpus_root / "holdouts" / "alpha_family" / "leaked_bundle.json"
+    stray.write_bytes(b'{"leaked": "b8"}')
+    _write_manifest(corpus_root)
+    report = corpus.verify_corpus_tree_consistency(corpus_root, tmp_path)
+    assert report.result == "INCONSISTENT"
+    assert any(d.code == "UNSEALED_HOLDOUT_BODY_IN_REPO" for d in report.defects)
+
+
+def test_majorR1_orphan_case_with_fixtures_subdir_is_refused(tmp_path: Path) -> None:
+    """B9 regression: an orphan case dir shaped exactly like a PUBLIC
+    scenario case (a fixtures/ subdirectory holding input.json/expected.json,
+    the shape NB-8's fixtures/*.json fence rule permits for public cases)
+    but living under holdouts/ with no seal -- must still be refused."""
+    corpus_root = tmp_path / "corpus" / "agent_eval"
+    _write_holdout_case(corpus_root, family="alpha_family", case="case_one")
+    orphan_fixtures = corpus_root / "holdouts" / "alpha_family" / "__orphan_case_b9" / "fixtures"
+    orphan_fixtures.mkdir(parents=True)
+    (orphan_fixtures / "input.json").write_bytes(b'{"leaked": "b9"}')
+    (orphan_fixtures / "expected.json").write_bytes(b'{"leaked": "b9"}')
+    _write_manifest(corpus_root)
+    report = corpus.verify_corpus_tree_consistency(corpus_root, tmp_path)
+    assert report.result == "INCONSISTENT"
+    assert any(d.code == "UNSEALED_HOLDOUT_BODY_IN_REPO" for d in report.defects)
+
+
+def test_majorR1_wholesale_walk_still_accepts_the_real_committed_holdouts() -> None:
+    """The wholesale holdouts/ walk must not regress the real, correctly-
+    shaped seals this PR ships."""
+    report = corpus.verify_corpus_tree_consistency(REAL_CORPUS_ROOT, ROOT)
+    assert report.result == "CONSISTENT"
+    assert report.holdout_count >= 3

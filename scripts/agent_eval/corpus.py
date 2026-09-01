@@ -75,7 +75,6 @@ _SEAL_STATUSES = frozenset({"PROVENANCE_PLACEHOLDER_BODY_UNRECOVERABLE", "SEALED
 _SCENARIO_FILENAME = "scenario.json"
 _HOLDOUT_SEAL_FILENAME = "holdout_seal.json"
 _MANIFEST_FILENAME = "corpus_manifest.json"
-_FIXTURES_DIRNAME = "fixtures"
 
 # ---------------------------------------------------------------------------
 # Corpus manifest contract
@@ -514,58 +513,71 @@ def verify_corpus_tree_consistency(corpus_root: Path, repo_root: Path) -> Corpus
                     )
                 )
 
-    for seal_file in sorted(corpus_root.rglob(_HOLDOUT_SEAL_FILENAME)):
-        if seal_file.is_symlink():
-            defects.append(ContractDefect(str(seal_file), "SYMLINK_REJECTED", "corpus holdout-seal path must not be a symlink"))
-            continue
-        relative = seal_file.relative_to(corpus_root)
-        holdout_count += 1
-        document = _read_json(seal_file)
-        if isinstance(document, dict) and isinstance(document.get("scenario_id"), str):
-            holdout_scenario_ids.add(document["scenario_id"])
-        try:
-            validate_holdout_seal_shape(document)
-        except ContractError as exc:
-            defects.extend(ContractDefect(f"{relative}::{d.path}", d.code, d.message) for d in exc.defects)
-        else:
-            try:
-                assert_public_safe_evidence(document)
-            except ContractError as exc:
-                defects.extend(ContractDefect(f"{relative}::{d.path}", d.code, d.message) for d in exc.defects)
-            if document["corpus_revision"] != manifest_corpus_revision:
-                defects.append(
-                    ContractDefect(str(relative), "CORPUS_REVISION_NOT_ANCHORED", "holdout seal corpus_revision does not match the corpus manifest anchor")
-                )
-            if isinstance(document, dict) and "scenario_id" in document:
-                try:
-                    expected_relative = holdout_seal_path(document["scenario_id"])
-                except ContractError:
-                    expected_relative = None
-                if expected_relative is not None and expected_relative != relative:
-                    defects.append(
-                        ContractDefect(
-                            str(relative),
-                            "HOLDOUT_SEAL_MISLOCATED",
-                            f"stored path does not match the canonical path derived from its own scenario_id (expected {expected_relative})",
-                        )
-                    )
-        # BLOCKER-1 repair: ALLOWLIST, not a denylist of two known escapes.
-        # Under any holdout-seal directory, the ONLY permitted entry is the
-        # seal file itself -- an alternate body filename (e.g. body.json), a
-        # subdirectory (e.g. sealed_bundle/), or anything else is an
-        # UNSEALED_HOLDOUT_BODY_IN_REPO refusal. A denylist of two known
-        # filenames only ever catches the escapes it was told about; an
-        # allowlist of one filename catches every escape by construction.
-        seal_dir = seal_file.parent
-        for entry in sorted(seal_dir.iterdir()):
-            if entry.name != _HOLDOUT_SEAL_FILENAME:
+    # MAJOR-R1 repair: the previous check discovered seals by
+    # ``rglob(_HOLDOUT_SEAL_FILENAME)`` and then allowlisted each seal's OWN
+    # directory -- a case dir that never got a holdout_seal.json in the
+    # first place (an orphan) was simply never visited, so a body dropped
+    # there verified CONSISTENT (reviewer B7/B9), and so did a stray file at
+    # the family level, one level above any per-seal directory (B8). The
+    # fix walks the ENTIRE ``holdouts/`` subtree WHOLESALE: every single
+    # file anywhere under it must be exactly
+    # ``holdouts/<family>/<case>/holdout_seal.json`` in both path shape and
+    # basename, or it is refused -- this subsumes and replaces the old
+    # per-seal-directory allowlist (a file that does not match this shape
+    # can never coexist with a seal it is "the directory of", because the
+    # shape check runs before -- not alongside -- discovery of what counts
+    # as a seal).
+    holdouts_root = corpus_root / "holdouts"
+    if holdouts_root.is_dir():
+        for path in sorted(holdouts_root.rglob("*")):
+            relative = path.relative_to(corpus_root)
+            if path.is_dir():
+                continue  # only leaf files are checked; a directory alone is not a body
+            if path.is_symlink():
+                defects.append(ContractDefect(str(relative), "SYMLINK_REJECTED", "corpus holdouts path must not be a symlink"))
+                continue
+            parts = relative.parts  # expect exactly ("holdouts", <family>, <case>, "holdout_seal.json")
+            if len(parts) != 4 or parts[3] != _HOLDOUT_SEAL_FILENAME:
                 defects.append(
                     ContractDefect(
                         str(relative),
                         "UNSEALED_HOLDOUT_BODY_IN_REPO",
-                        f"a holdout-seal directory must contain ONLY {_HOLDOUT_SEAL_FILENAME} in the public repository; found {entry.relative_to(corpus_root)}",
+                        f"every file under holdouts/ must be exactly holdouts/<family>/<case>/{_HOLDOUT_SEAL_FILENAME}; found {relative}",
                     )
                 )
+                continue
+
+            seal_file = path
+            holdout_count += 1
+            document = _read_json(seal_file)
+            if isinstance(document, dict) and isinstance(document.get("scenario_id"), str):
+                holdout_scenario_ids.add(document["scenario_id"])
+            try:
+                validate_holdout_seal_shape(document)
+            except ContractError as exc:
+                defects.extend(ContractDefect(f"{relative}::{d.path}", d.code, d.message) for d in exc.defects)
+            else:
+                try:
+                    assert_public_safe_evidence(document)
+                except ContractError as exc:
+                    defects.extend(ContractDefect(f"{relative}::{d.path}", d.code, d.message) for d in exc.defects)
+                if document["corpus_revision"] != manifest_corpus_revision:
+                    defects.append(
+                        ContractDefect(str(relative), "CORPUS_REVISION_NOT_ANCHORED", "holdout seal corpus_revision does not match the corpus manifest anchor")
+                    )
+                if isinstance(document, dict) and "scenario_id" in document:
+                    try:
+                        expected_relative = holdout_seal_path(document["scenario_id"])
+                    except ContractError:
+                        expected_relative = None
+                    if expected_relative is not None and expected_relative != relative:
+                        defects.append(
+                            ContractDefect(
+                                str(relative),
+                                "HOLDOUT_SEAL_MISLOCATED",
+                                f"stored path does not match the canonical path derived from its own scenario_id (expected {expected_relative})",
+                            )
+                        )
 
     overlap_ids = public_scenario_ids & holdout_scenario_ids
     for scenario_id in sorted(overlap_ids):
