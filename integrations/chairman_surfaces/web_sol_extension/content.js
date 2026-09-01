@@ -96,8 +96,9 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (
     !request ||
     request.kind !== REPROBE_KIND ||
-    typeof request.expected_conversation_fingerprint !== "string" ||
-    !/^[0-9a-f]{64}$/.test(request.expected_conversation_fingerprint)
+    (request.expected_conversation_fingerprint !== null &&
+      (typeof request.expected_conversation_fingerprint !== "string" ||
+        !/^[0-9a-f]{64}$/.test(request.expected_conversation_fingerprint)))
   ) {
     return false;
   }
