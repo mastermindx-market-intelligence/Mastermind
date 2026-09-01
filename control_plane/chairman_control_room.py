@@ -1142,10 +1142,19 @@ def _parse_placement_demand(raw: Any) -> executive_placement_selection.Placement
     capabilities = raw["required_capabilities"]
     if not isinstance(capabilities, list):
         raise ValueError("demand.required_capabilities must be a list")
+    # Mode wave: allowed_modes is required (no soft default — an omitted
+    # or empty set would silently mean "no candidate can ever satisfy
+    # this", which PlacementDemand itself already refuses).
+    allowed_modes_raw = raw["allowed_modes"]
+    if not isinstance(allowed_modes_raw, list):
+        raise ValueError("demand.allowed_modes must be a list")
     return executive_placement_selection.PlacementDemand(
         required_capabilities=frozenset(capabilities),
         quota_class=raw["quota_class"],
         provider=raw.get("provider"),
+        allowed_modes=frozenset(
+            executive_placement_selection.PlacementMode(item) for item in allowed_modes_raw
+        ),
     )
 
 
@@ -1169,6 +1178,13 @@ def _parse_placement_candidate(raw: Any) -> executive_placement_selection.Placem
         host_source_closure_proven=raw["host_source_closure_proven"],
         closure_source=_parse_source_ref(raw["closure_source"]),
         effect_state=executive_steward.EffectState(raw["effect_state"]),
+        # Mode wave: mode is required; the two creation bools default to
+        # None where absent — the exact shape a reuse candidate's facts
+        # document naturally omits them in (PlacementCandidateFact itself
+        # still refuses a fresh-lane candidate whose bools were left None).
+        mode=executive_placement_selection.PlacementMode(raw["mode"]),
+        creation_surface_accessible=raw.get("creation_surface_accessible"),
+        session_creation_allowed=raw.get("session_creation_allowed"),
     )
 
 

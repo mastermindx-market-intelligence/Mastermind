@@ -1282,12 +1282,17 @@ def run_check(config: ServerConfig) -> int:
     if placement_selection is not None:
         state = placement_selection.get("state")
         selected = placement_selection.get("selected")
+        selected_mode = placement_selection.get("selected_mode")
         tied = placement_selection.get("tied_worker_ids") or []
         exclusions = placement_selection.get("exclusions") or []
         if state == "selected" and selected is not None:
+            # Mode wave: names the winning mode AND the strengthened
+            # no-commitment string — selecting a fresh lane still creates
+            # no session, no reservation, nothing.
             detail = (
-                f"selected={selected.get('worker_id')} "
-                "commitment=none (no reservation/worker/attempt/runtime-binding/provider effect)"
+                f"selected={selected.get('worker_id')} mode={selected_mode} "
+                "commitment=none (no session created or committed; no reservation/"
+                "worker/attempt/runtime-binding/provider effect)"
             )
         elif state == "tie_abstained":
             detail = f"tied={','.join(tied)}"

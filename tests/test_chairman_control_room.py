@@ -896,6 +896,10 @@ def _placement_candidate(worker_id: str = "worker-1") -> eps.PlacementCandidateF
         host_source_closure_proven=True,
         closure_source=_placement_source(es.SourceOwner.CAPACITY, f"closure-{worker_id}"),
         effect_state=es.EffectState.NONE,
+        # Mode wave: a fresh lane whose creation bools are both True.
+        mode=eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+        creation_surface_accessible=True,
+        session_creation_allowed=True,
     )
 
 
@@ -904,6 +908,9 @@ def _valid_placement_selection_wire_dict() -> dict:
         responsibility=_placement_responsibility(),
         demand=eps.PlacementDemand(
             required_capabilities=frozenset({"cap_a"}), quota_class="standard", provider="acme",
+            allowed_modes=frozenset({
+                eps.PlacementMode.EXISTING_SESSION_REUSE, eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+            }),
         ),
         candidates=(_placement_candidate(),),
     )
@@ -965,6 +972,7 @@ def _facts_document(*, responsibility_state: str = "waiting_capacity") -> dict:
             "required_capabilities": ["cap_a"],
             "quota_class": "standard",
             "provider": "acme",
+            "allowed_modes": ["existing_session_reuse", "new_session_materialization"],
         },
         "candidates": [
             {
@@ -981,6 +989,9 @@ def _facts_document(*, responsibility_state: str = "waiting_capacity") -> dict:
                 "host_source_closure_proven": True,
                 "closure_source": candidate_source("capacity", "closure-worker-1"),
                 "effect_state": "none",
+                "mode": "new_session_materialization",
+                "creation_surface_accessible": True,
+                "session_creation_allowed": True,
             }
         ],
     }
@@ -1023,6 +1034,10 @@ def test_build_control_room_flows_a_valid_facts_document_to_a_selected_section(
     assert doc["placement_selection"] is not None
     assert doc["placement_selection"]["state"] == "selected"
     assert doc["placement_selection"]["selected"]["worker_id"] == "worker-1"
+    # Mode wave discriminator 6: consumer disclosure — selected_mode flows
+    # end-to-end from the facts document through to the composed section.
+    assert doc["placement_selection"]["selected_mode"] == "new_session_materialization"
+    assert doc["placement_selection"]["evidence"][0]["mode"] == "new_session_materialization"
     assert not any(entry.startswith("placement_selection:") for entry in doc["degraded"])
 
 

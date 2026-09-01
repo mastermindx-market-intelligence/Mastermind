@@ -45,6 +45,30 @@ including short-circuited and duplicate ones — and a constant
 ``selection_is_commitment: false`` discriminator, so a downstream consumer
 can audit exactly what was seen and never has to infer non-commitment from
 a field's absence.
+
+Sol correction — MODE WAVE (no scope change): an occupied EXISTING
+conversation is not the same fact as an unavailable provider seat. Every
+:class:`PlacementCandidateFact` carries a closed :class:`PlacementMode` —
+``EXISTING_SESSION_REUSE`` or ``NEW_SESSION_MATERIALIZATION`` — and every
+:class:`PlacementDemand` carries a non-empty ``allowed_modes`` set; an
+exact-session demand (``allowed_modes={EXISTING_SESSION_REUSE}``) can
+NEVER be satisfied by a fresh lane, by construction (``MODE_NOT_ALLOWED``).
+A busy existing conversation (``OCCUPIED``) never erases a separately
+proven fresh-session lane in the same call, and vice versa — each
+candidate is gated on its own facts only (ruling m-6, extended). Choosing
+a fresh lane still creates nothing: selection stays fully inert regardless
+of mode (``selection_is_commitment`` stays ``false``).
+
+**No Slack-principal field exists in this module, and none may be added.**
+Two candidates sharing an ``account_label`` remain fully independent
+candidates: there is no collapse, no deduplication, and no ranking by
+``account_label`` — three conversation candidates against the same account
+yield three separate :class:`CandidateEvidence` rows, exactly like three
+candidates against three different accounts would. Slack presence,
+communication identity, account numbering, and titles have **no input
+channel** into this module; a Slack principal (or any other communication
+identity) is a fact about how a HUMAN would be reached, never a fact this
+selector reads, ranks, or dedupes by.
 """
 from __future__ import annotations
 
@@ -83,6 +107,20 @@ class OccupancyState(_ValueEnum):
     CONTRADICTORY = "contradictory"
 
 
+class PlacementMode(_ValueEnum):
+    """Mode wave (Sol correction): a busy EXISTING conversation is not the
+    same fact as an unavailable provider seat. ``EXISTING_SESSION_REUSE``
+    describes a candidate that would REUSE an already-materialized
+    conversation/session; ``NEW_SESSION_MATERIALIZATION`` describes a
+    candidate that would create a fresh one. An exact-session demand is
+    expressed as ``allowed_modes={EXISTING_SESSION_REUSE}`` — a fresh lane
+    can never satisfy it, by construction (see the ``MODE_NOT_ALLOWED``
+    gate)."""
+
+    EXISTING_SESSION_REUSE = "existing_session_reuse"
+    NEW_SESSION_MATERIALIZATION = "new_session_materialization"
+
+
 class SelectionState(_ValueEnum):
     SELECTED = "selected"
     WAITING_CAPACITY = "waiting_capacity"
@@ -107,6 +145,12 @@ class ExclusionReason(_ValueEnum):
     EFFECT_UNKNOWN = "effect_unknown"
     CAPACITY_UNKNOWN = "capacity_unknown"
     DUPLICATE_IDENTITY = "duplicate_identity"
+    #: Mode wave (Sol correction) — see the gate order in
+    #: :func:`_first_exclusion_reason` and the fallthrough note on
+    #: :data:`_AGGREGATE_PRECEDENCE`.
+    MODE_NOT_ALLOWED = "mode_not_allowed"
+    CREATION_SURFACE_INACCESSIBLE = "creation_surface_inaccessible"
+    SESSION_CREATION_DISALLOWED = "session_creation_disallowed"
 
 
 #: Ranking order for eligible candidates — capacity state ONLY. Nothing
@@ -133,14 +177,18 @@ assert all(
 #: Aggregate precedence, evaluated top-to-bottom, when eligible candidates
 #: is empty. Each entry is (state, set-of-exclusion-reasons-that-trigger-it);
 #: the first entry whose reason set intersects the exclusions actually
-#: present wins. ``HOST_SOURCE_UNPROVEN`` and the three mismatch reasons
-#: (``CAPABILITY_MISMATCH``/``QUOTA_CLASS_MISMATCH``/``PROVIDER_MISMATCH``)
-#: are DELIBERATELY absent from every bucket below — reviewer-ratified
-#: (M-4/n-…): a candidate that is merely the wrong shape for this demand,
-#: or whose host-source closure was never proven, is not "the org is
-#: waiting on capacity" or "evidence is stale" in the same sense staleness/
-#: occupancy/effect-unknown are — it falls through to
-#: ``NO_ELIGIBLE_CANDIDATE``, same as zero candidates at all.
+#: present wins. ``HOST_SOURCE_UNPROVEN``, the three mismatch reasons
+#: (``CAPABILITY_MISMATCH``/``QUOTA_CLASS_MISMATCH``/``PROVIDER_MISMATCH``),
+#: and — mode wave, Sol correction — ``MODE_NOT_ALLOWED``/
+#: ``CREATION_SURFACE_INACCESSIBLE``/``SESSION_CREATION_DISALLOWED`` are
+#: DELIBERATELY absent from every bucket below — reviewer-ratified (M-4/
+#: n-…): a candidate that is merely the wrong shape for this demand, whose
+#: host-source closure was never proven, whose mode this demand does not
+#: accept, or whose fresh-lane creation preconditions are not met, is not
+#: "the org is waiting on capacity" or "evidence is stale" in the same
+#: sense staleness/occupancy/effect-unknown are — it falls through to
+#: ``NO_ELIGIBLE_CANDIDATE`` (durable ineligibility), same as zero
+#: candidates at all.
 #: :func:`_first_exclusion_reason` is a REFINEMENT of this same precedence
 #: at the per-candidate level: its fixed gate order checks the trigger sets
 #: below in this exact top-to-bottom order (splitting each bucket into its
@@ -203,6 +251,41 @@ def _require_capability_set(name: str, value: object) -> frozenset[str]:
     return value
 
 
+def _require_mode_set(name: str, value: object):
+    """A non-empty ``frozenset`` of :class:`PlacementMode` members. An
+    exact-session demand is expressed as ``{EXISTING_SESSION_REUSE}`` —
+    never an empty set, which would mean no mode could ever satisfy it."""
+    if not isinstance(value, frozenset) or not value:
+        raise ValueError(f"{name} must be a non-empty frozenset[PlacementMode]")
+    for item in value:
+        _require_enum(f"{name} item", item, PlacementMode)
+    return value
+
+
+def _require_mode_shape(
+    mode: object,
+    creation_surface_accessible: object,
+    session_creation_allowed: object,
+) -> None:
+    """The closed mode-shape rule (mode wave), shared by
+    :class:`PlacementCandidateFact` and :class:`CandidateEvidence`: for
+    ``EXISTING_SESSION_REUSE`` both creation bools MUST be ``None``; for
+    ``NEW_SESSION_MATERIALIZATION`` both MUST be actual ``bool`` values.
+    """
+    if mode is PlacementMode.EXISTING_SESSION_REUSE:
+        if creation_surface_accessible is not None or session_creation_allowed is not None:
+            raise ValueError(
+                "creation_surface_accessible and session_creation_allowed must "
+                "both be None for mode=existing_session_reuse"
+            )
+    else:
+        if type(creation_surface_accessible) is not bool or type(session_creation_allowed) is not bool:
+            raise ValueError(
+                "creation_surface_accessible and session_creation_allowed must "
+                "both be bool for mode=new_session_materialization"
+            )
+
+
 def _require_enum(name: str, value: object, expected: type[enum.Enum]) -> None:
     if not isinstance(value, expected):
         raise TypeError(f"{name} must be {expected.__name__}")
@@ -250,17 +333,29 @@ def _require_responsibility_ref(value: object) -> str:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class PlacementDemand:
-    """What a waiting-capacity responsibility needs, closed and secret-free."""
+    """What a waiting-capacity responsibility needs, closed and secret-free.
+
+    ``allowed_modes`` (mode wave) is REQUIRED and non-empty: it is the
+    closed set of :class:`PlacementMode` values a candidate may satisfy
+    this demand with. An exact-session demand — "reuse THIS conversation,
+    never a fresh one" — is expressed as
+    ``allowed_modes={PlacementMode.EXISTING_SESSION_REUSE}``; a candidate
+    whose own ``mode`` is not a member is excluded ``MODE_NOT_ALLOWED``
+    (see :func:`_first_exclusion_reason`), so a fresh lane can never
+    satisfy an exact-session demand by construction.
+    """
 
     required_capabilities: frozenset[str]
     quota_class: str
     provider: str | None
+    allowed_modes: frozenset[PlacementMode]
 
     def __post_init__(self) -> None:
         _require_capability_set("required_capabilities", self.required_capabilities)
         _require_token("quota_class", self.quota_class)
         if self.provider is not None:
             _require_token("provider", self.provider)
+        _require_mode_set("allowed_modes", self.allowed_modes)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -279,6 +374,19 @@ class PlacementCandidateFact:
     checks close the same gap for ``evidence`` — every source ref here
     flows verbatim into a decision's evidence rows, so it must already
     satisfy that wire's own validator.
+
+    Mode wave: ``mode`` names whether this candidate would REUSE an
+    existing conversation/session (``EXISTING_SESSION_REUSE``) or
+    materialize a fresh one (``NEW_SESSION_MATERIALIZATION``).
+    ``creation_surface_accessible``/``session_creation_allowed`` are
+    CLOSED-SHAPE with ``mode``: both ``None`` for a reuse candidate (a
+    fresh-lane-only concern does not apply to reusing something that
+    already exists), both actual ``bool`` for a fresh-lane candidate. Every
+    OTHER field keeps its existing meaning for a fresh lane too:
+    ``occupancy`` describes the LANE itself (normally ``FREE``, but a
+    bound/contradictory lane still representable), ``capacity_state``/
+    ``capacity_source`` prove usable quota/auth realm, and closure/effect
+    are unchanged.
     """
 
     worker_id: str
@@ -294,6 +402,9 @@ class PlacementCandidateFact:
     host_source_closure_proven: bool
     closure_source: SourceRef
     effect_state: EffectState
+    mode: PlacementMode
+    creation_surface_accessible: bool | None
+    session_creation_allowed: bool | None
 
     def __post_init__(self) -> None:
         _require_token("worker_id", self.worker_id)
@@ -317,6 +428,8 @@ class PlacementCandidateFact:
             "closure_source",
         )
         _require_enum("effect_state", self.effect_state, EffectState)
+        _require_enum("mode", self.mode, PlacementMode)
+        _require_mode_shape(self.mode, self.creation_surface_accessible, self.session_creation_allowed)
         # Addendum B round-trip closure: every source ref here flows
         # verbatim into a decision's `evidence` (addendum B), whose wire
         # validator re-checks `ref` via this SAME `_require_token` (reuse,
@@ -382,6 +495,11 @@ class CandidateEvidence:
     that candidate was eligible, excluded, the eventual winner, or even a
     duplicate ``worker_id`` — evidence is a record of what was looked at,
     never a deduplicated or filtered view.
+
+    Mode wave: ``mode``/``creation_surface_accessible``/
+    ``session_creation_allowed`` mirror :class:`PlacementCandidateFact`'s
+    own fields verbatim, including the same closed mode-shape rule
+    (:func:`_require_mode_shape`).
     """
 
     worker_id: str
@@ -392,6 +510,9 @@ class CandidateEvidence:
     host_source_closure_proven: bool
     closure_source: SourceRef
     effect_state: EffectState
+    mode: PlacementMode
+    creation_surface_accessible: bool | None
+    session_creation_allowed: bool | None
 
     def __post_init__(self) -> None:
         _require_token("worker_id", self.worker_id)
@@ -405,10 +526,13 @@ class CandidateEvidence:
         if not isinstance(self.closure_source, SourceRef):
             raise TypeError("closure_source must be SourceRef")
         _require_enum("effect_state", self.effect_state, EffectState)
+        _require_enum("mode", self.mode, PlacementMode)
+        _require_mode_shape(self.mode, self.creation_surface_accessible, self.session_creation_allowed)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "worker_id": self.worker_id,
+            "mode": self.mode.value,
             "occupancy": self.occupancy.value,
             "occupancy_source": _source_ref_dict(self.occupancy_source),
             "capacity_state": self.capacity_state.value,
@@ -416,6 +540,8 @@ class CandidateEvidence:
             "host_source_closure_proven": self.host_source_closure_proven,
             "closure_source": _source_ref_dict(self.closure_source),
             "effect_state": self.effect_state.value,
+            "creation_surface_accessible": self.creation_surface_accessible,
+            "session_creation_allowed": self.session_creation_allowed,
         }
 
 
@@ -447,8 +573,15 @@ def _evidence_sort_key(row: dict[str, Any]) -> tuple:
             source["owner"], source["ref"], source["observed_at"] or "", source["freshness"],
         )
 
+    def _optional_bool_key(value: bool | None) -> tuple[bool, bool]:
+        # None sorts before False sorts before True — a plain tuple
+        # comparison would TypeError comparing None against bool directly,
+        # so both are always mapped into a homogeneous (bool, bool) pair.
+        return (value is not None, bool(value))
+
     return (
         row["worker_id"],
+        row["mode"],
         row["occupancy"],
         _source_key(row["occupancy_source"]),
         row["capacity_state"],
@@ -456,6 +589,8 @@ def _evidence_sort_key(row: dict[str, Any]) -> tuple:
         row["host_source_closure_proven"],
         _source_key(row["closure_source"]),
         row["effect_state"],
+        _optional_bool_key(row["creation_surface_accessible"]),
+        _optional_bool_key(row["session_creation_allowed"]),
     )
 
 
@@ -483,11 +618,17 @@ class PlacementSelectionDecision:
     responsibility, or a duplicate ``worker_id``) — so a downstream
     consumer can audit exactly what this decision saw without re-deriving
     anything from a raw candidate list this module never returns.
+
+    ``selected_mode`` (mode wave) is the winning candidate's own ``mode``
+    and is present if-and-only-if ``state == "selected"`` — never inferred
+    from ``selected`` itself, since the snapshot dict carries no mode field
+    of its own.
     """
 
     responsibility_ref: str
     state: SelectionState
     selected: Mapping[str, Any] | None
+    selected_mode: PlacementMode | None
     tie_breaker_used: str | None
     tied_worker_ids: tuple[str, ...]
     exclusions: tuple[CandidateExclusion, ...]
@@ -499,6 +640,10 @@ class PlacementSelectionDecision:
         _require_enum("state", self.state, SelectionState)
         if self.selected is not None and not isinstance(self.selected, Mapping):
             raise TypeError("selected must be a mapping or None")
+        if self.selected_mode is not None:
+            _require_enum("selected_mode", self.selected_mode, PlacementMode)
+        if (self.selected_mode is not None) != (self.state is SelectionState.SELECTED):
+            raise ValueError("selected_mode must be present iff state is 'selected'")
         if self.tie_breaker_used is not None:
             # Addendum A: RESERVED — no tie-breaker authority exists in C1.
             raise ValueError("tie_breaker_used is RESERVED and must be None in C1")
@@ -524,7 +669,7 @@ class PlacementSelectionDecision:
     def to_dict(self) -> dict[str, Any]:
         """Closed-key, deterministically ordered wire document.
 
-        Nothing beyond these ten keys is ever emitted — no source-ref
+        Nothing beyond these eleven keys is ever emitted — no source-ref
         fields beyond the four ``evidence`` names, no environment, no clock
         read — so ``json.dumps(self.to_dict(), sort_keys=True)`` is
         byte-identical across repeated calls with equivalent inputs
@@ -547,6 +692,7 @@ class PlacementSelectionDecision:
             "responsibility_ref": self.responsibility_ref,
             "state": self.state.value,
             "selected": selected,
+            "selected_mode": self.selected_mode.value if self.selected_mode is not None else None,
             "tie_breaker_used": self.tie_breaker_used,
             "tied_worker_ids": sorted(self.tied_worker_ids),
             "exclusions": exclusions,
@@ -565,7 +711,7 @@ class PlacementSelectionDecision:
 # ---------------------------------------------------------------------------
 
 _SELECTION_KEYS = frozenset({
-    "schema_version", "responsibility_ref", "state", "selected",
+    "schema_version", "responsibility_ref", "state", "selected", "selected_mode",
     "tie_breaker_used", "tied_worker_ids", "exclusions", "evaluated_candidates",
     "selection_is_commitment", "evidence",
 })
@@ -573,9 +719,9 @@ _SELECTION_KEYS = frozenset({
 _EXCLUSION_KEYS = frozenset({"worker_id", "reason"})
 
 _EVIDENCE_ROW_KEYS = frozenset({
-    "worker_id", "occupancy", "occupancy_source", "capacity_state",
+    "worker_id", "mode", "occupancy", "occupancy_source", "capacity_state",
     "capacity_source", "host_source_closure_proven", "closure_source",
-    "effect_state",
+    "effect_state", "creation_surface_accessible", "session_creation_allowed",
 })
 
 _SOURCE_REF_KEYS = frozenset({"owner", "ref", "observed_at", "freshness"})
@@ -609,13 +755,18 @@ def _validate_source_ref_dict(value: Any, *, name: str) -> dict[str, Any]:
 
 
 def _validate_evidence_row(value: Any) -> dict[str, Any]:
-    """Closed-key revalidation of one ``evidence`` wire row (addendum B).
-    Enum-membership + strengthened-token (``_require_token``, which rejects
-    ``"@"``/``"/"``) checks on every field; field-only error messages.
+    """Closed-key revalidation of one ``evidence`` wire row (addendum B,
+    mode wave). Enum-membership + strengthened-token (``_require_token``,
+    which rejects ``"@"``/``"/"``) checks on every field; field-only error
+    messages.
     """
     if not isinstance(value, Mapping) or set(value) != _EVIDENCE_ROW_KEYS:
         raise ValueError(f"evidence row must have exactly {sorted(_EVIDENCE_ROW_KEYS)}")
     worker_id = _require_token("evidence.worker_id", value["worker_id"])
+    try:
+        mode = PlacementMode(value["mode"])
+    except ValueError as exc:
+        raise ValueError("evidence.mode is not a recognized PlacementMode value") from exc
     try:
         occupancy = OccupancyState(value["occupancy"])
     except ValueError as exc:
@@ -640,8 +791,16 @@ def _validate_evidence_row(value: Any) -> dict[str, Any]:
         effect_state = EffectState(value["effect_state"])
     except ValueError as exc:
         raise ValueError("evidence.effect_state is not a recognized EffectState value") from exc
+    creation_surface_accessible = value["creation_surface_accessible"]
+    session_creation_allowed = value["session_creation_allowed"]
+    if creation_surface_accessible is not None and type(creation_surface_accessible) is not bool:
+        raise TypeError("evidence.creation_surface_accessible must be bool or null")
+    if session_creation_allowed is not None and type(session_creation_allowed) is not bool:
+        raise TypeError("evidence.session_creation_allowed must be bool or null")
+    _require_mode_shape(mode, creation_surface_accessible, session_creation_allowed)
     return {
         "worker_id": worker_id,
+        "mode": mode.value,
         "occupancy": occupancy.value,
         "occupancy_source": occupancy_source,
         "capacity_state": capacity_state.value,
@@ -649,6 +808,8 @@ def _validate_evidence_row(value: Any) -> dict[str, Any]:
         "host_source_closure_proven": host_source_closure_proven,
         "closure_source": closure_source,
         "effect_state": effect_state.value,
+        "creation_surface_accessible": creation_surface_accessible,
+        "session_creation_allowed": session_creation_allowed,
     }
 
 
@@ -691,6 +852,15 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
 
     selected_raw = value["selected"]
     selected = validate_placement_snapshot(selected_raw) if selected_raw is not None else None
+
+    selected_mode_raw = value["selected_mode"]
+    if selected_mode_raw is not None:
+        try:
+            selected_mode = PlacementMode(selected_mode_raw)
+        except ValueError as exc:
+            raise ValueError("selected_mode is not a recognized PlacementMode value") from exc
+    else:
+        selected_mode = None
 
     # Addendum A: RESERVED — no tie-breaker authority exists in C1. ANY
     # non-null value is refused, unconditionally, before any state check.
@@ -737,9 +907,11 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
     if evidence != sorted(evidence, key=_evidence_sort_key):
         raise ValueError("evidence must be sorted canonically (mirrors exclusions)")
 
-    # --- cross-field invariants (reviewer M-3, addendum A/B) ----------------
+    # --- cross-field invariants (reviewer M-3, addendum A/B, mode wave) -----
     if (selected is not None) != (state is SelectionState.SELECTED):
         raise ValueError("selected must be present iff state is 'selected'")
+    if (selected_mode is not None) != (state is SelectionState.SELECTED):
+        raise ValueError("selected_mode must be present iff state is 'selected'")
     if state is SelectionState.TIE_ABSTAINED:
         if len(tied_raw) < 2:
             raise ValueError("state 'tie_abstained' requires at least two tied_worker_ids")
@@ -757,6 +929,7 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
         "responsibility_ref": responsibility_ref,
         "state": state.value,
         "selected": selected,
+        "selected_mode": selected_mode.value if selected_mode is not None else None,
         "tie_breaker_used": tie_breaker_used,
         "tied_worker_ids": list(tied_raw),
         "exclusions": exclusions,
@@ -776,23 +949,32 @@ def _first_exclusion_reason(
     """The first failing gate, or ``None`` if the candidate survives every
     gate (i.e. is eligible).
 
-    Reviewer-ratified order (M-4): this is a REFINEMENT of
-    :data:`_AGGREGATE_PRECEDENCE` at the per-candidate level — reasons that
-    would win the aggregate (``CONTRADICTORY_BINDING``, then
-    ``EFFECT_UNKNOWN``, then the stale/unknown-freshness/capacity-unknown
-    family, then ``OCCUPIED``/``BOUND_ELSEWHERE``) are checked first, in
-    that same order, and only THEN the reasons the aggregate deliberately
-    never elevates on their own (``HOST_SOURCE_UNPROVEN``, then the three
-    mismatches). A candidate failing multiple gates always reports the
-    highest-precedence one — e.g. a candidate that is both ``OCCUPIED`` and
-    has a stale capacity fact reports ``STALE_CAPACITY_FACT``, never
-    ``OCCUPIED``.
+    Reviewer-ratified order (M-4), extended by the mode wave: this is a
+    REFINEMENT of :data:`_AGGREGATE_PRECEDENCE` at the per-candidate level
+    — reasons that would win the aggregate (``CONTRADICTORY_BINDING``,
+    then ``EFFECT_UNKNOWN``, then the stale/unknown-freshness/capacity-
+    unknown family, then ``OCCUPIED``/``BOUND_ELSEWHERE``) are checked
+    first, in that same order, and only THEN the reasons the aggregate
+    deliberately never elevates on their own (``HOST_SOURCE_UNPROVEN``,
+    then the mode-wave fresh-lane gates ``CREATION_SURFACE_INACCESSIBLE``/
+    ``SESSION_CREATION_DISALLOWED``, then ``MODE_NOT_ALLOWED``, then the
+    three mismatches). A candidate failing multiple gates always reports
+    the highest-precedence one — e.g. a candidate that is both ``OCCUPIED``
+    and has a stale capacity fact reports ``STALE_CAPACITY_FACT``, never
+    ``OCCUPIED``; a candidate whose mode is not allowed AND whose fresh
+    lane has no accessible creation surface reports
+    ``CREATION_SURFACE_INACCESSIBLE``, never ``MODE_NOT_ALLOWED``.
 
     Ruling (m-6): a ``CONTRADICTORY`` or ``EFFECT_UNKNOWN`` candidate is
     excluded PER-CANDIDATE only — it never poisons a clean sibling's
     eligibility, and a clean sibling may still be ``SELECTED`` in the same
     call. Only a repeated ``worker_id`` (duplicate identity) is globally
     fatal to the whole decision; see :func:`select_placement` step 3.
+
+    Mode wave: ``CREATION_SURFACE_INACCESSIBLE``/``SESSION_CREATION_
+    DISALLOWED`` apply ONLY to a fresh-lane candidate (``mode ==
+    NEW_SESSION_MATERIALIZATION``) — a reuse candidate's creation bools are
+    always ``None`` by construction and never trigger either gate.
     """
     if candidate.occupancy is OccupancyState.CONTRADICTORY:
         return ExclusionReason.CONTRADICTORY_BINDING
@@ -814,6 +996,12 @@ def _first_exclusion_reason(
         return ExclusionReason.BOUND_ELSEWHERE
     if not candidate.host_source_closure_proven:
         return ExclusionReason.HOST_SOURCE_UNPROVEN
+    if candidate.mode is PlacementMode.NEW_SESSION_MATERIALIZATION and candidate.creation_surface_accessible is not True:
+        return ExclusionReason.CREATION_SURFACE_INACCESSIBLE
+    if candidate.mode is PlacementMode.NEW_SESSION_MATERIALIZATION and candidate.session_creation_allowed is not True:
+        return ExclusionReason.SESSION_CREATION_DISALLOWED
+    if candidate.mode not in demand.allowed_modes:
+        return ExclusionReason.MODE_NOT_ALLOWED
     if not demand.required_capabilities.issubset(candidate.capabilities):
         return ExclusionReason.CAPABILITY_MISMATCH
     if candidate.quota_class != demand.quota_class:
@@ -847,6 +1035,9 @@ def _evidence_from_candidates(
             host_source_closure_proven=c.host_source_closure_proven,
             closure_source=c.closure_source,
             effect_state=c.effect_state,
+            mode=c.mode,
+            creation_surface_accessible=c.creation_surface_accessible,
+            session_creation_allowed=c.session_creation_allowed,
         )
         for c in candidates
     )
@@ -857,6 +1048,7 @@ def _decision(
     state: SelectionState,
     *,
     selected: Mapping[str, Any] | None = None,
+    selected_mode: PlacementMode | None = None,
     tied_worker_ids: tuple[str, ...] = (),
     exclusions: tuple[CandidateExclusion, ...] = (),
     evaluated_candidates: int,
@@ -866,6 +1058,7 @@ def _decision(
         responsibility_ref=responsibility_ref,
         state=state,
         selected=selected,
+        selected_mode=selected_mode,
         # Addendum A: RESERVED, always None — no tie-breaker authority
         # exists in C1. select_placement() never sets this to anything else.
         tie_breaker_used=None,
@@ -910,30 +1103,45 @@ def select_placement(
        ``capacity_state`` ``UNKNOWN``, then ``OCCUPIED``, then
        ``BOUND_ELSEWHERE``, then (ratified: these deliberately fall through
        to ``NO_ELIGIBLE_CANDIDATE`` at the aggregate step rather than
-       elevating their own state) unproven host-source closure, then a
+       elevating their own state) unproven host-source closure, then —
+       mode wave — a fresh-lane candidate (``mode ==
+       NEW_SESSION_MATERIALIZATION``) whose ``creation_surface_accessible``
+       is not ``True`` (``CREATION_SURFACE_INACCESSIBLE``), then whose
+       ``session_creation_allowed`` is not ``True``
+       (``SESSION_CREATION_DISALLOWED``), then any candidate whose ``mode``
+       is not in ``demand.allowed_modes`` (``MODE_NOT_ALLOWED``), then a
        capability/quota-class/provider mismatch. A candidate failing no
        gate is eligible; a ``CONTRADICTORY``/``EFFECT_UNKNOWN`` exclusion is
        PER-CANDIDATE only — it never excludes a clean sibling, which may
-       still be ``SELECTED`` in the same call (ruling m-6).
+       still be ``SELECTED`` in the same call (ruling m-6). An occupied
+       EXISTING_SESSION_REUSE candidate never erases a separately proven
+       NEW_SESSION_MATERIALIZATION lane in the same call, and vice versa —
+       each candidate is gated on its OWN facts only.
     5. Eligible non-empty: rank ONLY by ``capacity_state`` (``AVAILABLE``
-       before ``DEGRADED``); take the min-rank set. Exactly one winner ->
-       ``SELECTED``. More than one -> ``TIE_ABSTAINED`` ALWAYS (addendum A:
-       C1 has no tie-breaker authority to resolve an exact top tie — every
-       tied id lands in ``tied_worker_ids``, ``selected`` stays ``None``,
-       and ``tie_breaker_used`` stays its RESERVED ``None``).
+       before ``DEGRADED``) — ``mode`` NEVER ranks, so a reuse candidate
+       and a fresh candidate at the same ``capacity_state`` tie exactly
+       like two same-mode candidates would; take the min-rank set. Exactly
+       one winner -> ``SELECTED`` (``selected_mode`` set to the winner's
+       own ``mode``). More than one -> ``TIE_ABSTAINED`` ALWAYS (addendum
+       A: C1 has no tie-breaker authority to resolve an exact top tie —
+       every tied id lands in ``tied_worker_ids``, ``selected``/
+       ``selected_mode`` stay ``None``, and ``tie_breaker_used`` stays its
+       RESERVED ``None``).
     6. Eligible empty: aggregate state by the CLOSED, documented precedence
        over the exclusion reasons actually present — see
        :data:`_AGGREGATE_PRECEDENCE` — falling through to
-       ``NO_ELIGIBLE_CANDIDATE`` when only mismatch/``HOST_SOURCE_UNPROVEN``
-       reasons are present (deliberate, ratified — see
-       :data:`_AGGREGATE_PRECEDENCE`), or when there were zero candidates at
-       all.
+       ``NO_ELIGIBLE_CANDIDATE`` when only mismatch/``HOST_SOURCE_UNPROVEN``/
+       mode-wave (``MODE_NOT_ALLOWED``/``CREATION_SURFACE_INACCESSIBLE``/
+       ``SESSION_CREATION_DISALLOWED``) reasons are present (deliberate,
+       ratified — see :data:`_AGGREGATE_PRECEDENCE`), or when there were
+       zero candidates at all.
 
     ``evidence`` (addendum B) is populated in EVERY return path — including
     both short-circuits above — from the FULL, un-deduplicated candidate
     tuple exactly as received; :meth:`PlacementSelectionDecision.to_dict`
     also emits the constant ``selection_is_commitment: false``
-    discriminator on every decision.
+    discriminator on every decision — choosing a fresh lane creates
+    nothing; selection stays inert regardless of mode.
 
     No clock, no environment, no I/O, no randomness: ranking and every
     aggregate decision are functions of the typed facts alone.
@@ -1020,7 +1228,7 @@ def select_placement(
             )
             return _decision(
                 responsibility_ref, SelectionState.SELECTED,
-                selected=selected, exclusions=exclusions,
+                selected=selected, selected_mode=winner.mode, exclusions=exclusions,
                 evaluated_candidates=evaluated_candidates, evidence=evidence,
             )
 

@@ -75,14 +75,22 @@ def _responsibility(
     )
 
 
+#: Default: a demand that allows either mode — every EXISTING test in this
+#: file predates the mode wave and asserts on outcomes that must stay
+#: unchanged, so the default must never itself trigger MODE_NOT_ALLOWED.
+_BOTH_MODES = frozenset({eps.PlacementMode.EXISTING_SESSION_REUSE, eps.PlacementMode.NEW_SESSION_MATERIALIZATION})
+
+
 def _demand(
     *,
     required_capabilities: frozenset[str] = frozenset({"cap_a"}),
     quota_class: str = "standard",
     provider: str | None = "acme",
+    allowed_modes: frozenset[eps.PlacementMode] = _BOTH_MODES,
 ) -> eps.PlacementDemand:
     return eps.PlacementDemand(
         required_capabilities=required_capabilities, quota_class=quota_class, provider=provider,
+        allowed_modes=allowed_modes,
     )
 
 
@@ -100,6 +108,13 @@ def _candidate(
     capacity_freshness: Freshness = Freshness.CURRENT,
     host_source_closure_proven: bool = True,
     effect_state: EffectState = EffectState.NONE,
+    # Mode wave defaults: a fresh lane whose creation bools are both True —
+    # this is what every EXISTING (pre-mode-wave) test candidate implicitly
+    # meant, so the default must never itself trigger CREATION_SURFACE_
+    # INACCESSIBLE/SESSION_CREATION_DISALLOWED/MODE_NOT_ALLOWED.
+    mode: eps.PlacementMode = eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+    creation_surface_accessible: bool | None = True,
+    session_creation_allowed: bool | None = True,
 ) -> eps.PlacementCandidateFact:
     return eps.PlacementCandidateFact(
         worker_id=worker_id,
@@ -115,6 +130,21 @@ def _candidate(
         host_source_closure_proven=host_source_closure_proven,
         closure_source=_source(SourceOwner.CAPACITY, f"closure-{worker_id}"),
         effect_state=effect_state,
+        mode=mode,
+        creation_surface_accessible=creation_surface_accessible,
+        session_creation_allowed=session_creation_allowed,
+    )
+
+
+def _reuse_candidate(*, worker_id: str = "worker-1", **kwargs) -> eps.PlacementCandidateFact:
+    """An EXISTING_SESSION_REUSE-mode candidate — the closed shape rule
+    requires both creation bools to be None for this mode."""
+    return _candidate(
+        worker_id=worker_id,
+        mode=eps.PlacementMode.EXISTING_SESSION_REUSE,
+        creation_surface_accessible=None,
+        session_creation_allowed=None,
+        **kwargs,
     )
 
 
@@ -412,9 +442,9 @@ def test_account_label_rejects_path_shape():
 
 
 _EVIDENCE_ROW_WIRE_KEYS = {
-    "worker_id", "occupancy", "occupancy_source", "capacity_state",
+    "worker_id", "mode", "occupancy", "occupancy_source", "capacity_state",
     "capacity_source", "host_source_closure_proven", "closure_source",
-    "effect_state",
+    "effect_state", "creation_surface_accessible", "session_creation_allowed",
 }
 _SOURCE_REF_WIRE_KEYS = {"owner", "ref", "observed_at", "freshness"}
 
@@ -426,9 +456,10 @@ def test_wire_dict_keys_are_exactly_the_closed_set():
     assert set(payload) == {
         "schema_version", "responsibility_ref", "state", "selected",
         "tie_breaker_used", "tied_worker_ids", "exclusions", "evaluated_candidates",
-        "selection_is_commitment", "evidence",
+        "selection_is_commitment", "evidence", "selected_mode",
     }
     assert payload["selection_is_commitment"] is False
+    assert payload["selected_mode"] == "new_session_materialization"
     assert set(payload["selected"]) == {
         "schema_version", "worker_id", "quota_class", "provider", "account_label", "observed_at_ms",
     }
@@ -440,6 +471,9 @@ def test_wire_dict_keys_are_exactly_the_closed_set():
         assert set(row["occupancy_source"]) == _SOURCE_REF_WIRE_KEYS
         assert set(row["capacity_source"]) == _SOURCE_REF_WIRE_KEYS
         assert set(row["closure_source"]) == _SOURCE_REF_WIRE_KEYS
+        assert row["mode"] == "new_session_materialization"
+        assert row["creation_surface_accessible"] is True
+        assert row["session_creation_allowed"] is True
 
 
 def test_no_env_fields_or_agent_os_leak_into_wire_dict():
@@ -989,6 +1023,7 @@ def test_tie_breaker_used_field_is_reserved_and_rejects_any_non_none_value():
             responsibility_ref="WS:CAP-C1",
             state=eps.SelectionState.SELECTED,
             selected=None,
+            selected_mode=None,
             tie_breaker_used="worker_id@lexicographic",
             tied_worker_ids=(),
             exclusions=(),
@@ -1000,6 +1035,7 @@ def test_tie_breaker_used_field_is_reserved_and_rejects_any_non_none_value():
             responsibility_ref="WS:CAP-C1",
             state=eps.SelectionState.TIE_ABSTAINED,
             selected=None,
+            selected_mode=None,
             tie_breaker_used="worker_id_lexicographic",
             tied_worker_ids=("worker-a", "worker-b"),
             exclusions=(),
@@ -1012,6 +1048,7 @@ def test_demand_required_capability_rejects_at_symbol():
     with pytest.raises(ValueError):
         eps.PlacementDemand(
             required_capabilities=frozenset({"cap@a"}), quota_class="standard", provider="acme",
+            allowed_modes=_BOTH_MODES,
         )
 
 
@@ -1019,6 +1056,23 @@ def test_demand_provider_rejects_slash():
     with pytest.raises(ValueError):
         eps.PlacementDemand(
             required_capabilities=frozenset(), quota_class="standard", provider="acme/inc",
+            allowed_modes=_BOTH_MODES,
+        )
+
+
+def test_demand_allowed_modes_must_be_non_empty():
+    with pytest.raises(ValueError):
+        eps.PlacementDemand(
+            required_capabilities=frozenset(), quota_class="standard", provider="acme",
+            allowed_modes=frozenset(),
+        )
+
+
+def test_demand_allowed_modes_members_are_type_checked():
+    with pytest.raises(TypeError):
+        eps.PlacementDemand(
+            required_capabilities=frozenset(), quota_class="standard", provider="acme",
+            allowed_modes=frozenset({"existing_session_reuse"}),  # plain str, not PlacementMode
         )
 
 
@@ -1081,9 +1135,16 @@ def test_gate_order_closure_unproven_beats_capability_mismatch_on_one_candidate(
     )
 
 
-def _evidence_row(worker_id: str) -> eps.CandidateEvidence:
+def _evidence_row(
+    worker_id: str,
+    *,
+    mode: eps.PlacementMode = eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+    creation_surface_accessible: bool | None = True,
+    session_creation_allowed: bool | None = True,
+) -> eps.CandidateEvidence:
     return eps.CandidateEvidence(
         worker_id=worker_id,
+        mode=mode,
         occupancy=eps.OccupancyState.FREE,
         occupancy_source=_source(SourceOwner.RUNTIME_BINDING, f"binding-{worker_id}"),
         capacity_state=CapacityState.AVAILABLE,
@@ -1091,6 +1152,8 @@ def _evidence_row(worker_id: str) -> eps.CandidateEvidence:
         host_source_closure_proven=True,
         closure_source=_source(SourceOwner.CAPACITY, f"closure-{worker_id}"),
         effect_state=EffectState.NONE,
+        creation_surface_accessible=creation_surface_accessible,
+        session_creation_allowed=session_creation_allowed,
     )
 
 
@@ -1099,6 +1162,7 @@ def test_to_dict_sorts_deliberately_unsorted_exclusions_tied_worker_ids_and_evid
         responsibility_ref="WS:CAP-C1",
         state=eps.SelectionState.TIE_ABSTAINED,
         selected=None,
+        selected_mode=None,
         tie_breaker_used=None,
         tied_worker_ids=("worker-z", "worker-a"),
         exclusions=(
@@ -1130,6 +1194,7 @@ def test_decision_construction_refuses_evidence_count_mismatching_evaluated_cand
             responsibility_ref="WS:CAP-C1",
             state=eps.SelectionState.NO_ELIGIBLE_CANDIDATE,
             selected=None,
+            selected_mode=None,
             tie_breaker_used=None,
             tied_worker_ids=(),
             exclusions=(),
@@ -1156,3 +1221,328 @@ def test_capacity_rank_map_is_total_over_capacity_state():
     member is ranked, or is exactly CapacityState.UNKNOWN."""
     ranked_or_unknown = set(eps._CAPACITY_RANK) | {CapacityState.UNKNOWN}
     assert ranked_or_unknown == set(CapacityState)
+
+
+# ---------------------------------------------------------------------------
+# MODE WAVE — Sol correction: existing-session reuse vs new-session
+# materialization. Eight named discriminators (commission D.1-D.8).
+# ---------------------------------------------------------------------------
+
+def test_mode_discriminator_1_occupied_reuse_excluded_fresh_lane_selected():
+    reuse = _reuse_candidate(worker_id="worker-a", account_label="account1", occupancy=eps.OccupancyState.OCCUPIED)
+    fresh = _candidate(worker_id="worker-b", account_label="account1")
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(reuse, fresh))
+    assert decision.state is eps.SelectionState.SELECTED
+    assert decision.selected["worker_id"] == "worker-b"
+    assert decision.selected_mode is eps.PlacementMode.NEW_SESSION_MATERIALIZATION
+    assert eps.CandidateExclusion(worker_id="worker-a", reason=eps.ExclusionReason.OCCUPIED) in decision.exclusions
+
+
+def test_mode_discriminator_2_reuse_only_demand_excludes_fresh_lane_mode_not_allowed():
+    reuse = _reuse_candidate(worker_id="worker-a", account_label="account1", occupancy=eps.OccupancyState.OCCUPIED)
+    fresh = _candidate(worker_id="worker-b", account_label="account1")
+    demand = _demand(allowed_modes=frozenset({eps.PlacementMode.EXISTING_SESSION_REUSE}))
+    decision = eps.select_placement(responsibility=_responsibility(), demand=demand, candidates=(reuse, fresh))
+    # The occupied reuse candidate dominates the aggregate fallthrough over
+    # the fresh lane's MODE_NOT_ALLOWED (which is not in any aggregate
+    # bucket — it falls through, same as HOST_SOURCE_UNPROVEN/mismatches).
+    assert decision.state is eps.SelectionState.WAITING_CAPACITY
+    assert eps.CandidateExclusion(worker_id="worker-a", reason=eps.ExclusionReason.OCCUPIED) in decision.exclusions
+    assert eps.CandidateExclusion(
+        worker_id="worker-b", reason=eps.ExclusionReason.MODE_NOT_ALLOWED
+    ) in decision.exclusions
+
+
+def test_mode_discriminator_3_fresh_lane_capacity_unknown():
+    candidate = _candidate(capacity_state=CapacityState.UNKNOWN)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.CAPACITY_UNKNOWN),
+    )
+
+
+def test_mode_discriminator_3_fresh_lane_capacity_source_stale():
+    candidate = _candidate(capacity_freshness=Freshness.STALE)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.STALE_CAPACITY_FACT),
+    )
+
+
+def test_mode_discriminator_3_fresh_lane_creation_surface_inaccessible():
+    candidate = _candidate(creation_surface_accessible=False)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.CREATION_SURFACE_INACCESSIBLE),
+    )
+
+
+def test_mode_discriminator_3_fresh_lane_session_creation_disallowed():
+    candidate = _candidate(session_creation_allowed=False)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.SESSION_CREATION_DISALLOWED),
+    )
+
+
+def test_mode_discriminator_3_fresh_lane_closure_unproven():
+    candidate = _candidate(host_source_closure_proven=False)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.HOST_SOURCE_UNPROVEN),
+    )
+
+
+def test_mode_discriminator_3_fresh_lane_effect_unknown():
+    candidate = _candidate(effect_state=EffectState.EFFECT_UNKNOWN)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.EFFECT_UNKNOWN),
+    )
+
+
+def test_mode_discriminator_4_shared_account_label_candidates_never_collapse():
+    a = _candidate(worker_id="worker-a", account_label="account1")
+    b = _candidate(worker_id="worker-b", account_label="account1")
+    c = _candidate(worker_id="worker-c", account_label="account1")
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(a, b, c))
+    assert decision.evaluated_candidates == 3
+    payload = decision.to_dict()
+    assert len(payload["evidence"]) == 3
+    assert {row["worker_id"] for row in payload["evidence"]} == {"worker-a", "worker-b", "worker-c"}
+    # No dedup, no rank-by-account_label: identical capacity_state across
+    # all three -> an exact tie that abstains, never a silent collapse to
+    # "the account".
+    assert decision.state is eps.SelectionState.TIE_ABSTAINED
+    assert decision.tied_worker_ids == ("worker-a", "worker-b", "worker-c")
+
+
+def test_mode_discriminator_4_account_label_numbering_never_changes_the_outcome():
+    a = _candidate(worker_id="worker-a", account_label="account9")
+    b = _candidate(worker_id="worker-b", account_label="account2")
+    c = _candidate(worker_id="worker-c", account_label="account1")
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(a, b, c))
+    assert decision.state is eps.SelectionState.TIE_ABSTAINED
+    assert decision.tied_worker_ids == ("worker-a", "worker-b", "worker-c")
+
+
+def test_mode_discriminator_5_busy_exact_session_excluded_alongside_clean_fresh_selection():
+    reuse = _reuse_candidate(worker_id="worker-a", account_label="account1", occupancy=eps.OccupancyState.OCCUPIED)
+    fresh = _candidate(worker_id="worker-b", account_label="account1")
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(reuse, fresh))
+    assert decision.state is eps.SelectionState.SELECTED
+    assert decision.selected["worker_id"] == "worker-b"
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-a", reason=eps.ExclusionReason.OCCUPIED),
+    )
+
+
+def test_mode_discriminator_6_reuse_candidate_with_non_null_bools_refuses():
+    with pytest.raises(ValueError):
+        _candidate(
+            mode=eps.PlacementMode.EXISTING_SESSION_REUSE,
+            creation_surface_accessible=True, session_creation_allowed=None,
+        )
+    with pytest.raises(ValueError):
+        _candidate(
+            mode=eps.PlacementMode.EXISTING_SESSION_REUSE,
+            creation_surface_accessible=None, session_creation_allowed=False,
+        )
+
+
+def test_mode_discriminator_6_fresh_candidate_with_null_bools_refuses():
+    with pytest.raises(ValueError):
+        _candidate(
+            mode=eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+            creation_surface_accessible=None, session_creation_allowed=True,
+        )
+    with pytest.raises(ValueError):
+        _candidate(
+            mode=eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+            creation_surface_accessible=True, session_creation_allowed=None,
+        )
+
+
+def test_mode_discriminator_6_demand_with_empty_allowed_modes_refuses():
+    with pytest.raises(ValueError):
+        _demand(allowed_modes=frozenset())
+
+
+def test_mode_discriminator_7_permutation_invariance_over_mixed_mode_candidates():
+    candidates = [
+        _reuse_candidate(worker_id="worker-a", occupancy=eps.OccupancyState.OCCUPIED),
+        _candidate(worker_id="worker-b", capacity_state=CapacityState.DEGRADED),
+        _candidate(worker_id="worker-c", creation_surface_accessible=False),
+        _reuse_candidate(worker_id="worker-d"),
+    ]
+    reference = None
+    reference_json = None
+    for permutation in itertools.permutations(candidates):
+        decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=permutation)
+        payload = json.dumps(decision.to_dict(), sort_keys=True)
+        if reference is None:
+            reference = decision
+            reference_json = payload
+        else:
+            assert decision == reference
+            assert payload == reference_json
+    assert reference.state is eps.SelectionState.SELECTED
+    assert reference.selected["worker_id"] == "worker-d"
+    assert reference.selected_mode is eps.PlacementMode.EXISTING_SESSION_REUSE
+
+
+def test_mode_discriminator_7_correction_replay_creation_disallowed_then_allowed():
+    disallowed = _candidate(worker_id="worker-1", session_creation_allowed=False)
+    decision_1 = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(disallowed,))
+    assert decision_1.state is eps.SelectionState.NO_ELIGIBLE_CANDIDATE
+    assert decision_1.exclusions[0].reason is eps.ExclusionReason.SESSION_CREATION_DISALLOWED
+
+    corrected = _candidate(worker_id="worker-1", session_creation_allowed=True)
+    decision_2 = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(corrected,))
+    assert decision_2.state is eps.SelectionState.SELECTED
+    assert decision_2.selected["worker_id"] == "worker-1"
+    assert decision_2.selected_mode is eps.PlacementMode.NEW_SESSION_MATERIALIZATION
+
+
+def test_reuse_vs_fresh_exact_tie_still_abstains_and_mode_never_ranks():
+    """Frozen spec A.5: ranking is capacity_state ONLY — mode never ranks.
+    A reuse candidate and a fresh candidate at the SAME capacity_state
+    still abstain on an exact tie, exactly like two same-mode candidates
+    would."""
+    reuse = _reuse_candidate(worker_id="worker-a")
+    fresh = _candidate(worker_id="worker-b")
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(reuse, fresh))
+    assert decision.state is eps.SelectionState.TIE_ABSTAINED
+    assert decision.tied_worker_ids == ("worker-a", "worker-b")
+    assert decision.selected_mode is None
+
+
+def test_mode_discriminator_8_evidence_row_bad_mode_enum_value_refused():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["evidence"] = [dict(payload["evidence"][0])]
+    payload["evidence"][0]["mode"] = "not_a_real_mode"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_mode_discriminator_8_evidence_reuse_row_with_non_null_bool_refused():
+    reuse = _reuse_candidate(worker_id="worker-1", occupancy=eps.OccupancyState.OCCUPIED)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(reuse,))
+    payload = dict(decision.to_dict())
+    payload["evidence"] = [dict(payload["evidence"][0])]
+    payload["evidence"][0]["creation_surface_accessible"] = True
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_mode_discriminator_8_evidence_fresh_row_with_null_bool_refused():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["evidence"] = [dict(payload["evidence"][0])]
+    payload["evidence"][0]["session_creation_allowed"] = None
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_mode_discriminator_8_selected_mode_without_selected_state_refused():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["state"] = "waiting_capacity"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_mode_discriminator_8_selected_state_without_selected_mode_refused():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["selected_mode"] = None
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_mode_discriminator_8_bad_selected_mode_enum_value_refused():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["selected_mode"] = "not_a_real_mode"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_candidate_evidence_reuse_row_with_non_null_bools_refuses_at_construction():
+    with pytest.raises(ValueError):
+        eps.CandidateEvidence(
+            worker_id="worker-1", mode=eps.PlacementMode.EXISTING_SESSION_REUSE,
+            occupancy=eps.OccupancyState.FREE,
+            occupancy_source=_source(SourceOwner.RUNTIME_BINDING, "binding-worker-1"),
+            capacity_state=CapacityState.AVAILABLE,
+            capacity_source=_source(SourceOwner.CAPACITY, "capacity-worker-1"),
+            host_source_closure_proven=True,
+            closure_source=_source(SourceOwner.CAPACITY, "closure-worker-1"),
+            effect_state=EffectState.NONE,
+            creation_surface_accessible=True,
+            session_creation_allowed=None,
+        )
+
+
+def test_candidate_evidence_fresh_row_with_null_bool_refuses_at_construction():
+    with pytest.raises(ValueError):
+        eps.CandidateEvidence(
+            worker_id="worker-1", mode=eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+            occupancy=eps.OccupancyState.FREE,
+            occupancy_source=_source(SourceOwner.RUNTIME_BINDING, "binding-worker-1"),
+            capacity_state=CapacityState.AVAILABLE,
+            capacity_source=_source(SourceOwner.CAPACITY, "capacity-worker-1"),
+            host_source_closure_proven=True,
+            closure_source=_source(SourceOwner.CAPACITY, "closure-worker-1"),
+            effect_state=EffectState.NONE,
+            creation_surface_accessible=None,
+            session_creation_allowed=True,
+        )
+
+
+def test_placement_mode_wire_values_pinned():
+    assert eps.PlacementMode.EXISTING_SESSION_REUSE.value == "existing_session_reuse"
+    assert eps.PlacementMode.NEW_SESSION_MATERIALIZATION.value == "new_session_materialization"
+
+
+def test_new_exclusion_reason_wire_values_pinned():
+    assert eps.ExclusionReason.MODE_NOT_ALLOWED.value == "mode_not_allowed"
+    assert eps.ExclusionReason.CREATION_SURFACE_INACCESSIBLE.value == "creation_surface_inaccessible"
+    assert eps.ExclusionReason.SESSION_CREATION_DISALLOWED.value == "session_creation_disallowed"
+
+
+def test_new_exclusion_reasons_fall_through_to_no_eligible_candidate():
+    """Ratified: MODE_NOT_ALLOWED/CREATION_SURFACE_INACCESSIBLE/
+    SESSION_CREATION_DISALLOWED are absent from every _AGGREGATE_PRECEDENCE
+    bucket — durable ineligibility, like HOST_SOURCE_UNPROVEN — so with
+    ONLY these reasons present the aggregate falls through to
+    NO_ELIGIBLE_CANDIDATE."""
+    mode_blocked = _candidate(
+        worker_id="worker-a",
+        mode=eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+    )
+    demand = _demand(allowed_modes=frozenset({eps.PlacementMode.EXISTING_SESSION_REUSE}))
+    creation_blocked = _candidate(worker_id="worker-b", creation_surface_accessible=False)
+    session_blocked = _candidate(worker_id="worker-c", session_creation_allowed=False)
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=demand,
+        candidates=(mode_blocked, creation_blocked, session_blocked),
+    )
+    assert decision.state is eps.SelectionState.NO_ELIGIBLE_CANDIDATE
+    reasons = {e.reason for e in decision.exclusions}
+    # mode_blocked's own mode is ALSO not in allowed_modes, but its creation
+    # bools default True so it never reaches the earlier gates and reports
+    # MODE_NOT_ALLOWED; creation_blocked and session_blocked each fail an
+    # EARLIER gate (11/12) than MODE_NOT_ALLOWED (13), even though their
+    # mode is equally not-allowed — first failing gate wins.
+    assert reasons == {
+        eps.ExclusionReason.MODE_NOT_ALLOWED,
+        eps.ExclusionReason.CREATION_SURFACE_INACCESSIBLE,
+        eps.ExclusionReason.SESSION_CREATION_DISALLOWED,
+    }
