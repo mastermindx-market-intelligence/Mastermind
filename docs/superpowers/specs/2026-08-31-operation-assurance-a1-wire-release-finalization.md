@@ -4,12 +4,14 @@
 **Date:** 2026-08-31  
 **Owner:** Sol, AI CEO of Mastermind-X  
 **Operation:** `mastermind-operation-liveness-soundness-20260830-sol-001`  
-**Current protected reconciliation:** `mastermindx-market-intelligence/Mastermind@dcce6f7ab6efad360f4854d748ad0d65dc9e0f7c`  
+**Protected reconciliation at drafting:** `mastermindx-market-intelligence/Mastermind@dcce6f7ab6efad360f4854d748ad0d65dc9e0f7c` (the Steward merge; the parent law's later pin `990b5b6c…` and every subsequent protected reconciliation supersede it — the current release base is pinned in the PR #279 release target)  
 **Current Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1  
 **Carrier:** Mastermind PR #279, branch `sol/mastermind-operation-liveness-soundness-20260830-sol-001`
 
-This finalization closes the last release-blocking ambiguity in the OLS-F0 record set and removes an
-external browser-placement ceremony that no longer improves the quality of a records-only release.
+This finalization closes the last release-blocking ambiguity in the top-level immutable report
+field list, rules the one remaining sub-field ambiguity (`repair_scope`, Section 2) into an explicit
+OLS-A1 schema-closure task, and removes an external browser-placement ceremony that no longer
+improves the quality of a records-only release.
 It changes no accepted checker algorithm, proof strength, owner boundary, report-only policy, or
 implementation scope. It creates no Job, creates no lifecycle, creates no source compiler, performs
 no GitHub effect, and performs no runtime mutation.
@@ -89,6 +91,14 @@ INCONCLUSIVE_MODEL_GAP
 The ambiguous bare fields `assurance_verdict`, `source_applicability`, and
 `current_projection_verdict` remain withdrawn.
 
+`repair_scope` is likewise not an immutable report field and not a counterexample field in OLS-F0.
+The closed repair vocabulary remains the repair-candidate `kind` list frozen in the immutable-report
+clarification; the model-fidelity amendment's `repair_scope = MODEL_OR_DECLARED_CONTRACT`
+recommendation-rule and fixture expectations are superseded on this field. OLS-A1's first
+schema-closure task must either freeze a closed `repair_scope` vocabulary on the repair-candidate
+object or remove the expectation entirely, decided by executable test — the accepted A1 TDD closure
+path for report-wire ambiguity.
+
 ## 3. Implementation navigation — one executable reading
 
 The parent plan remains the task-order and file-map scaffold. The controlling overlay and narrow
@@ -112,6 +122,11 @@ Historical parent examples that expose a missing abstraction_contract, the withd
 `REPORT_ONLY_PROCEED` are drafting residue. They are not implementation authority. The worker may
 reuse their test sequencing and file map only after translating every example through the controlling
 contract above.
+
+The same residue rule covers rank-2 amendment residue: the model-fidelity amendment's report-field
+addition list (its §9.7) and its fixture field names (`source_applicability`,
+`current_projection_verdict`, `repair_scope`) are drafting residue on field naming; the Section 2
+exact field list and the immutable-report clarification's counterexample field list win.
 
 This is intentionally a navigation correction rather than a second implementation plan. Creating a
 parallel plan would add another source to reconcile without improving the build.

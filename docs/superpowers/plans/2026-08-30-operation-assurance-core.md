@@ -13,10 +13,13 @@ of earlier examples are historical drafting residue. A fresh worker must **do no
 older example that conflicts with the following sources. Read them in this exact precedence order
 before writing the first test:
 
-1. `docs/superpowers/specs/2026-08-30-operation-assurance-immutable-report-projection-clarification.md`
-2. `docs/superpowers/specs/2026-08-30-operation-assurance-model-fidelity-counterexample-validation-amendment.md`
-3. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-trusted-input-total-proof-clarification.md`
-4. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-controlling-execution-overlay.md`
+1. `docs/superpowers/specs/2026-08-31-operation-assurance-a1-wire-release-finalization.md`
+   (wins on the exact immutable report field list, implementation navigation, the OLS-F0 release
+   gate, external-auditor placement removal, and the Steward predecessor state)
+2. `docs/superpowers/specs/2026-08-30-operation-assurance-immutable-report-projection-clarification.md`
+3. `docs/superpowers/specs/2026-08-30-operation-assurance-model-fidelity-counterexample-validation-amendment.md`
+4. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-trusted-input-total-proof-clarification.md`
+5. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-controlling-execution-overlay.md`
 
 Also read the current owner boundaries:
 

@@ -13,6 +13,9 @@ Current Steward boundary:
 Current GitHub/SCF boundary:
 `docs/superpowers/specs/2026-08-31-operation-liveness-soundness-sol-capability-fabric-reconciliation.md`.
 
+Current wire/release finalization:
+`docs/superpowers/specs/2026-08-31-operation-assurance-a1-wire-release-finalization.md`.
+
 Current diagnostic boundary:
 `docs/superpowers/specs/2026-08-30-operation-liveness-soundness-runtime-observability-reconciliation.md`.
 

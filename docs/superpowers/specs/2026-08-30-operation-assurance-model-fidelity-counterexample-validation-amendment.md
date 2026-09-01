@@ -289,6 +289,10 @@ OLS-A1 recommendation rules:
 - complete declared external gate/wait -> `REPORT_ONLY_AWAIT_GATE` only inside the model/fixture;
 - malformed/stale/conflicted input -> refusal or `REPORT_ONLY_RECONCILE` as applicable.
 
+*(Field-naming supersession: the 2026-08-31 wire-release finalization rules that `repair_scope` is
+not an OLS-F0 report or counterexample field; its closed-vocabulary definition or removal is an
+OLS-A1 schema-closure task. The recommendation values above remain authoritative.)*
+
 `REPORT_ONLY_PROCEED` is first eligible in OLS-A2/A5 only when all are true:
 
 ```text
@@ -510,6 +514,9 @@ realizability = DECLARED_MODEL_ONLY
 admission_recommendation = REPORT_ONLY_REPAIR
 repair_scope = MODEL_OR_DECLARED_CONTRACT
 ```
+
+*(The `repair_scope` line above is superseded on field naming by the 2026-08-31 wire-release
+finalization; see its Section 2.)*
 
 ## 11. Research basis
 

@@ -4,7 +4,7 @@
 **Owner:** Sol, AI CEO of Mastermind-X.  
 **Operation:** `mastermind-operation-liveness-soundness-20260830-sol-001`.  
 **Original architecture basis:** `mastermindx-market-intelligence/Mastermind@28d365cceaef6efb0a26e0ac9af51ead44695d60`.  
-**Current protected reconciliation:** `mastermindx-market-intelligence/Mastermind@990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc`.  
+**Protected reconciliation at drafting:** `mastermindx-market-intelligence/Mastermind@990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc` (later protected reconciliations are pinned in the PR #279 release target).  
 **Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1.  
 **Status:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT` until this source law is protected.  
 **Detailed design:** `docs/superpowers/specs/2026-08-30-operation-liveness-soundness-design.md`.  
@@ -16,10 +16,13 @@ The law, design, and original plan preserve the architecture and research histor
 their earlier examples are historical drafting residue. A worker must **do not implement** an older
 example where it conflicts with the following sources. Read them in this exact precedence order:
 
-1. `docs/superpowers/specs/2026-08-30-operation-assurance-immutable-report-projection-clarification.md`
-2. `docs/superpowers/specs/2026-08-30-operation-assurance-model-fidelity-counterexample-validation-amendment.md`
-3. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-trusted-input-total-proof-clarification.md`
-4. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-controlling-execution-overlay.md`
+1. `docs/superpowers/specs/2026-08-31-operation-assurance-a1-wire-release-finalization.md`
+   (wins on the exact immutable report field list, implementation navigation, the OLS-F0 release
+   gate, external-auditor placement removal, and the Steward predecessor state)
+2. `docs/superpowers/specs/2026-08-30-operation-assurance-immutable-report-projection-clarification.md`
+3. `docs/superpowers/specs/2026-08-30-operation-assurance-model-fidelity-counterexample-validation-amendment.md`
+4. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-trusted-input-total-proof-clarification.md`
+5. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-controlling-execution-overlay.md`
 
 Current adjacent-owner reconciliations are also mandatory:
 
@@ -334,6 +337,10 @@ source_refs
 minimal deterministic repair candidates
 limitations
 ```
+
+The controlling immutable-report clarification additionally freezes `witness_kind`
+(`TRACE / LASSO / GLOBAL_CERTIFICATE`) and `initial_state`; its exact counterexample field list wins
+over this summary.
 
 Safety prefixes use breadth-first distance and canonical transition ordering. Liveness lassos use the
 shortest reachable prefix, shortest fairness-valid violating closed walk, canonical transition

@@ -9,6 +9,60 @@ FINALIZATION = (
     / "specs"
     / "2026-08-31-operation-assurance-a1-wire-release-finalization.md"
 )
+LAW = ROOT / "docs" / "OPERATION_LIVENESS_SOUNDNESS_LAW.md"
+DESIGN = (
+    ROOT
+    / "docs"
+    / "superpowers"
+    / "specs"
+    / "2026-08-30-operation-liveness-soundness-design.md"
+)
+PLAN = ROOT / "docs" / "superpowers" / "plans" / "2026-08-30-operation-assurance-core.md"
+LEDGER = (
+    ROOT
+    / "research"
+    / "MASTERMIND_OPERATION_LIVENESS_SOUNDNESS_CAPABILITY_LEDGER_2026-08-30.md"
+)
+CLARIFICATION = (
+    ROOT
+    / "docs"
+    / "superpowers"
+    / "specs"
+    / "2026-08-30-operation-assurance-immutable-report-projection-clarification.md"
+)
+
+EXPECTED_REPORT_FIELDS = (
+    "schema",
+    "report_id",
+    "model_id",
+    "model_hash",
+    "source_snapshot_hash",
+    "checker_version",
+    "property_set_version",
+    "model_analysis_verdict",
+    "source_applicability_at_generation",
+    "abstraction_contract",
+    "progress_disposition",
+    "admission_recommendation",
+    "property_results",
+    "counterexamples",
+    "coverage",
+    "assumptions",
+    "known_model_gaps",
+    "exploration_receipt",
+    "generated_at",
+    "supersedes_report_id",
+    "report_hash",
+)
+
+
+def _fenced_fields(path: Path, marker: str) -> tuple[str, ...]:
+    raw = path.read_text(encoding="utf-8")
+    assert marker in raw, f"missing wire marker in {path.name}"
+    tail = raw.split(marker, 1)[1]
+    assert "```text" in tail, f"missing wire fence in {path.name}"
+    block = tail.split("```text", 1)[1].split("```", 1)[0]
+    return tuple(line.strip() for line in block.splitlines() if line.strip())
 
 
 def _text() -> str:
@@ -34,30 +88,7 @@ def test_finalization_is_the_narrow_controlling_source() -> None:
 
 def test_exact_immutable_report_wire_includes_all_generation_time_axes() -> None:
     text = _text()
-    expected_fields = (
-        "schema",
-        "report_id",
-        "model_id",
-        "model_hash",
-        "source_snapshot_hash",
-        "checker_version",
-        "property_set_version",
-        "model_analysis_verdict",
-        "source_applicability_at_generation",
-        "abstraction_contract",
-        "progress_disposition",
-        "admission_recommendation",
-        "property_results",
-        "counterexamples",
-        "coverage",
-        "assumptions",
-        "known_model_gaps",
-        "exploration_receipt",
-        "generated_at",
-        "supersedes_report_id",
-        "report_hash",
-    )
-    positions = [text.index(field) for field in expected_fields]
+    positions = [text.index(field) for field in EXPECTED_REPORT_FIELDS]
     assert positions == sorted(positions)
     assert "progress_disposition and admission_recommendation are immutable generation-time axes" in text
     assert "included in the canonical report body hashed into report_hash" in text
@@ -121,3 +152,42 @@ def test_finalization_remains_records_only_and_creates_no_duplicate_owner() -> N
     ):
         assert forbidden in text
     assert "Protecting OLS-F0 still does not build OLS-A1" in text
+
+
+def test_exact_wire_field_list_is_tuple_exact_not_positional() -> None:
+    fields = _fenced_fields(FINALIZATION, "field order is:")
+    assert fields == EXPECTED_REPORT_FIELDS
+    for forbidden in (
+        "repair_scope",
+        "current_recommendation",
+        "assurance_verdict",
+        "source_applicability",
+        "current_projection_verdict",
+        "current_assurance_status",
+        "computed_at",
+    ):
+        assert forbidden not in fields
+
+
+def test_wire_field_list_matches_immutable_report_clarification() -> None:
+    final_fields = _fenced_fields(FINALIZATION, "field order is:")
+    clarification_fields = _fenced_fields(
+        CLARIFICATION,
+        "`mastermind.operation_assurance_report.v1` contains exactly:",
+    )
+    assert final_fields == clarification_fields
+
+
+def test_finalization_is_reverse_linked_from_every_entrypoint() -> None:
+    for parent in (LAW, DESIGN, PLAN, LEDGER):
+        parent_text = " ".join(parent.read_text(encoding="utf-8").split())
+        assert (
+            "2026-08-31-operation-assurance-a1-wire-release-finalization.md" in parent_text
+        ), f"{parent.name} must point to the controlling wire-release finalization"
+
+
+def test_repair_scope_is_ruled_out_of_the_f0_wire() -> None:
+    text = _text()
+    assert "`repair_scope` is likewise not an immutable report field" in text
+    assert "superseded on this field" in text
+    assert "schema-closure task must either freeze a closed `repair_scope` vocabulary" in text
