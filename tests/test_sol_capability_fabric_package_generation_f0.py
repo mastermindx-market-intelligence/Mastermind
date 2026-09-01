@@ -145,12 +145,15 @@ def test_records_are_complete_owner_correct_and_production_inert() -> None:
     for forbidden in ("TODO", "TBD"):
         assert forbidden not in plan
 
+    spec_prose = _prose(SPEC)
+    plan_prose = _prose(PLAN)
     assert "WHY NOT FABLE" in plan
-    assert "Default `config/executive_agent_capabilities.json` remains schema v3" in spec
-    assert "No provider process" in spec
-    assert "builds no model-facing tool" in spec
-    assert "does not yield a live provider capability" in spec
-    assert "must not create `PluginRegistry`" in spec
+    assert "config/executive_agent_capabilities.json" in spec
+    assert "current v3 policy digest remains unchanged" in spec_prose
+    assert "No provider process" in plan_prose
+    assert "builds no model-facing tool" in spec_prose
+    assert "does not yield a live provider capability" in spec_prose
+    assert "must not create `PluginRegistry`" in spec_prose
     assert "`PackageStore`" in spec
 
 
@@ -239,7 +242,7 @@ def test_v4_is_opt_in_and_runtime_plugin_authority_remains_unavailable() -> None
     assert 'CAPABILITY_POLICY_SCHEMA_V4 = "mastermind.executive_agent_capabilities/v4"' in spec
     assert "CAPABILITY_POLICY_SCHEMA = CAPABILITY_POLICY_SCHEMA_V3" in spec
     assert "v3 non-empty plugin registry still refuses" in spec_lower
-    assert "runtime full-plugin grants remain unavailable" in spec_lower
+    assert "full runtime plugin grants remain unavailable" in spec_lower
     assert "Default `config/executive_agent_capabilities.json` remains schema v3" in plan
     assert "Do not start CAP-S1" in plan
 
