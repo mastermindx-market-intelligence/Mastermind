@@ -1,0 +1,129 @@
+{
+  "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+  "corpus_tree_digest": "sha256:ca1ea97e0f5026c06fb92c5214cfccba6bd4ede96125f570d1de7392dea81352",
+  "entries": [
+    {
+      "digest": "sha256:5e6e500d67f1b1ccd677db256f229aa5918de827fb34ff548e7085921663d7e2",
+      "relative_path": "holdouts/bounded_implementation_fence/multi_file_coordinated_fence/holdout_seal.json"
+    },
+    {
+      "digest": "sha256:b3b13a4e6d2cb661cbb1f9c9bb6c86ae1690caa4d42becf4455f3a4c0a6740be",
+      "relative_path": "holdouts/carrier_protocol_compliance/named_seat_override_freshness_fence/holdout_seal.json"
+    },
+    {
+      "digest": "sha256:356a8943ef084e42c1c2316d8857e1a2cff19a5e3fdee72341ebda026d2152c3",
+      "relative_path": "holdouts/current_source_comprehension/temporal_cutoff_ordering/holdout_seal.json"
+    },
+    {
+      "digest": "sha256:3629d9b307bc42920208a4c4c4641371ceed4b4622d187d63571e75e44a91af3",
+      "relative_path": "scenarios/bounded_implementation_fence/config_flag_addition/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:b15d62f4ac8e70d7e41b792e33173494922860d245f43c92939ea4c0f49ae592",
+      "relative_path": "scenarios/bounded_implementation_fence/config_flag_addition/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:052345730d3908d7b720e333d30ecef66a2454429173d565b933f488c217c737",
+      "relative_path": "scenarios/bounded_implementation_fence/config_flag_addition/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:720eafa8abf90cac70149b7529ea3ba455ba175f44230dbd3038306595e57815",
+      "relative_path": "scenarios/bounded_implementation_fence/doc_only_edit/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:fe4a96f7cb02dd2201468f949ecbb5c51e798c061c2a3bb722fa172d1135372d",
+      "relative_path": "scenarios/bounded_implementation_fence/doc_only_edit/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:7473b7401f7f72ce484e71322a3806586edea5157f3db395b015f386f6e0c74a",
+      "relative_path": "scenarios/bounded_implementation_fence/doc_only_edit/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:98445f6ffdf2597b0ed60a56f6fad49a921260554b6df69201c472e5a762dbfb",
+      "relative_path": "scenarios/bounded_implementation_fence/test_file_addition/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:dbdfa1394ea5be046b915333dc4f875e4f01271ec3302b20999bf797ea6d763b",
+      "relative_path": "scenarios/bounded_implementation_fence/test_file_addition/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:386cf51563f07395cb83210d9bbdece09ea300b5a394eb4b3a01a58c3044bd51",
+      "relative_path": "scenarios/bounded_implementation_fence/test_file_addition/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:a15b2dd8de8dfdabed448f4468d16eac1bcbd6a2a607ce41e0ccbfb378385189",
+      "relative_path": "scenarios/carrier_protocol_compliance/seat_vs_session_identity/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:835bf20091a60031449fc31f767d10240639666db4372411209d8e3c0566ff95",
+      "relative_path": "scenarios/carrier_protocol_compliance/seat_vs_session_identity/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:c894092bbf3ba98cc3068763485758ac96007d738abcd99a5b3107daa3dd8992",
+      "relative_path": "scenarios/carrier_protocol_compliance/seat_vs_session_identity/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:0718a07f37da7072ce373f261add2be570290e5a5c81b4d47cdc23603f73d61f",
+      "relative_path": "scenarios/carrier_protocol_compliance/stale_relay_spawn_prompt/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:4167e9b5d9c48eb96bc6dff005feb255bb9c6446b3163d2218cbefab8e94d636",
+      "relative_path": "scenarios/carrier_protocol_compliance/stale_relay_spawn_prompt/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:9f20df77e13af736c7dd7232504d82308891ad48eb989efce1f7e9f63d552248",
+      "relative_path": "scenarios/carrier_protocol_compliance/stale_relay_spawn_prompt/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:062a137fe9c527e5cf3a7be3f10df9cf4f0085ecc67d905b6ee4ac796957d50b",
+      "relative_path": "scenarios/carrier_protocol_compliance/unclaimed_key_no_assignment_edge/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:a7e6bb11c9752a7fc785f08240fd5a23f06df07f996da06d6198dea061531413",
+      "relative_path": "scenarios/carrier_protocol_compliance/unclaimed_key_no_assignment_edge/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:8a1218449c95b4c3ee42e27419845d73dc739628fabf385f699f8c8790d87ee9",
+      "relative_path": "scenarios/carrier_protocol_compliance/unclaimed_key_no_assignment_edge/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:290569f759e84d2fc9976f9a57359ba348edbab6b3d9cec9a8adb19fbf694504",
+      "relative_path": "scenarios/current_source_comprehension/canonical_artifact_size_bound/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:4c898846d42c7e8a3af3722281342834a9e7e1269d162cb27370a21af71a48a0",
+      "relative_path": "scenarios/current_source_comprehension/canonical_artifact_size_bound/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:1c9bdfa0176ea1e4e0cee5cd11bd11b09b313fc36d478534fa9741199ce2add8",
+      "relative_path": "scenarios/current_source_comprehension/canonical_artifact_size_bound/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:5eba1bc8ff1ce88c88038a6899ae639b06a665ed7de9cc7f97a9ea2fb057a6dd",
+      "relative_path": "scenarios/current_source_comprehension/effect_unknown_precedence/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:e1debb26bde7eabbe9ef347e0a18fd2ef714dd664d626a60f3f085d25b192bfd",
+      "relative_path": "scenarios/current_source_comprehension/effect_unknown_precedence/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:0b395f7043840852e4095079f187510f71dbf8f5478c4d4bfb96c886710a7efb",
+      "relative_path": "scenarios/current_source_comprehension/effect_unknown_precedence/v1/scenario.json"
+    },
+    {
+      "digest": "sha256:2c1098380e916f8e7e354ae834ed29dae72b7f6c76d8246d8dc19f7a1cb2b4f3",
+      "relative_path": "scenarios/current_source_comprehension/fresh_runner_canonical_owner/v1/fixtures/expected.json"
+    },
+    {
+      "digest": "sha256:ef776fcee866e45d4b9313a6e787f5dc17d53b0772580c038e5d092d59de8db6",
+      "relative_path": "scenarios/current_source_comprehension/fresh_runner_canonical_owner/v1/fixtures/input.json"
+    },
+    {
+      "digest": "sha256:71977de640011fc18f40bde3de64a89f87b00661f1e9514e3bd4465d071720ac",
+      "relative_path": "scenarios/current_source_comprehension/fresh_runner_canonical_owner/v1/scenario.json"
+    }
+  ],
+  "generated_at": "2026-09-01T01:15:00Z",
+  "manifest_digest": "sha256:99b111f18dc23eedb4e738440e025bbbf50597a1586b5a9a738e477346c274ac",
+  "schema": "mastermind.agent_evaluation_corpus_manifest.v1"
+}

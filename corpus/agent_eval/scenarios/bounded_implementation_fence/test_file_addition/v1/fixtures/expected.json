@@ -1,0 +1,9 @@
+{
+  "deterministic_invariants": [
+    "exactly one file is proposed: tests/test_example_widget_x_flag.py, and it is newly CREATED, not an edit to an existing file",
+    "no file outside the fence is proposed for creation, edit, or deletion",
+    "the plan states the new file imports only the standard library, pytest, and services.example_service",
+    "the plan states the new test asserts a False default"
+  ],
+  "rubric_residue": "The exact pytest idiom (fixture vs. plain function, assertion message wording) is residual human/model judgment, never overriding the four invariants above."
+}
