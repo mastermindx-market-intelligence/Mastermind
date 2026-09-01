@@ -7,6 +7,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "docs/superpowers/specs/2026-08-31-agent-operator-capability-convergence-design.md"
 PLAN = ROOT / "docs/superpowers/plans/2026-08-31-agent-operator-capability-pack-attestation.md"
 AMENDMENT = ROOT / "docs/superpowers/specs/2026-09-01-agent-operator-capability-convergence-owner-amendment.md"
+CLOSURE = ROOT / "docs/superpowers/specs/2026-09-01-agent-operator-effective-skill-closure-amendment.md"
+RECEIVE_SKILL = ROOT / "plugins/mastermind-operator/skills/receive-commission/SKILL.md"
+DIALOGUE_REFERENCE = ROOT / "plugins/mastermind-operator/references/dialogue-boundary.md"
 
 
 def _read(path: Path) -> str:
@@ -27,14 +30,28 @@ def test_records_are_present_and_explicitly_production_inert() -> None:
         assert "TODO" not in text
         assert "TBD" not in text
 
+    closure = _read(CLOSURE)
+    assert "PRODUCTION_INERT" in closure
+    assert "ExecutionCapabilityRegistry" in closure
+    assert "TODO" not in closure
+    assert "TBD" not in closure
 
-def test_amendment_has_narrow_precedence_over_the_original_records() -> None:
+
+def test_amendments_have_narrow_precedence_over_the_original_records() -> None:
     amendment = _read(AMENDMENT)
+    closure = _read(CLOSURE)
+
     assert "where it conflicts, supersedes" in amendment
     assert SPEC.name in amendment
     assert PLAN.name in amendment
     assert "The original product outcome" in amendment
     assert "This amendment" in amendment
+
+    assert "where it conflicts, supersedes" in closure
+    assert SPEC.name in closure
+    assert PLAN.name in closure
+    assert AMENDMENT.name in closure
+    assert "existing-owner ruling" in closure
 
 
 def test_existing_capability_and_practice_owners_are_not_duplicated() -> None:
@@ -83,6 +100,27 @@ def test_first_vertical_and_hf1_boundary_are_precise() -> None:
     assert "Do not create `claude_broker.py`" in plan
 
 
+def test_effective_skill_closure_includes_required_package_reference() -> None:
+    closure = _read(CLOSURE)
+    receive_skill = _read(RECEIVE_SKILL)
+    dialogue_reference = _read(DIALOGUE_REFERENCE)
+
+    assert "../../references/dialogue-boundary.md" in receive_skill
+    assert "Distinct states remain distinct" in dialogue_reference
+
+    assert "mastermind.effective_skill_closure/v1" in closure
+    assert '"entrypoint_path": "skills/receive-commission/SKILL.md"' in closure
+    assert '"relative_path": "references/dialogue-boundary.md"' in closure
+    assert "skills/receive-commission/SKILL.md\nreferences/dialogue-boundary.md" in closure
+    assert "effective Skill closure, not merely" in closure
+    assert "Skill closure identity and package generation identity are related but not collapsed" in closure
+    assert "A regex/link crawler cannot prove" in closure
+    assert "Name-only observation cannot satisfy a requested digest" in closure
+    assert "same name + changed required shared reference" in closure
+    assert "same closure + changed unrelated sibling Skill" in closure
+    assert "per-Skill effective-closure mapping" in closure
+
+
 def test_practice_and_execution_capability_identity_remain_distinct() -> None:
     amendment = _read(AMENDMENT)
     assert "Practice source and executable capability source remain distinct identities" in amendment
@@ -105,9 +143,12 @@ def test_browser_and_desktop_access_remain_explicit_resources() -> None:
 
 def test_records_do_not_claim_runtime_or_product_completion() -> None:
     amendment = _read(AMENDMENT)
+    closure = _read(CLOSURE)
     assert "It does not make any package generation attested" in amendment
     assert "custom Skill digest enforced" in amendment
     assert "provider materializer built" in amendment
     assert "browser available" in amendment
     assert "non-Codex worker routable" in amendment
     assert "practice adapter live" in amendment
+    assert "does not attest a live package generation" in closure
+    assert "Codex vertical `PROVEN_LIVE`" in closure
