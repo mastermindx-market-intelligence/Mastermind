@@ -46,10 +46,7 @@ def _text() -> str:
 
 def _immutable_report_wire_fields() -> tuple[str, ...]:
     raw = _raw()
-    marker = (
-        "`mastermind.operation_assurance_report.v1` contains the result "
-        "that was true at generation time:"
-    )
+    marker = "`mastermind.operation_assurance_report.v1` contains exactly:"
     assert marker in raw, "missing exact immutable-report wire marker"
     tail = raw.split(marker, 1)[1]
     assert "```text" in tail, "missing immutable-report wire fence"
