@@ -720,3 +720,348 @@ def test_auth_json_contents_are_never_read_copied_or_serialized(
     factory = build_live_client_factory(codex_home=dedicated, model="gpt-5.6-sol")
     assert callable(factory)
 
+
+# ---------------------------------------------------------------------------
+# Task 3: create-only evidence + CLI + MAS-136 matrix.
+# ---------------------------------------------------------------------------
+
+import hashlib
+import json
+
+import yaml
+
+from scripts.ohf.fresh_sol_eval import (
+    RUN_SCHEMA,
+    MANIFEST_SCHEMA,
+    write_run_artifact,
+    run_matrix,
+    check_corpus,
+    main as fresh_sol_eval_main,
+)
+
+
+def _observation(**overrides: Any):
+    from scripts.ohf.fresh_sol_eval import RunObservation, CapabilityReceipt, CleanupReceipt
+
+    defaults: dict[str, Any] = dict(
+        run_id="run-fixture-0001",
+        arm="control-1.0.0",
+        scenario_id="S8",
+        workspace=Path("/tmp/does-not-matter"),
+        process_pid=4242,
+        process_pgid=4242,
+        process_start_identity="4242:4242:run-fixture-0001",
+        native_thread_id="thr_fixture",
+        prompt="fixture exact prompt",
+        output="fixture exact output",
+        started_at="2026-08-26T00:00:00.000000Z",
+        completed_at="2026-08-26T00:00:01.000000Z",
+        capability=CapabilityReceipt(
+            requested_model="gpt-5.6-sol",
+            served_model="gpt-5.6-sol",
+            approval_policy="never",
+            sandbox_mode="read-only",
+            mcp_names=(),
+            plugin_names=(),
+            skill_names=(),
+            auth_type="chatgpt",
+            plan_type="pro",
+            requires_openai_auth=True,
+            harness_version="fixture-version",
+        ),
+        cleanup=CleanupReceipt(
+            controller_returncode=0,
+            private_group_id=4242,
+            private_group_empty=True,
+            termination_outcome="sigterm",
+        ),
+    )
+    defaults.update(overrides)
+    return RunObservation(**defaults)
+
+
+def _bundle_fixture(**overrides: Any) -> ProcedureBundle:
+    from scripts.ohf.fresh_sol_eval import ProcedureBundle, ProcedureSource
+
+    sources = (
+        ProcedureSource(path="docs/sol_skills/INDEX.md", blob_sha="a" * 40, content=b"index"),
+        ProcedureSource(path="docs/sol_skills/SIBLING.md", blob_sha="b" * 40, content=b"sibling"),
+    )
+    defaults: dict[str, Any] = dict(
+        arm=_control_arm(),
+        sources=sources,
+        context_sha256="c" * 64,
+    )
+    defaults.update(overrides)
+    return ProcedureBundle(**defaults)
+
+
+from scripts.ohf.fresh_sol_eval import ProcedureBundle  # noqa: E402  (used by _bundle_fixture)
+
+
+def test_evidence_artifact_exact_prompt_output_roundtrip(tmp_path: Path):
+    observation = _observation()
+    bundle = _bundle_fixture()
+    path = write_run_artifact(
+        observation=observation,
+        bundle=bundle,
+        protocol_sha256="d" * 64,
+        harness_kind="codex-app-server",
+        harness_binary_sha256="e" * 64,
+        evidence_root=tmp_path,
+    )
+    assert path == tmp_path / "runs" / "control-1.0.0" / "S8" / "run-fixture-0001.md"
+    text = path.read_text(encoding="utf-8")
+    assert "fixture exact prompt" in text
+    assert "fixture exact output" in text
+    front_text = text.split("---\n", 2)[1]
+    metadata = yaml.safe_load(front_text)
+    assert metadata["schema"] == RUN_SCHEMA
+    assert metadata["scenario_id"] == "S8"
+    assert metadata["arm"] == "control-1.0.0"
+    assert metadata["run_id"] == "run-fixture-0001"
+    assert metadata["manual_classification"] == "PENDING_SOL_REVIEW"
+    assert metadata["process_pid"] == 4242
+    assert metadata["native_thread_id"] == "thr_fixture"
+    for required_key in (
+        "procedure_commit_sha",
+        "expected_skillpack_version",
+        "procedure_source_blobs",
+        "procedure_context_sha256",
+        "protocol_sha256",
+        "prompt_sha256",
+        "model_requested",
+        "model_served",
+        "harness_kind",
+        "harness_version",
+        "harness_binary_sha256",
+        "provider_auth_type",
+        "provider_plan_type",
+        "requires_openai_auth",
+        "process_pgid",
+        "process_start_identity",
+        "started_at",
+        "completed_at",
+        "cleanup_proof",
+    ):
+        assert required_key in metadata, required_key
+
+
+def test_evidence_collision_never_overwrites_existing(tmp_path: Path):
+    observation = _observation()
+    bundle = _bundle_fixture()
+    write_run_artifact(
+        observation=observation, bundle=bundle, protocol_sha256="d" * 64,
+        harness_kind="codex-app-server", harness_binary_sha256="e" * 64, evidence_root=tmp_path,
+    )
+    target = tmp_path / "runs" / "control-1.0.0" / "S8" / "run-fixture-0001.md"
+    original_bytes = target.read_bytes()
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        write_run_artifact(
+            observation=_observation(output="a completely different output"),
+            bundle=bundle, protocol_sha256="d" * 64, harness_kind="codex-app-server",
+            harness_binary_sha256="e" * 64, evidence_root=tmp_path,
+        )
+    assert excinfo.value.code == "EVIDENCE_COLLISION"
+    assert target.read_bytes() == original_bytes
+
+
+def test_write_run_artifact_refuses_secret_shaped_prompt(tmp_path: Path):
+    observation = _observation(prompt="leaked key sk-testFixtureSecretShape1234567890 in prompt")
+    bundle = _bundle_fixture()
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        write_run_artifact(
+            observation=observation, bundle=bundle, protocol_sha256="d" * 64,
+            harness_kind="codex-app-server", harness_binary_sha256="e" * 64, evidence_root=tmp_path,
+        )
+    assert excinfo.value.code == "EVIDENCE_SECRET_SHAPE_REFUSED"
+    assert not (tmp_path / "runs").exists()
+
+
+def test_write_run_artifact_refuses_secret_shaped_output(tmp_path: Path):
+    observation = _observation(output="leaked key sk-testFixtureSecretShape1234567890 in output")
+    bundle = _bundle_fixture()
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        write_run_artifact(
+            observation=observation, bundle=bundle, protocol_sha256="d" * 64,
+            harness_kind="codex-app-server", harness_binary_sha256="e" * 64, evidence_root=tmp_path,
+        )
+    assert excinfo.value.code == "EVIDENCE_SECRET_SHAPE_REFUSED"
+    assert not (tmp_path / "runs").exists()
+
+
+def test_evidence_artifact_updates_manifest(tmp_path: Path):
+    observation = _observation()
+    bundle = _bundle_fixture()
+    write_run_artifact(
+        observation=observation, bundle=bundle, protocol_sha256="d" * 64,
+        harness_kind="codex-app-server", harness_binary_sha256="e" * 64, evidence_root=tmp_path,
+    )
+    manifest = json.loads((tmp_path / "MANIFEST.json").read_text(encoding="utf-8"))
+    assert manifest["schema"] == MANIFEST_SCHEMA
+    assert len(manifest["entries"]) == 1
+    entry = manifest["entries"][0]
+    assert entry["run_id"] == "run-fixture-0001"
+    assert entry["arm"] == "control-1.0.0"
+    assert entry["scenario_id"] == "S8"
+    artifact_path = tmp_path / entry["relative_path"]
+    assert hashlib.sha256(artifact_path.read_bytes()).hexdigest() == entry["artifact_sha256"]
+
+
+# ---------------------------------------------------------------------------
+# Task 3, Step 4: matrix cardinality + resume-manifest tests.
+# ---------------------------------------------------------------------------
+
+
+def _protocol_path(tmp_path: Path) -> Path:
+    path = tmp_path / "PRESSURE_TEST_PROTOCOL.md"
+    path.write_text(_protocol_text(), encoding="utf-8")
+    return path
+
+
+def test_mas136_matrix_is_exactly_four_control_twelve_amended(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    factory = _fake_factory()
+    written = run_matrix(
+        repo_root=mastermind_repo_root,
+        protocol_path=_protocol_path(tmp_path),
+        evidence_root=tmp_path / "evidence",
+        client_factory=factory,
+        run_root_parent=tmp_path / "runs_scratch",
+        mode="mas-136",
+    )
+    assert len(written) == 16
+    manifest = json.loads((tmp_path / "evidence" / "MANIFEST.json").read_text(encoding="utf-8"))
+    entries = manifest["entries"]
+    assert len(entries) == 16
+    counts: dict[tuple[str, str], int] = {}
+    for entry in entries:
+        key = (entry["arm"], entry["scenario_id"])
+        counts[key] = counts.get(key, 0) + 1
+    for scenario_id in MAS136_SCENARIOS:
+        assert counts[("control-1.0.0", scenario_id)] == 1
+        assert counts[("amended-1.1.0", scenario_id)] == 3
+
+
+def test_run_matrix_resume_manifest_skips_verified_entries(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    factory = _fake_factory()
+    evidence_root = tmp_path / "evidence"
+    run_matrix(
+        repo_root=mastermind_repo_root,
+        protocol_path=_protocol_path(tmp_path),
+        evidence_root=evidence_root,
+        client_factory=factory,
+        run_root_parent=tmp_path / "runs_scratch",
+        mode="mas-136",
+    )
+    first_pid_count = len(factory.made)
+
+    resume_manifest = evidence_root / "MANIFEST.json"
+    second_factory = _fake_factory()
+    written_again = run_matrix(
+        repo_root=mastermind_repo_root,
+        protocol_path=_protocol_path(tmp_path),
+        evidence_root=evidence_root,
+        client_factory=second_factory,
+        run_root_parent=tmp_path / "runs_scratch_2",
+        mode="mas-136",
+        resume_manifest=resume_manifest,
+    )
+    # Every planned sample was already satisfied; resume must not create any
+    # fresh App Server client/process.
+    assert written_again == []
+    assert len(second_factory.made) == 0
+    assert first_pid_count == 16
+
+
+def test_run_matrix_resume_manifest_tampered_artifact_refuses(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    factory = _fake_factory()
+    evidence_root = tmp_path / "evidence"
+    run_matrix(
+        repo_root=mastermind_repo_root,
+        protocol_path=_protocol_path(tmp_path),
+        evidence_root=evidence_root,
+        client_factory=factory,
+        run_root_parent=tmp_path / "runs_scratch",
+        mode="mas-136",
+    )
+    manifest = json.loads((evidence_root / "MANIFEST.json").read_text(encoding="utf-8"))
+    tampered_rel = manifest["entries"][0]["relative_path"]
+    (evidence_root / tampered_rel).write_text("TAMPERED", encoding="utf-8")
+
+    second_factory = _fake_factory()
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_matrix(
+            repo_root=mastermind_repo_root,
+            protocol_path=_protocol_path(tmp_path),
+            evidence_root=evidence_root,
+            client_factory=second_factory,
+            run_root_parent=tmp_path / "runs_scratch_2",
+            mode="mas-136",
+            resume_manifest=evidence_root / "MANIFEST.json",
+        )
+    assert excinfo.value.code == "EVIDENCE_COLLISION"
+
+
+def test_check_corpus_reports_incomplete_before_16(tmp_path: Path):
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    result = check_corpus(evidence_root=evidence_root, mode="mas-136")
+    assert result["ok"] is False
+    assert result["valid_count"] == 0
+    assert result["expected"] == 16
+
+
+def test_check_corpus_reports_complete_at_16(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory()
+    evidence_root = tmp_path / "evidence"
+    run_matrix(
+        repo_root=mastermind_repo_root,
+        protocol_path=_protocol_path(tmp_path),
+        evidence_root=evidence_root,
+        client_factory=factory,
+        run_root_parent=tmp_path / "runs_scratch",
+        mode="mas-136",
+    )
+    result = check_corpus(evidence_root=evidence_root, mode="mas-136")
+    assert result["ok"] is True
+    assert result["valid_count"] == 16
+
+
+def test_check_corpus_detects_digest_mismatch(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory()
+    evidence_root = tmp_path / "evidence"
+    run_matrix(
+        repo_root=mastermind_repo_root,
+        protocol_path=_protocol_path(tmp_path),
+        evidence_root=evidence_root,
+        client_factory=factory,
+        run_root_parent=tmp_path / "runs_scratch",
+        mode="mas-136",
+    )
+    manifest = json.loads((evidence_root / "MANIFEST.json").read_text(encoding="utf-8"))
+    corrupted_rel = manifest["entries"][0]["relative_path"]
+    (evidence_root / corrupted_rel).write_text("CORRUPTED", encoding="utf-8")
+    result = check_corpus(evidence_root=evidence_root, mode="mas-136")
+    assert result["ok"] is False
+    assert any("digest" in problem for problem in result["problems"])
+
+
+# ---------------------------------------------------------------------------
+# CLI smoke test
+# ---------------------------------------------------------------------------
+
+
+def test_cli_check_corpus_exits_nonzero_when_incomplete(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    exit_code = fresh_sol_eval_main(["check-corpus", "--evidence-root", str(evidence_root), "--mode", "mas-136"])
+    assert exit_code != 0
+    captured = capsys.readouterr()
+    assert "valid_count" in captured.out
+

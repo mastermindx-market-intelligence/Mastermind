@@ -14,11 +14,14 @@ substrate only (``scripts.ohf.laboratory``, ``scripts.ohf.protocol``,
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -27,7 +30,12 @@ from typing import Any, Callable, Protocol
 
 import yaml
 
-from scripts.ohf.laboratory import AppServerClient, AppServerStopProof, validate_live_codex_home
+from scripts.ohf.laboratory import (
+    AppServerClient,
+    AppServerStopProof,
+    binary_digest,
+    validate_live_codex_home,
+)
 from scripts.ohf.p1a_capability_policy import LAUNCH_OK, classify_observed, launch_decision
 from scripts.ohf.protocol import (
     config_mcp_names,
@@ -38,6 +46,7 @@ from scripts.ohf.protocol import (
     skills_list_params,
     thread_turns,
 )
+from scripts.ohf.redaction import evidence_contains_secret
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 REQUIRED_MODEL = "gpt-5.6-sol"
@@ -869,3 +878,459 @@ def build_live_client_factory(
         return AppServerClient(argv, env=env, cwd=workspace, start_new_session=True)
 
     return factory
+
+
+# ---------------------------------------------------------------------------
+# Create-only evidence + MAS-136 matrix + CLI (plan Task 3)
+# ---------------------------------------------------------------------------
+
+_EVIDENCE_METADATA_KEYS = (
+    "schema",
+    "scenario_id",
+    "arm",
+    "run_id",
+    "procedure_commit_sha",
+    "expected_skillpack_version",
+    "procedure_source_blobs",
+    "procedure_context_sha256",
+    "protocol_sha256",
+    "prompt_sha256",
+    "model_requested",
+    "model_served",
+    "harness_kind",
+    "harness_version",
+    "harness_binary_sha256",
+    "provider_auth_type",
+    "provider_plan_type",
+    "requires_openai_auth",
+    "process_pid",
+    "process_pgid",
+    "process_start_identity",
+    "native_thread_id",
+    "started_at",
+    "completed_at",
+    "cleanup_proof",
+    "manual_classification",
+)
+
+
+def _cleanup_proof_text(cleanup: CleanupReceipt) -> str:
+    return f"{cleanup.termination_outcome}/private_group_empty={cleanup.private_group_empty}"
+
+
+def _evidence_metadata(
+    *,
+    observation: RunObservation,
+    bundle: ProcedureBundle,
+    protocol_sha256: str,
+    prompt_sha256: str,
+    harness_kind: str,
+    harness_binary_sha256: str,
+) -> dict[str, Any]:
+    values = {
+        "schema": RUN_SCHEMA,
+        "scenario_id": observation.scenario_id,
+        "arm": observation.arm,
+        "run_id": observation.run_id,
+        "procedure_commit_sha": bundle.arm.commit_sha,
+        "expected_skillpack_version": bundle.arm.skillpack_version,
+        "procedure_source_blobs": [f"{s.path}@{s.blob_sha}" for s in bundle.sources],
+        "procedure_context_sha256": bundle.context_sha256,
+        "protocol_sha256": protocol_sha256,
+        "prompt_sha256": prompt_sha256,
+        "model_requested": observation.capability.requested_model,
+        "model_served": observation.capability.served_model,
+        "harness_kind": harness_kind,
+        "harness_version": observation.capability.harness_version,
+        "harness_binary_sha256": harness_binary_sha256,
+        "provider_auth_type": observation.capability.auth_type,
+        "provider_plan_type": observation.capability.plan_type,
+        "requires_openai_auth": observation.capability.requires_openai_auth,
+        "process_pid": observation.process_pid,
+        "process_pgid": observation.process_pgid,
+        "process_start_identity": observation.process_start_identity,
+        "native_thread_id": observation.native_thread_id,
+        "started_at": observation.started_at,
+        "completed_at": observation.completed_at,
+        "cleanup_proof": _cleanup_proof_text(observation.cleanup),
+        "manual_classification": "PENDING_SOL_REVIEW",
+    }
+    return {key: values[key] for key in _EVIDENCE_METADATA_KEYS}
+
+
+def _manifest_path(evidence_root: Path) -> Path:
+    return Path(evidence_root) / "MANIFEST.json"
+
+
+def _load_manifest(manifest_path: Path) -> dict[str, Any]:
+    if not manifest_path.is_file():
+        return {"schema": MANIFEST_SCHEMA, "entries": []}
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, indent=2, sort_keys=False) + "\n")
+        os.replace(tmp_name, path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+
+
+def _record_manifest_entry(
+    evidence_root: Path,
+    *,
+    run_id: str,
+    arm: str,
+    scenario_id: str,
+    relative_path: str,
+    artifact_sha256: str,
+) -> None:
+    manifest_path = _manifest_path(evidence_root)
+    manifest = _load_manifest(manifest_path)
+    entries = [e for e in (manifest.get("entries") or []) if e.get("run_id") != run_id]
+    entries.append(
+        {
+            "run_id": run_id,
+            "arm": arm,
+            "scenario_id": scenario_id,
+            "relative_path": relative_path,
+            "artifact_sha256": artifact_sha256,
+        }
+    )
+    entries.sort(key=lambda e: (str(e["arm"]), str(e["scenario_id"]), str(e["run_id"])))
+    _atomic_write_json(manifest_path, {"schema": MANIFEST_SCHEMA, "entries": entries})
+
+
+def write_run_artifact(
+    *,
+    observation: RunObservation,
+    bundle: ProcedureBundle,
+    protocol_sha256: str,
+    harness_kind: str,
+    harness_binary_sha256: str,
+    evidence_root: Path,
+) -> Path:
+    """Persist one run as a create-only Markdown evidence artifact.
+
+    Refuses (``EVIDENCE_SECRET_SHAPE_REFUSED``) without writing anything if
+    the exact prompt or output trips the existing repository secret-shape
+    detector.  Refuses (``EVIDENCE_COLLISION``) without touching the
+    existing bytes if the deterministic target path already exists.  Also
+    updates the atomic ``MANIFEST.json`` bookkeeping index.
+    """
+
+    if evidence_contains_secret(observation.prompt) or evidence_contains_secret(observation.output):
+        raise FreshSolEvalError(
+            "EVIDENCE_SECRET_SHAPE_REFUSED",
+            f"run {observation.run_id} tripped the secret-shape detector; rerun fresh",
+        )
+
+    evidence_root = Path(evidence_root)
+    target = evidence_root / "runs" / observation.arm / observation.scenario_id / f"{observation.run_id}.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    prompt_sha256 = hashlib.sha256(observation.prompt.encode("utf-8")).hexdigest()
+    metadata = _evidence_metadata(
+        observation=observation,
+        bundle=bundle,
+        protocol_sha256=protocol_sha256,
+        prompt_sha256=prompt_sha256,
+        harness_kind=harness_kind,
+        harness_binary_sha256=harness_binary_sha256,
+    )
+    front = yaml.safe_dump(metadata, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    content = (
+        f"---\n{front}---\n\n"
+        "## Exact prompt\n\n```text\n" + observation.prompt + "\n```\n\n"
+        "## Exact model output\n\n```text\n" + observation.output + "\n```\n"
+    )
+
+    try:
+        with open(target, "x", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+    except FileExistsError as exc:
+        raise FreshSolEvalError(
+            "EVIDENCE_COLLISION", f"evidence artifact already exists: {target}"
+        ) from exc
+
+    artifact_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
+    _record_manifest_entry(
+        evidence_root,
+        run_id=observation.run_id,
+        arm=observation.arm,
+        scenario_id=observation.scenario_id,
+        relative_path=target.relative_to(evidence_root).as_posix(),
+        artifact_sha256=artifact_sha256,
+    )
+    return target
+
+
+def _mas136_sample_plan() -> list[tuple[str, str, int]]:
+    """Deterministic 4-control + 12-amended plan grouped by scenario."""
+
+    plan: list[tuple[str, str, int]] = []
+    for scenario_id in MAS136_SCENARIOS:
+        plan.append(("control-1.0.0", scenario_id, 1))
+        for sample_index in (1, 2, 3):
+            plan.append(("amended-1.1.0", scenario_id, sample_index))
+    return plan
+
+
+def _verify_and_count_resume(evidence_root: Path, resume_manifest: Path) -> dict[tuple[str, str], int]:
+    """Verify every resumed entry's bytes against its recorded digest.
+
+    A missing or mismatched artifact refuses the whole resume attempt as
+    ``EVIDENCE_COLLISION`` rather than silently rerunning that sample.
+    """
+
+    payload = json.loads(Path(resume_manifest).read_text(encoding="utf-8"))
+    counts: dict[tuple[str, str], int] = {}
+    for entry in payload.get("entries") or []:
+        relative_path = str(entry.get("relative_path") or "")
+        artifact_path = Path(evidence_root) / relative_path
+        if not artifact_path.is_file():
+            raise FreshSolEvalError(
+                "EVIDENCE_COLLISION",
+                f"resume manifest entry is missing on disk: {relative_path}",
+            )
+        actual_sha256 = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        if actual_sha256 != entry.get("artifact_sha256"):
+            raise FreshSolEvalError(
+                "EVIDENCE_COLLISION",
+                f"resume manifest entry digest mismatch: {relative_path}",
+            )
+        key = (str(entry.get("arm")), str(entry.get("scenario_id")))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def run_matrix(
+    *,
+    repo_root: Path,
+    protocol_path: Path,
+    evidence_root: Path,
+    client_factory: "ClientFactory",
+    run_root_parent: Path,
+    mode: str = "mas-136",
+    resume_manifest: Path | None = None,
+    harness_kind: str = "codex-app-server",
+    harness_version: str = "unknown",
+    harness_binary_sha256: str = "",
+) -> list[Path]:
+    """Run the fixed MAS-136 sample plan.  A convenience wrapper, not a scheduler.
+
+    A failed/invalid sample stops the matrix immediately (no automatic
+    retry).  ``resume_manifest`` is the only skip path, and only for
+    entries whose artifact bytes still match the manifest exactly.
+    """
+
+    if mode != "mas-136":
+        raise ValueError(f"unsupported run-matrix mode: {mode!r}")
+
+    plan = _mas136_sample_plan()
+    assert len(plan) == 16
+
+    scenarios = parse_protocol(protocol_path)
+    protocol_sha256 = hashlib.sha256(Path(protocol_path).read_bytes()).hexdigest()
+
+    skip_counts: dict[tuple[str, str], int] = {}
+    if resume_manifest is not None:
+        skip_counts = _verify_and_count_resume(evidence_root, resume_manifest)
+
+    consumed: dict[tuple[str, str], int] = {}
+    written: list[Path] = []
+    for arm_key, scenario_id, _sample_index in plan:
+        key = (arm_key, scenario_id)
+        consumed[key] = consumed.get(key, 0) + 1
+        if consumed[key] <= skip_counts.get(key, 0):
+            continue
+
+        arm = MAS136_ARMS[arm_key]
+        scenario = scenarios[scenario_id]
+        bundle = materialize_skillpack(repo_root, arm)
+        run_root = Path(run_root_parent) / f"{arm_key}-{scenario_id}-{uuid.uuid4().hex[:8]}"
+        observation = run_one(
+            repo_root=repo_root,
+            arm=arm,
+            scenario=scenario,
+            run_root=run_root,
+            client_factory=client_factory,
+            harness_kind=harness_kind,
+            harness_version=harness_version,
+        )
+        artifact = write_run_artifact(
+            observation=observation,
+            bundle=bundle,
+            protocol_sha256=protocol_sha256,
+            harness_kind=harness_kind,
+            harness_binary_sha256=harness_binary_sha256,
+            evidence_root=evidence_root,
+        )
+        written.append(artifact)
+    return written
+
+
+def _mas136_expected_counts() -> dict[tuple[str, str], int]:
+    expected: dict[tuple[str, str], int] = {}
+    for scenario_id in MAS136_SCENARIOS:
+        expected[("control-1.0.0", scenario_id)] = 1
+        expected[("amended-1.1.0", scenario_id)] = 3
+    return expected
+
+
+def check_corpus(*, evidence_root: Path, mode: str = "mas-136") -> dict[str, Any]:
+    """Verify identity/cardinality/digest/cleanup completeness only.
+
+    Never behavioral-grades outputs -- that stays Sol's job.
+    """
+
+    if mode != "mas-136":
+        raise ValueError(f"unsupported check-corpus mode: {mode!r}")
+
+    evidence_root = Path(evidence_root)
+    manifest_path = _manifest_path(evidence_root)
+    if not manifest_path.is_file():
+        return {
+            "ok": False,
+            "valid_count": 0,
+            "expected": 16,
+            "cardinality_ok": False,
+            "problems": ["MANIFEST_MISSING"],
+        }
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    problems: list[str] = []
+    counts: dict[tuple[str, str], int] = {}
+    for entry in manifest.get("entries") or []:
+        relative_path = str(entry.get("relative_path") or "")
+        artifact_path = evidence_root / relative_path
+        if not artifact_path.is_file():
+            problems.append(f"missing artifact: {relative_path}")
+            continue
+        actual_sha256 = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        if actual_sha256 != entry.get("artifact_sha256"):
+            problems.append(f"digest mismatch: {relative_path}")
+            continue
+        metadata = _extract_yaml_frontmatter(artifact_path.read_bytes())
+        cleanup_proof = str((metadata or {}).get("cleanup_proof") or "")
+        if "private_group_empty=True" not in cleanup_proof:
+            problems.append(f"cleanup not proven: {relative_path}")
+            continue
+        key = (str(entry.get("arm")), str(entry.get("scenario_id")))
+        counts[key] = counts.get(key, 0) + 1
+
+    expected_counts = _mas136_expected_counts()
+    cardinality_ok = counts == expected_counts and not problems
+    valid_count = sum(counts.values())
+    return {
+        "ok": cardinality_ok,
+        "valid_count": valid_count,
+        "expected": 16,
+        "cardinality_ok": cardinality_ok,
+        "problems": problems,
+    }
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="fresh_sol_eval",
+        description="Fresh-Sol evaluation harness F0 (EVAL-OHF1) -- production-inert.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    run_one_p = sub.add_parser("run-one", help="Run exactly one isolated sample.")
+    run_one_p.add_argument("--repo-root", required=True, type=Path)
+    run_one_p.add_argument("--protocol-path", required=True, type=Path)
+    run_one_p.add_argument("--codex-home", required=True, type=Path)
+    run_one_p.add_argument("--evidence-root", required=True, type=Path)
+    run_one_p.add_argument("--arm", required=True, choices=sorted(MAS136_ARMS))
+    run_one_p.add_argument("--scenario", required=True, choices=list(MAS136_SCENARIOS))
+
+    run_matrix_p = sub.add_parser("run-matrix", help="Run the fixed MAS-136 sample plan.")
+    run_matrix_p.add_argument("--repo-root", required=True, type=Path)
+    run_matrix_p.add_argument("--protocol-path", required=True, type=Path)
+    run_matrix_p.add_argument("--codex-home", required=True, type=Path)
+    run_matrix_p.add_argument("--evidence-root", required=True, type=Path)
+    run_matrix_p.add_argument("--mode", default="mas-136", choices=["mas-136"])
+    run_matrix_p.add_argument("--resume-manifest", type=Path, default=None)
+
+    check_corpus_p = sub.add_parser("check-corpus", help="Verify corpus identity/cardinality/digest/cleanup.")
+    check_corpus_p.add_argument("--evidence-root", required=True, type=Path)
+    check_corpus_p.add_argument("--mode", default="mas-136", choices=["mas-136"])
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "run-one":
+            arm = MAS136_ARMS[args.arm]
+            scenarios = parse_protocol(args.protocol_path)
+            scenario = scenarios[args.scenario]
+            bundle = materialize_skillpack(args.repo_root, arm)
+            protocol_sha256 = hashlib.sha256(Path(args.protocol_path).read_bytes()).hexdigest()
+            harness_binary_sha256 = binary_digest(shutil.which("codex"))
+            client_factory = build_live_client_factory(codex_home=args.codex_home, model=REQUIRED_MODEL)
+            with tempfile.TemporaryDirectory(prefix="fresh-sol-eval-") as tmp:
+                observation = run_one(
+                    repo_root=args.repo_root,
+                    arm=arm,
+                    scenario=scenario,
+                    run_root=Path(tmp),
+                    client_factory=client_factory,
+                    harness_version=harness_binary_sha256[:12] or "unknown",
+                )
+                artifact = write_run_artifact(
+                    observation=observation,
+                    bundle=bundle,
+                    protocol_sha256=protocol_sha256,
+                    harness_kind="codex-app-server",
+                    harness_binary_sha256=harness_binary_sha256,
+                    evidence_root=args.evidence_root,
+                )
+            print(str(artifact))
+            return 0
+
+        if args.command == "run-matrix":
+            harness_binary_sha256 = binary_digest(shutil.which("codex"))
+            client_factory = build_live_client_factory(codex_home=args.codex_home, model=REQUIRED_MODEL)
+            with tempfile.TemporaryDirectory(prefix="fresh-sol-eval-matrix-") as tmp:
+                written = run_matrix(
+                    repo_root=args.repo_root,
+                    protocol_path=args.protocol_path,
+                    evidence_root=args.evidence_root,
+                    client_factory=client_factory,
+                    run_root_parent=Path(tmp),
+                    mode=args.mode,
+                    resume_manifest=args.resume_manifest,
+                    harness_binary_sha256=harness_binary_sha256,
+                )
+            for path in written:
+                print(str(path))
+            return 0
+
+        if args.command == "check-corpus":
+            result = check_corpus(evidence_root=args.evidence_root, mode=args.mode)
+            print(json.dumps(result, indent=2))
+            return 0 if result["ok"] else 1
+    except FreshSolEvalError as exc:
+        print(f"::error title={exc.code}::{exc}", flush=True)
+        return 2
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
