@@ -817,12 +817,202 @@ def scenario_configuration_defects(scenario: dict, configuration: dict) -> tuple
 
 
 # ---------------------------------------------------------------------------
+# Experiment contract (design §7.3, plan Task 3)
+# ---------------------------------------------------------------------------
+
+_PAIRING_METHODS = frozenset({"PAIRED_BY_SCENARIO", "BLOCKED", "UNPAIRED"})
+_STOPPING_RULE_KINDS = frozenset({"FIXED_REPLICATES_PER_ARM"})
+_EXPERIMENT_PHASES = frozenset({"RETROSPECTIVE", "REPLAY", "PROSPECTIVE_SHADOW", "CANARY", "PROMOTED"})
+
+
+def _v_scenario_ref(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {
+            "scenario_id": v_scenario_id,
+            "scenario_version": v_pos_int,
+            "scenario_digest": v_digest,
+            "corpus_revision": v_corpus_revision,
+        },
+    )
+
+
+def _v_arm(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {"arm_id": v_arm_id, "configuration_id": v_configuration_id, "configuration_digest": v_digest},
+    )
+
+
+def _v_pairing(value: Any, path: str) -> dict:
+    return validate_closed_object(value, path, {"method": v_enum(_PAIRING_METHODS), "random_seed": v_optional(v_int)})
+
+
+def _v_stopping_rule(value: Any, path: str) -> dict:
+    return validate_closed_object(value, path, {"kind": v_enum(_STOPPING_RULE_KINDS), "value": v_pos_int})
+
+
+def _v_scenario_ref_list(value: Any, path: str) -> list[dict]:
+    items = v_list_of(_v_scenario_ref)(value, path)
+    keys = [(item["scenario_id"], item["scenario_version"]) for item in items]
+    defects: list[ContractDefect] = []
+    if not items:
+        defects.append(ContractDefect(path, "EMPTY_LIST", "scenario_refs must be nonempty"))
+    if keys != sorted(keys):
+        defects.append(
+            ContractDefect(path, "LIST_NOT_SORTED", "scenario_refs must be sorted by (scenario_id, scenario_version)")
+        )
+    if len(set(keys)) != len(keys):
+        defects.append(
+            ContractDefect(path, "LIST_HAS_DUPLICATES", "scenario_refs must not repeat the same scenario_id/version")
+        )
+    if defects:
+        raise ContractError(defects)
+    return items
+
+
+def _v_arm_list(value: Any, path: str) -> list[dict]:
+    items = v_list_of(_v_arm)(value, path)
+    arm_ids = [item["arm_id"] for item in items]
+    config_ids = [item["configuration_id"] for item in items]
+    config_digests = [item["configuration_digest"] for item in items]
+    defects: list[ContractDefect] = []
+    if len(items) < 2:
+        defects.append(ContractDefect(path, "TOO_FEW_ARMS", "an experiment must declare at least two unique arms"))
+    if arm_ids != sorted(arm_ids):
+        defects.append(ContractDefect(path, "LIST_NOT_SORTED", "arms must be sorted by arm_id"))
+    if len(set(arm_ids)) != len(arm_ids):
+        defects.append(ContractDefect(path, "LIST_HAS_DUPLICATES", "arm_id values must be unique"))
+    if len(set(config_ids)) != len(config_ids):
+        defects.append(
+            ContractDefect(path, "DUPLICATE_ARM_CONFIGURATION_ID", "each arm must bind a distinct configuration_id")
+        )
+    if len(set(config_digests)) != len(config_digests):
+        defects.append(
+            ContractDefect(
+                path, "DUPLICATE_ARM_CONFIGURATION_DIGEST", "each arm must bind a distinct configuration_digest"
+            )
+        )
+    if defects:
+        raise ContractError(defects)
+    return items
+
+
+_EXPERIMENT_FIELDS: dict[str, Validator] = {
+    "schema": v_enum(frozenset({EXPERIMENT_SCHEMA})),
+    "experiment_id": v_experiment_id,
+    "scenario_refs": _v_scenario_ref_list,
+    "arms": _v_arm_list,
+    "pairing": _v_pairing,
+    "replicates_per_arm_target": v_pos_int,
+    "stopping_rule": _v_stopping_rule,
+    "primary_dimensions": v_sorted_unique_str_list,
+    "guardrail_dimensions": v_sorted_unique_str_list,
+    "analysis_version": v_str,
+    "phase": v_enum(_EXPERIMENT_PHASES),
+    "authorship": _v_authorship,
+    "created_at": v_timestamp,
+    "experiment_digest": v_digest,
+}
+
+
+def _experiment_cross_field_defects(document: dict) -> list[ContractDefect]:
+    defects: list[ContractDefect] = []
+    primary = set(document.get("primary_dimensions") or [])
+    guardrail = set(document.get("guardrail_dimensions") or [])
+    if primary & guardrail:
+        defects.append(
+            ContractDefect(
+                "$.guardrail_dimensions",
+                "DIMENSION_NOT_DISJOINT",
+                "primary_dimensions and guardrail_dimensions must be disjoint",
+            )
+        )
+    stopping_rule = document.get("stopping_rule")
+    if isinstance(stopping_rule, dict) and stopping_rule.get("value") != document.get("replicates_per_arm_target"):
+        defects.append(
+            ContractDefect(
+                "$.stopping_rule.value",
+                "STOPPING_RULE_MISMATCH",
+                "stopping_rule.value must equal replicates_per_arm_target",
+            )
+        )
+    pairing = document.get("pairing")
+    if isinstance(pairing, dict):
+        method = pairing.get("method")
+        seed = pairing.get("random_seed")
+        if method == "BLOCKED" and seed is None:
+            defects.append(
+                ContractDefect(
+                    "$.pairing.random_seed", "BLOCKED_REQUIRES_SEED", "BLOCKED pairing requires a non-null random_seed"
+                )
+            )
+        if method in {"PAIRED_BY_SCENARIO", "UNPAIRED"} and seed is not None:
+            defects.append(
+                ContractDefect(
+                    "$.pairing.random_seed",
+                    "SEED_NOT_ALLOWED_EXCEPT_BLOCKED",
+                    "random_seed must be null except for BLOCKED pairing",
+                )
+            )
+    authorship = document.get("authorship")
+    if isinstance(authorship, dict) and authorship.get("author_ref") == authorship.get("independent_reviewer_ref"):
+        if authorship.get("author_ref") is not None:
+            defects.append(
+                ContractDefect(
+                    "$.authorship.independent_reviewer_ref",
+                    "REVIEWER_NOT_INDEPENDENT",
+                    "independent_reviewer_ref must differ from author_ref",
+                )
+            )
+    return defects
+
+
+def _check_experiment_fields(document: Any, *, require_digest: bool) -> dict:
+    optional = frozenset({"experiment_digest"}) if not require_digest else frozenset()
+    validated = validate_closed_object(document, "$", _EXPERIMENT_FIELDS, optional=optional)
+    cross_defects = _experiment_cross_field_defects(document if isinstance(document, dict) else {})
+    if cross_defects:
+        raise ContractError(cross_defects)
+    if require_digest:
+        verify_document_digest(document, "experiment_digest")
+    return validated
+
+
+def validate_experiment_shape(document: Any) -> str:
+    """Validate a persisted experiment document. Returns 'SHAPE_VALID'."""
+    _check_experiment_fields(document, require_digest=True)
+    return "SHAPE_VALID"
+
+
+def build_experiment(fields: dict) -> dict:
+    """Assemble, validate, and digest an experiment document from field values.
+
+    ``fields`` must NOT include ``schema`` or ``experiment_digest``.
+    """
+    if not isinstance(fields, dict) or "schema" in fields or "experiment_digest" in fields:
+        raise ContractError(
+            [
+                ContractDefect(
+                    "$", "BUILD_FIELDS_MUST_EXCLUDE_SCHEMA_AND_DIGEST", "fields must omit schema and experiment_digest"
+                )
+            ]
+        )
+    document = {"schema": EXPERIMENT_SCHEMA, **fields}
+    _check_experiment_fields(document, require_digest=False)
+    return add_document_digest(document, "experiment_digest")
+
+
+# ---------------------------------------------------------------------------
 # Generic persisted-schema dispatch (extended by later tasks)
 # ---------------------------------------------------------------------------
 
 _SHAPE_VALIDATORS: dict[str, Callable[[Any], str]] = {
     SCENARIO_SCHEMA: validate_scenario_shape,
     CONFIGURATION_SCHEMA: validate_configuration_shape,
+    EXPERIMENT_SCHEMA: validate_experiment_shape,
 }
 
 

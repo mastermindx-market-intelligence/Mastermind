@@ -176,6 +176,48 @@ def build_alternate_configuration() -> dict:
     return contracts.build_configuration(_configuration_fields(arm_marker="arm_b"))
 
 
+def build_two_arm_experiment_fields(scenario: dict, configuration_a: dict, configuration_b: dict) -> dict:
+    return {
+        "experiment_id": fresh_experiment_id(),
+        "scenario_refs": [
+            {
+                "scenario_id": scenario["scenario_id"],
+                "scenario_version": scenario["scenario_version"],
+                "scenario_digest": scenario["scenario_digest"],
+                "corpus_revision": scenario["corpus_revision"],
+            }
+        ],
+        "arms": sorted(
+            [
+                {
+                    "arm_id": "arm_a",
+                    "configuration_id": configuration_a["configuration_id"],
+                    "configuration_digest": configuration_a["configuration_digest"],
+                },
+                {
+                    "arm_id": "arm_b",
+                    "configuration_id": configuration_b["configuration_id"],
+                    "configuration_digest": configuration_b["configuration_digest"],
+                },
+            ],
+            key=lambda item: item["arm_id"],
+        ),
+        "pairing": {"method": "PAIRED_BY_SCENARIO", "random_seed": None},
+        "replicates_per_arm_target": 1,
+        "stopping_rule": {"kind": "FIXED_REPLICATES_PER_ARM", "value": 1},
+        "primary_dimensions": ["configuration_integrity"],
+        "guardrail_dimensions": ["cleanup_integrity"],
+        "analysis_version": "mastermind.agent_evaluation_r0_analysis.v1",
+        "phase": "RETROSPECTIVE",
+        "authorship": {"author_ref": "person:sol", "independent_reviewer_ref": "person:auditor"},
+        "created_at": "2026-08-21T00:00:00Z",
+    }
+
+
+def build_two_arm_experiment(scenario: dict, configuration_a: dict, configuration_b: dict) -> dict:
+    return contracts.build_experiment(build_two_arm_experiment_fields(scenario, configuration_a, configuration_b))
+
+
 # ---------------------------------------------------------------------------
 # MemoryArtifactResolver — test-only, immutable, read-only (plan §5.6)
 # ---------------------------------------------------------------------------
