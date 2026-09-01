@@ -35,6 +35,16 @@ def _read(path: Path) -> str:
     return payload.decode("utf-8")
 
 
+def _prose(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _assert_prose(value: str, *markers: str) -> None:
+    normalized = _prose(value)
+    for marker in markers:
+        assert _prose(marker) in normalized
+
+
 def _marked_block(text: str, begin: str, end: str) -> str:
     _before, marker, remainder = text.partition(begin)
     assert marker
@@ -54,13 +64,16 @@ def test_amendment_narrowly_repairs_the_provider_reported_path_assumption() -> N
     amendment = _read(AMENDMENT)
     protected = _read(PROTECTED_SKILL_SET)
 
-    assert "exact provider-reported path" in protected
-    assert "supplements and, where it conflicts, supersedes only" in amendment
-    assert PROTECTED_SKILL_SET.name in amendment
-    assert VERTICAL.name in amendment
-    assert "A fake server's convenient `path` field cannot become production protocol truth" in amendment
-    assert "absence of `path`" in amendment
-    assert "no model turn is allowed" in amendment
+    _assert_prose(protected, "exact provider-reported path")
+    _assert_prose(
+        amendment,
+        "supplements and, where it conflicts, supersedes only",
+        PROTECTED_SKILL_SET.name,
+        VERTICAL.name,
+        "A fake server's convenient `path` field cannot become production protocol truth",
+        "absence of `path`",
+        "no model turn is allowed",
+    )
 
 
 def test_machine_protocol_strategy_requires_path_evidence_without_name_only_fallback() -> None:
@@ -100,7 +113,8 @@ def test_machine_protocol_strategy_requires_path_evidence_without_name_only_fall
 def test_exact_binary_generated_schema_is_the_action_time_protocol_authority() -> None:
     amendment = _read(AMENDMENT)
 
-    for marker in (
+    _assert_prose(
+        amendment,
         "codex app-server generate-json-schema --out <sealed-temp-dir>",
         "with `--experimental`",
         "exact generated schema",
@@ -108,11 +122,9 @@ def test_exact_binary_generated_schema_is_the_action_time_protocol_authority() -
         "SKILL_PROTOCOL_SCHEMA_UNATTESTED",
         "current official OpenAI App Server documentation as corroborating discovery",
         "fake App Server only as a protocol test double",
-    ):
-        assert marker in amendment
-
-    assert "future `main` branch feature" in amendment
-    assert "does not silently depend" in amendment
+        "future `main` branch feature",
+        "does not silently depend",
+    )
 
 
 def test_causal_sequence_proves_empty_add_four_clear_empty_before_cleanup() -> None:
@@ -139,26 +151,33 @@ def test_causal_sequence_proves_empty_add_four_clear_empty_before_cleanup() -> N
         "skills/list forceReload=true == enabled set {}",
         "terminate process and prove cleanup",
     ]
-    assert "AMBIENT_SKILL_SURFACE_NOT_EMPTY" in amendment
-    assert "SKILL_SET_CAUSALITY_FAILED" in amendment
-    assert "does not whitelist remembered" in amendment
+    _assert_prose(
+        amendment,
+        "AMBIENT_SKILL_SURFACE_NOT_EMPTY",
+        "SKILL_SET_CAUSALITY_FAILED",
+        "does not whitelist remembered",
+    )
 
 
 def test_source_modes_are_exact_release_or_exact_ephemeral_git_archive_only() -> None:
     amendment = _read(AMENDMENT)
 
-    assert "INSTALLED_RELEASE" in amendment
-    assert "VERIFIED_EPHEMERAL_GIT_ARCHIVE" in amendment
-    assert "dirty candidate worktree's package bytes" in amendment
-    assert "network-fetch a package" in amendment
-    assert "<exact package root>/skills/<exact runtime name>/SKILL.md" in amendment
-    assert "all seven file rows" in amendment
+    _assert_prose(
+        amendment,
+        "INSTALLED_RELEASE",
+        "VERIFIED_EPHEMERAL_GIT_ARCHIVE",
+        "dirty candidate worktree's package bytes",
+        "network-fetch a package",
+        "<exact package root>/skills/<exact runtime name>/SKILL.md",
+        "all seven file rows",
+    )
 
 
 def test_pathless_mode_uses_composite_provenance_not_fake_provider_precision() -> None:
     amendment = _read(AMENDMENT)
 
-    for marker in (
+    _assert_prose(
+        amendment,
         "exact provider evidence supplies the enabled name set",
         "deterministic Mastermind verification supplies package source/generation",
         "fresh empty baseline plus one server-owned extra root",
@@ -168,18 +187,17 @@ def test_pathless_mode_uses_composite_provenance_not_fake_provider_precision() -
         "never accepted as the source binding by itself",
         "skill_content_digest=<closure>",
         "preserve the provenance of each field",
-    ):
-        assert marker in amendment
-
-    assert "SKILL_PATH_ATTESTATION_UNAVAILABLE" in amendment
-    assert "$name` fallback" in amendment
-    assert "lower identity precision is allowed" in amendment
+        "SKILL_PATH_ATTESTATION_UNAVAILABLE",
+        "$name` fallback",
+        "lower identity precision is allowed",
+    )
 
 
 def test_structured_skill_input_is_codex_closed_and_preserves_ordinary_turns() -> None:
     amendment = _read(AMENDMENT)
 
-    for marker in (
+    _assert_prose(
+        amendment,
         "class CodexSkillTurnInput",
         "class CodexTurnInputEnvelope",
         "existing plain-string loaders remain valid",
@@ -190,11 +208,9 @@ def test_structured_skill_input_is_codex_closed_and_preserves_ordinary_turns() -
         "RemoteCodexOperatorAdapter",
         "remain unchanged",
         "CAP_S1_STRUCTURED_INPUT_SCOPE_COLLISION",
-    ):
-        assert marker in amendment
-
-    assert "without changing the provider-neutral `OperatorHarnessAdapter`" in amendment
-    assert "no raw path enters Executive Job constraints" in amendment
+        "without changing the provider-neutral `OperatorHarnessAdapter`",
+        "no raw path enters Executive Job constraints",
+    )
 
 
 def test_v4_canary_adds_bundled_skill_disable_without_changing_v3() -> None:
@@ -203,15 +219,19 @@ def test_v4_canary_adds_bundled_skill_disable_without_changing_v3() -> None:
 
     assert policy["schema_version"] == "mastermind.executive_agent_capabilities/v3"
     assert "capability_packages" not in policy
-    assert "skills.bundled.enabled=false" in amendment
-    assert "V4 canary profile's security config projection and digest" in amendment
-    assert "Valid V3 profiles and current V3 config/profile/policy digests remain" in amendment
+    _assert_prose(
+        amendment,
+        "skills.bundled.enabled=false",
+        "V4 canary profile's security config projection and digest",
+        "Valid V3 profiles and current V3 config/profile/policy digests remain",
+    )
 
 
 def test_skills_changed_and_source_movement_invalidate_without_blind_retry() -> None:
     amendment = _read(AMENDMENT)
 
-    for marker in (
+    _assert_prose(
+        amendment,
         "immediately before every path-bound turn",
         "immediately after every turn",
         "forceReload=true",
@@ -220,33 +240,32 @@ def test_skills_changed_and_source_movement_invalidate_without_blind_retry() -> 
         "SKILLS_CHANGED_DURING_CANARY",
         "Do not rerun the same canary operation automatically",
         "never repaired by recomputing a new requested profile",
-    ):
-        assert marker in amendment
+    )
 
 
 def test_real_model_journey_invokes_each_exact_skill_with_path_item() -> None:
     amendment = _read(AMENDMENT)
 
-    for turn in (
+    _assert_prose(
+        amendment,
         "turn 1: receive-commission",
         "turn 2: return-progress",
         "turn 3: escalate-decision",
         "turn 4: finish-operation",
-    ):
-        assert turn in amendment
-
-    assert '{"type": "skill", "name": "<exact-name>", "path":' in amendment
-    assert "pickup ACK is separated from START" in amendment
-    assert "progress does not claim completion" in amendment
-    assert "decision boundary is escalated" in amendment
-    assert "RESULT does not claim Sol acceptance or STOP" in amendment
-    assert "model output proves usefulness only" in amendment
+        '{"type": "skill", "name": "<exact-name>", "path":',
+        "pickup ACK is separated from START",
+        "progress does not claim completion",
+        "decision boundary is escalated",
+        "RESULT does not claim Sol acceptance or STOP",
+        "model output proves usefulness only",
+    )
 
 
 def test_fake_server_and_acceptance_falsifiers_cannot_lower_production_contract() -> None:
     amendment = _read(AMENDMENT)
 
-    for marker in (
+    _assert_prose(
+        amendment,
         "skills/list rows with exact path",
         "skills/list rows without path",
         "same-name duplicates rather than deduplicating",
@@ -258,8 +277,7 @@ def test_fake_server_and_acceptance_falsifiers_cannot_lower_production_contract(
         "accepting `$name` without a Skill input item fails",
         "omitting exact-binary schema generation fails",
         "allowing a second implementation PR for parser-only infrastructure fails",
-    ):
-        assert marker in amendment
+    )
 
     for failure in (
         "SKILL_PROTOCOL_SCHEMA_UNATTESTED",
