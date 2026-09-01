@@ -1,8 +1,8 @@
 """MCP projection for the authenticated Mastermind Steward app.
 
-This module is the only Steward-app module that imports the MCP SDK.  It exposes
+This module is the only Steward-app module that imports the MCP SDK. It exposes
 exactly the protected six Secretary tools plus one optional self-contained UI
-resource.  All organizational reads remain in the injected ``StewardReadPort``;
+resource. All organizational reads remain in the injected ``StewardReadPort``;
 this module creates no source reader, state store, retry loop, or write path.
 """
 from __future__ import annotations
@@ -34,16 +34,7 @@ from integrations.mastermind_steward_app.ui import (
 SERVER_NAME = "mastermind-steward"
 SERVER_VERSION = "1.0.0"
 REQUIRED_SCOPE = "mastermind.steward.read"
-OUTPUT_TEMPLATE_TOOLS = frozenset(
-    {
-        "list_responsibilities",
-        "get_responsibility",
-        "get_attention",
-        "get_current_runtime",
-        "explain_blocker",
-        "resolve_surface",
-    }
-)
+UI_TOOLS = frozenset({"list_responsibilities"})
 
 __all__ = [
     "REQUIRED_SCOPE",
@@ -68,7 +59,8 @@ def _tool_meta(name: str) -> dict[str, object]:
         "openai/toolInvocation/invoked": "Mastermind company state loaded",
         "openai/widgetAccessible": False,
     }
-    if name in OUTPUT_TEMPLATE_TOOLS:
+    if name in UI_TOOLS:
+        meta["ui"] = {"resourceUri": UI_RESOURCE_URI}
         meta["openai/outputTemplate"] = UI_RESOURCE_URI
     return meta
 
@@ -93,6 +85,22 @@ def build_tools() -> list[mcp_types.Tool]:
     return tools
 
 
+def _ui_meta() -> dict[str, object]:
+    return {
+        "ui": {
+            "prefersBorder": False,
+            "csp": {
+                "connectDomains": [],
+                "resourceDomains": [],
+            },
+        },
+        "openai/widgetDescription": (
+            "Read-only Mastermind responsibility, attention, runtime, blocker, "
+            "and surface facts."
+        ),
+    }
+
+
 def build_mcp_server(
     contract: SecretaryGroundingContractServer,
 ) -> Server:
@@ -111,7 +119,7 @@ def build_mcp_server(
         name: str, arguments: dict[str, Any] | None
     ) -> dict[str, Any]:
         # The protected contract performs closed input validation and exactly one
-        # injected read-port call.  Returning the mapping gives MCP both
+        # injected read-port call. Returning the mapping gives MCP both
         # structuredContent and a JSON text fallback.
         return await contract.call_tool(name, arguments or {})
 
@@ -127,16 +135,7 @@ def build_mcp_server(
                     "responsibility, attention, runtime, blocker, and surface facts."
                 ),
                 mimeType=UI_MIME_TYPE,
-                _meta={
-                    "openai/widgetDescription": (
-                        "Interactive read-only Mastermind company control room."
-                    ),
-                    "openai/widgetPrefersBorder": False,
-                    "openai/widgetCSP": {
-                        "connect_domains": [],
-                        "resource_domains": [],
-                    },
-                },
+                _meta=_ui_meta(),
             )
         ]
 
@@ -148,16 +147,7 @@ def build_mcp_server(
             ReadResourceContents(
                 content=CONTROL_ROOM_HTML,
                 mime_type=UI_MIME_TYPE,
-                meta={
-                    "openai/widgetDescription": (
-                        "Interactive read-only Mastermind company control room."
-                    ),
-                    "openai/widgetPrefersBorder": False,
-                    "openai/widgetCSP": {
-                        "connect_domains": [],
-                        "resource_domains": [],
-                    },
-                },
+                meta=_ui_meta(),
             )
         ]
 
@@ -172,7 +162,7 @@ def initialization_options(server: Server) -> InitializationOptions:
 
 
 async def run_stdio(contract: SecretaryGroundingContractServer) -> None:
-    """Run the read-only app over stdio for Secure MCP Tunnel canaries."""
+    """Run the read-only app over stdio for isolated local development only."""
 
     server = build_mcp_server(contract)
     options = initialization_options(server)
