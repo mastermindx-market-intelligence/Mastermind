@@ -337,10 +337,23 @@ def build_run_draft_fields(
 
 
 def build_run_draft(
-    scenario: dict, configuration: dict, experiment: dict, *, arm_id: str, replicate_index: int, model_served: str | None = None
+    scenario: dict,
+    configuration: dict,
+    experiment: dict,
+    *,
+    arm_id: str,
+    replicate_index: int,
+    model_served: str | None = None,
+    run_id: str | None = None,
 ) -> dict:
     fields = build_run_draft_fields(
-        scenario, configuration, experiment, arm_id=arm_id, replicate_index=replicate_index, model_served=model_served
+        scenario,
+        configuration,
+        experiment,
+        arm_id=arm_id,
+        replicate_index=replicate_index,
+        model_served=model_served,
+        run_id=run_id,
     )
     return {"schema": contracts.RUN_DRAFT_SCHEMA, **fields}
 

@@ -209,7 +209,7 @@ def verify_experiment_graph(document: dict, resolver: ArtifactResolver) -> Verif
     )
 
 
-def _collect_run_evidence_refs(document: dict) -> set[str]:
+def collect_run_evidence_refs(document: dict) -> set[str]:
     refs = {document["evidence"]["output"]["artifact_ref"], document["evidence"]["tool_events"]["artifact_ref"]}
     trace = document["evidence"].get("trace")
     if trace:
@@ -278,7 +278,7 @@ def verify_run_graph(document: dict, resolver: ArtifactResolver) -> Verification
     external_refs = (
         _collect_scenario_artifact_refs(scenario)
         | _collect_configuration_artifact_refs(configuration)
-        | _collect_run_evidence_refs(document)
+        | collect_run_evidence_refs(document)
     )
 
     return VerificationResult(
