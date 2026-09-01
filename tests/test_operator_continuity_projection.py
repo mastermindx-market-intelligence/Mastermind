@@ -93,6 +93,32 @@ def _facts(module, **overrides):
     return module.OperatorContinuityFacts(**values)
 
 
+def test_public_vocabularies_are_closed() -> None:
+    module = _module()
+
+    assert {item.value for item in module.Seat} == {"chairman", "ceo", "coo"}
+    assert {item.value for item in module.CapacityState} == {
+        "available",
+        "degraded",
+        "unknown",
+    }
+    assert {item.value for item in module.ContinuityStatus} == {
+        "RUNNING",
+        "REBINDING",
+        "BLOCKED",
+        "WAITING_CAPACITY",
+        "COMPLETED",
+        "UNKNOWN",
+    }
+    assert {item.value for item in module.AttentionClass} == {
+        "none",
+        "decision_required",
+        "reconciliation_required",
+        "capacity_risk",
+        "transport_degraded",
+    }
+
+
 def test_module_exists_before_behavior_is_exercised() -> None:
     assert _module().__name__ == MODULE_NAME
 
@@ -158,6 +184,54 @@ def test_prepared_continuation_is_rebinding_not_acknowledged() -> None:
     assert "continuation_acknowledged" not in wire["reason_codes"]
 
 
+def test_effect_state_is_explicit_in_the_closed_public_projection() -> None:
+    module = _module()
+
+    normal = module.project_operator_continuity(_facts(module)).to_dict()
+    blocked = module.project_operator_continuity(
+        _facts(module, effect_state=module.EffectState.EFFECT_UNKNOWN)
+    ).to_dict()
+
+    assert normal["effect_state"] == "none"
+    assert blocked["effect_state"] == "effect_unknown"
+
+
+def test_unknown_continuation_may_preserve_a_known_capsule_without_claiming_ack() -> None:
+    module = _module()
+    current = _current(
+        module,
+        continuation_state=module.ContinuationState.UNKNOWN,
+        capsule_id=CAPSULE_2,
+    )
+
+    wire = module.project_operator_continuity(
+        _facts(module, current=current)
+    ).to_dict()
+
+    assert wire["status"] == "REBINDING"
+    assert wire["current"]["capsule_id"] == CAPSULE_2
+    assert wire["current"]["continuation_state"] == "UNKNOWN"
+    assert "continuation_unknown" in wire["reason_codes"]
+    assert "continuation_acknowledged" not in wire["reason_codes"]
+
+
+def test_requeued_current_attempt_without_continuation_ack_is_rebinding() -> None:
+    module = _module()
+    current = _current(
+        module,
+        continuation_state=module.ContinuationState.NONE,
+        capsule_id=None,
+    )
+
+    wire = module.project_operator_continuity(
+        _facts(module, current=current)
+    ).to_dict()
+
+    assert wire["status"] == "REBINDING"
+    assert "continuation_ack_missing" in wire["reason_codes"]
+    assert "continuation_acknowledged" not in wire["reason_codes"]
+
+
 def test_effect_unknown_dominates_newer_transport_context() -> None:
     module = _module()
     facts = _facts(
@@ -188,7 +262,7 @@ def test_terminal_without_eligible_capacity_projects_waiting_capacity() -> None:
         requeue_committed=False,
         capacity=_capacity(
             module,
-            state=module.CapacityState.UNAVAILABLE,
+            state=module.CapacityState.DEGRADED,
             eligible=False,
             reason_codes=("all_eligible_realms_unavailable",),
         ),
@@ -198,10 +272,40 @@ def test_terminal_without_eligible_capacity_projects_waiting_capacity() -> None:
 
     assert wire["status"] == "WAITING_CAPACITY"
     assert wire["current"] is None
-    assert wire["capacity"]["state"] == "unavailable"
+    assert wire["capacity"]["state"] == "degraded"
     assert wire["capacity"]["eligible"] is False
     assert wire["attention"] == "capacity_risk"
     assert "no_eligible_capacity" in wire["reason_codes"]
+
+
+def test_waiting_capacity_attention_is_not_hidden_by_transport_degradation() -> None:
+    module = _module()
+    facts = _facts(
+        module,
+        job_id="JOB-005",
+        current_attempt_id=None,
+        current_join=module.CurrentJoinState.NONE,
+        current=None,
+        previous=_previous(module),
+        requeue_committed=False,
+        capacity=_capacity(
+            module,
+            state=module.CapacityState.DEGRADED,
+            eligible=False,
+            reason_codes=("all_eligible_realms_unavailable",),
+        ),
+        transport=module.TransportEvidence(
+            degraded=True,
+            reason_codes=("slack_projection_effect_unknown",),
+        ),
+    )
+
+    wire = module.project_operator_continuity(facts).to_dict()
+
+    assert wire["status"] == "WAITING_CAPACITY"
+    assert wire["attention"] == "capacity_risk"
+    assert "no_eligible_capacity" in wire["reason_codes"]
+    assert "transport_degraded" in wire["reason_codes"]
 
 
 def test_current_completed_attempt_projects_completed() -> None:
@@ -219,6 +323,27 @@ def test_current_completed_attempt_projects_completed() -> None:
     assert wire["status"] == "COMPLETED"
     assert wire["attention"] == "none"
     assert "current_attempt_completed" in wire["reason_codes"]
+
+
+def test_completed_responsibility_is_not_flagged_for_future_capacity() -> None:
+    module = _module()
+    current = _current(module, attempt_state=module.AttemptState.COMPLETED)
+    facts = _facts(
+        module,
+        current=current,
+        capacity=_capacity(
+            module,
+            state=module.CapacityState.DEGRADED,
+            eligible=False,
+            reason_codes=("all_eligible_realms_unavailable",),
+        ),
+    )
+
+    wire = module.project_operator_continuity(facts).to_dict()
+
+    assert wire["status"] == "COMPLETED"
+    assert wire["attention"] == "none"
+    assert "capacity_degraded" in wire["reason_codes"]
 
 
 @pytest.mark.parametrize(
@@ -302,6 +427,49 @@ def test_exact_current_attempt_pointer_prevents_old_attempt_selection() -> None:
         )
 
 
+def test_requeue_rejects_same_attempt_or_same_job_as_its_predecessor() -> None:
+    module = _module()
+
+    same_attempt = _current(
+        module,
+        attempt_id=ATTEMPT_1,
+        predecessor_attempt_id=ATTEMPT_1,
+    )
+    with pytest.raises(ValueError, match="distinct Attempt"):
+        _facts(module, current_attempt_id=ATTEMPT_1, current=same_attempt)
+
+    same_job_previous = _previous(module, job_id="JOB-004")
+    with pytest.raises(ValueError, match="distinct Job"):
+        _facts(module, previous=same_job_previous)
+
+
+def test_non_unknown_or_stale_capacity_requires_explicit_age() -> None:
+    module = _module()
+
+    with pytest.raises(ValueError, match="evidence_age_seconds"):
+        _capacity(module, evidence_age_seconds=None)
+
+    with pytest.raises(ValueError, match="evidence_age_seconds"):
+        _capacity(
+            module,
+            state=module.CapacityState.UNKNOWN,
+            eligible=None,
+            evidence_age_seconds=None,
+            stale=True,
+        )
+
+
+def test_unknown_capacity_cannot_claim_eligibility() -> None:
+    module = _module()
+
+    with pytest.raises(ValueError, match="unknown capacity"):
+        _capacity(
+            module,
+            state=module.CapacityState.UNKNOWN,
+            eligible=True,
+        )
+
+
 def test_requeue_requires_exact_predecessor_and_realm_evidence() -> None:
     module = _module()
 
@@ -331,6 +499,15 @@ def test_missing_capacity_is_unknown_not_available() -> None:
         "reason_codes": ["capacity_evidence_missing"],
     }
     assert "capacity_evidence_missing" in wire["reason_codes"]
+
+
+def test_reason_code_evidence_is_bounded() -> None:
+    module = _module()
+
+    with pytest.raises(ValueError, match="reason_codes"):
+        module.TransportEvidence(
+            reason_codes=tuple(f"reason_{index}" for index in range(33))
+        )
 
 
 def test_reason_code_order_is_canonical_and_input_order_independent() -> None:
@@ -369,6 +546,13 @@ def test_reason_code_order_is_canonical_and_input_order_independent() -> None:
     assert first_wire["reason_codes"] == sorted(set(first_wire["reason_codes"]))
     assert first_wire["capacity"]["reason_codes"] == ["alpha", "zeta"]
     assert first_wire["transport"]["reason_codes"] == ["one", "two"]
+
+
+def test_logical_actor_cannot_leak_contact_identity() -> None:
+    module = _module()
+
+    with pytest.raises(ValueError, match="logical_actor"):
+        _facts(module, logical_actor="operator@example.com")
 
 
 def test_public_wire_exposes_presence_not_native_session_identity_or_email() -> None:
