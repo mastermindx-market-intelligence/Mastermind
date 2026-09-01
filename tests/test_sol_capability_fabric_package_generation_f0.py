@@ -240,7 +240,7 @@ def test_v4_is_opt_in_and_runtime_plugin_authority_remains_unavailable() -> None
 
     assert "CAPABILITY_POLICY_SCHEMA_V3 = mastermind.executive_agent_capabilities/v3" in spec
     assert "CAPABILITY_POLICY_SCHEMA_V4 = mastermind.executive_agent_capabilities/v4" in spec
-    assert "CAPABILITY_POLICY_SCHEMA = CAPABILITY_POLICY_SCHEMA_V3" in spec
+    assert "`CAPABILITY_POLICY_SCHEMA` remains the current default v3 compatibility alias" in spec
     assert "v3 non-empty plugin registry still refuses" in spec_lower
     assert "full runtime plugin grants remain unavailable" in spec_lower
     assert "Default `config/executive_agent_capabilities.json` remains schema v3" in plan
