@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import datetime, timezone
 
@@ -93,11 +94,13 @@ def _port(snapshot: dict, calls: list[int] | None = None):
     )
 
 
-def test_public_responsibility_ref_is_stable_and_opaque():
+def test_public_responsibility_ref_uses_frozen_domain_and_is_opaque():
     first = responsibility_ref_for("WS:ALPHA")
     second = responsibility_ref_for("WS:ALPHA")
-    assert first == second
-    assert first.startswith("responsibility:")
+    expected = "responsibility:" + hashlib.sha256(
+        b"mastermind-steward-responsibility-v1\x00" + b"WS:ALPHA"
+    ).hexdigest()
+    assert first == second == expected
     assert "ALPHA" not in first
     assert len(first) == len("responsibility:") + 64
 
@@ -231,7 +234,7 @@ def test_list_is_bounded_and_reports_degradation():
     assert "STEWARD_DEGRADED" in result.reason_codes
 
 
-def test_multiple_jobs_with_same_runtime_state_do_not_become_ambiguous():
+def test_multiple_current_jobs_are_ambiguous_even_when_status_matches():
     snapshot = _snapshot()
     snapshot["work"][0]["executive"]["jobs"].append(
         {"job_id": "JOB-RAW-002", "status": "queued", "workstream": "WS:ALPHA"}
@@ -239,8 +242,23 @@ def test_multiple_jobs_with_same_runtime_state_do_not_become_ambiguous():
     ref = responsibility_ref_for("WS:ALPHA")
     result = asyncio.run(_port(snapshot).get_current_runtime(ref))
     values = {fact.predicate: fact.value for fact in result.facts}
-    assert values["runtime.state"] == "IDLE"
-    assert "AMBIGUOUS_JOIN" not in result.reason_codes
+    assert values["runtime.state"] == "UNKNOWN"
+    assert result.state == "DEGRADED"
+    assert "AMBIGUOUS_JOIN" in result.reason_codes
+
+
+def test_runtime_age_is_attributed_to_the_controlling_executive_observation():
+    snapshot = _snapshot(generated_at="2026-09-01T12:00:00Z")
+    snapshot["work"][0]["bindings"][0]["last_verified_at"] = "2026-09-01T12:04:30Z"
+    ref = responsibility_ref_for("WS:ALPHA")
+    result = asyncio.run(_port(snapshot).get_current_runtime(ref))
+    age_fact = next(
+        fact for fact in result.facts if fact.predicate == "runtime.age_seconds"
+    )
+    assert age_fact.value == 300
+    assert len(age_fact.sources) == 1
+    assert age_fact.sources[0].owner == "executive_os"
+    assert age_fact.sources[0].observed_at == "2026-09-01T12:00:00Z"
 
 
 def test_unrelated_global_degradation_does_not_fabricate_a_blocker():
