@@ -46,6 +46,29 @@ class _ProjectionAuthenticator(JwtAuthenticator):
         return self.result
 
 
+class _AwaitPolicyDriftAuthenticator(JwtAuthenticator):
+    def __init__(
+        self,
+        *,
+        policy: ResourcePolicy,
+        replacement_policy: ResourcePolicy,
+        result: VerifiedPrincipal,
+    ) -> None:
+        self._policy = policy
+        self.replacement_policy = replacement_policy
+        self.result = result
+        self.calls: list[tuple[object, int]] = []
+        self.verifier: MastermindTokenVerifier | None = None
+
+    async def verify_token(self, token: object, *, now: int) -> VerifiedPrincipal:
+        self.calls.append((token, now))
+        await asyncio.sleep(0)
+        assert self.verifier is not None
+        self._policy = self.replacement_policy
+        self.verifier._policy = self.replacement_policy
+        return self.result
+
+
 class _Sink:
     def __init__(self) -> None:
         self.events: list[AuthAuditEvent] = []
@@ -75,6 +98,34 @@ def _policy() -> ResourcePolicy:
             "required_scopes": ["mastermind.steward.read"],
             "allowed_subject_digests": [
                 subject_digest(issuer=issuer, subject="chairman-a")
+            ],
+            "allowed_algorithms": ["RS256"],
+            "clock_skew_seconds": 30,
+            "max_token_lifetime_seconds": 900,
+            "jwks_cache_ttl_seconds": 60,
+            "unknown_kid_refresh_cooldown_seconds": 30,
+            "fetch_failure_backoff_seconds": 5,
+        }
+    )
+
+
+def _replacement_policy() -> ResourcePolicy:
+    issuer = "https://identity.example.test/"
+    return load_resource_policy(
+        {
+            "schema": AUTH_POLICY_SCHEMA,
+            "policy_id": "mastermind-company-v1",
+            "resource": "https://mcp.example.test/mcp/company/v1",
+            "resource_metadata_url": (
+                "https://mcp.example.test/.well-known/"
+                "oauth-protected-resource/mcp/company/v1"
+            ),
+            "issuer": issuer,
+            "authorization_servers": [issuer],
+            "jwks_uri": "https://identity.example.test/.well-known/jwks.json",
+            "required_scopes": ["mastermind.company.read"],
+            "allowed_subject_digests": [
+                subject_digest(issuer=issuer, subject="chairman-b")
             ],
             "allowed_algorithms": ["RS256"],
             "clock_skew_seconds": 30,
@@ -185,6 +236,72 @@ def test_runtime_policy_drift_cannot_taint_refusal_audit_identity() -> None:
     assert _PRIVATE_POLICY_MARKER not in repr(sink.events)
 
 
+def test_same_valid_policy_drift_cannot_replace_accepted_authority() -> None:
+    original_policy = _policy()
+    replacement_policy = _replacement_policy()
+    authenticator = _ProjectionAuthenticator(
+        policy=original_policy,
+        result=_principal(replacement_policy),
+    )
+    sink = _Sink()
+    clock_calls: list[bool] = []
+
+    def _clock() -> int:
+        clock_calls.append(True)
+        return NOW
+
+    verifier = MastermindTokenVerifier(
+        authenticator=authenticator,
+        policy=original_policy,
+        now=_clock,
+        audit_sink=sink,
+    )
+    verifier._policy = replacement_policy
+    authenticator._policy = replacement_policy
+
+    assert _run(verifier.verify_token("opaque-token")) is None
+    assert clock_calls == []
+    assert authenticator.calls == []
+    assert sink.events == [
+        AuthAuditEvent(
+            schema=AUTH_AUDIT_SCHEMA,
+            policy_id=original_policy.policy_id,
+            code=AuthErrorCode.INTERNAL_ERROR.value,
+            accepted=False,
+        )
+    ]
+
+
+def test_policy_drift_during_await_cannot_project_replacement_authority() -> None:
+    original_policy = _policy()
+    replacement_policy = _replacement_policy()
+    authenticator = _AwaitPolicyDriftAuthenticator(
+        policy=original_policy,
+        replacement_policy=replacement_policy,
+        result=_principal(replacement_policy),
+    )
+    sink = _Sink()
+    verifier = MastermindTokenVerifier(
+        authenticator=authenticator,
+        policy=original_policy,
+        now=lambda: NOW,
+        audit_sink=sink,
+    )
+    authenticator.verifier = verifier
+
+    assert _run(verifier.verify_token("opaque-token")) is None
+    assert authenticator.calls == [("opaque-token", NOW)]
+    assert sink.events == [
+        AuthAuditEvent(
+            schema=AUTH_AUDIT_SCHEMA,
+            policy_id=original_policy.policy_id,
+            code=AuthErrorCode.INTERNAL_ERROR.value,
+            accepted=False,
+        )
+    ]
+    assert replacement_policy.policy_id not in repr(sink.events)
+
+
 def _assigned_names(tree: ast.Module) -> set[str]:
     names: set[str] = set()
     for node in tree.body:
@@ -221,7 +338,7 @@ def test_non_authorizing_scope_vocabulary_has_one_contract_owner() -> None:
         (root / "integrations/business_mcp_auth/claims.py").read_text(
             encoding="utf-8"
         )
-    )
+   )
 
     assert "NON_AUTHORIZING_OAUTH_SCOPES" in _assigned_names(contracts_tree)
     assert not {
