@@ -266,79 +266,117 @@ def test_a_run_from_a_scenario_absent_in_the_manifest_fails(two_scenario_graph) 
     assert any(d.code == "SCENARIO_NOT_IN_EXPERIMENT" for d in excinfo.value.defects)
 
 
-def test_multi_scenario_evidence_ref_is_not_yet_publishable_through_the_governed_store(two_scenario_graph, tmp_path) -> None:
-    """Pins the disclosed S1 limitation: store.py's create-only population
-    re-check is hardcoded to the single-scenario schema/recompute and is
-    outside this wave's owned surface, so a multi-scenario evidence
-    reference fails ``ArtifactStore.create()`` with a structured,
-    NON-crashing UNKNOWN_SCHEMA defect -- never a silent success and never
-    an uncaught exception."""
+def _create_full_graph(artifact_store: "store.ArtifactStore", g: dict) -> None:
+    for doc in (g["scenario_a"], g["scenario_b"], g["config_a"], g["config_b"], g["experiment"]):
+        artifact_store.create(doc)
+    for doc in (g["run_a1"], g["run_a2"], g["run_b"]):
+        artifact_store.create(doc)
+    for doc in (g["pass_a1"], g["pass_a2"], g["pass_b"]):
+        artifact_store.create(doc)
+
+
+# ---------------------------------------------------------------------------
+# Store integration (EVAL-S1 store-integration wave, same operation key):
+# the multi-scenario evidence reference is now published through the SAME
+# governed create-only ArtifactStore.create() path, with the SAME
+# enumeration-equality anti-laundering guarantee BLOCKER-1 gave R0's
+# single-scenario schema (tests/test_agent_eval_store.py::
+# test_create_refuses_an_evidence_ref_over_a_cherry_picked_run_subset /
+# test_hand_planted_subset_evidence_ref_is_flagged_by_verify_tree_graph).
+# ---------------------------------------------------------------------------
+
+
+def test_honest_multi_scenario_evidence_ref_publishes_and_tree_verifies_clean(two_scenario_graph, tmp_path) -> None:
     g = two_scenario_graph
+    artifact_store = store.ArtifactStore(tmp_path / "root")
+    _create_full_graph(artifact_store, g)
+
     evidence = scoring.summarize_multi_scenario_experiment(
         g["experiment"],
         (g["scenario_a"], g["scenario_b"]),
-        (g["run_a1"], g["run_a2"], g["run_b"]),
-        (g["pass_a1"], g["pass_a2"], g["pass_b"]),
+        artifact_store.enumerate_runs(),
+        artifact_store.enumerate_scorer_passes(),
         evidence_ref_id=_fresh_evidence_ref_id(),
         intended_owner="person:sol",
         review_at="2026-09-08T00:00:00Z",
         created_at="2026-09-01T00:00:13Z",
         analysis_version="mastermind.agent_evaluation_r0_analysis.v1",
     )
+    result = artifact_store.create(evidence)
+    assert result.disposition.value == "CREATED"
+    assert artifact_store.resolve_evidence_ref(evidence["evidence_ref_id"]) == evidence
+    assert artifact_store.verify_tree_graph() == ()
+
+
+def test_create_refuses_a_multi_scenario_evidence_ref_over_a_cherry_picked_scenario_subset(two_scenario_graph, tmp_path) -> None:
+    # mirrors test_create_refuses_an_evidence_ref_over_a_cherry_picked_run_subset
+    # exactly, one scenario up: summarize_multi_scenario_experiment ITSELF is
+    # internally consistent with whatever subset it is handed (it only
+    # requires supplied scenarios to match the EXPERIMENT's declared set,
+    # not that every declared run is present) -- the refusal must come from
+    # the store recomputing against its OWN complete enumeration.
+    g = two_scenario_graph
     artifact_store = store.ArtifactStore(tmp_path / "root")
-    with pytest.raises(ContractError) as excinfo:
-        artifact_store.create(evidence)
-    assert any(d.code == "UNKNOWN_SCHEMA" for d in excinfo.value.defects)
+    _create_full_graph(artifact_store, g)
 
-
-# ---------------------------------------------------------------------------
-# CLI: multi-scenario summarize journey
-# ---------------------------------------------------------------------------
-
-
-def test_cli_summarize_multi_scenario_requires_output(two_scenario_graph, tmp_path, capsys) -> None:
-    g = two_scenario_graph
-    root = tmp_path / "root"
-    artifact_store = store.ArtifactStore(root)
-    for doc in (g["scenario_a"], g["scenario_b"], g["config_a"], g["config_b"], g["experiment"]):
-        artifact_store.create(doc)
-    for doc in (g["run_a1"], g["run_a2"], g["run_b"]):
-        artifact_store.create(doc)
-    for doc in (g["pass_a1"], g["pass_a2"], g["pass_b"]):
-        artifact_store.create(doc)
-
-    exit_code = cli.main(
-        [
-            "summarize",
-            "--root",
-            str(root),
-            "--experiment-id",
-            g["experiment"]["experiment_id"],
-            "--owner",
-            "person:sol",
-            "--review-at",
-            "2026-09-08T00:00:00Z",
-            "--created-at",
-            "2026-09-01T00:00:13Z",
-            "--id",
-            _fresh_evidence_ref_id(),
-        ]
+    laundered_evidence = scoring.summarize_multi_scenario_experiment(
+        g["experiment"],
+        (g["scenario_a"], g["scenario_b"]),
+        (g["run_a1"],),  # run_a2 and run_b silently dropped from the population
+        (g["pass_a1"],),
+        evidence_ref_id=_fresh_evidence_ref_id(),
+        intended_owner="person:sol",
+        review_at="2026-09-08T00:00:00Z",
+        created_at="2026-09-01T00:00:13Z",
+        analysis_version="mastermind.agent_evaluation_r0_analysis.v1",
     )
-    assert exit_code == 2  # usage error: --output required for a multi-scenario experiment
+    assert laundered_evidence["sample_size"] == 1  # the laundering is internally "clean"
+
+    with pytest.raises(VerificationContextError) as excinfo:
+        artifact_store.create(laundered_evidence)
+    assert any(d.code == "EVIDENCE_POPULATION_INCOMPLETE" for d in excinfo.value.defects)
+    assert artifact_store.resolve_evidence_ref(laundered_evidence["evidence_ref_id"]) is None
 
 
-def test_cli_summarize_multi_scenario_writes_output_file(two_scenario_graph, tmp_path, capsys) -> None:
+def test_hand_planted_subset_multi_scenario_evidence_ref_is_flagged_by_verify_tree_graph(two_scenario_graph, tmp_path) -> None:
+    from scripts.agent_eval.canonical import canonical_json_bytes
+
+    g = two_scenario_graph
+    artifact_store = store.ArtifactStore(tmp_path / "root")
+    _create_full_graph(artifact_store, g)
+
+    laundered_evidence = scoring.summarize_multi_scenario_experiment(
+        g["experiment"],
+        (g["scenario_a"], g["scenario_b"]),
+        (g["run_a1"],),
+        (g["pass_a1"],),
+        evidence_ref_id=_fresh_evidence_ref_id(),
+        intended_owner="person:sol",
+        review_at="2026-09-08T00:00:00Z",
+        created_at="2026-09-01T00:00:13Z",
+        analysis_version="mastermind.agent_evaluation_r0_analysis.v1",
+    )
+
+    # hand-plant it directly at its own canonical path, bypassing create()
+    final_path = artifact_store.root / store.evidence_ref_path(laundered_evidence["evidence_ref_id"])
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    final_path.write_bytes(canonical_json_bytes(laundered_evidence))
+
+    defects = artifact_store.verify_tree_graph()
+    assert any(d.code == "EVIDENCE_POPULATION_INCOMPLETE" for d in defects)
+
+
+# ---------------------------------------------------------------------------
+# CLI: multi-scenario summarize journey (now store-published end-to-end)
+# ---------------------------------------------------------------------------
+
+
+def test_cli_summarize_multi_scenario_publishes_through_the_store_and_tree_verifies_clean(two_scenario_graph, tmp_path, capsys) -> None:
     g = two_scenario_graph
     root = tmp_path / "root"
     artifact_store = store.ArtifactStore(root)
-    for doc in (g["scenario_a"], g["scenario_b"], g["config_a"], g["config_b"], g["experiment"]):
-        artifact_store.create(doc)
-    for doc in (g["run_a1"], g["run_a2"], g["run_b"]):
-        artifact_store.create(doc)
-    for doc in (g["pass_a1"], g["pass_a2"], g["pass_b"]):
-        artifact_store.create(doc)
+    _create_full_graph(artifact_store, g)
 
-    output_path = tmp_path / "evidence-out.json"  # deliberately OUTSIDE --root
     exit_code = cli.main(
         [
             "summarize",
@@ -354,16 +392,21 @@ def test_cli_summarize_multi_scenario_writes_output_file(two_scenario_graph, tmp
             "2026-09-01T00:00:13Z",
             "--id",
             _fresh_evidence_ref_id(),
-            "--output",
-            str(output_path),
         ]
     )
     assert exit_code == 1  # R0/S1's evidence grade is always INSUFFICIENT_EVIDENCE
-    written = json.loads(output_path.read_text(encoding="utf-8"))
-    assert written["schema"] == "mastermind.agent_evaluation_evidence_ref_multi_scenario.v1"
-    assert len(written["scenario_groups"]) == 2
 
     out = capsys.readouterr().out
     printed = json.loads(out)
+    assert printed["disposition"] == "CREATED"
     assert printed["evidence_grade"] == "INSUFFICIENT_EVIDENCE"
-    assert printed["output"] == str(output_path)
+    assert len(printed["scenario_groups"]) == 2
+
+    stored = artifact_store.resolve_evidence_ref(printed["evidence_ref_id"])
+    assert stored is not None
+    assert stored["schema"] == "mastermind.agent_evaluation_evidence_ref_multi_scenario.v1"
+
+    tree_verify_exit = cli.main(["verify-tree-graph", "--root", str(root)])
+    assert tree_verify_exit == 0
+    tree_verify_out = json.loads(capsys.readouterr().out)
+    assert tree_verify_out["defect_count"] == 0

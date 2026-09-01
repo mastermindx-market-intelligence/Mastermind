@@ -215,60 +215,65 @@ Ten-line summary of the new contract:
 8. `INSUFFICIENT_EVIDENCE` (R0's fixed, honest grade) is unchanged; it is
    never claimed more precisely than before — this wave adds scoring
    coverage, not a new verification scope.
-9. Publication: written via the same exclusive create-only file primitive
-   the CLI already uses for `finalize-run --output` (a new, `summarize`-
-   only-required-when-multi-scenario `--output` flag) — **not** yet through
-   `ArtifactStore.create()`. See §5 below for why, and its exact scope.
-10. `verify-graph`/`verify-tree-graph` do not yet recognize the new schema;
-    a multi-scenario evidence reference is graph-verified directly via
-    `scoring.verify_multi_scenario_evidence_ref_graph(document, resolver)`.
+9. Publication: through the SAME governed `ArtifactStore.create()` path
+   the single-scenario branch uses. `store.py` now dispatches the new
+   schema too (§5).
+10. `verify-graph`/`verify-tree-graph` recognize the new schema and
+    graph-verify it via `scoring.verify_multi_scenario_evidence_ref_graph`,
+    exactly as they already do for R0's single-scenario schema.
 
-## 5. Disclosed limitation: multi-scenario evidence refs are not yet in the governed store
+## 5. Store integration (CLOSED — store-integration wave, same operation key)
 
-`scripts/agent_eval/store.py` is NOT in this wave's owned surface (the
-commissioning packet lists `scoring.py`/`cli.py` as the smallest-surface
-edit points). Investigation found `store.py::ArtifactStore.
-_require_evidence_ref_population_complete` hardcoded to (a) the exact
-field name `document["scenario_ref"]` (singular — a genuinely different
-multi-scenario document, which uses `scenario_refs` plural instead, would
-raise an unhandled `KeyError`, not a graceful defect) and (b) a
-recompute call to the single-scenario `scoring.summarize_experiment`
-specifically (which would silently reintroduce exactly the `scenario_refs
-[0]`-style bug this wave fixes, or spuriously reject a genuinely correct
-multi-scenario document, depending on how a caller tried to route around
-it). Extending that one method to dispatch on `document.get("scenario_
-refs")` vs `document.get("scenario_ref")` would be a small, real, narrow
-fix — but `store.py` sits outside this wave's owned files, so it was not
-touched.
+**Status: closed.** `scripts/agent_eval/store.py` was added to this wave's
+owned surface by explicit principal authorization
+(`mastermind-agent-evaluation-s1-scorers-20260901-fable-001`, store-
+integration wave) after the disclosed gap below was raised in this PR's
+first revision. `store.py::ArtifactStore` now fully supports the
+multi-scenario schema, with the SAME guarantees R0's single-scenario
+schema already had:
 
-Instead, `mastermind.agent_evaluation_evidence_ref_multi_scenario.v1` is a
-genuinely DISTINCT schema (not a same-string variant of R0's `EVIDENCE_REF_
-SCHEMA`, which would have risked exactly that `KeyError` the moment
-`verify-tree-graph` or `ArtifactStore.create()` encountered one). It is:
+1. **Schema dispatch.** `_DIGEST_FIELD_BY_SCHEMA`, `_artifact_path_for`,
+   and `_graph_verify_for` each gained one new branch for
+   `scoring.EVIDENCE_REF_MULTI_SCENARIO_SCHEMA` — same
+   `evidence-refs/<uuid>/evidence-ref.json` path scheme as the
+   single-scenario schema (both use the same `evidence_ref_id` field
+   name), digest field `evidence_ref_digest`, and graph verification
+   dispatched to `scoring.verify_multi_scenario_evidence_ref_graph`. A
+   multi-scenario document is now a completely ordinary citizen of
+   `ArtifactStore.create()`, `verify_graph()`, `verify_tree_graph()`, and
+   `enumerate_*()` — no special-casing anywhere else in the store.
+2. **Anti-laundering (the critical repair).**
+   `_require_evidence_ref_population_complete` — the BLOCKER-1 review
+   repair that already closed the "hand-build an evidence ref over a
+   cherry-picked run subset" hole for R0's single-scenario schema — now
+   dispatches per schema to
+   `_require_single_scenario_evidence_ref_population_complete` (R0's
+   original method, renamed, byte-for-byte unchanged logic) or the new
+   `_require_multi_scenario_evidence_ref_population_complete`. The new
+   method recomputes the COMPLETE multi-scenario evidence reference from
+   the store's own `enumerate_runs()`/`enumerate_scorer_passes()`, against
+   every scenario the EXPERIMENT itself declares (`experiment
+   ["scenario_refs"]`) — **never** the submitted document's own claimed
+   `scenario_refs`, which is exactly the field a laundering attempt would
+   shrink — and requires exact equality on `run_entries`, `counts`,
+   `scenario_groups`, `scorer_refs`, `configuration_refs`, `scenario_refs`,
+   and `sample_size`. A document that silently drops a scenario or a run
+   recomputes differently and is refused with `EVIDENCE_POPULATION_
+   INCOMPLETE`, at `create()` time and (if hand-planted directly onto disk,
+   bypassing `create()`) at `verify_tree_graph()` time — both laundering
+   shapes are pinned as regression tests (§8).
+3. **CLI.** `_cmd_summarize`'s multi-scenario branch now calls
+   `artifact_store.create(evidence)` exactly like the single-scenario
+   branch; the `summarize --output` flag introduced in this PR's first
+   revision (a workaround for the then-unintegrated store) was removed —
+   it no longer exists on either branch. The single-scenario branch's
+   code, output shape, and exit codes are **completely untouched**
+   (proven by the existing, unmodified `tests/test_agent_eval_cli.py`
+   still passing byte-for-byte).
 
-- buildable (`scoring.summarize_multi_scenario_experiment`);
-- shape-validatable (`scoring.validate_multi_scenario_evidence_ref_shape`,
-  registered with the generic `contracts.validate_document_shape`
-  dispatcher, so the existing `validate-shape` CLI command works on it
-  standalone);
-- graph-verifiable (`scoring.verify_multi_scenario_evidence_ref_graph`,
-  against any `ArtifactResolver` — including the real `ArtifactStore`, used
-  purely for its read-only `resolve_*` methods);
-- persistable via the CLI's `summarize --output <path>`, using the SAME
-  exclusive-create file primitive `finalize-run --output` already uses —
-  but **not** via `ArtifactStore.create()`, and it should **not** be placed
-  inside `--root`'s own `evidence-refs/` tree: `store.py`'s schema dispatch
-  (`_artifact_path_for`/`_graph_verify_for`) does not recognize this schema
-  and reports it as a graceful `UNKNOWN_SCHEMA` `ContractDefect` (pinned by
-  `test_multi_scenario_evidence_ref_is_not_yet_publishable_through_the_
-  governed_store`) rather than crashing — but it would still surface as a
-  defect in `verify-tree-graph` if placed there.
-
-This is a genuine, disclosed GAP, not a silent one: a future wave that owns
-`store.py` can close it with the narrow dispatch fix named above. It does
-not block E1's own use of these scorers/summarize function directly (E1
-does not require the governed store's create-only idempotency/conflict
-semantics to compute and inspect its own evidence).
+No stale "not yet publishable" language remains anywhere in this record or
+the module docstrings; the multi-scenario schema is now a first-class,
+fully governed artifact type.
 
 ## 6. Structured task-output ("submission") contracts
 
@@ -329,12 +334,20 @@ to R0's existing scorer-pass behavior/tests.
 - graph-verification round-trip via `MemoryArtifactResolver`.
 - a run from a scenario absent from the experiment's declared
   `scenario_refs` raises (never silently included).
-- the disclosed store-integration gap (§5) is pinned as an explicit,
-  non-crashing `ContractError` — a regression test on the LIMITATION
-  itself, so a future fix (or an accidental regression) is visible.
-- CLI: `summarize` without `--output` on a multi-scenario experiment exits
-  2 (usage error); with `--output`, writes the file, exits 1
-  (`INSUFFICIENT_EVIDENCE`, matching R0's own honest-exit-code convention).
+- **store integration (§5):** an honest multi-scenario evidence reference
+  publishes through `ArtifactStore.create()` and `verify_tree_graph()`
+  reports zero defects; a cherry-picked scenario/run subset is REFUSED at
+  `create()` (`EVIDENCE_POPULATION_INCOMPLETE`), mirroring
+  `tests/test_agent_eval_store.py::
+  test_create_refuses_an_evidence_ref_over_a_cherry_picked_run_subset`
+  exactly; the same subset, hand-planted directly onto disk bypassing
+  `create()`, is flagged by `verify_tree_graph()` — both laundering shapes
+  from R0's own BLOCKER-1 repair, now proven for the multi-scenario schema
+  too.
+- CLI: `summarize` on a multi-scenario experiment publishes through the
+  store (`disposition: CREATED`), exits 1 (`INSUFFICIENT_EVIDENCE`,
+  matching R0's own honest-exit-code convention), and a subsequent
+  `verify-tree-graph` exits 0 with zero defects.
 
 `python -m compileall scripts/agent_eval` and the full owned suite
 (`tests/test_agent_eval_*.py`) are run green as part of this wave's

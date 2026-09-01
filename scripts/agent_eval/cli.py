@@ -24,7 +24,6 @@ from pathlib import Path
 from scripts.agent_eval import MAX_CANONICAL_ARTIFACT_BYTES, contracts, corpus, scoring, store, validity
 from scripts.agent_eval.canonical import canonical_json_bytes
 from scripts.agent_eval.errors import ArtifactConflictError, ContractError, VerificationContextError
-from scripts.agent_eval.privacy import assert_public_safe_evidence
 
 DEFAULT_ANALYSIS_VERSION = "mastermind.agent_evaluation_r0_analysis.v1"
 
@@ -254,16 +253,13 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
     # above would silently apply the WRONG scenario's required_dimensions
     # to every other scenario's runs -- see docs/superpowers/plans/2026-09-
     # 01-agent-evaluation-s1-scorers.md. This path resolves EVERY declared
-    # scenario and groups runs by their OWN scenario. It is not yet
-    # published through ArtifactStore.create() (a disclosed S1 limitation
-    # -- store.py's create-only population re-check is hardcoded to the
-    # single-scenario recompute and is outside this wave's owned surface);
-    # it is written via the same exclusive create-only file primitive the
-    # CLI already uses for ``finalize-run --output``. Do not point
-    # --output inside --root's own evidence-refs/ tree: verify-tree-graph
-    # does not recognize this schema and will report it as a defect.
-    if not args.output:
-        raise CliUsageError("--output is required when the experiment declares more than one scenario")
+    # scenario and groups runs by their OWN scenario. Store-integration
+    # wave (same operation): published through the SAME governed create-
+    # only ``ArtifactStore.create()`` path the single-scenario branch above
+    # uses -- store.py now dispatches the multi-scenario schema too, with
+    # the same enumeration-equality anti-laundering guarantee (a caller-
+    # selected subset of scenarios/runs is refused at create, never
+    # silently accepted).
     scenarios = []
     for ref in scenario_refs:
         scenario = artifact_store.resolve_scenario(ref["scenario_id"], ref["scenario_version"])
@@ -284,12 +280,11 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
         created_at=args.created_at,
         analysis_version=DEFAULT_ANALYSIS_VERSION,
     )
-    assert_public_safe_evidence(evidence)
-    result = scoring.verify_multi_scenario_evidence_ref_graph(evidence, artifact_store)
-    _write_exclusive_json_file(Path(args.output), evidence)
+    result = artifact_store.create(evidence)
     _print_json(
         {
-            "scope": result.scope,
+            "scope": "EVALUATION_GRAPH_VERIFIED",
+            "disposition": result.disposition.value,
             "evidence_ref_id": evidence["evidence_ref_id"],
             "evidence_grade": evidence["evidence_grade"],
             "verification_scopes": list(evidence["verification_scopes"]),
@@ -298,10 +293,12 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
                 {"scenario_id": group["scenario_id"], "scenario_version": group["scenario_version"], "counts": group["counts"]}
                 for group in evidence["scenario_groups"]
             ],
-            "output": str(args.output),
             "external_content_unverified": True,
         }
     )
+    # R0/S1's evidence grade is always INSUFFICIENT_EVIDENCE (external
+    # content is never verified) -- report that honestly rather than as a
+    # clean 0.
     return _EXIT_INCOMPLETE
 
 
@@ -401,15 +398,6 @@ def _build_parser() -> argparse.ArgumentParser:
     summarize.add_argument("--review-at", required=True)
     summarize.add_argument("--created-at", required=True)
     summarize.add_argument("--id", required=True)
-    summarize.add_argument(
-        "--output",
-        required=False,
-        help=(
-            "EVAL-S1: required only when the experiment declares more than one "
-            "scenario (the multi-scenario evidence reference is written here "
-            "via exclusive create, never through --root's governed store)"
-        ),
-    )
     summarize.set_defaults(func=_cmd_summarize)
 
     verify_tree_graph = subparsers.add_parser(

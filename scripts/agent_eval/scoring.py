@@ -804,16 +804,17 @@ def build_scorer_pass_document(
 # builder, or verifier above -- every existing single-scenario call keeps
 # its exact current behavior and output bytes.
 #
-# This is a DISTINCT schema, not a v2 of EVIDENCE_REF_SCHEMA: it is not
-# wired into scripts/agent_eval/store.py's create-only publication path
-# (store.py is outside this wave's owned surface, and its
-# ``_require_evidence_ref_population_complete`` re-check is hardcoded to the
-# single-scenario recompute) -- see the S1 plan record's disclosed
-# limitation. A multi-scenario evidence reference is built, shape-validated,
-# and graph-verified by the functions below, and persisted by the CLI via
-# the same exclusive create-only file primitive already used for
-# ``finalize-run --output`` -- never inside the store's own
-# ``evidence-refs/`` tree (verify-tree-graph does not recognize this schema).
+# This is a DISTINCT schema, not a v2 of EVIDENCE_REF_SCHEMA (a genuinely
+# different field set -- plural scenario_refs + per-scenario scenario_
+# groups -- sharing only the evidence_ref_id field name and safe-path
+# scheme with the single-scenario schema). A multi-scenario evidence
+# reference is built, shape-validated, and graph-verified by the functions
+# below, and IS fully wired into scripts/agent_eval/store.py's create-only
+# publication path (store-integration wave, same operation key):
+# ArtifactStore.create()/verify_graph()/verify_tree_graph() all dispatch on
+# this schema exactly as they already do for the single-scenario one, with
+# the same enumeration-equality anti-laundering guarantee
+# (ArtifactStore._require_multi_scenario_evidence_ref_population_complete).
 # ---------------------------------------------------------------------------
 
 EVIDENCE_REF_MULTI_SCENARIO_SCHEMA = "mastermind.agent_evaluation_evidence_ref_multi_scenario.v1"
@@ -1179,7 +1180,6 @@ def summarize_multi_scenario_experiment(
             {
                 "R0/S1 implement SHAPE_VALID and EVALUATION_GRAPH_VERIFIED only; EVIDENCE_CONTENT_VERIFIED is not claimed.",
                 "S1's task-class scorers cover TC1/TC2/TC3 outcome dimensions only; scored_projection reflects each run's scenario's own required_dimensions.",
-                "This multi-scenario evidence reference is not yet published through the governed create-only artifact store; see the S1 plan record's disclosed limitation.",
             }
         ),
         "evidence_grade": "INSUFFICIENT_EVIDENCE",
