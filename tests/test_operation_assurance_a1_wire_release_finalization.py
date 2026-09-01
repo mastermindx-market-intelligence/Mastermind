@@ -69,7 +69,7 @@ def test_parent_plan_is_navigation_only_where_superseded() -> None:
     text = _text()
     assert "Do not implement stale parent snippets by copying them literally" in text
     assert "The parent plan remains the task-order and file-map scaffold" in text
-    assert "the controlling overlay and narrow clarifications define the executable wire" in text
+    assert "The controlling overlay and narrow clarifications define the executable wire" in text
     assert "missing abstraction_contract" in text
     assert "assurance_verdict" in text
     assert "REPORT_ONLY_PROCEED" in text
@@ -80,7 +80,7 @@ def test_external_grok_browser_placement_is_not_a_release_gate() -> None:
     assert "mastermind-operation-liveness-f0-audit-placement-20260830-sol-002" in text
     assert "CANCELLED_PRESTART / effect=NONE" in text
     assert "No Grok, browser-created chat, numbered account, or external placement is required" in text
-    assert "external reviewer availability cannot strand an otherwise verified records-only release" in text
+    assert "External reviewer availability cannot strand an otherwise verified records-only release" in text
     assert "Independent OLS-A1R review remains a later technical quality wave" in text
 
 
