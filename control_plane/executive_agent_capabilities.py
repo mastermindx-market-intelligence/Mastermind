@@ -42,8 +42,8 @@ _EXECUTION_SURFACES = frozenset({"codex-exec", "codex-app-server"})
 _AUTH_REALMS = frozenset({"dedicated-worker-account"})
 _SANDBOX_POLICIES = frozenset({"read-only", "workspace-write"})
 _APPROVAL_POLICIES = frozenset({"never"})
-_NETWORK_POLICIES = frozenset({"disabled"})
-_MCP_TRANSPORTS = frozenset({"streamable-http"})
+_NETWORK_POLICIES = frozenset({"disabled", "loopback-browser-only"})
+_MCP_TRANSPORTS = frozenset({"stdio", "streamable-http"})
 _MCP_AUTH_STATUSES = frozenset(
     {"unsupported", "notLoggedIn", "bearerToken", "oAuth"}
 )
@@ -52,11 +52,10 @@ _NATIVE_HELPER_MECHANISMS = frozenset({"codex-multi-agent-v2-inherit-parent"})
 _REASONING_EFFORTS = frozenset(
     {"low", "medium", "high", "xhigh", "max", "ultra"}
 )
-_MCP_KEYS = frozenset(
+_MCP_COMMON_KEYS = frozenset(
     {
         "config_name",
         "transport",
-        "url",
         "required",
         "auth_status",
         "server_identity",
@@ -64,6 +63,78 @@ _MCP_KEYS = frozenset(
         "enabled_tools",
         "default_tools_approval_mode",
         "tool_schema_digest",
+    }
+)
+_MCP_HTTP_KEYS = _MCP_COMMON_KEYS | {"url"}
+_MCP_STDIO_KEYS = _MCP_COMMON_KEYS | {"args", "command"}
+WORKER_BROWSER_MCP_COMMAND = "/usr/bin/python3"
+WORKER_BROWSER_MCP_BOOTSTRAP = r'''import hashlib,json,os,stat
+K=("MASTERMIND_BROWSER_ARTIFACT_DIR","MASTERMIND_BROWSER_FIXTURE_A_URL","MASTERMIND_BROWSER_FIXTURE_B_URL","MASTERMIND_BROWSER_FIXTURE_NONCE","MASTERMIND_BROWSER_ORIGIN","MASTERMIND_BROWSER_PROXY_URL","MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH","MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256","MASTERMIND_BROWSER_RUNTIME_ROOT","MASTERMIND_BROWSER_WORKSPACE_PATH","PLAYWRIGHT_BROWSERS_PATH")
+F="MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD"
+N="worker-browser-b1-install-manifest.json"
+d=-1; D=-1
+try:
+ e={k:os.environ[k] for k in K}
+ r=e["MASTERMIND_BROWSER_RUNTIME_ROOT"]
+ m=e["MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH"]
+ if not os.path.isabs(r) or os.path.basename(r)!="runtime" or m!=os.path.join(r,N): raise ValueError()
+ c=os.path.dirname(r)
+ q=getattr(os,"O_NOFOLLOW",0); z=getattr(os,"O_DIRECTORY",0)
+ if not q or not z: raise OSError()
+ d=os.open(c,os.O_RDONLY|q|z); i=os.fstat(d)
+ x=os.open("runtime/"+N,os.O_RDONLY|q,dir_fd=d)
+ try:
+  a=os.fstat(x)
+  if not stat.S_ISREG(a.st_mode) or a.st_nlink!=1 or a.st_uid!=os.geteuid() or stat.S_IMODE(a.st_mode)!=0o400 or not 0<a.st_size<=4194304: raise OSError()
+  b=b""
+  while len(b)<=4194304:
+   h=os.read(x,65536)
+   if not h: break
+   b+=h
+  j=os.fstat(x)
+ finally: os.close(x)
+ if len(b)>4194304 or (a.st_dev,a.st_ino,a.st_size,a.st_mtime_ns)!=(j.st_dev,j.st_ino,j.st_size,j.st_mtime_ns) or hashlib.sha256(b).hexdigest()!=e["MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256"]: raise ValueError()
+ v=json.loads(b.decode("utf-8")); w=v["runtime_container"]
+ if b!=json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()+b"\n" or set(w)!={"device","gid","inode","mode","uid"} or any(type(w[k]) is not int for k in w) or w!={"device":i.st_dev,"gid":i.st_gid,"inode":i.st_ino,"mode":stat.S_IMODE(i.st_mode),"uid":i.st_uid} or i.st_uid!=os.geteuid() or stat.S_IMODE(i.st_mode)!=0o500: raise ValueError()
+ D=os.dup(d)
+ for C in ("runtime","bin"):
+  Y=os.open(C,os.O_RDONLY|q|z,dir_fd=D); os.close(D); D=Y; U=os.fstat(D)
+  if not stat.S_ISDIR(U.st_mode) or U.st_uid!=os.geteuid() or stat.S_IMODE(U.st_mode)!=0o500: raise OSError()
+ l=v["launcher"]; y=os.open("worker-browser-b1-launcher",os.O_RDONLY|q,dir_fd=D)
+ try:
+  s=os.fstat(y); g=hashlib.sha256(); n=0
+  while n<=4194304:
+   h=os.read(y,65536)
+   if not h: break
+   n+=len(h); g.update(h)
+  t=os.fstat(y); k=os.stat("worker-browser-b1-launcher",dir_fd=D,follow_symlinks=False)
+ finally: os.close(y)
+ P=lambda o:(o.st_dev,o.st_ino,o.st_mode,o.st_nlink,o.st_uid,o.st_gid,o.st_size,o.st_mtime_ns,o.st_ctime_ns)
+ if set(l)!={"gid","mode","path","sha256","uid"} or l["path"]!=os.path.join(r,"bin","worker-browser-b1-launcher") or not stat.S_ISREG(s.st_mode) or s.st_nlink!=1 or s.st_uid!=os.geteuid() or stat.S_IMODE(s.st_mode)!=0o500 or n!=s.st_size or n>4194304 or P(s)!=P(t) or P(s)!=P(k) or l!={"gid":s.st_gid,"mode":0o500,"path":l["path"],"sha256":g.hexdigest(),"uid":s.st_uid}: raise ValueError()
+ os.close(D); D=-1
+ os.set_inheritable(d,True); e[F]=str(d); os.fchdir(d)
+ os.execve("runtime/bin/worker-browser-b1-launcher",["runtime/bin/worker-browser-b1-launcher"],e)
+except (KeyError,OSError,TypeError,UnicodeError,ValueError):
+ if D>=0:
+  try: os.close(D)
+  except OSError: pass
+ if d>=0:
+  try: os.close(d)
+  except OSError: pass
+ raise SystemExit("runtime container bootstrap refused")
+'''
+WORKER_BROWSER_MCP_ARGS = ("-I", "-S", "-c", WORKER_BROWSER_MCP_BOOTSTRAP)
+_RESOURCE_KEYS = frozenset(
+    {
+        "artifact_root",
+        "browser",
+        "browser_revision",
+        "kind",
+        "manifest_digest",
+        "manifest_path",
+        "runtime_root",
+        "runtime_manifest_digest",
+        "runtime_manifest_path",
     }
 )
 _PROFILE_KEYS = frozenset(
@@ -79,6 +150,7 @@ _PROFILE_KEYS = frozenset(
         "native_helper",
         "skills",
         "mcp_servers",
+        "resources",
         "plugins",
         "forbidden",
     }
@@ -153,7 +225,7 @@ def _config_name(value: Any, *, field: str) -> str:
 
 
 def _digest_value(value: Any, *, field: str) -> str:
-    token = str(value or "").strip().lower()
+    token = str(value or "").strip()
     if _DIGEST_RE.fullmatch(token) is None:
         raise CapabilityPolicyError(f"{field} must be a lowercase SHA-256 digest")
     return token
@@ -216,7 +288,9 @@ class McpServerGrant:
     capability_id: str
     config_name: str
     transport: str
-    url: str
+    url: str | None
+    command: str | None
+    args: tuple[str, ...]
     required: bool
     auth_status: str
     server_identity: str
@@ -227,19 +301,23 @@ class McpServerGrant:
     grant_digest: str
 
     def config_projection(self) -> dict[str, object]:
-        return {
+        projection: dict[str, object] = {
             "default_tools_approval_mode": self.default_tools_approval_mode,
             "enabled": True,
             "enabled_tools": list(self.enabled_tools),
             "required": self.required,
-            "url": self.url,
         }
+        if self.transport == "streamable-http":
+            projection["url"] = self.url
+        else:
+            projection["command"] = self.command
+            projection["args"] = list(self.args)
+        return projection
 
     def config_overrides(self) -> tuple[str, ...]:
         prefix = f"mcp_servers.{self.config_name}"
         tools = json.dumps(list(self.enabled_tools), ensure_ascii=True, separators=(",", ":"))
-        return (
-            f"{prefix}.url={_toml_string(self.url)}",
+        values = [
             f"{prefix}.required={'true' if self.required else 'false'}",
             f"{prefix}.enabled=true",
             f"{prefix}.enabled_tools={tools}",
@@ -247,7 +325,33 @@ class McpServerGrant:
                 f"{prefix}.default_tools_approval_mode="
                 f"{_toml_string(self.default_tools_approval_mode)}"
             ),
-        )
+        ]
+        if self.transport == "streamable-http":
+            assert self.url is not None
+            values.insert(0, f"{prefix}.url={_toml_string(self.url)}")
+        else:
+            assert self.command is not None
+            values.insert(0, f"{prefix}.command={_toml_string(self.command)}")
+            args = json.dumps(list(self.args), ensure_ascii=True, separators=(",", ":"))
+            values.insert(1, f"{prefix}.args={args}")
+        return tuple(values)
+
+
+@dataclasses.dataclass(frozen=True)
+class ResourceGrant:
+    """One immutable Attempt-subordinate resource grant in the existing registry."""
+
+    resource_id: str
+    kind: str
+    manifest_path: str
+    manifest_digest: str
+    runtime_root: str
+    runtime_manifest_digest: str
+    runtime_manifest_path: str
+    artifact_root: str
+    browser: str
+    browser_revision: str
+    grant_digest: str
 
 
 _FEATURE_PROJECTION_KEYS = (
@@ -296,7 +400,7 @@ def app_server_security_config_projection(
                 projected_servers[name] = {"invalid": True}
                 continue
             tools = raw_value.get("enabled_tools")
-            projected_servers[name] = {
+            projection: dict[str, object] = {
                 "default_tools_approval_mode": raw_value.get(
                     "default_tools_approval_mode"
                 ),
@@ -307,8 +411,14 @@ def app_server_security_config_projection(
                     else None
                 ),
                 "required": raw_value.get("required"),
-                "url": raw_value.get("url"),
             }
+            if raw_value.get("command") is not None or raw_value.get("args") is not None:
+                args = raw_value.get("args")
+                projection["command"] = raw_value.get("command")
+                projection["args"] = list(args) if isinstance(args, list) else None
+            else:
+                projection["url"] = raw_value.get("url")
+            projected_servers[name] = projection
     elif raw_servers is not None:
         projected_servers["__invalid__"] = {"invalid": True}
 
@@ -404,6 +514,7 @@ class ExecutionCapabilityProfile:
     native_helper: "NativeHelperGrant | None"
     skills: tuple[str, ...]
     mcp_server_grants: tuple[McpServerGrant, ...]
+    resource_grants: tuple[ResourceGrant, ...]
     plugins: tuple[str, ...]
     forbidden: tuple[str, ...]
     profile_digest: str
@@ -415,6 +526,7 @@ class ExecutionCapabilityProfile:
                 (
                     *self.skills,
                     *(grant.config_name for grant in self.mcp_server_grants),
+                    *(grant.resource_id for grant in self.resource_grants),
                     *self.plugins,
                 )
             )
@@ -574,6 +686,15 @@ class ExecutionCapabilityProfile:
                     mcp_auth_status=grant.auth_status,
                 )
             )
+        for grant in self.resource_grants:
+            required.append(
+                CapabilityIdentity(
+                    name=grant.resource_id,
+                    kind="resource",
+                    harness_binary_digest=binary_digest,
+                    resource_contract_digest=grant.grant_digest,
+                )
+            )
         for name in self.plugins:
             required.append(
                 CapabilityIdentity(
@@ -611,6 +732,7 @@ class ExecutionCapabilityRegistry:
     lifecycle_authority: str
     production_armed: bool
     mcp_servers: Mapping[str, McpServerGrant]
+    resources: Mapping[str, ResourceGrant]
     profiles: Mapping[str, ExecutionCapabilityProfile]
     policy_digest: str
     source_path: Path
@@ -632,6 +754,7 @@ class ExecutionCapabilityRegistry:
             "lifecycle_authority",
             "production_armed",
             "mcp_servers",
+            "resources",
             "plugins",
             "profiles",
         }:
@@ -660,7 +783,7 @@ class ExecutionCapabilityRegistry:
         config_names: set[str] = set()
         for raw_id, value in mcp_raw.items():
             capability_id = _identifier(raw_id, field="mcp_server capability_id")
-            if not isinstance(value, dict) or set(value) != _MCP_KEYS:
+            if not isinstance(value, dict):
                 raise CapabilityPolicyError(
                     f"MCP grant {capability_id!r} fields drifted"
                 )
@@ -678,9 +801,46 @@ class ExecutionCapabilityRegistry:
                 field=f"mcp_servers.{capability_id}.transport",
                 choices=_MCP_TRANSPORTS,
             )
-            url = _https_url(
-                value.get("url"), field=f"mcp_servers.{capability_id}.url"
+            expected_mcp_keys = (
+                _MCP_HTTP_KEYS if transport == "streamable-http" else _MCP_STDIO_KEYS
             )
+            if set(value) != expected_mcp_keys:
+                raise CapabilityPolicyError(
+                    f"MCP grant {capability_id!r} fields drifted"
+                )
+            url: str | None = None
+            command: str | None = None
+            args: tuple[str, ...] = ()
+            if transport == "streamable-http":
+                url = _https_url(
+                    value.get("url"), field=f"mcp_servers.{capability_id}.url"
+                )
+            else:
+                command_value = str(value.get("command") or "").strip()
+                if (
+                    capability_id != "playwright-worker-browser-b1"
+                    or command_value != WORKER_BROWSER_MCP_COMMAND
+                ):
+                    raise CapabilityPolicyError(
+                        f"MCP grant {capability_id!r} stdio command is not reviewed"
+                    )
+                raw_args = value.get("args")
+                if (
+                    raw_args != list(WORKER_BROWSER_MCP_ARGS)
+                    or len(
+                        json.dumps(
+                            raw_args,
+                            ensure_ascii=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    )
+                    > 4096
+                ):
+                    raise CapabilityPolicyError(
+                        f"MCP grant {capability_id!r} stdio args are not reviewed"
+                    )
+                command = command_value
+                args = tuple(raw_args)
             if value.get("required") is not True:
                 raise CapabilityPolicyError(
                     f"MCP grant {capability_id!r} must fail startup closed"
@@ -722,6 +882,8 @@ class ExecutionCapabilityRegistry:
                 "config_name": config_name,
                 "transport": transport,
                 "url": url,
+                "command": command,
+                "args": list(args),
                 "required": True,
                 "auth_status": auth_status,
                 "server_identity": server_identity,
@@ -735,6 +897,8 @@ class ExecutionCapabilityRegistry:
                 config_name=config_name,
                 transport=transport,
                 url=url,
+                command=command,
+                args=args,
                 required=True,
                 auth_status=auth_status,
                 server_identity=server_identity,
@@ -743,6 +907,79 @@ class ExecutionCapabilityRegistry:
                 default_tools_approval_mode=approval_mode,
                 tool_schema_digest=tool_schema_digest,
                 grant_digest=_digest(normalized_grant),
+            )
+        resources_raw = raw.get("resources")
+        if not isinstance(resources_raw, dict) or len(resources_raw) > 16:
+            raise CapabilityPolicyError("capability policy resource registry is invalid")
+        resource_registry: dict[str, ResourceGrant] = {}
+        for raw_id, value in resources_raw.items():
+            resource_id = _identifier(raw_id, field="resource_id")
+            if not isinstance(value, dict) or set(value) != _RESOURCE_KEYS:
+                raise CapabilityPolicyError(
+                    f"resource grant {resource_id!r} fields drifted"
+                )
+            if value.get("kind") != "browser-devserver":
+                raise CapabilityPolicyError(
+                    f"resource grant {resource_id!r} kind is unsupported"
+                )
+            if value.get("manifest_path") != "config/worker_browser_b1_control_room_devserver.json":
+                raise CapabilityPolicyError(
+                    f"resource grant {resource_id!r} manifest path is not reviewed"
+                )
+            manifest_digest = _digest_value(
+                value.get("manifest_digest"),
+                field=f"resources.{resource_id}.manifest_digest",
+            )
+            runtime_root = str(value.get("runtime_root") or "")
+            runtime_manifest_digest = _digest_value(
+                value.get("runtime_manifest_digest"),
+                field=f"resources.{resource_id}.runtime_manifest_digest",
+            )
+            runtime_manifest_path = str(value.get("runtime_manifest_path") or "")
+            artifact_root = str(value.get("artifact_root") or "")
+            if runtime_root != "/Volumes/Mastermind/worker-browser-b1/runtime":
+                raise CapabilityPolicyError(
+                    f"resource grant {resource_id!r} runtime root is not reviewed"
+                )
+            if artifact_root != "/Volumes/Mastermind/worker-browser-b1/artifacts":
+                raise CapabilityPolicyError(
+                    f"resource grant {resource_id!r} artifact root is not reviewed"
+                )
+            if runtime_manifest_path != (
+                "/Volumes/Mastermind/worker-browser-b1/runtime/"
+                "worker-browser-b1-install-manifest.json"
+            ):
+                raise CapabilityPolicyError(
+                    f"resource grant {resource_id!r} runtime manifest is not reviewed"
+                )
+            if value.get("browser") != "chromium" or value.get("browser_revision") != "1237":
+                raise CapabilityPolicyError(
+                    f"resource grant {resource_id!r} browser pin is unsupported"
+                )
+            normalized_resource = {
+                "resource_id": resource_id,
+                "kind": "browser-devserver",
+                "manifest_path": value["manifest_path"],
+                "manifest_digest": manifest_digest,
+                "runtime_root": runtime_root,
+                "runtime_manifest_digest": runtime_manifest_digest,
+                "runtime_manifest_path": runtime_manifest_path,
+                "artifact_root": artifact_root,
+                "browser": "chromium",
+                "browser_revision": "1237",
+            }
+            resource_registry[resource_id] = ResourceGrant(
+                resource_id=resource_id,
+                kind="browser-devserver",
+                manifest_path=str(value["manifest_path"]),
+                manifest_digest=manifest_digest,
+                runtime_root=runtime_root,
+                runtime_manifest_digest=runtime_manifest_digest,
+                runtime_manifest_path=runtime_manifest_path,
+                artifact_root=artifact_root,
+                browser="chromium",
+                browser_revision="1237",
+                grant_digest=_digest(normalized_resource),
             )
         profiles_raw = raw.get("profiles")
         if not isinstance(profiles_raw, dict) or not profiles_raw or len(profiles_raw) > 32:
@@ -879,6 +1116,9 @@ class ExecutionCapabilityRegistry:
             mcp_server_ids = _identities(
                 value.get("mcp_servers"), field=f"profiles.{profile_id}.mcp_servers"
             )
+            resource_ids = _identities(
+                value.get("resources"), field=f"profiles.{profile_id}.resources"
+            )
             plugins = _identities(
                 value.get("plugins"), field=f"profiles.{profile_id}.plugins"
             )
@@ -891,6 +1131,12 @@ class ExecutionCapabilityRegistry:
                     f"profile {profile_id!r} references unknown MCP grants: "
                     + ", ".join(unknown_mcp)
                 )
+            unknown_resources = sorted(set(resource_ids) - set(resource_registry))
+            if unknown_resources:
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} references unknown resources: "
+                    + ", ".join(unknown_resources)
+                )
             if plugins:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot grant plugins before "
@@ -899,10 +1145,14 @@ class ExecutionCapabilityRegistry:
             resolved_mcp = tuple(
                 mcp_registry[item] for item in mcp_server_ids
             )
+            resolved_resources = tuple(
+                resource_registry[item] for item in resource_ids
+            )
             required = set(
                 (
                     *skills,
                     *(grant.config_name for grant in resolved_mcp),
+                    *(grant.resource_id for grant in resolved_resources),
                     *plugins,
                 )
             )
@@ -911,9 +1161,33 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} both requires and forbids: {', '.join(collision)}"
                 )
-            if execution_surface == "codex-exec" and (mcp_server_ids or plugins):
+            if execution_surface == "codex-exec" and (
+                mcp_server_ids or resource_ids or plugins
+            ):
                 raise CapabilityPolicyError(
-                    f"profile {profile_id!r} cannot grant MCP/plugins to sealed codex-exec"
+                    f"profile {profile_id!r} cannot grant MCP/plugins or resources "
+                    "to sealed codex-exec"
+                )
+            is_browser_profile = profile_id == "operator.browser.local-review.v1"
+            if is_browser_profile:
+                if (
+                    mcp_server_ids
+                    != (
+                        "openai-developer-docs-v1",
+                        "playwright-worker-browser-b1",
+                    )
+                    or resource_ids != ("worker-browser-b1-local",)
+                    or network_policy != "loopback-browser-only"
+                    or execution_surface != "codex-app-server"
+                    or native_helper_policy is not NativeHelperPolicy.DISABLED
+                ):
+                    raise CapabilityPolicyError(
+                        "browser profile must preserve the exact reviewed rich-operator "
+                        "MCP/resource/network ceiling"
+                    )
+            elif resource_ids or network_policy == "loopback-browser-only":
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} cannot inherit browser resource authority"
                 )
             if write_capable and sandbox_policy != "workspace-write":
                 raise CapabilityPolicyError(
@@ -967,6 +1241,13 @@ class ExecutionCapabilityRegistry:
                     }
                     for grant in resolved_mcp
                 ],
+                "resources": [
+                    {
+                        "resource_id": grant.resource_id,
+                        "grant_digest": grant.grant_digest,
+                    }
+                    for grant in resolved_resources
+                ],
                 "plugins": list(plugins),
                 "forbidden": list(forbidden),
             }
@@ -983,6 +1264,7 @@ class ExecutionCapabilityRegistry:
                 native_helper=native_helper,
                 skills=skills,
                 mcp_server_grants=resolved_mcp,
+                resource_grants=resolved_resources,
                 plugins=plugins,
                 forbidden=forbidden,
                 profile_digest=_digest(normalized),
@@ -995,6 +1277,10 @@ class ExecutionCapabilityRegistry:
             "mcp_servers": {
                 capability_id: grant.grant_digest
                 for capability_id, grant in sorted(mcp_registry.items())
+            },
+            "resources": {
+                resource_id: grant.grant_digest
+                for resource_id, grant in sorted(resource_registry.items())
             },
             "plugins": {},
             "profiles": {
@@ -1010,6 +1296,7 @@ class ExecutionCapabilityRegistry:
             lifecycle_authority="executive_os",
             production_armed=False,
             mcp_servers=mcp_registry,
+            resources=resource_registry,
             profiles=profiles,
             policy_digest=_digest(normalized_policy),
             source_path=source,
@@ -1034,6 +1321,7 @@ __all__ = [
     "ExecutionCapabilityRegistry",
     "McpServerGrant",
     "NativeHelperGrant",
+    "ResourceGrant",
     "app_server_security_config_digest",
     "app_server_security_config_projection",
     "observed_mcp_tool_schema_digest",
