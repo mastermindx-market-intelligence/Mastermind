@@ -155,10 +155,10 @@ class Graph:
     peak_frontier: int
 
 
-def _disabled_reason_codes(transition: Transition, guard_failures: tuple[GuardFailure, ...]) -> tuple[str, ...]:
+def _disabled_reason_codes(guard_failures: tuple[GuardFailure, ...]) -> tuple[str, ...]:
     if not guard_failures:
         return ()
-    return tuple(sorted({"GUARD_NOT_SATISFIED"}))
+    return ("GUARD_NOT_SATISFIED",)
 
 
 def explore(model: OperationAssuranceModel) -> Graph:
@@ -206,7 +206,7 @@ def explore(model: OperationAssuranceModel) -> Graph:
                         else:
                             round_candidates.setdefault(succ, []).append((prefix_of[s] + (t.transition_id,), s, t.transition_id))
                 else:
-                    dis[t.transition_id] = (_disabled_reason_codes(t, failures), failures)
+                    dis[t.transition_id] = (_disabled_reason_codes(failures), failures)
             enabled_at[s] = tuple(en)
             disabled_at[s] = dis
 
@@ -370,6 +370,93 @@ def _path_from_prefix(graph: Graph, target: State) -> list[tuple[State, str, Sta
     return steps
 
 
+def _transitions_refs(model: OperationAssuranceModel, transition_ids) -> tuple[str, ...]:
+    """Deduped, deterministically ordered source_refs of the named transitions."""
+    by_id = {t.transition_id: t for t in model.transitions}
+    refs: set[str] = set()
+    for tid in transition_ids:
+        t = by_id.get(tid)
+        if t is not None:
+            refs.update(t.source_refs)
+    return tuple(sorted(refs))
+
+
+def _witness_transition_ids(prefix_path, cycle_path) -> tuple[str, ...]:
+    ids = [tid for (_f, tid, _t) in prefix_path] + [tid for (_f, tid, _t) in cycle_path]
+    return tuple(ids)
+
+
+def _witness_involved_variables(model: OperationAssuranceModel, transition_ids) -> frozenset[str]:
+    """The state variables referenced (in a guard or an effect) by the named
+    transitions — used to decide whether a model gap's declared
+    affects_variable_ids overlaps a witness (model-fidelity amendment
+    Section 5.1)."""
+    by_id = {t.transition_id: t for t in model.transitions}
+    out: set[str] = set()
+    for tid in transition_ids:
+        t = by_id.get(tid)
+        if t is None:
+            continue
+        for g in t.guards:
+            out.add(g.variable)
+        for e in t.effects:
+            out.add(e.variable)
+    return frozenset(out)
+
+
+def _gap_relevant_to(gap: "ModelGap", property_id: str, transition_ids: frozenset[str], variable_ids: frozenset[str]) -> bool:
+    """A load-bearing gap is relevant to a witness/property when it directly
+    names the property, or when its declared affected transitions/variables
+    intersect the ones actually involved in that witness's steps (model-
+    fidelity amendment Section 5.1 item 5: relevance is trace/property-
+    specific, not a blanket rule)."""
+    if property_id in gap.affects_property_ids:
+        return True
+    if set(gap.affects_transition_ids) & transition_ids:
+        return True
+    if set(gap.affects_variable_ids) & variable_ids:
+        return True
+    return False
+
+
+def _all_source_refs_by_id(model: OperationAssuranceModel) -> dict[str, tuple[str, ...]]:
+    """A best-effort id->source_refs lookup spanning every named model element,
+    used to attribute repair candidates to their target elements (trusted-input
+    Section 4 / finalization Section 6: 'source-attributed witness')."""
+    out: dict[str, tuple[str, ...]] = {}
+    for t in model.transitions:
+        out.setdefault(t.transition_id, t.source_refs)
+    for o in model.terminal_outcomes + model.recurring_progress_outcomes:
+        out.setdefault(o.outcome_id, o.source_refs)
+    for ob in model.obligations:
+        out.setdefault(ob.obligation_id, ob.source_refs)
+    for r in model.resources:
+        out.setdefault(r.resource_id, r.source_refs)
+    for g in model.external_gates:
+        out.setdefault(g.gate_id, g.source_refs)
+    for f in model.fairness_assumptions:
+        out.setdefault(f.fairness_id, f.source_refs)
+    for a in model.environment_assumptions:
+        out.setdefault(a.assumption_id, a.source_refs)
+    for p in model.safety_properties:
+        out.setdefault(p.property_id, p.source_refs)
+    return out
+
+
+def _repair_refs(model: OperationAssuranceModel, target_ids, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    """A repair candidate's own source_refs: the union of its named target
+    elements' declared refs, falling back to the witness's own aggregated
+    refs when the candidate names no specific target (e.g. a whole-region
+    repair like 'add a reachable boundary from this state')."""
+    lookup = _all_source_refs_by_id(model)
+    refs: set[str] = set()
+    for tid in target_ids:
+        refs.update(lookup.get(tid, ()))
+    if not refs:
+        return fallback
+    return tuple(sorted(refs))
+
+
 def _build_witness(
     graph: Graph,
     model: OperationAssuranceModel,
@@ -382,6 +469,7 @@ def _build_witness(
     invalidating_gap_ids: tuple[str, ...],
     limitations: tuple[str, ...],
     repair_candidates: tuple[RepairCandidate, ...],
+    source_refs: tuple[str, ...] = (),
 ) -> Counterexample:
     initial_sd = _state_dict(graph.initial, graph.var_order)
     prefix_ids = tuple(tid for (_f, tid, _t) in prefix_path)
@@ -410,7 +498,7 @@ def _build_witness(
         cycle=cycle_ids,
         state_delta_per_step=tuple(deltas),
         enabled_and_disabled_transition_reasons=tuple(reasons),
-        source_refs=(),
+        source_refs=source_refs,
         repair_candidates=repair_candidates,
         limitations=limitations,
     )
@@ -498,22 +586,38 @@ def _search_fair_lasso(
     entry_candidates: list[State],
     region_predicate,
     fair_transition_ids: frozenset[str],
+    max_product_states: int,
 ) -> LassoResult:
     """For each candidate entry state, BFS the augmented product
     (state, seen_or_disabled_mask) restricted to ``region_predicate`` states,
     searching for the shortest closed walk back to the entry with every
     fair transition seen-or-disabled. Returns the globally shortest result
     across all entries (prefix length via graph.prefix_of + cycle length),
-    tie-broken by canonical transition sequence then state fingerprint."""
+    tie-broken by canonical transition sequence then state fingerprint.
+
+    The augmented (state, mask) product is itself bounded by
+    ``max_product_states`` distinct visited nodes, separately from base-graph
+    completeness (trusted-input clarification Section 3: "the existing
+    max_states limit also bounds each augmented fairness-product ... search").
+    A fully materialized definite witness found before the bound is hit
+    remains valid regardless of what the search could not finish elsewhere
+    (found=True always stands); ``product_complete=False`` only affects the
+    no-witness (absence) case, which must then report UNKNOWN rather than
+    proof."""
     fair_list = sorted(fair_transition_ids)
     bit_of = {tid: i for i, tid in enumerate(fair_list)}
     full_mask = (1 << len(fair_list)) - 1 if fair_list else 0
 
     best: tuple | None = None  # (total_len, prefix_ids, cycle_ids, entry, cycle_path)
+    visited_product_nodes = 0
+    product_complete = True
 
     for entry in sorted(set(entry_candidates)):
         if not region_predicate(entry):
             continue
+        if visited_product_nodes >= max_product_states:
+            product_complete = False
+            break
 
         def local_mask(state: State) -> int:
             m = 0
@@ -531,9 +635,11 @@ def _search_fair_lasso(
         # silently reconstruct an empty path. Keeping the closing edge out
         # of ``parent`` sidesteps that collision entirely.
         parent: dict[tuple[State, int], tuple[State, int, str] | None] = {(entry, start_mask): None}
+        visited_product_nodes += 1
         queue: list[tuple[State, int]] = [(entry, start_mask)]
         qi = 0
         closing: tuple[State, int, str] | None = None
+        bound_hit = False
         while qi < len(queue) and closing is None:
             state, mask = queue[qi]
             qi += 1
@@ -549,10 +655,21 @@ def _search_fair_lasso(
                     break
                 key = (succ, new_mask)
                 if key not in parent:
+                    if visited_product_nodes >= max_product_states:
+                        bound_hit = True
+                        continue
                     parent[key] = (state, mask, tid)
+                    visited_product_nodes += 1
                     queue.append(key)
+            if bound_hit and closing is None:
+                # cannot expand further within budget; this entry's absence
+                # (no witness) can no longer be claimed complete.
+                product_complete = False
 
         if closing is None:
+            if bound_hit:
+                product_complete = False
+                break
             continue
 
         from_state, from_mask, closing_tid = closing
@@ -574,10 +691,16 @@ def _search_fair_lasso(
             best = candidate
 
     if best is None:
-        return LassoResult(found=False)
+        return LassoResult(found=False, product_complete=product_complete)
     _total, _pfx, _cyc, entry, cycle_path = best
     prefix_path = _path_from_prefix(graph, entry)
-    return LassoResult(found=True, prefix_path=prefix_path, cycle_path=cycle_path, used_fairness=bool(fair_list))
+    return LassoResult(
+        found=True,
+        prefix_path=prefix_path,
+        cycle_path=cycle_path,
+        used_fairness=bool(fair_list),
+        product_complete=product_complete,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -594,22 +717,23 @@ class Evaluated:
     reason_codes: tuple[str, ...]
     counterexample: Counterexample | None
     used_fairness: bool = False
+    source_refs: tuple[str, ...] = ()
 
 
-def _mk_pass(pid: str, kind: str, complete: bool = True, reason_codes: tuple[str, ...] = ()) -> Evaluated:
-    return Evaluated(pid, kind, "PASS", complete, reason_codes, None)
+def _mk_pass(pid: str, kind: str, complete: bool = True, reason_codes: tuple[str, ...] = (), source_refs: tuple[str, ...] = ()) -> Evaluated:
+    return Evaluated(pid, kind, "PASS", complete, reason_codes, None, source_refs=source_refs)
 
 
-def _mk_na(pid: str, kind: str, reason_codes: tuple[str, ...]) -> Evaluated:
-    return Evaluated(pid, kind, "NOT_APPLICABLE", True, reason_codes, None)
+def _mk_na(pid: str, kind: str, reason_codes: tuple[str, ...], source_refs: tuple[str, ...] = ()) -> Evaluated:
+    return Evaluated(pid, kind, "NOT_APPLICABLE", True, reason_codes, None, source_refs=source_refs)
 
 
-def _mk_unknown(pid: str, kind: str, reason_codes: tuple[str, ...]) -> Evaluated:
-    return Evaluated(pid, kind, "UNKNOWN", False, reason_codes, None)
+def _mk_unknown(pid: str, kind: str, reason_codes: tuple[str, ...], source_refs: tuple[str, ...] = ()) -> Evaluated:
+    return Evaluated(pid, kind, "UNKNOWN", False, reason_codes, None, source_refs=source_refs)
 
 
 def _mk_fail(pid: str, kind: str, cx: Counterexample, complete: bool = True) -> Evaluated:
-    return Evaluated(pid, kind, "FAIL", complete, (), cx)
+    return Evaluated(pid, kind, "FAIL", complete, (), cx, source_refs=cx.source_refs)
 
 
 def _eval_state_forbidden(model, graph: Graph) -> list[Evaluated]:
@@ -622,6 +746,7 @@ def _eval_state_forbidden(model, graph: Graph) -> list[Evaluated]:
             violating.sort(key=lambda s: (len(graph.prefix_of[s]), graph.prefix_of[s]))
             target = violating[0]
             prefix_path = _path_from_prefix(graph, target)
+            refs = tuple(sorted(set(p.source_refs) | set(_transitions_refs(model, _witness_transition_ids(prefix_path, [])))))
             cx = _build_witness(
                 graph,
                 model,
@@ -632,17 +757,18 @@ def _eval_state_forbidden(model, graph: Graph) -> list[Evaluated]:
                 realizability="DECLARED_MODEL_ONLY",
                 invalidating_gap_ids=(),
                 limitations=(),
+                source_refs=refs,
                 repair_candidates=(
-                    RepairCandidate(f"rep_{p.property_id}_state", "ADD_OR_CORRECT_TRANSITION", (p.property_id,), "revise the model/source to avoid this state", ()),
+                    RepairCandidate(f"rep_{p.property_id}_state", "ADD_OR_CORRECT_TRANSITION", (p.property_id,), "revise the model/source to avoid this state", p.source_refs),
                 ),
             )
             out.append(_mk_fail(p.property_id, "AUTHORED_STATE_SAFETY", cx))
         else:
             complete = graph.base_graph_complete
             out.append(
-                _mk_pass(p.property_id, "AUTHORED_STATE_SAFETY", complete)
+                _mk_pass(p.property_id, "AUTHORED_STATE_SAFETY", complete, source_refs=p.source_refs)
                 if complete
-                else _mk_unknown(p.property_id, "AUTHORED_STATE_SAFETY", ("BOUNDED_EXPLORATION",))
+                else _mk_unknown(p.property_id, "AUTHORED_STATE_SAFETY", ("BOUNDED_EXPLORATION",), source_refs=p.source_refs)
             )
     return out
 
@@ -665,6 +791,7 @@ def _eval_transition_forbidden(model, graph: Graph) -> list[Evaluated]:
             violating_edges.sort(key=lambda e: (len(graph.prefix_of[e[0]]) + 1, graph.prefix_of[e[0]] + (e[1],)))
             s, tid, s2 = violating_edges[0]
             prefix_path = _path_from_prefix(graph, s) + [(s, tid, s2)]
+            refs = tuple(sorted(set(p.source_refs) | set(_transitions_refs(model, _witness_transition_ids(prefix_path, [])))))
             cx = _build_witness(
                 graph,
                 model,
@@ -675,17 +802,18 @@ def _eval_transition_forbidden(model, graph: Graph) -> list[Evaluated]:
                 realizability="DECLARED_MODEL_ONLY",
                 invalidating_gap_ids=(),
                 limitations=(),
+                source_refs=refs,
                 repair_candidates=(
-                    RepairCandidate(f"rep_{p.property_id}_transition", "RECONCILE_EFFECT", (tid,), "forbid or gate this transition under the stated condition", ()),
+                    RepairCandidate(f"rep_{p.property_id}_transition", "RECONCILE_EFFECT", (tid,), "forbid or gate this transition under the stated condition", _repair_refs(model, (tid,), refs)),
                 ),
             )
             out.append(_mk_fail(p.property_id, "AUTHORED_TRANSITION_SAFETY", cx))
         else:
             complete = graph.base_graph_complete
             out.append(
-                _mk_pass(p.property_id, "AUTHORED_TRANSITION_SAFETY", complete)
+                _mk_pass(p.property_id, "AUTHORED_TRANSITION_SAFETY", complete, source_refs=p.source_refs)
                 if complete
-                else _mk_unknown(p.property_id, "AUTHORED_TRANSITION_SAFETY", ("BOUNDED_EXPLORATION",))
+                else _mk_unknown(p.property_id, "AUTHORED_TRANSITION_SAFETY", ("BOUNDED_EXPLORATION",), source_refs=p.source_refs)
             )
     return out
 
@@ -703,6 +831,7 @@ def _eval_option_to_complete(model, graph: Graph, boundaries: Boundaries) -> Eva
         failing.sort(key=lambda s: (len(graph.prefix_of[s]), graph.prefix_of[s]))
         target = failing[0]
         prefix_path = _path_from_prefix(graph, target)
+        refs = _transitions_refs(model, _witness_transition_ids(prefix_path, []))
         cx = _build_witness(
             graph,
             model,
@@ -713,8 +842,9 @@ def _eval_option_to_complete(model, graph: Graph, boundaries: Boundaries) -> Eva
             realizability="DECLARED_MODEL_ONLY",
             invalidating_gap_ids=(),
             limitations=(),
+            source_refs=refs,
             repair_candidates=(
-                RepairCandidate("rep_option_to_complete", "ADD_OR_CORRECT_TERMINAL_OUTCOME", (), "add a reachable terminal, gate, wait, or recurring boundary from this state", ()),
+                RepairCandidate("rep_option_to_complete", "ADD_OR_CORRECT_TERMINAL_OUTCOME", (), "add a reachable terminal, gate, wait, or recurring boundary from this state", refs),
             ),
         )
         return _mk_fail("OPTION_TO_COMPLETE", "OPTION_TO_COMPLETE", cx)
@@ -724,37 +854,67 @@ def _eval_option_to_complete(model, graph: Graph, boundaries: Boundaries) -> Eva
 
 
 def _residue_violation(sd: dict[str, str], model, matching: tuple[Outcome, ...]) -> str | None:
-    owned_obl = set()
-    owned_res = set()
+    """A pending persistent obligation/resource is excused only when EVERY
+    matching terminal outcome owns it (intersection, not union). When some
+    but not all matching outcomes own it, that is a genuine
+    AMBIGUOUS_TERMINAL_OWNERSHIP defect: the reached terminal set cannot
+    agree on who is responsible for the residue (fail-closed per the
+    ambiguity law; two overlapping same-kind terminals each owning a
+    DIFFERENT pending obligation must not silently union into a pass)."""
+    owned_obl_by_all: set[str] | None = None
+    owned_obl_by_any: set[str] = set()
+    owned_res_by_all: set[str] | None = None
+    owned_res_by_any: set[str] = set()
     for o in matching:
-        owned_obl |= set(o.owned_persistent_obligation_ids)
-        owned_res |= set(o.owned_persistent_resource_ids)
+        obl_set = set(o.owned_persistent_obligation_ids)
+        res_set = set(o.owned_persistent_resource_ids)
+        owned_obl_by_any |= obl_set
+        owned_res_by_any |= res_set
+        owned_obl_by_all = obl_set if owned_obl_by_all is None else (owned_obl_by_all & obl_set)
+        owned_res_by_all = res_set if owned_res_by_all is None else (owned_res_by_all & res_set)
+    owned_obl_by_all = owned_obl_by_all if owned_obl_by_all is not None else set()
+    owned_res_by_all = owned_res_by_all if owned_res_by_all is not None else set()
+
     for ob in model.obligations:
         pending = sd[ob.state_variable] in ob.pending_values
         if not pending:
             continue
         if not ob.persistent:
             return f"NON_PERSISTENT_OBLIGATION_PENDING:{ob.obligation_id}"
-        if ob.obligation_id not in owned_obl:
-            return f"UNOWNED_PERSISTENT_OBLIGATION:{ob.obligation_id}"
+        if ob.obligation_id in owned_obl_by_all:
+            continue
+        if ob.obligation_id in owned_obl_by_any:
+            return f"AMBIGUOUS_TERMINAL_OWNERSHIP:{ob.obligation_id}"
+        return f"UNOWNED_PERSISTENT_OBLIGATION:{ob.obligation_id}"
     for r in model.resources:
         held = sd[r.holder_variable] not in r.released_values
         if not held:
             continue
         if not r.persistent:
             return f"NON_PERSISTENT_RESOURCE_HELD:{r.resource_id}"
-        if r.resource_id not in owned_res:
-            return f"UNOWNED_PERSISTENT_RESOURCE:{r.resource_id}"
+        if r.resource_id in owned_res_by_all:
+            continue
+        if r.resource_id in owned_res_by_any:
+            return f"AMBIGUOUS_TERMINAL_OWNERSHIP:{r.resource_id}"
+        return f"UNOWNED_PERSISTENT_RESOURCE:{r.resource_id}"
+    return None
+
+
+def _reason_target_id(reason: str) -> str | None:
+    if ":" in reason:
+        return reason.split(":", 1)[1]
     return None
 
 
 def _eval_proper_completion(model, graph: Graph) -> Evaluated:
     failing = []
+    matching_by_state: dict[State, tuple[Outcome, ...]] = {}
     for s in graph.discovered:
         sd = _state_dict(s, graph.var_order)
         matching = _matching_outcomes(sd, model.terminal_outcomes)
         if not matching:
             continue
+        matching_by_state[s] = matching
         if len(matching) > 1 and len({o.kind for o in matching}) > 1:
             failing.append((s, "AMBIGUOUS_TERMINAL_CLASSIFICATION"))
             continue
@@ -764,10 +924,21 @@ def _eval_proper_completion(model, graph: Graph) -> Evaluated:
         reason = _residue_violation(sd, model, matching)
         if reason:
             failing.append((s, reason))
+    obligations_by_id = {ob.obligation_id: ob for ob in model.obligations}
+    resources_by_id = {r.resource_id: r for r in model.resources}
     if failing:
         failing.sort(key=lambda item: (len(graph.prefix_of[item[0]]), graph.prefix_of[item[0]]))
         target, reason = failing[0]
         prefix_path = _path_from_prefix(graph, target)
+        refs = set(_transitions_refs(model, _witness_transition_ids(prefix_path, [])))
+        for o in matching_by_state.get(target, ()):
+            refs.update(o.source_refs)
+        target_id = _reason_target_id(reason)
+        if target_id in obligations_by_id:
+            refs.update(obligations_by_id[target_id].source_refs)
+        if target_id in resources_by_id:
+            refs.update(resources_by_id[target_id].source_refs)
+        refs = tuple(sorted(refs))
         cx = _build_witness(
             graph,
             model,
@@ -778,14 +949,24 @@ def _eval_proper_completion(model, graph: Graph) -> Evaluated:
             realizability="DECLARED_MODEL_ONLY",
             invalidating_gap_ids=(),
             limitations=(reason,),
+            source_refs=refs,
             repair_candidates=(
-                RepairCandidate("rep_proper_completion", "DISCHARGE_OBLIGATION", (), "discharge pending non-persistent residue or explicitly own it as persistent before terminal completion", ()),
+                RepairCandidate(
+                    "rep_proper_completion",
+                    "DISCHARGE_OBLIGATION",
+                    (target_id,) if target_id else (),
+                    "discharge pending non-persistent residue or explicitly own it as persistent before terminal completion",
+                    _repair_refs(model, (target_id,) if target_id else (), refs),
+                ),
             ),
         )
         return _mk_fail("PROPER_COMPLETION", "PROPER_COMPLETION", cx)
+    pass_refs = tuple(sorted(
+        set().union(*(o.source_refs for o in model.terminal_outcomes), *(ob.source_refs for ob in model.obligations), *(r.source_refs for r in model.resources))
+    )) if (model.terminal_outcomes or model.obligations or model.resources) else ()
     if not graph.base_graph_complete:
-        return _mk_unknown("PROPER_COMPLETION", "PROPER_COMPLETION", ("BOUNDED_EXPLORATION",))
-    return _mk_pass("PROPER_COMPLETION", "PROPER_COMPLETION")
+        return _mk_unknown("PROPER_COMPLETION", "PROPER_COMPLETION", ("BOUNDED_EXPLORATION",), source_refs=pass_refs)
+    return _mk_pass("PROPER_COMPLETION", "PROPER_COMPLETION", source_refs=pass_refs)
 
 
 def _eval_no_dead_required_transition(model, graph: Graph) -> Evaluated:
@@ -798,6 +979,7 @@ def _eval_no_dead_required_transition(model, graph: Graph) -> Evaluated:
         return _mk_pass("NO_DEAD_REQUIRED_TRANSITION", "NO_DEAD_REQUIRED_TRANSITION")
     if not graph.base_graph_complete:
         return _mk_unknown("NO_DEAD_REQUIRED_TRANSITION", "NO_DEAD_REQUIRED_TRANSITION", ("BOUNDED_EXPLORATION",))
+    refs = _transitions_refs(model, (missing[0],))
     cx = _build_witness(
         graph,
         model,
@@ -808,8 +990,9 @@ def _eval_no_dead_required_transition(model, graph: Graph) -> Evaluated:
         realizability="DECLARED_MODEL_ONLY",
         invalidating_gap_ids=(),
         limitations=(f"MISSING_TRANSITION:{missing[0]}",),
+        source_refs=refs,
         repair_candidates=(
-            RepairCandidate("rep_dead_transition", "ADD_OR_CORRECT_TRANSITION", (missing[0],), "make this required transition reachable or remove required_reachable", ()),
+            RepairCandidate("rep_dead_transition", "ADD_OR_CORRECT_TRANSITION", (missing[0],), "make this required transition reachable or remove required_reachable", refs),
         ),
     )
     return _mk_fail("NO_DEAD_REQUIRED_TRANSITION", "NO_DEAD_REQUIRED_TRANSITION", cx)
@@ -817,10 +1000,13 @@ def _eval_no_dead_required_transition(model, graph: Graph) -> Evaluated:
 
 def _eval_no_post_terminal_transition(model, graph: Graph) -> Evaluated:
     failing = []
+    matching_by_state: dict[State, tuple[Outcome, ...]] = {}
     for s in graph.discovered:
         sd = _state_dict(s, graph.var_order)
-        if not _matching_outcomes(sd, model.terminal_outcomes):
+        matching = _matching_outcomes(sd, model.terminal_outcomes)
+        if not matching:
             continue
+        matching_by_state[s] = matching
         if graph.enabled_at.get(s, ()):
             failing.append(s)
     if failing:
@@ -830,6 +1016,10 @@ def _eval_no_post_terminal_transition(model, graph: Graph) -> Evaluated:
         enabled_tid = graph.enabled_at[target][0]
         succ = dict(graph.succ_of.get(target, [])).get(enabled_tid)
         extra = [(target, enabled_tid, succ)] if succ is not None else []
+        refs = set(_transitions_refs(model, _witness_transition_ids(prefix_path, []) + (enabled_tid,)))
+        for o in matching_by_state.get(target, ()):
+            refs.update(o.source_refs)
+        refs = tuple(sorted(refs))
         cx = _build_witness(
             graph,
             model,
@@ -840,14 +1030,16 @@ def _eval_no_post_terminal_transition(model, graph: Graph) -> Evaluated:
             realizability="DECLARED_MODEL_ONLY",
             invalidating_gap_ids=(),
             limitations=(),
+            source_refs=refs,
             repair_candidates=(
-                RepairCandidate("rep_terminal_absorption", "ADD_OR_CORRECT_TERMINAL_OUTCOME", (enabled_tid,), "remove or guard this transition so terminal states are absorbing", ()),
+                RepairCandidate("rep_terminal_absorption", "ADD_OR_CORRECT_TERMINAL_OUTCOME", (enabled_tid,), "remove or guard this transition so terminal states are absorbing", _repair_refs(model, (enabled_tid,), refs)),
             ),
         )
         return _mk_fail("NO_POST_TERMINAL_TRANSITION", "NO_POST_TERMINAL_TRANSITION", cx)
+    pass_refs = tuple(sorted(set().union(*(o.source_refs for o in model.terminal_outcomes)))) if model.terminal_outcomes else ()
     if not graph.base_graph_complete:
-        return _mk_unknown("NO_POST_TERMINAL_TRANSITION", "NO_POST_TERMINAL_TRANSITION", ("BOUNDED_EXPLORATION",))
-    return _mk_pass("NO_POST_TERMINAL_TRANSITION", "NO_POST_TERMINAL_TRANSITION")
+        return _mk_unknown("NO_POST_TERMINAL_TRANSITION", "NO_POST_TERMINAL_TRANSITION", ("BOUNDED_EXPLORATION",), source_refs=pass_refs)
+    return _mk_pass("NO_POST_TERMINAL_TRANSITION", "NO_POST_TERMINAL_TRANSITION", source_refs=pass_refs)
 
 
 def _eval_gate_or_wait_return_path_valid(model, graph: Graph, boundaries: Boundaries) -> Evaluated:
@@ -860,6 +1052,7 @@ def _eval_gate_or_wait_return_path_valid(model, graph: Graph, boundaries: Bounda
         failing.sort(key=lambda item: (len(graph.prefix_of[item[0]]), graph.prefix_of[item[0]]))
         target, gate = failing[0]
         prefix_path = _path_from_prefix(graph, target)
+        refs = tuple(sorted(set(_transitions_refs(model, _witness_transition_ids(prefix_path, []))) | set(gate.source_refs)))
         cx = _build_witness(
             graph,
             model,
@@ -870,19 +1063,22 @@ def _eval_gate_or_wait_return_path_valid(model, graph: Graph, boundaries: Bounda
             realizability="DECLARED_MODEL_ONLY",
             invalidating_gap_ids=(),
             limitations=(f"EXTERNAL_GATE_INCOMPLETE:{gate.gate_id}",),
+            source_refs=refs,
             repair_candidates=(
-                RepairCandidate("rep_gate_return", "ADD_OR_CORRECT_GATE_RETURN", (gate.gate_id,), "ensure a release transition is enabled and valid at every state matching this gate", ()),
+                RepairCandidate("rep_gate_return", "ADD_OR_CORRECT_GATE_RETURN", (gate.gate_id,), "ensure a release transition is enabled and valid at every state matching this gate", gate.source_refs),
             ),
         )
         return _mk_fail("GATE_OR_WAIT_RETURN_PATH_VALID", "GATE_OR_WAIT_RETURN_PATH_VALID", cx)
+    gate_refs = tuple(sorted(set().union(*(g.source_refs for g in model.external_gates)))) if model.external_gates else ()
     if not graph.base_graph_complete:
-        return _mk_unknown("GATE_OR_WAIT_RETURN_PATH_VALID", "GATE_OR_WAIT_RETURN_PATH_VALID", ("BOUNDED_EXPLORATION",))
-    return _mk_pass("GATE_OR_WAIT_RETURN_PATH_VALID", "GATE_OR_WAIT_RETURN_PATH_VALID")
+        return _mk_unknown("GATE_OR_WAIT_RETURN_PATH_VALID", "GATE_OR_WAIT_RETURN_PATH_VALID", ("BOUNDED_EXPLORATION",), source_refs=gate_refs)
+    return _mk_pass("GATE_OR_WAIT_RETURN_PATH_VALID", "GATE_OR_WAIT_RETURN_PATH_VALID", source_refs=gate_refs)
 
 
 def _eval_fairness_realizable(model, graph: Graph) -> tuple[Evaluated, frozenset[str]]:
     if not model.fairness_assumptions:
         return _mk_na("FAIRNESS_REALIZABLE", "FAIRNESS_REALIZABLE", ("NO_FAIRNESS_DECLARED",)), frozenset()
+    fairness_refs = tuple(sorted(set().union(*(f.source_refs for f in model.fairness_assumptions))))
     used_tids = {tid for (_s, tid, _s2) in graph.all_edges}
     realizable_ids = set()
     unrealizable_ids = []
@@ -895,6 +1091,11 @@ def _eval_fairness_realizable(model, graph: Graph) -> tuple[Evaluated, frozenset
         else:
             unrealizable_ids.append(f.fairness_id)
     if unrealizable_ids:
+        by_id = {f.fairness_id: f for f in model.fairness_assumptions}
+        refs = set(fairness_refs)
+        for fid in unrealizable_ids:
+            refs.update(_transitions_refs(model, by_id[fid].transition_ids))
+        refs = tuple(sorted(refs))
         cx = _build_witness(
             graph,
             model,
@@ -905,23 +1106,28 @@ def _eval_fairness_realizable(model, graph: Graph) -> tuple[Evaluated, frozenset
             realizability="DECLARED_MODEL_ONLY",
             invalidating_gap_ids=(),
             limitations=(f"UNREALIZABLE_FAIRNESS:{unrealizable_ids[0]}",),
+            source_refs=refs,
             repair_candidates=(
-                RepairCandidate("rep_fairness", "REVISE_FAIRNESS_ASSUMPTION", tuple(unrealizable_ids), "the declared fairness assumption never becomes enabled anywhere reachable", ()),
+                RepairCandidate("rep_fairness", "REVISE_FAIRNESS_ASSUMPTION", tuple(unrealizable_ids), "the declared fairness assumption never becomes enabled anywhere reachable", _repair_refs(model, tuple(unrealizable_ids), refs)),
             ),
         )
         return _mk_fail("FAIRNESS_REALIZABLE", "FAIRNESS_REALIZABLE", cx), frozenset(realizable_ids)
     if unknown_any or not graph.base_graph_complete:
-        return _mk_unknown("FAIRNESS_REALIZABLE", "FAIRNESS_REALIZABLE", ("BOUNDED_EXPLORATION",)), frozenset(realizable_ids)
-    return _mk_pass("FAIRNESS_REALIZABLE", "FAIRNESS_REALIZABLE"), frozenset(realizable_ids)
+        return _mk_unknown("FAIRNESS_REALIZABLE", "FAIRNESS_REALIZABLE", ("BOUNDED_EXPLORATION",), source_refs=fairness_refs), frozenset(realizable_ids)
+    return _mk_pass("FAIRNESS_REALIZABLE", "FAIRNESS_REALIZABLE", source_refs=fairness_refs), frozenset(realizable_ids)
 
 
-def _eval_universal_progress(model, graph: Graph, boundaries: Boundaries, fair_transition_ids: frozenset[str]) -> Evaluated:
+def _eval_universal_progress(model, graph: Graph, boundaries: Boundaries, fair_transition_ids: frozenset[str]) -> tuple[Evaluated, bool]:
+    """Returns (Evaluated, product_incomplete) — ``product_incomplete`` feeds
+    the analysis-product receipt so a fairness-product bound is visible
+    separately from base-graph completeness."""
     def region(s: State) -> bool:
         return not boundaries.is_boundary(s)
 
     entries = [s for s in graph.discovered if region(s)]
-    result = _search_fair_lasso(graph, boundaries, entries, region, fair_transition_ids)
+    result = _search_fair_lasso(graph, boundaries, entries, region, fair_transition_ids, model.exploration_limits.max_states)
     if result.found:
+        refs = _transitions_refs(model, _witness_transition_ids(result.prefix_path, result.cycle_path))
         cx = _build_witness(
             graph,
             model,
@@ -932,26 +1138,30 @@ def _eval_universal_progress(model, graph: Graph, boundaries: Boundaries, fair_t
             realizability="DECLARED_MODEL_ONLY",
             invalidating_gap_ids=(),
             limitations=(),
+            source_refs=refs,
             repair_candidates=(
-                RepairCandidate("rep_universal_progress", "ADD_OR_CORRECT_TERMINAL_OUTCOME", (), "this closed walk never reaches a terminal, valid gate/wait, or recurring boundary", ()),
+                RepairCandidate("rep_universal_progress", "ADD_OR_CORRECT_TERMINAL_OUTCOME", (), "this closed walk never reaches a terminal, valid gate/wait, or recurring boundary", refs),
             ),
         )
-        return _mk_fail("UNIVERSAL_PROGRESS", "UNIVERSAL_PROGRESS", cx)
+        return _mk_fail("UNIVERSAL_PROGRESS", "UNIVERSAL_PROGRESS", cx), False
+    if not result.product_complete:
+        return _mk_unknown("UNIVERSAL_PROGRESS", "UNIVERSAL_PROGRESS", ("FAIRNESS_PRODUCT_STATE_LIMIT_REACHED",)), True
     if not graph.base_graph_complete:
-        return _mk_unknown("UNIVERSAL_PROGRESS", "UNIVERSAL_PROGRESS", ("BOUNDED_EXPLORATION",))
+        return _mk_unknown("UNIVERSAL_PROGRESS", "UNIVERSAL_PROGRESS", ("BOUNDED_EXPLORATION",)), False
     ev = _mk_pass("UNIVERSAL_PROGRESS", "UNIVERSAL_PROGRESS")
     ev.used_fairness = bool(fair_transition_ids)
-    return ev
+    return ev, False
 
 
-def _eval_no_starvation(model, graph: Graph, boundaries: Boundaries, fair_transition_ids: frozenset[str]) -> Evaluated:
+def _eval_no_starvation(model, graph: Graph, boundaries: Boundaries, fair_transition_ids: frozenset[str]) -> tuple[Evaluated, bool]:
+    """Returns (Evaluated, product_incomplete); see _eval_universal_progress."""
     persistent_obligations = [o for o in model.obligations if o.persistent]
     if not persistent_obligations:
-        return _mk_na("NO_STARVATION_UNDER_DECLARED_FAIRNESS", "NO_STARVATION_UNDER_DECLARED_FAIRNESS", ("NO_PERSISTENT_OBLIGATION",))
+        return _mk_na("NO_STARVATION_UNDER_DECLARED_FAIRNESS", "NO_STARVATION_UNDER_DECLARED_FAIRNESS", ("NO_PERSISTENT_OBLIGATION",)), False
 
     best: LassoResult | None = None
     best_ob = None
-    any_incomplete = False
+    any_product_incomplete = False
     for ob in persistent_obligations:
         def region(s: State, ob=ob) -> bool:
             sd = _state_dict(s, graph.var_order)
@@ -959,7 +1169,9 @@ def _eval_no_starvation(model, graph: Graph, boundaries: Boundaries, fair_transi
             return pending and not boundaries.is_boundary(s)
 
         entries = [s for s in graph.discovered if region(s)]
-        result = _search_fair_lasso(graph, boundaries, entries, region, fair_transition_ids)
+        result = _search_fair_lasso(graph, boundaries, entries, region, fair_transition_ids, model.exploration_limits.max_states)
+        if not result.product_complete:
+            any_product_incomplete = True
         if result.found:
             total = len(result.prefix_path) + len(result.cycle_path)
             if best is None or total < (len(best.prefix_path) + len(best.cycle_path)):
@@ -967,6 +1179,9 @@ def _eval_no_starvation(model, graph: Graph, boundaries: Boundaries, fair_transi
                 best_ob = ob
 
     if best is not None:
+        refs = set(_transitions_refs(model, _witness_transition_ids(best.prefix_path, best.cycle_path)))
+        refs.update(best_ob.source_refs)
+        refs = tuple(sorted(refs))
         cx = _build_witness(
             graph,
             model,
@@ -977,37 +1192,48 @@ def _eval_no_starvation(model, graph: Graph, boundaries: Boundaries, fair_transi
             realizability="DECLARED_MODEL_ONLY",
             invalidating_gap_ids=(),
             limitations=(f"PENDING_OBLIGATION:{best_ob.obligation_id}",),
+            source_refs=refs,
             repair_candidates=(
-                RepairCandidate("rep_starvation", "DISCHARGE_OBLIGATION", (best_ob.obligation_id,), "this fairness-valid closed walk keeps a persistent obligation pending forever", ()),
+                RepairCandidate("rep_starvation", "DISCHARGE_OBLIGATION", (best_ob.obligation_id,), "this fairness-valid closed walk keeps a persistent obligation pending forever", _repair_refs(model, (best_ob.obligation_id,), refs)),
             ),
         )
-        return _mk_fail("NO_STARVATION_UNDER_DECLARED_FAIRNESS", "NO_STARVATION_UNDER_DECLARED_FAIRNESS", cx)
+        return _mk_fail("NO_STARVATION_UNDER_DECLARED_FAIRNESS", "NO_STARVATION_UNDER_DECLARED_FAIRNESS", cx), False
+    obligation_refs = tuple(sorted(set().union(*(o.source_refs for o in persistent_obligations))))
+    if any_product_incomplete:
+        return _mk_unknown("NO_STARVATION_UNDER_DECLARED_FAIRNESS", "NO_STARVATION_UNDER_DECLARED_FAIRNESS", ("FAIRNESS_PRODUCT_STATE_LIMIT_REACHED",), source_refs=obligation_refs), True
     if not graph.base_graph_complete:
-        return _mk_unknown("NO_STARVATION_UNDER_DECLARED_FAIRNESS", "NO_STARVATION_UNDER_DECLARED_FAIRNESS", ("BOUNDED_EXPLORATION",))
-    ev = _mk_pass("NO_STARVATION_UNDER_DECLARED_FAIRNESS", "NO_STARVATION_UNDER_DECLARED_FAIRNESS")
+        return _mk_unknown("NO_STARVATION_UNDER_DECLARED_FAIRNESS", "NO_STARVATION_UNDER_DECLARED_FAIRNESS", ("BOUNDED_EXPLORATION",), source_refs=obligation_refs), False
+    ev = _mk_pass("NO_STARVATION_UNDER_DECLARED_FAIRNESS", "NO_STARVATION_UNDER_DECLARED_FAIRNESS", source_refs=obligation_refs)
     ev.used_fairness = bool(fair_transition_ids)
-    return ev
+    return ev, False
 
 
 def _eval_recurring_progress_valid(model, graph: Graph) -> Evaluated:
     if not model.recurring_progress_outcomes:
         return _mk_na("RECURRING_PROGRESS_VALID", "RECURRING_PROGRESS_VALID", ("NO_RECURRING_OUTCOME_DECLARED",))
     failing = []
+    matching_by_state: dict[State, tuple[Outcome, ...]] = {}
     for s in graph.discovered:
         sd = _state_dict(s, graph.var_order)
         matching = _matching_outcomes(sd, model.recurring_progress_outcomes)
         if not matching:
             continue
+        matching_by_state[s] = matching
         if not graph.enabled_at.get(s, ()):
             failing.append((s, "RECURRING_STATE_HAS_NO_CONTINUATION"))
             continue
         reason = _residue_violation(sd, model, matching)
         if reason:
             failing.append((s, reason))
+    recurring_refs = tuple(sorted(set().union(*(o.source_refs for o in model.recurring_progress_outcomes))))
     if failing:
         failing.sort(key=lambda item: (len(graph.prefix_of[item[0]]), graph.prefix_of[item[0]]))
         target, reason = failing[0]
         prefix_path = _path_from_prefix(graph, target)
+        refs = set(_transitions_refs(model, _witness_transition_ids(prefix_path, [])))
+        for o in matching_by_state.get(target, ()):
+            refs.update(o.source_refs)
+        refs = tuple(sorted(refs))
         cx = _build_witness(
             graph,
             model,
@@ -1018,14 +1244,15 @@ def _eval_recurring_progress_valid(model, graph: Graph) -> Evaluated:
             realizability="DECLARED_MODEL_ONLY",
             invalidating_gap_ids=(),
             limitations=(reason,),
+            source_refs=refs,
             repair_candidates=(
-                RepairCandidate("rep_recurring", "ADD_OR_CORRECT_RECURRING_OUTCOME", (), "this recurring outcome cannot recur or continue, or owns undeclared residue", ()),
+                RepairCandidate("rep_recurring", "ADD_OR_CORRECT_RECURRING_OUTCOME", (), "this recurring outcome cannot recur or continue, or owns undeclared residue", refs),
             ),
         )
         return _mk_fail("RECURRING_PROGRESS_VALID", "RECURRING_PROGRESS_VALID", cx)
     if not graph.base_graph_complete:
-        return _mk_unknown("RECURRING_PROGRESS_VALID", "RECURRING_PROGRESS_VALID", ("BOUNDED_EXPLORATION",))
-    return _mk_pass("RECURRING_PROGRESS_VALID", "RECURRING_PROGRESS_VALID")
+        return _mk_unknown("RECURRING_PROGRESS_VALID", "RECURRING_PROGRESS_VALID", ("BOUNDED_EXPLORATION",), source_refs=recurring_refs)
+    return _mk_pass("RECURRING_PROGRESS_VALID", "RECURRING_PROGRESS_VALID", source_refs=recurring_refs)
 
 
 # ---------------------------------------------------------------------------
@@ -1116,6 +1343,8 @@ def _run_checker_inner(
     fairness_realizable_eval, realizable_fairness_ids = _eval_fairness_realizable(model, graph)
     fair_transition_ids = _fair_transitions_for(model, realizable_fairness_ids)
 
+    product_incomplete_ids: set[str] = set()
+
     evaluated: dict[str, Evaluated] = {}
     for e in _eval_state_forbidden(model, graph):
         evaluated[e.property_id] = e
@@ -1127,9 +1356,15 @@ def _run_checker_inner(
     evaluated["NO_DEAD_REQUIRED_TRANSITION"] = _eval_no_dead_required_transition(model, graph)
     evaluated["NO_POST_TERMINAL_TRANSITION"] = _eval_no_post_terminal_transition(model, graph)
     evaluated["GATE_OR_WAIT_RETURN_PATH_VALID"] = _eval_gate_or_wait_return_path_valid(model, graph, boundaries)
-    evaluated["UNIVERSAL_PROGRESS"] = _eval_universal_progress(model, graph, boundaries, fair_transition_ids)
+    universal_progress_eval, universal_progress_product_incomplete = _eval_universal_progress(model, graph, boundaries, fair_transition_ids)
+    evaluated["UNIVERSAL_PROGRESS"] = universal_progress_eval
+    if universal_progress_product_incomplete:
+        product_incomplete_ids.add("UNIVERSAL_PROGRESS")
     evaluated["RECURRING_PROGRESS_VALID"] = _eval_recurring_progress_valid(model, graph)
-    evaluated["NO_STARVATION_UNDER_DECLARED_FAIRNESS"] = _eval_no_starvation(model, graph, boundaries, fair_transition_ids)
+    starvation_eval, starvation_product_incomplete = _eval_no_starvation(model, graph, boundaries, fair_transition_ids)
+    evaluated["NO_STARVATION_UNDER_DECLARED_FAIRNESS"] = starvation_eval
+    if starvation_product_incomplete:
+        product_incomplete_ids.add("NO_STARVATION_UNDER_DECLARED_FAIRNESS")
     evaluated["FAIRNESS_REALIZABLE"] = fairness_realizable_eval
 
     reached_external_gate = False
@@ -1164,7 +1399,7 @@ def _run_checker_inner(
                 analysis_complete=e.analysis_complete,
                 counterexample_id=cx_id,
                 reason_codes=e.reason_codes,
-                source_refs=(),
+                source_refs=e.source_refs,
             )
         )
     property_results.sort(key=lambda r: r.property_id)
@@ -1175,12 +1410,62 @@ def _run_checker_inner(
     any_load_bearing_gap = any(g.load_bearing for g in model.known_model_gaps)
     fidelity_ok = _fidelity_proof_eligible(model)
 
-    if any_fail and fidelity_ok and not any_load_bearing_gap:
+    # --- model-gap relevance (overlay Section 1(6)/Section 8 Task 6; amendment
+    # Section 5.1 item 5): the withdrawn blanket "any load-bearing gap ->
+    # downgrade every witness" rule is replaced by per-witness relevance. A
+    # load-bearing gap downgrades a witness's realizability to
+    # POTENTIALLY_SPURIOUS, and populates its invalidating_gap_ids, ONLY when
+    # the gap's declared affects_transition_ids/affects_variable_ids overlap
+    # the transitions/variables actually involved in that witness's steps, or
+    # the gap directly names the property_id via affects_property_ids. An
+    # unrelated load-bearing gap must never hide or downgrade a definite,
+    # unaffected witness (fidelity amendment Section 5.1 items 5-6).
+    load_bearing_gaps = [g for g in model.known_model_gaps if g.load_bearing]
+    if load_bearing_gaps and counterexamples:
+        gap_adjusted = []
+        for cx in counterexamples:
+            witness_tids = frozenset(cx.shortest_prefix) | frozenset(cx.cycle)
+            witness_vids = _witness_involved_variables(model, witness_tids)
+            relevant = [
+                g for g in load_bearing_gaps
+                if _gap_relevant_to(g, cx.property_id, witness_tids, witness_vids)
+            ]
+            if relevant:
+                gap_adjusted.append(
+                    dataclasses.replace(
+                        cx,
+                        realizability="POTENTIALLY_SPURIOUS",
+                        invalidating_gap_ids=tuple(sorted(g.gap_id for g in relevant)),
+                    )
+                )
+            else:
+                gap_adjusted.append(cx)
+        counterexamples = gap_adjusted
+
+    cx_by_id = {c.counterexample_id: c for c in counterexamples}
+    fail_results = [r for r in property_results if r.status == "FAIL"]
+    any_fail_clean = any(
+        r.counterexample_id is not None
+        and cx_by_id.get(r.counterexample_id) is not None
+        and cx_by_id[r.counterexample_id].realizability == "DECLARED_MODEL_ONLY"
+        for r in fail_results
+    )
+
+    if any_fail and fidelity_ok and any_fail_clean:
+        # at least one FAIL witness is unaffected by any relevant load-bearing
+        # gap and the model is fidelity-eligible: the definite, unaffected
+        # witness stands. Per-witness realizability set above is preserved
+        # as-is — do NOT blanket-overwrite it here, or a gap-affected sibling
+        # witness's downgrade would be silently erased.
         model_analysis_verdict = "UNSAFE_COUNTEREXAMPLE"
-        counterexamples = [dataclasses.replace(c, realizability="DECLARED_MODEL_ONLY") for c in counterexamples]
-    elif any_fail and (not fidelity_ok or any_load_bearing_gap):
+    elif any_fail and not fidelity_ok:
         model_analysis_verdict = "INCONCLUSIVE_MODEL_GAP"
         counterexamples = [dataclasses.replace(c, realizability="POTENTIALLY_SPURIOUS") for c in counterexamples]
+    elif any_fail:
+        # every FAIL witness is gap-affected (any_fail_clean is False) and
+        # fidelity is otherwise fine: the gap(s) affecting verdict-bearing
+        # analysis flip the overall verdict, without a blanket rewrite.
+        model_analysis_verdict = "INCONCLUSIVE_MODEL_GAP"
     elif (
         not any_fail
         and not any_unknown
@@ -1246,13 +1531,33 @@ def _run_checker_inner(
         if fair_transition_ids and _fairness_load_bearing
         else ()
     )
+    # An environment assumption is reported as "required by results" only
+    # when its declared transitions were actually exercised in the reachable
+    # graph AND at least one of the properties it is declared to be required
+    # for actually PASSED in this report (immutable-report clarification
+    # Section 1.7: "preserve which assumptions affected the finite-model
+    # result" — never merely because it was declared).
+    used_tids_all = {tid for (_s, tid, _s2) in graph.all_edges}
+    passing_property_ids = {r.property_id for r in property_results if r.status == "PASS"}
+    env_used_ids = tuple(sorted(
+        a.assumption_id
+        for a in model.environment_assumptions
+        if any(tid in used_tids_all for tid in a.transition_ids)
+        and set(a.required_for_property_ids) & passing_property_ids
+    ))
+
     assumptions = Assumptions(
         declared_fairness_assumption_ids=tuple(sorted(f.fairness_id for f in model.fairness_assumptions)),
         fairness_assumption_ids_used_to_exclude_candidates=fairness_used_ids,
         declared_environment_assumption_ids=tuple(sorted(a.assumption_id for a in model.environment_assumptions)),
-        environment_assumption_ids_required_by_results=(),
+        environment_assumption_ids_required_by_results=env_used_ids,
     )
 
+    # Fairness-product incompleteness (trusted-input clarification Section 3)
+    # is tracked separately from base-graph completeness and takes priority
+    # over the base-graph limit reasons: a property whose own augmented
+    # product search hit the bound reports that exact reason even when the
+    # base graph itself is complete.
     analysis_products = tuple(
         AnalysisProduct(
             analysis_id=pid,
@@ -1260,9 +1565,13 @@ def _run_checker_inner(
             states_examined=len(graph.discovered),
             transitions_considered=graph.transitions_considered,
             limit_reason=(
-                "STATE_LIMIT_REACHED"
-                if graph.state_limit_reached and pid not in complete_ids and pid not in na_ids
-                else ("DEPTH_LIMIT_REACHED" if graph.depth_limit_reached and pid not in complete_ids and pid not in na_ids else None)
+                "FAIRNESS_PRODUCT_STATE_LIMIT_REACHED"
+                if pid in product_incomplete_ids and pid not in complete_ids and pid not in na_ids
+                else (
+                    "STATE_LIMIT_REACHED"
+                    if graph.state_limit_reached and pid not in complete_ids and pid not in na_ids
+                    else ("DEPTH_LIMIT_REACHED" if graph.depth_limit_reached and pid not in complete_ids and pid not in na_ids else None)
+                )
             ),
         )
         for pid in sorted(evaluated_ids)
