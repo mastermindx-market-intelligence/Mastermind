@@ -59,7 +59,8 @@ The initial drafts were rejected where they:
 11. separated evidence references from digests so association was ambiguous;
 12. used commit hashes without repository/source identity;
 13. omitted exact runner/validator/scorer code provenance;
-14. made run lookup depend on an unstated mutable index.
+14. made run lookup depend on an unstated mutable index;
+15. nested scorer-pass storage beneath a run ID that was not encoded in the scorer-pass ID, making direct lookup impossible without search or an index.
 
 The binding V1 law is now:
 
@@ -70,11 +71,11 @@ The binding V1 law is now:
 - runs bind scenario, configuration, arm, pair, replicate, source-qualified runner code, raw source/capability/tool/network observations, effect, cleanup, evidence artifacts/digests, resources, timing, and derived technical validity;
 - technical validity is recomputable from stored evaluation artifacts only;
 - known effects are valid only under exact scenario authorization; effect unknown always invalidates;
-- scorer passes append outside runs and bind exact scorer code;
+- scorer passes append outside runs, bind exact scorer code and run identity, and have globally direct paths derived from their own IDs;
 - task pass/fail projections arise only from required scorer evidence;
 - structural validation is never called verification;
 - evaluation-graph verification is explicit and does not overclaim external evidence-content verification;
-- canonical IDs map directly to safe, globally resolvable paths without a mutable registry.
+- canonical IDs map directly to safe, globally resolvable paths without a mutable registry or repository-wide search.
 
 ---
 
@@ -615,7 +616,7 @@ All reasons remain visible even when lower priority. Graph verification recomput
 
 A scorer pass binds:
 
-- ID;
+- globally unique scorer-pass ID;
 - exact run ID/digest;
 - scorer ID/version/source-qualified code ref/configuration digest;
 - method `DETERMINISTIC | STATISTICAL | MODEL_GENERATED | HUMAN`;
@@ -627,6 +628,8 @@ A scorer pass binds:
 - own digest.
 
 Dimension status is `PASS | FAIL | PARTIAL | UNKNOWN | NOT_APPLICABLE` with reasons/evidence. No universal aggregate or winner. Changed scoring appends; never rewrites.
+
+Scorer-pass storage is keyed by the scorer-pass ID itself. The run relation remains inside the artifact and is graph-verified; no run lookup is required merely to locate the scorer pass.
 
 ### 7.8 Evidence reference — `mastermind.agent_evaluation_evidence_ref.v1`
 
@@ -659,11 +662,11 @@ scenario:<family>:<case> -> scenarios/<family>/<case>/v<version>/scenario.json
 configuration:<uuid>     -> configurations/<uuid>/configuration.json
 experiment:<uuid>        -> experiments/<uuid>/manifest.json
 run:<uuid>               -> runs/<uuid>/receipt.json
-scorer-pass:<uuid>       -> runs/<run-uuid>/scorer-passes/<uuid>.json
-evidence-ref:<uuid>      -> evidence-refs/<uuid>.json
+scorer-pass:<uuid>       -> scorer-passes/<uuid>/scorer-pass.json
+evidence-ref:<uuid>      -> evidence-refs/<uuid>/evidence-ref.json
 ```
 
-Segments are validated safe ASCII, with no colon/slash/backslash/dot segment/device name/control/trailing dot-space. Experiment grouping remains a contract relation, not a filesystem identity or mutable index.
+Segments are validated safe ASCII, with no colon/slash/backslash/dot segment/device name/control/trailing dot-space. Experiment grouping and run–scorer relations remain contract relations, not filesystem identities or mutable indexes.
 
 ### 8.4 Create-only publication
 
@@ -804,7 +807,7 @@ R0 must shape-validate and graph-verify one scenario, two configurations, one ex
 
 ### 14.1 F0 acceptance
 
-Require exact current base, three-record delta, current Skillpack, exact-head required checks, independent architecture/source-law review, collision review, and final Sol review of corpus/configuration/source-evidence/effect/raw-observation/verification-scope/immutability/privacy/no-duplicate boundaries.
+Require exact current base, three-record delta, current Skillpack, exact-head required checks, independent architecture/source-law review, collision review, and final Sol review of corpus/configuration/source-evidence/effect/raw-observation/verification-scope/direct-resolution/immutability/privacy/no-duplicate boundaries.
 
 Merge proves only `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`.
 
@@ -830,6 +833,6 @@ Show material forward improvement—such as 30% fewer broad reads/tool calls, ma
 
 ## 15. Exact next action
 
-Update the executable R0 plan to this final contract; run exact-head checks; obtain independent architecture/source-law review; reconcile new protected-base movement; then make a separate hold-removal/merge decision.
+Update the executable R0 plan to the direct scorer-pass path; run exact-head checks; obtain independent architecture/source-law review; reconcile new protected-base movement; then make a separate hold-removal/merge decision.
 
 After F0 protection, commission R0 on a new implementation carrier and separately resume OHF1 on existing PR #162. No other wave starts merely because architecture exists.
