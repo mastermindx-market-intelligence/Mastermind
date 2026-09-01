@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 
@@ -551,3 +552,102 @@ def test_carrier_prefix_requires_exact_or_delimited_boundary() -> None:
         _document(_option(carrier_ref=exact_prefix + "/repair"), envelope)
     )
     assert child_item["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
+
+
+@pytest.mark.parametrize(
+    "defect,repair,reason",
+    [
+        (
+            {"expected_head_sha": None},
+            {"expected_head_sha": "a" * 40},
+            "EXPECTED_HEAD_REQUIRED",
+        ),
+        (
+            {"active_children_after": 4},
+            {"active_children_after": 1},
+            "ACTIVE_CHILDREN_EXCEED_ENVELOPE",
+        ),
+        (
+            {"carrier_state": "AMBIGUOUS"},
+            {"carrier_state": "EXACT_EXISTING"},
+            "EXACT_CARRIER_REQUIRED",
+        ),
+        (
+            {"stop_condition": None},
+            {"stop_condition": "Stop after one exact branch head."},
+            "CANARY_CONTROLS_REQUIRED",
+        ),
+    ],
+)
+def test_r3_hard_refusal_outranks_new_feature_chairman_requirement(
+    defect: dict, repair: dict, reason: str
+) -> None:
+    document = _document(
+        _option(change_classes=["NEW_FEATURE"], **defect)
+    )
+    item = _result(document)
+    assert item["disposition"] == "REFUSED"
+    assert item["reason"] == reason
+    assert item["blocking_constraint"] == "new_feature_expansion"
+
+    document["options"][0].update(repair)
+    _bind_document(document)
+    repaired = _result(document)
+    assert repaired["disposition"] == "CHAIRMAN_REQUIRED"
+    assert repaired["reason"] == "STRATEGIC_CONSTRAINT_REQUIRES_CHAIRMAN"
+    assert repaired["blocking_constraint"] == "new_feature_expansion"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("option_id", "OPT-TRANSPLANTED"),
+        ("action", "SOURCE_MERGE"),
+        ("scope_refs", ["WS:CHAIRMAN-CONTROL-ROOM:REPAIR"]),
+        ("repositories", ["mastermindx-market-intelligence/macro"]),
+        ("paths", ["control_plane/other.py"]),
+        ("creates_duplicate_control_plane", True),
+    ],
+)
+def test_r3_classification_binding_cannot_be_transplanted_to_another_subject(
+    field: str, value
+) -> None:
+    document = _document()
+    document["options"][0][field] = value
+    with pytest.raises(ChairmanCognitionError, match="classification source is not content-bound"):
+        evaluate_document(document)
+
+
+def test_r3_classification_subject_set_permutation_is_stable() -> None:
+    option = _option(
+        scope_refs=[
+            "WS:CHAIRMAN-CONTROL-ROOM:B",
+            "WS:CHAIRMAN-CONTROL-ROOM:A",
+        ],
+        paths=[
+            "control_plane/z.py",
+            "control_plane/a.py",
+        ],
+        change_classes=[
+            "MAINTENANCE_REPAIR",
+            "EXISTING_CAPABILITY_COMPLETION",
+        ],
+        affected_departments=["product", "executive"],
+    )
+    document = _document(option)
+    permuted = copy.deepcopy(document)
+    candidate = permuted["options"][0]
+    for field in (
+        "scope_refs",
+        "repositories",
+        "paths",
+        "change_classes",
+        "affected_departments",
+    ):
+        candidate[field] = list(reversed(candidate[field]))
+
+    first = evaluate_document(document)
+    second = evaluate_document(permuted)
+    assert first["adjudications"][0]["disposition"] == (
+        second["adjudications"][0]["disposition"]
+    )
