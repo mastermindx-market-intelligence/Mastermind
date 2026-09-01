@@ -22,6 +22,7 @@ from integrations.business_mcp_auth.contracts import (
     AuthErrorCode,
     ResourcePolicy,
     VerifiedPrincipal,
+    validate_resource_policy,
 )
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 
@@ -38,6 +39,10 @@ def _principal_matches_policy(
     principal: object,
     policy: ResourcePolicy,
 ) -> bool:
+    try:
+        policy = validate_resource_policy(policy)
+    except AuthError:
+        return False
     if not isinstance(principal, VerifiedPrincipal):
         return False
     if (
@@ -99,7 +104,7 @@ class MastermindTokenVerifier(TokenVerifier):
         if not callable(getattr(audit_sink, "emit", None)):
             raise TypeError("audit_sink must provide emit")
         self._authenticator = authenticator
-        self._policy = policy
+        self._policy = validate_resource_policy(policy)
         self._now = now
         self._audit_sink = audit_sink
 
@@ -126,10 +131,11 @@ class MastermindTokenVerifier(TokenVerifier):
         """Revalidate the exact immutable verifier policy before token work."""
 
         try:
-            bound_policy = self._authenticator.policy
+            expected_policy = validate_resource_policy(self._policy)
+            bound_policy = validate_resource_policy(self._authenticator.policy)
         except Exception:
             return False
-        return isinstance(bound_policy, ResourcePolicy) and bound_policy == self._policy
+        return bound_policy == expected_policy
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Return one closed MCP token projection or fail closed with ``None``."""

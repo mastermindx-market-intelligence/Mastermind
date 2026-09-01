@@ -362,6 +362,48 @@ def load_resource_policy(value: object) -> ResourcePolicy:
     )
 
 
+def validate_resource_policy(value: object) -> ResourcePolicy:
+    """Revalidate an existing policy through the sole closed wire parser.
+
+    Frozen dataclasses can still be manually constructed, replaced, subclassed,
+    or mutated through low-level object operations. Every authority-bearing edge
+    therefore round-trips its policy through ``load_resource_policy`` instead of
+    trusting construction history or duplicating policy rules.
+    """
+
+    if not isinstance(value, ResourcePolicy):
+        _refuse()
+    try:
+        canonical = load_resource_policy(
+            {
+                "schema": value.schema,
+                "policy_id": value.policy_id,
+                "resource": value.resource,
+                "resource_metadata_url": value.resource_metadata_url,
+                "issuer": value.issuer,
+                "authorization_servers": list(value.authorization_servers),
+                "jwks_uri": value.jwks_uri,
+                "required_scopes": list(value.required_scopes),
+                "allowed_subject_digests": list(value.allowed_subject_digests),
+                "allowed_algorithms": list(value.allowed_algorithms),
+                "clock_skew_seconds": value.clock_skew_seconds,
+                "max_token_lifetime_seconds": value.max_token_lifetime_seconds,
+                "jwks_cache_ttl_seconds": value.jwks_cache_ttl_seconds,
+                "unknown_kid_refresh_cooldown_seconds": (
+                    value.unknown_kid_refresh_cooldown_seconds
+                ),
+                "fetch_failure_backoff_seconds": value.fetch_failure_backoff_seconds,
+            }
+        )
+    except AuthError:
+        raise
+    except Exception:
+        _refuse()
+    if canonical != value:
+        _refuse()
+    return canonical
+
+
 __all__ = [
     "AUTH_AUDIT_SCHEMA",
     "AUTH_POLICY_SCHEMA",
@@ -374,4 +416,5 @@ __all__ = [
     "VerifiedPrincipal",
     "load_resource_policy",
     "subject_digest",
+    "validate_resource_policy",
 ]

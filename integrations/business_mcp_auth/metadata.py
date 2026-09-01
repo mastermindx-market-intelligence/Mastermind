@@ -17,6 +17,7 @@ from integrations.business_mcp_auth.contracts import (
     _SCOPE_RE,
     _exact_text,
     _split_https_url,
+    validate_resource_policy,
 )
 
 
@@ -126,8 +127,7 @@ def _normalized_scopes(
 def protected_resource_metadata(policy: ResourcePolicy) -> dict[str, object]:
     """Return the exact public RFC 9728 resource projection."""
 
-    if not isinstance(policy, ResourcePolicy):
-        _refuse()
+    policy = validate_resource_policy(policy)
     return {
         "resource": policy.resource,
         "authorization_servers": list(policy.authorization_servers),
@@ -141,7 +141,8 @@ def validate_authorization_server_metadata(
 ) -> ValidatedAuthorizationServerMetadata:
     """Validate provider capabilities without selecting an enrollment strategy."""
 
-    if not isinstance(policy, ResourcePolicy) or not isinstance(value, Mapping):
+    policy = validate_resource_policy(policy)
+    if not isinstance(value, Mapping):
         _refuse()
     if value.get("issuer") != policy.issuer:
         _refuse()
@@ -224,8 +225,7 @@ def www_authenticate(
 ) -> str:
     """Build one canonical HTTP or tool-level OAuth challenge."""
 
-    if not isinstance(policy, ResourcePolicy):
-        _refuse()
+    policy = validate_resource_policy(policy)
     # A frozen dataclass instance can be manually constructed or replaced after
     # policy loading. Revalidate the exact value at the final quoted boundary so
     # no raw quote or parser-ambiguous URI can create an extra challenge field.

@@ -22,6 +22,7 @@ from integrations.business_mcp_auth.contracts import (
     _SCOPE_RE,
     _exact_subject,
     subject_digest,
+    validate_resource_policy,
 )
 
 
@@ -114,7 +115,10 @@ def _client_ref(claims: Mapping[str, Any], issuer: str) -> str:
 def validate_jwt_header(header: Mapping[str, object], policy: ResourcePolicy) -> str:
     """Validate the untrusted JWT header and return only the exact key id."""
 
-    if not isinstance(policy, ResourcePolicy) or not isinstance(header, Mapping):
+    if not isinstance(policy, ResourcePolicy):
+        _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
+    policy = validate_resource_policy(policy)
+    if not isinstance(header, Mapping):
         _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
     if header.get("alg") != "RS256" or "RS256" not in policy.allowed_algorithms:
         _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
@@ -147,7 +151,10 @@ def validate_verified_claims(
 ) -> VerifiedPrincipal:
     """Enforce exact resource policy over a signature-verified claims mapping."""
 
-    if not isinstance(policy, ResourcePolicy) or not isinstance(claims, Mapping):
+    if not isinstance(policy, ResourcePolicy):
+        _refuse(AuthErrorCode.TOKEN_CLAIMS_REFUSED)
+    policy = validate_resource_policy(policy)
+    if not isinstance(claims, Mapping):
         _refuse(AuthErrorCode.TOKEN_CLAIMS_REFUSED)
     if type(now) is not int:
         _refuse(AuthErrorCode.TOKEN_CLAIMS_REFUSED)

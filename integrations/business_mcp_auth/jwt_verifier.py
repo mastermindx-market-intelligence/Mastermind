@@ -26,6 +26,7 @@ from integrations.business_mcp_auth.contracts import (
     AuthErrorCode,
     ResourcePolicy,
     VerifiedPrincipal,
+    validate_resource_policy,
 )
 
 
@@ -205,7 +206,7 @@ class JwtAuthenticator:
             raise TypeError("policy must be ResourcePolicy")
         if not callable(getattr(jwks_cache, "key_for", None)):
             raise TypeError("jwks_cache must provide key_for")
-        self._policy = policy
+        self._policy = validate_resource_policy(policy)
         self._jwks_cache = jwks_cache
 
     @property
@@ -229,6 +230,9 @@ class JwtAuthenticator:
         *,
         now: int,
     ) -> VerifiedPrincipal:
+        # Revalidate before parsing attacker-controlled token bytes or touching
+        # JWKS state. A frozen policy can still be replaced or low-level mutated.
+        policy = validate_resource_policy(self._policy)
         compact = _compact_token(token)
 
         try:
@@ -239,7 +243,7 @@ class JwtAuthenticator:
             _refuse(AuthErrorCode.INTERNAL_ERROR)
 
         try:
-            kid = validate_jwt_header(unverified_header, self._policy)
+            kid = validate_jwt_header(unverified_header, policy)
         except AuthError:
             raise
         except Exception:
@@ -279,7 +283,7 @@ class JwtAuthenticator:
             _refuse(AuthErrorCode.TOKEN_SIGNATURE_REFUSED)
 
         try:
-            verified_kid = validate_jwt_header(verified_header, self._policy)
+            verified_kid = validate_jwt_header(verified_header, policy)
         except AuthError:
             raise
         except Exception:
@@ -288,7 +292,7 @@ class JwtAuthenticator:
             _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
 
         try:
-            return validate_verified_claims(payload, self._policy, now=now)
+            return validate_verified_claims(payload, policy, now=now)
         except AuthError:
             raise
         except Exception:
