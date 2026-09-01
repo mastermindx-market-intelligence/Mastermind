@@ -56,6 +56,16 @@ def _read(path: Path) -> str:
     return payload.decode("utf-8")
 
 
+def _prose(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _assert_prose(value: str, *markers: str) -> None:
+    normalized = _prose(value)
+    for marker in markers:
+        assert _prose(marker) in normalized
+
+
 def _marked_block(text: str, begin: str, end: str) -> str:
     _before, marker, remainder = text.partition(begin)
     assert marker
@@ -73,8 +83,9 @@ def _fenced_body(block: str, language: str) -> str:
 
 def test_index_is_the_mandatory_first_read_and_names_complete_precedence() -> None:
     index = _read(INDEX)
+    normalized = _prose(index)
 
-    assert "mandatory first read" in index
+    assert "mandatory first read" in normalized
     ordered = [
         INDEX.name,
         PROTOCOL.name,
@@ -86,8 +97,11 @@ def test_index_is_the_mandatory_first_read_and_names_complete_precedence() -> No
     ]
     positions = [index.index(name) for name in ordered]
     assert positions == sorted(positions)
-    assert "Current protected Skillpack and universal source laws outrank this list" in index
-    assert "superseded clause is not an alternate implementation choice" in index
+    _assert_prose(
+        index,
+        "Current protected Skillpack and universal source laws outrank this list",
+        "superseded clause is not an alternate implementation choice",
+    )
 
 
 def test_final_ruling_is_machine_readable_and_complete() -> None:
@@ -139,7 +153,7 @@ def test_final_ruling_is_machine_readable_and_complete() -> None:
 
 
 def test_supersession_ledger_resolves_every_known_conflict() -> None:
-    index = _read(INDEX)
+    index = _prose(_read(INDEX))
 
     for old, final in (
         ("Package-content digest `a82a274a...`", CORRECT_PACKAGE_DIGEST),
@@ -158,9 +172,10 @@ def test_supersession_ledger_resolves_every_known_conflict() -> None:
         ("Source verifier needs only file-level final `fstat`", "complete-tree"),
         ("Valid JSON may contain duplicate object keys", "Rejected"),
     ):
-        assert old in index
-        row = index[index.index(old) : index.index(old) + 700]
-        assert final in row
+        normalized_old = _prose(old)
+        assert normalized_old in index
+        row = index[index.index(normalized_old) : index.index(normalized_old) + 700]
+        assert _prose(final) in row
 
 
 def test_source_chain_is_one_origin_projection_provider_and_cleanup_path() -> None:
@@ -186,9 +201,12 @@ def test_source_chain_is_one_origin_projection_provider_and_cleanup_path() -> No
         "bounded real model behavior",
         "process/artifact/projection cleanup",
     ]
-    assert "contains all seven package files" in index
-    assert "../../references/dialogue-boundary.md" in index
-    assert "not a durable package/install record" in index
+    _assert_prose(
+        index,
+        "contains all seven package files",
+        "../../references/dialogue-boundary.md",
+        "not a durable package/install record",
+    )
 
 
 def test_final_scope_has_one_fixture_and_preserves_production_no_edit_surfaces() -> None:
@@ -214,10 +232,6 @@ def test_final_scope_has_one_fixture_and_preserves_production_no_edit_surfaces()
         "tests/test_executive_capability_packages.py",
         "tests/test_executive_agent_capabilities_v4.py",
         "tests/test_cap_s1_mastermind_operator_canary.py",
-    ):
-        assert path in index
-
-    for protected in (
         "config/executive_agent_capabilities.json",
         "config/executive_worker_routes.json",
         "control_plane/executive_autonomy.py",
@@ -226,7 +240,7 @@ def test_final_scope_has_one_fixture_and_preserves_production_no_edit_surfaces()
         "plugins/mastermind-operator/**",
         "RemoteCodexOperatorAdapter/common worker-wire files",
     ):
-        assert protected in index
+        assert path in index
 
 
 def test_final_internal_order_has_real_consumer_proof_before_release() -> None:
@@ -251,7 +265,7 @@ def test_final_internal_order_has_real_consumer_proof_before_release() -> None:
     ]
     positions = [index.index(marker) for marker in ordered_markers]
     assert positions == sorted(positions)
-    assert "Internal phases do not create separate acceptance boundaries" in index
+    _assert_prose(index, "Internal phases do not create separate acceptance boundaries")
 
 
 def test_default_policy_and_existing_runtime_bindings_remain_unchanged() -> None:
@@ -263,7 +277,6 @@ def test_default_policy_and_existing_runtime_bindings_remain_unchanged() -> None
     assert policy["plugins"] == {}
     assert "capability_packages" not in policy
     assert "mastermind-operator.p1" not in joined
-    assert "general_route_added_in_cap_s1" in index
     assert '"general_route_added_in_cap_s1": false' in index
     assert '"production_armed_in_cap_s1": false' in index
 
@@ -271,7 +284,8 @@ def test_default_policy_and_existing_runtime_bindings_remain_unchanged() -> None
 def test_route_stop_and_records_release_boundaries_are_explicit() -> None:
     index = _read(INDEX)
 
-    for marker in (
+    _assert_prose(
+        index,
         "PREFERRED_AVENUE: CTO Sol",
         "WHY NOT FABLE",
         "RECEIVER_BINDING_MODE: CAPACITY_SELECTABLE",
@@ -279,8 +293,7 @@ def test_route_stop_and_records_release_boundaries_are_explicit() -> None:
         "No worker-facing commission, ACK, START, watcher or Git carrier exists for CAP-S1",
         "SCF-PKG0 = SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT / PROTECTED",
         "It does not implement V4",
-    ):
-        assert marker in index
+    )
 
     for stop in (
         "PACKAGE_GENERATION_OWNER_UNRESOLVED",
