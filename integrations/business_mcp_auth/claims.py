@@ -178,10 +178,12 @@ def validate_verified_claims(
         subject_ref = subject_digest(issuer=policy.issuer, subject=subject)  # type: ignore[arg-type]
     except AuthError:
         _refuse(AuthErrorCode.TOKEN_CLAIMS_REFUSED)
-    if not any(
-        hmac.compare_digest(subject_ref, allowed)
-        for allowed in policy.allowed_subject_digests
-    ):
+    subject_allowed = False
+    for allowed in policy.allowed_subject_digests:
+        # Evaluate every configured digest even after a match. Bitwise boolean
+        # accumulation avoids the early-exit semantics of ``any`` and ``or``.
+        subject_allowed |= hmac.compare_digest(subject_ref, allowed)
+    if not subject_allowed:
         _refuse(AuthErrorCode.SUBJECT_REFUSED)
 
     jti_digest = _optional_digest_claim(claims, "jti")

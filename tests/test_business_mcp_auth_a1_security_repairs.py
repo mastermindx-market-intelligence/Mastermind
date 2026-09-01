@@ -6,6 +6,7 @@ import hashlib
 
 import pytest
 
+from integrations.business_mcp_auth import claims as claims_module
 from integrations.business_mcp_auth import mcp_adapter
 from integrations.business_mcp_auth.contracts import (
     AUTH_AUDIT_SCHEMA,
@@ -298,6 +299,70 @@ def test_subject_membership_compares_the_full_allowlist(
     # One issuer-digest comparison is followed by every allowlist comparison,
     # even when an earlier subject entry already matched.
     assert comparisons[1:] == [(subject, digest) for digest in allowed]
+
+
+@pytest.mark.parametrize(
+    ("subject_index", "accepted"),
+    [(0, True), (2, True), (None, False)],
+)
+def test_verified_claims_compares_the_full_subject_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+    subject_index: int | None,
+    accepted: bool,
+) -> None:
+    issuer = "https://identity.example.test/"
+    digest_subject_pairs = sorted(
+        (subject_digest(issuer=issuer, subject=subject), subject)
+        for subject in ("chairman-a", "chairman-b", "chairman-c")
+    )
+    allowed = tuple(digest for digest, _subject in digest_subject_pairs)
+    subject = (
+        digest_subject_pairs[subject_index][1]
+        if subject_index is not None
+        else "chairman-missing"
+    )
+    subject_ref = subject_digest(issuer=issuer, subject=subject)
+    policy = dataclasses.replace(
+        _policy(),
+        allowed_subject_digests=allowed,
+    )
+    token_claims = {
+        "iss": policy.issuer,
+        "sub": subject,
+        "aud": policy.resource,
+        "iat": 1_788_000_000,
+        "exp": 1_788_000_600,
+        "scope": " ".join(policy.required_scopes),
+    }
+    comparisons: list[tuple[str, str]] = []
+
+    def _recording_compare_digest(left: str, right: str) -> bool:
+        comparisons.append((left, right))
+        return left == right
+
+    monkeypatch.setattr(
+        claims_module.hmac,
+        "compare_digest",
+        _recording_compare_digest,
+    )
+
+    if accepted:
+        principal = claims_module.validate_verified_claims(
+            token_claims,
+            policy,
+            now=NOW,
+        )
+        assert principal.subject_digest == subject_ref
+    else:
+        with pytest.raises(AuthError) as caught:
+            claims_module.validate_verified_claims(
+                token_claims,
+                policy,
+                now=NOW,
+            )
+        assert caught.value.code is AuthErrorCode.SUBJECT_REFUSED
+
+    assert comparisons == [(subject_ref, digest) for digest in allowed]
 
 
 def test_mcp_adapter_refuses_non_jwt_authenticator_at_composition_time() -> None:
