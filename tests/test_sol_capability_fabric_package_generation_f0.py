@@ -234,9 +234,9 @@ def test_package_and_effective_skill_closure_identities_stay_distinct() -> None:
 
 
 def test_v4_is_opt_in_and_runtime_plugin_authority_remains_unavailable() -> None:
-    spec = _read(SPEC)
+    spec = _prose(SPEC)
     spec_lower = spec.lower()
-    plan = _read(PLAN)
+    plan = _prose(PLAN)
 
     assert 'CAPABILITY_POLICY_SCHEMA_V3 = "mastermind.executive_agent_capabilities/v3"' in spec
     assert 'CAPABILITY_POLICY_SCHEMA_V4 = "mastermind.executive_agent_capabilities/v4"' in spec
