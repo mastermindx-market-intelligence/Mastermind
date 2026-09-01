@@ -148,7 +148,7 @@ def test_cap_s1_keeps_default_policy_routes_and_host_receipts_unchanged() -> Non
         "control_plane/executive_autonomy.py expected digests",
         "installed Executive configs or host receipts",
         "CAP-S1 uses one explicit immutable V4 canary policy",
-        "CAP-PROMOTE1 may migrate the checked-in default policy only after CAP-S1",
+        "`CAP-PROMOTE1` may migrate the checked-in default policy only after CAP-S1 acceptance",
         "must not rewrite or auto-refresh historical installed receipts",
     )
 
