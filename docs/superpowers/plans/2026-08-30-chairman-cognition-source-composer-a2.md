@@ -1,46 +1,48 @@
-# CCL-A2 — Owner-Preserving Chairman Cognition Source Composer
+# CCL-A2 - Owner-Preserving Chairman Cognition Source Composer
 
 **Operation:** `mastermind-chairman-cognition-source-composer-20260830-sol-001`  
+**R4 repair:** `mastermind-chairman-cognition-source-composer-r4-content-identity-20260901-sol-001`  
 **Parent:** `mastermind-chairman-cognition-loop-20260830-sol-001`  
-**Current base:** complete CCL-A1 R3 decision contract  
+**Current base:** protected CCL-A1 R3 decision contract  
 **Cognition route:** `CHAT_PRO_DEFAULT`  
 **Capability until protected:** `BUILT_NOT_PROVEN / PRODUCTION_INERT`
 
 ## Observable mission
 
 Given an already-produced `mastermind.ceo_boot_packet.v1`, one explicit Chairman-directive
-receipt, canonical revision attestations for Mastermind and Agent OS, optional receipts from existing
-owners, one delegation envelope and candidate strategic options, deterministically produce and
-evaluate one complete `mastermind.chairman_cognition_input.v1`.
+receipt, content-bound canonical attestations for Mastermind and Agent OS, optional receipts from
+existing owners, one delegation envelope and candidate strategic options, deterministically produce
+and evaluate one complete `mastermind.chairman_cognition_input.v1`.
 
 A2 does not crawl systems, invent CURRENT facts, create a second Steward, strategy store, lifecycle,
-queue, authority plane or execution path.
+queue, retrieval plane, authority plane or execution path.
 
 ## User and machine capability
 
-Before A2, the protected A1 core can adjudicate a closed decision document but no owner-preserving
-adapter composes that document from the existing CEO boot packet and explicit current-source
-receipts.
+Before A2, protected A1 can adjudicate a closed decision document but no owner-preserving adapter
+composes it from the existing CEO boot packet and explicit current-source receipts.
 
 After A2 protection, a trusted caller can assemble one A1-compatible source bundle while preserving:
 
 - the exact owner of each fact;
-- revision, observation time, state and load-bearing status;
+- repository revision, content identity, observation time, state and load-bearing status;
 - all six current Strategic State constraints;
 - exact Strategic State, option-classification and Chairman-envelope content bindings;
-- stale, conflict, unknown and degraded behavior;
+- mandatory Strategic State and Agent OS dependence for every modifying option;
+- stale, conflict, unknown, degraded and correction behavior;
 - `execution_authority_granted=false` throughout.
 
-This is still a pure source-composition capability. It does not make Chairman cognition live.
+This is still pure source composition. It does not make Chairman cognition, executive learning,
+worker dispatch or production autonomy live.
 
 ## Existing-owner composition
 
 ```text
 existing CEO boot packet
-  strategic-state summary + local Mastermind revision
+  Strategic State projection + local Mastermind revision
   Agent OS brief + local Macro revision
-+ protected-Mastermind revision attestation
-+ canonical-Agent-OS revision attestation
++ protected Mastermind revision + exact strategic-state blob + projection digest
++ canonical Agent OS revision + owner-produced source-record digest + brief digest
 + explicit Chairman directive
 + explicit GitHub / Executive / Capacity / Runtime / Wake / Steward receipts
 + content-bound delegation envelope and classified options
@@ -48,8 +50,8 @@ existing CEO boot packet
 -> A1 deterministic frontier and preflight
 ```
 
-A1 remains the controlling grammar and policy core. A2 does not duplicate its constraint selectors,
-authority decisions, Pareto logic, effect law or carrier law.
+A1 remains the only grammar, constraint, authority, carrier, effect and Pareto adjudicator. A2 does
+not duplicate those laws.
 
 ## Exact four-path scope
 
@@ -61,9 +63,9 @@ authority decisions, Pareto logic, effect law or carrier law.
 No A1 source file, Executive lifecycle, Agent OS owner, CEO boot-packet owner, Steward, GitHub,
 Linear, Slack, RuntimeBinding, Wake, Capacity, provider, credential or production path is modified.
 
-## Complete R2/R3 compatibility contract
+## Complete A1 compatibility contract
 
-### Strategic State
+### Strategic State root
 
 The composed input names:
 
@@ -71,8 +73,7 @@ The composed input names:
 strategic_constraints_source_ref = STRATEGIC_STATE:config/strategic_state.yml
 ```
 
-The composer derives exactly one load-bearing Strategic State receipt from the boot packet and the
-protected-Mastermind revision attestation. The normalized constraint map must contain **all six current constraints**:
+The normalized map must contain all six current constraints imported from A1:
 
 ```text
 autonomous_production_deploy
@@ -83,109 +84,155 @@ new_feature_expansion
 unbounded_autonomous_strategic_modification
 ```
 
-A2 imports the required set from A1 rather than maintaining a second policy list. It binds the exact
-normalized map through:
+The derived Strategic State receipt binds:
 
 ```text
-constraints-sha256:<sha256(canonical normalized constraint map)>
+constraints-sha256:<canonical normalized constraint digest>
+payload-sha256:<canonical supplied Strategic State projection digest>
+blob:<exact config/strategic_state.yml Git blob SHA>
+git:<protected Mastermind commit SHA>
 ```
 
-The full strategic-state projection remains separately content-addressed for provenance.
+`STRATEGIC_STATE:config/strategic_state.yml` is CURRENT only when all of the following agree:
 
-`STRATEGIC_STATE:config/strategic_state.yml` is CURRENT only when the boot packet reports canonical
-`master`, its full SHA matches the protected-Mastermind attestation and that attestation is CURRENT.
-An unresolved or noncanonical checkout is UNKNOWN at source derivation and causes A1 to reject the
-entire decision because the root Strategic State source is not CURRENT. A mismatched local `master`
-is CONFLICT and is rejected for the same reason. A2 never launders either state into an option-local
-refusal packet.
+1. the boot packet reports branch `master` and a full local Mastermind SHA;
+2. the local SHA equals the protected-Mastermind attestation revision;
+3. the attestation itself is CURRENT;
+4. `source_blob_sha` is a resolved full Git blob SHA;
+5. `payload_digest` equals the digest recomputed from the supplied Strategic State projection.
+
+A mutated local payload with unchanged repository SHAs is `CONFLICT`. Missing or `UNRESOLVED`
+content identity is `UNKNOWN`. A noncanonical checkout is `UNKNOWN`. A local/canonical revision
+mismatch is `CONFLICT`. Because Strategic State is A1's root source, anything other than CURRENT
+fails the complete decision closed.
+
+### Agent OS root for modifying options
+
+The dedicated Agent OS attestation carries:
+
+```text
+revision: <canonical Macro commit SHA>
+source_records_digest: <agentos.source_records_digest.v1 value>
+payload_digest: <sha256 of exact supplied ceo_brief.v1 payload>
+```
+
+The source-record digest is produced by Agent OS; A2 does not recompute the record walk, parse the
+Agent OS store or own a second digest. A separately accepted trusted source adapter must acquire the
+brief, canonical revision and owner-produced identity together.
+
+`AGENT_OS:ceo_brief` is CURRENT only when:
+
+1. the complete `ceo_brief.v1` wire shape and timestamps are valid;
+2. owner degradation and warning lists are empty;
+3. local Macro SHA equals the canonical Agent OS revision;
+4. the attestation is CURRENT;
+5. `source_records_digest` is resolved and syntactically valid;
+6. `payload_digest` equals the digest recomputed from the exact supplied brief.
+
+A mutated brief with unchanged repository SHA and source-record digest is `CONFLICT`. Missing or
+`UNRESOLVED` owner identity is `UNKNOWN`. Malformed/degraded input is `UNKNOWN` and cannot be
+promoted by an otherwise-current revision receipt.
+
+### Mandatory option owner binding
+
+Every option whose action is in A1's canonical `MODIFYING_ACTIONS` set must cite both:
+
+```text
+STRATEGIC_STATE:config/strategic_state.yml
+AGENT_OS:ceo_brief
+```
+
+A2 validates citation presence; it never silently injects refs. Omission fails closed before the
+option can rely on an unrelated current receipt. Read-only options are not forced to cite Agent OS
+unless their own evidence contract requires it.
 
 ### Option classification
 
-Every option must supply A1's closed fields:
-
-```text
-classification_source_ref
-change_classes
- affected_departments
-```
-
-The cited canonical receipt must carry:
+Every option supplies A1's closed classification fields. The cited eligible source must carry:
 
 ```text
 classification-sha256:<sha256(canonical exact option subject)>
 ```
 
-The exact subject includes option ID, action, affected-scope references, repositories, paths,
-duplicate-control-plane flag, change classes and affected departments. Title, prose and benefit/cost
-estimates do not grant classification authority. A token cannot be transplanted to another option.
-
-A2 passes owner-produced classification evidence through; it does not infer class from title or
-silently manufacture a canonical owner. A1 validates the binding and owner eligibility.
+The subject includes option ID, action, scope refs, repositories, paths, duplicate-control-plane
+flag, change classes and affected departments. A token cannot be transplanted to another option.
+A2 passes classification evidence through; A1 owns eligibility and binding validation.
 
 ### Chairman delegation envelope
 
-Every non-null envelope must already be bound through at least one cited current load-bearing
-Chairman-directive receipt:
+Every non-null envelope must already be content-bound through at least one cited current
+load-bearing Chairman-directive receipt:
 
 ```text
 envelope-sha256:<sha256(canonical complete delegation envelope)>
 ```
 
-The canonical payload covers schema and envelope ID, the complete authority-source set, mode,
-actions, reversibility, repository/path/scope/carrier limits, budget, active-child ceiling,
-exact-carrier rule and expiry. A caller-mutated envelope cannot retain an unrelated current Chairman
-receipt and become accepted.
-
-A2 preserves the supplied receipt and envelope; A1 validates the exact binding. The pure composer
-**does not authenticate** Chairman identity by itself.
+The payload includes every authority, action, reversibility, repository/path/scope/carrier, budget,
+child, exact-carrier and expiry field. A2 preserves the evidence; A1 validates it. A2 does not
+authenticate Chairman identity merely because JSON uses that label.
 
 ### Exact source actions
 
 Existing-carrier `SOURCE_BRANCH_WRITE` and `SOURCE_MERGE` options must name an exact
-`expected_head_sha`. A2 does not guess it or weaken A1's refusal behavior.
+`expected_head_sha`. A2 does not guess it or weaken A1's mechanical refusal precedence.
 
-## Canonical revision attestations
+## Attestation grammar
 
-A local checkout name or SHA is provenance, not proof that it matches current canonical source. The
-bundle therefore requires two dedicated, closed, load-bearing full-SHA attestations:
+The two dedicated attestations are closed documents.
 
-```text
-GITHUB:Mastermind:protected-master
-AGENT_OS:canonical-revision
+Mastermind:
+
+```yaml
+revision: <40 lowercase hex>
+state: CURRENT | STALE | CONFLICT | UNKNOWN
+load_bearing: true
+observed_at: <UTC ISO-8601>
+source_blob_sha: <40 lowercase hex> | UNRESOLVED
+payload_digest: sha256:<64 lowercase hex> | UNRESOLVED
 ```
 
-The caller cannot rewrite those owner identities. Matching revision propagates the attestation's
-CURRENT, STALE, CONFLICT or UNKNOWN state. Local/canonical mismatch becomes CONFLICT.
+Agent OS:
 
-This pure composer **does not authenticate** GitHub, Agent OS, Chairman identity or acquisition path
-merely because JSON uses an owner label. CURRENT is operationally meaningful only when a separately
-accepted **trusted source adapter** supplies owner payload and attestation together. A
-**model-authored or arbitrary local JSON** bundle remains fixture/evidence input. It grants no
-technical identity, organizational authority or reusable effect token.
+```yaml
+revision: <40 lowercase hex>
+state: CURRENT | STALE | CONFLICT | UNKNOWN
+load_bearing: true
+observed_at: <UTC ISO-8601>
+source_records_digest: sha256:<64 lowercase hex> | UNRESOLVED
+payload_digest: sha256:<64 lowercase hex> | UNRESOLVED
+```
 
-## Agent OS brief
+Unknown fields, malformed identities, non-load-bearing attestations or abbreviated revisions are
+refused. The extra identity fields remain composer-local metadata; A1 receives only its unchanged
+closed `SourceReceipt` grammar plus the identity-bearing derived receipts.
 
-A2 performs wire-shape and degradation validation only. It does not re-rank work or become another
-Agent OS implementation.
+This pure composer does not authenticate GitHub, Agent OS, Chairman identity or acquisition path.
+CURRENT is operationally meaningful only when a separately accepted **trusted source adapter**
+acquires the owner payload and attestation together. A **model-authored or arbitrary local JSON**
+bundle remains fixture/evidence input and grants no technical identity, organizational authority or
+reusable effect token.
 
-`AGENT_OS:ceo_brief` is CURRENT only when the complete `ceo_brief.v1` owner shape is structurally
-valid, timestamps are valid, degradation/warning lists are empty, the local Macro SHA matches the
-canonical Agent OS attestation and that attestation is CURRENT. Missing, malformed or degraded input
-is UNKNOWN. A valid brief on a mismatched Macro revision is CONFLICT.
+## Time, null and correction behavior
 
-Derived Strategic State and Agent OS observations use the latest load-bearing input time, preventing
-a newer attestation from being backdated into an older company snapshot.
+- derived receipts use the latest load-bearing owner/attestation observation time;
+- evidence later than the bundle `as_of` is rejected by A1;
+- content mismatch is `CONFLICT`, never silently refreshed;
+- missing content identity is `UNKNOWN`, never inferred from matching branch names;
+- a correction produces a new payload/identity pair and therefore a new composed-input digest;
+- no historical memory, receipt or successful procedure authorizes replay of an effect.
 
 ## Failure behavior
 
 - missing/wrong boot-packet schema -> opaque invalid source bundle;
 - missing Strategic State or any current constraint -> fail closed;
-- missing/non-full-SHA/non-load-bearing canonical attestation -> fail closed;
-- unresolved/noncanonical Strategic State revision -> derive UNKNOWN, then A1 rejects the whole decision;
-- local/canonical Strategic State disagreement -> derive CONFLICT, then A1 rejects the whole decision;
-- malformed/degraded Agent OS brief -> UNKNOWN and dependent options are refused;
+- missing, malformed, abbreviated or non-load-bearing attestation -> fail closed;
+- mutated Strategic State with unchanged revision identity -> CONFLICT and root refusal;
+- mutated Agent OS brief with unchanged revision/record identity -> CONFLICT and option refusal;
+- unresolved content identity -> UNKNOWN;
+- malformed/degraded Agent OS brief -> UNKNOWN;
+- modifying option omitting Strategic State or Agent OS -> refused;
 - reserved owner injection or duplicate source reference -> refused;
-- missing or mismatched `constraints-sha256`, `classification-sha256` or `envelope-sha256` -> A1 rejection;
+- missing/mismatched constraints, classification or envelope binding -> A1 rejection;
 - source branch or merge without expected head -> A1 refusal;
 - duplicate JSON key at any nesting level -> opaque CLI refusal;
 - future-dated evidence -> A1 rejection;
@@ -193,39 +240,43 @@ a newer attestation from being backdated into an older company snapshot.
 
 ## Proof ruler
 
-The focused source-composer suite must prove:
+The focused suite must prove:
 
-- deterministic composition without mutating input documents;
-- exact root Strategic State reference and complete six-constraint map;
-- exact Strategic State constraint binding;
-- exact option-subject classification and mutation refusal;
+- deterministic composition without input mutation;
+- all six Strategic State constraints and exact root reference;
+- exact strategic payload/blob/revision identity;
+- mutated local strategic payload cannot be CURRENT;
+- exact Agent OS brief/source-record/revision identity;
+- mutated local brief cannot be CURRENT;
+- missing/unresolved identities remain UNKNOWN;
+- malformed identity fields and unknown attestation fields are refused;
+- every modifying option must cite both canonical owner roots;
+- read-only behavior is not over-constrained;
+- exact option classification and mutation refusal;
 - exact Chairman-envelope binding and mutation refusal;
 - expected-head source-action compatibility;
-- non-current Strategic State inputs fail the complete A1 decision closed;
-- Agent OS and additional non-root stale/unknown/conflict states remain option-local;
-- malformed brief cannot become CURRENT;
-- latest-observation semantics;
-- strict recursive duplicate-key rejection;
-- static no-I/O/no-runtime/no-connector import fence;
-- valid and opaque-invalid CLI journeys;
+- stale/unknown/conflict/degraded/future-dated behavior;
+- recursive duplicate-key rejection and opaque errors;
+- no I/O, runtime, connector or owner import;
 - `execution_authority_granted=false` in both composition and A1 packet.
 
-Repository test and security analysis are implementation evidence. Final source acceptance is one
-accountable Sol exact-head review under the Chairman's current streamlined release ruling; a
-redundant external-auditor ceremony is not a blocking gate for this production-inert vertical.
+Repository tests and security analysis are implementation evidence. Final source acceptance remains an
+accountable exact-head Sol review and expected-head merge. Green CI, merge and source protection do
+not constitute a live Chairman workflow.
 
-## Non-goals
+## No-rebuild boundaries
 
-A2 does not call Agent OS, GitHub, Slack, Linear, Executive OS, Capacity, RuntimeBinding, Wake,
-Steward or a model. It does not create a Job, select a worker, write durable memory, deploy, trade or
-grant execution authority. It does not make A3, A4, A5 or A6 live.
+A2 has **no second Agent OS parser**, source crawler, digest store, RAG/CXI plane, memory database,
+strategy store, authority registry, lifecycle, queue, worker router or effect owner. It consumes the
+existing CEO boot packet, owner-produced identity and protected A1 contract.
 
 ## Completion and next action
 
-A2 is complete when one exact current-base PR contains only the four paths above, the focused and
-repository suites are green, the source contract is directly reviewed, and the expected-head merge
-is read back from protected `master`.
+A2 is complete when one exact current-base PR contains only the four paths above, focused and
+repository suites are green, the source contract receives exact-head review, and the expected-head
+merge is read back from protected `master`.
 
-After protection, CCL-A3 composes one real current-source bundle with materially different options,
-including `PORTFOLIO_HOLD`, and executes one supervised reversible canary only through an existing
-effect owner after owner-local revalidation.
+After protection, CCL-A3 may compose one real current-source bundle with materially different
+options, including `PORTFOLIO_HOLD`, but no effect may begin until the prospective Outcome Learning
+prediction/assumption receipt is sealed. Any effect must use an existing effect owner and owner-local
+revalidation. A2 itself never executes.
