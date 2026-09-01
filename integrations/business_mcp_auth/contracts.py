@@ -371,7 +371,7 @@ def validate_resource_policy(value: object) -> ResourcePolicy:
     trusting construction history or duplicating policy rules.
     """
 
-    if not isinstance(value, ResourcePolicy):
+    if type(value) is not ResourcePolicy:
         _refuse()
     try:
         canonical = load_resource_policy(
