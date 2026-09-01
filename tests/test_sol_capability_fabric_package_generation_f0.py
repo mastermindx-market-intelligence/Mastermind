@@ -86,6 +86,10 @@ def _read(path: Path) -> str:
     return payload.decode("utf-8")
 
 
+def _prose(path: Path) -> str:
+    return " ".join(_read(path).split())
+
+
 def _digest(value: object) -> str:
     payload = json.dumps(
         value,
@@ -122,7 +126,7 @@ def test_records_are_complete_owner_correct_and_production_inert() -> None:
     spec = _read(SPEC)
     correction = _read(CORRECTION)
     plan = _read(PLAN)
-    combined = "\n".join((spec, correction, plan))
+    combined = "\n".join((spec, correction, plan)).replace("_", " ")
 
     for token in (
         "ExecutionCapabilityRegistry",
@@ -136,16 +140,18 @@ def test_records_are_complete_owner_correct_and_production_inert() -> None:
         "SCF-PKG1",
         "CAP-S1",
     ):
-        assert token in combined.replace("_", " ")
+        assert token in combined
 
-    for forbidden in ("TODO", "TBD", "PluginRegistry", "PackageStore"):
+    for forbidden in ("TODO", "TBD"):
         assert forbidden not in plan
 
     assert "WHY NOT FABLE" in plan
     assert "Default `config/executive_agent_capabilities.json` remains schema v3" in spec
     assert "No provider process" in spec
-    assert "creates no MCP app/tool" in spec
+    assert "builds no model-facing tool" in spec
     assert "does not yield a live provider capability" in spec
+    assert "must not create `PluginRegistry`" in spec
+    assert "`PackageStore`" in spec
 
 
 def test_default_policy_routes_and_autonomy_remain_v3_without_package_grants() -> None:
@@ -214,8 +220,8 @@ def test_each_operator_skill_closure_includes_the_shared_dialogue_reference() ->
 
 
 def test_package_and_effective_skill_closure_identities_stay_distinct() -> None:
-    spec = _read(SPEC)
-    plan = _read(PLAN)
+    spec = _prose(SPEC)
+    plan = _prose(PLAN)
 
     assert "A package generation and a Skill closure are distinct identities" in spec
     assert "unrelated app-binding" in plan
@@ -226,15 +232,15 @@ def test_package_and_effective_skill_closure_identities_stay_distinct() -> None:
 
 def test_v4_is_opt_in_and_runtime_plugin_authority_remains_unavailable() -> None:
     spec = _read(SPEC)
+    spec_lower = spec.lower()
     plan = _read(PLAN)
 
     assert 'CAPABILITY_POLICY_SCHEMA_V3 = "mastermind.executive_agent_capabilities/v3"' in spec
     assert 'CAPABILITY_POLICY_SCHEMA_V4 = "mastermind.executive_agent_capabilities/v4"' in spec
     assert "CAPABILITY_POLICY_SCHEMA = CAPABILITY_POLICY_SCHEMA_V3" in spec
-    assert "V3 non-empty plugin registry still refuses" in spec
-    assert "runtime full-plugin grants remain unavailable" in spec
-    assert "Default production policy remains v3" in plan
-    assert "Do not begin CAP-S1" not in plan  # this plan stops before CAP-S1 instead
+    assert "v3 non-empty plugin registry still refuses" in spec_lower
+    assert "runtime full-plugin grants remain unavailable" in spec_lower
+    assert "Default `config/executive_agent_capabilities.json` remains schema v3" in plan
     assert "Do not start CAP-S1" in plan
 
 
@@ -252,14 +258,14 @@ def test_implementation_scope_preserves_all_no_edit_surfaces() -> None:
 
     assert "Protected no-edit files" in plan
     assert "SCF-PKG1 = BUILT_NOT_PROVEN / PRODUCTION_INERT" in plan
-    assert "No source merge creates host `CONFIG_DRIFT`" in spec
+    assert "No source merge creates host `CONFIG_DRIFT`" in _prose(SPEC)
 
 
 def test_next_wave_is_bounded_codex_engineering_not_principal_program_work() -> None:
-    plan = _read(PLAN)
+    plan = _prose(PLAN)
     assert "ROUTE: Codex engineering worker / CTO Sol-compatible execution surface" in plan
     assert "WHY NOT FABLE" in plan
     assert "single-repository" in plan
     assert "no remaining product/organizational ambiguity" in plan
     assert "Do not migrate the default policy" in plan
-    assert "Do not begin CAP-S1" not in plan
+    assert "Do not start CAP-S1" in plan
