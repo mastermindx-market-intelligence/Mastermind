@@ -30,6 +30,16 @@ def _read(path: Path) -> str:
     return payload.decode("utf-8")
 
 
+def _prose(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _assert_prose(value: str, *markers: str) -> None:
+    normalized = _prose(value)
+    for marker in markers:
+        assert _prose(marker) in normalized
+
+
 def _marked_block(text: str, begin: str, end: str) -> str:
     _before, marker, remainder = text.partition(begin)
     assert marker
@@ -47,15 +57,21 @@ def _fenced_body(block: str, language: str) -> str:
 
 def test_amendment_restores_the_protected_complete_vertical_law() -> None:
     amendment = _read(AMENDMENT)
-    parent = " ".join(_read(PARENT).split())
+    parent = _read(PARENT)
 
-    assert "first PR should still deliver the complete useful vertical" in parent
-    assert "rather than merging an unused digest library alone" in parent
-    assert "There is no independently releasable parser-only SCF-PKG1" in amendment
-    assert "internal implementation phase inside one CAP-S1 carrier" in amendment
-    assert "infrastructure replacing product" in amendment
-    assert "supplements and, where it conflicts, supersedes" in amendment
-    assert IDENTITY_AMENDMENT.name in amendment
+    _assert_prose(
+        parent,
+        "first PR should still deliver the complete useful vertical",
+        "rather than merging an unused digest library alone",
+    )
+    _assert_prose(
+        amendment,
+        "There is no independently releasable parser-only SCF-PKG1",
+        "internal implementation phase inside one CAP-S1 carrier",
+        "infrastructure replacing product",
+        "supplements and, where it conflicts, supersedes",
+        IDENTITY_AMENDMENT.name,
+    )
 
 
 def test_machine_readable_sequence_has_no_standalone_parser_release() -> None:
@@ -69,8 +85,11 @@ def test_machine_readable_sequence_has_no_standalone_parser_release() -> None:
 
     assert sequence == ["SCF-PKG0", "CAP-S1", "CAP-PROMOTE1"]
     assert "SCF-PKG1" not in sequence
-    assert "independently releasable parser-only SCF-PKG1" in amendment
-    assert "Internal commits and test phases" in amendment
+    _assert_prose(
+        amendment,
+        "independently releasable parser-only SCF-PKG1",
+        "Internal commits and test phases",
+    )
 
 
 def test_vertical_contract_requires_one_real_read_only_codex_consumer() -> None:
@@ -103,15 +122,15 @@ def test_vertical_contract_requires_one_real_read_only_codex_consumer() -> None:
         "isolated_canary_state_when_all_proof_passes": "PROVEN_LIVE",
     }
 
-    for marker in (
+    _assert_prose(
+        amendment,
         "real isolated read-only Codex App Server attempt",
         "A fake App Server may prove protocol mechanics but cannot satisfy",
         "receive -> progress -> decision/escalation -> finish/result",
         "Exactly one real provider canary",
         "EFFECT_UNKNOWN",
         "do not blind-retry",
-    ):
-        assert marker in amendment
+    )
 
 
 def test_cap_s1_keeps_default_policy_routes_and_host_receipts_unchanged() -> None:
@@ -122,17 +141,16 @@ def test_cap_s1_keeps_default_policy_routes_and_host_receipts_unchanged() -> Non
     assert default_policy["plugins"] == {}
     assert "capability_packages" not in default_policy
 
-    for protected in (
+    _assert_prose(
+        amendment,
         "config/executive_agent_capabilities.json",
         "config/executive_worker_routes.json",
         "control_plane/executive_autonomy.py expected digests",
         "installed Executive configs or host receipts",
-    ):
-        assert protected in amendment
-
-    assert "CAP-S1 uses one explicit immutable V4 canary policy" in amendment
-    assert "CAP-PROMOTE1 may migrate the checked-in default policy only after CAP-S1" in amendment
-    assert "must not rewrite or auto-refresh historical installed receipts" in amendment
+        "CAP-S1 uses one explicit immutable V4 canary policy",
+        "CAP-PROMOTE1 may migrate the checked-in default policy only after CAP-S1",
+        "must not rewrite or auto-refresh historical installed receipts",
+    )
 
 
 def test_existing_installer_already_places_the_package_in_exact_release_closure() -> None:
@@ -155,16 +173,20 @@ def test_existing_installer_already_places_the_package_in_exact_release_closure(
     assert '/bin/chmod -R go-w "$STAGING"' in installer
     assert '/bin/chmod 0755 "$STAGING"' in installer
 
-    assert "full `git archive` of one accepted Mastermind commit" in amendment
-    assert "both non-root service" in amendment
-    assert "is already part of the canonical exact-release source closure" in amendment
-    assert "must not point Codex at a mutable provider home" in amendment
+    _assert_prose(
+        amendment,
+        "full `git archive` of one accepted Mastermind commit",
+        "both non-root service",
+        "is already part of the canonical exact-release source closure",
+        "must not point Codex at a mutable provider home",
+    )
 
 
 def test_vertical_includes_real_producer_consumer_comparator_and_cleanup() -> None:
     amendment = _read(AMENDMENT)
 
-    for marker in (
+    _assert_prose(
+        amendment,
         "control_plane/executive_capability_packages.py",
         "control_plane/executive_agent_capabilities.py",
         "control_plane/operator_harness_contract.py",
@@ -176,19 +198,18 @@ def test_vertical_includes_real_producer_consumer_comparator_and_cleanup() -> No
         "exact requested-vs-observed comparator decision",
         "process/resource/artifact cleanup",
         "first work turn allowed only on exact match",
-    ):
-        assert marker in amendment
-
-    assert "same required name observed more than once" in amendment
-    assert "extra unclassified custom Skill" in amendment
-    assert "Skill resolved outside the one staged root" in amendment
-    assert "first turn attempted before LaunchDecision.ALLOW" in amendment
+        "same required name observed more than once",
+        "extra unclassified custom Skill",
+        "Skill resolved outside the one staged root",
+        "first turn attempted before LaunchDecision.ALLOW",
+    )
 
 
 def test_no_rebuild_and_stop_boundaries_remain_explicit() -> None:
     amendment = _read(AMENDMENT)
 
-    for marker in (
+    _assert_prose(
+        amendment,
         "not the provider-neutral materializer owned by HF1",
         "must not introduce a generic package installer",
         "add a general Model Router route",
@@ -198,10 +219,8 @@ def test_no_rebuild_and_stop_boundaries_remain_explicit() -> None:
         "WHY NOT FABLE",
         "PLACEMENT_STATE: WAITING_CAPACITY / needs_placement",
         "No worker-facing commission is emitted until a concrete eligible receiver",
-    ):
-        assert marker in amendment
-
-    assert "package/registry/adapter source              BUILT_NOT_PROVEN" in amendment
-    assert "exact isolated Codex four-Skill canary path  PROVEN_LIVE" in amendment
-    assert "checked-in default V4 policy                 NOT_BUILT" in amendment
-    assert "provider-neutral materializer                SPEC_ONLY / HF1-GATED" in amendment
+        "package/registry/adapter source BUILT_NOT_PROVEN",
+        "exact isolated Codex four-Skill canary path PROVEN_LIVE",
+        "checked-in default V4 policy NOT_BUILT",
+        "provider-neutral materializer SPEC_ONLY / HF1-GATED",
+    )
