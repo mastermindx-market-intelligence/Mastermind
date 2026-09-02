@@ -17,6 +17,7 @@ relabel a closed environment as a disabled network.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -24,12 +25,14 @@ import resource
 import shutil
 import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
 __all__ = [
     "DEFAULT_LIMITS",
+    "sandbox_launcher_available",
     "LaunchLimits",
     "SandboxContract",
     "SandboxUnavailable",
@@ -95,6 +98,49 @@ DEFAULT_LIMITS = LaunchLimits(
 def _launcher_path() -> str | None:
     """The host-supplied network-denying launcher, if this platform has one."""
     return shutil.which("sandbox-exec")
+
+
+@functools.lru_cache(maxsize=1)
+def _linux_launcher() -> tuple[str, ...] | None:
+    """A network-denying launcher prefix on Linux, verified to actually exec.
+
+    `bwrap --unshare-net` is preferred; `unshare -r -n` is the fallback where
+    user namespaces are permitted. Both are PROBED here — a launcher that cannot
+    run is treated as absent, never as enforcement.
+    """
+    candidates: list[tuple[str, ...]] = []
+    bwrap = shutil.which("bwrap")
+    if bwrap:
+        candidates.append((bwrap, "--unshare-net", "--dev-bind", "/", "/", "--"))
+    unshare = shutil.which("unshare")
+    if unshare:
+        candidates.append((unshare, "-r", "-n", "--"))
+    for prefix in candidates:
+        try:
+            probe = subprocess.run(
+                [*prefix, "/bin/sh", "-c", "exit 0"],
+                capture_output=True, timeout=30, shell=False,
+                env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if probe.returncode != 0:
+            continue
+        # Exec-ing is not enforcing. A launcher that runs but leaves the network
+        # reachable is treated as ABSENT, so "available" can never mean less than
+        # "actually denies".
+        try:
+            verdict = subprocess.run(
+                [*prefix, str(Path(sys.executable).resolve()), "-c", _NETWORK_CANARY],
+                capture_output=True, text=True, timeout=60, shell=False,
+                env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+            )
+            observed = json.loads(verdict.stdout.strip().splitlines()[-1])
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            continue
+        if not observed.get("reachable"):
+            return prefix
+    return None
 
 
 _LIMIT_PROBE = (
@@ -246,7 +292,27 @@ def build_sandbox(
     require_network_denial: bool = True,
 ) -> SandboxContract:
     """Build an enforcing contract, or fail closed with a typed blocker."""
-    launcher = _launcher_path() if require_network_denial else None
+    launcher = None
+    linux_prefix: tuple[str, ...] | None = None
+    if require_network_denial:
+        launcher = _launcher_path()
+        if launcher is None:
+            linux_prefix = _linux_launcher()
+
+    if linux_prefix is not None:
+        enforced, unenforced = _measure_enforceable_limits(limits)
+        return SandboxContract(
+            network_denied=True,
+            launcher_argv=linux_prefix,
+            profile_path=None,
+            profile_digest=hashlib.sha256(
+                " ".join(linux_prefix).encode("utf-8")
+            ).hexdigest(),
+            limits=limits,
+            enforced_limits=enforced,
+            unenforced_limits=unenforced,
+        )
+
     if launcher is None:
         if require_network_denial:
             raise SandboxUnavailable(
@@ -310,3 +376,8 @@ def kill_process_group(pid: int, *, grace: float = 3.0) -> dict[str, Any]:
     except (ProcessLookupError, PermissionError):
         return {"group_signalled": True, "descendants_alive": 0, "detail": "died"}
     return {"group_signalled": True, "descendants_alive": 1, "detail": "group still alive"}
+
+
+def sandbox_launcher_available() -> bool:
+    """True when this host can actually deny network to a child process."""
+    return _launcher_path() is not None or _linux_launcher() is not None

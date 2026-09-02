@@ -298,10 +298,20 @@ class TestB6Enforcement:
         )
 
     def test_client_runs_the_child_under_the_sandbox(self, tmp_path: Path) -> None:
-        client = self._sandboxed("echo", tmp_path)
+        from experiments.code_intelligence.sandbox import (
+            build_sandbox, sandbox_launcher_available,
+        )
+
+        if not sandbox_launcher_available():
+            pytest.skip("host supplies no network-denying launcher")
+        sandbox = build_sandbox(scratch=tmp_path / "sbx")
+        client = JsonRpcStdioClient(
+            spec=_spec("echo"), scratch=tmp_path, sandbox=sandbox
+        )
         client.start()
         try:
-            assert client.launch_argv[0].endswith("sandbox-exec")
+            # The launcher, whatever this platform's is, must be argv[0].
+            assert client.launch_argv[0] == sandbox.launcher_argv[0]
             assert client.request("ping", {}) == {"method": "ping", "params": {}}
         finally:
             client.close()
