@@ -431,10 +431,15 @@ def test_installer_exact_extracted_allowlist_boots_under_isolated_python(tmp_pat
     assert {
         path for path in manifest["files"] if path.endswith(".py")
     } == _repo_python_import_closure(source)
+    # Literal tripwire beside the computed closure assertion above: it makes
+    # any growth of the remote runtime closure visible in review rather than
+    # silent.  25 -> 27 when the compositor gained the autonomy projection,
+    # which pulls in control_plane/autonomy_control_room_projection.py and the
+    # control_plane/executive_steward.py it consumes.
     assert sum(
         path.startswith("control_plane/") and path.endswith(".py")
         for path in manifest["files"]
-    ) == 25
+    ) == 27
     assert "config/strategic_state.yml" in manifest["files"]
     assert not any(path.startswith(".git/") for path in manifest["files"])
     for unrelated in (
