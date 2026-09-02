@@ -251,6 +251,16 @@ safe, perform zero child effect, and **do not spawn or substitute another sessio
 session and any dirty/effectful local state for canonical continuity reconciliation; a shared Slack
 identity, seat label, account nickname, or newly spawned same-model session cannot satisfy exactness.
 
+**Slack mention alone is not an exact-session delivery mechanism.** Sol may issue asynchronous
+`EXACT_SESSION_REQUIRED` delivery only when the exact provider conversation is already the current
+live interaction or a **production-proven exact native wake/resume path** can address that verified
+RuntimeBinding/native session. An account/seat mention, ordinary Slack notification, channel
+membership, task title, or ability to spawn a fresh same-model session is insufficient. If no proven
+exact-session path exists, represent the operation as `WAITING_EXACT_SESSION / wake_unavailable` and
+**do not emit an account-targeted DIRECT_TARGETED packet** pretending the named native session will
+consume it. Preserve any existing dirty/effectful owner and reconcile/materialize through the
+canonical RuntimeBinding/Wake/session-provisioning owners instead.
+
 Do not label ordinary new work `EXACT_SESSION_REQUIRED` merely because Sol happened to mention or tag a
 numbered account in an earlier packet. Exactness comes from the operation's real target requirement,
 not from accidental transport wording.
