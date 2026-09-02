@@ -268,38 +268,24 @@ def test_launchd_entrypoint_boots_under_isolated_python_from_foreign_cwd(
 
 
 def _w3c_candidate(runtime, *, stale_parent: bool = False):
-    from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
     from tests.test_company_dialogue_runtime_binding import (
         THREAD_TS,
         caller,
         identity,
         parent,
-        resolve,
         snapshot,
     )
 
     dialogue_parent = parent()
-    valid_binding = resolve(dialogue_parent=dialogue_parent).binding
-    assert valid_binding is not None
     current = snapshot(
         parent_fingerprint=("f" * 64 if stale_parent else dialogue_parent["fingerprint"])
     )
     return runtime.RelayTurnCandidate(
-        context=DialogueContextV2(
-            work_ref=valid_binding.work_ref,
-            commission_ref=valid_binding.commission_ref,
-            session_ref=valid_binding.session_ref,
-            operation_key=valid_binding.operation_key,
-            watch_mode=valid_binding.watch_mode,
-            actor_ref=valid_binding.actor_ref,
-            applies_to=valid_binding.applies_to,
-        ),
         delegation_identity=identity(),
         dialogue_parent=dialogue_parent,
         thread_ts=THREAD_TS,
         current_worker=current,
         actor=caller(),
-        routing_workstream=None,
     )
 
 
@@ -339,9 +325,11 @@ def test_turn_runtime_derives_trusted_routing_before_observer_io() -> None:
         runtime.ObservationOutcome.NO_ACTION
     ]
     assert len(observer.calls) == 1
-    routing = observer.calls[0][1]
+    context, routing = observer.calls[0]
+    assert context.operation_key == _w3c_candidate(runtime).dialogue_parent["operation_key"]
     assert routing.ceo_target_bound is True
     assert routing.coo_target_bound is True
+    assert routing.routing_workstream is None
 
 
 def test_turn_runtime_refuses_stale_current_worker_before_observer_or_target_io() -> None:
