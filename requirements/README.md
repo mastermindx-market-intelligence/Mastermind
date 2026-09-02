@@ -25,8 +25,9 @@ Current locks:
   `/opt/homebrew/bin/python3.12`).
 - `gate-linux-x86_64-py312.lock` -- linux/x86_64, CPython 3.12 (hosted-CI
   tool-cache interpreter). Minted by the bootstrap run of
-  `.github/workflows/rwe-shadow.yml` the first time it runs without this file
-  present, then committed.
+  `.github/workflows/rwe-shadow.yml` (its `linux-lock` artifact) and
+  committed here. If this file is ever removed, the workflow's bootstrap
+  step mints and uploads a fresh one again automatically.
 
 ## How to regenerate
 
