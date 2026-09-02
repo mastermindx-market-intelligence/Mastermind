@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import dataclasses
 import os
 import stat
 import sys
@@ -162,15 +161,20 @@ class RelayRuntimeConfig:
 
 @dataclass(frozen=True)
 class RelayTurnCandidate:
-    """One host-owned input snapshot for a bounded turn-observation pass."""
+    """One host-owned input snapshot for a bounded turn-observation pass.
 
-    context: DialogueContextV2
+    The candidate carries only source-owner facts needed to re-resolve the
+    exact current worker. The observer context and routing namespace are
+    derived from the accepted WP-3 result and canonical target owners inside
+    :class:`AgentRelayTurnRuntime`; callers cannot author parallel identity
+    or routing facts.
+    """
+
     delegation_identity: ExecutiveDelegationIdentity
     dialogue_parent: Mapping[str, Any]
     thread_ts: str
     current_worker: CurrentWorkerDialogueSnapshot | None
     actor: WorkerDialogueCaller
-    routing_workstream: str | None = None
 
 
 class AgentRelayTurnRuntime:
@@ -220,18 +224,21 @@ class AgentRelayTurnRuntime:
         )
 
     @staticmethod
-    def _trusted_workstream(value: str | None) -> str | None:
-        if value is None:
-            return None
-        if (
-            not isinstance(value, str)
-            or not value
-            or value != value.strip()
-            or len(value) > 200
-            or any(ord(character) < 32 for character in value)
-        ):
-            raise TurnRoutingFactsError("DIALOGUE_BINDING_MISMATCH")
-        return value
+    def _context_from_binding(binding: object) -> DialogueContextV2:
+        """Derive the observer context only from the accepted WP-3 binding."""
+
+        try:
+            return DialogueContextV2(
+                work_ref=binding.work_ref,
+                commission_ref=binding.commission_ref,
+                session_ref=binding.session_ref,
+                operation_key=binding.operation_key,
+                watch_mode=binding.watch_mode,
+                actor_ref=binding.actor_ref,
+                applies_to=binding.applies_to,
+            )
+        except (AttributeError, TypeError, ValueError):
+            raise TurnRoutingFactsError("DIALOGUE_BINDING_MISMATCH") from None
 
     async def _reconcile_candidate(
         self,
@@ -259,6 +266,7 @@ class AgentRelayTurnRuntime:
 
         assert candidate.current_worker is not None
         try:
+            context = self._context_from_binding(resolution.binding)
             routing = resolve_turn_routing_facts(
                 dialogue_parent=candidate.dialogue_parent,
                 current_worker=candidate.current_worker,
@@ -266,14 +274,6 @@ class AgentRelayTurnRuntime:
                 registry=self.registry,
                 current_binding_for=self._current_binding_for,
             )
-            routing_workstream = self._trusted_workstream(
-                candidate.routing_workstream
-            )
-            if routing_workstream is not None:
-                routing = dataclasses.replace(
-                    routing,
-                    routing_workstream=routing_workstream,
-                )
         except TurnRoutingFactsError as exc:
             return self._receipt(ObservationOutcome.REFUSED, exc.code)
         except Exception:
@@ -284,7 +284,7 @@ class AgentRelayTurnRuntime:
 
         try:
             return await self.observer.reconcile_once(
-                context=candidate.context,
+                context=context,
                 routing=routing,
             )
         except Exception:
