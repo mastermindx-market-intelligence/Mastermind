@@ -234,8 +234,19 @@ def _require_token(name: str, value: object) -> str:
         or any(ch.isspace() for ch in value)
         or "@" in value
         or "/" in value
+        # Exact-head review: `str.isspace()` does not cover NUL, ESC or BEL,
+        # and banning "/" alone does not cover a Windows path. These reached
+        # the composed Chairman document intact, and `scripts/
+        # chairman_control_room.py` prints these fields to a terminal, where
+        # an ANSI escape is not inert. `isprintable()` is False for every
+        # control character (and for the separators already banned above).
+        or "\\" in value
+        or any(not ch.isprintable() for ch in value)
     ):
-        raise ValueError(f"{name} must be a non-empty token with no whitespace, '@', or '/'")
+        raise ValueError(
+            f"{name} must be a non-empty token with no whitespace, '@', '/', "
+            "backslash, or control characters"
+        )
     return value
 
 
@@ -331,13 +342,24 @@ def _require_source_owner(
 
 
 def _require_responsibility_ref(value: object) -> str:
+    """An exact ``WS:<key>`` identity that ALSO obeys the module's token law.
+
+    Exact-head review: this had its own looser check, so a
+    ``responsibility_ref`` carrying a filesystem path or an email address
+    validated and reached the Chairman wire verbatim — contradicting
+    :func:`_require_token`'s stated contract that neither can flow through
+    any token field. One shared helper now governs both, and because this
+    same function guards BOTH construction
+    (:class:`PlacementSelectionDecision`) and wire revalidation, the two
+    sides cannot disagree: a ref the wire would refuse can never be emitted.
+    """
     if (
         not isinstance(value, str)
         or not value.startswith("WS:")
         or len(value) <= 3
-        or any(ch.isspace() for ch in value)
     ):
         raise ValueError("responsibility_ref must be an exact WS:<key> identity")
+    _require_token("responsibility_ref", value)
     return value
 
 
@@ -453,6 +475,21 @@ class PlacementCandidateFact:
         _require_token("occupancy_source.ref", self.occupancy_source.ref)
         _require_token("capacity_source.ref", self.capacity_source.ref)
         _require_token("closure_source.ref", self.closure_source.ref)
+        # Exact-head review: the SAME closure was missing for `observed_at`.
+        # SourceRef permits "@"/"/" there, but `_validate_source_ref_dict`
+        # token-checks it — so a candidate could construct cleanly and then
+        # produce a decision whose own to_dict() FAILED this module's
+        # validator, and the real Control Room dropped a genuine decision
+        # into `degraded`. That is the exact failure the .ref checks above
+        # exist to prevent; this completes it. `observed_at` is optional, so
+        # only a present value is checked.
+        for _name, _source in (
+            ("occupancy_source", self.occupancy_source),
+            ("capacity_source", self.capacity_source),
+            ("closure_source", self.closure_source),
+        ):
+            if _source.observed_at is not None:
+                _require_token(f"{_name}.observed_at", _source.observed_at)
         # Reviewer M-1/M-2: eagerly enforce the Phase-B snapshot contract's
         # own canonical regexes (executive_orchestration_principal._ID_RE /
         # _PROVIDER_RE / _ACCOUNT_RE) at CONSTRUCTION time, on every

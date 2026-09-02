@@ -2313,3 +2313,137 @@ def test_evidence_carries_the_candidates_own_values_not_fixture_defaults():
     assert payload["selected"]["quota_class"] == "premium"
     assert payload["selected"]["observed_at_ms"] == 4242
     assert eps.validate_placement_selection(payload) == payload
+
+
+# ---------------------------------------------------------------------------
+# exact-head review of 19227a64 — round-trip closure + token-law gaps
+#
+# All three are PRE-EXISTING (they predate the provenance wave) and all three
+# are fixed the same way: ONE shared helper serves both construction and wire
+# revalidation, so the two sides cannot disagree by construction.
+# ---------------------------------------------------------------------------
+
+def _candidate_fields() -> dict:
+    """Every PlacementCandidateFact field as a plain dict, so a test can
+    substitute a whole SourceRef (which `_candidate()` builds internally)."""
+    return dict(
+        worker_id="worker-a", provider="acme", account_label="account1",
+        quota_class="standard", capabilities=frozenset({"cap_a"}),
+        observed_at_ms=1000,
+        occupancy=eps.OccupancyState.FREE,
+        occupancy_source=_source(SourceOwner.RUNTIME_BINDING, "binding-a"),
+        capacity_state=CapacityState.AVAILABLE,
+        capacity_source=_source(SourceOwner.CAPACITY, "capacity-a"),
+        host_source_closure_proven=True,
+        closure_source=_source(SourceOwner.CAPACITY, "closure-a"),
+        effect_state=EffectState.NONE,
+        mode=eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+        creation_surface_accessible=True, session_creation_allowed=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "observed_at",
+    [
+        "2026-09-01T00:00:00Z/run-9",       # a path-ish segment
+        "2026-09-01T00:00:00Z@studio",      # an at-sign
+    ],
+)
+@pytest.mark.parametrize(
+    "source_field", ["occupancy_source", "capacity_source", "closure_source"],
+)
+def test_candidate_refuses_a_source_observed_at_the_wire_could_not_carry(source_field, observed_at):
+    """Round-trip closure, the `.observed_at` half.
+
+    `PlacementCandidateFact` already eagerly token-checks each
+    `*_source.ref` precisely so a candidate cannot construct cleanly and
+    then emit a decision its OWN wire validator rejects. The same closure
+    was missing for `*_source.observed_at`: `SourceRef` permits `@`/`/`
+    there, but `_validate_source_ref_dict` applies `_require_token`. The
+    result was a genuine `select_placement()` output that failed its own
+    validator, so the real Control Room dropped a real decision.
+    """
+    owners = {
+        "occupancy_source": SourceOwner.RUNTIME_BINDING,
+        "capacity_source": SourceOwner.CAPACITY,
+        "closure_source": SourceOwner.CAPACITY,
+    }
+    fields = _candidate_fields()
+    fields[source_field] = SourceRef(
+        owner=owners[source_field], ref="ref-a",
+        observed_at=observed_at, freshness=Freshness.CURRENT,
+    )
+    with pytest.raises(ValueError):
+        eps.PlacementCandidateFact(**fields)
+
+
+def test_every_constructible_candidate_produces_a_revalidatable_decision():
+    """The closure property itself, stated once: if a candidate can be
+    built, the decision it produces MUST pass this module's own validator.
+    Any future field that can be constructed but not revalidated fails
+    here, not silently in the Chairman's degraded list."""
+    edge_timestamps = [
+        "2026-09-01T00:00:00Z",
+        "2026-09-01T00:00:00.123456Z",
+        "20260901T000000Z",
+    ]
+    for observed_at in edge_timestamps:
+        fields = _candidate_fields()
+        fields["occupancy_source"] = SourceRef(
+            owner=SourceOwner.RUNTIME_BINDING, ref="ref-a",
+            observed_at=observed_at, freshness=Freshness.CURRENT,
+        )
+        candidate = eps.PlacementCandidateFact(**fields)
+        payload = eps.select_placement(
+            responsibility=_responsibility(), demand=_demand(), candidates=(candidate,),
+        ).to_dict()
+        assert eps.validate_placement_selection(payload) == payload, observed_at
+
+
+@pytest.mark.parametrize(
+    "responsibility_ref",
+    [
+        "WS:/Users/chriswong/.ssh/id_rsa",
+        "WS:daniela33777555@gmail.com",
+        "WS:teams/alpha",
+    ],
+)
+def test_responsibility_ref_obeys_the_modules_own_token_law(responsibility_ref):
+    """`_require_token`'s contract says an email address or a filesystem
+    path can never flow through ANY token field, but `responsibility_ref`
+    had its own looser check and reached the Chairman wire verbatim."""
+    with pytest.raises(ValueError):
+        eps._require_responsibility_ref(responsibility_ref)
+
+
+def test_a_decision_cannot_carry_a_path_shaped_responsibility_ref():
+    """Both sides: construction refuses it, so the selector can never emit
+    one, and the wire validator refuses it too."""
+    payload = _selected_payload(worker_id="worker-a")
+    payload["responsibility_ref"] = "WS:/Users/chriswong/.ssh/id_rsa"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "qc\x00-1",                    # NUL
+        "\x1b[2J\x1b[31mqc-1",         # ANSI terminal escape
+        "C:\\Users\\chriswong\\secrets.txt",  # a Windows path
+        "line\x07bell",                # BEL
+    ],
+)
+def test_token_law_rejects_control_characters_and_backslash_paths(token):
+    """`str.isspace()` does not cover NUL, ESC or BEL, and `/` alone does
+    not cover a backslash path — so these reached the composed document and
+    on to a terminal renderer."""
+    with pytest.raises(ValueError):
+        eps._require_token("t", token)
+
+
+def test_a_decision_cannot_carry_a_terminal_escape_in_its_demand():
+    payload = _selected_payload(worker_id="worker-a")
+    payload["demand"]["quota_class"] = "\x1b[2J\x1b[31mqc\x00-1"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
