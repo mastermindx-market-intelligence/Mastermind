@@ -374,6 +374,51 @@ def test_v4_duplicate_json_keys_refuse_at_every_depth(tmp_path, path):
         ExecutionCapabilityRegistry.load(dest, source_root=REPO_ROOT)
 
 
+# ---------------------------------------------------------------------------
+# WAVE-3 REPAIR A, Part 2: fixed non-echoing duplicate-JSON-key refusal
+# (review 5087139217 BLOCKER 4), exercised against a real V4 document at a
+# nested nested depth.
+# ---------------------------------------------------------------------------
+
+
+def test_wave3_partB_v4_duplicate_key_shaped_like_secret_does_not_echo(tmp_path, capsys, caplog):
+    poison = "sk-live-EXAMPLESECRETTOKEN"
+    raw = _load_v4_fixture_raw()
+    # `_canon_with_duplicate` appends ONE extra `dup_key` pair on top of
+    # whatever the target object already holds -- so the target must
+    # already carry an occurrence of `poison` for the appended pair to
+    # produce a genuine DUPLICATE (two occurrences) rather than a single
+    # novel key with no ambiguity at all.
+    raw["capability_packages"][PACKAGE_CAPABILITY_ID][poison] = "irrelevant-value-1"
+    duplicated_text = _canon_with_duplicate(
+        raw,
+        ("capability_packages", PACKAGE_CAPABILITY_ID),
+        poison,
+        "irrelevant-value-2",
+    )
+    dest = tmp_path / "dup_v4_secret.json"
+    dest.write_text(duplicated_text, encoding="utf-8")
+
+    with pytest.raises(CapabilityPolicyError) as excinfo:
+        ExecutionCapabilityRegistry.load(dest, source_root=REPO_ROOT)
+
+    exc = excinfo.value
+    assert poison not in str(exc)
+    assert poison not in repr(exc)
+
+    cause = exc.__cause__
+    context = exc.__context__
+    assert cause is None or poison not in str(cause)
+    assert cause is None or poison not in repr(cause)
+    assert context is None or poison not in str(context)
+    assert context is None or poison not in repr(context)
+
+    captured = capsys.readouterr()
+    assert poison not in captured.out
+    assert poison not in captured.err
+    assert poison not in caplog.text
+
+
 def _build_self_consistent_second_package(
     *, new_capability_id: str, new_generation: str, skill_capability_prefix: str
 ) -> dict:

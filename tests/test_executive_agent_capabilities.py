@@ -659,3 +659,58 @@ def test_duplicate_json_keys_refuse_for_v3_documents(tmp_path, raw_key_path):
     path.write_text(duplicated_text, encoding="utf-8")
     with pytest.raises(CapabilityPolicyError, match="duplicate JSON key"):
         ExecutionCapabilityRegistry.load(path)
+
+
+# ---------------------------------------------------------------------------
+# WAVE-3 REPAIR A, Part 2: fixed non-echoing duplicate-JSON-key refusal
+# (review 5087139217 BLOCKER 4). A duplicate JSON object key is completely
+# attacker-controlled and has no length or character-set bound the way every
+# OTHER validated field in this module does -- the refusal must never echo
+# any fragment of it into the exception text, its exception chain, or any
+# captured log/stdout/stderr surface.
+# ---------------------------------------------------------------------------
+
+
+def test_wave3_partB_duplicate_key_shaped_like_secret_does_not_echo(tmp_path, capsys, caplog):
+    poison = "sk-live-EXAMPLESECRETTOKEN"
+    raw_text = "{" + f'"{poison}": 1, "{poison}": 2' + "}"
+    path = tmp_path / "dup_secret.json"
+    path.write_text(raw_text, encoding="utf-8")
+
+    with pytest.raises(CapabilityPolicyError) as excinfo:
+        ExecutionCapabilityRegistry.load(path)
+
+    exc = excinfo.value
+    assert poison not in str(exc)
+    assert poison not in repr(exc)
+
+    cause = exc.__cause__
+    context = exc.__context__
+    assert cause is None or poison not in str(cause)
+    assert cause is None or poison not in repr(cause)
+    assert context is None or poison not in str(context)
+    assert context is None or poison not in repr(context)
+
+    captured = capsys.readouterr()
+    assert poison not in captured.out
+    assert poison not in captured.err
+    assert poison not in caplog.text
+
+
+def test_wave3_partB_duplicate_key_refusal_reason_is_fixed_regardless_of_key(tmp_path):
+    """The refusal reason is IDENTICAL byte-for-byte no matter which key
+    repeated, how long it was, or at what depth -- proving it is a fixed
+    token rather than a template that merely omits the key in this one
+    case."""
+    from control_plane.executive_agent_capabilities import _DUPLICATE_JSON_KEY_REASON
+
+    messages: set[str] = set()
+    for poison in ("short", "a-very-different-and-much-longer-duplicate-key-value-entirely"):
+        raw_text = "{" + f'"{poison}": 1, "{poison}": 2' + "}"
+        path = tmp_path / f"dup-{len(poison)}.json"
+        path.write_text(raw_text, encoding="utf-8")
+        with pytest.raises(CapabilityPolicyError) as excinfo:
+            ExecutionCapabilityRegistry.load(path)
+        messages.add(str(excinfo.value))
+
+    assert messages == {_DUPLICATE_JSON_KEY_REASON}

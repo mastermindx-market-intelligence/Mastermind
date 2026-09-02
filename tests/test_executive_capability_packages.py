@@ -2698,3 +2698,251 @@ def test_item4_mid_read_growth_refusal_balances_descriptors(tmp_path, monkeypatc
         verify_capability_package_source(tmp_path, generation, _between_read_chunks=_grow)
     assert counts["open"] > 0
     assert counts["open"] == counts["close"]
+
+
+# ===========================================================================
+# WAVE-3 REPAIR A: retained census file objects (Sol corrections 5087211688
+# + 5087236388, mastermind-cap-s1-complete-vertical-20260901-sol-001, PR #350)
+# ===========================================================================
+#
+# `test_item3_regular_file_swapped_for_different_regular_file_same_bytes_refuses`
+# above is kept EXACTLY as it was: on this macOS host neither `unlink()`ing
+# nor `os.replace()`ing a file naturally recycles the freed inode number, so
+# the test passing here does not by itself prove the CODE (rather than the
+# filesystem's allocator) is what refuses the swap. The tests below extend
+# coverage to the rest of the RED/GREEN matrix (atomic replace; post-census
+# replacement by symlink/FIFO/socket/directory; same-path mode mutation
+# while retained; the enlarged descriptor-balance surface) and include a
+# dedicated bite-check that disables the identity fence to prove IT -- not
+# this platform's inode-allocation behavior -- is load-bearing.
+
+
+def test_wave3_partA_os_replace_byte_identical_refuses(tmp_path, monkeypatch):
+    """Atomic os.replace() swap-in of a byte-identical file must still
+    refuse: os.replace() is a single syscall (no unlink+create window at
+    all), so this is a strictly harder case than unlink+recreate for any
+    check relying on a window between two separate operations -- the
+    census-time open must bind identity to whatever object existed at
+    CENSUS-lstat time, not to whatever the name resolves to by the time the
+    open actually executes."""
+    import control_plane.executive_capability_packages as scf_pkg
+
+    def _identity_without_timestamps(st):
+        return (st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_uid, st.st_gid, st.st_size)
+
+    monkeypatch.setattr(scf_pkg, "_stat_identity", _identity_without_timestamps)
+
+    generation, _ = _standard_generation(tmp_path)
+    target = "references/boundary.md"
+    victim = tmp_path / "plugins" / "example" / target
+    original_bytes = victim.read_bytes()
+
+    def _swap(path):
+        if path == target:
+            replacement = tmp_path / "replacement-boundary.md"
+            replacement.write_bytes(original_bytes)
+            os.replace(replacement, victim)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_file_open=_swap)
+
+
+def test_wave3_partA_terminal_fence_symlink_replacement_refuses(tmp_path):
+    """Post-census (after every file has been hashed via its retained fd),
+    replace a declared file's NAME with a symlink. The terminal fence's
+    fresh no-follow lstat must see this without ever opening/following it."""
+    generation, _ = _standard_generation(tmp_path)
+    target = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+    outside = tmp_path / "outside-terminal-swap.md"
+    outside.write_bytes(b"shared reference bytes")
+
+    def _swap():
+        target.unlink()
+        os.symlink(outside, target)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_swap)
+
+
+def test_wave3_partA_terminal_fence_fifo_replacement_refuses_without_blocking(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    target = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+
+    def _swap():
+        target.unlink()
+        os.mkfifo(target)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_swap)
+
+
+def test_wave3_partA_terminal_fence_socket_replacement_refuses_without_blocking(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    target = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+
+    def _swap():
+        target.unlink()
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.bind(str(target))
+        except OSError:
+            sock.close()
+            pytest.skip("platform refuses AF_UNIX bind in tmpdir")
+        sock.close()
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_swap)
+
+
+def test_wave3_partA_terminal_fence_directory_replacement_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    target = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+
+    def _swap():
+        target.unlink()
+        target.mkdir()
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_swap)
+
+
+def test_wave3_partA_mode_mutation_while_retained_refuses(tmp_path):
+    """Same-path MODE mutation while the file's fd is retained: the read
+    loop streams the same (unchanged) bytes -- content and size stay
+    matched -- but the mode bit drift must still surface via the
+    final-fstat-vs-open-fstat identity comparison, exactly like the
+    existing byte-mutation seam test above."""
+    package_root = "plugins/example"
+    contents = {"skills/receive/SKILL.md": b"original skill bytes"}
+    _write_tree(tmp_path, package_root, contents)
+    skill_md = _row_from_disk(tmp_path, package_root, "skills/receive/SKILL.md")
+    generation = _canonical_generation(
+        capability_id="example.pkg1",
+        package_root=package_root,
+        manifest_path="skills/receive/SKILL.md",
+        files=(skill_md,),
+        skills_spec=[
+            {
+                "skill_capability_id": "example.receive.v1",
+                "runtime_name": "receive",
+                "entrypoint_path": "skills/receive/SKILL.md",
+                "closure_paths": ["skills/receive/SKILL.md"],
+            }
+        ],
+    )
+
+    mutated = {"done": False}
+
+    def _mutate():
+        if not mutated["done"]:
+            mutated["done"] = True
+            path = tmp_path / package_root / "skills/receive/SKILL.md"
+            path.chmod(0o755)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_final_stat=_mutate)
+
+    assert mutated["done"] is True
+
+
+def test_wave3_partA_hardlink_refusal_balances_descriptors(tmp_path, monkeypatch):
+    """Descriptor-balance proof extended to the census-time hardlink
+    refusal path: this now fires INSIDE the walk (before the census even
+    completes), while OTHER directories/files may already be retained --
+    every one of them must still close."""
+    counts = _count_opens_closes(monkeypatch)
+    generation, _ = _standard_generation(tmp_path)
+    victim = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+    external = tmp_path / "external-hardlink.md"
+    os.link(victim, external)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]
+
+
+def test_wave3_partA_executable_mismatch_refusal_balances_descriptors(tmp_path, monkeypatch):
+    """Descriptor-balance proof extended to the census-time executable-bit
+    mismatch refusal path (also now fires inside the walk)."""
+    counts = _count_opens_closes(monkeypatch)
+    generation, _ = _standard_generation(tmp_path)
+    victim = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+    victim.chmod(0o755)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]
+
+
+def test_wave3_partA_hashing_never_reopens_retained_file(tmp_path, monkeypatch):
+    """No-reopen proof: every declared file's underlying `os.open` call
+    (dir_fd-relative, non-directory) must occur exactly ONCE across the
+    whole verification transaction -- proving the hash loop reads from the
+    SAME fd opened during the census rather than reopening the path."""
+    import control_plane.executive_capability_packages as scf_pkg
+
+    generation, _ = _standard_generation(tmp_path)
+    real_open = os.open
+    open_calls: dict[tuple[int, str], int] = {}
+
+    def counting_open(path, flags, *args, dir_fd=None, **kwargs):
+        if dir_fd is not None and not (flags & os.O_DIRECTORY):
+            key = (dir_fd, path)
+            open_calls[key] = open_calls.get(key, 0) + 1
+        return real_open(path, flags, *args, dir_fd=dir_fd, **kwargs)
+
+    monkeypatch.setattr(scf_pkg.os, "open", counting_open)
+
+    receipt = verify_capability_package_source(tmp_path, generation)
+    assert isinstance(receipt, VerifiedCapabilityPackage)
+    assert open_calls, "expected at least one non-directory (file) open to be recorded"
+    assert all(count == 1 for count in open_calls.values()), open_calls
+
+
+def test_wave3_partA_disabling_identity_fence_lets_reused_inode_swap_through(tmp_path, monkeypatch):
+    """Mutation-proof bite check (Sol corrections 5087211688 + 5087236388).
+
+    On this macOS host, `unlink()` followed by recreating a file at the
+    same name does not naturally recycle the freed inode number, so
+    `test_item3_regular_file_swapped_for_different_regular_file_same_bytes_refuses`
+    passing here does not by itself distinguish "the identity fence caught
+    a genuine swap" from "this platform's allocator happened not to reuse
+    the inode". This test isolates the fence's own contribution instead of
+    relying on filesystem luck: it replays that EXACT unlink+recreate swap
+    with `_same_object` -- the single comparison every retained-object
+    identity check in the module routes through -- monkeypatched to
+    unconditionally report a match (precisely the observable behavior a
+    genuine reused-inode collision would produce). With the fence disabled
+    this way, verification WRONGLY succeeds: content, size, executable bit,
+    nlink, and every other portable stat field the swapped file shares with
+    the original are identical, so nothing else in the pipeline would catch
+    it either. This is the deliberately WRONG outcome, reproduced here only
+    to prove the fence -- not this platform's inode-allocation behavior --
+    is what makes the real (unpatched) test refuse.
+    """
+    import control_plane.executive_capability_packages as scf_pkg
+
+    # As in test_item2/test_item3 above: also neutralize the pre-existing
+    # "did any retained descriptor's own fstat drift" signal, which would
+    # otherwise catch this swap for an UNRELATED reason (the PARENT
+    # directory's own mtime bumps when a file underneath it is unlinked and
+    # recreated) and mask whether disabling `_same_object` is what actually
+    # lets the swap through.
+    def _identity_without_timestamps(st):
+        return (st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_uid, st.st_gid, st.st_size)
+
+    monkeypatch.setattr(scf_pkg, "_stat_identity", _identity_without_timestamps)
+    monkeypatch.setattr(scf_pkg, "_same_object", lambda a, b: True)
+
+    generation, _ = _standard_generation(tmp_path)
+    target = "references/boundary.md"
+    victim = tmp_path / "plugins" / "example" / target
+    original_bytes = victim.read_bytes()
+
+    def _swap(path):
+        if path == target:
+            victim.unlink()
+            victim.write_bytes(original_bytes)
+
+    receipt = verify_capability_package_source(tmp_path, generation, _before_file_open=_swap)
+    assert isinstance(receipt, VerifiedCapabilityPackage)
