@@ -22,9 +22,7 @@ import argparse
 import getpass
 import json
 import os
-import stat
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,6 +44,8 @@ from integrations.chairman_surfaces import mas115_multilogin_port_policy as port
 WORK_REF = "WS:CHAIRMAN-CONTROL-ROOM"
 SEAT_REFS = ("chatgpt1", "chatgpt2", "chatgpt3")
 _CONFIRM_ENROLL = "ENROLL THREE CHAIRMAN SEATS"
+_CONFIRM_CREATE_PEER = "CREATE ONE DISPOSABLE PEER PROFILE"
+_CONFIRM_ROLLBACK_PEER = "REMOVE THE OPERATION-CREATED PEER PROFILE"
 _MAX_PRIVATE_URL_BYTES = 8 * 1024
 
 
@@ -218,29 +218,9 @@ def assert_current_nonseat(bound_doc: dict, row: dict, *, now: datetime) -> None
         )
 
 
-def _atomic_private_json(doc: dict, path: str | Path) -> None:
-    target = Path(path).expanduser()
-    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    content = (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    tmp = tempfile.NamedTemporaryFile(
-        dir=os.fspath(target.parent), prefix=f".{target.name}.", suffix=".tmp", delete=False,
-    )
-    try:
-        os.fchmod(tmp.fileno(), 0o600)
-        tmp.write(content)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-    finally:
-        tmp.close()
-    try:
-        os.replace(tmp.name, target)
-        os.chmod(target, stat.S_IRUSR | stat.S_IWUSR)
-    except Exception:
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
-        raise
+#: Single implementation lives in vendors.py (REALM1-C1 spec §3.10); this
+#: name is kept for every existing caller/test in this module.
+_atomic_private_json = vendors.atomic_private_json
 
 
 def _migrate_legacy_provision(
@@ -360,6 +340,68 @@ def provision_interactive() -> int:
     return 0
 
 
+def _matching_local_row(bound_doc: dict) -> dict:
+    """Re-identify the anchor provision's exact profile in the fresh local
+    census, then re-run the three-seat exclusion against it. Raises
+    :class:`SetupRefusal` on any missing/ambiguous/colliding state."""
+    loaded, code = _load_current_provision()
+    if loaded is None:
+        raise SetupRefusal(f"the disposable profile provision is unavailable ({code}); prepare it first")
+    candidates = _candidate_rows(chatgpt.list_local_environments())
+    matches = [
+        row for row in candidates
+        if row.get("env_manager") == "multilogin"
+        and row.get("profile_id") == loaded.get("profile_id")
+        and row.get("folder_id") == loaded.get("folder_id")
+    ]
+    if len(matches) != 1:
+        raise SetupRefusal("the disposable profile could not be re-identified in the local census")
+    assert_current_nonseat(bound_doc, matches[0], now=datetime.now(timezone.utc))
+    return matches[0]
+
+
+def create_peer_interactive() -> int:
+    """Create the one missing stopped disposable Multilogin peer profile.
+
+    This coordinator never reads the credential, never constructs vendor
+    HTTP, and never sees a raw vendor response — it only forwards the exit
+    code and lets ``vendors.main`` print its own receipt.
+    """
+    bound_doc, problems = sb.load_bindings()
+    if problems or bound_doc is None:
+        raise SetupRefusal("enroll all three Chairman ChatGPT seats before preparing a disposable peer profile")
+    _matching_local_row(bound_doc)
+    if input(f"Type {_CONFIRM_CREATE_PEER!r} to create one disposable peer profile: ").strip() != _CONFIRM_CREATE_PEER:
+        raise SetupRefusal("peer-create confirmation did not match; nothing was dispatched")
+    return vendors.main([
+        "create-peer-profile",
+        "--vendor", "multilogin",
+        "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+        "--confirmed",
+    ])
+
+
+def rollback_peer_interactive() -> int:
+    """Remove only the exact operation-created disposable peer profile.
+
+    This coordinator never reads the credential, never constructs vendor
+    HTTP, and never sees a raw vendor response — it only forwards the exit
+    code and lets ``vendors.main`` print its own receipt.
+    """
+    bound_doc, problems = sb.load_bindings()
+    if problems or bound_doc is None:
+        raise SetupRefusal("enroll all three Chairman ChatGPT seats before rolling back a disposable peer profile")
+    _matching_local_row(bound_doc)
+    if input(f"Type {_CONFIRM_ROLLBACK_PEER!r} to remove the operation-created peer profile: ").strip() != _CONFIRM_ROLLBACK_PEER:
+        raise SetupRefusal("peer-rollback confirmation did not match; nothing was dispatched")
+    return vendors.main([
+        "rollback-peer-profile",
+        "--vendor", "multilogin",
+        "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+        "--confirmed",
+    ])
+
+
 def status() -> int:
     census = _candidate_rows(chatgpt.list_local_environments())
     bindings, problems = sb.load_bindings()
@@ -402,6 +444,14 @@ def main(argv=None) -> int:
     )
     run_parser = sub.add_parser("run-canary", help="run the accepted disposable canary")
     run_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
+    create_peer_parser = sub.add_parser(
+        "create-peer-profile", help="create the one missing stopped disposable peer profile",
+    )
+    create_peer_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
+    rollback_peer_parser = sub.add_parser(
+        "rollback-peer-profile", help="remove only the exact operation-created peer profile",
+    )
+    rollback_peer_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
     args = parser.parse_args(argv)
 
     try:
@@ -438,6 +488,14 @@ def main(argv=None) -> int:
                 "--vendor", args.vendor,
                 "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
             ])
+        if args.command == "create-peer-profile":
+            if args.vendor != "multilogin":
+                raise SetupRefusal("GoLogin peer profiles remain unsupported; no disposable peer profile will be created")
+            return create_peer_interactive()
+        if args.command == "rollback-peer-profile":
+            if args.vendor != "multilogin":
+                raise SetupRefusal("GoLogin peer profiles remain unsupported; no disposable peer profile will be removed")
+            return rollback_peer_interactive()
     except SetupRefusal as refusal:
         print(f"REFUSED: {refusal}", file=sys.stderr)
         return 2

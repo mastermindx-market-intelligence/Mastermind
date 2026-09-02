@@ -160,6 +160,46 @@ The ordered journey is:
    The v2 receipt includes a separate cleanup proof: stop acknowledged (or no
    start needed), exact-profile process count returned to zero, and all other
    managed-profile process counts unchanged.
+6. `create-peer-profile` (REALM1-C1, Mastermind #385) creates the one missing
+   stopped disposable Multilogin **peer** profile alongside the existing
+   anchor (`profile_A`) disposable profile, so a second automation-owned
+   non-seat browser can exist without ever touching a Chairman seat. It is
+   `BUILT_NOT_PROVEN / PRODUCTION_INERT`: no profile has been created live by
+   this wave; every repository test is hermetic. The command re-runs the same
+   local three-seat exclusion as `prepare-disposable`, then reaches the same
+   narrow secret-owning helper, which never binds or self-tests the fixed
+   loopback origin — this operation never launches a browser, so the fixed
+   port is irrelevant to it. At most ONE create request is ever dispatched,
+   and only after an intent sidecar is committed to disk first; an ambiguous
+   or lost vendor response is never a reason to dispatch again. The peer's
+   deterministic name (`peer_profile_name`) is derived from the operation key
+   plus the folder/anchor-profile identity, so the same inputs always
+   resolve to the same name — this is what makes reconciliation possible
+   without ever storing a raw vendor identity. **The vendor response never
+   decides the effect** — exactly one read-only folder census after dispatch
+   does, checking identity (folder/browser-core/OS/name), non-ownership, and
+   a positive stopped-state proof before the peer provision is written.
+   Two documented vendor silences are designed around rather than resolved:
+   the create-success HTTP status is 201 in Multilogin's own Postman example
+   but 200 in its help-article prose, so **both** are accepted as "dispatch
+   acknowledged" (never load-bearing — read-back still decides); and no
+   error-body shape is documented for a 4xx/5xx create/remove response, so
+   any non-exact response is treated as ambiguous, never as a definitive
+   failure permitting a retry.
+7. `rollback-peer-profile` removes **only** the exact stopped, unowned,
+   operation-created peer profile recorded in the peer provision file, via
+   `permanently: false` (recoverable — Multilogin's trash, not permanent
+   deletion) — "absence" is proven against the same live folder census used
+   by create, immediately after the one remove dispatch. Like create, it
+   re-runs the local three-seat exclusion and never binds the loopback
+   origin. A wrong id, a replaced identity, a still-running or still-locked
+   profile, or a profile this operation did not create all refuse before any
+   remove request is ever sent — there is no generic "remove by search"
+   surface, only this one exact-id path. `profile_A` and every enrolled
+   Chairman-seat profile/binding are structurally unreachable by either
+   command: the create/remove HTTP bodies are built entirely from
+   `folder_id`/the deterministic peer name (create) or the peer's own id
+   (remove), and neither command ever writes to the anchor provision file.
 
 The supported Multilogin run path is the documented v2 exact-profile launcher
 with `automation_type=selenium`, followed by a closed W3C WebDriver subset:

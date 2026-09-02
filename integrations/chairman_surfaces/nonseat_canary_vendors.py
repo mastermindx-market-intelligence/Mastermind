@@ -33,10 +33,13 @@ import re
 import secrets
 import select
 import signal
+import stat
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import quote
 
 import httpx
@@ -72,6 +75,114 @@ _MLX_STATUS_DATA_KEYS = frozenset({
 _USER_DATA_DIR_RE = re.compile(r"--user-data-dir=(\S+)")
 _WEBDRIVER_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _WEBDRIVER_MISSING = object()
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+
+# ---------------------------------------------------------------------------
+# REALM1-C1 — MAS-115 one-profile Multilogin peer create/reconcile/remove
+# (Mastermind #385). See docs/CHAIRMAN_CONTROL_ROOM.md item 6/7.
+# ---------------------------------------------------------------------------
+
+_MLX_PROFILE_CREATE_PATH = "/profile/create"
+_MLX_PROFILE_REMOVE_PATH = "/profile/remove"
+
+PEER_OPERATION_KEY = "web-sol-realm1-multilogin-profile-create-owner-20260902-sol-001"
+PEER_PROVISION_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_canary_peer.json"
+PEER_INTENT_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_peer_create_intent.json"
+PEER_INTENT_SCHEMA = "mastermind.mas115_nonseat_peer_create_intent.v1"
+PEER_RECEIPT_SCHEMA = "mastermind.mas115_nonseat_peer_lifecycle.v1"
+_PEER_NAME_PREFIX = "mas115-peer-"
+_PEER_BROWSER_TYPE = "mimic"
+_PEER_OS_TYPE = "macos"
+_PEER_REMOVE_PERMANENTLY = False  # recoverable; absence is proven against the active census
+
+PEER_EFFECT_CODES = frozenset({
+    "NONE", "CREATE_DISPATCHED", "CREATE_APPLIED", "CREATE_EFFECT_UNKNOWN",
+    "PROVISION_WRITTEN", "PROFILE_STOPPED_PROVEN", "REMOVE_DISPATCHED",
+    "REMOVE_APPLIED", "REMOVE_EFFECT_UNKNOWN", "ROLLBACK_VERIFIED",
+})
+PEER_EFFECT_DETAILS = {
+    "NONE": "no peer-profile effect occurred.",
+    "CREATE_DISPATCHED": "a create request for the disposable peer profile was sent to the vendor.",
+    "CREATE_APPLIED": "the disposable peer profile exists but its stopped state is not yet proven.",
+    "CREATE_EFFECT_UNKNOWN": "whether the disposable peer profile was created could not be determined.",
+    "PROVISION_WRITTEN": "the disposable peer profile was created, proven stopped, and its provision was written.",
+    "PROFILE_STOPPED_PROVEN": "the disposable peer profile was proven to exist and to be stopped.",
+    "REMOVE_DISPATCHED": "a remove request for the disposable peer profile was sent to the vendor.",
+    "REMOVE_APPLIED": "the disposable peer profile was removed but its absence is not yet proven.",
+    "REMOVE_EFFECT_UNKNOWN": "whether the disposable peer profile was removed could not be determined.",
+    "ROLLBACK_VERIFIED": "the disposable peer profile's absence was proven after removal.",
+}
+if set(PEER_EFFECT_DETAILS) != PEER_EFFECT_CODES:
+    raise RuntimeError("nonseat_canary_vendors: PEER_EFFECT_DETAILS keys must exactly match PEER_EFFECT_CODES")
+
+_PEER_PASS_EFFECTS = frozenset({"PROVISION_WRITTEN", "PROFILE_STOPPED_PROVEN", "ROLLBACK_VERIFIED"})
+_PEER_HOLD_EFFECTS = frozenset({
+    "CREATE_DISPATCHED", "CREATE_APPLIED", "CREATE_EFFECT_UNKNOWN",
+    "REMOVE_DISPATCHED", "REMOVE_APPLIED", "REMOVE_EFFECT_UNKNOWN",
+})
+
+_PEER_RECEIPT_PREDICATE_KEYS = frozenset({
+    "intent_committed", "candidates_before", "dispatched", "reconciled",
+    "exact_readback", "stopped_proven", "provision_written",
+    "cleanup_lease_retained", "removed_absent",
+})
+_PEER_BASE_PREDICATES = {
+    "intent_committed": False,
+    "candidates_before": 0,
+    "dispatched": False,
+    "reconciled": False,
+    "exact_readback": False,
+    "stopped_proven": False,
+    "provision_written": False,
+    "cleanup_lease_retained": False,
+    "removed_absent": False,
+}
+
+
+def peer_profile_name(folder_id: str, anchor_profile_id: str) -> str:
+    """Pure, deterministic, opaque peer-profile name.
+
+    Same ``(folder_id, anchor_profile_id)`` always yields the same name; the
+    caller can never supply a name directly. This is what makes read-back
+    reconciliation possible without ever storing a raw vendor identity.
+    """
+    material = "|".join((PEER_OPERATION_KEY, folder_id, anchor_profile_id))
+    return _PEER_NAME_PREFIX + _core.sha256_hex(material)[:16]
+
+
+def peer_receipt(*, effect: str, code: str, verdict: str, digests: dict, **predicates) -> dict:
+    """Build one closed, redacted MAS-115 peer lifecycle receipt."""
+
+    if effect not in PEER_EFFECT_CODES:
+        raise ValueError(f"unknown peer effect: {effect!r}")
+    if code not in _core.RESULT_CODES:
+        raise ValueError(f"unknown peer receipt code: {code!r}")
+    if verdict not in ("PASS", "HOLD", "REFUSED"):
+        raise ValueError(f"unknown peer receipt verdict: {verdict!r}")
+    if not isinstance(digests, dict) or set(digests) != {"folder", "peer_name", "peer_profile", "anchor_profile"}:
+        raise ValueError("peer receipt digests must carry exactly the fixed digest keys")
+    for value in digests.values():
+        if value is not None and not (isinstance(value, str) and _HEX64_RE.fullmatch(value)):
+            raise ValueError("peer receipt digest values must be a sha256 hex digest or None")
+    if set(predicates) != _PEER_RECEIPT_PREDICATE_KEYS:
+        raise ValueError("peer receipt predicates must carry exactly the fixed predicate keys")
+    for key, value in predicates.items():
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            continue
+        raise ValueError(f"peer receipt predicate {key!r} must be bool or int")
+    return {
+        "schema": PEER_RECEIPT_SCHEMA,
+        "operation": PEER_OPERATION_KEY,
+        "verdict": verdict,
+        "effect": effect,
+        "effect_detail": PEER_EFFECT_DETAILS[effect],
+        "code": code,
+        "detail": _core.DETAILS[code],
+        "digests": dict(digests),
+        "predicates": dict(predicates),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +260,31 @@ class BoundedHttpClient:
         return self._request(
             "POST", _MLX_CLOUD_ORIGIN, "/profile/search",
             headers=self._bearer(credential), json_body=body,
+        )
+
+    def _mlx_profile_create(self, credential, folder_id: str, name: str):
+        body = {
+            "name": name,
+            "browser_type": _PEER_BROWSER_TYPE,
+            "os_type": _PEER_OS_TYPE,
+            "folder_id": folder_id,
+            "times": 1,
+            "parameters": {
+                "flags": {"ports_masking": "mask", "proxy_masking": "disabled"},
+                "storage": {"is_local": True, "save_service_worker": True},
+                "fingerprint": {},
+            },
+        }
+        return self._request(
+            "POST", _MLX_CLOUD_ORIGIN, _MLX_PROFILE_CREATE_PATH,
+            headers=self._bearer(credential), json_body=body,
+        )
+
+    def _mlx_profile_remove(self, credential, profile_id: str):
+        return self._request(
+            "POST", _MLX_CLOUD_ORIGIN, _MLX_PROFILE_REMOVE_PATH,
+            headers=self._bearer(credential),
+            json_body={"ids": [profile_id], "permanently": _PEER_REMOVE_PERMANENTLY},
         )
 
     def _mlx_profile_status(self, credential, profile_id: str):
@@ -366,6 +502,46 @@ class WebDriverNavigator:
 # ---------------------------------------------------------------------------
 
 
+def _is_exact_profile_create_success(response) -> bool:
+    if response is None or response.status_code not in (200, 201):
+        return False
+    payload = response.payload
+    if not isinstance(payload, dict) or set(payload) != {"status", "data"}:
+        return False
+    status = payload.get("status")
+    data = payload.get("data")
+    if not isinstance(status, dict) or set(status) != {"error_code", "http_code", "message"}:
+        return False
+    if (
+        status.get("error_code") != ""
+        or status.get("http_code") != response.status_code
+        or status.get("message") != "Profile successfully created"
+    ):
+        return False
+    if not isinstance(data, dict) or set(data) != {"ids"}:
+        return False
+    ids = data.get("ids")
+    if not isinstance(ids, list) or len(ids) != 1:
+        return False
+    only_id = ids[0]
+    return isinstance(only_id, str) and bool(only_id)
+
+
+def _is_exact_profile_remove_success(response) -> bool:
+    return (
+        response is not None
+        and response.status_code == 200
+        and response.payload == {
+            "status": {
+                "error_code": "",
+                "http_code": 200,
+                "message": "Profile successfully removed",
+            },
+            "data": None,
+        }
+    )
+
+
 def _is_exact_partial_update_success(response) -> bool:
     return (
         response is not None
@@ -419,6 +595,12 @@ class MultiloginClient:
         #: it survives ambiguous responses and C5's simulated owner loss and
         #: cannot be redirected to a caller-supplied profile.
         self._cleanup_profile_ref = None
+        #: Resolved id of the peer profile the most recent
+        #: :meth:`create_peer_profile` proved into existence — set only from
+        #: an exact read-back, never from a caller or a vendor response
+        #: alone. The CLI layer reads this to write the peer provision; it
+        #: is never placed in a receipt.
+        self._peer_profile_id = None
 
     def _require_credential(self) -> None:
         if not self._credential.present:
@@ -710,6 +892,305 @@ class MultiloginClient:
         if state == "stopped":
             return False
         return self._started_profile_id != profile_ref.get("profile_id")
+
+    # -----------------------------------------------------------------
+    # REALM1-C1 — one-profile peer create/reconcile/remove (Mastermind #385)
+    # -----------------------------------------------------------------
+
+    def peer_candidates(self, *, folder_id: str, peer_name: str) -> list:
+        """Read-only census of every profile in ``folder_id`` named exactly
+        ``peer_name``. Mirrors :meth:`_profile_inventory_item`'s pagination,
+        duplicate-id, and auth/shape guards; never mutates anything."""
+        self._require_credential()
+        offset = 0
+        expected_total = None
+        seen_ids = set()
+        matches = []
+        while offset < _MAX_PROFILE_CENSUS:
+            resp = self._safe_call(
+                lambda: self._client._mlx_profile_search(self._credential, folder_id, offset=offset),
+            )
+            if resp is None:
+                raise _core.CanaryRefusal("VENDOR_ERROR")
+            if resp.status_code in (401, 403):
+                raise _core.CanaryRefusal("AUTH_EXPIRED")
+            if resp.status_code != 200:
+                raise _core.CanaryRefusal("VENDOR_ERROR")
+            data = self._successful_envelope(resp.payload, expected_message=None)
+            if data is None or set(data) != {"profiles", "total_count"}:
+                raise _core.CanaryRefusal("VENDOR_ERROR")
+            profiles = data.get("profiles")
+            total = data.get("total_count")
+            if not isinstance(profiles, list) or not isinstance(total, int) or isinstance(total, bool):
+                raise _core.CanaryRefusal("VENDOR_ERROR")
+            if total < 0 or total > _MAX_PROFILE_CENSUS:
+                raise _core.CanaryRefusal("VENDOR_ERROR")
+            if expected_total is None:
+                expected_total = total
+            if total != expected_total or len(profiles) > _PROFILE_PAGE_SIZE:
+                raise _core.CanaryRefusal("VENDOR_ERROR")
+            for item in profiles:
+                if not isinstance(item, dict) or not {"id", "folder_id", "name"}.issubset(item):
+                    raise _core.CanaryRefusal("VENDOR_ERROR")
+                item_id = item.get("id")
+                item_folder = item.get("folder_id")
+                item_name = item.get("name")
+                if (
+                    not isinstance(item_id, str)
+                    or not isinstance(item_folder, str)
+                    or not isinstance(item_name, str)
+                ):
+                    raise _core.CanaryRefusal("VENDOR_ERROR")
+                if item_id in seen_ids:
+                    raise _core.CanaryRefusal("VENDOR_ERROR")
+                seen_ids.add(item_id)
+                if item_name == peer_name:
+                    if item_folder != folder_id:
+                        raise _core.CanaryRefusal("VENDOR_ERROR")
+                    if not isinstance(item.get("browser_type"), str) or not isinstance(item.get("os_type"), str):
+                        # We cannot prove identity we cannot see.
+                        raise _core.CanaryRefusal("VENDOR_ERROR")
+                    matches.append(dict(item))
+            offset += len(profiles)
+            if offset == total:
+                return matches
+            if not profiles or offset > total:
+                raise _core.CanaryRefusal("VENDOR_ERROR")
+        raise _core.CanaryRefusal("VENDOR_ERROR")
+
+    @staticmethod
+    def _peer_identity_matches(record, *, folder_id: str, peer_name: str, require_unowned: bool = False) -> bool:
+        if not isinstance(record, dict):
+            return False
+        ok = (
+            record.get("folder_id") == folder_id
+            and record.get("browser_type") == _PEER_BROWSER_TYPE
+            and record.get("os_type") == _PEER_OS_TYPE
+            and record.get("name") == peer_name
+        )
+        if not ok:
+            return False
+        if require_unowned:
+            if record.get("in_use_by") != "":
+                return False
+            if "locked_by" in record and record.get("locked_by") != "":
+                return False
+        return True
+
+    @staticmethod
+    def _peer_digests(folder_id: str, anchor_profile_id: str, peer_name: str, *, peer_profile_id=None) -> dict:
+        return {
+            "folder": _core.sha256_hex(folder_id),
+            "peer_name": _core.sha256_hex(peer_name),
+            "peer_profile": _core.sha256_hex(peer_profile_id) if peer_profile_id else None,
+            "anchor_profile": _core.sha256_hex(anchor_profile_id),
+        }
+
+    def create_peer_profile(self, *, folder_id, anchor_profile_id, intent_present, commit_intent) -> dict:
+        """Create the one missing stopped disposable peer profile.
+
+        At most ONE create dispatch, ever. The vendor response never decides
+        the effect — a single read-only census read-back always does. This
+        method performs NO file I/O: ``intent_present``/``commit_intent`` are
+        supplied by the caller (the CLI layer in :func:`main`).
+        """
+        peer_name = peer_profile_name(folder_id, anchor_profile_id)
+        digests = self._peer_digests(folder_id, anchor_profile_id, peer_name)
+        intent_committed = bool(intent_present)
+
+        def _receipt(effect, code, verdict, **overrides):
+            predicates = dict(_PEER_BASE_PREDICATES)
+            predicates["intent_committed"] = intent_committed
+            predicates.update(overrides)
+            return peer_receipt(effect=effect, code=code, verdict=verdict, digests=digests, **predicates)
+
+        if not self._credential.present:
+            return _receipt("NONE", "AUTH_MISSING", "REFUSED")
+
+        try:
+            candidates = self.peer_candidates(folder_id=folder_id, peer_name=peer_name)
+        except _core.CanaryRefusal as refusal:
+            return _receipt("NONE", refusal.code, "REFUSED")
+
+        candidates_before = len(candidates)
+        dispatched = False
+        reconciled = False
+
+        if candidates_before >= 1 and not intent_present:
+            # A name-colliding profile we did not create is a conflict; we
+            # never adopt it.
+            return _receipt("NONE", "BUSY_PROFILE", "REFUSED", candidates_before=candidates_before)
+
+        if intent_present and candidates_before == 1:
+            if not self._peer_identity_matches(candidates[0], folder_id=folder_id, peer_name=peer_name):
+                return _receipt("NONE", "VENDOR_ERROR", "REFUSED", candidates_before=candidates_before)
+            dispatched = False
+            reconciled = True
+        elif intent_present and candidates_before != 1:
+            # A committed intent means a create may already have been
+            # dispatched; zero or many candidates is uncertainty, never
+            # permission to dispatch again.
+            return _receipt(
+                "CREATE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
+                candidates_before=candidates_before, dispatched=False, reconciled=True,
+            )
+        elif not intent_present and candidates_before == 0:
+            try:
+                committed = commit_intent()
+            except Exception:  # noqa: BLE001 — a raising commit is a failed commit
+                committed = False
+            if committed is not True:
+                return _receipt(
+                    "NONE", "PROVISION_MISSING", "REFUSED", candidates_before=0, dispatched=False,
+                )
+            intent_committed = True
+            response = None
+            try:
+                response = self._client._mlx_profile_create(self._credential, folder_id, peer_name)
+            except Exception:  # noqa: BLE001 — never echo a dynamic transport error
+                response = None
+            if response is not None and response.status_code in (401, 403):
+                # Auth rejection precedes creation; the ONLY pre-effect exit
+                # after commit.
+                return _receipt(
+                    "NONE", "AUTH_EXPIRED", "REFUSED", candidates_before=0, dispatched=False,
+                )
+            exact = _is_exact_profile_create_success(response)
+            dispatched = True
+            reconciled = not exact
+        else:  # pragma: no cover — every (intent_present, candidates_before)
+            # combination is covered by the three branches above; this exists
+            # only so a future mutation cannot silently fall through to a
+            # dispatch with no guard.
+            return _receipt("NONE", "BUSY_PROFILE", "REFUSED", candidates_before=candidates_before)
+
+        # Read-back reconciliation: ALWAYS exactly one census read. The
+        # create response never decides the effect by itself.
+        try:
+            after = self.peer_candidates(folder_id=folder_id, peer_name=peer_name)
+        except _core.CanaryRefusal as refusal:
+            return _receipt(
+                "CREATE_EFFECT_UNKNOWN", refusal.code, "HOLD",
+                candidates_before=candidates_before, dispatched=dispatched, reconciled=reconciled,
+                exact_readback=False,
+            )
+
+        if len(after) != 1:
+            return _receipt(
+                "CREATE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
+                candidates_before=candidates_before, dispatched=dispatched, reconciled=reconciled,
+                exact_readback=False,
+            )
+
+        record = after[0]
+        if not self._peer_identity_matches(
+            record, folder_id=folder_id, peer_name=peer_name, require_unowned=True,
+        ):
+            return _receipt(
+                "CREATE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
+                candidates_before=candidates_before, dispatched=dispatched, reconciled=reconciled,
+                exact_readback=False,
+            )
+
+        resolved_id = record["id"]
+        self._peer_profile_id = resolved_id
+        digests["peer_profile"] = _core.sha256_hex(resolved_id)
+
+        try:
+            state = self._profile_state({"profile_id": resolved_id, "folder_id": folder_id})
+        except _core.CanaryRefusal:
+            state = None
+
+        if state != "stopped":
+            return _receipt(
+                "CREATE_APPLIED", "BUSY_PROFILE", "HOLD",
+                candidates_before=candidates_before, dispatched=dispatched, reconciled=reconciled,
+                exact_readback=True, stopped_proven=False, cleanup_lease_retained=True,
+            )
+
+        return _receipt(
+            "PROFILE_STOPPED_PROVEN", "OK", "HOLD",
+            candidates_before=candidates_before, dispatched=dispatched, reconciled=reconciled,
+            exact_readback=True, stopped_proven=True, cleanup_lease_retained=True,
+        )
+
+    def remove_peer_profile(self, *, folder_id, anchor_profile_id, peer_profile_id) -> dict:
+        """Remove ONLY the exact stopped, unowned, operation-created peer
+        profile. At most ONE remove dispatch, ever; the vendor response
+        never decides the effect on its own."""
+        peer_name = peer_profile_name(folder_id, anchor_profile_id)
+        digests = self._peer_digests(
+            folder_id, anchor_profile_id, peer_name, peer_profile_id=peer_profile_id,
+        )
+
+        def _receipt(effect, code, verdict, **overrides):
+            predicates = dict(_PEER_BASE_PREDICATES)
+            predicates.update(overrides)
+            return peer_receipt(effect=effect, code=code, verdict=verdict, digests=digests, **predicates)
+
+        if not self._credential.present:
+            return _receipt("NONE", "AUTH_MISSING", "REFUSED")
+
+        try:
+            candidates = self.peer_candidates(folder_id=folder_id, peer_name=peer_name)
+        except _core.CanaryRefusal as refusal:
+            return _receipt("NONE", refusal.code, "REFUSED")
+
+        candidates_before = len(candidates)
+        if candidates_before == 0:
+            return _receipt("NONE", "PROFILE_NOT_FOUND", "REFUSED", candidates_before=0)
+
+        exact_target = (
+            candidates_before == 1
+            and candidates[0].get("id") == peer_profile_id
+            and self._peer_identity_matches(
+                candidates[0], folder_id=folder_id, peer_name=peer_name, require_unowned=True,
+            )
+        )
+        if not exact_target:
+            return _receipt("NONE", "BUSY_PROFILE", "REFUSED", candidates_before=candidates_before)
+
+        try:
+            state = self._profile_state({"profile_id": peer_profile_id, "folder_id": folder_id})
+        except _core.CanaryRefusal:
+            state = None
+        if state != "stopped":
+            return _receipt("NONE", "BUSY_PROFILE", "REFUSED", candidates_before=candidates_before)
+
+        response = None
+        try:
+            response = self._client._mlx_profile_remove(self._credential, peer_profile_id)
+        except Exception:  # noqa: BLE001 — never echo a dynamic transport error
+            response = None
+        if response is not None and response.status_code in (401, 403):
+            return _receipt(
+                "NONE", "AUTH_EXPIRED", "REFUSED", candidates_before=candidates_before,
+            )
+        exact = _is_exact_profile_remove_success(response)
+
+        try:
+            after = self.peer_candidates(folder_id=folder_id, peer_name=peer_name)
+        except _core.CanaryRefusal:
+            return _receipt(
+                "REMOVE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
+                candidates_before=candidates_before, dispatched=True, reconciled=True,
+            )
+
+        if len(after) == 0:
+            return _receipt(
+                "ROLLBACK_VERIFIED", "OK", "PASS",
+                candidates_before=candidates_before, dispatched=True,
+                reconciled=not exact, removed_absent=True,
+            )
+        if exact:
+            return _receipt(
+                "REMOVE_DISPATCHED", "VENDOR_ERROR", "REFUSED",
+                candidates_before=candidates_before, dispatched=True, reconciled=False,
+            )
+        return _receipt(
+            "REMOVE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
+            candidates_before=candidates_before, dispatched=True, reconciled=True,
+        )
 
     def port_policy_snapshot(self, profile_ref: dict):
         """Read and classify the exact stopped disposable profile policy."""
@@ -1274,6 +1755,171 @@ def _local_disposable_preflight(provision: dict, environment_loader=None):
     return "BUSY_PROFILE" if matches[0]["running"] else None
 
 
+def atomic_private_json(doc: dict, path) -> None:
+    """Write ``doc`` to ``path`` as private (0600) JSON, atomically.
+
+    The single implementation (moved here from ``scripts/mas115_setup.py``
+    per the REALM1-C1 spec §3.10): parent mkdir 0700, tmp file in the same
+    directory, fchmod 0600, write/flush/fsync, ``os.replace``, chmod 0600,
+    unlink the tmp file on any failure.
+    """
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    content = (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    tmp = tempfile.NamedTemporaryFile(
+        dir=os.fspath(target.parent), prefix=f".{target.name}.", suffix=".tmp", delete=False,
+    )
+    try:
+        os.fchmod(tmp.fileno(), 0o600)
+        tmp.write(content)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+    finally:
+        tmp.close()
+    try:
+        os.replace(tmp.name, target)
+        os.chmod(target, stat.S_IRUSR | stat.S_IWUSR)
+    except Exception:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
+
+
+def _peer_intent_present(path, *, peer_name: str) -> bool:
+    """True iff ``path`` holds an exact, schema/operation/peer_name-matching
+    intent document. A malformed or mismatched file is treated as NOT
+    present (see :func:`_commit_peer_intent`, which additionally refuses to
+    silently overwrite such a file)."""
+    target = Path(path).expanduser()
+    try:
+        if not target.is_file():
+            return False
+        doc = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (
+        isinstance(doc, dict)
+        and doc.get("schema") == PEER_INTENT_SCHEMA
+        and doc.get("operation") == PEER_OPERATION_KEY
+        and doc.get("peer_name") == peer_name
+    )
+
+
+def _commit_peer_intent(path, *, folder_id: str, anchor_profile_id: str, peer_name: str) -> bool:
+    """Atomically write the intent sidecar BEFORE any create dispatch.
+
+    Idempotent: an existing file that already byte-matches the candidate
+    document is treated as already committed. Any other existing file
+    (malformed, foreign, or from a different operation) blocks — it is
+    never silently overwritten.
+    """
+    target = Path(path).expanduser()
+    candidate = {
+        "schema": PEER_INTENT_SCHEMA,
+        "operation": PEER_OPERATION_KEY,
+        "folder_digest": _core.sha256_hex(folder_id),
+        "anchor_profile_digest": _core.sha256_hex(anchor_profile_id),
+        "peer_name": peer_name,
+        "browser_type": _PEER_BROWSER_TYPE,
+        "os_type": _PEER_OS_TYPE,
+    }
+    try:
+        if target.is_file():
+            existing = json.loads(target.read_text(encoding="utf-8"))
+            return existing == candidate
+    except (OSError, ValueError):
+        return False
+    try:
+        atomic_private_json(candidate, target)
+    except Exception:  # noqa: BLE001 — a write failure is a failed commit
+        return False
+    return True
+
+
+def _write_peer_provision(
+    path, *, profile_id: str, folder_id: str, bindings_loader, now,
+):
+    """Write (or reconcile) the peer provision, then require it re-validates.
+
+    Returns ``(written, loaded_or_none)``. An already-present, byte-different
+    file refuses rather than overwriting; a written-but-invalid document
+    also reports ``written=False`` — both collapse to the same HOLD/
+    PROVISION_MISSING outcome the caller applies to the receipt.
+    """
+    target = Path(path).expanduser()
+    doc = {
+        "schema": _core.PROVISION_SCHEMA,
+        "vendor": "multilogin",
+        "profile_id": profile_id,
+        "folder_id": folder_id,
+        "browser_type": _PEER_BROWSER_TYPE,
+        "origin_policy": _port_policy.ORIGIN_POLICY,
+        "disposable_ack": _core.REQUIRED_ACK,
+    }
+    try:
+        if target.is_file():
+            existing = json.loads(target.read_text(encoding="utf-8"))
+            if existing != doc:
+                return False, None
+        else:
+            atomic_private_json(doc, target)
+    except Exception:  # noqa: BLE001 — any write/read failure is a failed write
+        return False, None
+    loaded, _code = _core.load_provision(str(target), bindings_loader=bindings_loader, now=now)
+    return (loaded is not None), loaded
+
+
+def _create_peer_profile_cli(
+    client: "MultiloginClient", provision: dict, *,
+    peer_intent_path, peer_provision_path, bindings_loader, now,
+) -> dict:
+    """CLI-layer wrapper: owns the intent/provision file I/O that
+    :meth:`MultiloginClient.create_peer_profile` deliberately does not."""
+    folder_id = provision["folder_id"]
+    anchor_profile_id = provision["profile_id"]
+    peer_name = peer_profile_name(folder_id, anchor_profile_id)
+    intent_present = _peer_intent_present(peer_intent_path, peer_name=peer_name)
+
+    def _commit():
+        return _commit_peer_intent(
+            peer_intent_path, folder_id=folder_id, anchor_profile_id=anchor_profile_id,
+            peer_name=peer_name,
+        )
+
+    receipt = client.create_peer_profile(
+        folder_id=folder_id, anchor_profile_id=anchor_profile_id,
+        intent_present=intent_present, commit_intent=_commit,
+    )
+    if receipt["effect"] != "PROFILE_STOPPED_PROVEN":
+        # A create whose read-back could not prove the profile stopped is NOT
+        # a provisionable profile. Writing profile_B here would publish a
+        # binding for a profile that may be running or owned, and would let a
+        # HOLD masquerade as PASS. The exact cleanup lease stays retained.
+        return receipt
+
+    peer_profile_id = client._peer_profile_id  # noqa: SLF001 — CLI/client are one unit here
+    written, _loaded = _write_peer_provision(
+        peer_provision_path, profile_id=peer_profile_id, folder_id=folder_id,
+        bindings_loader=bindings_loader, now=now,
+    )
+    predicates = dict(receipt["predicates"])
+    if written:
+        predicates["provision_written"] = True
+        predicates["cleanup_lease_retained"] = False
+        return peer_receipt(
+            effect="PROVISION_WRITTEN", code="OK", verdict="PASS",
+            digests=receipt["digests"], **predicates,
+        )
+    predicates["provision_written"] = False
+    predicates["cleanup_lease_retained"] = True
+    return peer_receipt(
+        effect=receipt["effect"], code="PROVISION_MISSING", verdict="HOLD",
+        digests=receipt["digests"], **predicates,
+    )
+
+
 def main(
     argv=None, *, stdout=None, bindings_loader=None, credential_stream_factory=None,
     client_factory=BoundedHttpClient, origin_factory=LoopbackBenignOrigin,
@@ -1288,11 +1934,17 @@ def main(
     parser = argparse.ArgumentParser(prog="nonseat_canary_vendors")
     parser.add_argument(
         "operation", nargs="?", default="run",
-        choices=("run", "configure-canary-port"),
+        choices=("run", "configure-canary-port", "create-peer-profile", "rollback-peer-profile"),
     )
     parser.add_argument("--vendor", required=True, choices=("gologin", "multilogin"))
     parser.add_argument("--provision-path", required=True)
+    parser.add_argument("--peer-provision-path", default=None)
+    parser.add_argument("--peer-intent-path", default=None)
+    parser.add_argument("--confirmed", action="store_true")
     args = parser.parse_args(argv)
+    peer_ops = ("create-peer-profile", "rollback-peer-profile")
+    if args.operation in peer_ops and not args.confirmed:
+        parser.error(f"--confirmed is required for {args.operation}")
     out = stdout if stdout is not None else sys.stdout
 
     # GoLogin stays completely unsupported until a pinned SDK contract is
@@ -1315,21 +1967,36 @@ def main(
     if local_code is not None:
         return _emit_refusal(out, args.vendor, local_code)
 
-    # Bind and self-test the one fixed loopback origin before any secret or
-    # vendor transport exists. There is no fallback port.
-    token = "mas115-live-" + secrets.token_hex(16)
+    peer_provision_path = args.peer_provision_path or PEER_PROVISION_PATH
+    peer_intent_path = args.peer_intent_path or PEER_INTENT_PATH
+    peer_provision = None
+    if args.operation == "rollback-peer-profile":
+        # Rollback needs the PEER provision's profile_id before it can even
+        # build a target — a purely local check, so it happens before Keychain.
+        peer_provision, peer_code = _core.load_provision(
+            peer_provision_path, bindings_loader=bindings_loader, now=reference_time,
+        )
+        if peer_provision is None:
+            return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
+
     origin = None
-    try:
-        origin = origin_factory(token=token)
-        if origin.base_url != _port_policy.CANARY_ORIGIN or origin.self_test() is not True:
-            raise _core.CanaryRefusal("CANARY_PORT_UNAVAILABLE")
-    except Exception:  # noqa: BLE001 — bind/self-test failures have one static refusal
-        if origin is not None:
-            try:
-                origin.close()
-            except Exception:  # noqa: BLE001 — closed result cannot expand
-                pass
-        return _emit_refusal(out, args.vendor, "CANARY_PORT_UNAVAILABLE")
+    if args.operation not in peer_ops:
+        # Bind and self-test the one fixed loopback origin before any secret
+        # or vendor transport exists. There is no fallback port. The peer
+        # create/rollback operations never launch a browser, so the fixed
+        # port origin is irrelevant to them and is skipped entirely.
+        token = "mas115-live-" + secrets.token_hex(16)
+        try:
+            origin = origin_factory(token=token)
+            if origin.base_url != _port_policy.CANARY_ORIGIN or origin.self_test() is not True:
+                raise _core.CanaryRefusal("CANARY_PORT_UNAVAILABLE")
+        except Exception:  # noqa: BLE001 — bind/self-test failures have one static refusal
+            if origin is not None:
+                try:
+                    origin.close()
+                except Exception:  # noqa: BLE001 — closed result cannot expand
+                    pass
+            return _emit_refusal(out, args.vendor, "CANARY_PORT_UNAVAILABLE")
 
     # This is intentionally after every provision, collision, bind, and local
     # self-test preflight. Production has no external-stdin path: that would
@@ -1340,10 +2007,12 @@ def main(
         credential_stream = factory()
         credential = _read_direct_pipe_credential(credential_stream)
     except _core.CanaryRefusal as refusal:
-        origin.close()
+        if origin is not None:
+            origin.close()
         return _emit_refusal(out, args.vendor, refusal.code)
     except Exception:  # noqa: BLE001 — fixed absence result only
-        origin.close()
+        if origin is not None:
+            origin.close()
         return _emit_refusal(out, args.vendor, "AUTH_MISSING")
     finally:
         if credential_stream is not None:
@@ -1352,7 +2021,8 @@ def main(
             except Exception:  # noqa: BLE001 — fixed cleanup boundary
                 pass
     if not credential.present:
-        origin.close()
+        if origin is not None:
+            origin.close()
         return _emit_refusal(out, args.vendor, "AUTH_MISSING")
 
     client = None
@@ -1367,6 +2037,27 @@ def main(
             "profile_id": provision["profile_id"],
             "folder_id": provision["folder_id"],
         }
+        if args.operation == "create-peer-profile":
+            receipt = _create_peer_profile_cli(
+                vendor_client, provision,
+                peer_intent_path=peer_intent_path, peer_provision_path=peer_provision_path,
+                bindings_loader=bindings_loader, now=reference_time,
+            )
+            print(json.dumps(receipt, indent=2, sort_keys=True), file=out)
+            if receipt.get("verdict") == "PASS":
+                return 0
+            return 3 if receipt.get("verdict") == "HOLD" else 2
+
+        if args.operation == "rollback-peer-profile":
+            receipt = vendor_client.remove_peer_profile(
+                folder_id=provision["folder_id"], anchor_profile_id=provision["profile_id"],
+                peer_profile_id=peer_provision["profile_id"],
+            )
+            print(json.dumps(receipt, indent=2, sort_keys=True), file=out)
+            if receipt.get("verdict") == "PASS":
+                return 0
+            return 3 if receipt.get("verdict") == "HOLD" else 2
+
         if args.operation == "configure-canary-port":
             receipt = vendor_client.configure_canary_port(profile_ref)
             print(json.dumps(receipt, indent=2, sort_keys=True), file=out)
