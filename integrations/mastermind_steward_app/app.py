@@ -71,6 +71,21 @@ def _ascii(value: bytes) -> str | None:
     return token
 
 
+def _canonical_raw_path(scope: Scope) -> bytes:
+    """Return one ASCII path value even when the optional ASGI raw_path is absent."""
+
+    raw_path = scope.get("raw_path")
+    if isinstance(raw_path, bytes):
+        return raw_path
+    path = scope.get("path")
+    if not isinstance(path, str):
+        return b""
+    try:
+        return path.encode("ascii")
+    except UnicodeEncodeError:
+        return b""
+
+
 def _host_matches(candidate: str, allowed_hosts: Sequence[str]) -> bool:
     candidate = candidate.lower()
     for raw in allowed_hosts:
@@ -150,12 +165,7 @@ class _StewardTransportGuard:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
-        raw_path = scope.get("raw_path")
-        if not isinstance(raw_path, bytes):
-            try:
-                raw_path = str(scope.get("path") or "").encode("ascii")
-            except UnicodeEncodeError:
-                raw_path = b""
+        raw_path = _canonical_raw_path(scope)
         if scope.get("root_path") or scope.get("query_string"):
             await _reply(scope, receive, send, 404, "not_found")
             return
@@ -271,7 +281,7 @@ class _A1AuthGate:
         self.resource = resource_path.encode("ascii")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope.get("type") != "http" or scope.get("raw_path") != self.resource:
+        if scope.get("type") != "http" or _canonical_raw_path(scope) != self.resource:
             await self.app(scope, receive, send)
             return
         user = scope.get("user")
