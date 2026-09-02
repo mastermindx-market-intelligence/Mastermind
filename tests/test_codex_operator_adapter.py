@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -99,6 +100,22 @@ def _load_cap_s1_profile():
     return registry.resolve(CAP_S1_PROFILE_ID)
 
 
+def _installed_release_origin_root(tmp_path: Path, generation) -> Path:
+    """Sol wave-3 review (5087139217, finding M6): ``INSTALLED_RELEASE``
+    now requires the origin root's own basename to equal the generation's
+    exact ``source_commit`` (the Executive installer's ``releases/<sha>``
+    layout) -- a bare checkout root no longer authenticates. This helper
+    builds that small, real (non-symlink) release-shaped origin by copying
+    only the already-reviewed package subtree, never the whole repository.
+    """
+    release_root = tmp_path / "cap-s1-release-root" / generation.source_commit
+    package_dest = release_root / generation.package_root
+    package_dest.parent.mkdir(parents=True, exist_ok=True)
+    if not package_dest.exists():
+        shutil.copytree(REPO_ROOT / generation.package_root, package_dest)
+    return release_root
+
+
 def _stage_cap_s1_binding(
     tmp_path: Path,
     *,
@@ -109,10 +126,11 @@ def _stage_cap_s1_binding(
     profile = _load_cap_s1_profile()
     attempt_root = tmp_path / "cap-s1-attempt-root"
     attempt_root.mkdir(parents=True, exist_ok=True)
+    origin_root = _installed_release_origin_root(tmp_path, generation)
     projection = stage_skill_projection(
         generation=generation,
         origin_mode=ORIGIN_INSTALLED_RELEASE,
-        origin_root=REPO_ROOT,
+        origin_root=origin_root,
         attempt_root=attempt_root,
         owning_operation_id=CAP_S1_OPERATION_ID,
         owning_process_generation=owning_process_generation,

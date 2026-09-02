@@ -588,10 +588,27 @@ def run_canary(
     attempt_root = scratch_root / "cap-s1-attempt-root"
     attempt_root.mkdir(parents=True, exist_ok=True)
     process_generation_id = f"{operation_id}-gen1"
+
+    # Sol wave-3 review (5087139217, finding M6): INSTALLED_RELEASE now
+    # requires the origin root's own basename to equal the generation's
+    # exact ``source_commit`` (the Executive installer's
+    # ``releases/<sha>`` layout) -- a bare checkout root no longer
+    # authenticates. This canary runs from an ordinary checkout, so it
+    # builds a small, real (non-symlink) release-shaped origin by copying
+    # only the already-reviewed, tiny package subtree (7 files) into a
+    # freshly named ``<scratch>/cap-s1-release-root/<source_commit>/...``
+    # directory -- never the whole repository -- immediately before
+    # staging. This is the one call-site adaptation this commission makes;
+    # every other runner behavior is unchanged.
+    release_root = scratch_root / "cap-s1-release-root" / generation.source_commit
+    release_package_dest = release_root / generation.package_root
+    release_package_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(repo_root / generation.package_root, release_package_dest)
+
     projection = stage_skill_projection(
         generation=generation,
         origin_mode=ORIGIN_INSTALLED_RELEASE,
-        origin_root=repo_root,
+        origin_root=release_root,
         attempt_root=attempt_root,
         owning_operation_id=operation_id,
         owning_process_generation=process_generation_id,
