@@ -1,6 +1,7 @@
 """MAS-115 operator setup — hermetic privacy and fail-closed tests."""
 from __future__ import annotations
 
+import inspect
 import io
 import json
 import os
@@ -515,3 +516,202 @@ def test_configure_command_refuses_gologin_before_provision_or_vendor(monkeypatc
         lambda argv: (_ for _ in ()).throw(AssertionError("must refuse before vendor")),
     )
     assert setup.main(["configure-canary-port", "--vendor", "gologin"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# REALM1-C1 — MAS-115 peer create/rollback coordinator (Mastermind #385)
+# ---------------------------------------------------------------------------
+
+
+def _peer_anchor_provision(row: dict) -> dict:
+    return {
+        "schema": canary.PROVISION_SCHEMA,
+        "vendor": "multilogin",
+        "profile_id": row["profile_id"],
+        "folder_id": row["folder_id"],
+        "browser_type": "mimic",
+        "origin_policy": port_policy.ORIGIN_POLICY,
+        "disposable_ack": canary.REQUIRED_ACK,
+    }
+
+
+@pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_setup_gologin_refuses_before_bindings_or_provision(monkeypatch, command):
+    """Coordinator #385-2: GoLogin is refused before any local I/O."""
+    monkeypatch.setattr(
+        setup.sb, "load_bindings",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse GoLogin before reading bindings")),
+    )
+    monkeypatch.setattr(
+        setup, "_load_current_provision",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse GoLogin before loading a provision")),
+    )
+    monkeypatch.setattr(
+        setup.vendors, "main",
+        lambda argv: (_ for _ in ()).throw(AssertionError("must refuse GoLogin before any dispatch")),
+    )
+    assert setup.main([command, "--vendor", "gologin"]) == 2
+
+
+@pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_setup_missing_bindings_refuses_before_provision_or_dispatch(monkeypatch, command):
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (None, ["stale"]))
+    monkeypatch.setattr(
+        setup, "_load_current_provision",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse before loading a provision")),
+    )
+    monkeypatch.setattr(
+        setup.vendors, "main",
+        lambda argv: (_ for _ in ()).throw(AssertionError("must refuse before any dispatch")),
+    )
+    assert setup.main([command, "--vendor", "multilogin"]) == 2
+
+
+@pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_setup_missing_provision_refuses_before_local_census_or_dispatch(monkeypatch, command):
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: ({"schema": sb.SCHEMA, "bindings": []}, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (None, "PROVISION_MISSING"))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse before reading the local census")),
+    )
+    monkeypatch.setattr(
+        setup.vendors, "main",
+        lambda argv: (_ for _ in ()).throw(AssertionError("must refuse before any dispatch")),
+    )
+    assert setup.main([command, "--vendor", "multilogin"]) == 2
+
+
+@pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_setup_seat_collision_refuses_before_confirmation_or_dispatch(monkeypatch, command):
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(
+        setup, "assert_current_nonseat",
+        lambda *a, **k: (_ for _ in ()).throw(setup.SetupRefusal("the selected disposable profile collides with a Chairman seat")),
+    )
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must refuse before prompting for confirmation")),
+    )
+    monkeypatch.setattr(
+        setup.vendors, "main",
+        lambda argv: (_ for _ in ()).throw(AssertionError("must refuse before any dispatch")),
+    )
+    with pytest.raises(setup.SetupRefusal, match="collides"):
+        (setup.create_peer_interactive if command == "create-peer-profile" else setup.rollback_peer_interactive)()
+
+
+@pytest.mark.parametrize(
+    ("command", "confirm_const"),
+    (
+        ("create-peer-profile", "_CONFIRM_CREATE_PEER"),
+        ("rollback-peer-profile", "_CONFIRM_ROLLBACK_PEER"),
+    ),
+)
+def test_peer_setup_confirmation_mismatch_refuses_without_dispatch(monkeypatch, command, confirm_const):
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: "the wrong phrase")
+    monkeypatch.setattr(
+        setup.vendors, "main",
+        lambda argv: (_ for _ in ()).throw(AssertionError("a confirmation mismatch must dispatch nothing")),
+    )
+    handler = setup.create_peer_interactive if command == "create-peer-profile" else setup.rollback_peer_interactive
+    with pytest.raises(setup.SetupRefusal, match="confirmation"):
+        handler()
+
+
+def test_peer_setup_create_happy_path_delegates_exact_confirmed_argv(monkeypatch):
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_CREATE_PEER)
+    calls = []
+    monkeypatch.setattr(setup.vendors, "main", lambda argv: calls.append(argv) or 0)
+    assert setup.main(["create-peer-profile", "--vendor", "multilogin"]) == 0
+    assert calls == [[
+        "create-peer-profile",
+        "--vendor", "multilogin",
+        "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+        "--confirmed",
+    ]]
+
+
+def test_peer_setup_rollback_happy_path_delegates_exact_confirmed_argv(monkeypatch):
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_ROLLBACK_PEER)
+    calls = []
+    monkeypatch.setattr(setup.vendors, "main", lambda argv: calls.append(argv) or 0)
+    assert setup.main(["rollback-peer-profile", "--vendor", "multilogin"]) == 0
+    assert calls == [[
+        "rollback-peer-profile",
+        "--vendor", "multilogin",
+        "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+        "--confirmed",
+    ]]
+
+
+def test_peer_setup_coordinator_never_touches_credential_or_http(monkeypatch):
+    """The coordinator forwards only argv/exit code — it never reads a
+    credential, constructs vendor HTTP, or sees a raw vendor response."""
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_CREATE_PEER)
+
+    source = inspect.getsource(setup.create_peer_interactive) + inspect.getsource(setup.rollback_peer_interactive)
+    for forbidden in ("Credential(", ".expose(", "_open_keychain_credential_pipe", "BoundedHttpClient(", "httpx."):
+        assert forbidden not in source
+
+    monkeypatch.setattr(setup.vendors, "main", lambda argv: 0)
+    assert setup.main(["create-peer-profile", "--vendor", "multilogin"]) == 0
+
+
+def test_atomic_private_json_has_exactly_one_implementation(tmp_path):
+    """#3.10: after the move, setup._atomic_private_json must be the same
+    object as vendors.atomic_private_json — never a second copy."""
+    assert setup._atomic_private_json is setup.vendors.atomic_private_json
+    doc = {"a": 1}
+    path = tmp_path / "x.json"
+    setup.vendors.atomic_private_json(doc, path)
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(path.read_text(encoding="utf-8")) == doc

@@ -16,6 +16,7 @@ import inspect
 import io
 import json
 import re
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -2809,3 +2810,889 @@ def test_falsifier_binding_result_code_is_closed_and_receipt_safe():
     detail = core.DETAILS["BINDINGS_UNAVAILABLE"]
     assert "://" not in detail
     assert "profile_id" not in detail
+
+
+# ---------------------------------------------------------------------------
+# REALM1-C1 — MAS-115 one-profile Multilogin peer create/reconcile/remove
+#
+# Discriminators reference Mastermind issue #385. Every test here is
+# hermetic: no real network, Keychain, or browser is ever touched.
+# ---------------------------------------------------------------------------
+
+_PEER_FOLDER = "peer-folder"
+_PEER_ANCHOR = "anchor-profile"
+
+
+def _peer_name() -> str:
+    return vendors.peer_profile_name(_PEER_FOLDER, _PEER_ANCHOR)
+
+
+_PEER_CREATED_UUID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+
+def _peer_record(peer_name, **overrides):
+    record = {
+        "id": _PEER_CREATED_UUID,
+        "folder_id": _PEER_FOLDER,
+        "name": peer_name,
+        "browser_type": "mimic",
+        "os_type": "macos",
+        "in_use_by": "",
+    }
+    record.update(overrides)
+    return record
+
+
+def _peer_create_success(profile_id=_PEER_CREATED_UUID, *, status_code=201):
+    return vendors._BoundedResponse(status_code, {
+        "status": {"error_code": "", "http_code": status_code, "message": "Profile successfully created"},
+        "data": {"ids": [profile_id]},
+    })
+
+
+def _peer_remove_success():
+    return vendors._BoundedResponse(200, {
+        "status": {"error_code": "", "http_code": 200, "message": "Profile successfully removed"},
+        "data": None,
+    })
+
+
+class _PeerTransport:
+    """Fake ``BoundedHttpClient`` surface for peer create/remove tests.
+
+    ``set_candidates_sequence`` takes one full-profiles-list per successive
+    call to :meth:`MultiloginClient.peer_candidates` (the before-census, the
+    after-census, and so on) so a test can express "zero, then one" or
+    "one, then zero" without any real pagination server.
+    """
+
+    def __init__(self):
+        self.calls = []
+        self.search_rounds = [[]]
+        self._search_round = -1
+        self.status_by_id = {}
+        # The launcher status envelope is folder-checked by the client, so the
+        # fake must answer for the folder actually being censused rather than
+        # a hardcoded one -- otherwise a "stopped" proof silently degrades
+        # into a folder mismatch and the happy path passes for the wrong
+        # reason.
+        self.folder_id = _PEER_FOLDER
+        self.create_response = None
+        self.create_raises = False
+        self.remove_response = None
+        self.remove_raises = False
+
+    def set_candidates_sequence(self, *rounds):
+        self.search_rounds = list(rounds)
+
+    def _mlx_profile_search(self, credential, folder_id, *, offset):
+        if offset == 0:
+            self._search_round += 1
+        profiles = self.search_rounds[min(self._search_round, len(self.search_rounds) - 1)]
+        self.folder_id = folder_id
+        self.calls.append(("search", folder_id, offset))
+        page = profiles[offset:offset + vendors._PROFILE_PAGE_SIZE]
+        return vendors._BoundedResponse(200, {
+            "status": {"error_code": "", "http_code": 200, "message": "Search profile successfully result"},
+            "data": {"profiles": page, "total_count": len(profiles)},
+        })
+
+    def _mlx_profile_status(self, credential, profile_id):
+        self.calls.append(("status", profile_id))
+        state = self.status_by_id.get(profile_id, "stopped")
+        if isinstance(state, vendors._BoundedResponse):
+            return state
+        return vendors._BoundedResponse(200, {
+            "status": {"error_code": "", "http_code": 200, "message": ""},
+            "data": {
+                "profile_id": profile_id, "folder_id": self.folder_id, "status": state,
+                "browser_type": "mimic", "core_version": 132,
+                "in_use_by": "" if state == "stopped" else "synthetic-owner",
+                "is_quick": False, "last_launched_at": "2026-08-23T00:00:00Z",
+                "last_launched_by": "op", "last_launched_on": "machine",
+                "message": "", "name": "synthetic", "timestamp": 1787472000000,
+                "workspace_id": "workspace",
+            },
+        })
+
+    def _mlx_profile_create(self, credential, folder_id, name):
+        self.calls.append(("create", folder_id, name))
+        if self.create_raises:
+            raise RuntimeError("synthetic create transport failure")
+        return self.create_response
+
+    def _mlx_profile_remove(self, credential, profile_id):
+        self.calls.append(("remove", profile_id))
+        if self.remove_raises:
+            raise RuntimeError("synthetic remove transport failure")
+        return self.remove_response
+
+    def close(self):
+        self.calls.append(("close",))
+
+
+def _peer_client(transport, *, credential=None):
+    return vendors.MultiloginClient(credential or core.Credential("cred", "stdin"), transport)
+
+
+def _committing_intent():
+    """A ``commit_intent`` fake that always succeeds, like a real first commit."""
+    calls = []
+
+    def _commit():
+        calls.append(True)
+        return True
+
+    _commit.calls = calls
+    return _commit
+
+
+def _refusing_intent():
+    calls = []
+
+    def _commit():
+        calls.append(True)
+        return False
+
+    _commit.calls = calls
+    return _commit
+
+
+# --- #385-1: the seams exist and are closed --------------------------------
+
+
+def test_peer_d1_create_remove_seams_are_closed_frozen_calls():
+    """#385-1: only fixed folder_id/name (create) or profile_id (remove) ever
+    reach the transport; no caller-supplied URL/method/body/count exists."""
+    seen = []
+
+    def _handler(request):
+        seen.append((
+            request.method, str(request.url),
+            json.loads(request.read()) if request.content else None,
+        ))
+        return httpx.Response(200, json={})
+
+    inner = httpx.Client(
+        transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False,
+    )
+    client = vendors.BoundedHttpClient(client=inner)
+    credential = core.Credential("synthetic-credential", "stdin")
+    try:
+        client._mlx_profile_create(credential, "folder-x", "name-x")
+        client._mlx_profile_remove(credential, "profile-x")
+    finally:
+        client.close()
+    assert [(m, u) for m, u, _ in seen] == [
+        ("POST", "https://api.multilogin.com/profile/create"),
+        ("POST", "https://api.multilogin.com/profile/remove"),
+    ]
+    assert seen[0][2] == {
+        "name": "name-x",
+        "browser_type": "mimic",
+        "os_type": "macos",
+        "folder_id": "folder-x",
+        "times": 1,
+        "parameters": {
+            "flags": {"ports_masking": "mask", "proxy_masking": "disabled"},
+            "storage": {"is_local": True, "save_service_worker": True},
+            "fingerprint": {},
+        },
+    }
+    assert seen[1][2] == {"ids": ["profile-x"], "permanently": False}
+    public = {
+        name for name in dir(vendors.BoundedHttpClient)
+        if not name.startswith("_") and callable(getattr(vendors.BoundedHttpClient, name))
+    }
+    assert public == {"close"}
+
+
+# --- #385-2: pre-secret failures prove Keychain/HTTP never reached ---------
+
+
+@pytest.mark.parametrize("operation", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_d2_bad_anchor_provision_refuses_before_keychain_or_http(tmp_path, operation):
+    path = tmp_path / "missing-provision.json"
+    out = io.StringIO()
+    code = vendors.main(
+        [operation, "--vendor", "multilogin", "--provision-path", str(path), "--confirmed"],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=lambda: (_ for _ in ()).throw(
+            AssertionError("must not read the local environment before a valid anchor provision"),
+        ),
+        credential_stream_factory=lambda: (_ for _ in ()).throw(
+            AssertionError("must not read Keychain before a valid anchor provision"),
+        ),
+        client_factory=lambda: (_ for _ in ()).throw(AssertionError("must not build a vendor client")),
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "PROVISION_MISSING"
+
+
+@pytest.mark.parametrize("operation", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_d2_running_anchor_profile_refuses_before_keychain_or_http(tmp_path, operation):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    out = io.StringIO()
+    code = vendors.main(
+        [operation, "--vendor", "multilogin", "--provision-path", str(path), "--confirmed"],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision, running=True),
+        credential_stream_factory=lambda: (_ for _ in ()).throw(AssertionError("must not read Keychain")),
+        client_factory=lambda: (_ for _ in ()).throw(AssertionError("must not build a vendor client")),
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "BUSY_PROFILE"
+
+
+@pytest.mark.parametrize("operation", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_d2_stale_bindings_refuse_before_keychain_or_http(tmp_path, operation):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    out = io.StringIO()
+    code = vendors.main(
+        [operation, "--vendor", "multilogin", "--provision-path", str(path), "--confirmed"],
+        stdout=out,
+        bindings_loader=lambda: (None, ["stale"]),
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: (_ for _ in ()).throw(AssertionError("must not read Keychain")),
+        client_factory=lambda: (_ for _ in ()).throw(AssertionError("must not build a vendor client")),
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "BINDINGS_UNAVAILABLE"
+
+
+def test_peer_d2_new_operations_never_bind_or_self_test_loopback_origin(tmp_path):
+    """#385-2 (loopback carve-out): these operations never launch a browser,
+    so the fixed-port origin must never be bound or self-tested."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, folder_id=provision["folder_id"])])
+    transport.create_response = _peer_create_success()
+
+    origin_calls = []
+
+    def _tracking_origin(*args, **kwargs):
+        origin_calls.append(1)
+        raise AssertionError("create/rollback must never bind the loopback origin")
+
+    out = io.StringIO()
+    code = vendors.main(
+        [
+            "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
+            "--confirmed",
+            "--peer-intent-path", str(tmp_path / "intent.json"),
+            "--peer-provision-path", str(tmp_path / "peer.json"),
+        ],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_tracking_origin,
+        now=_NOW,
+    )
+    assert origin_calls == []
+    assert code == 0
+    assert json.loads(out.getvalue())["verdict"] == "PASS"
+
+
+# --- #385-3: caller cannot widen the create body ---------------------------
+
+
+def test_peer_d3_create_body_is_frozen_and_times_is_always_one():
+    observed = []
+
+    def _handler(request):
+        observed.append(json.loads(request.read()))
+        return httpx.Response(201, json={
+            "status": {"error_code": "", "http_code": 201, "message": "Profile successfully created"},
+            "data": {"ids": ["ignored"]},
+        })
+
+    inner = httpx.Client(transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False)
+    bounded = vendors.BoundedHttpClient(client=inner)
+    try:
+        bounded._mlx_profile_create(core.Credential("secret", "stdin"), "attacker-folder", "attacker-name")
+    finally:
+        bounded.close()
+    assert observed == [{
+        "name": "attacker-name",
+        "browser_type": "mimic",
+        "os_type": "macos",
+        "folder_id": "attacker-folder",
+        "times": 1,
+        "parameters": {
+            "flags": {"ports_masking": "mask", "proxy_masking": "disabled"},
+            "storage": {"is_local": True, "save_service_worker": True},
+            "fingerprint": {},
+        },
+    }]
+    # No proxy, custom_start_urls, notes, tags, or fingerprint values exist
+    # anywhere in the emitted body.
+    for forbidden in ("proxy", "custom_start_urls", "notes", "tags", "core_version"):
+        assert forbidden not in observed[0]
+        assert forbidden not in observed[0]["parameters"]
+
+
+# --- #385-4: zero candidates -> one create -> exact readback -> PASS ------
+
+
+def test_peer_d4_zero_candidates_creates_reads_back_and_writes_provision(tmp_path):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, folder_id=provision["folder_id"])])
+    transport.create_response = _peer_create_success()
+    peer_provision_path = tmp_path / "peer_provision.json"
+    peer_intent_path = tmp_path / "peer_intent.json"
+
+    out = io.StringIO()
+    code = vendors.main(
+        [
+            "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
+            "--confirmed",
+            "--peer-intent-path", str(peer_intent_path),
+            "--peer-provision-path", str(peer_provision_path),
+        ],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 0
+    assert receipt["verdict"] == "PASS"
+    assert receipt["effect"] == "PROVISION_WRITTEN"
+    # profile_B is only publishable once the read-back positively proved the
+    # exact profile stopped; PASS must never be reachable without it.
+    assert receipt["predicates"]["stopped_proven"] is True
+    assert receipt["predicates"]["exact_readback"] is True
+    assert receipt["predicates"]["provision_written"] is True
+    assert receipt["predicates"]["cleanup_lease_retained"] is False
+    assert [c[0] for c in transport.calls].count("create") == 1
+    assert peer_provision_path.exists()
+    written = json.loads(peer_provision_path.read_text(encoding="utf-8"))
+    assert written["vendor"] == "multilogin"
+    assert written["folder_id"] == provision["folder_id"]
+    assert peer_intent_path.exists()
+    intent_doc = json.loads(peer_intent_path.read_text(encoding="utf-8"))
+    assert intent_doc["peer_name"] == peer_name
+    assert intent_doc["schema"] == vendors.PEER_INTENT_SCHEMA
+    # Both private files are owner-only; neither carries a raw vendor id.
+    assert stat.S_IMODE(peer_provision_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(peer_intent_path.stat().st_mode) == 0o600
+    assert provision["folder_id"] not in json.dumps(intent_doc)
+    assert provision["profile_id"] not in json.dumps(intent_doc)
+
+
+# --- #385-5: matching committed intent -> read-only, zero create ----------
+
+
+def test_peer_d5_matching_intent_and_exact_candidate_is_read_only():
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name)],
+        [_peer_record(peer_name)],
+    )
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=True, commit_intent=lambda: (_ for _ in ()).throw(
+            AssertionError("must not attempt to commit a new intent when one already matches"),
+        ),
+    )
+    assert receipt["predicates"]["dispatched"] is False
+    assert receipt["predicates"]["reconciled"] is True
+    assert [c[0] for c in transport.calls].count("create") == 0
+    assert receipt["effect"] in ("PROFILE_STOPPED_PROVEN", "CREATE_APPLIED")
+
+
+# --- #385-6: candidate exists WITHOUT matching intent -> conflict ---------
+
+
+def test_peer_d6_colliding_name_without_intent_is_conflict_never_adopted():
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([_peer_record(peer_name)])
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False,
+        commit_intent=lambda: (_ for _ in ()).throw(
+            AssertionError("a name collision without intent must never attempt a commit"),
+        ),
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert receipt["code"] == "BUSY_PROFILE"
+    assert receipt["predicates"]["candidates_before"] == 1
+    assert [c[0] for c in transport.calls].count("create") == 0
+
+
+# --- #385-7: create response lost, exact one candidate on readback -------
+
+
+def test_peer_d7_lost_create_response_with_one_readback_candidate_reconciles():
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name)])
+    transport.create_response = None  # transport returns None: response lost
+    client = _peer_client(transport)
+    commit = _committing_intent()
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=commit,
+    )
+    assert receipt["effect"] in ("CREATE_APPLIED", "PROFILE_STOPPED_PROVEN")
+    assert receipt["predicates"]["reconciled"] is True
+    assert receipt["predicates"]["dispatched"] is True
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+# --- #385-8: create response lost + zero/multiple readback candidates ----
+
+
+@pytest.mark.parametrize("scenario", ("zero", "multiple"))
+def test_peer_d8_lost_create_response_with_zero_or_many_candidates_is_unknown(scenario):
+    peer_name = _peer_name()
+    if scenario == "zero":
+        after_round = []
+    else:
+        # Two distinct vendor records that both happen to carry the exact
+        # deterministic peer name — a vendor-side collision, not something
+        # this actuator could ever cause by construction.
+        after_round = [
+            _peer_record(peer_name, id="dup-peer-a"),
+            _peer_record(peer_name, id="dup-peer-b"),
+        ]
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], after_round)
+    transport.create_response = None
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+# --- #385-9: explicit 401/403 -> typed auth failure, zero pre-dispatch create -
+
+
+@pytest.mark.parametrize("status_code", (401, 403))
+def test_peer_d9_auth_rejection_during_dispatch_is_typed_and_pre_effect(status_code):
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([])
+    transport.create_response = vendors._BoundedResponse(status_code, None)
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert receipt["code"] == "AUTH_EXPIRED"
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+@pytest.mark.parametrize("status_code", (401, 403))
+def test_peer_d9_auth_rejection_during_pre_dispatch_census_emits_zero_creates(status_code):
+    class _AuthBoomTransport(_PeerTransport):
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            self.calls.append(("search", folder_id, offset))
+            return vendors._BoundedResponse(status_code, None)
+
+    transport = _AuthBoomTransport()
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False,
+        commit_intent=lambda: (_ for _ in ()).throw(
+            AssertionError("a census auth failure must never reach commit_intent"),
+        ),
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert receipt["code"] == "AUTH_EXPIRED"
+    assert [c[0] for c in transport.calls].count("create") == 0
+
+
+# --- #385-10: hostile leak scan --------------------------------------------
+
+
+def test_peer_d10_hostile_leak_scan_create_and_remove(tmp_path):
+    secret_folder = "the-secret-folder-id"
+    secret_profile = "the-secret-profile-id"
+    peer_name = vendors.peer_profile_name(secret_folder, _PEER_ANCHOR)
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [], [_peer_record(peer_name, id=secret_profile, folder_id=secret_folder)],
+    )
+    transport.create_response = _peer_create_success(profile_id=secret_profile)
+    client = _peer_client(transport, credential=core.Credential(_SECRET, "stdin"))
+    create_receipt = client.create_peer_profile(
+        folder_id=secret_folder, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    dumped_create = json.dumps(create_receipt)
+    for forbidden in (_SECRET, secret_profile, secret_folder, peer_name):
+        assert forbidden not in dumped_create
+
+    transport2 = _PeerTransport()
+    transport2.set_candidates_sequence(
+        [_peer_record(peer_name, id=secret_profile, folder_id=secret_folder)], [],
+    )
+    transport2.remove_response = _peer_remove_success()
+    client2 = _peer_client(transport2, credential=core.Credential(_SECRET, "stdin"))
+    remove_receipt = client2.remove_peer_profile(
+        folder_id=secret_folder, anchor_profile_id=_PEER_ANCHOR,
+        peer_profile_id=secret_profile,
+    )
+    dumped_remove = json.dumps(remove_receipt)
+    for forbidden in (_SECRET, secret_profile, secret_folder, peer_name):
+        assert forbidden not in dumped_remove
+
+
+def test_peer_d10_hostile_leak_scan_vendor_error_body_never_escapes():
+    class _LeakyTransport(_PeerTransport):
+        def _mlx_profile_create(self, credential, folder_id, name):
+            self.calls.append(("create", folder_id, name))
+            raise RuntimeError(_SECRET)
+
+    transport = _LeakyTransport()
+    transport.set_candidates_sequence([])
+    client = _peer_client(transport, credential=core.Credential(_SECRET, "stdin"))
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    assert _SECRET not in json.dumps(receipt)
+
+
+# --- #385-11: provision-write failure after a known create ----------------
+
+
+def test_peer_d11_provision_write_failure_retains_cleanup_lease(tmp_path):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, folder_id=provision["folder_id"])])
+    transport.create_response = _peer_create_success()
+    peer_provision_path = tmp_path / "peer_provision.json"
+    # Pre-seed a colliding, non-reconcilable peer provision file so the
+    # write-then-reload step is forced to fail.
+    peer_provision_path.write_text(json.dumps({"not": "reconcilable"}), encoding="utf-8")
+
+    out = io.StringIO()
+    code = vendors.main(
+        [
+            "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
+            "--confirmed",
+            "--peer-intent-path", str(tmp_path / "peer_intent.json"),
+            "--peer-provision-path", str(peer_provision_path),
+        ],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["predicates"]["provision_written"] is False
+    assert receipt["predicates"]["cleanup_lease_retained"] is True
+    assert [c[0] for c in transport.calls].count("create") == 1
+    # The pre-seeded foreign file must not have been silently overwritten.
+    assert json.loads(peer_provision_path.read_text(encoding="utf-8")) == {"not": "reconcilable"}
+
+
+def test_peer_d11_unstopped_create_never_writes_a_peer_provision(tmp_path):
+    """A create whose read-back cannot prove the profile stopped must NOT
+    publish profile_B and must NOT report PASS.
+
+    This is the mutation that turns a HOLD into a false PASS: the search
+    record looks unowned, but the launcher reports the profile running. The
+    provision file must stay absent and the cleanup lease must be retained.
+    """
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, folder_id=provision["folder_id"])])
+    transport.create_response = _peer_create_success()
+    transport.status_by_id = {_PEER_CREATED_UUID: "browser_running"}
+    peer_provision_path = tmp_path / "peer_provision.json"
+
+    out = io.StringIO()
+    code = vendors.main(
+        [
+            "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
+            "--confirmed",
+            "--peer-intent-path", str(tmp_path / "peer_intent.json"),
+            "--peer-provision-path", str(peer_provision_path),
+        ],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["effect"] == "CREATE_APPLIED"
+    assert receipt["predicates"]["stopped_proven"] is False
+    assert receipt["predicates"]["provision_written"] is False
+    assert receipt["predicates"]["cleanup_lease_retained"] is True
+    # The load-bearing assertion: no profile_B binding was published.
+    assert not peer_provision_path.exists()
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+# --- #385-12: remove exact stopped operation-created peer -> ROLLBACK_VERIFIED -
+
+
+def test_peer_d12_remove_exact_stopped_peer_verifies_absence():
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name, id="peer-created-1")], [],
+    )
+    transport.remove_response = _peer_remove_success()
+    client = _peer_client(transport)
+    receipt = client.remove_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR, peer_profile_id="peer-created-1",
+    )
+    assert receipt["verdict"] == "PASS"
+    assert receipt["effect"] == "ROLLBACK_VERIFIED"
+    assert receipt["predicates"]["removed_absent"] is True
+    assert [c[0] for c in transport.calls].count("remove") == 1
+
+
+# --- #385-13: wrong id / replaced identity / bound / running / unowned ---
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("wrong_id", "replaced_identity", "folder_mismatch", "still_bound", "running", "unowned"),
+)
+def test_peer_d13_non_exact_target_emits_zero_remove_requests(mutation):
+    peer_name = _peer_name()
+    record = _peer_record(peer_name, id="peer-created-1")
+    target_id = "peer-created-1"
+    status_by_id = {}
+    if mutation == "wrong_id":
+        target_id = "some-other-id"
+    elif mutation == "replaced_identity":
+        record["browser_type"] = "stealthfox"
+    elif mutation == "folder_mismatch":
+        record["folder_id"] = "not-the-anchor-folder"
+    elif mutation == "still_bound":
+        record["locked_by"] = "other-session"
+    elif mutation == "running":
+        status_by_id["peer-created-1"] = "browser_running"
+    elif mutation == "unowned":
+        record["in_use_by"] = "someone-else"
+
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([record])
+    transport.status_by_id = status_by_id
+    client = _peer_client(transport)
+    receipt = client.remove_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR, peer_profile_id=target_id,
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert [c[0] for c in transport.calls].count("remove") == 0
+
+
+# --- #385-14: remove response lost -> one reconciliation, one remove call -
+
+
+def test_peer_d14_lost_remove_response_reconciles_once():
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name, id="peer-created-1")], [],
+    )
+    transport.remove_response = None  # response lost
+    client = _peer_client(transport)
+    receipt = client.remove_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR, peer_profile_id="peer-created-1",
+    )
+    assert receipt["effect"] in ("ROLLBACK_VERIFIED", "REMOVE_EFFECT_UNKNOWN")
+    assert [c[0] for c in transport.calls].count("remove") == 1
+    assert [c[0] for c in transport.calls].count("search") == 2
+
+
+# --- #385-15: profile_A and Chairman profiles/bindings are untouched ------
+
+
+def test_peer_d15_anchor_profile_and_bindings_are_never_targeted_or_mutated(tmp_path):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    before_bytes = path.read_bytes()
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, folder_id=provision["folder_id"])])
+    transport.create_response = _peer_create_success()
+
+    out = io.StringIO()
+    vendors.main(
+        [
+            "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
+            "--confirmed",
+            "--peer-intent-path", str(tmp_path / "peer_intent.json"),
+            "--peer-provision-path", str(tmp_path / "peer_provision.json"),
+        ],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert path.read_bytes() == before_bytes
+    for call in transport.calls:
+        if call[0] == "create":
+            assert call[2] != provision["profile_id"]
+        elif call[0] in ("remove", "status"):
+            assert call[1] != provision["profile_id"]
+
+
+# --- #385-16: GoLogin/quick-profile stay unsupported; no new bare httpx ---
+
+
+def test_peer_d16_no_new_generic_endpoint_and_gologin_stays_unsupported():
+    source = VENDORS_PATH.read_text(encoding="utf-8")
+    assert re.search(r"\bhttpx\.(get|put|post|patch|delete|request|stream)\s*\(", source) is None
+    public = {
+        name for name in dir(vendors.BoundedHttpClient)
+        if not name.startswith("_") and callable(getattr(vendors.BoundedHttpClient, name))
+    }
+    assert public == {"close"}
+    # The peer create/remove capability must exist on MultiloginClient...
+    multilogin = vendors.MultiloginClient(core.Credential("x", "stdin"), _PeerTransport())
+    assert callable(getattr(multilogin, "create_peer_profile", None))
+    assert callable(getattr(multilogin, "remove_peer_profile", None))
+    # ...and must never be extended to GoLogin, which stays a hard refusal.
+    gologin = vendors.GoLoginClient(core.Credential("x", "stdin"))
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        gologin.profile_exists({"profile_id": "x"})
+    assert exc_info.value.code == "UNSUPPORTED_SURFACE"
+    assert not hasattr(gologin, "create_peer_profile")
+    assert not hasattr(gologin, "remove_peer_profile")
+
+
+# --- mutation-kill discipline ----------------------------------------------
+
+
+def test_mutation_kill_create_dispatch_must_follow_intent_commit():
+    """FAILS if the create dispatch is moved before the intent commit."""
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([])
+    transport.create_response = _peer_create_success()
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_refusing_intent(),
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["code"] == "PROVISION_MISSING"
+    assert [c[0] for c in transport.calls].count("create") == 0
+
+
+def test_mutation_kill_ambiguous_response_never_dispatches_a_second_create():
+    """FAILS if the ambiguous-response branch is allowed to dispatch twice."""
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name)])
+    transport.create_response = None
+    client = _peer_client(transport)
+    client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+def test_mutation_kill_readback_alone_decides_never_the_response():
+    """FAILS if a "successful" create response alone is trusted without the
+    read-back census actually proving the profile exists."""
+    transport = _PeerTransport()
+    # Vendor claims success, but the read-back census still shows nothing.
+    transport.set_candidates_sequence([], [])
+    transport.create_response = _peer_create_success()
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["effect"] not in ("CREATE_APPLIED", "PROFILE_STOPPED_PROVEN", "PROVISION_WRITTEN")
+
+
+def test_mutation_kill_os_type_must_be_sent_explicitly():
+    """FAILS if os_type is dropped from the create body (vendor default is
+    "windows"; MAS-115 profiles must always be explicitly "macos")."""
+    observed = []
+
+    def _handler(request):
+        observed.append(json.loads(request.read()))
+        return httpx.Response(201, json={
+            "status": {"error_code": "", "http_code": 201, "message": "Profile successfully created"},
+            "data": {"ids": ["x"]},
+        })
+
+    inner = httpx.Client(transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False)
+    bounded = vendors.BoundedHttpClient(client=inner)
+    try:
+        bounded._mlx_profile_create(core.Credential("secret", "stdin"), "folder", "name")
+    finally:
+        bounded.close()
+    assert observed[0].get("os_type") == "macos"
+    assert observed[0].get("os_type") != "windows"
+
+
+def test_mutation_kill_canary_refusal_exception_chain_stays_severed():
+    """FAILS if CanaryRefusal's severed ``from None`` is replaced by a bare
+    ``raise`` anywhere on the create/remove path."""
+    class _LeakyTransport(_PeerTransport):
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            self.calls.append(("search", folder_id, offset))
+            raise RuntimeError(_SECRET)
+
+    transport = _LeakyTransport()
+    client = _peer_client(transport, credential=core.Credential(_SECRET, "stdin"))
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.peer_candidates(folder_id=_PEER_FOLDER, peer_name=_peer_name())
+    exc = exc_info.value
+    assert exc.code == "VENDOR_ERROR"
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
+    assert _SECRET not in str(exc)
+    assert _SECRET not in repr(exc)
