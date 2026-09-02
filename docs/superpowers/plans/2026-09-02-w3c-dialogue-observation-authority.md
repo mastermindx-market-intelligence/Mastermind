@@ -43,8 +43,8 @@ parallel parent-binding event in W3C.
 
 ### Gate B - RET1 and RET2
 
-RET1 must be protected before RET2. RET2 must protect one immutable parent/message/result projection
-receipt with known effect. Until then `TERMINAL_RESULT` remains held.
+RET1 is protected. RET2 must protect one immutable parent/message/result projection receipt with
+known effect. Until then `TERMINAL_RESULT` remains held.
 
 ### Gate C - dedicated listener
 
@@ -149,8 +149,9 @@ Raw message body and provider/private identity are excluded.
 ## Wave P3 - terminal observation extension
 
 Extend the same P1 resolver and listener. A terminal response is valid only for an exact RET2
-`APPLIED` or `RECOVERED` receipt. `ATTEMPTED`/`EFFECT_UNKNOWN`/missing/conflicting projection remains
-UNKNOWN/HELD with zero candidate.
+`APPLIED` receipt. Recovery may prove the exact projection and result in `APPLIED`; it is not a
+second state. `ATTEMPTED`/`EFFECT_UNKNOWN`/missing/conflicting projection remains UNKNOWN/HELD with
+zero candidate.
 
 The active and terminal reducers must be separate closed branches. Tests must mutate a BUSY active
 worker into a terminal result and a completed terminal result into an active worker; both refuse.
