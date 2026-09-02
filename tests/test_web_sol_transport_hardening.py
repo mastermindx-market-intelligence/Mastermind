@@ -7,6 +7,7 @@ from pathlib import Path
 import socket
 import struct
 import threading
+import time
 
 import pytest
 
@@ -298,3 +299,199 @@ def test_private_server_refuses_overlong_unix_socket_path_before_bind(tmp_path):
     with pytest.raises(native.NativeHostError, match="socket_path_too_long"):
         native.open_private_server(destination, owner_uid=os.getuid())
     assert not destination.exists()
+
+
+def _private_socket_root(tmp_path: Path) -> Path:
+    private = tmp_path / "private-host"
+    private.mkdir(mode=0o700)
+    os.chmod(private, 0o700)
+    return private
+
+
+def _run_host_with_partial_unsolicited_frame(
+    monkeypatch,
+    tmp_path: Path,
+    material: bytes,
+) -> tuple[bool, list[BaseException], float]:
+    private = _private_socket_root(tmp_path)
+    destination = native.wsi.socket_path(INSTANCE_ID, root=private)
+    read_fd, write_fd = os.pipe()
+    chrome_in = os.fdopen(read_fd, "rb", buffering=0)
+    errors: list[BaseException] = []
+    monkeypatch.setattr(
+        native,
+        "complete_server_handshake",
+        lambda *_args, **_kwargs: {},
+    )
+    os.write(write_fd, material)
+
+    def run() -> None:
+        try:
+            native.run_native_host(
+                chrome_in,
+                io.BytesIO(),
+                caller_origin=native.ALLOWED_EXTENSION_ORIGIN,
+                expected_instance_id=INSTANCE_ID,
+                socket_root=private,
+                owner_uid=os.getuid(),
+                action_timeout_seconds=0.1,
+                boot_nonce_factory=lambda: BOOT_NONCE,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    worker.join(0.75)
+    exceeded_deadline = worker.is_alive()
+    try:
+        os.close(write_fd)
+    except OSError:
+        pass
+    worker.join(2.0)
+    elapsed = time.monotonic() - started
+    try:
+        assert not worker.is_alive()
+    finally:
+        chrome_in.close()
+        if destination.exists():
+            os.unlink(destination)
+        native._SERVER_SOCKET_IDENTITIES.clear()
+    return exceeded_deadline, errors, elapsed
+
+
+def test_run_native_host_reports_exact_owned_socket_cleanup_failure(
+    monkeypatch,
+    tmp_path,
+):
+    private = _private_socket_root(tmp_path)
+    destination = native.wsi.socket_path(INSTANCE_ID, root=private)
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    chrome_in = os.fdopen(read_fd, "rb", buffering=0)
+    original_unlink = Path.unlink
+
+    def refuse_exact_owned_socket(path: Path, *args, **kwargs):
+        if path == destination:
+            raise PermissionError("blocked by test")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        native,
+        "complete_server_handshake",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(Path, "unlink", refuse_exact_owned_socket)
+    try:
+        with pytest.raises(native.NativeHostError, match="socket_cleanup_failed"):
+            native.run_native_host(
+                chrome_in,
+                io.BytesIO(),
+                caller_origin=native.ALLOWED_EXTENSION_ORIGIN,
+                expected_instance_id=INSTANCE_ID,
+                socket_root=private,
+                owner_uid=os.getuid(),
+                action_timeout_seconds=0.1,
+                boot_nonce_factory=lambda: BOOT_NONCE,
+            )
+        assert destination.exists()
+    finally:
+        chrome_in.close()
+        if destination.exists():
+            os.unlink(destination)
+        native._SERVER_SOCKET_IDENTITIES.clear()
+
+
+def test_failed_open_reports_exact_owned_socket_cleanup_failure(
+    monkeypatch,
+    tmp_path,
+):
+    private = _private_socket_root(tmp_path)
+    destination = private / "open-cleanup.sock"
+    original_unlink = Path.unlink
+
+    def refuse_exact_owned_socket(path: Path, *args, **kwargs):
+        if path == destination:
+            raise PermissionError("blocked by test")
+        return original_unlink(path, *args, **kwargs)
+
+    def fail_post_bind_chmod(path, _mode):
+        if Path(path) == destination:
+            raise PermissionError("post-bind failure")
+        return os.chmod(path, _mode)
+
+    monkeypatch.setattr(Path, "unlink", refuse_exact_owned_socket)
+    monkeypatch.setattr(native.os, "chmod", fail_post_bind_chmod)
+    try:
+        with pytest.raises(native.NativeHostError, match="socket_cleanup_failed"):
+            native.open_private_server(destination, owner_uid=os.getuid())
+        assert destination.exists()
+    finally:
+        if destination.exists():
+            os.unlink(destination)
+        native._SERVER_SOCKET_IDENTITIES.clear()
+
+
+def test_unsolicited_partial_header_is_bounded_by_action_timeout(
+    monkeypatch,
+    tmp_path,
+):
+    exceeded, errors, elapsed = _run_host_with_partial_unsolicited_frame(
+        monkeypatch,
+        tmp_path,
+        b"\x08\x00",
+    )
+    assert not exceeded, f"host exceeded frame deadline ({elapsed:.3f}s)"
+    assert len(errors) == 1
+    assert isinstance(errors[0], native.ChromeChannelError)
+    assert errors[0].code == "frame_read_timeout"
+
+
+def test_unsolicited_partial_payload_is_bounded_by_action_timeout(
+    monkeypatch,
+    tmp_path,
+):
+    exceeded, errors, elapsed = _run_host_with_partial_unsolicited_frame(
+        monkeypatch,
+        tmp_path,
+        struct.pack("@I", 8) + b'{"x"',
+    )
+    assert not exceeded, f"host exceeded frame deadline ({elapsed:.3f}s)"
+    assert len(errors) == 1
+    assert isinstance(errors[0], native.ChromeChannelError)
+    assert errors[0].code == "frame_read_timeout"
+
+
+def test_clean_chrome_eof_remains_normal_and_removes_exact_socket(
+    monkeypatch,
+    tmp_path,
+):
+    private = _private_socket_root(tmp_path)
+    destination = native.wsi.socket_path(INSTANCE_ID, root=private)
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    chrome_in = os.fdopen(read_fd, "rb", buffering=0)
+    monkeypatch.setattr(
+        native,
+        "complete_server_handshake",
+        lambda *_args, **_kwargs: {},
+    )
+    try:
+        result = native.run_native_host(
+            chrome_in,
+            io.BytesIO(),
+            caller_origin=native.ALLOWED_EXTENSION_ORIGIN,
+            expected_instance_id=INSTANCE_ID,
+            socket_root=private,
+            owner_uid=os.getuid(),
+            action_timeout_seconds=0.1,
+            boot_nonce_factory=lambda: BOOT_NONCE,
+        )
+        assert result is None
+        assert not destination.exists()
+    finally:
+        chrome_in.close()
+        if destination.exists():
+            os.unlink(destination)
+        native._SERVER_SOCKET_IDENTITIES.clear()
