@@ -15,6 +15,7 @@ import control_plane.codex_operator_adapter as codex_operator_adapter
 from control_plane.codex_operator_adapter import (
     CodexAdapterError,
     CodexOperatorAdapter,
+    CodexProtocolAttestationReceipt,
     CodexSkillCanaryBinding,
     CodexSkillTurnInput,
     CodexTurnInputEnvelope,
@@ -74,6 +75,15 @@ CAP_S1_V4_FIXTURE = (
 CAP_S1_PACKAGE_CAPABILITY_ID = "mastermind-operator.p1"
 CAP_S1_PROFILE_ID = "operator.appserver.readonly.mastermind-operator.v1"
 CAP_S1_OPERATION_ID = "mastermind-cap-s1-complete-vertical-20260901-sol-001"
+CAP_S1_HARNESS_VERSION = "ohf-fake-app-server/p0b"
+
+
+def _test_binary_digest() -> str:
+    """The exact digest the fake-App-Server harness (the running python
+    interpreter) will compute for itself -- every skill-canary harness in
+    this module launches that same interpreter, so this is a fixed value."""
+
+    return hashlib.sha256(Path(sys.executable).resolve().read_bytes()).hexdigest()
 
 
 def _load_cap_s1_generation():
@@ -111,8 +121,20 @@ def _stage_cap_s1_binding(
         generation=generation,
         profile=profile,
         projection=projection,
-        schema_receipt_digest="b" * 64,
-        schema_supports_skill_input_path=schema_supports_skill_input_path,
+        protocol_receipt=CodexProtocolAttestationReceipt(
+            binary_path=str(Path(sys.executable).resolve()),
+            binary_digest=_test_binary_digest(),
+            binary_version=CAP_S1_HARNESS_VERSION,
+            stable_inventory_digest="c" * 64,
+            experimental_inventory_digest="d" * 64,
+            supports_skill_input_path=schema_supports_skill_input_path,
+            skill_input_schema_evidence=(
+                "skill_turn_input_schema_node_detected"
+                if schema_supports_skill_input_path
+                else ""
+            ),
+            probe_user_agent="",
+        ),
     )
 
 
@@ -1738,15 +1760,65 @@ def test_skill_canary_binding_constructor_validation_matrix(tmp_path: Path) -> N
     with pytest.raises(CodexAdapterError, match="does not match the package generation"):
         _adapter(bad_generation_digest)
 
-    bad_schema = replace(good_binding, schema_receipt_digest="not-a-digest")
-    with pytest.raises(CodexAdapterError, match="schema receipt digest is invalid"):
-        _adapter(bad_schema)
+    # --- B3: typed protocol attestation receipt falsifiers -----------------
 
-    symlinked_root = tmp_path / "symlinked-skills-root"
-    symlinked_root.symlink_to(good_binding.projection.skills_root)
+    forged_binary_digest = replace(
+        good_binding,
+        protocol_receipt=replace(good_binding.protocol_receipt, binary_digest="0" * 64),
+    )
+    with pytest.raises(CodexAdapterError, match="binary digest mismatch"):
+        _adapter(forged_binary_digest)
+
+    bad_binary_version = replace(
+        good_binding,
+        protocol_receipt=replace(
+            good_binding.protocol_receipt, binary_version="wrong-harness/version"
+        ),
+    )
+    with pytest.raises(CodexAdapterError, match="binary version mismatch"):
+        _adapter(bad_binary_version)
+
+    bad_inventory_digest = replace(
+        good_binding,
+        protocol_receipt=replace(
+            good_binding.protocol_receipt, stable_inventory_digest="not-a-digest"
+        ),
+    )
+    with pytest.raises(CodexAdapterError, match="inventory digest is invalid"):
+        _adapter(bad_inventory_digest)
+
+    same_inventory_digests = replace(
+        good_binding,
+        protocol_receipt=replace(
+            good_binding.protocol_receipt,
+            experimental_inventory_digest=good_binding.protocol_receipt.stable_inventory_digest,
+        ),
+    )
+    with pytest.raises(CodexAdapterError, match="must be distinct"):
+        _adapter(same_inventory_digests)
+
+    missing_schema_evidence = replace(
+        good_binding,
+        protocol_receipt=replace(
+            good_binding.protocol_receipt,
+            supports_skill_input_path=True,
+            skill_input_schema_evidence="",
+        ),
+    )
+    with pytest.raises(CodexAdapterError, match="schema evidence is required"):
+        _adapter(missing_schema_evidence)
+
+    # --- B1: projection_root is the only identity re-checked here; a
+    # caller-substituted ``skills_root`` is never trusted or even inspected
+    # at construction time -- it is re-derived and matched inside
+    # ``_run_skill_causal_sequence`` at launch time instead (see
+    # ``test_skill_canary_root_substitution_refuses_before_thread_start``).
+
+    symlinked_root = tmp_path / "symlinked-projection-root"
+    symlinked_root.symlink_to(good_binding.projection.projection_root)
     via_symlink = replace(
         good_binding,
-        projection=replace(good_binding.projection, skills_root=str(symlinked_root)),
+        projection=replace(good_binding.projection, projection_root=str(symlinked_root)),
     )
     with pytest.raises(CodexAdapterError, match="must be a real directory"):
         _adapter(via_symlink)
@@ -1754,11 +1826,20 @@ def test_skill_canary_binding_constructor_validation_matrix(tmp_path: Path) -> N
     missing_root = replace(
         good_binding,
         projection=replace(
-            good_binding.projection, skills_root=str(tmp_path / "does-not-exist")
+            good_binding.projection, projection_root=str(tmp_path / "does-not-exist")
         ),
     )
     with pytest.raises(CodexAdapterError, match="not observable"):
         _adapter(missing_root)
+
+    different_real_root = tmp_path / "different-real-projection-root"
+    different_real_root.mkdir()
+    retargeted_root = replace(
+        good_binding,
+        projection=replace(good_binding.projection, projection_root=str(different_real_root)),
+    )
+    with pytest.raises(CodexAdapterError, match="identity mismatch"):
+        _adapter(retargeted_root)
 
     for state in scaffold.adapter._generations.values():
         state.client.close()
@@ -1940,6 +2021,147 @@ def test_skill_canary_mixed_path_presence_refuses(tmp_path: Path) -> None:
 
     with pytest.raises(CodexAdapterError, match="skill_path_precision_inconsistent"):
         _start(harness)
+
+
+# ---------------------------------------------------------------------------
+# CAP-S1 Sol wave-3 review B1: server-derived skills root / root substitution
+# ---------------------------------------------------------------------------
+
+
+def test_skill_canary_root_substitution_refuses_before_thread_start(
+    tmp_path: Path,
+) -> None:
+    """A caller-substituted ``skills_root`` pointing at a different, real,
+    attacker-controlled directory tree carrying the SAME four Skill names
+    must never reach ``skills/extraRoots/set`` or ``thread/start`` -- the
+    adapter derives the only lawful root itself from the already-verified
+    ``projection_root`` and never trusts the binding's own field as a
+    destination (CAP-S1 Sol review B1)."""
+
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="root-substitution")
+
+    alternate_root = tmp_path / "alternate-real-skills-root"
+    for grant in binding.profile.skill_grants:
+        skill_dir = alternate_root / grant.runtime_name
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# forged alternate skill\n", encoding="utf-8")
+
+    forged_binding = replace(
+        binding, projection=replace(binding.projection, skills_root=str(alternate_root))
+    )
+
+    created_clients: list = []
+
+    def factory(argv, env, cwd):
+        inner = AppServerClient(argv, env=env, cwd=cwd, start_new_session=True)
+        wrapped = _RecordingSkillsClient(inner)
+        created_clients.append(wrapped)
+        return wrapped
+
+    harness = _make_skill_harness(tmp_path, forged_binding, client_factory=factory)
+
+    with pytest.raises(CodexAdapterError, match="skill_root_identity_mismatch"):
+        _start(harness)
+
+    assert len(created_clients) == 1
+    calls = [method for method, _params in created_clients[0].calls]
+    assert "thread/start" not in calls
+    # The forged root must never even be handed to the provider.
+    extra_root_calls = [
+        params
+        for method, params in created_clients[0].calls
+        if method == "skills/extraRoots/set"
+    ]
+    assert all(str(alternate_root) not in params.get("extraRoots", []) for params in extra_root_calls)
+
+
+# ---------------------------------------------------------------------------
+# CAP-S1 Sol wave-3 review M7: skills/changed fencing at the accepted-list
+# boundary
+# ---------------------------------------------------------------------------
+
+
+class _NotificationAfterCallClient:
+    """Wraps a real ``AppServerClient``.
+
+    Injects one synthetic notification directly into the wrapped client's
+    own live ``notifications`` buffer immediately after the Nth call to a
+    chosen RPC method returns -- proving a ``skills/changed`` notification
+    arriving between the accepted causal-sequence ``skills/list`` and
+    ``thread/start`` cannot be silently dropped (CAP-S1 Sol review M7).
+    """
+
+    def __init__(self, inner, *, after_method: str, after_call_index: int, notification: dict) -> None:
+        self._inner = inner
+        self._after_method = after_method
+        self._after_call_index = after_call_index
+        self._notification = notification
+        self._count = 0
+        self.calls: list[tuple[str, dict]] = []
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def request(self, method, params=None, *, timeout=15.0):
+        self.calls.append((method, dict(params or {})))
+        result = self._inner.request(method, params, timeout=timeout)
+        if method == self._after_method:
+            self._count += 1
+            if self._count == self._after_call_index:
+                with self._inner._notification_condition:
+                    self._inner.notifications.append(dict(self._notification))
+                    self._inner._notification_condition.notify_all()
+        return result
+
+
+def test_skills_changed_between_accepted_list_and_thread_start_refuses_before_first_turn(
+    tmp_path: Path,
+) -> None:
+    binding = _stage_cap_s1_binding(
+        tmp_path, owning_process_generation="pre-thread-start-changed"
+    )
+
+    def factory(argv, env, cwd):
+        inner = AppServerClient(argv, env=env, cwd=cwd, start_new_session=True)
+        # The three real ``skills/list`` calls before ``thread/start`` are:
+        # (1) the ordinary lenient attestation probe, (2) the causal
+        # baseline (must be empty), (3) the causal accepted list (the four
+        # required Skills) -- inject right after call #3 returns.
+        return _NotificationAfterCallClient(
+            inner,
+            after_method="skills/list",
+            after_call_index=3,
+            notification={"method": "skills/changed", "params": {}},
+        )
+
+    harness = _make_skill_harness(tmp_path, binding, client_factory=factory)
+
+    _observation, _observed, launch = _start(harness)
+
+    state = harness.adapter._state(harness.generation)
+    assert state.skills_changed is True
+
+    client = state.client
+    assert "turn/start" not in [method for method, _params in client.calls]
+
+    envelope, _final_path = _cap_s1_envelope(binding)
+    harness.adapter.turn_input_loader = lambda turn: envelope
+    turn = TurnRef(
+        "turn-pre-thread-start-changed",
+        harness.epoch.session_epoch_id,
+        harness.generation.process_generation_id,
+        harness.epoch.attempt_id,
+    )
+
+    with pytest.raises(CodexAdapterError, match="skills_changed_during_canary"):
+        harness.adapter.begin_turn(
+            operation_id=_op("pre-thread-start-changed-turn"),
+            turn=turn,
+            generation=harness.generation,
+            launch=launch,
+        )
+
+    assert "turn/start" not in [method for method, _params in client.calls]
 
 
 # ---------------------------------------------------------------------------
@@ -2230,6 +2452,134 @@ def test_collect_candidate_result_refuses_on_post_turn_skill_drift(
     # collection: the server-side skill surface no longer matches the four
     # required Skills.
     state.client.request("skills/extraRoots/set", {"extraRoots": []})
+
+    with pytest.raises(CodexAdapterError, match="post_turn_skill_state_mismatch"):
+        harness.adapter.collect_candidate_result(turn)
+
+
+# ---------------------------------------------------------------------------
+# CAP-S1 Sol wave-3 review B2: exact accepted-observation reducer (pre/post
+# drift the old names/cardinality-only reconfirm could not see)
+# ---------------------------------------------------------------------------
+
+
+def _reducer_drift_harness(tmp_path: Path, binding: CodexSkillCanaryBinding, extra_rows: list):
+    """A skill-canary harness whose ``skills/list`` calls after the launch
+    causal sequence are fully scripted, one entry per subsequent call."""
+
+    cwd = str(tmp_path / "workspace")
+    names = [grant.runtime_name for grant in binding.profile.skill_grants]
+    skills_root = binding.projection.skills_root
+    good_rows = [_skill_row(name, path=f"{skills_root}/{name}") for name in names]
+    script = [
+        _strict_skills_list_result(cwd, []),
+        _strict_skills_list_result(cwd, []),
+        _strict_skills_list_result(cwd, good_rows),
+        *[_strict_skills_list_result(cwd, rows) for rows in extra_rows],
+    ]
+    return _make_skill_harness(
+        tmp_path, binding, client_factory=_recording_client_factory(script)
+    )
+
+
+def _begin_envelope_turn(harness: "Harness", binding: CodexSkillCanaryBinding, launch, turn_id: str):
+    envelope, _final_path = _cap_s1_envelope(binding)
+    harness.adapter.turn_input_loader = lambda turn: envelope
+    turn = TurnRef(
+        turn_id,
+        harness.epoch.session_epoch_id,
+        harness.generation.process_generation_id,
+        harness.epoch.attempt_id,
+    )
+    return turn, lambda: harness.adapter.begin_turn(
+        operation_id=_op(f"{turn_id}-op"),
+        turn=turn,
+        generation=harness.generation,
+        launch=launch,
+    )
+
+
+def test_pre_turn_skill_observation_wrong_root_refuses(tmp_path: Path) -> None:
+    """A fake server that pathes rows under a DIFFERENT root pre-turn (same
+    four names) must refuse -- the old names/cardinality-only reconfirm
+    could not see this at all (CAP-S1 Sol review B2)."""
+
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="pre-turn-wrong-root")
+    names = [grant.runtime_name for grant in binding.profile.skill_grants]
+    wrong_root = str(tmp_path / "attacker-root")
+    wrong_rows = [_skill_row(name, path=f"{wrong_root}/{name}") for name in names]
+    harness = _reducer_drift_harness(tmp_path, binding, [wrong_rows])
+    _observation, _observed, launch = _start(harness)
+    client = harness.adapter._state(harness.generation).client
+
+    turn, do_begin = _begin_envelope_turn(harness, binding, launch, "turn-pre-turn-wrong-root")
+    with pytest.raises(CodexAdapterError, match="skill_set_causality_failed"):
+        do_begin()
+    assert "turn/start" not in [method for method, _params in client.calls]
+
+
+def test_pre_turn_mixed_path_presence_refuses(tmp_path: Path) -> None:
+    """Mixed path/pathless rows pre-turn must refuse via the same reducer
+    logic used at launch, never a diverging pre-turn implementation (CAP-S1
+    Sol review B2)."""
+
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="pre-turn-mixed")
+    names = [grant.runtime_name for grant in binding.profile.skill_grants]
+    skills_root = binding.projection.skills_root
+    mixed_rows = [
+        _skill_row(names[0], path=f"{skills_root}/{names[0]}"),
+        _skill_row(names[1], path=f"{skills_root}/{names[1]}"),
+        _skill_row(names[2], path=None),
+        _skill_row(names[3], path=None),
+    ]
+    harness = _reducer_drift_harness(tmp_path, binding, [mixed_rows])
+    _observation, _observed, launch = _start(harness)
+
+    turn, do_begin = _begin_envelope_turn(harness, binding, launch, "turn-pre-turn-mixed")
+    with pytest.raises(CodexAdapterError, match="skill_set_causality_failed"):
+        do_begin()
+
+
+def test_pre_turn_pathless_flip_refuses(tmp_path: Path) -> None:
+    """Mode A (paths) at launch, pathless pre-turn with the SAME four names
+    must refuse -- the schema-support mode is part of the exact accepted
+    reduction, so a silent mode flip can never pass as "close enough" (CAP-S1
+    Sol review B2)."""
+
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="pre-turn-pathless-flip")
+    names = [grant.runtime_name for grant in binding.profile.skill_grants]
+    pathless_rows = [_skill_row(name, path=None) for name in names]
+    harness = _reducer_drift_harness(tmp_path, binding, [pathless_rows])
+    _observation, _observed, launch = _start(harness)
+
+    turn, do_begin = _begin_envelope_turn(harness, binding, launch, "turn-pre-turn-pathless-flip")
+    with pytest.raises(CodexAdapterError, match="skill_set_causality_failed"):
+        do_begin()
+
+
+def test_post_turn_duplicate_row_refuses(tmp_path: Path) -> None:
+    """A duplicate enabled row post-turn (one of the four names appearing
+    twice) must refuse via the reducer with no second attempt (CAP-S1 Sol
+    review B2)."""
+
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="post-turn-duplicate")
+    names = [grant.runtime_name for grant in binding.profile.skill_grants]
+    skills_root = binding.projection.skills_root
+    good_rows = [_skill_row(name, path=f"{skills_root}/{name}") for name in names]
+    duplicate_rows = good_rows + [_skill_row(names[0], path=f"{skills_root}/{names[0]}")]
+    harness = _reducer_drift_harness(tmp_path, binding, [good_rows, duplicate_rows])
+    _observation, _observed, launch = _start(harness)
+
+    turn, do_begin = _begin_envelope_turn(harness, binding, launch, "turn-post-turn-duplicate")
+    do_begin()
+    harness.adapter.read_events(
+        EventCursor(
+            turn.attempt_id,
+            turn.session_epoch_id,
+            turn.process_generation_id,
+            turn_id=turn.turn_id,
+        )
+    )
 
     with pytest.raises(CodexAdapterError, match="post_turn_skill_state_mismatch"):
         harness.adapter.collect_candidate_result(turn)

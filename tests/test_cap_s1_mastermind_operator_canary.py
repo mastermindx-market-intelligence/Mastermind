@@ -579,11 +579,25 @@ def _asserts_never_the_real_codex_binary(argv) -> None:
 
 
 def _fake_schema_run_command(schema_doc):
+    """Write ``schema_doc`` to whichever ``--out`` directory is requested.
+
+    The written payload embeds ``out_dir.name`` ("stable" or "experimental",
+    per ``attest_protocol_schema``'s own two fixed subdirectory names) so the
+    stable and experimental inventory digests this fixture produces are
+    genuinely distinct -- matching what a real ``--experimental`` schema
+    dump would look like -- while staying a pure, deterministic function of
+    ``(schema_doc, variant)`` so
+    ``test_attest_protocol_schema_with_skill_path_supports_true_and_is_
+    deterministic`` still sees identical digests across two independent
+    runs of the same schema_doc.
+    """
+
     def run_command(argv, **_kwargs):
         _asserts_never_the_real_codex_binary(argv)
         out_dir = Path(argv[argv.index("--out") + 1])
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "schema.json").write_text(json.dumps(schema_doc), encoding="utf-8")
+        payload = {"schema": schema_doc, "variant": out_dir.name}
+        (out_dir / "schema.json").write_text(json.dumps(payload), encoding="utf-8")
         return _subprocess.CompletedProcess(argv, 0)
 
     return run_command
