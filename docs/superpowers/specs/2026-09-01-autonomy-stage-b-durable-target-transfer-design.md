@@ -12,7 +12,7 @@
 ## 0. Protected-source incident and controlling correction
 
 The original Stage-B0 v1 records were merged before a later exact-head adversarial review reached its
-final verdict. That post-merge review found five implementation-blocking defects:
+final verdict. That post-merge exact-head review found five implementation-blocking defects:
 
 1. `authority_source_ref` named no exact accepted authority owner or fingerprint law;
 2. materialization, acknowledgement, release, and terminal evidence were represented as generic
@@ -30,13 +30,18 @@ for every Stage-B implementation decision. Where v2 is narrower, v2 wins. Where 
 worker must stop rather than infer the missing owner from old prose, Slack, a model, a RuntimeBinding,
 or a convenient provider state.
 
-The repaired architecture preserves the full program outcome while narrowing the first source wave to
-what current protected owners can actually prove:
+The repaired architecture preserves the full program outcome while truthfully holding every Stage-B1
+mode until the missing initial-assignment owners exist:
 
 ```text
-STAGE-B1
-  Codex INITIAL_ASSIGNMENT only when an existing root/ceo SessionTarget binding already owns alias choice
-  Codex SAME_ALIAS_GENERATION_SUCCESSION only after a valid current Stage-B assignment
+STAGE-B0 OWNER PREREQUISITE (separately commissioned after this correction protects)
+  extend the existing SessionTargetRegistry ownership path, without a second registry
+  create one durable root/CEO alias assignment receipt/map
+  create one compatible Codex CEO SessionTarget policy
+
+STAGE-B1 (held until that predecessor is protected)
+  no current Codex INITIAL_ASSIGNMENT
+  no current SAME_ALIAS_GENERATION_SUCCESSION
   no cross-alias transfer
   no ChatGPT-Web succession
   no provider or deployment action
@@ -86,7 +91,7 @@ Canonical ownership remains:
 | root responsibility and lifecycle | Executive Runtime Job/Attempt/Worker/Event | exact root identity; no second responsibility |
 | transaction, event lookup, append | `control_plane.executive_runtime.RuntimeStore` | one `BEGIN IMMEDIATE` command-first transaction |
 | current admitted Codex writer | `Runtime.current_harness_binding_source` through `runtime_binding_projection` | derive destination facts on the same connection |
-| logical root/seat alias policy | `SessionTargetRegistry` | authorize only an already-owned initial alias and unchanged same-alias continuity |
+| logical root/seat alias policy | `SessionTargetRegistry` | future consumer only after a separately protected durable root/CEO assignment receipt/map and compatible Codex CEO policy |
 | target acknowledgement | Wake ACK ingress and Wake ledger | consume exact `TARGET_ACKNOWLEDGED`; never write ACK |
 | source generation release | Executive Runtime process-generation evidence | prove old generation `PROVEN_DEAD / RELEASED` for succession |
 | durable Stage-B assignment history | Runtime Events on root Job aggregate | append/fold exact revisions |
@@ -109,8 +114,8 @@ current assignment, current RuntimeBinding evidence, target policy, and actor id
   "correction_operation": "autonomy-stage-b0-protected-source-correction-r1-20260902-sol-001",
   "supersedes_schema": "mastermind.autonomy_stage_b_f0_contract.v1",
   "protected_source_disposition": "PROTECTED_SOURCE_CORRECTION_REQUIRED / V1_NOT_IMPLEMENTATION_AUTHORITY",
-  "first_implementation_wave": "STAGE-B1",
-  "implementation_gate": "HELD_UNTIL_V2_CORRECTION_PROTECTED",
+  "first_implementation_wave": "SESSION_TARGETS_ROOT_CEO_ASSIGNMENT_OWNER_PREREQUISITE",
+  "implementation_gate": "HELD_UNTIL_OWNER_PREREQUISITE_PROTECTED",
   "command_schema": "mastermind.sol_action_target_command.v2",
   "event_schema": "mastermind.sol_action_target_event.v2",
   "snapshot_schema": "mastermind.sol_action_target_snapshot.v2",
@@ -119,10 +124,16 @@ current assignment, current RuntimeBinding evidence, target policy, and actor id
     "SOL_ACTION_TARGET_ASSIGNED",
     "SOL_ACTION_TARGET_TRANSFERRED"
   ],
-  "supported_reasoning_surfaces": [
-    "codex"
-  ],
+  "supported_reasoning_surfaces": [],
   "held_reasoning_surfaces": [
+    {
+      "reasoning_surface": "codex",
+      "state": "HELD_OWNER_UNRESOLVED",
+      "missing_owners": [
+        "root_binding_assignment_owner",
+        "codex_ceo_session_target_policy_owner"
+      ]
+    },
     {
       "reasoning_surface": "chatgpt-web",
       "state": "HELD_NOT_PROVEN",
@@ -134,35 +145,28 @@ current assignment, current RuntimeBinding evidence, target policy, and actor id
   ],
   "mode_support": {
     "INITIAL_ASSIGNMENT": {
-      "state": "SUPPORTED_WITH_EXISTING_ROOT_BINDING",
-      "stage": "STAGE-B1",
-      "reasoning_surfaces": [
-        "codex"
-      ],
-      "authority_owner": "control_plane.session_targets.SessionTargetRegistry.policy_digest",
+      "state": "HELD_OWNER_UNRESOLVED",
+      "stage": "PREDECESSOR_OWNER_PREREQUISITE",
+      "reasoning_surfaces": [],
+      "authority_owner": "root_binding_assignment_owner + codex_ceo_session_target_policy_owner",
       "required_preconditions": [
-        "root Job exists",
-        "root_job_bindings[root_job_id][ceo] already exists",
-        "caller destination alias equals the policy-owned alias",
-        "destination is one exact current Codex RuntimeBinding",
-        "destination has exact TARGET_ACKNOWLEDGED evidence"
+        "separately protected root_binding_assignment_owner creates an exact durable root/CEO alias assignment receipt/map",
+        "separately protected codex_ceo_session_target_policy_owner creates a compatible Codex CEO SessionTarget policy in the existing registry",
+        "future Stage-B1 action-time lookup binds the receipt/map, alias, Codex target policy, and root identity",
+        "caller-supplied with_root_job_bindings() mapping is never authority"
       ],
       "refusal_when_missing": "INITIAL_AUTHORITY_OWNER_UNRESOLVED"
     },
     "SAME_ALIAS_GENERATION_SUCCESSION": {
-      "state": "SUPPORTED_AFTER_VALID_INITIAL_ASSIGNMENT",
-      "stage": "STAGE-B1",
-      "reasoning_surfaces": [
-        "codex"
-      ],
-      "authority_owner": "current Stage-B assignment + unchanged SessionTargetRegistry root/ceo alias",
+      "state": "HELD_OWNER_UNRESOLVED",
+      "stage": "PREDECESSOR_OWNER_PREREQUISITE",
+      "reasoning_surfaces": [],
+      "authority_owner": "root_binding_assignment_owner + codex_ceo_session_target_policy_owner",
       "required_preconditions": [
-        "contiguous current Stage-B assignment exists",
-        "source and destination session_alias are identical",
-        "registry root/ceo alias is unchanged",
-        "source process generation is PROVEN_DEAD and RELEASED",
-        "destination generation is strictly greater and current",
-        "destination has exact TARGET_ACKNOWLEDGED evidence"
+        "a valid protected INITIAL_ASSIGNMENT capability can exist only after both missing owner prerequisites are protected",
+        "a future protected Stage-B1 assignment history exists before succession is considered",
+        "the future root/CEO receipt/map and compatible Codex target policy remain exact",
+        "caller-supplied with_root_job_bindings() mapping is never authority"
       ],
       "refusal_when_missing": "SUCCESSION_EVIDENCE_UNRESOLVED"
     },
@@ -213,43 +217,26 @@ current assignment, current RuntimeBinding evidence, target policy, and actor id
   },
   "authority_evidence_by_mode": {
     "INITIAL_ASSIGNMENT": {
-      "state": "SUPPORTED_WITH_EXISTING_ROOT_BINDING",
-      "owner": "control_plane.session_targets.SessionTargetRegistry",
-      "source_ref_format": "session-target-policy:<policy_digest>:root:<root_job_id>:seat:ceo",
-      "fingerprint_fields": [
-        "policy_digest",
-        "root_job_id",
-        "target_seat",
-        "session_alias",
-        "reasoning_surface"
-      ],
+      "state": "HELD_OWNER_UNRESOLVED",
+      "owner": "root_binding_assignment_owner + codex_ceo_session_target_policy_owner",
+      "source_ref_format": null,
+      "fingerprint_fields": [],
       "action_time_revalidation": [
-        "root Job exists in Runtime",
-        "root_job_bindings[root_job_id][ceo] exists",
-        "target alias exists and target_seat is ceo",
-        "target reasoning_surface is codex",
-        "caller destination alias equals the policy-owned alias",
-        "policy digest is recomputed inside the transaction input boundary"
+        "refuse: checked-in root_job_bindings is empty and test-overlay-only",
+        "refuse: policy_digest() omits root_job_bindings and cannot attest a root-to-alias choice",
+        "refuse: no compatible Codex CEO SessionTarget policy exists in current protected source",
+        "refuse caller-supplied with_root_job_bindings() mapping, RuntimeBinding, Wake ACK, placement result, Slack prose, and Stage-B event as initial-assignment authority"
       ]
     },
     "SAME_ALIAS_GENERATION_SUCCESSION": {
-      "state": "SUPPORTED_AFTER_VALID_INITIAL_ASSIGNMENT",
-      "owner": "current Stage-B assignment event + control_plane.session_targets.SessionTargetRegistry",
-      "source_ref_format": "sol-target-assignment:<root_job_id>:revision:<assignment_revision>",
-      "fingerprint_fields": [
-        "root_job_id",
-        "assignment_revision",
-        "current_assignment_event_command_id",
-        "session_target_policy_digest",
-        "session_alias"
-      ],
+      "state": "HELD_OWNER_UNRESOLVED",
+      "owner": "root_binding_assignment_owner + codex_ceo_session_target_policy_owner",
+      "source_ref_format": null,
+      "fingerprint_fields": [],
       "action_time_revalidation": [
-        "current assignment history is contiguous and unique",
-        "previous target equals the folded current assignment",
-        "source and destination aliases are identical",
-        "registry root/ceo alias remains identical",
-        "destination binding generation is strictly greater",
-        "source generation release and destination ACK are exact and effect-known"
+        "refuse: no valid protected initial-assignment capability can exist until both missing owners are protected",
+        "refuse: no current Stage-B assignment history can ground succession before that prerequisite",
+        "refuse caller-supplied with_root_job_bindings() mapping as a substitute for the missing protected initial assignment"
       ]
     },
     "CROSS_ALIAS_RESPONSIBILITY_TRANSFER": {
@@ -279,12 +266,12 @@ current assignment, current RuntimeBinding evidence, target policy, and actor id
       "effect_known_rule": "missing or unreadable root Job refuses before any append"
     },
     "session_target_policy": {
-      "owner": "control_plane.session_targets.SessionTargetRegistry",
-      "lookup": "policy_digest() + root_job_bindings[root_job_id][ceo] + targets[session_alias]",
+      "owner": "root_binding_assignment_owner + codex_ceo_session_target_policy_owner",
+      "lookup": "future durable root/CEO alias assignment receipt/map plus compatible Codex CEO SessionTarget policy from one existing SessionTargetRegistry extension",
       "aggregate_type": null,
       "event_type": null,
-      "command_id_law": "not an Event; persist the recomputed policy digest and derived source_ref",
-      "schema_or_typed_shape": "control_plane.session_targets.SessionTargetRegistry",
+      "command_id_law": "future receipt/map identity and target-policy identity must be independently fingerprinted; current policy_digest alone is insufficient",
+      "schema_or_typed_shape": "separately commissioned existing SessionTargetRegistry extension; no second registry",
       "required_identity": [
         "policy_digest",
         "root_job_id",
@@ -292,7 +279,7 @@ current assignment, current RuntimeBinding evidence, target policy, and actor id
         "session_alias",
         "reasoning_surface=codex"
       ],
-      "effect_known_rule": "absent, changed, malformed, or non-Codex policy refuses"
+      "effect_known_rule": "until the separately protected receipt/map and compatible Codex CEO policy exist, INITIAL_ASSIGNMENT and SAME_ALIAS_GENERATION_SUCCESSION remain HELD_OWNER_UNRESOLVED"
     },
     "destination_current_binding": {
       "owner": "control_plane.runtime_binding_projection.active_operator_binding_facts + project_runtime_binding",
@@ -426,7 +413,7 @@ current assignment, current RuntimeBinding evidence, target policy, and actor id
     "stage_a_resolver_signature_changed": false,
     "production_armed_in_stage_b1": false
   },
-  "truthful_maximum_stage_b1_claim": "BUILT_NOT_PROVEN / CODEX_INITIAL_AND_SAME_ALIAS_SOURCE_ONLY / PRODUCTION_DISARMED"
+  "truthful_maximum_stage_b1_claim": "RECORDS_ONLY / OWNER_PREREQUISITE_REQUIRED / STAGE_B1_UNSTARTED / PRODUCTION_DISARMED"
 }
 ```
 <!-- STAGE_B_F0_CORRECTION_CONTRACT_END -->
@@ -523,46 +510,31 @@ Slack identity, email, path, token, credential, transcript content, or provider 
 
 ## 4. Exact mode law
 
-### 4.1 Initial assignment
+### 4.1 Initial assignment — held
 
-Stage-B1 may establish revision 1 only when `SessionTargetRegistry` already owns the root/CEO alias.
-This is a durable materialization of existing target policy, not a caller choosing a destination.
+`INITIAL_ASSIGNMENT` is `HELD_OWNER_UNRESOLVED` in current protected source. The checked-in
+`root_job_bindings` map is empty and explicitly test-overlay-only, `policy_digest()` does not fingerprint
+that map, and the target catalog has no compatible Codex CEO SessionTarget. A caller-supplied
+`with_root_job_bindings()` mapping is never authority: it is a replacement/projection API, not a durable
+assignment-owner receipt.
 
-Required conditions:
+The first separately commissioned implementation wave, after this records correction protects, must extend
+the existing `SessionTargetRegistry` ownership path to create one exact durable root/CEO alias assignment
+receipt/map and one compatible Codex CEO SessionTarget policy. It must not create a second registry. Until
+that predecessor is protected, Stage B establishes no revision-one event and returns
+`INITIAL_AUTHORITY_OWNER_UNRESOLVED` with zero event/provider/target effect.
 
-1. exact root Job exists;
-2. no Stage-B assignment event exists;
-3. `expected_assignment_revision == 0` and previous target is null;
-4. `root_job_bindings[root_job_id]["ceo"]` exists;
-5. target alias exists, owns seat `ceo`, and has reasoning surface `codex`;
-6. caller destination alias equals that exact policy alias;
-7. current Runtime source produces exactly one admitted matching binding;
-8. exact destination Wake ACK matches alias, binding ID, generation, and causally prior delivery;
-9. policy, binding, ACK, and command evidence remain current on the transaction connection.
+### 4.2 Same-alias generation succession — held
 
-A missing root binding is not permission to create one. It returns
-`INITIAL_AUTHORITY_OWNER_UNRESOLVED` with no event.
+`SAME_ALIAS_GENERATION_SUCCESSION` is also `HELD_OWNER_UNRESOLVED`. It cannot be reachable until a valid
+protected initial-assignment capability can exist, and current protected source has neither the root/CEO
+assignment receipt/map owner nor the compatible Codex CEO SessionTarget policy owner. A fabricated overlay,
+RuntimeBinding, Wake ACK, placement result, Slack prose, or imagined Stage-B event cannot supply that
+predecessor.
 
-### 4.2 Same-alias generation succession
-
-Stage-B1 may advance revision N to N+1 only after a valid current assignment and only when logical
-responsibility remains on the same alias.
-
-Required conditions:
-
-1. current history folds to one exact assignment;
-2. caller previous target equals the folded target;
-3. source and destination aliases are byte-identical;
-4. current SessionTarget policy still maps root/CEO to that alias;
-5. destination generation is strictly greater;
-6. exact old process generation belongs to prior Attempt/epoch/generation and is ended;
-7. one exact Runtime reconcile observation proves `PROVEN_DEAD` and `RELEASED`;
-8. current Runtime source produces exactly the new admitted Codex generation;
-9. destination Wake ACK matches the new alias/ID/generation;
-10. no source, destination, delivery, ACK, or transaction effect is unknown.
-
-Stage B does not terminate or release the old writer. It consumes the existing Runtime evidence after
-that owner has done so.
+After the separately commissioned prerequisite is protected, a new Stage-B1 commission may apply the
+preserved future command/replay/evidence/full-map law to a valid protected initial assignment. Stage B will
+still consume—not create—the old-writer release evidence.
 
 ### 4.3 Cross-alias transfer — held
 
@@ -605,9 +577,12 @@ Malformed or foreign lineage refuses before assignment fold.
 
 ### 5.2 SessionTarget policy
 
-`SessionTargetRegistry.policy_digest()` plus the exact root/CEO alias and target object is the initial
-assignment authority source. It is not an Event. Stage B persists the recomputed digest and derived
-source reference so the decision is explainable without inventing a policy registry.
+`SessionTargetRegistry.policy_digest()` is not the initial-assignment authority source in current protected
+code: it excludes `root_job_bindings`, so it cannot attest a root-to-alias choice. The future prerequisite
+must persist an exact durable root/CEO assignment receipt/map and a compatible Codex CEO target-policy
+identity through the existing registry owner, with a separate fingerprint for that receipt/map. Stage B
+will consume that accepted evidence only after the prerequisite is protected; it must not invent another
+policy registry.
 
 ### 5.3 Destination current binding
 
@@ -663,7 +638,7 @@ unknown.
 ## 7. Full root-binding projection
 
 `SessionTargetRegistry.with_root_job_bindings()` validates and then replaces the supplied complete
-mapping. It does not merge one root automatically. Therefore the projector must:
+mapping. It does not merge one root automatically. Therefore the future projector must:
 
 1. deep-copy every root and every seat map from `registry.root_job_bindings`;
 2. copy or create only the selected root’s map;
@@ -673,6 +648,10 @@ mapping. It does not merge one root automatically. Therefore the projector must:
 
 Tests must prove that projecting root A cannot erase root B and cannot erase root A’s COO or Chairman
 binding. A destructive partial overlay is a release blocker.
+
+This complete-map projection law is future implementation law only. A caller-supplied
+`with_root_job_bindings()` mapping is never authority for selecting the initial root/CEO alias; the
+separately protected assignment-owner receipt/map must exist first.
 
 The projected complete registry and a complete RuntimeBinding snapshot feed the unchanged
 `resolve_sol_action_target()` consumer. A successful Stage-B append alone never grants actor
@@ -719,9 +698,12 @@ Failure behavior:
 
 ---
 
-## 9. Stage-B1 implementation surface
+## 9. Future Stage-B1 implementation surface
 
-The first implementation remains one bounded source PR.
+The first implementation is not this Stage-B1 transaction surface. It is the separately commissioned
+`SESSION_TARGETS_ROOT_CEO_ASSIGNMENT_OWNER_PREREQUISITE` described above. The following paths and
+responsibilities remain preserved future law only, for a later Stage-B1 commission after that prerequisite
+has protected an exact durable root/CEO receipt/map and compatible Codex CEO target policy.
 
 <!-- STAGE_B1_EXPECTED_PATHS_BEGIN -->
 ```text
@@ -805,10 +787,10 @@ Green CI and a protected merge are not production proof.
 
 ## 11. Completion boundary
 
-The maximum Stage-B1 source claim is:
+The maximum current records claim is:
 
 ```text
-BUILT_NOT_PROVEN / CODEX_INITIAL_AND_SAME_ALIAS_SOURCE_ONLY / PRODUCTION_DISARMED
+RECORDS_ONLY / OWNER_PREREQUISITE_REQUIRED / STAGE_B1_UNSTARTED / PRODUCTION_DISARMED
 ```
 
 It does not make cross-alias transfer, ChatGPT-Web continuity, provider materialization, target ACK,

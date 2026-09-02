@@ -15,6 +15,7 @@ PLAN = (
     ROOT
     / "docs/superpowers/plans/2026-09-01-autonomy-stage-b-durable-target-transfer.md"
 )
+SESSION_TARGETS_CONFIG = ROOT / "config/wake_session_targets.json"
 SESSION_TARGETS = ROOT / "control_plane/session_targets.py"
 RUNTIME_BINDING_PROJECTION = ROOT / "control_plane/runtime_binding_projection.py"
 WAKE_LEDGER = ROOT / "control_plane/wake_ledger.py"
@@ -105,6 +106,19 @@ def _assert_contract_shape(contract: dict[str, object]) -> None:
         "SOL_ACTION_TARGET_ASSIGNED",
         "SOL_ACTION_TARGET_TRANSFERRED",
     ]
+    assert contract["first_implementation_wave"] == (
+        "SESSION_TARGETS_ROOT_CEO_ASSIGNMENT_OWNER_PREREQUISITE"
+    )
+    assert contract["implementation_gate"] == "HELD_UNTIL_OWNER_PREREQUISITE_PROTECTED"
+    assert contract["supported_reasoning_surfaces"] == []
+    assert contract["held_reasoning_surfaces"][0] == {
+        "reasoning_surface": "codex",
+        "state": "HELD_OWNER_UNRESOLVED",
+        "missing_owners": [
+            "root_binding_assignment_owner",
+            "codex_ceo_session_target_policy_owner",
+        ],
+    }
 
     modes = contract["mode_support"]
     assert isinstance(modes, dict)
@@ -127,6 +141,21 @@ def _assert_contract_shape(contract: dict[str, object]) -> None:
         assert isinstance(value["required_preconditions"], list)
         assert value["required_preconditions"]
 
+    for mode_name in ("INITIAL_ASSIGNMENT", "SAME_ALIAS_GENERATION_SUCCESSION"):
+        mode = modes[mode_name]
+        assert mode["state"] == "HELD_OWNER_UNRESOLVED"
+        assert mode["stage"] == "PREDECESSOR_OWNER_PREREQUISITE"
+        assert mode["reasoning_surfaces"] == []
+        assert mode["authority_owner"] == (
+            "root_binding_assignment_owner + codex_ceo_session_target_policy_owner"
+        )
+
+    cross_alias = modes["CROSS_ALIAS_RESPONSIBILITY_TRANSFER"]
+    assert cross_alias["state"] == "HELD_OWNER_UNRESOLVED"
+    assert cross_alias["stage"] == "NOT_AUTHORIZED_FOR_STAGE-B1"
+    assert cross_alias["reasoning_surfaces"] == []
+    assert cross_alias["authority_owner"] == "NONE_ACCEPTED_IN_CURRENT_PROTECTED_SOURCE"
+
     authority = contract["authority_evidence_by_mode"]
     assert isinstance(authority, dict)
     assert set(authority) == set(modes)
@@ -142,6 +171,15 @@ def _assert_contract_shape(contract: dict[str, object]) -> None:
         assert isinstance(value["fingerprint_fields"], list)
         assert isinstance(value["action_time_revalidation"], list)
         assert value["action_time_revalidation"]
+
+    for mode_name in ("INITIAL_ASSIGNMENT", "SAME_ALIAS_GENERATION_SUCCESSION"):
+        evidence_for_mode = authority[mode_name]
+        assert evidence_for_mode["state"] == "HELD_OWNER_UNRESOLVED"
+        assert evidence_for_mode["owner"] == (
+            "root_binding_assignment_owner + codex_ceo_session_target_policy_owner"
+        )
+        assert evidence_for_mode["source_ref_format"] is None
+        assert evidence_for_mode["fingerprint_fields"] == []
 
     evidence = contract["evidence_contracts"]
     assert isinstance(evidence, dict)
@@ -220,7 +258,7 @@ def test_protected_source_incident_and_correction_are_explicit() -> None:
     assert contract["protected_source_disposition"] == (
         "PROTECTED_SOURCE_CORRECTION_REQUIRED / V1_NOT_IMPLEMENTATION_AUTHORITY"
     )
-    assert contract["implementation_gate"] == "HELD_UNTIL_V2_CORRECTION_PROTECTED"
+    assert contract["implementation_gate"] == "HELD_UNTIL_OWNER_PREREQUISITE_PROTECTED"
     assert "SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT" in plan
 
 
@@ -232,8 +270,16 @@ def test_supported_surface_and_modes_are_truthful() -> None:
     contract = _contract()
     modes = contract["mode_support"]
 
-    assert contract["supported_reasoning_surfaces"] == ["codex"]
+    assert contract["supported_reasoning_surfaces"] == []
     assert contract["held_reasoning_surfaces"] == [
+        {
+            "reasoning_surface": "codex",
+            "state": "HELD_OWNER_UNRESOLVED",
+            "missing_owners": [
+                "root_binding_assignment_owner",
+                "codex_ceo_session_target_policy_owner",
+            ],
+        },
         {
             "reasoning_surface": "chatgpt-web",
             "state": "HELD_NOT_PROVEN",
@@ -245,20 +291,20 @@ def test_supported_surface_and_modes_are_truthful() -> None:
     ]
 
     initial = modes["INITIAL_ASSIGNMENT"]
-    assert initial["state"] == "SUPPORTED_WITH_EXISTING_ROOT_BINDING"
-    assert initial["stage"] == "STAGE-B1"
-    assert initial["reasoning_surfaces"] == ["codex"]
+    assert initial["state"] == "HELD_OWNER_UNRESOLVED"
+    assert initial["stage"] == "PREDECESSOR_OWNER_PREREQUISITE"
+    assert initial["reasoning_surfaces"] == []
     assert initial["authority_owner"] == (
-        "control_plane.session_targets.SessionTargetRegistry.policy_digest"
+        "root_binding_assignment_owner + codex_ceo_session_target_policy_owner"
     )
     assert initial["refusal_when_missing"] == "INITIAL_AUTHORITY_OWNER_UNRESOLVED"
 
     succession = modes["SAME_ALIAS_GENERATION_SUCCESSION"]
-    assert succession["state"] == "SUPPORTED_AFTER_VALID_INITIAL_ASSIGNMENT"
-    assert succession["stage"] == "STAGE-B1"
-    assert succession["reasoning_surfaces"] == ["codex"]
+    assert succession["state"] == "HELD_OWNER_UNRESOLVED"
+    assert succession["stage"] == "PREDECESSOR_OWNER_PREREQUISITE"
+    assert succession["reasoning_surfaces"] == []
     assert succession["authority_owner"] == (
-        "current Stage-B assignment + unchanged SessionTargetRegistry root/ceo alias"
+        "root_binding_assignment_owner + codex_ceo_session_target_policy_owner"
     )
     assert succession["refusal_when_missing"] == "SUCCESSION_EVIDENCE_UNRESOLVED"
 
@@ -270,55 +316,99 @@ def test_supported_surface_and_modes_are_truthful() -> None:
     assert cross_alias["refusal_when_missing"] == "CROSS_ALIAS_AUTHORITY_OWNER_UNRESOLVED"
 
 
+def test_current_owner_gap_holds_codex_initial_and_same_alias_modes() -> None:
+    """A test-only root overlay or digest omission cannot elect a Stage-B owner."""
+
+    target_config = json.loads(_read(SESSION_TARGETS_CONFIG))
+    assert target_config["root_job_bindings"] == {}
+    targets = target_config["targets"]
+    assert not any(
+        target["target_seat"] == "ceo" and target["reasoning_surface"] == "codex"
+        for target in targets.values()
+    )
+
+    registry_source = _read(SESSION_TARGETS)
+    policy_digest_source = registry_source[
+        registry_source.index("    def policy_digest") : registry_source.index(
+            "    def with_root_job_bindings"
+        )
+    ]
+    assert "root_job_bindings" not in policy_digest_source
+    overlay_calls = [
+        line.strip()
+        for line in registry_source.splitlines()
+        if "with_root_job_bindings(" in line and "def with_root_job_bindings" not in line
+    ]
+    assert overlay_calls == []
+
+    contract = _contract()
+    assert contract["first_implementation_wave"] == (
+        "SESSION_TARGETS_ROOT_CEO_ASSIGNMENT_OWNER_PREREQUISITE"
+    )
+    assert contract["supported_reasoning_surfaces"] == []
+    assert contract["held_reasoning_surfaces"][0] == {
+        "reasoning_surface": "codex",
+        "state": "HELD_OWNER_UNRESOLVED",
+        "missing_owners": [
+            "root_binding_assignment_owner",
+            "codex_ceo_session_target_policy_owner",
+        ],
+    }
+
+    for mode_name in ("INITIAL_ASSIGNMENT", "SAME_ALIAS_GENERATION_SUCCESSION"):
+        mode = contract["mode_support"][mode_name]
+        assert mode["state"] == "HELD_OWNER_UNRESOLVED"
+        assert mode["stage"] == "PREDECESSOR_OWNER_PREREQUISITE"
+        assert mode["reasoning_surfaces"] == []
+        assert mode["authority_owner"] == (
+            "root_binding_assignment_owner + codex_ceo_session_target_policy_owner"
+        )
+
+    initial_evidence = contract["authority_evidence_by_mode"]["INITIAL_ASSIGNMENT"]
+    assert initial_evidence["state"] == "HELD_OWNER_UNRESOLVED"
+    assert initial_evidence["owner"] == (
+        "root_binding_assignment_owner + codex_ceo_session_target_policy_owner"
+    )
+    assert initial_evidence["source_ref_format"] is None
+    assert initial_evidence["fingerprint_fields"] == []
+    assert "caller-supplied with_root_job_bindings() mapping is never authority" in _read(
+        DESIGN
+    )
+
+    gate = _gate()
+    assert gate["authorized_modes_after_gate"] == []
+    assert gate["held_modes"] == [
+        "INITIAL_ASSIGNMENT",
+        "SAME_ALIAS_GENERATION_SUCCESSION",
+        "CROSS_ALIAS_RESPONSIBILITY_TRANSFER",
+    ]
+
+
 def test_authority_sources_are_exact_and_never_self_authorizing() -> None:
     contract = _contract()
     authority = contract["authority_evidence_by_mode"]
 
     assert authority["INITIAL_ASSIGNMENT"] == {
-        "state": "SUPPORTED_WITH_EXISTING_ROOT_BINDING",
-        "owner": "control_plane.session_targets.SessionTargetRegistry",
-        "source_ref_format": (
-            "session-target-policy:<policy_digest>:root:<root_job_id>:seat:ceo"
-        ),
-        "fingerprint_fields": [
-            "policy_digest",
-            "root_job_id",
-            "target_seat",
-            "session_alias",
-            "reasoning_surface",
-        ],
+        "state": "HELD_OWNER_UNRESOLVED",
+        "owner": "root_binding_assignment_owner + codex_ceo_session_target_policy_owner",
+        "source_ref_format": None,
+        "fingerprint_fields": [],
         "action_time_revalidation": [
-            "root Job exists in Runtime",
-            "root_job_bindings[root_job_id][ceo] exists",
-            "target alias exists and target_seat is ceo",
-            "target reasoning_surface is codex",
-            "caller destination alias equals the policy-owned alias",
-            "policy digest is recomputed inside the transaction input boundary",
+            "refuse: checked-in root_job_bindings is empty and test-overlay-only",
+            "refuse: policy_digest() omits root_job_bindings and cannot attest a root-to-alias choice",
+            "refuse: no compatible Codex CEO SessionTarget policy exists in current protected source",
+            "refuse caller-supplied with_root_job_bindings() mapping, RuntimeBinding, Wake ACK, placement result, Slack prose, and Stage-B event as initial-assignment authority",
         ],
     }
     assert authority["SAME_ALIAS_GENERATION_SUCCESSION"] == {
-        "state": "SUPPORTED_AFTER_VALID_INITIAL_ASSIGNMENT",
-        "owner": (
-            "current Stage-B assignment event + control_plane.session_targets."
-            "SessionTargetRegistry"
-        ),
-        "source_ref_format": (
-            "sol-target-assignment:<root_job_id>:revision:<assignment_revision>"
-        ),
-        "fingerprint_fields": [
-            "root_job_id",
-            "assignment_revision",
-            "current_assignment_event_command_id",
-            "session_target_policy_digest",
-            "session_alias",
-        ],
+        "state": "HELD_OWNER_UNRESOLVED",
+        "owner": "root_binding_assignment_owner + codex_ceo_session_target_policy_owner",
+        "source_ref_format": None,
+        "fingerprint_fields": [],
         "action_time_revalidation": [
-            "current assignment history is contiguous and unique",
-            "previous target equals the folded current assignment",
-            "source and destination aliases are identical",
-            "registry root/ceo alias remains identical",
-            "destination binding generation is strictly greater",
-            "source generation release and destination ACK are exact and effect-known",
+            "refuse: no valid protected initial-assignment capability can exist until both missing owners are protected",
+            "refuse: no current Stage-B assignment history can ground succession before that prerequisite",
+            "refuse caller-supplied with_root_job_bindings() mapping as a substitute for the missing protected initial assignment",
         ],
     }
     assert authority["CROSS_ALIAS_RESPONSIBILITY_TRANSFER"]["state"] == (
@@ -353,13 +443,22 @@ def test_evidence_contracts_name_existing_owners_and_closed_identity() -> None:
     ]
 
     policy = evidence["session_target_policy"]
-    assert policy["owner"] == "control_plane.session_targets.SessionTargetRegistry"
+    assert policy["owner"] == (
+        "root_binding_assignment_owner + codex_ceo_session_target_policy_owner"
+    )
     assert policy["lookup"] == (
-        "policy_digest() + root_job_bindings[root_job_id][ceo] + targets[session_alias]"
+        "future durable root/CEO alias assignment receipt/map plus compatible Codex CEO "
+        "SessionTarget policy from one existing SessionTargetRegistry extension"
     )
     assert policy["aggregate_type"] is None
     assert policy["event_type"] is None
-    assert policy["command_id_law"] == "not an Event; persist the recomputed policy digest and derived source_ref"
+    assert policy["command_id_law"] == (
+        "future receipt/map identity and target-policy identity must be independently "
+        "fingerprinted; current policy_digest alone is insufficient"
+    )
+    assert policy["schema_or_typed_shape"] == (
+        "separately commissioned existing SessionTargetRegistry extension; no second registry"
+    )
 
     binding = evidence["destination_current_binding"]
     assert binding["owner"] == (
@@ -488,7 +587,10 @@ def test_projection_merge_preserves_unrelated_roots_and_sibling_seats() -> None:
     source = _normalized(_read(SESSION_TARGETS))
     assert "def with_root_job_bindings" in source
     assert "return dataclasses.replace(self, root_job_bindings=resolved)" in source
-    assert "with_root_job_bindings replaces the complete mapping" in _normalized(_read(DESIGN))
+    assert "validates and then replaces the supplied complete mapping" in _normalized(_read(DESIGN))
+    assert "caller-supplied with_root_job_bindings() mapping is never authority" in _read(
+        DESIGN
+    )
 
 
 def test_current_source_corroborates_codex_ack_and_release_boundaries() -> None:
@@ -498,11 +600,11 @@ def test_current_source_corroborates_codex_ack_and_release_boundaries() -> None:
     runtime = _read(EXECUTIVE_RUNTIME)
 
     assert '_PROVIDER_TO_REASONING_SURFACE = {"openai-codex": "codex"}' in projection
-    assert "Runtime.current_harness_binding_source" in projection
+    assert "runtime.current_harness_binding_source(" in projection
     assert 'WAKE_AGGREGATE_TYPE = "wake"' in ledger
     assert 'return f"{oid}:ACK"' in ledger
-    assert 'ACK_OPERATION_SCHEMA = "mastermind.wake_ack_ingress/v1"' in ack_ingress
-    assert "mastermind.wake_consumption_ack/v1" in ack_ingress
+    assert "def acknowledge_consumed_wakes(" in ack_ingress
+    assert "AckMode.REASONING_SESSION" in ack_ingress
     assert 'OHF_RECONCILE_OBSERVATION_SCHEMA_VERSION = (' in runtime
     assert '"mastermind.operator_harness_reconcile_observation/v1"' in runtime
     assert 'admission_command = f"ohf-work-admit:{generation.process_generation_id}"' in runtime
@@ -584,14 +686,15 @@ def test_plan_gate_blocks_old_v1_and_cross_alias_or_web_implementation() -> None
         "schema": "mastermind.autonomy_stage_b1_correction_gate.v1",
         "requires_protected_design_schema": "mastermind.autonomy_stage_b_f0_contract.v2",
         "v1_implementation_authority": "REVOKED_BY_POST_MERGE_REVIEW",
-        "stage_b1_state": "HELD_UNTIL_V2_CORRECTION_PROTECTED",
-        "authorized_modes_after_gate": [
+        "stage_b1_state": "HELD_UNTIL_OWNER_PREREQUISITE_PROTECTED",
+        "authorized_modes_after_gate": [],
+        "held_modes": [
             "INITIAL_ASSIGNMENT",
             "SAME_ALIAS_GENERATION_SUCCESSION",
+            "CROSS_ALIAS_RESPONSIBILITY_TRANSFER",
         ],
-        "held_modes": ["CROSS_ALIAS_RESPONSIBILITY_TRANSFER"],
-        "supported_reasoning_surfaces": ["codex"],
-        "held_reasoning_surfaces": ["chatgpt-web"],
+        "supported_reasoning_surfaces": [],
+        "held_reasoning_surfaces": ["codex", "chatgpt-web"],
         "requires_exact_evidence_contracts": True,
         "requires_full_root_binding_merge_preservation": True,
         "requires_derived_command_id": True,
@@ -602,17 +705,9 @@ def test_plan_gate_blocks_old_v1_and_cross_alias_or_web_implementation() -> None
     assert order == (
         "1. PROTECT_STAGE_B0_R1_CORRECTION",
         "2. RE_PIN_AND_COLLISION_FREEZE",
-        "3. RED_COMMAND_AUTHORITY_EVIDENCE_AND_FOLD_TESTS",
-        "4. IMPLEMENT_CLOSED_TYPES_AND_FULL_MAPPING_PROJECTOR",
-        "5. RED_RUNTIME_TRANSACTION_REPLAY_AND_RELEASE_TESTS",
-        "6. IMPLEMENT_EXISTING_RUNTIME_TRANSACTION_SEAM",
-        "7. RED_REAL_STAGE_A_CONSUMER_TESTS",
-        "8. INTEGRATE_CODEX_ONLY_INITIAL_AND_SAME_ALIAS_MODES",
-        "9. RUN_MUTATION_FORBIDDEN_PLANE_AND_ROW_INTEGRITY_PROOF",
-        "10. RUN_FOCUSED_ADJACENT_FULL_AND_SECURITY_GATES",
-        "11. PUBLISH_ONE_DRAFT_HOLD_CARRIER",
-        "12. INDEPENDENT_EXACT_HEAD_REVIEW",
-        "13. SOL_EXPECTED_HEAD_SOURCE_RELEASE",
+        "3. HOLD_STAGE_B1_FOR_SEPARATE_SESSION_TARGETS_ROOT_CEO_ASSIGNMENT_OWNER_COMMISSION",
+        "4. PROTECT_DURABLE_ROOT_CEO_RECEIPT_MAP_AND_COMPATIBLE_CODEX_CEO_POLICY",
+        "5. RE_PIN_AND_SEPARATELY_COMMISSION_FUTURE_STAGE_B1_TRANSACTION_WORK",
     )
     plan = _normalized(_read(PLAN))
     assert "Do not start Stage-B1 from the protected v1 source law" in plan
@@ -658,6 +753,26 @@ def test_source_law_validation_is_mutation_discriminating() -> None:
     web_widened["supported_reasoning_surfaces"] = ["codex", "chatgpt-web"]
     mutations.append(web_widened)
 
+    codex_reenabled = copy.deepcopy(contract)
+    codex_reenabled["supported_reasoning_surfaces"] = ["codex"]
+    mutations.append(codex_reenabled)
+
+    initial_reenabled = copy.deepcopy(contract)
+    initial_reenabled["mode_support"]["INITIAL_ASSIGNMENT"]["state"] = (
+        "SUPPORTED_WITH_EXISTING_ROOT_BINDING"
+    )
+    mutations.append(initial_reenabled)
+
+    succession_reenabled = copy.deepcopy(contract)
+    succession_reenabled["mode_support"]["SAME_ALIAS_GENERATION_SUCCESSION"][
+        "state"
+    ] = "SUPPORTED_AFTER_VALID_INITIAL_ASSIGNMENT"
+    mutations.append(succession_reenabled)
+
+    old_transaction_first = copy.deepcopy(contract)
+    old_transaction_first["first_implementation_wave"] = "STAGE-B1"
+    mutations.append(old_transaction_first)
+
     cross_alias_unheld = copy.deepcopy(contract)
     cross_alias_unheld["mode_support"]["CROSS_ALIAS_RESPONSIBILITY_TRANSFER"][
         "state"
@@ -675,7 +790,7 @@ def test_source_law_validation_is_mutation_discriminating() -> None:
 def test_truthful_claim_and_no_rebuild_boundaries_are_explicit() -> None:
     contract = _contract()
     assert contract["truthful_maximum_stage_b1_claim"] == (
-        "BUILT_NOT_PROVEN / CODEX_INITIAL_AND_SAME_ALIAS_SOURCE_ONLY / PRODUCTION_DISARMED"
+        "RECORDS_ONLY / OWNER_PREREQUISITE_REQUIRED / STAGE_B1_UNSTARTED / PRODUCTION_DISARMED"
     )
     design = _normalized(_read(DESIGN))
     plan = _normalized(_read(PLAN))

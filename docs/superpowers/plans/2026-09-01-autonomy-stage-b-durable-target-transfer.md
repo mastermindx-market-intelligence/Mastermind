@@ -20,8 +20,9 @@ roots/seats, and replay semantics contradicted a fully derived command ID.
 Do not start Stage-B1 from the protected v1 source law. This Stage-B0-R1 records carrier replaces its
 implementation authority with a v2 contract. The broader product goal remains unchanged: one durable
 Sol responsibility must survive context/runtime rotation without stale actors, duplicate provider
-writes, or Chairman message shuttling. The first code wave is narrower because current protected
-owners support only Codex initial assignment and same-alias generation succession.
+writes, or Chairman message shuttling. Current protected owners support neither Codex initial assignment
+nor same-alias generation succession: the first code wave is a separately commissioned root/CEO
+assignment-owner prerequisite in the existing `SessionTargetRegistry` ownership path.
 
 Cross-alias responsibility transfer remains held until an exact accepted authority receipt owner
 exists. ChatGPT-Web remains held until one accepted current RuntimeBinding writer and exact semantic
@@ -33,15 +34,16 @@ ACK owner exist.
 
 Protect exactly one correction where:
 
-- every supported transfer mode names its current canonical authority owner;
+- every mode whose current authority owner is absent is explicitly held;
 - every evidence requirement names an owner, lookup, aggregate/event, command law, schema/typed shape,
   identity closure, and effect-known rule;
 - command identity is derived and caller-inaccessible;
 - same-revision races produce one append and one revision refusal, not a fictional same-ID conflict;
 - Stage-B projection preserves all unrelated roots and sibling seats;
-- current source support is Codex-only;
-- unsupported cross-alias and Web journeys are explicit held states;
-- Stage-B1 cannot start until the correction itself is protected.
+- current source supports no Stage-B1 reasoning surface;
+- Codex, cross-alias, and ChatGPT-Web journeys are explicit held states;
+- Stage-B1 cannot start until both this correction and the separately commissioned owner prerequisite
+  are protected.
 
 The records carrier changes only the existing design, plan, and source-law test. It produces no
 Runtime, provider, Wake, target, host, or production effect.
@@ -56,18 +58,16 @@ Runtime, provider, Wake, target, host, or production effect.
   "schema": "mastermind.autonomy_stage_b1_correction_gate.v1",
   "requires_protected_design_schema": "mastermind.autonomy_stage_b_f0_contract.v2",
   "v1_implementation_authority": "REVOKED_BY_POST_MERGE_REVIEW",
-  "stage_b1_state": "HELD_UNTIL_V2_CORRECTION_PROTECTED",
-  "authorized_modes_after_gate": [
-    "INITIAL_ASSIGNMENT",
-    "SAME_ALIAS_GENERATION_SUCCESSION"
-  ],
+  "stage_b1_state": "HELD_UNTIL_OWNER_PREREQUISITE_PROTECTED",
+  "authorized_modes_after_gate": [],
   "held_modes": [
+    "INITIAL_ASSIGNMENT",
+    "SAME_ALIAS_GENERATION_SUCCESSION",
     "CROSS_ALIAS_RESPONSIBILITY_TRANSFER"
   ],
-  "supported_reasoning_surfaces": [
-    "codex"
-  ],
+  "supported_reasoning_surfaces": [],
   "held_reasoning_surfaces": [
+    "codex",
     "chatgpt-web"
   ],
   "requires_exact_evidence_contracts": true,
@@ -140,25 +140,25 @@ preservation is replaced by a one-root overlay.
 
 ---
 
-## 6. Stage-B1 operator handoff
+## 6. First implementation wave — separate root/CEO assignment-owner prerequisite
 
 ### Mission
 
-Implement one source-only Executive capability that can:
+After this records correction is protected, commission exactly one existing-system extension that can:
 
-1. persist revision-one assignment for a root whose current SessionTarget policy already owns the
-   exact CEO alias; and
-2. advance that same alias to a strictly newer admitted Codex RuntimeBinding generation after exact
-   old-generation release and exact new-generation target ACK.
+1. create an exact durable root/CEO alias assignment receipt/map; and
+2. create a compatible Codex CEO SessionTarget policy through the existing `SessionTargetRegistry`
+   ownership path.
 
-The unchanged Stage-A resolver must then make only the exact new binding action-authoritative while
-stale/sister actors remain observer-only.
+It must use no second registry or control plane, and it must expose an action-time lookup and independent
+receipt/map fingerprint that a later Stage-B1 transaction can consume. This records carrier neither starts
+that wave nor selects its code/config paths.
 
 ### Why it matters
 
-This closes the durable seam between an already-proven current target and the machine’s one current
-Sol action responsibility. It also makes lost transfer responses reconcilable without a second target
-store. It does not yet solve cross-alias delegation or Web-Sol context rotation.
+This closes the missing authority seam before a transaction can safely materialize it. The preserved
+Stage-B1 command/replay/evidence/full-map architecture becomes reachable only after the predecessor is
+protected. Cross-alias delegation and Web-Sol context rotation remain separately held.
 
 ### Authority/document precedence
 
@@ -172,18 +172,15 @@ store. It does not yet solve cross-alias delegation or Web-Sol context rotation.
 If protected source materially changes any owner contract, return one finite current-source decision
 request before writing. Path-disjoint movement may be joined history-preservingly on the same carrier.
 
-### Expected implementation paths
+### Required bounded owner outcome
 
-```text
-control_plane/sol_action_target_transfer.py
-control_plane/executive_runtime.py
-tests/test_sol_action_target_transfer.py
-tests/test_sol_action_target.py
-tests/test_executive_runtime.py
-```
+The separately commissioned extension must prove all of the following before another Stage-B1 commission:
 
-A fresh path census may narrow the list. It may not add an authority/production path without an exact
-same-carrier decision request.
+- it owns a durable root/CEO assignment receipt/map, not a test or caller overlay;
+- the exact receipt/map has a distinct action-time fingerprint, so `policy_digest()` alone cannot attest
+  a root-to-alias choice;
+- it creates one compatible Codex CEO SessionTarget policy in the existing registry;
+- it has a real producer and consumer, with no second registry, RuntimeBinding owner, or authority map.
 
 ### Explicit non-goals
 
@@ -205,9 +202,12 @@ same-carrier decision request.
 
 ---
 
-## 7. Complete supported journeys
+## 7. Future Stage-B1 journeys — unreachable until the owner prerequisite protects
 
-### 7.1 Codex initial assignment
+The following preserve the desired future Stage-B1 behavior. They are not current supported journeys and
+must not be implemented on this records carrier.
+
+### 7.1 Future Codex initial assignment
 
 ```text
 root Job exists
@@ -220,10 +220,10 @@ root Job exists
 -> unchanged Stage-A resolver grants only exact actor binding
 ```
 
-If root/CEO alias is absent, stop with `INITIAL_AUTHORITY_OWNER_UNRESOLVED`. The command cannot create
-or choose an alias.
+Until the owner prerequisite protects, stop with `INITIAL_AUTHORITY_OWNER_UNRESOLVED` before any command.
+The later command cannot create or choose an alias.
 
-### 7.2 Codex same-alias succession
+### 7.2 Future Codex same-alias succession
 
 ```text
 valid current Stage-B assignment revision N
@@ -238,7 +238,8 @@ valid current Stage-B assignment revision N
 -> Stage A fences stale binding and grants exact successor
 ```
 
-If release, ACK, current binding, policy, or history is missing/unknown/conflicting, append nothing.
+Until valid protected initial assignment can exist, succession is held. Thereafter, missing/unknown/
+conflicting release, ACK, current binding, policy, or history appends nothing.
 
 ### 7.3 Lost response
 
@@ -328,122 +329,53 @@ ambiguous effect, or make a source-only merge production-proven.
 
 ---
 
-## 10. Ordered implementation sequence
+## 10. Ordered next operations
 
 <!-- STAGE_B1_IMPLEMENTATION_ORDER_BEGIN -->
 ```text
 1. PROTECT_STAGE_B0_R1_CORRECTION
 2. RE_PIN_AND_COLLISION_FREEZE
-3. RED_COMMAND_AUTHORITY_EVIDENCE_AND_FOLD_TESTS
-4. IMPLEMENT_CLOSED_TYPES_AND_FULL_MAPPING_PROJECTOR
-5. RED_RUNTIME_TRANSACTION_REPLAY_AND_RELEASE_TESTS
-6. IMPLEMENT_EXISTING_RUNTIME_TRANSACTION_SEAM
-7. RED_REAL_STAGE_A_CONSUMER_TESTS
-8. INTEGRATE_CODEX_ONLY_INITIAL_AND_SAME_ALIAS_MODES
-9. RUN_MUTATION_FORBIDDEN_PLANE_AND_ROW_INTEGRITY_PROOF
-10. RUN_FOCUSED_ADJACENT_FULL_AND_SECURITY_GATES
-11. PUBLISH_ONE_DRAFT_HOLD_CARRIER
-12. INDEPENDENT_EXACT_HEAD_REVIEW
-13. SOL_EXPECTED_HEAD_SOURCE_RELEASE
+3. HOLD_STAGE_B1_FOR_SEPARATE_SESSION_TARGETS_ROOT_CEO_ASSIGNMENT_OWNER_COMMISSION
+4. PROTECT_DURABLE_ROOT_CEO_RECEIPT_MAP_AND_COMPATIBLE_CODEX_CEO_POLICY
+5. RE_PIN_AND_SEPARATELY_COMMISSION_FUTURE_STAGE_B1_TRANSACTION_WORK
 ```
 <!-- STAGE_B1_IMPLEMENTATION_ORDER_END -->
 
 ### Step 1 — Protect the correction
 
-Do not commission or start Stage-B1 until protected master contains the exact v2 design and the
-source-law suite is green with independent review. The protected v1 merge is not a substitute.
+Do not commission or start the owner prerequisite until protected master contains the exact corrected v2
+design and the source-law suite is green with independent review. The protected v1 merge is not a
+substitute.
 
 ### Step 2 — Re-pin and collision freeze
 
 Fresh-read protected master and same-SHA Skillpack. Inspect open PRs/branches/worktrees touching the
-five expected paths. Reconcile any existing effect. Return a compact `PATH_FREEZE / STAGE-B1` and then
-separate `START` only when the single-carrier boundary is clean.
+owner path. Reconcile any existing effect. Return a compact `PATH_FREEZE` and then separate `START` only
+when the single-carrier boundary is clean.
 
-### Step 3 — RED command/authority/evidence/fold tests
+### Step 3 — Hold Stage-B1 and commission the missing owner
 
-Require exact v2 command keys and reject caller command ID. Add discriminating failures for:
+Do not add Stage-B1 command, event, Runtime, provider, or target code on this carrier. Separately commission
+one existing `SessionTargetRegistry` ownership extension that creates:
 
-- missing root/CEO binding;
-- caller alias mismatch;
-- Web/cross-alias mode;
-- malformed policy digest;
-- missing/changed ACK identity;
-- missing/changed release identity;
-- malformed/gapped/branched assignment history;
-- forbidden persisted fields;
-- canonical key/list permutations.
+- an exact durable root/CEO alias assignment receipt/map; and
+- one compatible Codex CEO SessionTarget policy;
+- an action-time lookup and separate receipt/map fingerprint;
+- real producer/consumer evidence, without a second registry or control plane.
 
-### Step 4 — Closed types and full-map projector
+### Step 4 — Protect the owner prerequisite
 
-Build one stdlib-only module with immutable command/event/snapshot types, exact parsing, canonical
-bytes/digest, fold, and complete root-binding map merge. Do not write source owners.
+The owner extension must receive its own source, tests, review, and protected-head proof. A test-only or
+caller-created `with_root_job_bindings()` overlay, `policy_digest()` absence, RuntimeBinding, Wake ACK,
+provider fact, placement result, Slack prose, or Stage-B event is not a substitute.
 
-### Step 5 — RED Runtime transaction/replay/release tests
+### Step 5 — Recommission future Stage-B1 only after the prerequisite protects
 
-Prove:
-
-- command lookup precedes current-state reads;
-- identical response-loss replay succeeds after later state movement;
-- corrupt occupancy conflicts;
-- different same-revision commands produce one append plus one revision mismatch;
-- all Runtime/ACK/release reads use the one transaction connection;
-- old-generation release must match exact previous target lineage.
-
-### Step 6 — Existing Runtime seam
-
-Add the smallest method in `executive_runtime.py`. Reuse `RuntimeStore.transaction`, event lookup,
-Runtime Job/Event rows, `current_harness_binding_source`, and existing process-generation evidence.
-Do not add another table, lock, lease, registry, cursor, cache, or transaction owner.
-
-### Step 7 — Real Stage-A tests
-
-Use `resolve_sol_action_target()` unchanged. Prove:
-
-- before assignment, target is absent/observer-only;
-- after valid assignment, exact actor is authoritative;
-- after succession, old actor is observer-only and new actor authoritative;
-- sister alias remains observer-only;
-- missing/unknown/conflict snapshots never grant authority.
-
-### Step 8 — Supported-mode integration
-
-Implement only Codex initial assignment and same-alias succession. A branch containing cross-alias or
-ChatGPT-Web behavior violates scope even if tests pass.
-
-### Step 9 — Mutation and row-integrity proof
-
-Kill mutations for command-first lookup, policy-owned alias, expected revision, previous target,
-exact ACK, exact release, greater generation, full-map preservation, forbidden fields, and Stage-A
-actor check. Snapshot all relevant Runtime/Wake rows before/after and prove Stage B changed only one
-Runtime Event row.
-
-### Step 10 — Repository/security gates
-
-Run focused and adjacent tests, all feasible repository tests, compile, diff check, static ownership
-scan, secret/private-field scan, and hosted security. A local environment gap is named honestly;
-hosted CI remains required.
-
-### Step 11 — One Draft/HOLD carrier
-
-Use one operation, branch, and PR. Path-disjoint protected movement is joined history-preservingly.
-Never replace the carrier because CI fails, review finds defects, or master moves.
-
-### Step 12 — Independent review
-
-The reviewer must verify original outcome and exact source law:
-
-- are only supported modes implemented?
-- can caller/model choose target or command ID?
-- are owner/evidence reads exact and same-transaction?
-- can projection delete another root or seat?
-- can replay/race create a second event?
-- are all adjacent owners untouched?
-- is source-only work being misrepresented as production proof?
-
-### Step 13 — Sol release
-
-Expected-head merge only after exact current-base head, terminal required checks, independent PASS,
-no blocking threads, exact path ceiling, final protected-head reread, and truthful capability state.
+Only then may a fresh, separately scoped Stage-B1 commission use the preserved command/replay/evidence/
+full-map/no-duplicate-registry law. That later commission begins again with RED discriminators for
+command authority, replay, exact Runtime/Wake evidence, Stage-A consumer behavior, row integrity, and
+all held modes. It remains Codex-only only if the prerequisite has proved the compatible Codex CEO policy;
+cross-alias and ChatGPT-Web remain held.
 
 ---
 
@@ -451,15 +383,15 @@ no blocking threads, exact path ceiling, final protected-head reread, and truthf
 
 ### Authority/evidence
 
-- existing policy root/CEO alias required for initial assignment;
-- current Stage-B assignment plus unchanged alias required for succession;
+- current empty/test-only root bindings, digest omission, absent Codex CEO target, and caller overlay all
+  hold initial assignment;
+- same-alias succession remains held until a valid protected initial-assignment capability can exist;
 - cross-alias always refuses;
 - Web always refuses;
-- exact destination Runtime facts and Wake ACK required;
-- exact source release required for succession;
-- missing/duplicate/conflicting/effect-unknown evidence appends nothing.
+- the separately commissioned prerequisite must create the receipt/map and compatible Codex CEO policy
+  before a future Stage-B1 transaction is considered.
 
-### Replay/concurrency
+### Future replay/concurrency after the prerequisite
 
 - identical semantic retry returns same event;
 - transport claimed-ID mismatch refuses;
@@ -467,7 +399,7 @@ no blocking threads, exact path ceiling, final protected-head reread, and truthf
 - two different revision-N commands serialize to one append/one mismatch;
 - no automatic revision rebase or alias failover.
 
-### Projection
+### Future projection after the prerequisite
 
 - unrelated root survives;
 - root’s COO survives;
@@ -475,7 +407,7 @@ no blocking threads, exact path ceiling, final protected-head reread, and truthf
 - only root/CEO alias changes;
 - real Stage-A actor authority flips only to exact current binding.
 
-### No-mutation/no-leak
+### Future no-mutation/no-leak proof
 
 - Job/Attempt/Worker/RuntimeBinding rows unchanged;
 - Wake history unchanged;
@@ -488,7 +420,7 @@ no blocking threads, exact path ceiling, final protected-head reread, and truthf
 Maximum source claim:
 
 ```text
-BUILT_NOT_PROVEN / CODEX_INITIAL_AND_SAME_ALIAS_SOURCE_ONLY / PRODUCTION_DISARMED
+RECORDS_ONLY / OWNER_PREREQUISITE_REQUIRED / STAGE_B1_UNSTARTED / PRODUCTION_DISARMED
 ```
 
 No test or merge may call cross-alias, Web continuity, automatic rotation, provider delivery, ACK,
@@ -523,7 +455,7 @@ repaired on the same carrier without Chairman intervention.
 
 ---
 
-## 13. Production proof after source release
+## 13. Production proof after future owner and Stage-B source releases
 
 A separate canary operation—not Stage-B1—must use a disposable exact Codex target and prove:
 
@@ -558,8 +490,9 @@ After this records carrier reaches immutable `RESULT / HOLD-FOR-SOL`, return:
 - hosted repository/security check IDs;
 - independent review identity/verdict;
 - local/remote/production effects;
-- explicit statement that Stage-B1 remains unstarted until expected-head protection;
-- exact next operation only after protection.
+- explicit statement that Stage-B1 remains unstarted until the separately commissioned owner prerequisite
+  protects an exact durable receipt/map and compatible Codex CEO policy;
+- exact next operation only after this records correction protects.
 
 After Stage-B1 source release, return the same evidence plus the remaining cross-alias, Web, and
 production-canary gates. Green source is a checkpoint, not the finish line.
