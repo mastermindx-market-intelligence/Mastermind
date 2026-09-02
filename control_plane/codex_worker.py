@@ -534,6 +534,10 @@ class _RunState:
     cancel_reason: str | None = None
     timed_out: bool = False
     escalated: bool = False
+    # Set once the verified original process group has been *proven* absent.
+    # A group cannot come back, so this latches: no later sweep may re-probe or
+    # signal that PGID, which the host may already have recycled to a stranger.
+    group_proven_absent: bool = False
     finished_at: str | None = None
     receipt: CollectionReceipt | None = None
 
@@ -2557,6 +2561,12 @@ class CodexWorkerAdapter:
             except ProcessLookupError:
                 pass
         await wait_task
+        if group_vanished:
+            # Nothing was signalled and the group was already proven absent, so
+            # there is no exit to wait for and no SIGKILL that could have been
+            # survived.  Re-probing here would reopen the same reused-PGID
+            # window the branch above exists to close.
+            return
         if not await _wait_for_process_group_exit(pgid):
             raise ProcessIdentityError("validation process group survived SIGKILL")
 
@@ -2974,6 +2984,13 @@ class CodexWorkerAdapter:
     async def _kill_residual_process_group(self, state: _RunState) -> bool:
         """Kill descendants that outlive the already-reaped group leader."""
 
+        if state.group_proven_absent:
+            # Termination already proved this exact group absent.  Every member
+            # including the leader had exited, so there is no descendant to
+            # reap; probing again could only observe a PGID the host has since
+            # recycled to a foreign group, and an absent leader must never
+            # authorise signalling a reused group.
+            return False
         if not _process_group_exists(state.ref.pgid):
             return False
         try:
@@ -3032,6 +3049,7 @@ class CodexWorkerAdapter:
                         # ProcessLookupError and raises when the observation itself
                         # is unavailable, so an unreadable group still fails closed.
                         group_vanished = not _process_group_exists(state.ref.pgid)
+                        state.group_proven_absent = group_vanished
                     else:
                         if (
                             identity != state.ref.process_start_identity

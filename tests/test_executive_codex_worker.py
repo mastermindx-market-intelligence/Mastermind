@@ -1610,6 +1610,7 @@ class _CancelRaceControl:
         self.armed = False
         self.mode = "vanished"
         self.signals: list[tuple[int, int]] = []
+        self.armed_probes = 0
         # Unpatched killpg, so test cleanup never pollutes the signal evidence.
         self.real_killpg = os.killpg
 
@@ -1617,6 +1618,7 @@ class _CancelRaceControl:
         self.pid = pid
         self.pgid = pgid
         self.release = release
+        self.armed_probes = 0
 
     def disarm(self) -> None:
         self.armed = False
@@ -1635,8 +1637,17 @@ def _install_cancel_race_control(monkeypatch: pytest.MonkeyPatch) -> _CancelRace
             # Existence probe.  Real signals below are never intercepted, so a
             # wrongly issued SIGKILL can still be observed and asserted against.
             if control.armed and int(pgid) == control.pgid:
+                control.armed_probes += 1
                 if control.mode == "group_unavailable":
                     raise PermissionError(f"cannot inspect process group {pgid}")
+                if control.mode == "recycled":
+                    # Proven absent at the escalation observation, then the host
+                    # hands the same PGID to a foreign group.  Every later probe
+                    # therefore reports "exists" -- and anything that signals on
+                    # the strength of it is signalling a stranger.
+                    if control.armed_probes == 1:
+                        raise ProcessLookupError(f"no process group {pgid}")
+                    return 0
                 if control.mode != "off":
                     raise ProcessLookupError(f"no process group {pgid}")
             return real_killpg(pgid, sig)
@@ -1972,3 +1983,79 @@ def test_validation_terminate_falsifiers_remain_fail_closed(
         f"{mode} must not authorise a validation SIGKILL: {control.signals}"
     )
     _assert_process_gone(child_pid, "validation descendant survived the fail-closed path")
+
+
+def test_cancel_never_signals_a_pgid_recycled_after_proven_absence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Proven absence must latch for the whole run, not just one branch.
+
+    Reconciling the vanished group is worthless if a later residual sweep
+    re-probes the same PGID and signals whatever now answers to it.  Here the
+    host recycles the PGID immediately after it is proven absent; no SIGKILL may
+    be issued by any path.
+    """
+
+    control = _install_cancel_race_control(monkeypatch)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        adapter.inspector = _RaceInspector(adapter.inspector, control)
+        ref, _state, _release, child_pid = await _start_with_gated_wait(
+            adapter, spec, run_dir, control
+        )
+        control.mode = "recycled"
+        cancel = await adapter.cancel(ref, "operator requested")
+        receipt = await adapter.collect_result(ref)
+        return cancel, receipt, child_pid
+
+    cancel, receipt, child_pid = asyncio.run(exercise())
+
+    assert control.group_signals(signal.SIGKILL) == [], (
+        "a PGID proven absent was signalled after the host recycled it: "
+        f"{control.signals}"
+    )
+    assert cancel.escalated_to_sigkill is False
+    assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
+    _assert_process_gone(child_pid, "cancelled Codex descendant survived its process group")
+
+
+def test_validation_never_signals_or_faults_on_a_recycled_pgid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Validation twin: no signal, and no false 'survived SIGKILL' either.
+
+    The branch issues no SIGKILL, so it must never report that one was survived.
+    """
+
+    control = _install_cancel_race_control(monkeypatch)
+
+    async def exercise():
+        adapter, _spec, _workspace_path, _run_dir = _fixture(tmp_path, prompt="success")
+        process, child_pid = await _spawn_validation_group(tmp_path, "recycled", stubborn=False)
+        wait_task, release, pgid, start_identity, boot_id = (
+            await _drive_validation_termination(adapter, control, process)
+        )
+        control.mode = "recycled"
+        try:
+            await adapter._terminate_validation_process(
+                process,
+                wait_task,
+                pid=process.pid,
+                pgid=pgid,
+                start_identity=start_identity,
+                boot_id=boot_id,
+                grace_seconds=0.1,
+            )
+        finally:
+            await _reap_validation_group(control, pgid, release, wait_task)
+        return child_pid
+
+    child_pid = asyncio.run(exercise())
+
+    assert control.group_signals(signal.SIGKILL) == [], (
+        f"validation signalled a recycled PGID: {control.signals}"
+    )
+    _assert_process_gone(child_pid, "validation descendant survived its process group")
