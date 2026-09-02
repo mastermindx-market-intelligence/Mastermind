@@ -863,6 +863,25 @@ def test_no_control_plane_config_dependency_or_workflow_file_touched() -> None:
         assert not path.startswith(forbidden_prefixes), f"unexpected control-plane/config/workflow change: {path}"
 
 
+@pytest.mark.parametrize(
+    "fence_test",
+    [
+        test_changed_paths_are_within_the_allowed_r0_surface,
+        test_no_control_plane_config_dependency_or_workflow_file_touched,
+    ],
+    ids=["allowed_surface_fence", "forbidden_surface_fence"],
+)
+def test_empty_delta_is_not_applicable_for_real_fences(monkeypatch, fence_test) -> None:
+    """An empty protected-master delta is not this program's business.
+
+    Exercise the real fence entry points, not only the classifier helper, so
+    a premature non-empty assertion cannot regress ahead of self-scoping.
+    """
+    monkeypatch.setattr(sys.modules[__name__], "compute_pr_diff_paths", lambda _repo: set())
+    with pytest.raises(pytest.skip.Exception, match="not applicable"):
+        fence_test()
+
+
 # ---------------------------------------------------------------------------
 # 4a. Test-of-the-test: compute_pr_diff_paths is merge-ref-safe
 # ---------------------------------------------------------------------------
