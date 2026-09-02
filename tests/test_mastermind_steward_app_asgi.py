@@ -1,16 +1,29 @@
 from __future__ import annotations
 
+import base64
+import inspect
+import json
 import time
+from collections.abc import Mapping
+from types import MethodType
 
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from starlette.testclient import TestClient
 
 from integrations.business_mcp_auth.contracts import (
+    AUTH_AUDIT_SCHEMA,
     AUTH_POLICY_SCHEMA,
+    AuthAuditEvent,
+    AuthErrorCode,
     load_resource_policy,
     subject_digest,
 )
+from integrations.business_mcp_auth.jwks import BoundedJwksCache
+from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
+from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 from integrations.mastermind_secretary_mcp.adapter import StewardGrounding
 from integrations.mastermind_steward_app.app import build_authenticated_app
 from integrations.mastermind_steward_app.server import (
@@ -22,6 +35,13 @@ from integrations.mastermind_steward_app.server import (
 MCP_PATH = "/mcp/steward/v1"
 METADATA_PATH = "/.well-known/oauth-protected-resource/mcp/steward/v1"
 BASE_URL = "https://mcp.example.test"
+ISSUER = "https://identity.example.test/"
+JWKS_URI = "https://identity.example.test/.well-known/jwks.json"
+SUBJECT = "chairman-opaque"
+CLIENT_ID = "chatgpt-business-client"
+NOW = 1_788_000_100
+ISSUED_AT = 1_788_000_000
+EXPIRES_AT = 1_788_000_600
 MCP_BODY = {
     "jsonrpc": "2.0",
     "id": 1,
@@ -32,20 +52,53 @@ MCP_BODY = {
         "clientInfo": {"name": "mastermind-test", "version": "1.0"},
     },
 }
+TOOL_CALL_BODY = {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {"name": "list_responsibilities", "arguments": {}},
+}
 MCP_HEADERS = {
     "accept": "application/json, text/event-stream",
     "content-type": "application/json",
 }
+_UNSET = object()
 
 
-class _Verifier(TokenVerifier):
-    def __init__(self, result: AccessToken | None = None) -> None:
-        self.result = result
+class _ForeignVerifier(TokenVerifier):
+    async def verify_token(self, token: str):
+        del token
+        return None
+
+
+class _Fetcher:
+    def __init__(self, *responses: bytes | Exception) -> None:
+        self.responses = list(responses)
         self.calls: list[str] = []
 
-    async def verify_token(self, token: str):
-        self.calls.append(token)
-        return self.result
+    async def fetch(
+        self,
+        *,
+        url: str,
+        timeout_seconds: float,
+        max_bytes: int,
+    ) -> bytes:
+        del timeout_seconds, max_bytes
+        self.calls.append(url)
+        if not self.responses:
+            raise RuntimeError("unexpected JWKS fetch")
+        result = self.responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+class _Sink:
+    def __init__(self) -> None:
+        self.events: list[AuthAuditEvent] = []
+
+    def emit(self, event: AuthAuditEvent) -> None:
+        self.events.append(event)
 
 
 class _Port:
@@ -80,7 +133,6 @@ class _Port:
 
 
 def _policy(*, scopes=(REQUIRED_SCOPE,)):
-    issuer = "https://identity.example.test/"
     return load_resource_policy(
         {
             "schema": AUTH_POLICY_SCHEMA,
@@ -90,12 +142,12 @@ def _policy(*, scopes=(REQUIRED_SCOPE,)):
                 "https://mcp.example.test/.well-known/"
                 "oauth-protected-resource/mcp/steward/v1"
             ),
-            "issuer": issuer,
-            "authorization_servers": [issuer],
-            "jwks_uri": "https://identity.example.test/.well-known/jwks.json",
+            "issuer": ISSUER,
+            "authorization_servers": [ISSUER],
+            "jwks_uri": JWKS_URI,
             "required_scopes": list(scopes),
             "allowed_subject_digests": [
-                subject_digest(issuer=issuer, subject="chairman-opaque")
+                subject_digest(issuer=ISSUER, subject=SUBJECT)
             ],
             "allowed_algorithms": ["RS256"],
             "clock_skew_seconds": 30,
@@ -128,27 +180,147 @@ def _access_token(
     )
 
 
-def _build(*, verifier: _Verifier | None = None):
+def _base64url_uint(value: int) -> str:
+    width = max(1, (value.bit_length() + 7) // 8)
+    return (
+        base64.urlsafe_b64encode(value.to_bytes(width, "big"))
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+
+
+def _rsa_jwk(
+    private_key: rsa.RSAPrivateKey,
+    *,
+    kid: str,
+) -> dict[str, object]:
+    numbers = private_key.public_key().public_numbers()
+    return {
+        "kid": kid,
+        "kty": "RSA",
+        "use": "sig",
+        "alg": "RS256",
+        "n": _base64url_uint(numbers.n),
+        "e": _base64url_uint(numbers.e),
+    }
+
+
+def _jwks(*keys: Mapping[str, object]) -> bytes:
+    return json.dumps(
+        {"keys": list(keys)}, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def _token(
+    private_key: rsa.RSAPrivateKey,
+    policy,
+    *,
+    kid: str = "kid-a",
+    issuer: str | None = None,
+    audience: str | None = None,
+    subject: str = SUBJECT,
+    scopes: tuple[str, ...] | None = None,
+    client_id: object = CLIENT_ID,
+    azp: object = _UNSET,
+    jti: str = "opaque-token-id",
+) -> str:
+    claims: dict[str, object] = {
+        "iss": issuer if issuer is not None else policy.issuer,
+        "sub": subject,
+        "aud": audience if audience is not None else policy.resource,
+        "iat": ISSUED_AT,
+        "nbf": ISSUED_AT,
+        "exp": EXPIRES_AT,
+        "scope": " ".join(scopes or policy.required_scopes),
+        "jti": jti,
+    }
+    if client_id is not _UNSET:
+        claims["client_id"] = client_id
+    if azp is not _UNSET:
+        claims["azp"] = azp
+    return jwt.encode(
+        claims,
+        private_key,
+        algorithm="RS256",
+        headers={"kid": kid, "typ": "at+jwt"},
+    )
+
+
+def _real_verifier(
+    policy,
+    private_key: rsa.RSAPrivateKey,
+    *,
+    kid: str = "kid-a",
+) -> tuple[MastermindTokenVerifier, _Fetcher, _Sink]:
+    fetcher = _Fetcher(_jwks(_rsa_jwk(private_key, kid=kid)))
+    cache = BoundedJwksCache(
+        policy=policy,
+        fetcher=fetcher,
+        monotonic=lambda: 100.0,
+    )
+    authenticator = JwtAuthenticator(policy=policy, jwks_cache=cache)
+    sink = _Sink()
+    verifier = MastermindTokenVerifier(
+        authenticator=authenticator,
+        policy=policy,
+        now=lambda: NOW,
+        audit_sink=sink,
+    )
+    return verifier, fetcher, sink
+
+
+def _stub_verifier(
+    policy,
+    result: AccessToken | None = None,
+) -> tuple[MastermindTokenVerifier, list[str]]:
+    fetcher = _Fetcher()
+    cache = BoundedJwksCache(
+        policy=policy,
+        fetcher=fetcher,
+        monotonic=lambda: 100.0,
+    )
+    authenticator = JwtAuthenticator(policy=policy, jwks_cache=cache)
+    verifier = MastermindTokenVerifier(
+        authenticator=authenticator,
+        policy=policy,
+        now=lambda: NOW,
+        audit_sink=_Sink(),
+    )
+    calls: list[str] = []
+
+    async def verify_token(_self, token: str):
+        calls.append(token)
+        return result
+
+    verifier.verify_token = MethodType(verify_token, verifier)  # type: ignore[method-assign]
+    return verifier, calls
+
+
+def _build(*, result: AccessToken | None = None):
     policy = _policy()
-    selected_verifier = verifier or _Verifier()
+    verifier, calls = _stub_verifier(policy, result)
     port = _Port()
     app = build_authenticated_app(
         build_contract_server(port),
         policy=policy,
-        token_verifier=selected_verifier,
+        token_verifier=verifier,
     )
-    return app, policy, selected_verifier, port
+    return app, policy, calls, port
 
 
 def _challenge(response) -> str:
     return response.headers["www-authenticate"]
 
 
+@pytest.fixture(scope="module")
+def rsa_key() -> rsa.RSAPrivateKey:
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
 def test_authenticated_app_exposes_metadata_and_readiness_tracks_lifespan():
-    app, policy, verifier, port = _build()
+    app, policy, verifier_calls, port = _build()
     client = TestClient(app, base_url=BASE_URL)
 
-    # Construction or process reachability is not manager readiness.
     not_started = client.get("/readyz")
     assert not_started.status_code == 503
     assert not_started.json() == {
@@ -173,12 +345,12 @@ def test_authenticated_app_exposes_metadata_and_readiness_tracks_lifespan():
 
     stopped = client.get("/readyz")
     assert stopped.status_code == 503
-    assert verifier.calls == []
+    assert verifier_calls == []
     assert port.calls == []
 
 
 def test_canonical_mcp_path_uses_a1_missing_and_invalid_token_challenges():
-    app, policy, verifier, port = _build()
+    app, policy, verifier_calls, port = _build()
     with TestClient(app, base_url=BASE_URL) as client:
         missing = client.post(MCP_PATH, headers=MCP_HEADERS, json=MCP_BODY)
         assert missing.status_code == 401
@@ -208,13 +380,13 @@ def test_canonical_mcp_path_uses_a1_missing_and_invalid_token_challenges():
         assert "invalid-token" not in invalid.text
         assert "invalid-token" not in invalid_challenge
 
-    assert verifier.calls == ["invalid-token"]
+    assert verifier_calls == ["invalid-token"]
     assert port.calls == []
 
 
 def test_valid_bearer_is_required_scope_bound_and_request_auth_does_not_leak():
     policy = _policy()
-    verifier = _Verifier(_access_token(policy))
+    verifier, verifier_calls = _stub_verifier(policy, _access_token(policy))
     port = _Port()
     app = build_authenticated_app(
         build_contract_server(port),
@@ -232,23 +404,23 @@ def test_valid_bearer_is_required_scope_bound_and_request_auth_does_not_leak():
         assert accepted.history == []
         assert accepted.json()["result"]["protocolVersion"] == "2025-06-18"
 
-        # A later request in the same TestClient must not inherit prior auth.
         missing = client.post(MCP_PATH, headers=MCP_HEADERS, json=MCP_BODY)
         assert missing.status_code == 401
         assert missing.json() == {"error": "invalid_token"}
 
-    assert verifier.calls == ["valid-token"]
+    assert verifier_calls == ["valid-token"]
     assert port.calls == []
 
 
 def test_valid_token_without_steward_scope_gets_a1_insufficient_scope_challenge():
     policy = _policy()
-    verifier = _Verifier(
+    verifier, verifier_calls = _stub_verifier(
+        policy,
         _access_token(
             policy,
             token="wrong-scope-token",
             scopes=("mastermind.executive.read",),
-        )
+        ),
     )
     port = _Port()
     app = build_authenticated_app(
@@ -276,7 +448,7 @@ def test_valid_token_without_steward_scope_gets_a1_insufficient_scope_challenge(
     assert "does not include the required scope" in challenge
     assert "wrong-scope-token" not in refused.text
     assert "wrong-scope-token" not in challenge
-    assert verifier.calls == ["wrong-scope-token"]
+    assert verifier_calls == ["wrong-scope-token"]
     assert port.calls == []
 
 
@@ -304,7 +476,9 @@ def test_transport_alias_method_and_content_type_refuse_before_authentication(
     method, path, headers, body, expected_status
 ):
     policy = _policy()
-    verifier = _Verifier(_access_token(policy, token="must-not-be-read"))
+    verifier, verifier_calls = _stub_verifier(
+        policy, _access_token(policy, token="must-not-be-read")
+    )
     port = _Port()
     app = build_authenticated_app(
         build_contract_server(port),
@@ -325,7 +499,7 @@ def test_transport_alias_method_and_content_type_refuse_before_authentication(
 
     assert response.status_code == expected_status
     assert response.history == []
-    assert verifier.calls == []
+    assert verifier_calls == []
     assert port.calls == []
     assert "must-not-be-read" not in response.text
 
@@ -378,7 +552,9 @@ def test_host_origin_and_duplicate_security_headers_refuse_before_verifier(
     headers, expected_status
 ):
     policy = _policy()
-    verifier = _Verifier(_access_token(policy, token="must-not-be-read"))
+    verifier, verifier_calls = _stub_verifier(
+        policy, _access_token(policy, token="must-not-be-read")
+    )
     port = _Port()
     app = build_authenticated_app(
         build_contract_server(port),
@@ -402,7 +578,7 @@ def test_host_origin_and_duplicate_security_headers_refuse_before_verifier(
 
     assert response.status_code == expected_status
     assert response.history == []
-    assert verifier.calls == []
+    assert verifier_calls == []
     assert port.calls == []
     assert "attacker.test" not in response.text
     assert "must-not-be-read" not in response.text
@@ -410,8 +586,9 @@ def test_host_origin_and_duplicate_security_headers_refuse_before_verifier(
 
 def test_oversized_body_and_root_path_injection_refuse_before_verifier():
     oversized_policy = _policy()
-    oversized_verifier = _Verifier(
-        _access_token(oversized_policy, token="must-not-be-read")
+    oversized_verifier, oversized_calls = _stub_verifier(
+        oversized_policy,
+        _access_token(oversized_policy, token="must-not-be-read"),
     )
     oversized_port = _Port()
     oversized_app = build_authenticated_app(
@@ -432,8 +609,9 @@ def test_oversized_body_and_root_path_injection_refuse_before_verifier():
         )
 
     injected_policy = _policy()
-    injected_verifier = _Verifier(
-        _access_token(injected_policy, token="must-not-be-read")
+    injected_verifier, injected_calls = _stub_verifier(
+        injected_policy,
+        _access_token(injected_policy, token="must-not-be-read"),
     )
     injected_port = _Port()
     injected_app = build_authenticated_app(
@@ -450,21 +628,136 @@ def test_oversized_body_and_root_path_injection_refuse_before_verifier():
 
     assert oversized.status_code == 413
     assert injected.status_code == 404
-    assert oversized_verifier.calls == []
+    assert oversized_calls == []
     assert oversized_port.calls == []
-    assert injected_verifier.calls == []
+    assert injected_calls == []
     assert injected_port.calls == []
 
 
 def test_authenticated_app_refuses_cross_realm_scope_policy():
     policy = _policy(scopes=("mastermind.executive.read",))
-    try:
+    verifier, _calls = _stub_verifier(policy)
+    with pytest.raises(ValueError, match="exactly mastermind.steward.read"):
         build_authenticated_app(
             build_contract_server(_Port()),
             policy=policy,
-            token_verifier=_Verifier(),
+            token_verifier=verifier,
         )
-    except ValueError as exc:
-        assert "exactly mastermind.steward.read" in str(exc)
-    else:
-        raise AssertionError("cross-realm policy was accepted")
+
+
+def test_authenticated_app_refuses_non_a1_verifier():
+    with pytest.raises(TypeError, match="MastermindTokenVerifier"):
+        build_authenticated_app(
+            build_contract_server(_Port()),
+            policy=_policy(),
+            token_verifier=_ForeignVerifier(),
+        )
+
+
+def test_authenticated_app_has_no_operator_host_widening_parameter():
+    assert "extra_allowed_hosts" not in inspect.signature(
+        build_authenticated_app
+    ).parameters
+
+
+def test_real_signed_token_performs_one_authenticated_tool_call(
+    rsa_key: rsa.RSAPrivateKey,
+):
+    policy = _policy()
+    verifier, fetcher, sink = _real_verifier(policy, rsa_key)
+    token = _token(rsa_key, policy)
+    port = _Port()
+    app = build_authenticated_app(
+        build_contract_server(port),
+        policy=policy,
+        token_verifier=verifier,
+    )
+
+    with TestClient(app, base_url=BASE_URL) as client:
+        response = client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": f"Bearer {token}"},
+            json=TOOL_CALL_BODY,
+        )
+        missing = client.post(MCP_PATH, headers=MCP_HEADERS, json=TOOL_CALL_BODY)
+
+    assert response.status_code == 200
+    payload = response.json()
+    structured = payload["result"]["structuredContent"]
+    assert structured["schema"] == "mastermind.secretary_grounding_mcp_result.v1"
+    assert structured["tool"] == "list_responsibilities"
+    assert structured["ok"] is True
+    assert structured["data"] == {
+        "state": "UNKNOWN",
+        "facts": [],
+        "reason_codes": ["NO_SOURCE"],
+    }
+    assert json.loads(payload["result"]["content"][0]["text"]) == structured
+    assert port.calls == [("list_responsibilities", None)]
+    assert fetcher.calls == [JWKS_URI]
+    assert sink.events == [
+        AuthAuditEvent(
+            schema=AUTH_AUDIT_SCHEMA,
+            policy_id=policy.policy_id,
+            code="accepted",
+            accepted=True,
+        )
+    ]
+    assert missing.status_code == 401
+    assert missing.json() == {"error": "invalid_token"}
+    assert token not in response.text
+    assert token not in missing.text
+
+
+@pytest.mark.parametrize(
+    ("token_kwargs", "expected_code"),
+    [
+        ({"issuer": "https://wrong-issuer.example.test/"}, AuthErrorCode.ISSUER_REFUSED),
+        ({"audience": "https://mcp.example.test/mcp/executive/v1"}, AuthErrorCode.RESOURCE_REFUSED),
+        ({"scopes": ("mastermind.executive.read",)}, AuthErrorCode.SCOPE_REFUSED),
+        ({"subject": "not-the-chairman"}, AuthErrorCode.SUBJECT_REFUSED),
+        (
+            {"client_id": "client-one", "azp": "client-two"},
+            AuthErrorCode.TOKEN_CLAIMS_REFUSED,
+        ),
+    ],
+)
+def test_real_signed_token_claim_refusals_are_closed_and_secret_free(
+    rsa_key: rsa.RSAPrivateKey,
+    token_kwargs,
+    expected_code: AuthErrorCode,
+):
+    policy = _policy()
+    verifier, fetcher, sink = _real_verifier(policy, rsa_key)
+    token = _token(rsa_key, policy, **token_kwargs)
+    app = build_authenticated_app(
+        build_contract_server(_Port()),
+        policy=policy,
+        token_verifier=verifier,
+    )
+
+    with TestClient(app, base_url=BASE_URL) as client:
+        response = client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": f"Bearer {token}"},
+            json=TOOL_CALL_BODY,
+        )
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "invalid_token"}
+    challenge = _challenge(response)
+    assert 'error="invalid_token"' in challenge
+    assert token not in response.text
+    assert token not in challenge
+    assert fetcher.calls == [JWKS_URI]
+    assert sink.events == [
+        AuthAuditEvent(
+            schema=AUTH_AUDIT_SCHEMA,
+            policy_id=policy.policy_id,
+            code=expected_code.value,
+            accepted=False,
+        )
+    ]
+    rendered_audit = repr(sink.events)
+    for forbidden in (token, SUBJECT, CLIENT_ID, "client-one", "client-two"):
+        assert forbidden not in rendered_audit

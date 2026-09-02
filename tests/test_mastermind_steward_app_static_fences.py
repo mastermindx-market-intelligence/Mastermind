@@ -5,6 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "integrations" / "mastermind_steward_app"
+LAUNCHER = ROOT / "scripts" / "mastermind_steward_app.py"
+RUNBOOK = ROOT / "docs" / "runbooks" / "mastermind-steward-app.md"
 
 
 def _imports(path: Path) -> set[str]:
@@ -84,8 +86,6 @@ def test_authenticated_http_stack_has_one_dispatch_and_a1_owns_challenges():
     assert "Mount(" not in text
     assert "RedirectResponse" not in text
 
-    # Starlette evaluates user middleware outermost-first in declaration order:
-    # transport refusal must happen before bearer verification.
     transport = text.index("Middleware(_StewardTransportGuard")
     authentication = text.index("Middleware(\n            AuthenticationMiddleware")
     auth_context = text.index("Middleware(AuthContextMiddleware")
@@ -112,3 +112,35 @@ def test_transport_guard_has_closed_pre_auth_boundary_vocabulary():
     )
     for token in required:
         assert token in text
+
+
+def test_authenticated_app_accepts_only_exact_protected_a1_verifier_type():
+    text = (PACKAGE / "app.py").read_text(encoding="utf-8")
+    assert (
+        "from integrations.business_mcp_auth.mcp_adapter import "
+        "MastermindTokenVerifier"
+    ) in text
+    assert "type(token_verifier) is not MastermindTokenVerifier" in text
+    assert "token_verifier: MastermindTokenVerifier" in text
+    assert "from mcp.server.auth.provider import TokenVerifier" not in text
+
+
+def test_authenticated_app_has_no_operator_host_authority_widening_seam():
+    text = (PACKAGE / "app.py").read_text(encoding="utf-8")
+    assert "extra_allowed_hosts" not in text
+    assert "def _allowed_hosts(policy: ResourcePolicy)" in text
+    assert "resource_host = urlsplit(policy.resource).netloc" in text
+
+
+def test_launcher_and_runbook_preserve_policy_resource_host_as_only_public_host():
+    launcher = LAUNCHER.read_text(encoding="utf-8")
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    forbidden = (
+        "--extra-allowed-hosts",
+        "MASTERMIND_STEWARD_ALLOWED_HOSTS",
+        "extra_allowed_hosts=",
+    )
+    for token in forbidden:
+        assert token not in launcher
+        assert token not in runbook
+    assert "preserve the exact Host authority from `policy.resource`" in runbook
