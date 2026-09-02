@@ -21,6 +21,8 @@ import dataclasses
 import hashlib
 import json
 import os
+import shutil
+import socket
 from pathlib import Path
 
 import pytest
@@ -47,6 +49,10 @@ from control_plane.executive_capability_packages import (
     capability_package_content_digest,
     effective_skill_content_digest,
     verify_capability_package_source,
+    _validate_identifier,
+    _validate_relative_path,
+    _validate_sha256_value,
+    _validate_hex40,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -1501,5 +1507,517 @@ def test_verify_closes_all_descriptors_on_race_seam_refusal(tmp_path, monkeypatc
     with pytest.raises(CapabilityPackageError):
         verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_insert)
 
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]
+
+
+# ===========================================================================
+# HOSTILE RED COVERAGE for Sol review 5085454178 (five findings)
+# ===========================================================================
+#
+# The sections below are additive-only against the pre-existing test file.
+# Each block is labeled with the finding it exercises. Some individual cases
+# already happen to refuse under the pre-repair module for unrelated reasons
+# (e.g. a digest-chain mismatch masking a path-shape bug); those are kept as
+# discriminating regression coverage even where they are not, on their own,
+# RED evidence. The RED-head pytest tail is the authority on which cases are
+# newly failing before the repair.
+
+
+# ---------------------------------------------------------------------------
+# FINDING 1: token regexes anchored with `$` but validated via `.match()`
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("suffix", ["\n", "\r"])
+def test_finding1_identifier_terminal_control_char_refuses(suffix):
+    with pytest.raises(CapabilityPackageError):
+        _validate_identifier("example.pkg1" + suffix, "field")
+
+
+def test_finding1_identifier_without_terminal_control_char_still_valid():
+    assert _validate_identifier("example.pkg1", "field") == "example.pkg1"
+
+
+@pytest.mark.parametrize("suffix", ["\n", "\r"])
+def test_finding1_sha256_terminal_control_char_refuses(suffix):
+    with pytest.raises(CapabilityPackageError):
+        _validate_sha256_value("a" * 64 + suffix, "field")
+
+
+def test_finding1_sha256_without_terminal_control_char_still_valid():
+    assert _validate_sha256_value("a" * 64, "field") == "a" * 64
+
+
+@pytest.mark.parametrize("suffix", ["\n", "\r"])
+def test_finding1_hex40_terminal_control_char_refuses(suffix):
+    with pytest.raises(CapabilityPackageError):
+        _validate_hex40("1" * 40 + suffix, "field")
+
+
+def test_finding1_hex40_without_terminal_control_char_still_valid():
+    assert _validate_hex40("1" * 40, "field") == "1" * 40
+
+
+# ---------------------------------------------------------------------------
+# Shared fixture: a fully self-consistent, disk-backed generation built via
+# the real canonical helpers (independent of production's private helpers,
+# same pattern as `_baseline_pieces`), used by the FINDING 3/4/5 tests below.
+# This is NOT a change to `_standard_generation`/`_make_generation` (those
+# stay untouched in this RED commit); it is a new, additive fixture.
+# ---------------------------------------------------------------------------
+
+
+def _real_generation_and_files(tmp_path: Path, *, package_root: str = "plugins/example2"):
+    contents = {
+        ".codex-plugin/plugin.json": b'{"name": "example2"}',
+        "references/boundary.md": b"shared reference bytes v2",
+        "skills/receive/SKILL.md": b"skill entrypoint bytes v2",
+    }
+    _write_tree(tmp_path, package_root, contents)
+    manifest = _row_from_disk(tmp_path, package_root, ".codex-plugin/plugin.json")
+    boundary = _row_from_disk(tmp_path, package_root, "references/boundary.md")
+    skill_md = _row_from_disk(tmp_path, package_root, "skills/receive/SKILL.md")
+    files = tuple(sorted((manifest, boundary, skill_md), key=lambda f: f.relative_path))
+
+    capability_id = "example.pkg2"
+    repository = "mastermindx-market-intelligence/Mastermind"
+    source_commit = "3" * 40
+    source_tree_sha = "4" * 40
+    manifest_path = ".codex-plugin/plugin.json"
+    generation_label = "example.pkg2.g1"
+    skill_capability_id = "example.pkg2.receive.v1"
+    runtime_name = "receive"
+    entrypoint_path = "skills/receive/SKILL.md"
+    closure_paths = ["references/boundary.md", "skills/receive/SKILL.md"]
+
+    content_digest = _expected_content_digest(files)
+    source_digest = _expected_source_digest(
+        capability_id=capability_id,
+        kind=PACKAGE_KIND_SKILLS_ONLY_SOURCE,
+        repository=repository,
+        source_commit=source_commit,
+        source_tree_sha=source_tree_sha,
+        package_root=package_root,
+        manifest_path=manifest_path,
+        package_content_digest=content_digest,
+        required_app_references=[],
+    )
+    files_by_path = {f.relative_path: f for f in files}
+    closure_files = tuple(files_by_path[p] for p in closure_paths)
+    skill_content_digest = _expected_closure_digest(
+        runtime_name=runtime_name, entrypoint_path=entrypoint_path, closure_files=closure_files
+    )
+    grant_digest = _expected_grant_digest(
+        capability_id=skill_capability_id,
+        runtime_name=runtime_name,
+        entrypoint_path=entrypoint_path,
+        closure_paths=closure_paths,
+        skill_content_digest=skill_content_digest,
+        package_capability_id=capability_id,
+        package_generation=generation_label,
+        package_source_digest=source_digest,
+    )
+    generation_digest = _expected_generation_digest(
+        capability_id=capability_id,
+        generation=generation_label,
+        source_state=PACKAGE_SOURCE_STATE_PROTECTED,
+        revoked=False,
+        package_source_digest=source_digest,
+        skills_ordered=((skill_capability_id, grant_digest),),
+    )
+
+    raw = {
+        "kind": PACKAGE_KIND_SKILLS_ONLY_SOURCE,
+        "repository": repository,
+        "source_commit": source_commit,
+        "source_tree_sha": source_tree_sha,
+        "package_root": package_root,
+        "manifest_path": manifest_path,
+        "generation": generation_label,
+        "source_state": PACKAGE_SOURCE_STATE_PROTECTED,
+        "revoked": False,
+        "package_content_digest": content_digest,
+        "package_source_digest": source_digest,
+        "files": [
+            {
+                "relative_path": f.relative_path,
+                "sha256": f.sha256,
+                "byte_length": f.byte_length,
+                "executable": f.executable,
+            }
+            for f in files
+        ],
+        "skills": {
+            skill_capability_id: {
+                "runtime_name": runtime_name,
+                "entrypoint_path": entrypoint_path,
+                "closure_paths": closure_paths,
+                "skill_content_digest": skill_content_digest,
+                "grant_digest": grant_digest,
+            }
+        },
+        "required_app_references": [],
+        "package_generation_digest": generation_digest,
+    }
+    generation = build_capability_package_generation(capability_id=capability_id, raw=raw)
+    return generation
+
+
+# ---------------------------------------------------------------------------
+# FINDING 3: verifier trusts a publicly constructed CapabilityPackageGeneration
+# ---------------------------------------------------------------------------
+
+
+def test_finding3_hand_built_zeroed_source_digest_refuses(tmp_path):
+    generation = _real_generation_and_files(tmp_path)
+    tampered = dataclasses.replace(generation, package_source_digest="0" * 64)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, tampered)
+
+
+def test_finding3_hand_built_zeroed_generation_digest_refuses(tmp_path):
+    generation = _real_generation_and_files(tmp_path)
+    tampered = dataclasses.replace(generation, package_generation_digest="0" * 64)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, tampered)
+
+
+def test_finding3_hand_built_malformed_repository_refuses(tmp_path):
+    generation = _real_generation_and_files(tmp_path)
+    tampered = dataclasses.replace(generation, repository="not-a-valid-repo-no-slash")
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, tampered)
+
+
+def test_finding3_hand_built_malformed_source_commit_refuses(tmp_path):
+    generation = _real_generation_and_files(tmp_path)
+    tampered = dataclasses.replace(generation, source_commit="not-40-hex-at-all")
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, tampered)
+
+
+def test_finding3_hand_built_inconsistent_file_sha256_refuses(tmp_path):
+    generation = _real_generation_and_files(tmp_path)
+    files = list(generation.files)
+    tampered_file = dataclasses.replace(files[0], sha256="9" * 64)
+    files[0] = tampered_file
+    tampered = dataclasses.replace(generation, files=tuple(files))
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, tampered)
+
+
+def test_finding3_happy_path_receipt_carries_provenance_fields(tmp_path):
+    generation = _real_generation_and_files(tmp_path)
+    receipt = verify_capability_package_source(tmp_path, generation)
+    assert receipt.package_source_digest == generation.package_source_digest
+    assert receipt.package_generation_digest == generation.package_generation_digest
+    assert receipt.source_state == generation.source_state
+    assert receipt.revoked == generation.revoked
+
+
+# ---------------------------------------------------------------------------
+# FINDING 4: a census-to-open FIFO/symlink/socket swap must refuse without
+# ever blocking the verifier.
+# ---------------------------------------------------------------------------
+
+
+def test_finding4_before_file_open_fifo_swap_refuses_without_blocking(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    target = "references/boundary.md"
+
+    def _swap(path):
+        if path == target:
+            victim = tmp_path / "plugins" / "example" / target
+            victim.unlink()
+            os.mkfifo(victim)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_file_open=_swap)
+
+
+def test_finding4_before_file_open_symlink_swap_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    target = "references/boundary.md"
+    outside = tmp_path / "outside-swap-target.md"
+    outside.write_bytes(b"shared reference bytes")
+
+    def _swap(path):
+        if path == target:
+            victim = tmp_path / "plugins" / "example" / target
+            victim.unlink()
+            os.symlink(outside, victim)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_file_open=_swap)
+
+
+def test_finding4_before_file_open_socket_swap_refuses_without_blocking(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    target = "references/boundary.md"
+
+    def _swap(path):
+        if path == target:
+            victim = tmp_path / "plugins" / "example" / target
+            victim.unlink()
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                sock.bind(str(victim))
+            except OSError:
+                sock.close()
+                pytest.skip("platform refuses AF_UNIX bind in tmpdir")
+            sock.close()
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_file_open=_swap)
+
+
+def test_finding4_before_file_open_seam_not_invoked_without_swap(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    seen: list[str] = []
+
+    def _record(path):
+        seen.append(path)
+
+    verify_capability_package_source(tmp_path, generation, _before_file_open=_record)
+    assert sorted(seen) == sorted(row.relative_path for row in generation.files)
+
+
+# ---------------------------------------------------------------------------
+# FINDING 5: `repository` grammar + explicit byte ceilings.
+# ---------------------------------------------------------------------------
+
+
+def _raw_with_repository(repository: str) -> tuple[str, dict]:
+    pieces = _baseline_pieces()
+    capability_id = pieces["capability_id"]
+    raw = copy.deepcopy(pieces["raw"])
+    content_digest = pieces["content_digest"]
+    source_digest = _expected_source_digest(
+        capability_id=capability_id,
+        kind=raw["kind"],
+        repository=repository,
+        source_commit=raw["source_commit"],
+        source_tree_sha=raw["source_tree_sha"],
+        package_root=raw["package_root"],
+        manifest_path=raw["manifest_path"],
+        package_content_digest=content_digest,
+        required_app_references=raw["required_app_references"],
+    )
+    skill_id = pieces["skill_capability_id"]
+    grant_digest = _expected_grant_digest(
+        capability_id=skill_id,
+        runtime_name=raw["skills"][skill_id]["runtime_name"],
+        entrypoint_path=raw["skills"][skill_id]["entrypoint_path"],
+        closure_paths=tuple(raw["skills"][skill_id]["closure_paths"]),
+        skill_content_digest=pieces["skill_content_digest"],
+        package_capability_id=capability_id,
+        package_generation=raw["generation"],
+        package_source_digest=source_digest,
+    )
+    generation_digest = _expected_generation_digest(
+        capability_id=capability_id,
+        generation=raw["generation"],
+        source_state=raw["source_state"],
+        revoked=raw["revoked"],
+        package_source_digest=source_digest,
+        skills_ordered=((skill_id, grant_digest),),
+    )
+    raw["repository"] = repository
+    raw["package_source_digest"] = source_digest
+    raw["skills"][skill_id]["grant_digest"] = grant_digest
+    raw["package_generation_digest"] = generation_digest
+    return capability_id, raw
+
+
+@pytest.mark.parametrize(
+    "bad_repository",
+    [
+        "no-slash-here",
+        "too/many/slashes",
+        "/leading-slash",
+        "trailing-slash/",
+        "/",
+        "good-repo/name\n",
+        "a" * 100 + "/" + "b" * 100,  # 201 UTF-8 bytes: over MAX_REPOSITORY_BYTES=200
+    ],
+    ids=[
+        "no_slash",
+        "two_slashes",
+        "leading_slash",
+        "trailing_slash",
+        "bare_slash",
+        "terminal_newline",
+        "over_byte_ceiling",
+    ],
+)
+def test_finding5_malformed_repository_refuses(bad_repository):
+    capability_id, raw = _raw_with_repository(bad_repository)
+    with pytest.raises(CapabilityPackageError):
+        build_capability_package_generation(capability_id=capability_id, raw=raw)
+
+
+def test_finding5_real_protected_repository_value_still_accepted():
+    capability_id, raw = _raw_with_repository("mastermindx-market-intelligence/Mastermind")
+    generation = build_capability_package_generation(capability_id=capability_id, raw=raw)
+    assert generation.repository == "mastermindx-market-intelligence/Mastermind"
+
+
+def test_finding5_relative_path_segment_over_255_bytes_refuses():
+    long_segment = "a" * 256
+    with pytest.raises(CapabilityPackageError):
+        _validate_relative_path(f"dir/{long_segment}/file.md", "field")
+
+
+def test_finding5_relative_path_segment_at_255_bytes_is_permitted():
+    segment = "a" * 255
+    assert _validate_relative_path(f"dir/{segment}", "field") == f"dir/{segment}"
+
+
+def test_finding5_relative_path_total_over_512_bytes_refuses():
+    segment = "a" * 50
+    path = "/".join([segment] * 11)  # 11*50 + 10 separators = 560 bytes, each segment <=255
+    assert len(path.encode("utf-8")) > 512
+    with pytest.raises(CapabilityPackageError):
+        _validate_relative_path(path, "field")
+
+
+def test_finding5_relative_path_at_512_bytes_is_permitted():
+    # 10 segments of 50 bytes + 9 separators = 509 bytes; well under the ceiling.
+    segment = "a" * 50
+    path = "/".join([segment] * 10)
+    assert len(path.encode("utf-8")) <= 512
+    assert _validate_relative_path(path, "field") == path
+
+
+# ---------------------------------------------------------------------------
+# FINDING 2: censuses compare only regular files; directories are opened and
+# retained but never compared; undeclared directories (empty or nested) pass;
+# a directory inserted after the first census is invisible to the terminal
+# fence; a required directory's removal/replacement must still refuse.
+# ---------------------------------------------------------------------------
+
+
+def _count_opens_closes(monkeypatch):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    counts = {"open": 0, "close": 0}
+    real_open = os.open
+    real_close = os.close
+
+    def counting_open(*args, **kwargs):
+        counts["open"] += 1
+        return real_open(*args, **kwargs)
+
+    def counting_close(fd, *args, **kwargs):
+        counts["close"] += 1
+        return real_close(fd, *args, **kwargs)
+
+    monkeypatch.setattr(scf_pkg.os, "open", counting_open)
+    monkeypatch.setattr(scf_pkg.os, "close", counting_close)
+    return counts
+
+
+def test_finding2_static_extra_empty_directory_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    extra_dir = tmp_path / "plugins" / "example" / "empty-extra"
+    extra_dir.mkdir()
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_finding2_nested_extra_empty_directory_forest_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    nested = tmp_path / "plugins" / "example" / "forest"
+    for i in range(6):
+        nested = nested / f"level{i}"
+    nested.mkdir(parents=True)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_finding2_directory_inserted_before_terminal_fence_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+
+    def _insert_dir_with_file():
+        new_dir = tmp_path / "plugins" / "example" / "sneaked-dir"
+        new_dir.mkdir()
+        (new_dir / "file.txt").write_text("surprise")
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_insert_dir_with_file)
+
+
+def test_finding2_required_directory_removed_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    shutil.rmtree(tmp_path / "plugins" / "example" / "skills" / "receive")
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_finding2_required_directory_replaced_with_file_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    receive_dir = tmp_path / "plugins" / "example" / "skills" / "receive"
+    shutil.rmtree(receive_dir)
+    receive_dir.write_text("not a directory anymore")
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_finding2_required_directory_renamed_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    receive_dir = tmp_path / "plugins" / "example" / "skills" / "receive"
+    receive_dir.rename(receive_dir.with_name("receive-renamed"))
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_finding2_extra_directory_refusal_balances_descriptors(tmp_path, monkeypatch):
+    counts = _count_opens_closes(monkeypatch)
+    generation, _ = _standard_generation(tmp_path)
+    extra_dir = tmp_path / "plugins" / "example" / "empty-extra"
+    extra_dir.mkdir()
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]
+
+
+def test_finding2_nested_forest_refusal_balances_descriptors(tmp_path, monkeypatch):
+    counts = _count_opens_closes(monkeypatch)
+    generation, _ = _standard_generation(tmp_path)
+    nested = tmp_path / "plugins" / "example" / "forest"
+    for i in range(6):
+        nested = nested / f"level{i}"
+    nested.mkdir(parents=True)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]
+
+
+def test_finding2_directory_insert_before_fence_refusal_balances_descriptors(tmp_path, monkeypatch):
+    counts = _count_opens_closes(monkeypatch)
+    generation, _ = _standard_generation(tmp_path)
+
+    def _insert_dir_with_file():
+        new_dir = tmp_path / "plugins" / "example" / "sneaked-dir"
+        new_dir.mkdir()
+        (new_dir / "file.txt").write_text("surprise")
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_insert_dir_with_file)
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]
+
+
+def test_finding2_required_directory_mutation_refusal_balances_descriptors(tmp_path, monkeypatch):
+    counts = _count_opens_closes(monkeypatch)
+    generation, _ = _standard_generation(tmp_path)
+    receive_dir = tmp_path / "plugins" / "example" / "skills" / "receive"
+    shutil.rmtree(receive_dir)
+    receive_dir.write_text("not a directory anymore")
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
     assert counts["open"] > 0
     assert counts["open"] == counts["close"]
