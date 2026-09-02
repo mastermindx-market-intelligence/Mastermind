@@ -120,14 +120,24 @@ def _optional_control_plane_module(name: str, *, requires: tuple[str, ...] = ())
 
 
 #: Every control-plane module :mod:`control_plane.executive_placement_selection`
-#: STATICALLY imports. The selector's absence-handling is only as complete as
-#: this list: any dependency missing from it reproduces the exact hard import
-#: crash BLOCKER 4 was filed for. Declaring only the steward was itself that
-#: bug a second time — `executive_orchestration_principal` was equally static
-#: and equally fatal. `tests/test_chairman_control_room.py::
-#: test_declared_selector_dependencies_match_its_actual_static_imports`
-#: derives this set from the selector's own AST, so the list cannot drift
-#: again if a third import is ever added.
+#: STATICALLY imports, derived from its own AST by
+#: ``tests/test_chairman_control_room.py::
+#: test_declared_selector_dependencies_match_its_actual_static_imports`` so
+#: the list cannot silently drift if an import is added later.
+#:
+#: What this buys, stated exactly — because an earlier pass over-claimed it:
+#: declaring a dependency here converts its absence into the documented
+#: "not shipped" degrade ONLY IF the dependency is not ALREADY reachable
+#: from this module's own mandatory imports. ``executive_steward`` is such a
+#: case and genuinely degrades. ``executive_orchestration_principal`` is NOT:
+#: ``from control_plane import (... executive_runtime ...)`` above runs
+#: unconditionally and pulls it transitively, so its absence raises long
+#: before this optional block is reached. It is listed here because it IS a
+#: static import of the selector and the AST guard is the source of truth —
+#: but a mandatory transitive dependency cannot be softened from here, and
+#: ``test_a_mandatory_transitive_dependency_is_a_hard_failure_not_a_degrade``
+#: pins that hard failure as the correct behaviour rather than pretending
+#: otherwise.
 _SELECTOR_CONTROL_PLANE_REQUIRES: tuple[str, ...] = (
     "executive_orchestration_principal",
     "executive_steward",

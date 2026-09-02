@@ -1733,6 +1733,86 @@ def test_module_boots_with_selector_present_but_steward_absent(tmp_path):
         importlib.import_module("control_plane.chairman_control_room")
 
 
+def _static_control_plane_imports(path) -> set[str]:
+    """Every `control_plane.<top>` module a source file imports AT RUNTIME.
+
+    Review of head a53d34d0: the first version of this derivation matched
+    only `from control_plane.X import y` and `import control_plane.X`. It
+    MISSED `from control_plane import X` — the house idiom, used by six
+    files in control_plane/ including chairman_control_room.py itself — so
+    a future selector import in that form would derive nothing, the
+    equality assert below would stay green, and the declared list would
+    silently go stale again. A guard that under-derives is worse than no
+    guard, because it manufactures confidence.
+
+    Handles: `from control_plane import X` (+ `as`), `from control_plane.X
+    import y`, `import control_plane.X` (+ `as`), both relative forms, and
+    nested subpackages (the TOP segment is what a requires= entry names).
+    `if TYPE_CHECKING:` bodies are skipped deliberately — they never execute,
+    so forcing them into requires= would make the selector report "not
+    shipped" for a module it never actually needs.
+    """
+    import ast as _ast
+
+    found: set[str] = set()
+    top = lambda name: name.split(".", 1)[0]  # noqa: E731
+
+    class _Visitor(_ast.NodeVisitor):
+        def visit_If(self, node):
+            test = node.test
+            if (isinstance(test, _ast.Name) and test.id == "TYPE_CHECKING") or (
+                isinstance(test, _ast.Attribute) and test.attr == "TYPE_CHECKING"
+            ):
+                for child in node.orelse:
+                    self.visit(child)
+                return
+            self.generic_visit(node)
+
+        def visit_ImportFrom(self, node):
+            module = node.module or ""
+            if node.level:  # relative — this file already lives in control_plane/
+                if module:
+                    found.add(top(module))
+                else:
+                    for alias in node.names:
+                        found.add(top(alias.name))
+            elif module == "control_plane":
+                for alias in node.names:
+                    found.add(top(alias.name))
+            elif module.startswith("control_plane."):
+                found.add(top(module.split(".", 1)[1]))
+
+        def visit_Import(self, node):
+            for alias in node.names:
+                if alias.name.startswith("control_plane."):
+                    found.add(top(alias.name.split(".", 1)[1]))
+
+    _Visitor().visit(_ast.parse(Path(path).read_text(encoding="utf-8")))
+    return found
+
+
+@pytest.mark.parametrize(
+    "form, source, expected",
+    [
+        ("from control_plane.X import y", "from control_plane.executive_steward import Seat", {"executive_steward"}),
+        ("import control_plane.X", "import control_plane.executive_steward", {"executive_steward"}),
+        ("import control_plane.X as z", "import control_plane.executive_steward as s", {"executive_steward"}),
+        ("from control_plane import X", "from control_plane import executive_steward", {"executive_steward"}),
+        ("from control_plane import X as z", "from control_plane import executive_steward as s", {"executive_steward"}),
+        ("from .X import y", "from .executive_steward import Seat", {"executive_steward"}),
+        ("from . import X", "from . import executive_steward", {"executive_steward"}),
+        ("nested subpackage", "from control_plane.sub.mod import y", {"sub"}),
+        ("TYPE_CHECKING is skipped", "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from control_plane import executive_steward", set()),
+    ],
+)
+def test_the_import_derivation_covers_every_form_it_claims(form, source, expected, tmp_path):
+    """The guard below is only as good as this derivation, so the
+    derivation itself is pinned form by form."""
+    probe = tmp_path / "probe.py"
+    probe.write_text(source, encoding="utf-8")
+    assert _static_control_plane_imports(probe) == expected, form
+
+
 def test_declared_selector_dependencies_match_its_actual_static_imports():
     """The declared `requires=` list must equal what the selector ACTUALLY
     imports — derived from its own AST, never hand-maintained.
@@ -1745,17 +1825,7 @@ def test_declared_selector_dependencies_match_its_actual_static_imports():
     CLASS: adding a third static control-plane import to the selector fails
     here until it is declared.
     """
-    import ast as _ast
-
-    source = Path(ccr.executive_placement_selection.__file__).read_text(encoding="utf-8")
-    actual: set[str] = set()
-    for node in _ast.walk(_ast.parse(source)):
-        if isinstance(node, _ast.ImportFrom) and (node.module or "").startswith("control_plane."):
-            actual.add((node.module or "").split(".", 1)[1])
-        elif isinstance(node, _ast.Import):
-            for alias in node.names:
-                if alias.name.startswith("control_plane."):
-                    actual.add(alias.name.split(".", 1)[1])
+    actual = _static_control_plane_imports(ccr.executive_placement_selection.__file__)
     assert actual, "AST walk found no control_plane imports — the derivation is broken"
     assert set(ccr._SELECTOR_CONTROL_PLANE_REQUIRES) == actual, (
         "declared requires= does not match the selector's real static imports",
@@ -1763,7 +1833,7 @@ def test_declared_selector_dependencies_match_its_actual_static_imports():
     )
 
 
-@pytest.mark.parametrize("absent", ["executive_steward", "executive_orchestration_principal"])
+@pytest.mark.parametrize("absent", ["executive_steward"])
 def test_module_fails_closed_when_any_selector_dependency_is_absent(tmp_path, absent):
     """Real 'not shipped' shape: `find_spec` returns a None spec (the branch
     that actually fires in production), not a raised ModuleNotFoundError.
@@ -1815,3 +1885,65 @@ def test_module_fails_closed_when_any_selector_dependency_is_absent(tmp_path, ab
             if module is not None:
                 sys.modules[name] = module
         importlib.import_module("control_plane.chairman_control_room")
+
+
+def test_a_mandatory_transitive_dependency_is_a_hard_failure_not_a_degrade():
+    """States what `requires=` can and cannot buy, because the previous pass
+    got this wrong and asserted the opposite.
+
+    `executive_orchestration_principal` IS a static import of the selector,
+    so it belongs in `_SELECTOR_CONTROL_PLANE_REQUIRES`. But it is ALSO a
+    mandatory transitive dependency of this module itself:
+
+        chairman_control_room  -- `from control_plane import (... executive_runtime ...)`
+        -> executive_runtime   -- `from control_plane.executive_orchestration_principal import ...`
+
+    That chain runs unconditionally, ~60 lines ABOVE the optional block, so
+    deleting the module raises before `_optional_control_plane_module` is
+    ever consulted. Declaring it in an OPTIONAL requires= tuple cannot
+    soften a MANDATORY dependency, and the previous pass shipped a test
+    asserting it degraded — green only because it patched `find_spec`,
+    which the mandatory chain never consults. Green test, red reality.
+
+    So: hard failure is the CORRECT behaviour here, and this pins it.
+    """
+    # structural — the mandatory chain exists and is what actually binds
+    assert "executive_runtime" in _static_control_plane_imports(ccr.__file__)
+    assert "executive_orchestration_principal" in _static_control_plane_imports(
+        ccr.executive_runtime.__file__
+    )
+
+    # behavioural — absence RAISES; it does not degrade by name. Run in a
+    # FRESH interpreter: in this one the `control_plane` package object
+    # still holds `executive_runtime` as an attribute, so
+    # `from control_plane import executive_runtime` is satisfied from cache
+    # and never attempts the import the blocker is meant to intercept.
+    import subprocess
+    import sys
+    import textwrap
+
+    probe = textwrap.dedent(
+        """
+        import sys
+        blocked = "control_plane.executive_orchestration_principal"
+
+        class _Absent:
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == blocked:
+                    raise ModuleNotFoundError(fullname)
+                return None
+
+        sys.meta_path.insert(0, _Absent())
+        try:
+            import control_plane.chairman_control_room  # noqa: F401
+            print("NO_RAISE")
+        except ModuleNotFoundError as exc:
+            print("RAISED", exc)
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=Path(__file__).resolve().parent.parent,
+        capture_output=True, text=True,
+    )
+    assert result.stdout.startswith("RAISED"), (result.stdout, result.stderr[-400:])
