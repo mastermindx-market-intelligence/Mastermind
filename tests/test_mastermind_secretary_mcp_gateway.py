@@ -44,6 +44,157 @@ def _fact(*, value="SOL_REQUIRED", freshness="FRESH") -> GroundingFact:
     )
 
 
+_TOOL_FACT_ROWS = {
+    "list_responsibilities": (
+        ("responsibility.identity", "WS:ALPHA", "agent_os", "WS:ALPHA"),
+        ("responsibility.title", "Alpha responsibility", "agent_os", "WS:ALPHA"),
+        ("responsibility.state", "ACTIVE", "agent_os", "WS:ALPHA"),
+        (
+            "responsibility.next_action",
+            "Review the current exact gate.",
+            "agent_os",
+            "WS:ALPHA",
+        ),
+    ),
+    "get_responsibility": (
+        ("responsibility.identity", "WS:ALPHA", "agent_os", "WS:ALPHA"),
+        ("responsibility.title", "Alpha responsibility", "agent_os", "WS:ALPHA"),
+        (
+            "responsibility.objective",
+            "Preserve truthful public grounding.",
+            "agent_os",
+            "WS:ALPHA",
+        ),
+        (
+            "responsibility.next_action",
+            "Review the current exact gate.",
+            "agent_os",
+            "WS:ALPHA",
+        ),
+        ("responsibility.state", "ACTIVE", "agent_os", "WS:ALPHA"),
+    ),
+    "get_attention": (
+        (
+            "attention.ref",
+            "attention-alpha",
+            "executive_inbox",
+            "executive-inbox:attention-alpha",
+        ),
+        (
+            "attention.reason",
+            "Exact head requires review.",
+            "executive_inbox",
+            "executive-inbox:attention-alpha",
+        ),
+        (
+            "attention.requested_action",
+            "Review the exact release head.",
+            "executive_inbox",
+            "executive-inbox:attention-alpha",
+        ),
+        (
+            "attention.state",
+            "SOL_REQUIRED",
+            "executive_inbox",
+            "executive-inbox:attention-alpha",
+        ),
+    ),
+    "get_current_runtime": (
+        (
+            "runtime.job_ref",
+            "JOB-001",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+        (
+            "runtime.attempt_ref",
+            "ATT-alpha",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+        (
+            "runtime.worker_ref",
+            "worker-alpha",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+        (
+            "runtime.binding_ref",
+            "binding-alpha",
+            "runtime_binding",
+            "runtime-binding:ATT-alpha",
+        ),
+        (
+            "runtime.state",
+            "RUNNING",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+        (
+            "runtime.effect_state",
+            "NONE",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+    ),
+    "explain_blocker": (
+        ("blocker.present", True, "agent_os", "WS:ALPHA"),
+        ("blocker.kind", "review_required", "agent_os", "WS:ALPHA"),
+        (
+            "blocker.explanation",
+            "Independent review is pending.",
+            "agent_os",
+            "WS:ALPHA",
+        ),
+    ),
+    "resolve_surface": (
+        (
+            "surface.ref",
+            "11111111-1111-4111-8111-111111111111",
+            "surface_bindings",
+            "surface-binding:11111111-1111-4111-8111-111111111111",
+        ),
+        (
+            "surface.locator_kind",
+            "chatgpt_managed_env",
+            "surface_bindings",
+            "surface-binding:11111111-1111-4111-8111-111111111111",
+        ),
+        (
+            "surface.review_state",
+            "approved",
+            "surface_bindings",
+            "surface-binding:11111111-1111-4111-8111-111111111111",
+        ),
+        (
+            "surface.health",
+            "responsive",
+            "surface_bindings",
+            "surface-binding:11111111-1111-4111-8111-111111111111",
+        ),
+    ),
+}
+
+
+def _tool_facts(tool_name: str) -> tuple[GroundingFact, ...]:
+    return tuple(
+        GroundingFact(
+            subject_ref="responsibility:alpha",
+            predicate=predicate,
+            value=value,
+            freshness="FRESH",
+            sources=(
+                GroundingSource(
+                    owner=owner,
+                    source_ref=source_ref,
+                    observed_at="2026-08-29T05:00:00Z",
+                ),
+            ),
+        )
+        for predicate, value, owner, source_ref in _TOOL_FACT_ROWS[tool_name]
+    )
+
+
 def _run(coroutine):
     return asyncio.run(coroutine)
 
@@ -82,7 +233,7 @@ class FakeSteward(StewardReadPort):
 
 @pytest.mark.parametrize("tool_name", [spec.name for spec in TOOL_SPECS])
 def test_each_tool_calls_exactly_one_typed_steward_read(tool_name):
-    steward = FakeSteward(StewardGrounding(state="FACTS", facts=(_fact(),)))
+    steward = FakeSteward(StewardGrounding(state="FACTS", facts=_tool_facts(tool_name)))
     gateway = SecretaryGroundingGateway(steward)
     arguments = (
         {}
@@ -98,31 +249,81 @@ def test_each_tool_calls_exactly_one_typed_steward_read(tool_name):
             None if not arguments else "responsibility:alpha",
         )
     ]
-    assert envelope == {
-        "schema": RESULT_SCHEMA,
-        "tool": tool_name,
-        "ok": True,
-        "server_version": "1.0.0",
-        "data": {
-            "state": "FACTS",
-            "facts": [
-                {
-                    "subject_ref": "responsibility:alpha",
-                    "predicate": "attention.state",
-                    "value": "SOL_REQUIRED",
-                    "freshness": "FRESH",
-                    "sources": [
-                        {
-                            "owner": "agent_os",
-                            "source_ref": "WS:EXECUTIVE-CAPACITY-FABRIC",
-                            "observed_at": "2026-08-29T05:00:00Z",
-                        }
-                    ],
-                }
-            ],
-            "reason_codes": [],
-        },
-        "error": None,
+    assert envelope["schema"] == RESULT_SCHEMA
+    assert envelope["tool"] == tool_name
+    assert envelope["ok"] is True
+    assert envelope["error"] is None
+    assert {
+        fact["predicate"] for fact in envelope["data"]["facts"]
+    } == {row[0] for row in _TOOL_FACT_ROWS[tool_name]}
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "get_responsibility",
+        "get_current_runtime",
+        "explain_blocker",
+        "resolve_surface",
+    ],
+)
+def test_scoped_tools_refuse_facts_for_a_different_requested_responsibility(tool_name):
+    mismatched_facts = tuple(
+        GroundingFact(
+            subject_ref="responsibility:beta",
+            predicate=fact.predicate,
+            value=fact.value,
+            freshness=fact.freshness,
+            sources=fact.sources,
+        )
+        for fact in _tool_facts(tool_name)
+    )
+    steward = FakeSteward(
+        StewardGrounding(state="FACTS", facts=mismatched_facts)
+    )
+
+    envelope = _run(
+        SecretaryGroundingGateway(steward).call(
+            tool_name, {"responsibility_ref": "responsibility:alpha"}
+        )
+    )
+
+    assert steward.calls == [(tool_name, "responsibility:alpha")]
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "RESPONSE_REFUSED"
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "get_responsibility",
+        "get_current_runtime",
+        "explain_blocker",
+        "resolve_surface",
+    ],
+)
+def test_scoped_tools_preserve_unknown_with_zero_facts_for_requested_responsibility(
+    tool_name,
+):
+    steward = FakeSteward(
+        StewardGrounding(
+            state="UNKNOWN",
+            reason_codes=("RESPONSIBILITY_UNKNOWN",),
+        )
+    )
+
+    envelope = _run(
+        SecretaryGroundingGateway(steward).call(
+            tool_name, {"responsibility_ref": "responsibility:alpha"}
+        )
+    )
+
+    assert steward.calls == [(tool_name, "responsibility:alpha")]
+    assert envelope["ok"] is True
+    assert envelope["data"] == {
+        "state": "UNKNOWN",
+        "facts": [],
+        "reason_codes": ["RESPONSIBILITY_UNKNOWN"],
     }
 
 
@@ -378,20 +579,27 @@ def test_semantically_private_predicate_value_pairs_are_unrepresentable(
 def test_long_canonical_source_references_remain_source_attributable(
     canonical_source_ref
 ):
-    fact = GroundingFact(
-        subject_ref="responsibility:alpha",
-        predicate="attention.state",
-        value="SOL_REQUIRED",
-        freshness="FRESH",
-        sources=(_source(source_ref=canonical_source_ref),),
+    facts = tuple(
+        GroundingFact(
+            subject_ref=fact.subject_ref,
+            predicate=fact.predicate,
+            value=fact.value,
+            freshness=fact.freshness,
+            sources=(_source(source_ref=canonical_source_ref),),
+        )
+        for fact in _tool_facts("get_attention")
     )
     envelope = _run(
         SecretaryGroundingGateway(
-            FakeSteward(StewardGrounding(state="FACTS", facts=(fact,)))
+            FakeSteward(StewardGrounding(state="FACTS", facts=facts))
         ).call("get_attention", {})
     )
     assert envelope["ok"] is True
-    assert envelope["data"]["facts"][0]["sources"][0]["source_ref"] == canonical_source_ref
+    assert {
+        source["source_ref"]
+        for fact in envelope["data"]["facts"]
+        for source in fact["sources"]
+    } == {canonical_source_ref}
 
 
 def test_oversize_steward_output_is_refused():

@@ -17,6 +17,7 @@ from integrations.mastermind_secretary_mcp.schemas import (
     GatewayError,
 )
 from integrations.mastermind_secretary_mcp.schemas import (
+    canonical_json,
     error_envelope,
     result_envelope,
     validate_result_data,
@@ -81,17 +82,11 @@ def test_sdk_free_static_tool_rows_are_exact_and_read_only():
 def test_advertised_output_schema_matches_runtime_state_and_error_law():
     jsonschema = pytest.importorskip("jsonschema")
     validator = jsonschema.Draft202012Validator(TOOL_SPECS[2].output_schema)
-    source = {"owner": "agent_os", "source_ref": "WS:SAFE", "observed_at": None}
-    fresh_fact = {
-        "subject_ref": "responsibility:alpha",
-        "predicate": "attention.state",
-        "value": "SOL_REQUIRED",
-        "freshness": "FRESH",
-        "sources": [source],
-    }
+    fresh_facts = _required_facts("get_attention")
+    fresh_fact = fresh_facts[0]
     stale_fact = {**fresh_fact, "freshness": "STALE"}
     valid_data = (
-        {"state": "FACTS", "facts": [fresh_fact], "reason_codes": []},
+        {"state": "FACTS", "facts": fresh_facts, "reason_codes": []},
         {"state": "UNKNOWN", "facts": [], "reason_codes": ["NO_SOURCE"]},
         {
             "state": "DEGRADED",
@@ -227,19 +222,14 @@ def test_advertised_and_runtime_input_contract_reject_wrapped_credentials(
 )
 def test_advertised_and_runtime_output_contract_accept_same_canonical_sources(source_ref):
     jsonschema = pytest.importorskip("jsonschema")
+    facts = _required_facts("get_attention")
+    for fact in facts:
+        fact["sources"] = [
+            {"owner": "agent_os", "source_ref": source_ref, "observed_at": None}
+        ]
     data = {
         "state": "FACTS",
-        "facts": [
-            {
-                "subject_ref": "responsibility:alpha",
-                "predicate": "attention.state",
-                "value": "SOL_REQUIRED",
-                "freshness": "FRESH",
-                "sources": [
-                    {"owner": "agent_os", "source_ref": source_ref, "observed_at": None}
-                ],
-            }
-        ],
+        "facts": facts,
         "reason_codes": [],
     }
     normalized = validate_result_data(data)
@@ -378,6 +368,510 @@ def _producer_data(facts: list[dict]):
     return {"state": "FACTS", "facts": facts, "reason_codes": []}
 
 
+_REQUIRED_FACT_ROWS = {
+    "list_responsibilities": (
+        ("responsibility.identity", "WS:ALPHA", "agent_os", "WS:ALPHA"),
+        ("responsibility.title", "Alpha responsibility", "agent_os", "WS:ALPHA"),
+        ("responsibility.state", "ACTIVE", "agent_os", "WS:ALPHA"),
+        (
+            "responsibility.next_action",
+            "Review the current exact gate.",
+            "agent_os",
+            "WS:ALPHA",
+        ),
+    ),
+    "get_responsibility": (
+        ("responsibility.identity", "WS:ALPHA", "agent_os", "WS:ALPHA"),
+        ("responsibility.title", "Alpha responsibility", "agent_os", "WS:ALPHA"),
+        (
+            "responsibility.objective",
+            "Preserve truthful public grounding.",
+            "agent_os",
+            "WS:ALPHA",
+        ),
+        (
+            "responsibility.next_action",
+            "Review the current exact gate.",
+            "agent_os",
+            "WS:ALPHA",
+        ),
+        ("responsibility.state", "ACTIVE", "agent_os", "WS:ALPHA"),
+    ),
+    "get_attention": (
+        (
+            "attention.ref",
+            "attention-alpha",
+            "executive_inbox",
+            "executive-inbox:attention-alpha",
+        ),
+        (
+            "attention.reason",
+            "Exact head requires review.",
+            "executive_inbox",
+            "executive-inbox:attention-alpha",
+        ),
+        (
+            "attention.requested_action",
+            "Review the exact release head.",
+            "executive_inbox",
+            "executive-inbox:attention-alpha",
+        ),
+        (
+            "attention.state",
+            "SOL_REQUIRED",
+            "executive_inbox",
+            "executive-inbox:attention-alpha",
+        ),
+    ),
+    "get_current_runtime": (
+        (
+            "runtime.job_ref",
+            "JOB-001",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+        (
+            "runtime.attempt_ref",
+            "ATT-alpha",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+        (
+            "runtime.worker_ref",
+            "worker-alpha",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+        (
+            "runtime.binding_ref",
+            "binding-alpha",
+            "runtime_binding",
+            "runtime-binding:ATT-alpha",
+        ),
+        (
+            "runtime.state",
+            "RUNNING",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+        (
+            "runtime.effect_state",
+            "none",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+    ),
+    "explain_blocker": (
+        ("blocker.present", True, "agent_os", "WS:ALPHA"),
+        ("blocker.kind", "review_required", "agent_os", "WS:ALPHA"),
+        (
+            "blocker.explanation",
+            "Independent review is pending.",
+            "agent_os",
+            "WS:ALPHA",
+        ),
+    ),
+    "resolve_surface": (
+        (
+            "surface.ref",
+            "11111111-1111-4111-8111-111111111111",
+            "surface_bindings",
+            "surface-binding:11111111-1111-4111-8111-111111111111",
+        ),
+        (
+            "surface.locator_kind",
+            "chatgpt_managed_env",
+            "surface_bindings",
+            "surface-binding:11111111-1111-4111-8111-111111111111",
+        ),
+        (
+            "surface.review_state",
+            "approved",
+            "surface_bindings",
+            "surface-binding:11111111-1111-4111-8111-111111111111",
+        ),
+        (
+            "surface.health",
+            "responsive",
+            "surface_bindings",
+            "surface-binding:11111111-1111-4111-8111-111111111111",
+        ),
+    ),
+}
+
+
+def _required_facts(tool_name: str, *, subject: str = "responsibility:alpha"):
+    return [
+        _producer_fact(
+            predicate,
+            value,
+            owner=owner,
+            source_ref=source_ref,
+            subject=subject,
+        )
+        for predicate, value, owner, source_ref in _REQUIRED_FACT_ROWS[tool_name]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "missing_predicate"),
+    [
+        (tool_name, row[0])
+        for tool_name, rows in _REQUIRED_FACT_ROWS.items()
+        for row in rows
+    ],
+)
+def test_each_tool_runtime_and_advertised_schema_reject_missing_required_predicate(
+    tool_name, missing_predicate
+):
+    """Deleting any frozen useful predicate must fail at both public boundaries."""
+
+    jsonschema = pytest.importorskip("jsonschema")
+    complete_facts = _required_facts(tool_name)
+    complete = result_envelope(tool_name, data=_producer_data(complete_facts))
+    validator = jsonschema.Draft202012Validator(
+        next(spec.output_schema for spec in TOOL_SPECS if spec.name == tool_name)
+    )
+    validator.validate(complete)
+
+    incomplete_facts = [
+        fact for fact in complete_facts if fact["predicate"] != missing_predicate
+    ]
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        result_envelope(tool_name, data=_producer_data(incomplete_facts))
+
+    incomplete = copy.deepcopy(complete)
+    incomplete["data"]["facts"] = [
+        fact
+        for fact in incomplete["data"]["facts"]
+        if fact["predicate"] != missing_predicate
+    ]
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(incomplete)
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "missing_predicate"),
+    [
+        (tool_name, row[0])
+        for tool_name in ("list_responsibilities", "get_attention")
+        for row in _REQUIRED_FACT_ROWS[tool_name]
+    ],
+)
+def test_collection_tools_require_useful_predicates_for_each_returned_subject(
+    tool_name, missing_predicate
+):
+    """One complete neighboring bundle must not lend a missing field to another."""
+
+    alpha = _required_facts(tool_name)
+    beta = copy.deepcopy(alpha)
+    for fact in beta:
+        fact["subject_ref"] = "responsibility:beta"
+        if fact["predicate"] == "responsibility.identity":
+            fact["value"] = "WS:BETA"
+        for source in fact["sources"]:
+            if source["owner"] == "agent_os":
+                source["source_ref"] = "WS:BETA"
+            elif source["owner"] == "executive_inbox":
+                source["source_ref"] = "executive-inbox:attention-beta"
+        if fact["predicate"] == "attention.ref":
+            fact["value"] = "attention-beta"
+
+    alpha = [fact for fact in alpha if fact["predicate"] != missing_predicate]
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        result_envelope(tool_name, data=_producer_data(alpha + beta))
+
+
+_ENUM_ALIAS_CASES = (
+    (
+        "get_attention",
+        "attention.target_seat",
+        ("ceo", "CEO", "SOL"),
+        "CEO",
+        "executive_inbox",
+        "executive-inbox:attention-alpha",
+    ),
+    (
+        "get_current_runtime",
+        "runtime.effect_state",
+        ("none", "NONE"),
+        "NONE",
+        "executive_os",
+        "executive-runtime:ATT-alpha",
+    ),
+    (
+        "get_current_runtime",
+        "runtime.capacity_state",
+        ("available", "AVAILABLE"),
+        "AVAILABLE",
+        "capacity",
+        "CAPACITY:realm-alpha",
+    ),
+    (
+        "resolve_surface",
+        "surface.review_state",
+        ("approved", "APPROVED"),
+        "APPROVED",
+        "surface_bindings",
+        "surface-binding:11111111-1111-4111-8111-111111111111",
+    ),
+)
+
+
+def _facts_with_predicate_value(
+    tool_name: str,
+    predicate: str,
+    value,
+    *,
+    owner: str,
+    source_ref: str,
+):
+    facts = _required_facts(tool_name)
+    for fact in facts:
+        if fact["predicate"] == predicate:
+            fact["value"] = value
+            return facts
+    facts.append(
+        _producer_fact(
+            predicate,
+            value,
+            owner=owner,
+            source_ref=source_ref,
+        )
+    )
+    return facts
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "predicate", "aliases", "canonical", "owner", "source_ref"),
+    _ENUM_ALIAS_CASES,
+)
+def test_admitted_source_aliases_collapse_to_one_canonical_output(
+    tool_name, predicate, aliases, canonical, owner, source_ref
+):
+    rendered = []
+    for alias in aliases:
+        envelope = result_envelope(
+            tool_name,
+            data=_producer_data(
+                _facts_with_predicate_value(
+                    tool_name,
+                    predicate,
+                    alias,
+                    owner=owner,
+                    source_ref=source_ref,
+                )
+            ),
+        )
+        projected = next(
+            fact for fact in envelope["data"]["facts"]
+            if fact["predicate"] == predicate
+        )
+        assert projected["value"] == canonical
+        rendered.append(canonical_json(envelope))
+    assert len(set(rendered)) == 1
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "predicate", "near_match", "canonical", "owner", "source_ref"),
+    (
+        (
+            "get_attention",
+            "attention.target_seat",
+            "CeO",
+            "CEO",
+            "executive_inbox",
+            "executive-inbox:attention-alpha",
+        ),
+        (
+            "get_current_runtime",
+            "runtime.effect_state",
+            "effect-unknown",
+            "NONE",
+            "executive_os",
+            "executive-runtime:ATT-alpha",
+        ),
+        (
+            "get_current_runtime",
+            "runtime.capacity_state",
+            "Available",
+            "AVAILABLE",
+            "capacity",
+            "CAPACITY:realm-alpha",
+        ),
+        (
+            "resolve_surface",
+            "surface.review_state",
+            "Approved",
+            "APPROVED",
+            "surface_bindings",
+            "surface-binding:11111111-1111-4111-8111-111111111111",
+        ),
+    ),
+)
+def test_unadvertised_enum_near_matches_fail_runtime_and_schema(
+    tool_name, predicate, near_match, canonical, owner, source_ref
+):
+    jsonschema = pytest.importorskip("jsonschema")
+    invalid_facts = _facts_with_predicate_value(
+        tool_name,
+        predicate,
+        near_match,
+        owner=owner,
+        source_ref=source_ref,
+    )
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        result_envelope(tool_name, data=_producer_data(invalid_facts))
+
+    valid = result_envelope(
+        tool_name,
+        data=_producer_data(
+            _facts_with_predicate_value(
+                tool_name,
+                predicate,
+                canonical,
+                owner=owner,
+                source_ref=source_ref,
+            )
+        ),
+    )
+    next(
+        fact for fact in valid["data"]["facts"]
+        if fact["predicate"] == predicate
+    )["value"] = near_match
+    validator = jsonschema.Draft202012Validator(
+        next(spec.output_schema for spec in TOOL_SPECS if spec.name == tool_name)
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(valid)
+
+
+def _replace_fact_source_ref(facts: list[dict], predicate: str, source_ref: str):
+    fact = next(fact for fact in facts if fact["predicate"] == predicate)
+    fact["sources"][0]["source_ref"] = source_ref
+
+
+def test_selected_executive_runtime_facts_require_one_common_receipt():
+    facts = _required_facts("get_current_runtime")
+    _replace_fact_source_ref(
+        facts,
+        "runtime.worker_ref",
+        "executive-runtime:ATT-beta",
+    )
+
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        result_envelope("get_current_runtime", data=_producer_data(facts))
+
+
+def test_runtime_binding_and_continuation_require_one_common_receipt():
+    facts = _required_facts("get_current_runtime")
+    facts.append(
+        _producer_fact(
+            "runtime.continuation",
+            "ACKNOWLEDGED",
+            owner="runtime_binding",
+            source_ref="runtime-binding:ATT-beta",
+        )
+    )
+
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        result_envelope("get_current_runtime", data=_producer_data(facts))
+
+
+def test_executive_runtime_receipt_attempt_must_match_projected_attempt():
+    facts = _required_facts("get_current_runtime")
+    for predicate in (
+        "runtime.job_ref",
+        "runtime.attempt_ref",
+        "runtime.worker_ref",
+        "runtime.state",
+        "runtime.effect_state",
+    ):
+        _replace_fact_source_ref(
+            facts,
+            predicate,
+            "executive-runtime:ATT-beta",
+        )
+
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        result_envelope("get_current_runtime", data=_producer_data(facts))
+
+
+def test_capacity_receipt_is_independent_of_executive_and_binding_receipts():
+    facts = _required_facts("get_current_runtime")
+    facts.append(
+        _producer_fact(
+            "runtime.capacity_state",
+            "available",
+            owner="capacity",
+            source_ref="capacity:realm-independent",
+        )
+    )
+
+    envelope = result_envelope(
+        "get_current_runtime",
+        data=_producer_data(facts),
+    )
+
+    capacity = next(
+        fact for fact in envelope["data"]["facts"]
+        if fact["predicate"] == "runtime.capacity_state"
+    )
+    assert capacity["value"] == "AVAILABLE"
+    assert capacity["sources"][0]["source_ref"] == "capacity:realm-independent"
+
+
+@pytest.mark.parametrize(
+    ("owner", "valid_source_ref", "invalid_source_ref"),
+    (
+        ("agent_os", "WS:ALPHA", "ws:ALPHA"),
+        ("executive_os", "executive-runtime:ATT-alpha", "MAS:216"),
+        ("runtime_binding", "runtime-binding:ATT-alpha", "RUNTIME:ATT-alpha"),
+        (
+            "executive_inbox",
+            "executive-inbox:attention-alpha",
+            "EIA:attention-alpha",
+        ),
+        ("capacity", "CAPACITY:realm-alpha", "Capacity:realm-alpha"),
+        ("wake", "WAKE:attention-alpha", "Wake:attention-alpha"),
+        ("agent_dialogue", "DIALOGUE:edge-alpha", "Dialogue:edge-alpha"),
+        ("surface_binding", "SURFACE:control-room", "Surface:control-room"),
+        (
+            "surface_bindings",
+            "surface-binding:11111111-1111-4111-8111-111111111111",
+            "surface-bindings:11111111-1111-4111-8111-111111111111",
+        ),
+        ("provider_control", "POLICY:reviewed-alpha", "Policy:reviewed-alpha"),
+        ("unknown", "UNKNOWN:alpha", "Unknown:alpha"),
+    ),
+)
+def test_advertised_and_runtime_source_ref_grammars_are_bidirectionally_equal(
+    owner, valid_source_ref, invalid_source_ref
+):
+    from integrations.mastermind_secretary_mcp import schemas as contract_schemas
+
+    jsonschema = pytest.importorskip("jsonschema")
+    fact_schema = TOOL_SPECS[0].output_schema["properties"]["data"]["oneOf"][1][
+        "properties"
+    ]["facts"]["items"]
+    source_schema = fact_schema["properties"]["sources"]["items"]
+    validator = jsonschema.Draft202012Validator(source_schema)
+    valid = {
+        "owner": owner,
+        "source_ref": valid_source_ref,
+        "observed_at": "2026-09-01T10:00:00Z",
+    }
+    invalid = {**valid, "source_ref": invalid_source_ref}
+
+    validator.validate(valid)
+    assert contract_schemas._validated_source(valid) == valid
+
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(invalid)
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        contract_schemas._validated_source(invalid)
+
+
 def test_producer_native_runtime_identity_and_provenance_are_distinct():
     from integrations.mastermind_secretary_mcp import schemas as contract_schemas
 
@@ -480,6 +974,12 @@ def test_producer_native_attention_owner_and_vocabulary_are_preserved():
         _producer_fact(
             "attention.requested_action",
             "Review the exact release head.",
+            owner="executive_inbox",
+            source_ref=receipt,
+        ),
+        _producer_fact(
+            "attention.state",
+            "SOL_REQUIRED",
             owner="executive_inbox",
             source_ref=receipt,
         ),

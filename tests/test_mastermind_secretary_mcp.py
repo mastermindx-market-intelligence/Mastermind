@@ -253,6 +253,7 @@ def test_source_owner_namespaces_do_not_blur_executive_into_linear():
     assert set(mapping["executive_os"]) == {"JOB", "ATTEMPT", "WORKER", "EVENT", "EXEC"}
     assert "MAS" not in mapping["executive_os"]
     assert mapping["runtime_binding"] == ("RUNTIME",)
+    assert mapping["executive_inbox"] == ("executive-inbox",)
 
 
 def test_product_sufficient_public_predicate_families_are_closed():
@@ -366,22 +367,34 @@ def test_descriptive_text_controls_are_refused(bad_text):
 
 
 def test_executive_mas_source_is_refused_and_capacity_source_is_supported():
+    runtime_facts = [
+        _fact("responsibility:alpha", "runtime.job_ref", "JOB-001",
+              owner="executive_os", source_ref="executive-runtime:ATT-alpha"),
+        _fact("responsibility:alpha", "runtime.attempt_ref", "ATT-alpha",
+              owner="executive_os", source_ref="executive-runtime:ATT-alpha"),
+        _fact("responsibility:alpha", "runtime.worker_ref", "worker-alpha",
+              owner="executive_os", source_ref="executive-runtime:ATT-alpha"),
+        _fact("responsibility:alpha", "runtime.binding_ref", "binding-alpha",
+              owner="runtime_binding", source_ref="runtime-binding:ATT-alpha"),
+        _fact("responsibility:alpha", "runtime.state", "RUNNING",
+              owner="executive_os", source_ref="executive-runtime:ATT-alpha"),
+        _fact("responsibility:alpha", "runtime.effect_state", "NONE",
+              owner="executive_os", source_ref="executive-runtime:ATT-alpha"),
+    ]
+    invalid_mas_facts = copy.deepcopy(runtime_facts)
+    invalid_mas_facts[0]["sources"][0]["source_ref"] = "MAS:216"
     with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
         contract_schemas.result_envelope(
             "get_current_runtime",
-            data=_data(
-                "FACTS",
-                [_fact("responsibility:alpha", "runtime.job_ref", "JOB:ROOT-1",
-                       owner="executive_os", source_ref="MAS:216")],
-            ),
+            data=_data("FACTS", invalid_mas_facts),
         )
+    runtime_facts.append(
+        _fact("responsibility:alpha", "runtime.capacity_state", "AVAILABLE",
+              owner="capacity", source_ref="CAPACITY:REALM-1")
+    )
     accepted = contract_schemas.result_envelope(
         "get_current_runtime",
-        data=_data(
-            "FACTS",
-            [_fact("responsibility:alpha", "runtime.capacity_state", "AVAILABLE",
-                   owner="capacity", source_ref="CAPACITY:REALM-1")],
-        ),
+        data=_data("FACTS", runtime_facts),
     )
     assert accepted["ok"] is True
 
