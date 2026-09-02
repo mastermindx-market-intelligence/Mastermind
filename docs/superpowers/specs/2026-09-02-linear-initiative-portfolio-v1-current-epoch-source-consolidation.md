@@ -19,21 +19,22 @@ This record closes the exact authority and census gap in the Linear Initiative p
 The protected base design froze seven Initiative definitions, fifty exact Project-to-Initiative memberships and two deliberately unassigned exceptions. The portfolio then changed in two distinct ways:
 
 1. two canonical workstreams were explicitly classified after the base design and added to the Macro strategy companion;
-2. six additional portfolio-eligible workstreams existed at the current Agent OS census but were absent from that 52-row companion.
+2. six additional active Project-plan workstreams existed at the current Agent OS census but were absent from that 52-row companion.
 
-The intermediate state was therefore not merely a stale source locator. It was an incomplete current-epoch census:
+The intermediate state was therefore not merely a stale source locator. It was an incomplete current-epoch classification:
 
 ```text
 protected strategic source at d004f5bf... -> 50 memberships
 Macro companion in PR #6658             -> 52 memberships
-current eligible Agent OS universe      -> 58 memberships + 1 WS exception
+current approved strategy set           -> 58 memberships
+current active/candidate coverage        -> complete only with those 58 rows + the exact WS exception
 ```
 
-The 52-row companion could pass its own static count while still refusing a fresh current Project plan with `strategy_unmapped_active_workstream`. A content digest proves which companion bytes were consumed; it does not prove that the companion contains every currently eligible organizational workstream or that each later classification was authorized.
+The 52-row companion could pass its own static count while still refusing a fresh current Project plan with `strategy_unmapped_active_workstream`. A content digest proves which companion bytes were consumed; it does not prove that the companion covers every currently mandatory active/review-candidate workstream or that each later classification was authorized.
 
 Slack and GitHub discussion preserve decision evidence, but neither is the durable portfolio strategy authority. This protected consolidation incorporates the immutable 50-row base, records the eight exact additions required by the current Agent OS census, and makes the complete epoch independently recoverable without creating another registry.
 
-## 2. Source-of-truth, eligibility and precedence law
+## 2. Source-of-truth, Project-plan universe and precedence law
 
 The base design at `d004f5bf7953e943281dff7efd8fe17a54b0cf6c` remains authoritative for:
 
@@ -45,19 +46,25 @@ The base design at `d004f5bf7953e943281dff7efd8fe17a54b0cf6c` remains authoritat
 - the prohibition on fuzzy/title/program/market inference;
 - the Linear, Agent OS, Executive OS, GitHub and Slack source-owner boundaries.
 
-The canonical Project compiler at the Agent OS census pin defines portfolio eligibility mechanically:
+The canonical Project compiler at the Agent OS census pin defines three relevant buckets mechanically:
 
 ```text
 active Projects: status in active | blocked | awaiting_ci | awaiting_review
 review candidates: status == proposed
-excluded: status in done | parked | killed
+excluded Projects: status in done | parked | killed
+Project-plan universe: active Projects + review candidates + excluded Projects
 ```
 
-The Initiative strategy must classify every active Project and every review candidate except an explicitly approved workstream exception. Names, programs, owners and semantic similarity have zero implicit classification authority.
+The Initiative strategy obeys two different set laws that must not be blurred:
+
+1. every strategy membership key must exist somewhere in the complete Project-plan universe, including historically retained excluded Projects;
+2. every active Project and every review candidate must be either explicitly mapped or equal the one approved workstream exception, `WS:WATCHLIST-PORTFOLIO-CEO`.
+
+An excluded Project may retain an approved historical Initiative membership. An excluded workstream that was never approved as a strategy member need not be newly classified merely because its durable record still exists. Names, programs, owners and semantic similarity have zero implicit classification authority.
 
 **After this file is reviewed and merged to protected `master`, this file becomes the current v1 membership source identity.** It incorporates the immutable base design and adds only the eight rows in §3. It has narrow precedence over stale literal counts, membership totals and missing-Project lists in the base design and the 2026-08-29 rollout plan.
 
-The Agent OS census pin is part of the epoch boundary. A later portfolio-eligible workstream does not inherit an Initiative by analogy. It invalidates live-apply readiness until Sol records a new protected amendment or consolidation and the deterministic companion is updated and re-proven.
+The Agent OS census pin is part of the epoch boundary. A later active or review-candidate workstream does not inherit an Initiative by analogy. It invalidates live-apply readiness until Sol records a new protected amendment or consolidation and the deterministic companion is updated and re-proven. A later excluded-only record is reconciled under the two set laws above rather than silently treated as a mandatory new membership.
 
 Nothing in this file changes the seven Initiative definitions, reclassifies an original membership, removes a membership, creates another exception or widens Linear into canonical organizational/runtime truth.
 
@@ -201,7 +208,7 @@ Initiatives: 0
 Project -> Initiative memberships: 0
 ```
 
-Every visible Project had an empty Initiative-parent set. The two frozen exceptions remained present and unassigned. Ten portfolio-eligible strategy members were absent as Linear Projects:
+Every visible Project had an empty Initiative-parent set. The two frozen exceptions remained present and unassigned. Ten current strategy members were absent as Linear Projects, and all ten were active at the pinned Agent OS census:
 
 ```text
 WS:TOP-ANATOMY
@@ -216,7 +223,7 @@ WS:REACTIVE-PROJECTION
 WS:REPRODUCIBLE-WORKER-ENVIRONMENTS
 ```
 
-If that exact Linear witness and the pinned Agent OS eligibility universe remain unchanged at the accepted dry-run boundary, the deterministic pre-apply signature is:
+If that exact Linear witness and the pinned Agent OS Project-plan buckets remain unchanged at the accepted dry-run boundary, the deterministic pre-apply signature is:
 
 ```text
 initiative_missing: 7
@@ -246,7 +253,7 @@ path: docs/superpowers/specs/2026-09-02-linear-initiative-portfolio-v1-current-e
 protected_revision: <the exact protected merge commit containing this file>
 ```
 
-A source identity that still points only to `d004f5bf7953e943281dff7efd8fe17a54b0cf6c` is stale for every post-base epoch. A companion containing 52 memberships is also stale for the current `Macro@818451ef...` eligibility universe.
+A source identity that still points only to `d004f5bf7953e943281dff7efd8fe17a54b0cf6c` is stale for every post-base epoch. A companion containing 52 memberships is also stale for the current `Macro@818451ef...` active/review-candidate set.
 
 The deterministic compiler receipt must bind:
 
@@ -256,11 +263,11 @@ The deterministic compiler receipt must bind:
 - the Initiative-plan semantic hash;
 - the Project-plan semantic hash;
 - the exact desired, group, exception, create and drift counts;
-- enough current-source identity to prove the Project plan was compiled from the intended Agent OS epoch.
+- enough Project-plan source identity to prove the plan was compiled from the intended Agent OS epoch.
 
 A reviewer must be able to locate this protected source, follow its immutable base-source incorporation, reproduce the companion and membership digests, and distinguish the approved 58-row epoch from both the original 50-row and intermediate 52-row epochs without access to process-local state.
 
-The compiler remains deterministic, zero-network and zero-write. It validates source identity and set equality but does not call GitHub or Linear at runtime. GitHub protection/review proves the source revision externally.
+The compiler remains deterministic, zero-network and zero-write. It validates source identity and set relationships but does not call GitHub or Linear at runtime. GitHub protection/review proves the source revision externally.
 
 ## 7. Failure and correction behavior
 
@@ -269,13 +276,13 @@ The current epoch fails closed on:
 - missing or malformed source identity;
 - source repository, path or protected revision mismatch;
 - source identity still naming the 50-row base while the companion contains a later epoch;
-- a 50-row or 52-row companion presented as current against the pinned 58-member eligibility universe;
+- a 50-row or 52-row companion presented as current against the pinned active/review-candidate set;
 - any membership count other than 58;
 - any group counts other than `10,16,11,5,4,7,5`;
 - any of the eight added workstreams missing, duplicated, mapped elsewhere or also listed as an exception;
 - any change to the two frozen exceptions;
-- any portfolio-eligible workstream absent from both the exact membership map and approved workstream-exception set;
-- any strategy membership whose workstream is absent from the canonical Project universe;
+- any active or review-candidate workstream absent from both the exact membership map and approved workstream-exception set;
+- any strategy membership whose workstream is absent from the complete Project-plan universe;
 - any unexpected Initiative, confusingly similar name, duplicate ID, multi-parent membership, malformed witness row or effect-unknown live state;
 - any input ordering that changes semantic output.
 
@@ -314,4 +321,4 @@ protect this 58-row source consolidation
 -> start WR-P0 against accepted 7/58/2 portfolio truth
 ```
 
-Any new portfolio-eligible workstream before the dry-run/apply boundary returns the program to source reconciliation. It does not authorize inference, silent omission or a live write against an outdated epoch.
+Any new active or review-candidate workstream before the dry-run/apply boundary returns the program to source reconciliation. It does not authorize inference, silent omission or a live write against an outdated epoch.
