@@ -93,7 +93,7 @@ Exit codes:
 - `1` — at least one prompt or wrapper finding;
 - `2` — malformed or unreadable top-level input.
 
-The report separates `invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, and `duplicate_task_ids`. Enabled `NON_WATCHER` entries remain visible but are excluded from watcher-conformance counts.
+The report separates `invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, `duplicate_task_ids`, `duplicate_action_authority`, and `conflicting_handled_edges`. `duplicate_action_authority` is the deterministic operation/task-ID source for the required unresolved action-authority-conflicts receipt. Enabled `NON_WATCHER` entries remain visible but are excluded from watcher-conformance counts.
 
 ## Step 4 — Render and replace invalid prompts
 

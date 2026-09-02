@@ -135,6 +135,15 @@ The source renderer owns the exact role tails. Do not hand-copy or paraphrase th
 
 Ordinary reminders may use `audit_kind: NON_WATCHER`. Unknown classifications fail closed.
 
+### Read-capable, write-incapable scheduled-surface bridge
+
+If the scheduled surface can read but cannot write the lawful carrier, it must return
+`WRITE_UNAVAILABLE` to its own task or automation surface. That typed boundary may wake or
+notify the exact interactive Sol surface as a transport bridge; it does not transfer action
+authority to the scheduled host, a sister account, or the Chairman. On that first interactive
+turn, Sol must re-pin, adjudicate, and act before reporting. Do not turn a write-capability
+limitation into permanent Chairman relay work.
+
 ## Exact rollout and repair law
 
 For each account-local task update:
@@ -154,7 +163,7 @@ The validator and CLI are read-only:
 python3 -m scripts.audit_sol_watchers <tasks.json>
 ```
 
-Exit `0` means all enabled `SOL_WATCHER` tasks conform; `1` means findings; `2` means malformed input. Native `id`/`task_id` aliases are independently trimmed before equality and duplicate census. Enabled state must be a JSON Boolean. Duplicate IDs, conflicting aliases/Booleans, unknown `audit_kind`, and non-object entries fail the account export. Reports keep `invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, and `duplicate_task_ids` separate.
+Exit `0` means all enabled `SOL_WATCHER` tasks conform; `1` means findings; `2` means malformed input. Native `id`/`task_id` aliases are independently trimmed before equality and duplicate census. Enabled state must be a JSON Boolean. Duplicate IDs, conflicting aliases/Booleans, unknown `audit_kind`, and non-object entries fail the account export. Reports keep `invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, `duplicate_task_ids`, `duplicate_action_authority`, and `conflicting_handled_edges` separate.
 
 A passing audit proves prompt conformance only. It does not prove the task fired, the carrier was read, a Sol edge was written, or event-driven Wake is live.
 

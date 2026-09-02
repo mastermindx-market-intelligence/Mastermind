@@ -80,6 +80,8 @@ class FindingCode(str, Enum):
     INVALID_TASK_ID = "INVALID_TASK_ID"
     INVALID_ENABLED_FLAG = "INVALID_ENABLED_FLAG"
     DUPLICATE_TASK_ID = "DUPLICATE_TASK_ID"
+    DUPLICATE_ACTION_AUTHORITY = "DUPLICATE_ACTION_AUTHORITY"
+    CONFLICTING_HANDLED_EDGE = "CONFLICTING_HANDLED_EDGE"
     CLASSIFICATION_MISMATCH = "CLASSIFICATION_MISMATCH"
     TASK_FIELD_TOO_LARGE = "TASK_FIELD_TOO_LARGE"
 
@@ -141,6 +143,34 @@ class TaskAudit:
 
 
 @dataclass(frozen=True)
+class ActionAuthorityConflict:
+    operation_key: str
+    task_ids: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "operation_key": self.operation_key,
+            "task_ids": list(self.task_ids),
+        }
+
+
+@dataclass(frozen=True)
+class HandledEdgeConflict:
+    operation_key: str
+    carrier: str
+    task_ids: tuple[str, ...]
+    latest_handled_edges: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "operation_key": self.operation_key,
+            "carrier": self.carrier,
+            "task_ids": list(self.task_ids),
+            "latest_handled_edges": list(self.latest_handled_edges),
+        }
+
+
+@dataclass(frozen=True)
 class AuditReport:
     valid: bool
     total_tasks: int
@@ -150,6 +180,8 @@ class AuditReport:
     invalid_classification_tasks: int
     invalid_export_tasks: int
     duplicate_task_ids: tuple[str, ...]
+    duplicate_action_authority: tuple[ActionAuthorityConflict, ...]
+    conflicting_handled_edges: tuple[HandledEdgeConflict, ...]
     tasks: tuple[TaskAudit, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -164,6 +196,12 @@ class AuditReport:
                 "invalid_classification_tasks": self.invalid_classification_tasks,
                 "invalid_export_tasks": self.invalid_export_tasks,
                 "duplicate_task_ids": list(self.duplicate_task_ids),
+                "duplicate_action_authority": [
+                    conflict.to_dict() for conflict in self.duplicate_action_authority
+                ],
+                "conflicting_handled_edges": [
+                    conflict.to_dict() for conflict in self.conflicting_handled_edges
+                ],
             },
             "tasks": [task.to_dict() for task in self.tasks],
         }
@@ -551,12 +589,14 @@ def _normalize_task_id(value: Any, *, field: str) -> tuple[str | None, ContractF
     return value.strip(), None
 
 
-def _extract_task_id(raw: Mapping[str, Any], index: int) -> tuple[str, list[ContractFinding]]:
+def _extract_task_id(
+    raw: Mapping[str, Any], index: int
+) -> tuple[str | None, list[ContractFinding]]:
     findings: list[ContractFinding] = []
     has_id = "id" in raw
     has_task_id = "task_id" in raw
     if not has_id and not has_task_id:
-        return f"invalid-task-{index}", [
+        return None, [
             _finding(
                 FindingCode.INVALID_TASK_ID,
                 "task export must contain id or task_id",
@@ -586,7 +626,13 @@ def _extract_task_id(raw: Mapping[str, Any], index: int) -> tuple[str, list[Cont
                 field="id",
             )
         )
-    return normalized_id or normalized_task_id or f"invalid-task-{index}", findings
+    return normalized_id or normalized_task_id, findings
+
+
+def _display_task_id(task_id: str | None, index: int) -> str:
+    """Render a malformed row label without assigning it a native task identity."""
+
+    return task_id if task_id is not None else f"invalid-task-{index}"
 
 
 def _extract_enabled(raw: Mapping[str, Any]) -> tuple[bool, list[ContractFinding]]:
@@ -662,7 +708,7 @@ def audit_tasks(tasks: Iterable[Any]) -> AuditReport:
         if not isinstance(raw, Mapping):
             continue
         task_id, _findings = _extract_task_id(raw, index)
-        if not task_id.startswith("invalid-task-"):
+        if task_id is not None:
             candidate_ids.append(task_id)
 
     duplicate_task_ids = tuple(
@@ -694,6 +740,7 @@ def audit_tasks(tasks: Iterable[Any]) -> AuditReport:
             continue
 
         task_id, wrapper_findings = _extract_task_id(raw, index)
+        display_task_id = _display_task_id(task_id, index)
         enabled, enabled_findings = _extract_enabled(raw)
         wrapper_findings.extend(enabled_findings)
         title, title_findings = _extract_title(raw)
@@ -729,7 +776,7 @@ def audit_tasks(tasks: Iterable[Any]) -> AuditReport:
                     field="audit_kind",
                 )
             )
-        if task_id in duplicate_set:
+        if task_id is not None and task_id in duplicate_set:
             wrapper_findings.append(
                 _finding(
                     FindingCode.DUPLICATE_TASK_ID,
@@ -741,7 +788,7 @@ def audit_tasks(tasks: Iterable[Any]) -> AuditReport:
         if wrapper_findings:
             results.append(
                 TaskAudit(
-                    task_id=task_id,
+                    task_id=display_task_id,
                     title=title,
                     enabled=enabled,
                     evaluated=True,
@@ -754,7 +801,7 @@ def audit_tasks(tasks: Iterable[Any]) -> AuditReport:
         if not enabled or audit_kind == "NON_WATCHER":
             results.append(
                 TaskAudit(
-                    task_id=task_id,
+                    task_id=display_task_id,
                     title=title,
                     enabled=enabled,
                     evaluated=False,
@@ -766,7 +813,7 @@ def audit_tasks(tasks: Iterable[Any]) -> AuditReport:
 
         results.append(
             TaskAudit(
-                task_id=task_id,
+                task_id=display_task_id,
                 title=title,
                 enabled=True,
                 evaluated=True,
@@ -774,6 +821,106 @@ def audit_tasks(tasks: Iterable[Any]) -> AuditReport:
                 audit=validate_watcher_prompt(prompt),
             )
         )
+
+    action_authority_groups: dict[str, list[tuple[int, TaskAudit]]] = {}
+    handled_edge_groups: dict[tuple[str, str], list[tuple[int, TaskAudit]]] = {}
+    for result_index, result in enumerate(results):
+        audit = result.audit
+        if (
+            not result.enabled
+            or result.audit_kind != "SOL_WATCHER"
+            or audit is None
+            or not audit.valid
+            or audit.role is None
+            or audit.operation_key is None
+            or audit.carrier is None
+            or audit.latest_handled_edge is None
+        ):
+            continue
+        handled_edge_groups.setdefault((audit.operation_key, audit.carrier), []).append(
+            (result_index, result)
+        )
+        if audit.role is WatcherRole.ACTION_AUTHORITATIVE:
+            action_authority_groups.setdefault(audit.operation_key, []).append(
+                (result_index, result)
+            )
+
+    duplicate_action_authority = tuple(
+        ActionAuthorityConflict(
+            operation_key=operation_key,
+            task_ids=tuple(sorted(result.task_id for _, result in group)),
+        )
+        for operation_key, group in sorted(action_authority_groups.items())
+        if len(group) > 1
+    )
+    conflicting_handled_edges = tuple(
+        HandledEdgeConflict(
+            operation_key=operation_key,
+            carrier=carrier,
+            task_ids=tuple(sorted(result.task_id for _, result in group)),
+            latest_handled_edges=tuple(
+                sorted(
+                    {
+                        result.audit.latest_handled_edge
+                        for _, result in group
+                        if result.audit is not None
+                    }
+                )
+            ),
+        )
+        for (operation_key, carrier), group in sorted(handled_edge_groups.items())
+        if len(
+            {
+                result.audit.latest_handled_edge
+                for _, result in group
+                if result.audit is not None
+            }
+        )
+        > 1
+    )
+    cross_task_findings: dict[int, list[ContractFinding]] = {}
+    for conflict in duplicate_action_authority:
+        finding = _finding(
+            FindingCode.DUPLICATE_ACTION_AUTHORITY,
+            "multiple enabled ACTION_AUTHORITATIVE watchers for one operation: "
+            + ", ".join(conflict.task_ids),
+            field="operation_key",
+        )
+        for result_index, result in action_authority_groups[conflict.operation_key]:
+            cross_task_findings.setdefault(result_index, []).append(finding)
+    for conflict in conflicting_handled_edges:
+        finding = _finding(
+            FindingCode.CONFLICTING_HANDLED_EDGE,
+            "enabled watchers for one operation and carrier disagree on "
+            "LATEST_HANDLED_EDGE: " + ", ".join(conflict.task_ids),
+            field="latest_handled_edge",
+        )
+        for result_index, result in handled_edge_groups[
+            (conflict.operation_key, conflict.carrier)
+        ]:
+            cross_task_findings.setdefault(result_index, []).append(finding)
+    if cross_task_findings:
+        results = [
+            TaskAudit(
+                task_id=result.task_id,
+                title=result.title,
+                enabled=result.enabled,
+                evaluated=result.evaluated,
+                audit_kind=result.audit_kind,
+                audit=PromptAudit(
+                    valid=False,
+                    role=result.audit.role,
+                    operation_key=result.audit.operation_key,
+                    carrier=result.audit.carrier,
+                    latest_handled_edge=result.audit.latest_handled_edge,
+                    findings=result.audit.findings
+                    + tuple(cross_task_findings.get(result_index, ())),
+                )
+                if result_index in cross_task_findings and result.audit is not None
+                else result.audit,
+            )
+            for result_index, result in enumerate(results)
+        ]
 
     enabled_results = [
         result
@@ -816,5 +963,7 @@ def audit_tasks(tasks: Iterable[Any]) -> AuditReport:
         invalid_classification_tasks=invalid_classification_count,
         invalid_export_tasks=invalid_export_count,
         duplicate_task_ids=duplicate_task_ids,
+        duplicate_action_authority=duplicate_action_authority,
+        conflicting_handled_edges=conflicting_handled_edges,
         tasks=tuple(results),
     )

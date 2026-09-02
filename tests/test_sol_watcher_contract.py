@@ -32,10 +32,14 @@ def _prompt(
     *,
     carrier: str | None = None,
     edge: str = "NONE",
+    operation_key: str | None = None,
 ) -> str:
     return render_watcher_prompt(
         role=role,
-        operation_key=f"sol-watcher-{role.value.casefold().replace('_', '-')}-test",
+        operation_key=(
+            operation_key
+            or f"sol-watcher-{role.value.casefold().replace('_', '-')}-test"
+        ),
         carrier=carrier or _carrier(role),
         latest_handled_edge=edge,
     )
@@ -285,6 +289,168 @@ def test_audit_tasks_skips_declared_non_watcher_tasks() -> None:
     assert by_id["ordinary-reminder"].evaluated is False
 
 
+def test_audit_rejects_duplicate_action_authority_with_a_deterministic_summary() -> None:
+    duplicate = audit_tasks(
+        [
+            {
+                "id": "action-z",
+                "title": "Later action authority",
+                "is_enabled": True,
+                "prompt": _prompt(WatcherRole.ACTION_AUTHORITATIVE),
+            },
+            {
+                "id": "action-a",
+                "title": "Earlier action authority",
+                "is_enabled": True,
+                "prompt": _prompt(WatcherRole.ACTION_AUTHORITATIVE),
+            },
+        ]
+    )
+
+    assert duplicate.valid is False
+    assert duplicate.to_dict()["summary"]["duplicate_action_authority"] == [
+        {
+            "operation_key": "sol-watcher-action-authoritative-test",
+            "task_ids": ["action-a", "action-z"],
+        }
+    ]
+    for task in duplicate.tasks:
+        assert task.audit is not None
+        assert FindingCode.DUPLICATE_ACTION_AUTHORITY in {
+            finding.code for finding in task.audit.findings
+        }
+
+    lawful = audit_tasks(
+        [
+            {
+                "id": "one-action",
+                "title": "The one action authority",
+                "is_enabled": True,
+                "prompt": _prompt(WatcherRole.ACTION_AUTHORITATIVE),
+            },
+            {
+                "id": "observer-one",
+                "title": "First observer",
+                "is_enabled": True,
+                "prompt": _prompt(WatcherRole.OBSERVER_ONLY),
+            },
+            {
+                "id": "observer-two",
+                "title": "Second observer",
+                "is_enabled": True,
+                "prompt": _prompt(WatcherRole.OBSERVER_ONLY),
+            },
+        ]
+    )
+    assert lawful.valid is True
+    assert lawful.to_dict()["summary"]["duplicate_action_authority"] == []
+
+
+def test_audit_rejects_conflicting_handled_edges_for_one_operation_and_carrier() -> None:
+    conflicting = audit_tasks(
+        [
+            {
+                "id": "edge-z",
+                "title": "Later baseline",
+                "is_enabled": True,
+                "prompt": _prompt(
+                    WatcherRole.OBSERVER_ONLY,
+                    carrier=ACTION_CARRIER,
+                    edge="1788339162.614019",
+                    operation_key="sol-watcher-action-authoritative-test",
+                ),
+            },
+            {
+                "id": "edge-a",
+                "title": "Earlier baseline",
+                "is_enabled": True,
+                "prompt": _prompt(
+                    WatcherRole.TRIAGE_ONLY,
+                    carrier=ACTION_CARRIER,
+                    edge="NONE",
+                    operation_key="sol-watcher-action-authoritative-test",
+                ),
+            },
+        ]
+    )
+
+    assert conflicting.valid is False
+    assert conflicting.to_dict()["summary"]["conflicting_handled_edges"] == [
+        {
+            "operation_key": "sol-watcher-action-authoritative-test",
+            "carrier": ACTION_CARRIER,
+            "task_ids": ["edge-a", "edge-z"],
+            "latest_handled_edges": ["1788339162.614019", "NONE"],
+        }
+    ]
+    for task in conflicting.tasks:
+        assert task.audit is not None
+        assert FindingCode.CONFLICTING_HANDLED_EDGE in {
+            finding.code for finding in task.audit.findings
+        }
+
+    identical = audit_tasks(
+        [
+            {
+                "id": "same-edge-one",
+                "title": "First shared baseline",
+                "is_enabled": True,
+                "prompt": _prompt(
+                    WatcherRole.OBSERVER_ONLY,
+                    carrier=ACTION_CARRIER,
+                    edge="1788339162.614019",
+                    operation_key="sol-watcher-action-authoritative-test",
+                ),
+            },
+            {
+                "id": "same-edge-two",
+                "title": "Second shared baseline",
+                "is_enabled": True,
+                "prompt": _prompt(
+                    WatcherRole.TRIAGE_ONLY,
+                    carrier=ACTION_CARRIER,
+                    edge="1788339162.614019",
+                    operation_key="sol-watcher-action-authoritative-test",
+                ),
+            },
+        ]
+    )
+    assert identical.valid is True
+    assert identical.to_dict()["summary"]["conflicting_handled_edges"] == []
+
+
+@pytest.mark.parametrize("task_id", ("ordinary-duplicate", "invalid-task-0"))
+def test_duplicate_caller_task_ids_are_never_exempt_from_the_duplicate_census(
+    task_id: str,
+) -> None:
+    report = audit_tasks(
+        [
+            {
+                "id": task_id,
+                "title": "First ordinary task",
+                "is_enabled": False,
+                "audit_kind": "NON_WATCHER",
+                "prompt": "ordinary reminder",
+            },
+            {
+                "id": task_id,
+                "title": "Second ordinary task",
+                "is_enabled": False,
+                "audit_kind": "NON_WATCHER",
+                "prompt": "ordinary reminder",
+            },
+        ]
+    )
+
+    assert report.valid is False
+    assert report.duplicate_task_ids == (task_id,)
+    for task in report.tasks:
+        assert task.audit is not None
+        assert FindingCode.DUPLICATE_TASK_ID in {
+            finding.code for finding in task.audit.findings
+        }
+
+
 def test_unknown_audit_kind_fails_closed_even_when_task_is_disabled() -> None:
     report = audit_tasks(
         [
@@ -514,7 +680,10 @@ def test_cli_preserves_every_row_for_a_valid_list_with_a_non_object_task(tmp_pat
                     "id": "clean-two",
                     "title": "Clean two",
                     "is_enabled": True,
-                    "prompt": _prompt(),
+                    "prompt": _prompt(
+                        WatcherRole.OBSERVER_ONLY,
+                        operation_key="sol-watcher-action-authoritative-test",
+                    ),
                 },
             ]
         ),
@@ -531,6 +700,8 @@ def test_cli_preserves_every_row_for_a_valid_list_with_a_non_object_task(tmp_pat
         "invalid_classification_tasks": 0,
         "invalid_export_tasks": 1,
         "duplicate_task_ids": [],
+        "duplicate_action_authority": [],
+        "conflicting_handled_edges": [],
     }
     assert [task["task_id"] for task in report["tasks"]] == [
         "clean-one",

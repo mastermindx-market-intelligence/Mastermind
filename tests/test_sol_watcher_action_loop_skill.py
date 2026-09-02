@@ -52,6 +52,19 @@ def test_watcher_lifetime_survives_nonterminal_events_until_stop() -> None:
         assert phrase in normalized, f"missing watcher lifetime invariant: {phrase}"
 
 
+def test_read_capable_write_incapable_schedule_bridges_to_exact_interactive_sol() -> None:
+    normalized = " ".join(_read("docs/sol_skills/WATCHER_ACTION_LOOP.md").split())
+    required = (
+        "If the scheduled surface can read but cannot write the lawful carrier",
+        "return `WRITE_UNAVAILABLE` to its own task or automation surface",
+        "wake or notify the exact interactive Sol surface as a transport bridge",
+        "On that first interactive turn, Sol must re-pin, adjudicate, and act before reporting",
+        "Do not turn a write-capability limitation into permanent Chairman relay work",
+    )
+    for phrase in required:
+        assert phrase in normalized, f"missing write-incapable re-entry law: {phrase}"
+
+
 def test_watcher_prompts_are_renderer_owned_canonical_documents() -> None:
     normalized = " ".join(_read("docs/sol_skills/WATCHER_ACTION_LOOP.md").split())
     required = (
