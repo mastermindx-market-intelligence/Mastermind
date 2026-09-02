@@ -8,7 +8,7 @@ HC0 exposes exactly one read-only tool:
 inspect_surface_context({})
 ```
 
-It returns pseudonymous correlation evidence for documented ChatGPT request metadata. It does not return raw host identifiers and cannot authenticate Chris, assign Sol/worker responsibility, create a RuntimeBinding, admit an Executive Job, mutate Mastermind OS, or authorize another tool.
+It returns pseudonymous correlation evidence for documented ChatGPT request metadata. Each identifier has an app-local `fingerprint`, separated by app realm and generation, plus a `comparison_fingerprint` for the controlled cross-app experiment. Neither value is reversible or usable for authorization. The tool does not return raw host identifiers and cannot authenticate Chris, assign Sol/worker responsibility, create a RuntimeBinding, admit an Executive Job, mutate Mastermind OS, or authorize another tool.
 
 Account availability, plugin import, app registration, tunnel connection, tool delivery, OAuth, RuntimeBinding, Executive admission, worker execution, production proof and final operational cutover are separate gates.
 
@@ -19,7 +19,7 @@ Use the two concurrent Business Premium accounts as a canary/control pair. Do no
 - **Account A — canary:** primary HC0 development and same-conversation repeat testing.
 - **Account B — control:** cross-principal and organization-boundary testing. Do not share Account A credentials, cookies, tokens, browser profile or app registration.
 
-For the cross-app experiment, create two separate private HC0 app registrations, `surface-probe-a` and `surface-probe-b`. They may temporarily share one probe-cohort HMAC key solely so equality can be tested without exposing raw host values. The key grants no authority and must be rotated or destroyed after the experiment.
+For the cross-app experiment, create two separate private HC0 app registrations, `surface-probe-a` and `surface-probe-b`. They may temporarily share one probe-cohort HMAC key solely so `comparison_fingerprint` equality can be tested without exposing raw host values. The comparison domain binds the exact result schema, `cross_app_comparison` purpose, fingerprint scope, key ID, key version, field and raw value while excluding app realm and generation. The app-local `fingerprint` retains realm and generation separation. The key and both fingerprint forms grant no authority, and the key must be rotated or destroyed after the experiment.
 
 ## Exact source and dependency prerequisite
 
@@ -133,18 +133,18 @@ For every row, record `PROVEN`, `DISPROVEN` or `UNKNOWN`. Never copy raw host me
 
 | Test | Account | App | Conversation condition | Compare |
 |---|---|---|---|---|
-| Same-app repeat | A | A | two calls in one conversation | session/subject/org fingerprints |
-| New conversation | A | A | new conversation | old versus new session fingerprint |
-| Fork | A | A | fork existing conversation | parent versus fork session fingerprint |
-| Refresh | A | A | refresh same conversation | before versus after |
-| Tunnel restart | A | A | restart local server/tunnel | before versus after |
-| App generation | A | A-v2 | new immutable generation | behavior and domain-separated change |
-| Cross-app | A | A then B | same conversation if host permits both | A versus B under shared cohort key |
-| Cross-principal | B | B | equivalent steps in Account B | subject and organization separation |
-| Organization boundary | A/B | A/B | another organization if available | organization fingerprint separation |
+| Same-app repeat | A | A | two calls in one conversation | local `fingerprint` for session/subject/org |
+| New conversation | A | A | new conversation | old versus new local session `fingerprint` |
+| Fork | A | A | fork existing conversation | parent versus fork local session `fingerprint` |
+| Refresh | A | A | refresh same conversation | local `fingerprint` before versus after |
+| Tunnel restart | A | A | restart local server/tunnel | local `fingerprint` before versus after |
+| App generation | A | A-v2 | new immutable generation | behavior and domain-separated local `fingerprint` change |
+| Cross-app | A | A then B | same conversation if host permits both | A versus B `comparison_fingerprint` only under shared cohort key |
+| Cross-principal | B | B | equivalent steps in Account B | local subject and organization `fingerprint` separation |
+| Organization boundary | A/B | A/B | another organization if available | `comparison_fingerprint` only when comparing different apps; otherwise local `fingerprint` |
 | Metadata absence | A/B | A/B | host omits optional field | explicit absence/degradation |
 
-A fingerprint is correlation evidence only. Equality does not establish authority; inequality does not justify a fallback Business-session database.
+Both fingerprint forms are correlation evidence only. Equality does not establish authority; inequality does not justify a fallback Business-session database. Never compare app-local `fingerprint` values across different realms or generations: construction requires them to differ. Cross-app experiment rows compare only `comparison_fingerprint` under the same temporary key ID, key version, scope and secret.
 
 ## Receipt template
 
@@ -162,7 +162,8 @@ business_account_role: canary | control
 condition:
 observed_at:
 host_field_presence:
-comparison_result: equal | unequal | unavailable | not_applicable
+app_local_fingerprint_result: equal | unequal | unavailable | not_applicable
+comparison_fingerprint_result: equal | unequal | unavailable | not_applicable
 claim_state: PROVEN | DISPROVEN | UNKNOWN
 raw_host_values_captured: false
 runtime_binding_created: false
@@ -179,7 +180,7 @@ Receipts must not contain the HMAC key, raw host IDs, tokens, cookies, email add
 - Tool inventory or digest drift: stop and compare exact app/server/source generation.
 - Raw value in output or logs: stop, revoke/rotate the cohort key, quarantine the artifact and treat it as a security incident.
 - Tunnel/server timeout: the call is read-only; retry only against the same exact generation. No host claim is proven until a valid response arrives.
-- Cross-app mismatch: record `DISPROVEN`; do not create another session registry.
+- Cross-app `comparison_fingerprint` mismatch under the exact same key ID, key version, scope and secret: record `DISPROVEN`; do not substitute app-local `fingerprint` or create another session registry.
 - App/account ambiguity: record `UNKNOWN`; do not infer which principal was active.
 - Public bind or noncanonical path request: configuration must refuse before serving.
 

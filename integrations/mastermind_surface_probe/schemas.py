@@ -70,9 +70,20 @@ _IDENTIFIER_ROW_SCHEMA: dict[str, Any] = {
                 {"type": "null"},
             ]
         },
+        "comparison_fingerprint": {
+            "oneOf": [
+                {"type": "string", "pattern": FINGERPRINT_PATTERN},
+                {"type": "null"},
+            ]
+        },
         "usable_for_authorization": {"const": False},
     },
-    "required": ["present", "fingerprint", "usable_for_authorization"],
+    "required": [
+        "present",
+        "fingerprint",
+        "comparison_fingerprint",
+        "usable_for_authorization",
+    ],
     "additionalProperties": False,
 }
 
@@ -81,9 +92,15 @@ _HINT_ROW_SCHEMA: dict[str, Any] = {
     "properties": {
         "present": {"type": "boolean"},
         "fingerprint": {"type": "null"},
+        "comparison_fingerprint": {"type": "null"},
         "usable_for_authorization": {"const": False},
     },
-    "required": ["present", "fingerprint", "usable_for_authorization"],
+    "required": [
+        "present",
+        "fingerprint",
+        "comparison_fingerprint",
+        "usable_for_authorization",
+    ],
     "additionalProperties": False,
 }
 

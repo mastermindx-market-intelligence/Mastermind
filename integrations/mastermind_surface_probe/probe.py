@@ -224,6 +224,27 @@ def _fingerprint(config: HostContextProbeConfig, *, field: str, raw_value: str) 
     return f"hmac-sha256:{config.fingerprint_key_version}:{digest}"
 
 
+def _comparison_fingerprint(
+    config: HostContextProbeConfig,
+    *,
+    field: str,
+    raw_value: str,
+) -> str:
+    message = canonical_json(
+        {
+            "schema": RESULT_SCHEMA,
+            "purpose": "cross_app_comparison",
+            "fingerprint_scope": config.fingerprint_scope,
+            "fingerprint_key_id": config.fingerprint_key_id,
+            "fingerprint_key_version": config.fingerprint_key_version,
+            "field": field,
+            "value": raw_value,
+        }
+    )
+    digest = hmac.new(config._secret_bytes(), message, hashlib.sha256).hexdigest()
+    return f"hmac-sha256:{config.fingerprint_key_version}:{digest}"
+
+
 def _normalize_observation_time(observed_at: datetime) -> str:
     if (
         not isinstance(observed_at, datetime)
@@ -286,6 +307,7 @@ def inspect_surface_context(
             host_context[output_key] = {
                 "present": False,
                 "fingerprint": None,
+                "comparison_fingerprint": None,
                 "usable_for_authorization": False,
             }
             continue
@@ -296,9 +318,15 @@ def inspect_surface_context(
             raise HostContextProbeError("INVALID_HOST_METADATA") from None
 
         fingerprint: str | None = None
+        comparison_fingerprint: str | None = None
         if kind == "identifier":
             identifier = _validate_text(raw_value, max_bytes=_MAX_IDENTIFIER_BYTES)
             fingerprint = _fingerprint(config, field=output_key, raw_value=identifier)
+            comparison_fingerprint = _comparison_fingerprint(
+                config,
+                field=output_key,
+                raw_value=identifier,
+            )
         elif kind == "locale":
             _validate_text(raw_value, max_bytes=_MAX_LOCALE_BYTES)
         elif kind == "user_agent":
@@ -311,13 +339,18 @@ def inspect_surface_context(
         host_context[output_key] = {
             "present": True,
             "fingerprint": fingerprint,
+            "comparison_fingerprint": comparison_fingerprint,
             "usable_for_authorization": False,
         }
 
     if tuple(host_context) != HOST_CONTEXT_KEYS:  # pragma: no cover - invariant guard.
         raise HostContextProbeError("INVALID_HOST_METADATA")
     if any(
-        row["fingerprint"] is not None and key not in IDENTIFIER_HOST_FIELDS
+        (
+            row["fingerprint"] is not None
+            or row["comparison_fingerprint"] is not None
+        )
+        and key not in IDENTIFIER_HOST_FIELDS
         for key, row in host_context.items()
     ):  # pragma: no cover - invariant guard.
         raise HostContextProbeError("INVALID_HOST_METADATA")
