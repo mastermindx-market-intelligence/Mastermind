@@ -502,29 +502,45 @@ class WebDriverNavigator:
 # ---------------------------------------------------------------------------
 
 
-def _is_exact_profile_create_success(response) -> bool:
+def _exact_profile_create_id(response):
+    """Return the one acknowledged profile id iff ``response`` is an exact
+    documented create success, else ``None``.
+
+    The two official sources disagree on the success status code (the help
+    article's prose says ``200``; the Postman collection's saved example
+    shows ``201``), so both are accepted as *dispatch acknowledged*. This
+    never decides the effect on its own -- the read-back always does -- but
+    the acknowledged id is the strongest available cross-check on the record
+    the census hands back.
+    """
     if response is None or response.status_code not in (200, 201):
-        return False
+        return None
     payload = response.payload
     if not isinstance(payload, dict) or set(payload) != {"status", "data"}:
-        return False
+        return None
     status = payload.get("status")
     data = payload.get("data")
     if not isinstance(status, dict) or set(status) != {"error_code", "http_code", "message"}:
-        return False
+        return None
     if (
         status.get("error_code") != ""
         or status.get("http_code") != response.status_code
         or status.get("message") != "Profile successfully created"
     ):
-        return False
+        return None
     if not isinstance(data, dict) or set(data) != {"ids"}:
-        return False
+        return None
     ids = data.get("ids")
     if not isinstance(ids, list) or len(ids) != 1:
-        return False
+        return None
     only_id = ids[0]
-    return isinstance(only_id, str) and bool(only_id)
+    if not isinstance(only_id, str) or not only_id:
+        return None
+    return only_id
+
+
+def _is_exact_profile_create_success(response) -> bool:
+    return _exact_profile_create_id(response) is not None
 
 
 def _is_exact_profile_remove_success(response) -> bool:
@@ -1015,6 +1031,7 @@ class MultiloginClient:
         candidates_before = len(candidates)
         dispatched = False
         reconciled = False
+        acknowledged_id = None
 
         if candidates_before >= 1 and not intent_present:
             # A name-colliding profile we did not create is a conflict; we
@@ -1055,7 +1072,8 @@ class MultiloginClient:
                 return _receipt(
                     "NONE", "AUTH_EXPIRED", "REFUSED", candidates_before=0, dispatched=False,
                 )
-            exact = _is_exact_profile_create_success(response)
+            acknowledged_id = _exact_profile_create_id(response)
+            exact = acknowledged_id is not None
             dispatched = True
             reconciled = not exact
         else:  # pragma: no cover — every (intent_present, candidates_before)
@@ -1086,6 +1104,18 @@ class MultiloginClient:
         if not self._peer_identity_matches(
             record, folder_id=folder_id, peer_name=peer_name, require_unowned=True,
         ):
+            return _receipt(
+                "CREATE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
+                candidates_before=candidates_before, dispatched=dispatched, reconciled=reconciled,
+                exact_readback=False,
+            )
+
+        if acknowledged_id is not None and record.get("id") != acknowledged_id:
+            # The vendor named one id and the folder census returned another.
+            # Adopting the census row here would leave the acknowledged
+            # profile untracked in the approved folder, unreachable by
+            # rollback, and fatal to every later create. Contradiction is
+            # uncertainty, never permission.
             return _receipt(
                 "CREATE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
                 candidates_before=candidates_before, dispatched=dispatched, reconciled=reconciled,
@@ -1838,6 +1868,19 @@ def _commit_peer_intent(path, *, folder_id: str, anchor_profile_id: str, peer_na
     return True
 
 
+def _discard_peer_intent(path, *, peer_name: str) -> bool:
+    """Remove ONLY an intent sidecar that exactly matches this operation and
+    peer name. A foreign, malformed, or mismatched file is never touched."""
+    target = Path(path).expanduser()
+    if not _peer_intent_present(target, peer_name=peer_name):
+        return False
+    try:
+        target.unlink()
+    except OSError:
+        return False
+    return True
+
+
 def _write_peer_provision(
     path, *, profile_id: str, folder_id: str, bindings_loader, now,
 ):
@@ -1882,16 +1925,34 @@ def _create_peer_profile_cli(
     peer_name = peer_profile_name(folder_id, anchor_profile_id)
     intent_present = _peer_intent_present(peer_intent_path, peer_name=peer_name)
 
+    committed_here = {"value": False}
+
     def _commit():
-        return _commit_peer_intent(
+        ok = _commit_peer_intent(
             peer_intent_path, folder_id=folder_id, anchor_profile_id=anchor_profile_id,
             peer_name=peer_name,
         )
+        committed_here["value"] = committed_here["value"] or ok
+        return ok
 
     receipt = client.create_peer_profile(
         folder_id=folder_id, anchor_profile_id=anchor_profile_id,
         intent_present=intent_present, commit_intent=_commit,
     )
+    if (
+        committed_here["value"]
+        and receipt["effect"] == "NONE"
+        and receipt["code"] == "AUTH_EXPIRED"
+    ):
+        # #385-9 classifies an explicit 401/403 as preceding any possible
+        # creation, so the preimage this invocation just wrote describes an
+        # effect that provably did not happen. Leaving it behind would wedge
+        # every later invocation into CREATE_EFFECT_UNKNOWN permanently on
+        # the single most common vendor failure -- an expired bearer token.
+        # Only the sidecar THIS call authored is discarded, and only on that
+        # one typed pre-effect code; an ambiguous or lost response always
+        # keeps its preimage.
+        _discard_peer_intent(peer_intent_path, peer_name=peer_name)
     if receipt["effect"] != "PROFILE_STOPPED_PROVEN":
         # A create whose read-back could not prove the profile stopped is NOT
         # a provisionable profile. Writing profile_B here would publish a
@@ -1923,13 +1984,18 @@ def _create_peer_profile_cli(
 def main(
     argv=None, *, stdout=None, bindings_loader=None, credential_stream_factory=None,
     client_factory=BoundedHttpClient, origin_factory=LoopbackBenignOrigin,
-    environment_loader=None, now=None,
+    environment_loader=None, now=None, peer_provision_path=None, peer_intent_path=None,
 ) -> int:
     """Run the operator-only helper.
 
     ``credential_stream_factory`` is a hermetic test seam.  The CLI/live path
     cannot set it and always uses the fixed post-preflight Keychain pipe.
     No repository test calls a real credential store or vendor endpoint.
+
+    ``peer_provision_path``/``peer_intent_path`` are hermetic test seams for
+    the same reason.  #385 requires a FIXED private peer destination, so the
+    argument parser deliberately exposes no flag for either: the live CLI can
+    only ever use :data:`PEER_PROVISION_PATH` and :data:`PEER_INTENT_PATH`.
     """
     parser = argparse.ArgumentParser(prog="nonseat_canary_vendors")
     parser.add_argument(
@@ -1938,8 +2004,6 @@ def main(
     )
     parser.add_argument("--vendor", required=True, choices=("gologin", "multilogin"))
     parser.add_argument("--provision-path", required=True)
-    parser.add_argument("--peer-provision-path", default=None)
-    parser.add_argument("--peer-intent-path", default=None)
     parser.add_argument("--confirmed", action="store_true")
     args = parser.parse_args(argv)
     peer_ops = ("create-peer-profile", "rollback-peer-profile")
@@ -1967,8 +2031,8 @@ def main(
     if local_code is not None:
         return _emit_refusal(out, args.vendor, local_code)
 
-    peer_provision_path = args.peer_provision_path or PEER_PROVISION_PATH
-    peer_intent_path = args.peer_intent_path or PEER_INTENT_PATH
+    peer_provision_path = peer_provision_path or PEER_PROVISION_PATH
+    peer_intent_path = peer_intent_path or PEER_INTENT_PATH
     peer_provision = None
     if args.operation == "rollback-peer-profile":
         # Rollback needs the PEER provision's profile_id before it can even
@@ -1977,6 +2041,16 @@ def main(
             peer_provision_path, bindings_loader=bindings_loader, now=reference_time,
         )
         if peer_provision is None:
+            return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
+        # #385 requires the exact operation-created provision AND the
+        # create-intent receipt to match before one removal is permitted.
+        # The provision alone cannot prove THIS operation created the
+        # profile; without the preimage, a hand-authored or stale provision
+        # would be enough to delete a profile we never made.
+        if not _peer_intent_present(
+            peer_intent_path,
+            peer_name=peer_profile_name(provision["folder_id"], provision["profile_id"]),
+        ):
             return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
 
     origin = None

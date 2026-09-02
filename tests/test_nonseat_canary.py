@@ -3091,9 +3091,9 @@ def test_peer_d2_new_operations_never_bind_or_self_test_loopback_origin(tmp_path
         [
             "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
             "--confirmed",
-            "--peer-intent-path", str(tmp_path / "intent.json"),
-            "--peer-provision-path", str(tmp_path / "peer.json"),
         ],
+        peer_intent_path=str(tmp_path / "intent.json"),
+        peer_provision_path=str(tmp_path / "peer.json"),
         stdout=out,
         bindings_loader=_no_collision_loader,
         environment_loader=_environment_loader_for(provision),
@@ -3163,9 +3163,9 @@ def test_peer_d4_zero_candidates_creates_reads_back_and_writes_provision(tmp_pat
         [
             "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
             "--confirmed",
-            "--peer-intent-path", str(peer_intent_path),
-            "--peer-provision-path", str(peer_provision_path),
         ],
+        peer_intent_path=str(peer_intent_path),
+        peer_provision_path=str(peer_provision_path),
         stdout=out,
         bindings_loader=_no_collision_loader,
         environment_loader=_environment_loader_for(provision),
@@ -3406,9 +3406,9 @@ def test_peer_d11_provision_write_failure_retains_cleanup_lease(tmp_path):
         [
             "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
             "--confirmed",
-            "--peer-intent-path", str(tmp_path / "peer_intent.json"),
-            "--peer-provision-path", str(peer_provision_path),
         ],
+        peer_intent_path=str(tmp_path / "peer_intent.json"),
+        peer_provision_path=str(peer_provision_path),
         stdout=out,
         bindings_loader=_no_collision_loader,
         environment_loader=_environment_loader_for(provision),
@@ -3449,9 +3449,9 @@ def test_peer_d11_unstopped_create_never_writes_a_peer_provision(tmp_path):
         [
             "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
             "--confirmed",
-            "--peer-intent-path", str(tmp_path / "peer_intent.json"),
-            "--peer-provision-path", str(peer_provision_path),
         ],
+        peer_intent_path=str(tmp_path / "peer_intent.json"),
+        peer_provision_path=str(peer_provision_path),
         stdout=out,
         bindings_loader=_no_collision_loader,
         environment_loader=_environment_loader_for(provision),
@@ -3490,6 +3490,266 @@ def test_peer_d12_remove_exact_stopped_peer_verifies_absence():
     assert receipt["effect"] == "ROLLBACK_VERIFIED"
     assert receipt["predicates"]["removed_absent"] is True
     assert [c[0] for c in transport.calls].count("remove") == 1
+
+
+# --- REVIEW REPAIRS: gaps found by the non-author adversarial review -------
+
+
+def _seed_peer_intent(tmp_path, provision):
+    """Write the create-intent preimage exactly as a real create would."""
+    intent_path = tmp_path / "peer_intent.json"
+    assert vendors._commit_peer_intent(
+        intent_path,
+        folder_id=provision["folder_id"],
+        anchor_profile_id=provision["profile_id"],
+        peer_name=vendors.peer_profile_name(provision["folder_id"], provision["profile_id"]),
+    )
+    return intent_path
+
+
+def _peer_provision_doc(provision, profile_id):
+    return {
+        "schema": core.PROVISION_SCHEMA,
+        "vendor": "multilogin",
+        "profile_id": profile_id,
+        "folder_id": provision["folder_id"],
+        "browser_type": "mimic",
+        "origin_policy": port_policy.ORIGIN_POLICY,
+        "disposable_ack": core.REQUIRED_ACK,
+    }
+
+
+def _rollback_main(tmp_path, provision, transport, *, intent_path, peer_provision_path, out):
+    return vendors.main(
+        [
+            "rollback-peer-profile", "--vendor", "multilogin",
+            "--provision-path", str(_write_provision(tmp_path, provision)), "--confirmed",
+        ],
+        peer_intent_path=str(intent_path),
+        peer_provision_path=str(peer_provision_path),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+
+
+def test_peer_rollback_without_create_intent_receipt_refuses_before_any_remove(tmp_path):
+    """A peer provision ALONE must not authorize a removal.
+
+    #385 requires the exact operation-created provision AND the create-intent
+    receipt to match. Without this gate a hand-authored or stale provision is
+    enough to delete a profile this operation never created -- precisely the
+    state #385-6 calls a conflict on the create side.
+    """
+    provision = _valid_provision("multilogin")
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    peer_provision_path = tmp_path / "peer_provision.json"
+    peer_provision_path.write_text(
+        json.dumps(_peer_provision_doc(provision, _PEER_CREATED_UUID)), encoding="utf-8"
+    )
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name, folder_id=provision["folder_id"], id=_PEER_CREATED_UUID)], [],
+    )
+    transport.remove_response = _peer_remove_success()
+
+    out = io.StringIO()
+    code = _rollback_main(
+        tmp_path, provision, transport,
+        intent_path=tmp_path / "absent_intent.json",
+        peer_provision_path=peer_provision_path, out=out,
+    )
+    assert code == 2
+    # The load-bearing assertion: nothing was dispatched at all.
+    assert [c[0] for c in transport.calls].count("remove") == 0
+
+
+def test_peer_rollback_with_matching_intent_receipt_verifies_absence(tmp_path):
+    """The same flow WITH the operation's own preimage completes end to end."""
+    provision = _valid_provision("multilogin")
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    intent_path = _seed_peer_intent(tmp_path, provision)
+    peer_provision_path = tmp_path / "peer_provision.json"
+    peer_provision_path.write_text(
+        json.dumps(_peer_provision_doc(provision, _PEER_CREATED_UUID)), encoding="utf-8"
+    )
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name, folder_id=provision["folder_id"], id=_PEER_CREATED_UUID)], [],
+    )
+    transport.remove_response = _peer_remove_success()
+
+    out = io.StringIO()
+    code = _rollback_main(
+        tmp_path, provision, transport,
+        intent_path=intent_path, peer_provision_path=peer_provision_path, out=out,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 0
+    assert receipt["effect"] == "ROLLBACK_VERIFIED"
+    assert receipt["predicates"]["removed_absent"] is True
+    assert [c[0] for c in transport.calls].count("remove") == 1
+
+
+def test_peer_pre_effect_auth_rejection_does_not_wedge_the_capability(tmp_path):
+    """An explicit 401 is classified pre-effect by #385-9, so the preimage it
+    just wrote describes a creation that provably did not happen.
+
+    Without discarding it, the single most common vendor failure (an expired
+    bearer token) would pin every later invocation at CREATE_EFFECT_UNKNOWN
+    forever, making the promised capability permanently unreachable.
+    """
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    intent_path = tmp_path / "peer_intent.json"
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([])
+    transport.create_response = vendors._BoundedResponse(401, {})
+
+    out = io.StringIO()
+    code = vendors.main(
+        ["create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path), "--confirmed"],
+        peer_intent_path=str(intent_path),
+        peer_provision_path=str(tmp_path / "peer_provision.json"),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 2
+    assert receipt["effect"] == "NONE"
+    assert receipt["code"] == "AUTH_EXPIRED"
+    assert [c[0] for c in transport.calls].count("create") == 1
+    # The capability is still reachable: no stale preimage was left behind.
+    assert not intent_path.exists()
+
+
+def test_peer_ambiguous_response_keeps_its_preimage(tmp_path):
+    """The converse of the pre-effect discard: a LOST response must retain the
+    preimage, because a profile may well have been created."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    intent_path = tmp_path / "peer_intent.json"
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [])
+    transport.create_raises = True
+
+    out = io.StringIO()
+    vendors.main(
+        ["create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path), "--confirmed"],
+        peer_intent_path=str(intent_path),
+        peer_provision_path=str(tmp_path / "peer_provision.json"),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert intent_path.exists()
+
+
+def test_peer_acknowledged_id_must_match_the_read_back_record():
+    """The vendor named one id and the census returned another.
+
+    Adopting the census row would strand the acknowledged profile in the
+    approved folder: untracked, unreachable by rollback, and fatal to every
+    later create (which would then see multiple candidates).
+    """
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, id="census-id-Y")])
+    transport.create_response = _peer_create_success(profile_id="acked-id-X")
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=lambda: True,
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["predicates"]["exact_readback"] is False
+    assert receipt["digests"]["peer_profile"] is None
+    assert client._peer_profile_id is None
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+def test_peer_read_back_record_must_be_unowned():
+    """Pins ``require_unowned=True`` on the create read-back.
+
+    A census row claiming an owner is not a publishable profile even when the
+    launcher reports it stopped; without this the wave's "stopped AND unowned"
+    claim would be prose only.
+    """
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [], [_peer_record(peer_name, in_use_by="someone@example.com")],
+    )
+    transport.create_response = _peer_create_success()
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=lambda: True,
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["predicates"]["exact_readback"] is False
+    assert client._peer_profile_id is None
+
+
+@pytest.mark.parametrize("status_code", (202, 204, 500))
+def test_peer_create_success_status_set_is_exactly_200_and_201(status_code):
+    """Pins the deliberate two-source decision.
+
+    The help article's prose says 200 and the Postman collection's example
+    shows 201, so both are accepted as *dispatch acknowledged*. Any other code
+    is ambiguous, never exact -- widening this set must fail a test.
+    """
+    ok = vendors._BoundedResponse(status_code, {
+        "status": {"error_code": "", "http_code": status_code, "message": "Profile successfully created"},
+        "data": {"ids": [_PEER_CREATED_UUID]},
+    })
+    assert vendors._is_exact_profile_create_success(ok) is False
+    for accepted in (200, 201):
+        assert vendors._is_exact_profile_create_success(_peer_create_success(status_code=accepted)) is True
+
+
+@pytest.mark.parametrize("after_rows", ("zero", "multiple"))
+def test_peer_committed_intent_with_wrong_candidate_count_never_dispatches(after_rows):
+    """#385-8's committed-intent half: a preimage on disk plus zero or many
+    candidates is uncertainty, and uncertainty is never permission to create."""
+    peer_name = _peer_name()
+    rows = [] if after_rows == "zero" else [
+        _peer_record(peer_name, id="dup-1"), _peer_record(peer_name, id="dup-2"),
+    ]
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(rows)
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=True, commit_intent=lambda: True,
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["predicates"]["dispatched"] is False
+    assert [c[0] for c in transport.calls].count("create") == 0
+
+
+def test_peer_paths_are_not_caller_suppliable_on_the_cli():
+    """#385 requires a FIXED private peer destination, so the argument parser
+    must expose no flag that could redirect the provision or the preimage."""
+    source = inspect.getsource(vendors.main)
+    assert "--peer-provision-path" not in source
+    assert "--peer-intent-path" not in source
 
 
 # --- #385-13: wrong id / replaced identity / bound / running / unowned ---
@@ -3565,9 +3825,9 @@ def test_peer_d15_anchor_profile_and_bindings_are_never_targeted_or_mutated(tmp_
         [
             "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
             "--confirmed",
-            "--peer-intent-path", str(tmp_path / "peer_intent.json"),
-            "--peer-provision-path", str(tmp_path / "peer_provision.json"),
         ],
+        peer_intent_path=str(tmp_path / "peer_intent.json"),
+        peer_provision_path=str(tmp_path / "peer_provision.json"),
         stdout=out,
         bindings_loader=_no_collision_loader,
         environment_loader=_environment_loader_for(provision),

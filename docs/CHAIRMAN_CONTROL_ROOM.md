@@ -185,9 +185,31 @@ The ordered journey is:
    acknowledged" (never load-bearing — read-back still decides); and no
    error-body shape is documented for a 4xx/5xx create/remove response, so
    any non-exact response is treated as ambiguous, never as a definitive
-   failure permitting a retry.
+   failure permitting a retry. When the vendor *does* acknowledge exactly,
+   the acknowledged id must also equal the id the read-back census returns;
+   a disagreement is `CREATE_EFFECT_UNKNOWN`, because adopting the census row
+   would leave the acknowledged profile untracked in the approved folder and
+   unreachable by rollback. Both private destinations are fixed constants
+   (`PEER_PROVISION_PATH`, `PEER_INTENT_PATH`); the helper CLI deliberately
+   exposes no flag that could redirect either one.
+
+   **Intent sidecar lifecycle.** The preimage is written before dispatch and
+   is deliberately durable: it is what makes a re-run reconcile instead of
+   creating a second profile, so it survives a successful create and is the
+   proof that this operation — and not a hand-authored provision — created
+   the peer. It is discarded automatically in exactly one case: an explicit
+   `401`/`403`, which #385 classifies as preceding any possible creation, so
+   the preimage describes an effect that provably did not happen. Every other
+   outcome keeps it. If a sidecar is ever left behind for a create that may
+   really have happened, the operation stays at `CREATE_EFFECT_UNKNOWN` by
+   design; clearing it is a deliberate operator act (delete
+   `mas115_nonseat_peer_create_intent.json` from the private control-room
+   directory) and must only follow a manual confirmation, in the vendor's own
+   profile list, that no profile carrying the deterministic peer name exists.
 7. `rollback-peer-profile` removes **only** the exact stopped, unowned,
-   operation-created peer profile recorded in the peer provision file, via
+   operation-created peer profile — proven by the conjunction of the peer
+   provision file **and** the matching create-intent sidecar, never by the
+   provision alone — via
    `permanently: false` (recoverable — Multilogin's trash, not permanent
    deletion) — "absence" is proven against the same live folder census used
    by create, immediately after the one remove dispatch. Like create, it
