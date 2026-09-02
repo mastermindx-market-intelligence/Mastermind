@@ -12,6 +12,7 @@ import pytest
 MODULE = "integrations.business_sol_canary.evidence"
 EVALUATED_AT = "2026-09-02T04:00:00Z"
 P1_COMMIT = "12c2cb8993f78e81c6cb9e9a75a9829f9b194dab"
+P1_INVENTORY_DIGEST = "3847c8ac04fbd6354a4a352c8eb7bb1fd98c92e24f2c1e3e13c2051f891834df"
 TOOLS = (
     "list_responsibilities",
     "get_responsibility",
@@ -74,7 +75,7 @@ def _receipt() -> dict:
         },
         "package": {
             "protected_commit": P1_COMMIT,
-            "inventory_digest": "1" * 64,
+            "inventory_digest": P1_INVENTORY_DIGEST,
             "plugins": ["mastermind-operator", "mastermind-sol"],
         },
         "generations": {
