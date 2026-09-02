@@ -209,10 +209,25 @@ The ordered journey is:
 7. `rollback-peer-profile` removes **only** the exact stopped, unowned,
    operation-created peer profile — proven by the conjunction of the peer
    provision file **and** the matching create-intent sidecar, never by the
-   provision alone — via
-   `permanently: false` (recoverable — Multilogin's trash, not permanent
-   deletion) — "absence" is proven against the same live folder census used
-   by create, immediately after the one remove dispatch. Like create, it
+   provision alone.
+
+   **Removal is a trash move, not a deletion.** Multilogin's deletion law is
+   two-stage: an ordinary remove sends the profile to the Trash, where it
+   remains restorable and **may still consume a plan slot**; permanent
+   deletion is a separate, irreversible action taken from inside the Trash.
+   This command dispatches only the reversible form (`permanently: false`),
+   and "absence" is proven against the same **active** folder census
+   (`Profile Search(is_removed=false)`) used by create, immediately after the
+   one remove dispatch. Absence from that active census therefore proves the
+   profile left the active folder and nothing more: `ROLLBACK_VERIFIED` is
+   **not** evidence of permanent deletion or of capacity release, and the
+   receipt says so in its own `removal_disposition` /
+   `removal_disposition_detail` fields rather than leaving it to the reader.
+   Permanent deletion *is* reachable on the same documented endpoint via
+   `permanently: true`, and #385 does not authorize it — so the boundary is
+   structural, not prose: setting that constant makes the module refuse to
+   import, naming the `DECISION_REQUEST / PERMANENT_DELETE_BOUNDARY` ruling
+   that would be required first. Like create, it
    re-runs the local three-seat exclusion and never binds the loopback
    origin. A wrong id, a replaced identity, a still-running or still-locked
    profile, or a profile this operation did not create all refuse before any

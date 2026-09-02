@@ -3752,6 +3752,96 @@ def test_peer_paths_are_not_caller_suppliable_on_the_cli():
     assert "--peer-intent-path" not in source
 
 
+# --- SOL POST-START CLARIFICATION: trash is not permanent deletion ---------
+
+
+def test_peer_active_search_absence_never_proves_permanent_deletion(tmp_path):
+    """Absence from ``Profile Search(is_removed=False)`` proves the profile left
+    the ACTIVE folder -- nothing more.
+
+    Multilogin deletion is two-stage: an ordinary remove moves the profile to
+    the Trash, where it stays restorable and may still consume a plan slot;
+    permanent deletion is a separate irreversible action from inside the Trash.
+    So a ROLLBACK_VERIFIED receipt built from active-census absence must NOT be
+    readable as permanent deletion or capacity release.
+    """
+    provision = _valid_provision("multilogin")
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    intent_path = _seed_peer_intent(tmp_path, provision)
+    peer_provision_path = tmp_path / "peer_provision.json"
+    peer_provision_path.write_text(
+        json.dumps(_peer_provision_doc(provision, _PEER_CREATED_UUID)), encoding="utf-8"
+    )
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name, folder_id=provision["folder_id"], id=_PEER_CREATED_UUID)], [],
+    )
+    transport.remove_response = _peer_remove_success()
+
+    out = io.StringIO()
+    code = _rollback_main(
+        tmp_path, provision, transport,
+        intent_path=intent_path, peer_provision_path=peer_provision_path, out=out,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 0
+    assert receipt["effect"] == "ROLLBACK_VERIFIED"
+    assert receipt["predicates"]["removed_absent"] is True
+
+    # The disposition must be carried explicitly, not left to the reader.
+    assert receipt["removal_disposition"] == "TRASHED_RESTORABLE"
+    detail = receipt["removal_disposition_detail"].lower()
+    assert "restorable" in detail
+    assert "may still consume a plan slot" in detail
+    assert "not permanent deletion" in detail
+    assert "no capacity" in detail
+
+    # No effect sentence anywhere may assert permanence or capacity release.
+    vocabulary = " ".join(vendors.PEER_EFFECT_DETAILS.values()).lower()
+    for forbidden in ("permanently deleted", "permanent deletion", "capacity released", "slot freed"):
+        assert forbidden not in vocabulary
+
+    # And the request that produced the absence asked for the reversible form.
+    assert vendors._PEER_REMOVE_PERMANENTLY is False
+
+
+def test_peer_refused_removal_carries_no_removal_disposition():
+    """A refusal that dispatched nothing must not imply a trash move either."""
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([])
+    client = _peer_client(transport)
+    receipt = client.remove_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR, peer_profile_id="peer-created-1",
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["predicates"]["dispatched"] is False
+    assert receipt["removal_disposition"] == "NOT_APPLICABLE"
+    assert [c[0] for c in transport.calls].count("remove") == 0
+
+
+def test_peer_permanent_delete_is_structurally_unauthorized():
+    """#385 authorizes ONE exact remove request, not an irreversible purge.
+
+    Permanent deletion IS reachable on the same documented endpoint via
+    ``permanently: true``, so the boundary cannot rest on prose. Flipping the
+    constant must stop the module from importing at all, forcing a
+    DECISION_REQUEST / PERMANENT_DELETE_BOUNDARY ruling first.
+    """
+    source = Path(vendors.__file__).read_text(encoding="utf-8")
+    assert "_PEER_REMOVE_PERMANENTLY = False" in source
+    mutated = source.replace("_PEER_REMOVE_PERMANENTLY = False", "_PEER_REMOVE_PERMANENTLY = True", 1)
+    namespace = {
+        "__name__": "mutated_nonseat_canary_vendors",
+        "__file__": vendors.__file__,
+        "__package__": "integrations.chairman_surfaces",
+    }
+    with pytest.raises(RuntimeError) as raised:
+        exec(compile(mutated, vendors.__file__, "exec"), namespace)  # noqa: S102 — boundary probe
+    assert "permanent profile deletion is not authorized" in str(raised.value)
+    assert "PERMANENT_DELETE_BOUNDARY" in str(raised.value)
+
+
 # --- #385-13: wrong id / replaced identity / bound / running / unowned ---
 
 

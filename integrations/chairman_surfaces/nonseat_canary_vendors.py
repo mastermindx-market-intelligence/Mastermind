@@ -108,12 +108,42 @@ PEER_EFFECT_DETAILS = {
     "PROVISION_WRITTEN": "the disposable peer profile was created, proven stopped, and its provision was written.",
     "PROFILE_STOPPED_PROVEN": "the disposable peer profile was proven to exist and to be stopped.",
     "REMOVE_DISPATCHED": "a remove request for the disposable peer profile was sent to the vendor.",
-    "REMOVE_APPLIED": "the disposable peer profile was removed but its absence is not yet proven.",
+    "REMOVE_APPLIED": "the disposable peer profile was moved to the vendor trash but its absence is not yet proven.",
     "REMOVE_EFFECT_UNKNOWN": "whether the disposable peer profile was removed could not be determined.",
-    "ROLLBACK_VERIFIED": "the disposable peer profile's absence was proven after removal.",
+    "ROLLBACK_VERIFIED": "the disposable peer profile is absent from the active folder census after removal.",
 }
 if set(PEER_EFFECT_DETAILS) != PEER_EFFECT_CODES:
     raise RuntimeError("nonseat_canary_vendors: PEER_EFFECT_DETAILS keys must exactly match PEER_EFFECT_CODES")
+
+#: Multilogin deletion is two-stage: an ordinary remove moves the profile to the
+#: Trash, where it stays restorable and may still consume a plan slot; permanent
+#: deletion is a separate irreversible action taken from inside the Trash.
+#: #385 authorizes ONE exact remove request -- not a second-stage purge -- so this
+#: operation only ever asks for the reversible form. Flipping this constant is a
+#: load-bearing authority change, not a tuning knob, and the module refuses to
+#: import rather than let it happen silently.
+if _PEER_REMOVE_PERMANENTLY is not False:
+    # An `assert` here would be stripped by `python -O`; this boundary must hold
+    # even in an optimized interpreter.
+    raise RuntimeError(
+        "nonseat_canary_vendors: permanent profile deletion is not authorized by #385; "
+        "a DECISION_REQUEST / PERMANENT_DELETE_BOUNDARY ruling is required first"
+    )
+
+REMOVAL_DISPOSITIONS = frozenset({"NOT_APPLICABLE", "TRASHED_RESTORABLE"})
+REMOVAL_DISPOSITION_DETAILS = {
+    "NOT_APPLICABLE": "this operation dispatched no removal.",
+    "TRASHED_RESTORABLE": (
+        "the profile was removed from the active folder into the vendor trash with "
+        "permanently=false; it remains restorable and may still consume a plan slot. "
+        "Absence from the active census is not permanent deletion and no capacity "
+        "release is claimed."
+    ),
+}
+if set(REMOVAL_DISPOSITION_DETAILS) != REMOVAL_DISPOSITIONS:
+    raise RuntimeError(
+        "nonseat_canary_vendors: REMOVAL_DISPOSITION_DETAILS keys must exactly match REMOVAL_DISPOSITIONS"
+    )
 
 _PEER_PASS_EFFECTS = frozenset({"PROVISION_WRITTEN", "PROFILE_STOPPED_PROVEN", "ROLLBACK_VERIFIED"})
 _PEER_HOLD_EFFECTS = frozenset({
@@ -150,7 +180,10 @@ def peer_profile_name(folder_id: str, anchor_profile_id: str) -> str:
     return _PEER_NAME_PREFIX + _core.sha256_hex(material)[:16]
 
 
-def peer_receipt(*, effect: str, code: str, verdict: str, digests: dict, **predicates) -> dict:
+def peer_receipt(
+    *, effect: str, code: str, verdict: str, digests: dict,
+    removal_disposition: str = "NOT_APPLICABLE", **predicates,
+) -> dict:
     """Build one closed, redacted MAS-115 peer lifecycle receipt."""
 
     if effect not in PEER_EFFECT_CODES:
@@ -159,6 +192,8 @@ def peer_receipt(*, effect: str, code: str, verdict: str, digests: dict, **predi
         raise ValueError(f"unknown peer receipt code: {code!r}")
     if verdict not in ("PASS", "HOLD", "REFUSED"):
         raise ValueError(f"unknown peer receipt verdict: {verdict!r}")
+    if removal_disposition not in REMOVAL_DISPOSITIONS:
+        raise ValueError(f"unknown removal disposition: {removal_disposition!r}")
     if not isinstance(digests, dict) or set(digests) != {"folder", "peer_name", "peer_profile", "anchor_profile"}:
         raise ValueError("peer receipt digests must carry exactly the fixed digest keys")
     for value in digests.values():
@@ -180,6 +215,8 @@ def peer_receipt(*, effect: str, code: str, verdict: str, digests: dict, **predi
         "effect_detail": PEER_EFFECT_DETAILS[effect],
         "code": code,
         "detail": _core.DETAILS[code],
+        "removal_disposition": removal_disposition,
+        "removal_disposition_detail": REMOVAL_DISPOSITION_DETAILS[removal_disposition],
         "digests": dict(digests),
         "predicates": dict(predicates),
     }
@@ -1156,7 +1193,12 @@ class MultiloginClient:
         def _receipt(effect, code, verdict, **overrides):
             predicates = dict(_PEER_BASE_PREDICATES)
             predicates.update(overrides)
-            return peer_receipt(effect=effect, code=code, verdict=verdict, digests=digests, **predicates)
+            # A dispatched removal is a TRASH move, never a permanent delete.
+            disposition = "TRASHED_RESTORABLE" if predicates["dispatched"] else "NOT_APPLICABLE"
+            return peer_receipt(
+                effect=effect, code=code, verdict=verdict, digests=digests,
+                removal_disposition=disposition, **predicates,
+            )
 
         if not self._credential.present:
             return _receipt("NONE", "AUTH_MISSING", "REFUSED")
