@@ -4,20 +4,45 @@ The runtime owns no dialogue, worker, retry, Wake, queue, or durable lifecycle
 state. It reads one host-provisioned token exactly once at startup, injects one
 Slack client into the existing V1 and V2 engines, and serves their closed
 request surface over one group-reachable, peer-credentialled Unix socket.
+
+W3C adds only an optional, production-disarmed in-process turn loop. The loop
+recomputes exact-current-worker and target bindings on every pass and delegates
+all history, Wake persistence, retry, and provider effects to existing owners.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import os
 import stat
 import sys
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
+from control_plane.session_targets import (
+    RuntimeBinding,
+    SessionTargetRegistry,
+    WakeRoute,
+)
+from control_plane.wake_events import utc_now_iso
+from control_plane.wake_ledger import WakeRetryPolicy
+from control_plane.wake_persist import WakeLedgerRepository
+from integrations.executive_wake.registry import WakeDispatcherRegistry
+from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
+    BindingState,
+    CurrentWorkerDialogueSnapshot,
+    WorkerDialogueCaller,
+    resolve_company_dialogue_binding,
+)
 from integrations.slack_agent_dialogue.engine import DialogueEngine, DialoguePolicy
-from integrations.slack_agent_dialogue.engine_v2 import DialogueEngineV2
+from integrations.slack_agent_dialogue.engine_v2 import (
+    DialogueContextV2,
+    DialogueEngineV2,
+)
 from integrations.slack_agent_dialogue.service import (
     AgentDialogueService,
     DialogueServiceError,
@@ -26,6 +51,18 @@ from integrations.slack_agent_dialogue.service import (
 from integrations.slack_agent_dialogue.slack_web_api import (
     SlackHttpTransport,
     SlackWebApiDialogueClient,
+)
+from integrations.slack_agent_dialogue.turn_observer import (
+    DialogueTurnObserver,
+    ObservationOutcome,
+    ObservationReceipt,
+)
+from integrations.slack_agent_dialogue.turn_routing_facts import (
+    TurnRoutingFactsError,
+    resolve_turn_routing_facts,
+)
+from integrations.slack_agent_dialogue.wake_projection import (
+    compose_persisted_turn_observer,
 )
 
 _TOKEN_MAX_BYTES = 2048
@@ -123,6 +160,161 @@ class RelayRuntimeConfig:
         )
 
 
+@dataclass(frozen=True)
+class RelayTurnCandidate:
+    """One host-owned input snapshot for a bounded turn-observation pass."""
+
+    context: DialogueContextV2
+    delegation_identity: ExecutiveDelegationIdentity
+    dialogue_parent: Mapping[str, Any]
+    thread_ts: str
+    current_worker: CurrentWorkerDialogueSnapshot | None
+    actor: WorkerDialogueCaller
+    routing_workstream: str | None = None
+
+
+class AgentRelayTurnRuntime:
+    """Recompute trusted routing and invoke the existing observer in-process."""
+
+    def __init__(
+        self,
+        *,
+        observer: DialogueTurnObserver,
+        registry: SessionTargetRegistry,
+        current_binding_for: Callable[[str], RuntimeBinding | None],
+        candidate_source: Callable[[], Iterable[RelayTurnCandidate]],
+        poll_interval_seconds: float = 1.0,
+    ) -> None:
+        if not hasattr(observer, "reconcile_once"):
+            raise TypeError("observer must expose reconcile_once")
+        if not isinstance(registry, SessionTargetRegistry):
+            raise TypeError("registry must be SessionTargetRegistry")
+        if not callable(current_binding_for):
+            raise TypeError("current_binding_for must be callable")
+        if not callable(candidate_source):
+            raise TypeError("candidate_source must be callable")
+        if (
+            isinstance(poll_interval_seconds, bool)
+            or not isinstance(poll_interval_seconds, (int, float))
+            or poll_interval_seconds <= 0
+        ):
+            raise ValueError("poll_interval_seconds must be positive")
+
+        self.observer = observer
+        self.registry = registry
+        self._current_binding_for = current_binding_for
+        self._candidate_source = candidate_source
+        self._poll_interval_seconds = float(poll_interval_seconds)
+
+    @staticmethod
+    def _receipt(
+        outcome: ObservationOutcome,
+        reason: str,
+    ) -> ObservationReceipt:
+        return ObservationReceipt(
+            outcome=outcome,
+            reason=reason,
+            decision=None,
+            obligation=None,
+            route=None,
+        )
+
+    @staticmethod
+    def _trusted_workstream(value: str | None) -> str | None:
+        if value is None:
+            return None
+        if (
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+            or len(value) > 200
+            or any(ord(character) < 32 for character in value)
+        ):
+            raise TurnRoutingFactsError("DIALOGUE_BINDING_MISMATCH")
+        return value
+
+    async def _reconcile_candidate(
+        self,
+        candidate: RelayTurnCandidate,
+    ) -> ObservationReceipt:
+        if not isinstance(candidate, RelayTurnCandidate):
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TURN_CANDIDATE_INVALID",
+            )
+
+        resolution = resolve_company_dialogue_binding(
+            delegation_identity=candidate.delegation_identity,
+            dialogue_parent=candidate.dialogue_parent,
+            thread_ts=candidate.thread_ts,
+            current=candidate.current_worker,
+            actor=candidate.actor,
+        )
+        if resolution.state is not BindingState.RESOLVED or resolution.binding is None:
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "CURRENT_WORKER_REFUSED:"
+                f"{resolution.state.value}/{resolution.reason.value}",
+            )
+
+        assert candidate.current_worker is not None
+        try:
+            routing = resolve_turn_routing_facts(
+                dialogue_parent=candidate.dialogue_parent,
+                current_worker=candidate.current_worker,
+                binding_resolution=resolution,
+                registry=self.registry,
+                current_binding_for=self._current_binding_for,
+            )
+            routing_workstream = self._trusted_workstream(
+                candidate.routing_workstream
+            )
+            if routing_workstream is not None:
+                routing = dataclasses.replace(
+                    routing,
+                    routing_workstream=routing_workstream,
+                )
+        except TurnRoutingFactsError as exc:
+            return self._receipt(ObservationOutcome.REFUSED, exc.code)
+        except Exception:
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TURN_ROUTING_FACTS_INVALID",
+            )
+
+        try:
+            return await self.observer.reconcile_once(
+                context=candidate.context,
+                routing=routing,
+            )
+        except Exception:
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TURN_OBSERVER_UNAVAILABLE",
+            )
+
+    async def reconcile_once(self) -> tuple[ObservationReceipt, ...]:
+        try:
+            candidates = tuple(self._candidate_source())
+        except Exception:
+            return (
+                self._receipt(
+                    ObservationOutcome.REFUSED,
+                    "TURN_CANDIDATE_SOURCE_UNAVAILABLE",
+                ),
+            )
+
+        receipts: list[ObservationReceipt] = []
+        for candidate in candidates:
+            receipts.append(await self._reconcile_candidate(candidate))
+        return tuple(receipts)
+
+    async def serve_forever(self) -> None:
+        while True:
+            await self.reconcile_once()
+            await asyncio.sleep(self._poll_interval_seconds)
+
+
 def read_private_token_file(path: str | Path) -> str:
     """Read one exact owner-only regular inode without following a final symlink."""
 
@@ -209,10 +401,85 @@ def build_service(
     )
 
 
-async def run_relay(config: RelayRuntimeConfig) -> None:
-    """Run until the process is cancelled or terminated by its host supervisor."""
+def build_turn_runtime(
+    service: AgentDialogueService,
+    *,
+    registry: SessionTargetRegistry,
+    repository: WakeLedgerRepository,
+    dispatchers: WakeDispatcherRegistry,
+    current_binding_for: Callable[[str], RuntimeBinding | None],
+    retry_policy: WakeRetryPolicy,
+    candidate_source: Callable[[], Iterable[RelayTurnCandidate]],
+    has_active_waiter: Callable[[str, str], bool] | None = None,
+    emitted_at: Callable[[], str] = utc_now_iso,
+    poll_interval_seconds: float = 1.0,
+) -> AgentRelayTurnRuntime:
+    """Compose the disarmed W3C loop around the already-built relay service."""
 
-    await build_service(config).serve_forever()
+    if not isinstance(service, AgentDialogueService):
+        raise TypeError("service must be AgentDialogueService")
+    if service.engine_v2 is None or service.engine.client is not service.engine_v2.client:
+        raise RelayRuntimeError("RUNTIME_INVALID")
+
+    def current_for_route(route: WakeRoute) -> RuntimeBinding | None:
+        return current_binding_for(route.target_seat)
+
+    observer = compose_persisted_turn_observer(
+        policy=service.engine.policy,
+        client=service.engine.client,
+        registry=registry,
+        repository=repository,
+        dispatchers=dispatchers,
+        current_binding_for=current_for_route,
+        retry_policy=retry_policy,
+        binding_for=current_binding_for,
+        has_active_waiter=has_active_waiter,
+        emitted_at=emitted_at,
+    )
+    return AgentRelayTurnRuntime(
+        observer=observer,
+        registry=registry,
+        current_binding_for=current_binding_for,
+        candidate_source=candidate_source,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+
+
+async def run_relay(
+    config: RelayRuntimeConfig,
+    *,
+    turn_runtime_factory: Callable[[AgentDialogueService], Any] | None = None,
+) -> None:
+    """Run the relay, plus an explicitly injected W3C loop, until cancelled."""
+
+    service = build_service(config)
+    if turn_runtime_factory is None:
+        await service.serve_forever()
+        return
+
+    try:
+        turn_runtime = turn_runtime_factory(service)
+        turn_serve = turn_runtime.serve_forever
+    except Exception:
+        raise RelayRuntimeError("RUNTIME_INVALID") from None
+    if not callable(turn_serve):
+        raise RelayRuntimeError("RUNTIME_INVALID")
+
+    service_task = asyncio.create_task(service.serve_forever())
+    turn_task = asyncio.create_task(turn_serve())
+    tasks = (service_task, turn_task)
+    try:
+        done, _pending = await asyncio.wait(
+            tasks,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in done:
+            await task
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -254,10 +521,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 __all__ = [
     "AGENT_RELAY_SOCKET_PATH",
     "EXECUTIVE_CLIENT_UID",
+    "AgentRelayTurnRuntime",
+    "ObservationOutcome",
+    "ObservationReceipt",
     "PrivateRelayAuthorityPolicy",
     "RelayRuntimeConfig",
     "RelayRuntimeError",
+    "RelayTurnCandidate",
+    "TurnRoutingFactsError",
     "build_service",
+    "build_turn_runtime",
     "main",
     "read_private_token_file",
     "run_relay",
