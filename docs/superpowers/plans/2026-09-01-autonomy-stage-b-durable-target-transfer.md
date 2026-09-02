@@ -15,13 +15,14 @@ Freeze one coherent initial-assignment vertical with no parallel binding owner:
 ```text
 CEO-owned responsibility root
 + exact CEO-owned role-null Codex carrier writer
++ exact non-serialized live actor RuntimeBinding
 + canonical disabled Codex CEO target
 -> first immutable root-Job assignment Event
 -> exact generation-fenced Stage-B context
 -> unchanged Stage-A authority enforcement
 ```
 
-The Event is the durable assignment owner. V4 does not create a predecessor receipt/store and does not require a pre-assignment Wake ACK.
+The Event is the durable assignment owner. V4 does not create a predecessor receipt/store and does not require a pre-assignment Wake ACK. The modifying call requires a non-serialized live actor RuntimeBinding from the invoking session boundary that exactly equals the destination current binding; caller actor labels or command-embedded bindings are not authority.
 
 <!-- STAGE_B1_CORRECTION_GATE_BEGIN -->
 ```json
@@ -43,6 +44,8 @@ The Event is the durable assignment owner. V4 does not create a predecessor rece
   "durable_assignment_owner": "first SOL_ACTION_TARGET_ASSIGNED Event on responsibility root Job",
   "separate_root_binding_owner_required": false,
   "pre_assignment_wake_ack_required": false,
+  "requires_exact_current_actor_binding": true,
+  "caller_actor_label_authoritative": false,
   "held_modes": ["SAME_ALIAS_GENERATION_SUCCESSION", "CROSS_ALIAS_RESPONSIBILITY_TRANSFER"],
   "held_surfaces": ["chatgpt-sol", "claude", "workspace-agent", "human"],
   "requires_exact_binding_generation_fence": true,
@@ -55,7 +58,7 @@ The Event is the durable assignment owner. V4 does not create a predecessor rece
 
 ## Verified state and V4 delta
 
-Protected source has empty/test-overlay root bindings, no Codex CEO target, role-null CEO Job/OHF evidence, an exact roleful-only RuntimeBinding source seam, implemented `codex-app-server`, exact Stage A, and real downstream Wake ACK. V3 correctly held false authority but would have created a second durable root-binding owner. V4 makes the first Stage-B Event the only owner and authorizes source implementation for `INITIAL_ASSIGNMENT` only.
+Protected source has empty/test-overlay root bindings, no Codex CEO target, role-null CEO Job/OHF evidence, an exact roleful-only RuntimeBinding source seam, implemented `codex-app-server`, exact Stage A, and real downstream Wake ACK. V3 correctly held false authority but would have created a second durable root-binding owner. V4 makes the first Stage-B Event the only assignment owner and authorizes source implementation for `INITIAL_ASSIGNMENT` only. It also binds creation to the exact live actor RuntimeBinding, not a caller string or serialized command field.
 
 ## Exact source-wave scope
 
@@ -76,7 +79,7 @@ No seventh path is authorized. Do not modify `control_plane/sol_action_target.py
 
 ### Observable mission
 
-Ship one production-disarmed source vertical where an exact CEO-owned responsibility root is assigned to an exact current CEO-owned Codex carrier RuntimeBinding by one immutable root Event and enforced through unchanged Stage A with an exact binding-generation fence.
+Ship one production-disarmed source vertical where an exact CEO-owned responsibility root is assigned to an exact current CEO-owned Codex carrier RuntimeBinding by one immutable root Event, by the exact live actor bound to that carrier, and enforced through unchanged Stage A with an exact binding-generation fence.
 
 ### Why it matters
 
@@ -92,27 +95,28 @@ This converts transient Sol materialization into durable, replay-safe action rou
 
 ### Non-goals
 
-No succession, cross-alias transfer, ChatGPT-Sol assignment, COO-root escalation, Wake write/ACK prerequisite, target enablement, new seat/role, provider-wire change, Stage-A edit, provider launch, table, migration, registry, lifecycle, queue, lease, or mutable pointer.
+No succession, cross-alias transfer, ChatGPT-Sol assignment, COO-root escalation, Wake write/ACK prerequisite, target enablement, new seat/role, provider-wire change, Stage-A edit, provider launch, table, migration, registry, lifecycle, queue, lease, mutable pointer, or caller-supplied actor authority.
 
 ### Complete journey
 
 1. Validate exact CEO-owned responsibility root and unique typed provenance.
 2. Validate exact role-null CEO carrier root and current OHF Attempt.
 3. Project one current `openai-codex -> codex` RuntimeBinding on the same Runtime connection.
-4. Validate disabled `EXECUTIVE-CEO-CODEX-A` and target fingerprint.
-5. Parse comparison claims and derive command ID.
-6. In `BEGIN IMMEDIATE`, reconcile command first, fold root revision zero, validate root/carrier/current binding, and check global alias coherence.
-7. Append one revision-one `SOL_ACTION_TARGET_ASSIGNED` Event.
-8. Action-time: reread active root, fold Event, verify every assignment behind alias binds one exact RuntimeBinding, reproject current carrier, require bound ID/generation equality, preserve complete root map, and call unchanged Stage A.
-9. Same command replays; a new generation is unavailable until future succession law.
+4. Require the invoking live actor RuntimeBinding, supplied outside command JSON, to equal that destination binding exactly.
+5. Validate disabled `EXECUTIVE-CEO-CODEX-A` and target fingerprint.
+6. Parse comparison claims and derive command ID.
+7. In `BEGIN IMMEDIATE`, reconcile command first, fold root revision zero, validate root/carrier/current actor/current binding, and check global alias coherence.
+8. Append one revision-one `SOL_ACTION_TARGET_ASSIGNED` Event.
+9. Action-time: reread active root, fold Event, verify every assignment behind alias binds one exact RuntimeBinding, reproject current carrier, require bound ID/generation equality, preserve complete root map, and call unchanged Stage A.
+10. Same command replays; a new generation is unavailable until future succession law.
 
 ### Data/time/null/correction law
 
-All IDs are exact bounded values. Root status is exactly `QUEUED`, `RUNNING`, or `CHECKPOINTED`. Timestamps are audit-only and never elect a target. Missing/duplicate/conflicting provenance, target, Attempt, epoch, writer, attestation, launch decision, or binding fails closed. Same semantics replay. Same-root competitors serialize to one append and one revision mismatch. Same alias may share only the same bound ID/generation. V4 has no reassignment/succession correction. Effect uncertainty reconciles only by the same derived command ID.
+All IDs are exact bounded values. Root and carrier status is exactly `QUEUED`, `RUNNING`, or `CHECKPOINTED`. Timestamps are audit-only and never elect a target. Missing/duplicate/conflicting provenance, target, Attempt, epoch, writer, attestation, launch decision, actor, or binding fails closed. Same semantics replay. Same-root competitors serialize to one append and one revision mismatch. Same alias may share only the same bound ID/generation. V4 has no reassignment/succession correction. Effect uncertainty reconciles only by the same derived command ID.
 
 ### Deterministic versus model work
 
-Code owns authority, validation, fingerprints, command ID, fold, replay, concurrency, projection, and failure states. Models may request/explain but cannot choose alias, authority, command ID, binding, generation, retry, or arming.
+Code owns authority, live-actor comparison, validation, fingerprints, command ID, fold, replay, concurrency, projection, and failure states. Models may request/explain but cannot choose actor label, actor binding, alias, authority, command ID, destination binding, generation, retry, or arming.
 
 ### Ordered implementation
 
@@ -137,7 +141,7 @@ Code owns authority, validation, fingerprints, command ID, fold, replay, concurr
 
 ### Acceptance
 
-Tests must prove root/carrier provenance and state, exact role-null OHF projection, unchanged roleful behavior, target definition, caller-inaccessible command ID/alias, one Event, replay, same-root races, multi-root same-binding sharing, different-binding conflict, complete-map/sibling preservation, exact actor, wrong actor, stale generation refusal, forbidden-field absence, and unchanged Job/Attempt/Worker/quota/OHF/Wake rows. Use real Runtime/OHF paths except explicit corruption cases.
+Tests must prove root/carrier provenance and state, exact role-null OHF projection, unchanged roleful behavior, target definition, exact live actor/wrong actor, caller-inaccessible actor label/binding/command ID/alias, one Event, replay, same-root races, multi-root same-binding sharing, different-binding conflict, complete-map/sibling preservation, exact Stage-A actor, stale generation refusal, forbidden-field absence, and unchanged Job/Attempt/Worker/quota/OHF/Wake rows. Use real Runtime/OHF paths except explicit corruption cases.
 
 ### Stop and continuation
 
@@ -145,6 +149,6 @@ Stop for active path collision, material source movement, provenance or OHF owne
 
 ## Records-carrier source-law and release
 
-The records test must prove current source archaeology plus V4 Event-as-owner, no pre-assignment ACK, one target/mode, generation fence, complete-map law, six-path ceiling, no rebuild, and production disarm. Mutations adding a predecessor owner, ACK, caller ID/alias, succession/cross-alias/ChatGPT-Sol, roleful shortcut, implicit generation transfer, destructive map, path widening, new store, or arming must fail.
+The records test must prove current source archaeology plus V4 Event-as-owner, no pre-assignment ACK, exact live-actor authority, one target/mode, generation fence, complete-map law, six-path ceiling, no rebuild, and production disarm. Mutations adding a predecessor owner, ACK, caller actor authority, caller ID/alias, succession/cross-alias/ChatGPT-Sol, roleful shortcut, implicit generation transfer, destructive map, path widening, new store, or arming must fail.
 
 PR #368 may merge only after its branch history joins current protected master without force; the effective delta remains three records paths; focused/full/security checks are terminal green; an independent exact-head review passes; and Sol performs expected-head release. The records merge authorizes source implementation only. Source release yields at most `BUILT_NOT_PROVEN / INITIAL_ASSIGNMENT_ONLY / PRODUCTION_DISARMED`; production requires a separate canary.
