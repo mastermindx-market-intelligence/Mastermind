@@ -1,0 +1,4 @@
+{
+  "answer": "4194304 bytes (4 * 1024 * 1024); a document of exactly that many bytes is ACCEPTED, not refused.",
+  "rationale": "The extract states the constant equals 4 * 1024 * 1024 = 4194304, and explicitly states '== 4 MiB is permitted; > 4 MiB is refused' -- refusal is strictly greater-than, so the exact boundary passes."
+}
