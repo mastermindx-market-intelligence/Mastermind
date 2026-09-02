@@ -751,6 +751,39 @@ def test_turn_unauthorized_error_detected_at_params_error_carrier(
     assert excinfo.value.code == "TURN_UNAUTHORIZED"
 
 
+def test_turn_unauthorized_error_detected_with_camelcase_wire_key(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    """Adversarial-review MAJOR-1 (2026-09-01): the persisted rollout form of
+    this field is snake_case `codex_error_info`, but the LIVE App Server
+    `turn/completed` wire notification is a distinct, camelCase-serializing
+    struct (`codexErrorInfo`) -- confirmed against the codex native binary's
+    serde structs, not by a live capture this repo can read. Feeding ONLY
+    the camelCase key (no snake_case key present at all) proves the
+    classifier does not depend on the rollout-only casing; a version that
+    reads solely `codex_error_info` misclassifies this as
+    TURN_PROVIDER_ERROR because `.get("codex_error_info")` returns None."""
+
+    factory = _fake_factory(
+        thread_read_turns="empty",
+        turn_error={
+            "message": "Your access token could not be refreshed because your refresh token was revoked.",
+            "codexErrorInfo": "unauthorized",
+        },
+        turn_error_at="turn",
+    )
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "TURN_UNAUTHORIZED"
+    assert "revoked" in str(excinfo.value)
+
+
 def test_turn_generic_provider_error_raises_turn_provider_error(
     mastermind_repo_root: Path, tmp_path: Path
 ):

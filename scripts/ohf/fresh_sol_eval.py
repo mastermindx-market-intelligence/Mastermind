@@ -190,19 +190,44 @@ def _extract_turn_error(notification: dict[str, Any] | None) -> dict[str, Any] |
     return None
 
 
+def _turn_error_info(error: dict[str, Any]) -> Any:
+    """Read the error-classification field under BOTH its plausible key
+    casings.
+
+    Ground truth (rollout line 11, a persisted/stored rollout event) uses
+    snake_case ``codex_error_info``. The LIVE App Server ``turn/completed``
+    wire notification is a *different* struct (codex's native wire types
+    are camelCase; the rollout's stored form is a separate, distinct
+    snake_case struct) and so is expected to serialize this same field as
+    ``codexErrorInfo`` -- confirmed only by adversarial review against the
+    codex native binary's serde structs, not by a live capture this repo
+    can read. Reading only one casing would silently misclassify a real
+    ``unauthorized`` turn as ``TURN_PROVIDER_ERROR`` on the wire shape
+    while every fixture-fed (snake_case) test stayed green -- exactly the
+    fits-the-fake failure mode this module's header comment warns about.
+    Check both; never assume one is authoritative over the other.
+    """
+
+    if "codex_error_info" in error:
+        return error.get("codex_error_info")
+    return error.get("codexErrorInfo")
+
+
 def _turn_error_failure_code(error: dict[str, Any]) -> str:
     """Ground truth (rollout line 11): a revoked/rejected refresh token
-    surfaces as ``error.codex_error_info == "unauthorized"``. Any other
-    non-null error is a generic provider failure, not an auth failure."""
+    surfaces as ``error.codex_error_info == "unauthorized"`` (persisted
+    rollout form) or ``error.codexErrorInfo == "unauthorized"`` (live wire
+    form). Any other non-null error is a generic provider failure, not an
+    auth failure."""
 
-    info = error.get("codex_error_info")
+    info = _turn_error_info(error)
     if isinstance(info, str) and info.strip().lower() == "unauthorized":
         return "TURN_UNAUTHORIZED"
     return "TURN_PROVIDER_ERROR"
 
 
 def _turn_error_message(thread_id: str, error: dict[str, Any]) -> str:
-    info = error.get("codex_error_info")
+    info = _turn_error_info(error)
     detail = error.get("message")
     parts: list[str] = []
     if isinstance(info, str) and info:
