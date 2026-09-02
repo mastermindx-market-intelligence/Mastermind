@@ -63,6 +63,16 @@ def test_seat_grammar_zero_or_multiple_matches_return_none(owner: str) -> None:
     assert derive_seat_token(owner) is None
 
 
+def test_seat_grammar_repair_fix2_duplicate_identical_tokens_return_none() -> None:
+    # design: "Exactly one match is required; zero or multiple matches make
+    # the record an explicit SOURCE_PARTIAL fact" — two RAW matches for the
+    # same seat (even identical case) is "multiple matches", not "the same
+    # seat mentioned twice"; the closed grammar counts occurrences, not
+    # distinct values.
+    assert derive_seat_token("(COO seat) ... (COO seat)") is None
+    assert derive_seat_token("(coo seat) ... (COO SEAT)") is None
+
+
 # ---------------------------------------------------------------------------
 # Real-record parsing (hostile fixture = byte-exact capture at the pinned SHA)
 # ---------------------------------------------------------------------------
@@ -136,6 +146,24 @@ def test_truncated_record_is_flagged_and_never_partially_parsed() -> None:
     assert fact.payload is None
     ws_family = next(c for c in facts.coverage if c.record_schema == "agentos.workstream.v1")
     assert ws_family.truncated is True
+
+
+def test_repair_fix3_truncated_digest_is_explicitly_marked_as_a_prefix() -> None:
+    # a digest-keyed supersession contract must never mistake a
+    # prefix-of-256KiB digest for the real full-record digest.
+    facts = _gather("truncated")
+    fact = facts.facts[0]
+    assert fact.content_digest.startswith("prefix-sha256:")
+    raw_hex = fact.content_digest.removeprefix("prefix-sha256:")
+    assert len(raw_hex) == 64
+    int(raw_hex, 16)  # still a valid hex digest underneath the marker
+
+
+def test_repair_fix3_ok_record_digest_is_never_prefix_marked() -> None:
+    facts = _gather("hostile")
+    for fact in facts.facts:
+        assert fact.status == "OK"
+        assert not fact.content_digest.startswith("prefix-sha256:")
 
 
 def test_conflicting_duplicate_key_marks_both_facts_conflicted() -> None:

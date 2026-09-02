@@ -37,6 +37,7 @@ from control_plane.executive_steward import (
     QueryStatus,
     ResponsibilityFact,
     Seat,
+    SourceFailure,
     SourceOwner,
     SourceRef,
 )
@@ -115,15 +116,35 @@ def _build_steward_snapshot(facts: SourceFacts) -> tuple[ExecutiveStewardSnapsho
     """Present every OK workstream fact to the EXISTING Steward composition.
 
     Handoff records are never presented (design Section 2: they are
-    evidence-only). Returns the snapshot plus a lookup from the compact
-    source-ref token back to the originating SourceFact, so the compiler can
-    read wave detail from exactly the record the Steward accepted without
-    reimplementing any Steward join logic.
+    evidence-only — SourceFailure disclosure stays scoped to the
+    AGENT_OS-workstream family the Steward actually owns here). Returns the
+    snapshot plus a lookup from the compact source-ref token back to the
+    originating SourceFact, so the compiler can read wave detail from
+    exactly the record the Steward accepted without reimplementing any
+    Steward join logic.
+
+    REPAIR FIX 6 (coordinator REQUEST_REPAIR, adversarial review): every
+    non-OK workstream fact is also registered as a Steward ``SourceFailure``
+    (owner=AGENT_OS) so a gather-time failure is visible in the Steward's
+    own DEGRADED issues, not silently dropped just because it produced no
+    ResponsibilityFact.
     """
     responsibilities: list[ResponsibilityFact] = []
+    source_failures: list[SourceFailure] = []
     by_ref: dict[str, SourceFact] = {}
     for fact in facts.facts:
-        if fact.record_schema != WORKSTREAM_SCHEMA or fact.status != STATUS_OK:
+        if fact.record_schema != WORKSTREAM_SCHEMA:
+            continue
+        if fact.status != STATUS_OK:
+            source_failures.append(
+                SourceFailure(
+                    owner=SourceOwner.AGENT_OS,
+                    code=fact.status,
+                    explanation=fact.reason or f"{fact.status} at {fact.path}",
+                    source_ref=_compact_source_ref(fact.repo, fact.path, fact.content_digest),
+                    observed_at=fact.observed_at,
+                )
+            )
             continue
         payload = fact.payload or {}
         key = payload.get("key")
@@ -151,7 +172,10 @@ def _build_steward_snapshot(facts: SourceFacts) -> tuple[ExecutiveStewardSnapsho
                 ),
             )
         )
-    snapshot = ExecutiveStewardSnapshot(responsibilities=tuple(responsibilities))
+    snapshot = ExecutiveStewardSnapshot(
+        responsibilities=tuple(responsibilities),
+        source_failures=tuple(source_failures),
+    )
     return snapshot, by_ref
 
 
@@ -220,7 +244,21 @@ def _compile_waves(
         wait = wave.get("wait")
 
         current_marking = marking
-        if deps:
+        if deps and marking == "PENDING":
+            # REPAIR FIX 1 (coordinator REQUEST_REPAIR, adversarial review):
+            # only author the PENDING->ACTIVE gating transition when the
+            # wave's OWN recorded status is still PENDING. When the record
+            # already says the wave is ACTIVE (in_progress/awaiting_ci)
+            # despite also declaring depends_on, the record's own status
+            # field is authoritative for CURRENT position (design Section 5:
+            # "compiler-template behavior grounded in exact record fields")
+            # — the dependency gate has, by the record's own assertion,
+            # already been cleared. A `start_<id>` transition guarded on
+            # `var EQ PENDING` would be unsatisfiable from an ACTIVE initial
+            # state and, marked required_reachable=True, would be a
+            # permanently DEAD required transition: a FALSE
+            # NO_DEAD_REQUIRED_TRANSITION witness naming a perfectly healthy
+            # record.
             dep_guards = [_guard(var, "EQ", "PENDING")]
             for dep_id in deps:
                 dep_guards.append(_guard(var_by_wave[dep_id], "IN", ["DONE", "DROPPED"]))
@@ -240,9 +278,7 @@ def _compile_waves(
                     "required_reachable": True,
                 }
             )
-            # once gated, the record only ever declares the wave ACTIVE for
-            # the purpose of a finish transition below.
-            current_marking = "ACTIVE" if marking == "PENDING" else marking
+            current_marking = "ACTIVE"
 
         if wait is not None:
             gate_id = f"gate_{wave_id.lower()}"
@@ -270,7 +306,9 @@ def _compile_waves(
                     "disposition": wait["kind"],
                     "state_guards": [gate_guard],
                     "owner_or_authority": seat_token,
-                    "release_condition": str(wait.get("on") or "external release recorded through exact carrier"),
+                    "release_condition": str(
+                        wait.get("condition") or "external release recorded through exact carrier"
+                    ),
                     "release_transition_ids": [finish_id],
                     "return_or_observation_source": "agentos workstream wave record",
                     "wake_or_review_path": "existing Wake or explicit workstream update",
@@ -438,6 +476,15 @@ def compile_operation_assurance_model(
         raise _refuse_for_missing_target(facts, target_workstream_key)
     if result.status == QueryStatus.REFUSED:
         raise CompilerError("SOURCE_CONFLICTED", f"{ref} has more than one candidate Agent OS record")
+    if result.data is None:
+        # REPAIR FIX 6 (coordinator REQUEST_REPAIR, adversarial review):
+        # QueryStatus.DEGRADED with data=None is a real Steward outcome
+        # (executive_steward.get_responsibility returns it when there are
+        # zero matching responsibility facts AND non-empty source issues —
+        # reachable now that non-OK workstream facts are registered as
+        # SourceFailure above). Refuse typed instead of crashing on
+        # `responsibility.accountable_seat` below.
+        raise _refuse_for_missing_target(facts, target_workstream_key)
 
     responsibility: ResponsibilityFact = result.data
     fact = by_ref.get(responsibility.source.ref)

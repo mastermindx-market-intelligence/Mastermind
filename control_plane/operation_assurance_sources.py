@@ -606,9 +606,29 @@ def _validate_wave(wave: dict) -> None:
     if "pr" in wave and not isinstance(wave["pr"], (int, list)):
         raise _RecordParseError("UNSUPPORTED_SEMANTICS", "wave.pr must be an int or a list")
     if "wait" in wave:
-        wait = wave["wait"]
-        if not isinstance(wait, dict) or wait.get("kind") not in _WAIT_KIND_VALUES:
-            raise _RecordParseError("UNSUPPORTED_SEMANTICS", "wave.wait must be a schema-valid wait mapping")
+        _validate_wait(wave["wait"])
+
+
+def _validate_wait(wait: object) -> None:
+    # REPAIR FIX 4 (coordinator REQUEST_REPAIR, adversarial review): the
+    # wait mapping is not part of the live agentos.workstream.v1 schema
+    # today (this compiler defines it, per the design's own "schema-valid
+    # wait object" language); validate its OWN closed field set exactly the
+    # same way every other shape in this module is validated — an unknown
+    # key refuses the record rather than being silently accepted (probe
+    # p12: an `evil_field` inside `wait: {...}` was previously accepted).
+    if not isinstance(wait, dict):
+        raise _RecordParseError("UNSUPPORTED_SEMANTICS", "wave.wait must be a schema-valid wait mapping")
+    allowed = {"kind", "review_after", "condition"}
+    unknown = set(wait.keys()) - allowed
+    if unknown:
+        raise _RecordParseError("UNKNOWN_FIELD", f"unknown wave.wait field(s) {sorted(unknown)}")
+    if wait.get("kind") not in _WAIT_KIND_VALUES:
+        raise _RecordParseError("UNSUPPORTED_SEMANTICS", "wave.wait.kind must be EXTERNAL_GATE or INTENTIONAL_WAIT")
+    if "review_after" in wait and not isinstance(wait["review_after"], str):
+        raise _RecordParseError("UNSUPPORTED_SEMANTICS", "wave.wait.review_after must be a string")
+    if "condition" in wait and not isinstance(wait["condition"], str):
+        raise _RecordParseError("UNSUPPORTED_SEMANTICS", "wave.wait.condition must be a string")
 
 
 def _validate_workstream_payload(payload: dict) -> None:
@@ -680,12 +700,20 @@ def parse_handoff_frontmatter(text: str) -> dict:
 
 
 def derive_seat_token(owner_field: str) -> str | None:
-    """Closed token grammar (design Section 4): exactly one match required."""
+    """Closed token grammar (design Section 4): exactly one match required.
+
+    "Exactly one match" counts RAW occurrences, before any case-insensitive
+    dedup: two tokens for the same seat (even byte-identical, even only
+    differing by case) are "multiple matches" per the design's own words,
+    not "the same seat asserted twice" — REPAIR FIX 2 (coordinator
+    REQUEST_REPAIR, adversarial review). The token matching itself stays
+    case-insensitive (that half is per-design); only the match-COUNT rule
+    changed from a deduped count to the raw count.
+    """
     matches = _SEAT_TOKEN_RE.findall(owner_field or "")
-    unique = {m.upper() for m in matches}
-    if len(unique) != 1:
+    if len(matches) != 1:
         return None
-    return next(iter(unique))
+    return matches[0].upper()
 
 
 def _read_bounded(path: Path) -> tuple[bytes, bool]:
@@ -702,6 +730,18 @@ def _digest(raw: bytes) -> str:
 
 
 EMPTY_CONTENT_DIGEST = _digest(b"")
+
+# REPAIR FIX 3 (coordinator REQUEST_REPAIR, adversarial review): a truncated
+# record's digest is computed over only the MAX_FILE_BYTES prefix that was
+# actually read, never the full file. Presenting that as an ordinary
+# content_digest lets a digest-keyed supersession contract mistake a prefix
+# digest for the real whole-record hash. Every prefix digest carries this
+# marker so it can never be silently compared as if it were a full digest.
+PREFIX_DIGEST_MARKER = "prefix-sha256:"
+
+
+def _prefix_digest(raw: bytes) -> str:
+    return PREFIX_DIGEST_MARKER + _digest(raw)
 
 
 def _gather_family(
@@ -726,7 +766,6 @@ def _gather_family(
         total_bytes[0] += len(raw)
         if total_bytes[0] > MAX_TOTAL_BYTES:
             raise SourceGatherError("INPUT_TOO_LARGE", "gather exceeds the total-bytes ceiling")
-        digest = _digest(raw)
         if truncated:
             truncated_any = True
             facts.append(
@@ -736,7 +775,7 @@ def _gather_family(
                     revision=revision,
                     path=rel_path,
                     record_schema=record_schema,
-                    content_digest=digest,
+                    content_digest=_prefix_digest(raw),
                     observed_at=observed_at,
                     status=STATUS_SOURCE_TRUNCATED,
                     reason=f"record exceeds MAX_FILE_BYTES={MAX_FILE_BYTES}",
@@ -745,6 +784,7 @@ def _gather_family(
                 )
             )
             continue
+        digest = _digest(raw)
         try:
             text = raw.decode("utf-8", errors="strict")
             payload = parse_fn(text)

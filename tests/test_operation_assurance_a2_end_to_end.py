@@ -37,10 +37,17 @@ OBSERVED_AT = "2026-09-02T00:00:00Z"
 REPO = "mastermindx-market-intelligence/macro"
 
 
+HOSTILE_WORKSTREAM_SHA256 = "6562c148d9248970ef95917896421c19013b97990a8acf2795435736f7e13ed4"
+
+
 def test_hostile_fixture_is_the_exact_pinned_revision() -> None:
     facts = gather_agent_os_source_facts(FIXTURES / "hostile", repo=REPO, revision=REV, observed_at=OBSERVED_AT)
     ws = next(f for f in facts.facts if f.path.endswith("WS-OPERATION-ASSURANCE.md"))
     assert ws.revision == REV
+    # pinned true digest of the byte-exact captured record (not a
+    # passthrough-of-the-caller's-assertion check): if this fixture file's
+    # bytes ever drift, this must fail even though `revision` still matches.
+    assert ws.content_digest == HOSTILE_WORKSTREAM_SHA256
 
 
 def test_1_hostile_end_to_end_through_the_protected_a1_engine() -> None:

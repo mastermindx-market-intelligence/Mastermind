@@ -15,7 +15,7 @@ blast_radius: reversible
 ambiguity: scoped
 waves:
   - {id: R0, title: "Recover canonical truth", status: done}
-  - {id: GATED, title: "Waits on an external Sol acceptance gate", status: in_progress, wait: {kind: EXTERNAL_GATE, on: "Sol acceptance"}}
+  - {id: GATED, title: "Waits on an external Sol acceptance gate", status: in_progress, wait: {kind: EXTERNAL_GATE, condition: "Sol acceptance"}}
 next_action: This fixture exists only to exercise the wait-mapping compiler path.
 ---
 
