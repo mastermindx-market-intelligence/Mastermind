@@ -6,14 +6,14 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
-from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser, BearerAuthBackend
-from mcp.server.auth.provider import TokenVerifier
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
+from starlette.authentication import AuthCredentials, AuthenticationBackend
 from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
-from starlette.requests import Request
+from starlette.requests import HTTPConnection, Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -24,6 +24,7 @@ from integrations.business_mcp_auth.contracts import (
     ResourcePolicy,
     validate_resource_policy,
 )
+from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 from integrations.business_mcp_auth.metadata import (
     mcp_auth_error_result,
     protected_resource_metadata,
@@ -97,6 +98,30 @@ class _McpEndpoint:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         await self._app(scope, receive, send)
+
+
+class _A1BearerAuthBackend(AuthenticationBackend):
+    """Project A1's single verified decision into Starlette request auth."""
+
+    def __init__(self, token_verifier: MastermindTokenVerifier) -> None:
+        self._token_verifier = token_verifier
+
+    async def authenticate(self, conn: HTTPConnection):
+        auth_header = next(
+            (
+                conn.headers.get(key)
+                for key in conn.headers
+                if key.lower() == "authorization"
+            ),
+            None,
+        )
+        if not auth_header or not auth_header.lower().startswith("bearer "):
+            return None
+
+        auth_info = await self._token_verifier.verify_token(auth_header[7:])
+        if auth_info is None:
+            return None
+        return AuthCredentials(auth_info.scopes), AuthenticatedUser(auth_info)
 
 
 class _StewardTransportGuard:
@@ -287,15 +312,11 @@ def _url_path(url: str, label: str) -> str:
     return (parsed.path or "/").rstrip("/") or "/"
 
 
-def _allowed_hosts(policy: ResourcePolicy, extra: Sequence[str]) -> list[str]:
+def _allowed_hosts(policy: ResourcePolicy) -> list[str]:
     values = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
     resource_host = urlsplit(policy.resource).netloc
-    if resource_host:
+    if resource_host and resource_host not in values:
         values.append(resource_host)
-    for raw in extra:
-        token = str(raw).strip()
-        if token and token not in values:
-            values.append(token)
     return values
 
 
@@ -303,8 +324,7 @@ def build_authenticated_app(
     contract: SecretaryGroundingContractServer,
     *,
     policy: ResourcePolicy,
-    token_verifier: TokenVerifier,
-    extra_allowed_hosts: Sequence[str] = (),
+    token_verifier: MastermindTokenVerifier,
     allowed_origins: Sequence[str] = ("https://chatgpt.com",),
 ) -> Starlette:
     """Build one stateless A1-authenticated, read-only Steward MCP app."""
@@ -314,11 +334,11 @@ def build_authenticated_app(
     policy = validate_resource_policy(policy)
     if tuple(policy.required_scopes) != (REQUIRED_SCOPE,):
         raise ValueError("Steward policy must require exactly mastermind.steward.read")
-    if not callable(getattr(token_verifier, "verify_token", None)):
-        raise TypeError("token_verifier must provide verify_token")
+    if type(token_verifier) is not MastermindTokenVerifier:
+        raise TypeError("token_verifier must be MastermindTokenVerifier")
 
     mcp_server = build_mcp_server(contract)
-    hosts = _allowed_hosts(policy, extra_allowed_hosts)
+    hosts = _allowed_hosts(policy)
     origins = tuple(str(value) for value in allowed_origins)
     security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
@@ -383,7 +403,7 @@ def build_authenticated_app(
         ),
         Middleware(
             AuthenticationMiddleware,
-            backend=BearerAuthBackend(token_verifier),
+            backend=_A1BearerAuthBackend(token_verifier),
         ),
         Middleware(_A1AuthGate, policy=policy, resource_path=resource_path),
         Middleware(AuthContextMiddleware),

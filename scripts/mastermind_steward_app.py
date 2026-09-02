@@ -67,16 +67,6 @@ def _load_policy(path: Path):
     return load_resource_policy(payload)
 
 
-def _split_csv(value: str | None) -> tuple[str, ...]:
-    if not value:
-        return ()
-    return tuple(
-        token
-        for token in (item.strip() for item in value.split(","))
-        if token
-    )
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -92,10 +82,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--policy-file", default=os.getenv("MASTERMIND_STEWARD_POLICY"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
-    parser.add_argument(
-        "--extra-allowed-hosts",
-        default=os.getenv("MASTERMIND_STEWARD_ALLOWED_HOSTS"),
-    )
     parser.add_argument("--describe", action="store_true")
     return parser
 
@@ -152,7 +138,6 @@ def main(argv: list[str] | None = None) -> int:
         contract,
         policy=policy,
         token_verifier=verifier,
-        extra_allowed_hosts=_split_csv(args.extra_allowed_hosts),
     )
 
     import uvicorn

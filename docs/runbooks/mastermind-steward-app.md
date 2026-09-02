@@ -80,10 +80,10 @@ company responses are never persisted.
 ## Reverse proxy / public endpoint
 
 Terminate TLS in the existing deployment owner and forward only the policy's
-resource and metadata paths to `127.0.0.1:8766`. Add the externally visible Host
-value through `--extra-allowed-hosts` or
-`MASTERMIND_STEWARD_ALLOWED_HOSTS`. Do not expose the process directly and do
-not add TCP/HTTP to ExecutiveControlService.
+resource and metadata paths to `127.0.0.1:8766`. The reverse proxy must
+preserve the exact Host authority from `policy.resource` when forwarding to
+the loopback process; do not rewrite or widen it. Do not expose the process
+directly and do not add TCP/HTTP to ExecutiveControlService.
 
 ## ChatGPT app values
 
