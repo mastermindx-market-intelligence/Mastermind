@@ -283,3 +283,89 @@ class TestClosedEnvironment:
             assert client.used_shell is False
         finally:
             client.close()
+
+
+class TestB6Enforcement:
+    """B6 — the transport must enforce, not merely declare, its boundary."""
+
+    def _sandboxed(self, mode: str, tmp_path: Path) -> JsonRpcStdioClient:
+        from experiments.code_intelligence.sandbox import build_sandbox
+
+        return JsonRpcStdioClient(
+            spec=_spec(mode),
+            scratch=tmp_path,
+            sandbox=build_sandbox(scratch=tmp_path / "sbx"),
+        )
+
+    def test_client_runs_the_child_under_the_sandbox(self, tmp_path: Path) -> None:
+        client = self._sandboxed("echo", tmp_path)
+        client.start()
+        try:
+            assert client.launch_argv[0].endswith("sandbox-exec")
+            assert client.request("ping", {}) == {"method": "ping", "params": {}}
+        finally:
+            client.close()
+
+    def test_oversized_header_is_refused(self, tmp_path: Path) -> None:
+        client = _client("hugeheader", tmp_path)
+        client.start()
+        with pytest.raises(JsonRpcError) as excinfo:
+            client.request("ping", {}, timeout=8)
+        assert excinfo.value.code == "PROTOCOL_HEADER_TOO_LARGE"
+        client.close()
+
+    def test_server_initiated_mutation_request_is_a_hard_failure(
+        self, tmp_path: Path
+    ) -> None:
+        client = _client("mutate", tmp_path)
+        client.start()
+        try:
+            with pytest.raises(JsonRpcError) as excinfo:
+                client.request("ping", {}, timeout=10)
+            assert excinfo.value.code == "SERVER_INITIATED_MUTATION_REFUSED"
+            assert "workspace/applyEdit" in excinfo.value.detail
+        finally:
+            client.close()
+
+    def test_close_receipts_the_process_group(self, tmp_path: Path) -> None:
+        client = _client("echo", tmp_path)
+        client.start()
+        client.request("ping", {})
+        client.close()
+        receipt = client.shutdown_receipt()
+        assert receipt["group_signalled"] in (True, False)
+        assert receipt["descendants_alive"] == 0, receipt
+
+    def test_descendants_are_killed_with_the_group(self, tmp_path: Path) -> None:
+        client = _client("spawn", tmp_path)
+        client.start()
+        client.request("ping", {}, timeout=15)
+        client.close()
+        assert client.shutdown_receipt()["descendants_alive"] == 0
+
+    def test_argv_artifacts_are_digest_bound(self, tmp_path: Path) -> None:
+        # B6: binding the interpreter alone is not binding the candidate.
+        spec = ExecutableSpec(
+            path=PYTHON,
+            sha256=_python_digest(),
+            argv_suffix=(str(SERVER), "echo"),
+            argv_digests=((str(SERVER), "0" * 64),),
+        )
+        client = JsonRpcStdioClient(spec=spec, scratch=tmp_path)
+        with pytest.raises(JsonRpcError) as excinfo:
+            client.start()
+        assert excinfo.value.code == "ARTIFACT_DIGEST_MISMATCH"
+
+    def test_correct_argv_artifact_digest_starts(self, tmp_path: Path) -> None:
+        spec = ExecutableSpec(
+            path=PYTHON,
+            sha256=_python_digest(),
+            argv_suffix=(str(SERVER), "echo"),
+            argv_digests=((str(SERVER), hashlib.sha256(SERVER.read_bytes()).hexdigest()),),
+        )
+        client = JsonRpcStdioClient(spec=spec, scratch=tmp_path)
+        client.start()
+        try:
+            assert client.request("ping", {}) == {"method": "ping", "params": {}}
+        finally:
+            client.close()

@@ -95,11 +95,17 @@ class BackendIdentity:
 
 @dataclass(frozen=True, slots=True)
 class ExecutableSpec:
-    """A host-injected, digest-pinned executable. Never model-facing."""
+    """A host-injected, digest-pinned executable. Never model-facing.
+
+    ``argv_digests`` binds the *artifacts named in argv* — the server script,
+    bundle entry point or package — because pinning only the interpreter pins
+    almost nothing: the same python can run any code.
+    """
 
     path: Path
     sha256: str
     argv_suffix: tuple[str, ...]
+    argv_digests: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.sha256, str) or not _HEX64.match(self.sha256):
@@ -109,6 +115,13 @@ class ExecutableSpec:
         for item in self.argv_suffix:
             if not isinstance(item, str):
                 raise TypeError("argv_suffix must contain only strings")
+        if not isinstance(self.argv_digests, tuple):
+            raise TypeError("argv_digests must be a tuple")
+        for entry in self.argv_digests:
+            if not (isinstance(entry, tuple) and len(entry) == 2):
+                raise TypeError("argv_digests entries must be (path, sha256) pairs")
+            if not _HEX64.match(entry[1]):
+                raise ValueError("argv_digests entries need a 64-char hex digest")
 
 
 @runtime_checkable

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from experiments.code_intelligence.backend import ExecutableSpec
+from experiments.code_intelligence.sandbox import SandboxContract, kill_process_group
 
 __all__ = [
     "MAX_FRAME_BYTES",
@@ -36,6 +37,37 @@ __all__ = [
 
 MAX_FRAME_BYTES = 4 * 1024 * 1024
 MAX_STDERR_BYTES = 32 * 1024
+MAX_HEADER_BYTES = 64 * 1024
+
+#: Failures that invalidate an answer even if the reply already arrived. A server
+#: that violated the protocol or tried to mutate the workspace during our call
+#: does not get to have that call's result published. A clean EOF after a
+#: complete, valid reply is deliberately NOT in this set.
+TAINTING_CODES = frozenset(
+    {
+        "SERVER_INITIATED_MUTATION_REFUSED",
+        "PROTOCOL_HEADER_TOO_LARGE",
+        "PROTOCOL_FRAME_TOO_LARGE",
+        "PROTOCOL_MALFORMED_HEADER",
+        "PROTOCOL_MALFORMED_BODY",
+    }
+)
+
+#: Server-initiated requests that would mutate the workspace, run commands or
+#: touch files. These are refused as hard failures, never silently dropped.
+SERVER_INITIATED_MUTATIONS = frozenset(
+    {
+        "workspace/applyEdit",
+        "workspace/executeCommand",
+        "workspace/willCreateFiles",
+        "workspace/willRenameFiles",
+        "workspace/willDeleteFiles",
+        "workspace/didCreateFiles",
+        "workspace/didRenameFiles",
+        "workspace/didDeleteFiles",
+        "window/showDocument",
+    }
+)
 _DEFAULT_TIMEOUT = 30.0
 _DEFAULT_MAX_NOTIFICATIONS = 256
 _READ_CHUNK = 64 * 1024
@@ -81,7 +113,10 @@ class JsonRpcStdioClient:
         scratch: Path,
         max_notifications: int = _DEFAULT_MAX_NOTIFICATIONS,
         default_timeout: float = _DEFAULT_TIMEOUT,
+        sandbox: SandboxContract | None = None,
     ) -> None:
+        self._sandbox = sandbox
+        self._shutdown_receipt: dict[str, Any] = {}
         self._spec = spec
         self._scratch = Path(scratch)
         self._default_timeout = default_timeout
@@ -101,7 +136,14 @@ class JsonRpcStdioClient:
 
     @property
     def launch_argv(self) -> list[str]:
-        return [str(self._spec.path), *self._spec.argv_suffix]
+        argv = [str(self._spec.path), *self._spec.argv_suffix]
+        if self._sandbox is not None:
+            return self._sandbox.wrap(argv)
+        return argv
+
+    def shutdown_receipt(self) -> dict[str, Any]:
+        """Proof about descendants, not a hope that they exited."""
+        return dict(self._shutdown_receipt)
 
     @property
     def child_env_allowlist(self) -> tuple[str, ...]:
@@ -142,6 +184,18 @@ class JsonRpcStdioClient:
                 "EXECUTABLE_DIGEST_MISMATCH",
                 f"expected {self._spec.sha256}, found {actual}",
             )
+        for artifact, expected in self._spec.argv_digests:
+            artifact_path = Path(artifact)
+            if artifact_path.is_symlink():
+                raise JsonRpcError("ARTIFACT_SYMLINK_REFUSED", artifact)
+            if not artifact_path.is_file():
+                raise JsonRpcError("ARTIFACT_UNAVAILABLE", artifact)
+            observed = _file_digest(artifact_path)
+            if observed != expected:
+                raise JsonRpcError(
+                    "ARTIFACT_DIGEST_MISMATCH",
+                    f"{artifact}: expected {expected}, found {observed}",
+                )
 
     def start(self) -> None:
         self._verify_executable()
@@ -156,6 +210,7 @@ class JsonRpcStdioClient:
                 cwd=str(self._scratch),
                 shell=False,
                 close_fds=True,
+                preexec_fn=self._preexec(),
             )
         except OSError as exc:
             raise JsonRpcError("EXECUTABLE_UNAVAILABLE", str(exc)) from exc
@@ -170,12 +225,29 @@ class JsonRpcStdioClient:
 
     # ------------------------------------------------------------------ reading
 
+    def _preexec(self):
+        """New process group always; resource limits when a sandbox is bound."""
+        if self._sandbox is not None:
+            return self._sandbox.preexec()
+
+        def _apply() -> None:  # pragma: no cover - runs in the forked child
+            os.setsid()
+
+        return _apply
+
     def _read_frame(self, stream) -> dict[str, Any] | None:
         headers: dict[bytes, bytes] = {}
+        header_bytes = 0
         while True:
-            line = stream.readline()
+            line = stream.readline(MAX_HEADER_BYTES + 1)
             if not line:
                 return None
+            header_bytes += len(line)
+            if len(line) > MAX_HEADER_BYTES or header_bytes > MAX_HEADER_BYTES:
+                raise JsonRpcError(
+                    "PROTOCOL_HEADER_TOO_LARGE",
+                    f"header exceeded {MAX_HEADER_BYTES} bytes",
+                )
             if line in (b"\r\n", b"\n"):
                 break
             if b":" not in line:
@@ -244,10 +316,17 @@ class JsonRpcStdioClient:
                 pending.answered = True
             pending.event.set()
             return
-        if message.get("method"):
+        method = message.get("method")
+        if method in SERVER_INITIATED_MUTATIONS:
+            # A server asking US to mutate is a hard failure, not a dropped frame.
+            self._fail_all(
+                JsonRpcError("SERVER_INITIATED_MUTATION_REFUSED", str(method))
+            )
+            return
+        if method:
             with self._lock:
                 self._notifications.append(
-                    {"method": message["method"], "params": message.get("params")}
+                    {"method": method, "params": message.get("params")}
                 )
 
     def _stderr_loop(self) -> None:
@@ -338,6 +417,9 @@ class JsonRpcStdioClient:
                 pass
             raise JsonRpcError("REQUEST_TIMEOUT", f"{method} exceeded budget")
 
+        if fatal is not None and fatal.code in TAINTING_CODES:
+            raise fatal
+
         if not pending.answered:
             raise fatal or JsonRpcError("SERVER_EXITED", method)
 
@@ -369,6 +451,7 @@ class JsonRpcStdioClient:
                     stream.close()
             except OSError:  # pragma: no cover - defensive
                 pass
+        self._shutdown_receipt = kill_process_group(process.pid)
         if process.poll() is None:
             process.terminate()
             try:

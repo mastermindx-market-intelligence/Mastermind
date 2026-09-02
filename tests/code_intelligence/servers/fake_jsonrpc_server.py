@@ -55,6 +55,11 @@ def main() -> None:
         time.sleep(5)
         return
 
+    if mode == "hugeheader":
+        _write(b"X-Pad: " + b"A" * (2 * 1024 * 1024) + b"\r\n\r\n")
+        time.sleep(5)
+        return
+
     if mode == "noheader":
         _write(b"garbage without a content length\r\n\r\n")
         time.sleep(5)
@@ -75,6 +80,19 @@ def main() -> None:
 
         if request_id is None:
             continue  # a notification we do not answer
+
+        if mode == "mutate":
+            # A server-initiated REQUEST asking the client to edit the workspace.
+            _write(_frame({"jsonrpc": "2.0", "id": 9001, "method": "workspace/applyEdit",
+                           "params": {"edit": {"changes": {}}}}))
+            _write(_frame({"jsonrpc": "2.0", "id": request_id, "result": {"ok": True}}))
+            continue
+
+        if mode == "spawn":
+            import subprocess
+            subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+            _write(_frame({"jsonrpc": "2.0", "id": request_id, "result": {"ok": True}}))
+            continue
 
         if mode == "silent_log":
             if method == "report":
