@@ -301,7 +301,16 @@ def test_bounded_output_and_search_process_exit_are_typed_and_cleanup_is_idempot
     processes.build_indexes(manifest)
     endpoint = processes.start_search()
     assert endpoint.host == "127.0.0.1"
-    assert "--listen=" + endpoint.authority in (tmp_path / "webserver-argv.txt").read_text()
+    webserver_argv = (tmp_path / "webserver-argv.txt").read_text().splitlines()
+    assert webserver_argv == [
+        f"--listen={endpoint.authority}",
+        f"--index={tmp_path / 'disposable-shards'}",
+        f"--log_dir={tmp_path / 'disposable-logs'}",
+        "--html=true",
+        "--rpc=false",
+        "--indexserver_proxy=false",
+        "--pprof=false",
+    ]
     processes._search_process.kill()  # type: ignore[union-attr]
     for _ in range(20):
         if processes._search_process.poll() is not None:  # type: ignore[union-attr]

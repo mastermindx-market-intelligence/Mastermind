@@ -333,7 +333,7 @@ def _webserver_argv(
         f"--listen={endpoint.authority}",
         f"--index={shard_root}",
         f"--log_dir={log_root}",
-        "--html=false",
+        "--html=true",
         "--rpc=false",
         "--indexserver_proxy=false",
         "--pprof=false",
