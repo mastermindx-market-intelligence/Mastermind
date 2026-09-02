@@ -152,3 +152,28 @@ def test_transport_and_auth_gates_share_one_optional_raw_path_normalizer():
     assert "def _canonical_raw_path(scope: Scope) -> bytes:" in text
     assert text.count("_canonical_raw_path(scope)") == 2
     assert 'scope.get("raw_path") != self.resource' not in text
+
+def _load_canonical_raw_path():
+    text = (PACKAGE / "app.py").read_text(encoding="utf-8")
+    tree = ast.parse(text, filename=str(PACKAGE / "app.py"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_canonical_raw_path"
+    )
+    module = ast.Module(body=[function], type_ignores=[])
+    namespace = {"Scope": dict}
+    exec(compile(ast.fix_missing_locations(module), str(PACKAGE / "app.py"), "exec"), namespace)
+    return namespace["_canonical_raw_path"]
+
+
+def test_canonical_path_requires_exact_decoded_and_raw_asgi_paths():
+    normalize = _load_canonical_raw_path()
+    canonical = "/mcp/steward/v1"
+    raw = canonical.encode("ascii")
+
+    assert normalize({"path": canonical, "raw_path": raw}) == raw
+    assert normalize({"path": canonical}) == b""
+    assert normalize({"path": canonical, "raw_path": b"/mcp%2Fsteward%2Fv1"}) == b""
+    assert normalize({"path": canonical + "/", "raw_path": raw}) == b""
+
