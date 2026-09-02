@@ -578,8 +578,10 @@ def _private_parent(path: Path, owner_uid: int) -> None:
 def _socket_identity(path: Path) -> tuple[int, int] | None:
     try:
         info = path.lstat()
-    except OSError:
+    except FileNotFoundError:
         return None
+    except OSError:
+        raise NativeHostError("socket_cleanup_failed") from None
     if not stat.S_ISSOCK(info.st_mode):
         return None
     return (info.st_dev, info.st_ino)
