@@ -3,15 +3,12 @@
 These tests inspect SOURCE, not behavior: the app package must never import
 the general Executive control socket module, the MCP SDK, or call the
 in-process mutation sink, no matter how its runtime behavior is composed.
-They also pin the "did this PR touch something it must not have"
-invariants named by the FROZEN SPEC: the Executive MCP schema digest is
-byte-identical to the frozen literal, and
-``control_plane/executive_service.py`` carries zero diff across the WHOLE
-PR (PR #265's file, reused read-only, never edited here). The scope fences
-below are anchored to this PR's merge-base with ``master``, never to
-``HEAD`` -- a HEAD-anchored diff is empty (or vacuously "no diff") the
-moment this PR's own commits land, which is not a claim about the PR's
-scope at all.
+They also preserve the original BSC-E1 "did this PR touch something it must
+not have" assertions. Those three branch-delta assertions apply only while
+the computed merge base predates the Executive app release. Once the app is
+already protected in the merge base, applying PR #363's fixed 11-path delta
+to an unrelated later PR would be false; the historical assertions skip,
+while every enduring source, AST, import and schema fence remains active.
 """
 from __future__ import annotations
 
@@ -33,6 +30,7 @@ APP_PACKAGE_FILES = [
 ]
 ENTRYPOINT_SCRIPT = REPO_ROOT / "scripts" / "mastermind_executive_app.py"
 ALL_OWNED_MODULES = APP_PACKAGE_FILES + [ENTRYPOINT_SCRIPT]
+_BSC_E1_RELEASE_SENTINEL = "integrations/mastermind_executive_app/app.py"
 
 
 def _imported_module_names(path: Path) -> set[str]:
@@ -169,14 +167,13 @@ def test_admission_never_widens_the_five_tool_privileged_field_list():
 
 
 # ---------------------------------------------------------------------------
-# "did this PR touch something it must not have" pins
+# Enduring schema pin plus historical BSC-E1 commission-scope evidence
 # ---------------------------------------------------------------------------
 
 
 def test_schema_digest_unchanged():
     """The Executive MCP tool/schema surface is byte-identical to the frozen
-    literal named in the FROZEN SPEC -- this PR never touched
-    integrations/executive_mcp/schemas.py's TOOL_SPECS."""
+    literal named in the FROZEN SPEC."""
 
     assert mcp_schemas.schema_snapshot_sha256() == (
         "546b4345e30c24363a02ae3d4fc873e17559ffd569cde188a533fb628b284232"
@@ -193,17 +190,11 @@ def _rev_parse_quiet(ref: str) -> bool:
 
 
 def _merge_base_with_master() -> str:
-    """The PR's base commit against ``master`` -- NOT ``HEAD``.
+    """Resolve the candidate branch's base commit against ``master``.
 
-    A ``git diff HEAD`` (working-tree vs. the current commit) is empty the
-    moment this PR's own changes are committed, which makes a HEAD-anchored
-    scope fence either a false CI red (the diff it expects is gone, since it
-    is now baked into a commit) or a vacuous pass (nothing uncommitted, so
-    "no unexpected diff" is trivially true no matter what the PR shipped).
-    The fence that actually discriminates is base..HEAD across the WHOLE
-    PR. CI's ``actions/checkout@v4`` step uses ``fetch-depth: 0``, so
-    ``origin/master`` is already resolvable there; a local dev checkout may
-    need one fetch, attempted here as a last resort only.
+    CI checks out pull-request merge refs with ``fetch-depth: 0``, so
+    ``origin/master`` is normally available. A local development checkout
+    gets one existing last-resort fetch before failing closed.
     """
 
     for ref in ("origin/master", "master"):
@@ -227,19 +218,30 @@ def _merge_base_with_master() -> str:
     raise RuntimeError("cannot resolve a merge-base against master")
 
 
-def test_executive_service_file_has_zero_diff_against_base():
-    """control_plane/executive_service.py (PR #265's file) carries zero diff
-    across the WHOLE PR (base..HEAD) -- this PR reused it read-only and
-    never edited it in any commit, not merely in the working tree.
+def _skip_historical_bsc_e1_scope_if_released(base: str) -> None:
+    """Deactivate PR #363's branch-delta assertions after its release.
 
-    Anchored to the PR's merge-base with master, never to HEAD: once this
-    PR's own commits land, a HEAD-anchored version of this test is
-    vacuously green regardless of what the PR actually touched (the exact
-    defect an independent review caught -- see
-    ``test_ceo_request_change_is_the_only_control_plane_diff`` below for the
-    sibling fence that was outright FALSE-RED under the same mistake)."""
+    The three callers below prove the original BSC-E1 commission's exact
+    candidate delta. They remain discriminating when the merge base predates
+    BSC-E1. Once the released app sentinel already exists at ``base``, that
+    historical delta belongs to the base rather than the current PR, so
+    evaluating it against ``base..HEAD`` would reject every unrelated change.
+    A missing/unresolvable sentinel does not skip and therefore fails closed
+    through the original assertions.
+    """
+
+    if _rev_parse_quiet(f"{base}:{_BSC_E1_RELEASE_SENTINEL}"):
+        pytest.skip(
+            "historical BSC-E1 PR-scope assertion: Executive app is already "
+            "released in the merge base"
+        )
+
+
+def test_executive_service_file_has_zero_diff_against_base():
+    """For an unreleased BSC-E1 candidate, executive_service.py is unchanged."""
 
     base = _merge_base_with_master()
+    _skip_historical_bsc_e1_scope_if_released(base)
     result = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "diff", "--stat", base, "HEAD", "--", "control_plane/executive_service.py"],
         check=True,
@@ -250,17 +252,10 @@ def test_executive_service_file_has_zero_diff_against_base():
 
 
 def test_ceo_request_change_is_the_only_control_plane_diff():
-    """Every path this PR touches under control_plane/, across the WHOLE PR
-    (base..HEAD), is exactly the one P5-authorized 11th-path file.
-
-    Anchored to the PR's merge-base with master. The pre-fix, HEAD-anchored
-    version of this test FAILED on any clean checkout of a committed head
-    (``git diff HEAD`` is empty once ceo_request.py's change is committed,
-    so ``changed == []`` never equals ``["control_plane/ceo_request.py"]``)
-    -- a false CI red on the very PR it was meant to protect, independent of
-    whether the PR's actual scope was clean."""
+    """For an unreleased BSC-E1 candidate, ceo_request.py is its sole control-plane diff."""
 
     base = _merge_base_with_master()
+    _skip_historical_bsc_e1_scope_if_released(base)
     result = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "diff", "--name-only", base, "HEAD", "--", "control_plane/"],
         check=True,
@@ -272,19 +267,10 @@ def test_ceo_request_change_is_the_only_control_plane_diff():
 
 
 def test_ten_ceiling_paths_are_exactly_the_new_files_this_pr_adds():
-    """The ten OWNED FILES this commission authorized are EXACTLY the files
-    ADDED across the whole PR (base..HEAD), and the full base..HEAD diff
-    (additions + the one modification) is EXACTLY those ten plus the one
-    P5-authorized 11th-path file -- eleven paths, no more, no fewer.
-
-    Anchored to the PR's merge-base with master. The pre-fix version used
-    ``git status --porcelain``/``git diff HEAD`` (working-tree state), which
-    is vacuously true on any clean checkout of a committed head no matter
-    what the PR shipped -- it could not have caught a twelfth file landing
-    in a commit.
-    """
+    """For an unreleased BSC-E1 candidate, enforce its exact 11-path ceiling."""
 
     base = _merge_base_with_master()
+    _skip_historical_bsc_e1_scope_if_released(base)
     added = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "diff", "--name-only", "--diff-filter=A", base, "HEAD"],
         check=True, stdout=subprocess.PIPE, text=True,
