@@ -37,6 +37,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from control_plane.codex_operator_adapter import (
     CodexAdapterError,
+    OHF_CLIENT_INFO,
     CodexOperatorAdapter,
     CodexProtocolAttestationReceipt,
     CodexSkillCanaryBinding,
@@ -243,11 +244,10 @@ def _seam_probe_client_factory(argv: list, env: Mapping[str, str], cwd: Path):
 
 SCHEMA_ATTESTATION_DIR_NAME = "schema-attestation"
 
-_PROBE_CLIENT_INFO = {
-    "name": "cap-s1-canary-probe",
-    "title": "CAP-S1 Protocol Attestation Probe",
-    "version": "p1b",
-}
+# One client-info truth: the probe must identify exactly as the launch
+# will, or the sealed and observed userAgents can never match on a real
+# binary (live canary EFFECT_UNKNOWN, PR #350).
+_PROBE_CLIENT_INFO = OHF_CLIENT_INFO
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -912,6 +912,7 @@ def run_canary(
             # App Server double must echo that block for the config-digest
             # attestation gate to close.
             "OHF_FAKE_BUNDLED_DISABLED": "1",
+            "OHF_FAKE_ECHO_CLIENT_INFO": "1",
             # CAP-S1 addendum finding 1: turn-specific, closed-marker-
             # compliant replies keyed by the captured Skill turn-input name
             # -- required for the fake backend's own CLI subprocess journey

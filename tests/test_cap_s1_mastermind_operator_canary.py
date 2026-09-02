@@ -1431,7 +1431,7 @@ def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
     assert evidence.origin_authentication == ORIGIN_AUTHENTICATION_EPHEMERAL_GIT_ARCHIVE
     assert evidence.skills_root
     assert evidence.binary_digest
-    assert evidence.binary_version == FAKE_HARNESS_VERSION
+    assert evidence.binary_version == f"{FAKE_HARNESS_VERSION} (mastermind-ohf/p1b)"
     assert evidence.protocol_receipt_digest
     cleanup_map = _cleanup_map(evidence.cleanup)
     assert set(cleanup_map) == {"schema", "workspace", "archive_origin", "projection", "process"}
@@ -1456,6 +1456,39 @@ def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 # config-digest attestation gate (protocol amendment §5)
 # ---------------------------------------------------------------------------
+
+
+def test_probe_client_identity_mismatch_reproduces_the_live_version_refusal(tmp_path, monkeypatch):
+    """The live canary refused EFFECT_UNKNOWN because the attestation probe
+    identified as a different client than the launch, and the real App
+    Server's userAgent incorporates the caller's clientInfo (PR #350
+    reconciliation). With the clientInfo-echoing fake this defect class is
+    now fake-detectable: a mismatched probe identity must reproduce the
+    exact version-equality refusal, while the unified one-truth identity
+    passes (every other green fake-journey test in this file)."""
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    monkeypatch.setattr(
+        canary_module,
+        "_PROBE_CLIENT_INFO",
+        {"name": "cap-s1-canary-probe", "title": "Mismatched Probe", "version": "p1b"},
+    )
+    scratch = tmp_path / "scratch-probe-mismatch"
+    scratch.mkdir()
+    factory = _canary_client_factory(replies=list(_HAPPY_REPLIES))
+    with pytest.raises(CanaryStop) as exc:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-probe-mismatch",
+            client_factory=factory,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert exc.value.code == "EFFECT_UNKNOWN"
+    assert "version" in exc.value.detail
 
 
 def test_run_canary_fake_backend_bundled_omission_refuses_config_drift(tmp_path) -> None:

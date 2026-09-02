@@ -103,6 +103,10 @@ from scripts.ohf.protocol import (
 )
 
 _CLIENT_INFO = {"name": "mastermind-ohf", "title": "Mastermind OHF", "version": "p1b"}
+# Public alias: the CAP-S1 attestation probe MUST initialize with the same
+# clientInfo as the launch, because the real App Server's userAgent
+# incorporates it (proven by the live canary version-equality refusal).
+OHF_CLIENT_INFO = _CLIENT_INFO
 _FAKE_ENV_PREFIX = "OHF_FAKE_"
 _SAFE_ENV_KEYS = frozenset({"PATH", "LC_ALL", "LANG", "PYTHONPATH"})
 _ATTENTION_COMPLETION_METHOD = "turn/completed"

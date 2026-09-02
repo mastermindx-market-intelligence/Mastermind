@@ -169,10 +169,23 @@ class FakeAppServer:
                 raise SystemExit(9)
         if method == "initialize":
             self.initialized = True
+            user_agent = "ohf-fake-app-server/p0b"
+            if os.environ.get("OHF_FAKE_ECHO_CLIENT_INFO") == "1":
+                # Faithful to the real App Server, whose returned userAgent
+                # incorporates the caller's declared clientInfo: a probe and a
+                # launch that identify differently observe DIFFERENT versions.
+                # This made the CAP-S1 live canary's version-equality gate
+                # refuse (EFFECT_UNKNOWN, PR #350) while every fake-backed
+                # gate passed against the constant string above. Opt-in so
+                # legacy fixtures sealing the bare constant stay valid.
+                client = params.get("clientInfo") if isinstance(params, dict) else None
+                name = str((client or {}).get("name") or "unknown")
+                version = str((client or {}).get("version") or "0")
+                user_agent = f"ohf-fake-app-server/p0b ({name}/{version})"
             self._ok(
                 request_id,
                 {
-                    "userAgent": "ohf-fake-app-server/p0b",
+                    "userAgent": user_agent,
                     "codexHome": str(self.state_path.parent),
                     "platformFamily": "unix",
                     "platformOs": sys.platform,
