@@ -118,7 +118,7 @@ def test_local_pro_counter_requires_known_mode_and_exact_submission():
 
     assert "a pro-specific local counter increments only when both are proven" in law
     assert "the reasoning/model class for that submission is known" in law
-    assert "unknown reasoning mode" in design
+    assert "unknown model mode" in design
     assert "service-worker restart after receipt" in design
     assert "same event id, no second count" in design
 
