@@ -2,6 +2,8 @@
 
 This module is validation-only. It owns no watcher, task store, lifecycle,
 action target, transport, retry, cursor, provider session, or persistence.
+Managed watcher prompts use a closed, canonically rendered body document;
+legacy free-prose bodies remain readable only for migration/audit compatibility.
 """
 from __future__ import annotations
 
@@ -13,6 +15,9 @@ from typing import Any, Iterable, Mapping, Pattern
 
 
 DISCRIMINATOR = "MMX_SOL_WATCHER_V1"
+BODY_DISCRIMINATOR = "MMX_SOL_WATCHER_BODY_V1"
+ACCOUNT_EXPORT_SCHEMA = "mastermind.sol_watcher_account_export.v1"
+
 _REQUIRED_FIELDS = (
     "WATCHER_ROLE",
     "OPERATION_KEY",
@@ -28,6 +33,21 @@ _AGGREGATE_CARRIER_RE = re.compile(r"^aggregate:[a-z0-9][a-z0-9._/-]{2,127}$")
 _OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
 _EDGE_RE = re.compile(r"^(?:NONE|\d{10}\.\d{6}|[A-Za-z0-9][A-Za-z0-9._:/-]{1,255})$")
 _AUDIT_KINDS = frozenset({"SOL_WATCHER", "NON_WATCHER"})
+
+_BODY_SECTIONS = ("ROLE", "SOURCE_LAW", "AUTHORITY")
+_BODY_KEYS: dict[str, tuple[str, ...]] = {
+    "ROLE": ("ROLE", "EVENTS", "OUTCOME", "RESPONSIBILITY"),
+    "SOURCE_LAW": (
+        "CURRENT_PROTECTED_REPIN",
+        "EXACT_CARRIER_FRESH_READ",
+        "NONTERMINAL_RETURN_STATE",
+        "SLACK_EXECUTIVE_LIFECYCLE_INFERENCE",
+        "BLIND_RETRY",
+        "CROSS_CARRIER_FAILOVER",
+        "TERMINAL_STOP_BEFORE_DISARM",
+    ),
+    "AUTHORITY": ("ALLOWED", "FORBIDDEN"),
+}
 
 
 class WatcherRole(str, Enum):
@@ -62,6 +82,15 @@ class FindingCode(str, Enum):
     MISSING_TERMINAL_STOP_ORDER = "MISSING_TERMINAL_STOP_ORDER"
     NOTIFICATION_ONLY_SELF_DEADLOCK = "NOTIFICATION_ONLY_SELF_DEADLOCK"
     NON_AUTHORITATIVE_MODIFICATION_FORBIDDEN = "NON_AUTHORITATIVE_MODIFICATION_FORBIDDEN"
+    MISSING_BODY_DISCRIMINATOR = "MISSING_BODY_DISCRIMINATOR"
+    MISSING_BODY_SECTION = "MISSING_BODY_SECTION"
+    DUPLICATE_BODY_SECTION = "DUPLICATE_BODY_SECTION"
+    UNKNOWN_BODY_SECTION = "UNKNOWN_BODY_SECTION"
+    INVALID_BODY_LINE = "INVALID_BODY_LINE"
+    UNKNOWN_BODY_KEY = "UNKNOWN_BODY_KEY"
+    DUPLICATE_BODY_KEY = "DUPLICATE_BODY_KEY"
+    BODY_CONTRACT_MISMATCH = "BODY_CONTRACT_MISMATCH"
+    NONCANONICAL_MANAGED_BODY = "NONCANONICAL_MANAGED_BODY"
     INVALID_TASK = "INVALID_TASK"
     INVALID_TASK_ID = "INVALID_TASK_ID"
     INVALID_ENABLED_FLAG = "INVALID_ENABLED_FLAG"
@@ -153,28 +182,71 @@ class AuditReport:
         }
 
 
-_ROLE_CONTRACTS: dict[WatcherRole, tuple[frozenset[str], str, str]] = {
-    WatcherRole.ACTION_AUTHORITATIVE: (
-        frozenset({"BLOCKED", "DECISION_REQUEST", "RESULT"}),
-        "SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER",
-        "OBSERVE_ONLY_UNLESS_EXACT_ACTION_TARGET",
+@dataclass(frozen=True)
+class _RoleContract:
+    events: frozenset[str]
+    outcome: str
+    sister_policy: str
+    responsibility: str
+    allowed: tuple[str, ...]
+    forbidden: tuple[str, ...]
+
+
+_NON_AUTHORITATIVE_FORBIDDEN = (
+    "CHILD_CONTINUE",
+    "CHILD_RULING",
+    "CHILD_REQUEST_REPAIR",
+    "CHILD_STOP",
+    "DISARM_OTHER_WATCHER",
+    "MERGE",
+    "RELEASE",
+    "RETRY",
+    "RESUBMIT",
+    "REQUEUE",
+    "FAILOVER",
+    "SUCCESSOR",
+)
+
+_ROLE_CONTRACTS: dict[WatcherRole, _RoleContract] = {
+    WatcherRole.ACTION_AUTHORITATIVE: _RoleContract(
+        events=frozenset({"BLOCKED", "DECISION_REQUEST", "RESULT"}),
+        outcome="SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER",
+        sister_policy="OBSERVE_ONLY_UNLESS_EXACT_ACTION_TARGET",
+        responsibility="ACT_NOW",
+        allowed=("SAME_CARRIER_SOL_EDGE", "TYPED_BLOCKER", "TERMINAL_STOP"),
+        forbidden=(
+            "WAIT_FOR_SOL",
+            "NOTIFICATION_ONLY",
+            "BLIND_RETRY",
+            "CROSS_CARRIER_FAILOVER",
+        ),
     ),
-    WatcherRole.OBSERVER_ONLY: (
-        frozenset({"NONE"}),
-        "OBSERVE_ONLY_NO_MODIFY",
-        "NEVER_ACT_WITHOUT_CANONICAL_TRANSFER",
+    WatcherRole.OBSERVER_ONLY: _RoleContract(
+        events=frozenset({"NONE"}),
+        outcome="OBSERVE_ONLY_NO_MODIFY",
+        sister_policy="NEVER_ACT_WITHOUT_CANONICAL_TRANSFER",
+        responsibility="NO_CHILD_ACTION",
+        allowed=("OBSERVE", "REPORT_DELTA"),
+        forbidden=_NON_AUTHORITATIVE_FORBIDDEN,
     ),
-    WatcherRole.PARENT_ORCHESTRATOR: (
-        frozenset({"PARENT_TRANSITION"}),
-        "PARENT_EDGE_ONLY_NO_CHILD_RACE",
-        "NEVER_ACT_ON_DEDICATED_CHILD_RETURN",
+    WatcherRole.PARENT_ORCHESTRATOR: _RoleContract(
+        events=frozenset({"PARENT_TRANSITION"}),
+        outcome="PARENT_EDGE_ONLY_NO_CHILD_RACE",
+        sister_policy="NEVER_ACT_ON_DEDICATED_CHILD_RETURN",
+        responsibility="NO_CHILD_ACTION",
+        allowed=("PARENT_EDGE", "REPORT_DELTA"),
+        forbidden=_NON_AUTHORITATIVE_FORBIDDEN,
     ),
-    WatcherRole.TRIAGE_ONLY: (
-        frozenset({"UNCONSUMED_RETURN"}),
-        "RECONCILE_OR_REPORT_NO_DUPLICATE",
-        "NEVER_ELECT_BY_RECENCY",
+    WatcherRole.TRIAGE_ONLY: _RoleContract(
+        events=frozenset({"UNCONSUMED_RETURN"}),
+        outcome="RECONCILE_OR_REPORT_NO_DUPLICATE",
+        sister_policy="NEVER_ELECT_BY_RECENCY",
+        responsibility="NO_CHILD_ACTION",
+        allowed=("READ_ONLY_RECONCILIATION", "REPORT_BLOCKER"),
+        forbidden=_NON_AUTHORITATIVE_FORBIDDEN,
     ),
 }
+
 
 _NOTIFICATION_ONLY_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bsol action required\b", re.IGNORECASE),
@@ -243,18 +315,19 @@ _TERMINAL_STOP_ORDER_PATTERNS: tuple[Pattern[str], ...] = (
     ),
 )
 _LIFECYCLE_INFERENCE_RE = re.compile(r"\binfer(?:ring|red|s)?\b", re.IGNORECASE)
-_POLARITY_ACTION_START = (
+_ACTION_START = (
     r"(?:do\s+not|don't|never|must\s+not|cannot|can't|if|when|wait|await|defer|"
     r"escalate|pause|post|send|issue|write|emit|reply|respond|merge|release|"
     r"enable|arm|retry|resubmit|requeue|fail|commission|start|infer|re-pin|repin|"
     r"fresh-read|return|report)"
 )
-_POLARITY_BOUNDARY_RE = re.compile(
-    rf"[;.!?]+|,(?!\s*(?:unless|except)\b)\s*|\b(?:then|but|however|instead|whereas)\b|"
-    rf"\band\s+(?={_POLARITY_ACTION_START}\b)",
+_CLAUSE_BOUNDARY_RE = re.compile(
+    rf"[;.!?]+|,(?!\s*(?:unless|except)\b)\s*|"
+    rf"\b(?:then|but|however|instead|whereas)\b|"
+    rf"\band\s+(?={_ACTION_START}\b)",
     re.IGNORECASE,
 )
-_NEGATOR_RE = re.compile(r"\b(?:do not|don't|never|must not|cannot|can't)\b", re.IGNORECASE)
+_NEGATOR_RE = re.compile(r"\b(?:do not|don't|never|must not|cannot|can't|no)\b", re.IGNORECASE)
 _SCOPE_REVERSER_RE = re.compile(
     r"\b(?:forbid(?:s|den|ding)?|prohibit(?:s|ed|ing)?|reject(?:s|ed|ing)?|"
     r"prevent(?:s|ed|ing)?|disallow(?:s|ed|ing)?|ban(?:s|ned|ning)?|"
@@ -266,21 +339,6 @@ _REQUIRED_EXCEPTION_RE = re.compile(
     r"\b(?:unless|except(?:\s+when)?|optional(?:ly)?|may\s+(?:skip|omit)|"
     r"need\s+not|no\s+need\s+to|not\s+(?:required|necessary|mandatory)|only\s+if)\b",
     re.IGNORECASE,
-)
-_BLIND_RETRY_OCCURRENCE_RE = re.compile(r"\b(?:blind[- ]retry|retry\s+blindly)\b", re.IGNORECASE)
-_BLIND_RETRY_DIRECT_PROHIBITIONS: tuple[Pattern[str], ...] = (
-    re.compile(
-        r"\bno\s+blind[- ]retry\b(?!\s+prohibition\b)[^;.!?]{0,80}\b(?:permitted|allowed)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\bblind[- ]retry\s+(?:is\s+)?(?:forbidden|prohibited|disallowed|not\s+permitted|not\s+allowed)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:never|do not|don't|must not|cannot|can't)\s+(?:blind[- ]retry|retry\s+blindly)\b",
-        re.IGNORECASE,
-    ),
 )
 _MARKDOWN_TRANSLATION = str.maketrans("", "", "`*~")
 _EXPORT_FINDING_CODES = frozenset(
@@ -313,6 +371,99 @@ def _audit_from_findings(findings: Iterable[ContractFinding]) -> PromptAudit:
         latest_handled_edge=None,
         findings=frozen,
     )
+
+
+def _with_finding(audit: PromptAudit, finding: ContractFinding) -> PromptAudit:
+    findings = audit.findings + (finding,)
+    return PromptAudit(
+        valid=False,
+        role=audit.role,
+        operation_key=audit.operation_key,
+        carrier=audit.carrier,
+        latest_handled_edge=audit.latest_handled_edge,
+        findings=findings,
+    )
+
+
+def _coerce_role(role: WatcherRole | str) -> WatcherRole:
+    if isinstance(role, WatcherRole):
+        return role
+    return WatcherRole(str(role))
+
+
+def _event_text(events: frozenset[str]) -> str:
+    return ",".join(sorted(events))
+
+
+def _managed_body_values(role: WatcherRole) -> dict[str, dict[str, str]]:
+    contract = _ROLE_CONTRACTS[role]
+    return {
+        "ROLE": {
+            "ROLE": role.value,
+            "EVENTS": _event_text(contract.events),
+            "OUTCOME": contract.outcome,
+            "RESPONSIBILITY": contract.responsibility,
+        },
+        "SOURCE_LAW": {
+            "CURRENT_PROTECTED_REPIN": "REQUIRED",
+            "EXACT_CARRIER_FRESH_READ": "REQUIRED",
+            "NONTERMINAL_RETURN_STATE": "OPEN",
+            "SLACK_EXECUTIVE_LIFECYCLE_INFERENCE": "FORBIDDEN",
+            "BLIND_RETRY": "FORBIDDEN",
+            "CROSS_CARRIER_FAILOVER": "FORBIDDEN",
+            "TERMINAL_STOP_BEFORE_DISARM": "REQUIRED",
+        },
+        "AUTHORITY": {
+            "ALLOWED": ",".join(contract.allowed),
+            "FORBIDDEN": ",".join(contract.forbidden),
+        },
+    }
+
+
+def render_watcher_body(role: WatcherRole | str) -> str:
+    """Render the one canonical managed body for a watcher role."""
+
+    resolved = _coerce_role(role)
+    values = _managed_body_values(resolved)
+    lines = [BODY_DISCRIMINATOR]
+    for section in _BODY_SECTIONS:
+        lines.append(f"[{section}]")
+        for key in _BODY_KEYS[section]:
+            lines.append(f"{key}: {values[section][key]}")
+        lines.append(f"[/{section}]")
+    return "\n".join(lines)
+
+
+def render_watcher_prompt(
+    *,
+    role: WatcherRole | str,
+    operation_key: str,
+    carrier: str,
+    latest_handled_edge: str = "NONE",
+) -> str:
+    """Render an exact-header/exact-body managed watcher prompt."""
+
+    resolved = _coerce_role(role)
+    if not _OPERATION_RE.fullmatch(operation_key):
+        raise ValueError("operation_key is invalid")
+    if not _carrier_is_valid_for_role(carrier, resolved):
+        raise ValueError("carrier is invalid for role")
+    if not _EDGE_RE.fullmatch(latest_handled_edge):
+        raise ValueError("latest_handled_edge is invalid")
+    contract = _ROLE_CONTRACTS[resolved]
+    header = "\n".join(
+        (
+            DISCRIMINATOR,
+            f"WATCHER_ROLE: {resolved.value}",
+            f"OPERATION_KEY: {operation_key}",
+            f"CARRIER: {carrier}",
+            f"LATEST_HANDLED_EDGE: {latest_handled_edge}",
+            f"ACTION_REQUIRED_EVENTS: {_event_text(contract.events)}",
+            f"ACTION_REQUIRED_OUTCOME: {contract.outcome}",
+            f"SISTER_SOL_POLICY: {contract.sister_policy}",
+        )
+    )
+    return f"{header}\n\n{render_watcher_body(resolved)}"
 
 
 def _parse_prompt(prompt: str) -> tuple[dict[str, str], str, list[ContractFinding]]:
@@ -369,14 +520,174 @@ def _parse_prompt(prompt: str) -> tuple[dict[str, str], str, list[ContractFindin
             continue
         headers[key] = value
 
-    body = "\n".join(lines[body_start:])
+    body = "\n".join(lines[body_start:]).rstrip("\n")
     return headers, body, findings
 
 
+def _parse_managed_body(
+    body: str,
+) -> tuple[dict[str, dict[str, str]], list[ContractFinding]]:
+    findings: list[ContractFinding] = []
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if not lines or lines[0] != BODY_DISCRIMINATOR:
+        return {}, [
+            _finding(
+                FindingCode.MISSING_BODY_DISCRIMINATOR,
+                f"managed body must start with {BODY_DISCRIMINATOR}",
+            )
+        ]
+
+    sections: dict[str, dict[str, str]] = {}
+    order: list[str] = []
+    current: str | None = None
+    for index, raw_line in enumerate(lines[1:], start=2):
+        line = raw_line.strip()
+        if not line:
+            findings.append(
+                _finding(
+                    FindingCode.INVALID_BODY_LINE,
+                    "managed body cannot contain blank lines",
+                    field=f"body_line_{index}",
+                )
+            )
+            continue
+        if line.startswith("[/") and line.endswith("]"):
+            name = line[2:-1]
+            if current != name:
+                findings.append(
+                    _finding(
+                        FindingCode.INVALID_BODY_LINE,
+                        "managed body section close is mismatched",
+                        field=f"body_line_{index}",
+                    )
+                )
+            current = None
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            name = line[1:-1]
+            if name not in _BODY_SECTIONS:
+                findings.append(
+                    _finding(
+                        FindingCode.UNKNOWN_BODY_SECTION,
+                        f"unknown managed body section {name!r}",
+                        field=name,
+                    )
+                )
+                current = None
+                continue
+            if name in sections:
+                findings.append(
+                    _finding(
+                        FindingCode.DUPLICATE_BODY_SECTION,
+                        f"duplicate managed body section {name}",
+                        field=name,
+                    )
+                )
+                current = name
+                continue
+            sections[name] = {}
+            order.append(name)
+            current = name
+            continue
+        if current is None or ":" not in line:
+            findings.append(
+                _finding(
+                    FindingCode.INVALID_BODY_LINE,
+                    "managed body lines must be inside a named section and use KEY: value",
+                    field=f"body_line_{index}",
+                )
+            )
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().upper()
+        value = value.strip()
+        if key not in _BODY_KEYS[current]:
+            findings.append(
+                _finding(
+                    FindingCode.UNKNOWN_BODY_KEY,
+                    f"unknown key {key!r} in {current}",
+                    field=f"{current}.{key}",
+                )
+            )
+            continue
+        if key in sections[current]:
+            findings.append(
+                _finding(
+                    FindingCode.DUPLICATE_BODY_KEY,
+                    f"duplicate key {key} in {current}",
+                    field=f"{current}.{key}",
+                )
+            )
+            continue
+        sections[current][key] = value
+
+    if current is not None:
+        findings.append(
+            _finding(
+                FindingCode.INVALID_BODY_LINE,
+                f"managed body section {current} is not closed",
+                field=current,
+            )
+        )
+    for section in _BODY_SECTIONS:
+        if section not in sections:
+            findings.append(
+                _finding(
+                    FindingCode.MISSING_BODY_SECTION,
+                    f"missing managed body section {section}",
+                    field=section,
+                )
+            )
+    if order != [section for section in _BODY_SECTIONS if section in sections]:
+        findings.append(
+            _finding(
+                FindingCode.NONCANONICAL_MANAGED_BODY,
+                "managed body sections are not in canonical order",
+            )
+        )
+    return sections, findings
+
+
+def _validate_managed_body(body: str, role: WatcherRole | None) -> list[ContractFinding]:
+    sections, findings = _parse_managed_body(body)
+    if role is None:
+        return findings
+    expected = _managed_body_values(role)
+    for section in _BODY_SECTIONS:
+        observed = sections.get(section)
+        if observed is None:
+            continue
+        expected_keys = set(_BODY_KEYS[section])
+        missing = sorted(expected_keys - set(observed))
+        if missing:
+            findings.append(
+                _finding(
+                    FindingCode.BODY_CONTRACT_MISMATCH,
+                    f"{section} is missing required keys: {','.join(missing)}",
+                    field=section,
+                )
+            )
+        for key in _BODY_KEYS[section]:
+            if key in observed and observed[key] != expected[section][key]:
+                findings.append(
+                    _finding(
+                        FindingCode.BODY_CONTRACT_MISMATCH,
+                        f"{section}.{key} does not match the closed {role.value} contract",
+                        field=f"{section}.{key}",
+                    )
+                )
+    if body != render_watcher_body(role):
+        findings.append(
+            _finding(
+                FindingCode.NONCANONICAL_MANAGED_BODY,
+                "managed body must equal the canonical role renderer byte-for-byte",
+            )
+        )
+    return findings
+
+
 def _normalized_events(raw: str) -> frozenset[str]:
-    return frozenset(
-        part.strip().upper() for part in raw.split(",") if part.strip()
-    )
+    return frozenset(part.strip().upper() for part in raw.split(",") if part.strip())
 
 
 def _scan_line(raw_line: str) -> str:
@@ -384,14 +695,12 @@ def _scan_line(raw_line: str) -> str:
 
 
 def _scan_clauses(text: str) -> Iterable[str]:
-    """Yield deterministic action-local clauses for polarity classification."""
-
     for raw_line in text.splitlines():
         normalized = _scan_line(raw_line)
         if not normalized:
             continue
         start = 0
-        for boundary in _POLARITY_BOUNDARY_RE.finditer(normalized):
+        for boundary in _CLAUSE_BOUNDARY_RE.finditer(normalized):
             clause = normalized[start : boundary.start()].strip()
             if clause:
                 yield clause
@@ -402,12 +711,10 @@ def _scan_clauses(text: str) -> Iterable[str]:
 
 
 def _match_polarity(clause: str, start: int) -> str:
-    """Classify one matched action as direct positive, negated, or scope-reversed."""
-
     prefix = clause[:start]
     negators = list(_NEGATOR_RE.finditer(prefix))
     if not negators:
-        return "NEGATED" if re.search(r"\bno\s*$", prefix, re.IGNORECASE) else "POSITIVE"
+        return "POSITIVE"
     closest = negators[-1]
     governed_prefix = prefix[closest.end() :]
     if _SCOPE_REVERSER_RE.search(governed_prefix):
@@ -449,43 +756,50 @@ def _contains_required_positive_phrase(
     return positive and not negated and not reversed_scope and not excepted
 
 
-def _is_lifecycle_inference_clause(clause: str) -> bool:
-    return (
-        bool(_LIFECYCLE_INFERENCE_RE.search(clause))
-        and "executive" in clause
-        and "lifecycle" in clause
-        and "slack" in clause
+def _contains_no_blind_retry(text: str) -> bool:
+    saw = False
+    occurrence = re.compile(r"\b(?:blind[- ]retry|retry\s+blindly)\b", re.IGNORECASE)
+    accepted = (
+        re.compile(r"^no\s+blind[- ]retry\b.*\b(?:permitted|allowed)\b", re.IGNORECASE),
+        re.compile(
+            r"^blind[- ]retry\s+(?:is\s+)?(?:forbidden|prohibited|disallowed|not\s+permitted|not\s+allowed)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(r"^(?:never|do\s+not|don't|must\s+not)\s+retry\s+blindly\b", re.IGNORECASE),
     )
+    rejected_double_negative = re.compile(
+        r"\b(?:do\s+not|never)\s+(?:forbid|reject|prevent|disallow)\b|"
+        r"\bno\s+blind[- ]retry\s+prohibition\b",
+        re.IGNORECASE,
+    )
+    for clause in _scan_clauses(text):
+        if not occurrence.search(clause):
+            continue
+        if _REQUIRED_EXCEPTION_RE.search(clause) or rejected_double_negative.search(clause):
+            return False
+        if not any(pattern.search(clause) for pattern in accepted):
+            return False
+        saw = True
+    return saw
 
 
 def _contains_lifecycle_refusal(text: str) -> bool:
-    saw_refusal = False
+    saw = False
     for clause in _scan_clauses(text):
-        if not _is_lifecycle_inference_clause(clause):
+        if not (
+            _LIFECYCLE_INFERENCE_RE.search(clause)
+            and "executive" in clause
+            and "lifecycle" in clause
+            and "slack" in clause
+        ):
             continue
         if _REQUIRED_EXCEPTION_RE.search(clause):
             return False
         for match in _LIFECYCLE_INFERENCE_RE.finditer(clause):
             if _match_polarity(clause, match.start()) != "NEGATED":
                 return False
-            saw_refusal = True
-    return saw_refusal
-
-
-def _contains_no_blind_retry(text: str) -> bool:
-    saw_prohibition = False
-    for clause in _scan_clauses(text):
-        occurrences = list(_BLIND_RETRY_OCCURRENCE_RE.finditer(clause))
-        if not occurrences:
-            continue
-        if _REQUIRED_EXCEPTION_RE.search(clause):
-            return False
-        if len(occurrences) != 1:
-            return False
-        if not any(pattern.search(clause) for pattern in _BLIND_RETRY_DIRECT_PROHIBITIONS):
-            return False
-        saw_prohibition = True
-    return saw_prohibition
+            saw = True
+    return saw
 
 
 def _carrier_is_valid_for_role(carrier: str, role: WatcherRole | None) -> bool:
@@ -500,11 +814,83 @@ def _carrier_is_valid_for_role(carrier: str, role: WatcherRole | None) -> bool:
     }
 
 
+def _validate_legacy_body(body: str, role: WatcherRole | None) -> list[ContractFinding]:
+    findings: list[ContractFinding] = []
+    if not _contains_required_positive_phrase(body, _CURRENT_REPIN_PATTERNS):
+        findings.append(
+            _finding(
+                FindingCode.MISSING_CURRENT_REPIN,
+                "prompt must positively require re-pinning the CURRENT protected Skillpack",
+            )
+        )
+    if not _contains_required_positive_phrase(body, _CARRIER_FRESHNESS_PATTERNS):
+        findings.append(
+            _finding(
+                FindingCode.MISSING_CARRIER_FRESHNESS,
+                "prompt must positively require a fresh-read of the exact carrier/thread",
+            )
+        )
+    if not _contains_no_blind_retry(body):
+        findings.append(
+            _finding(
+                FindingCode.MISSING_NO_BLIND_RETRY,
+                "prompt must explicitly forbid blind retry",
+            )
+        )
+    if not _contains_lifecycle_refusal(body):
+        findings.append(
+            _finding(
+                FindingCode.MISSING_LIFECYCLE_BOUNDARY,
+                "prompt must explicitly refuse inferring Executive lifecycle from Slack delivery",
+            )
+        )
+    if role is WatcherRole.ACTION_AUTHORITATIVE:
+        if not _contains_required_positive_phrase(body, _SAME_CARRIER_ACTION_PATTERNS):
+            findings.append(
+                _finding(
+                    FindingCode.MISSING_SAME_CARRIER_ACTION,
+                    "action-authoritative watcher must positively require the same-carrier Sol edge",
+                )
+            )
+        if not _contains_required_positive_phrase(body, _TYPED_BLOCKER_PATTERNS):
+            findings.append(
+                _finding(
+                    FindingCode.MISSING_TYPED_BLOCKER,
+                    "action-authoritative watcher must positively require a typed blocker",
+                )
+            )
+        if not _contains_required_positive_phrase(body, _TERMINAL_STOP_ORDER_PATTERNS):
+            findings.append(
+                _finding(
+                    FindingCode.MISSING_TERMINAL_STOP_ORDER,
+                    "terminal STOP must be positively ordered before child watcher disarm",
+                )
+            )
+        if _contains_positive_phrase(body, _NOTIFICATION_ONLY_PATTERNS):
+            findings.append(
+                _finding(
+                    FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK,
+                    "action-authoritative watcher cannot wait for the Sol role it already represents",
+                )
+            )
+    if role in {
+        WatcherRole.OBSERVER_ONLY,
+        WatcherRole.PARENT_ORCHESTRATOR,
+        WatcherRole.TRIAGE_ONLY,
+    } and _contains_positive_phrase(body, _NON_AUTHORITATIVE_MODIFICATION_PATTERNS):
+        findings.append(
+            _finding(
+                FindingCode.NON_AUTHORITATIVE_MODIFICATION_FORBIDDEN,
+                "non-authoritative watcher cannot claim modification, retry, release, or successor authority",
+            )
+        )
+    return findings
+
+
 def validate_watcher_prompt(prompt: str) -> PromptAudit:
     """Validate one prompt without executing or mutating anything."""
 
     headers, body, findings = _parse_prompt(prompt)
-
     for field in _REQUIRED_FIELDS:
         if not headers.get(field):
             findings.append(
@@ -563,103 +949,37 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
         )
 
     if role is not None:
-        expected_events, expected_outcome, expected_policy = _ROLE_CONTRACTS[role]
+        expected = _ROLE_CONTRACTS[role]
         observed_events = _normalized_events(headers.get("ACTION_REQUIRED_EVENTS", ""))
         if (
-            observed_events != expected_events
-            or headers.get("ACTION_REQUIRED_OUTCOME", "") != expected_outcome
-            or headers.get("SISTER_SOL_POLICY", "") != expected_policy
+            observed_events != expected.events
+            or headers.get("ACTION_REQUIRED_OUTCOME", "") != expected.outcome
+            or headers.get("SISTER_SOL_POLICY", "") != expected.sister_policy
         ):
             findings.append(
                 _finding(
                     FindingCode.ROLE_CONTRACT_MISMATCH,
                     (
-                        f"{role.value} requires events={','.join(sorted(expected_events))}, "
-                        f"outcome={expected_outcome}, sister_policy={expected_policy}"
+                        f"{role.value} requires events={_event_text(expected.events)}, "
+                        f"outcome={expected.outcome}, sister_policy={expected.sister_policy}"
                     ),
                     field="WATCHER_ROLE",
                 )
             )
 
-    if not _contains_required_positive_phrase(body, _CURRENT_REPIN_PATTERNS):
-        findings.append(
-            _finding(
-                FindingCode.MISSING_CURRENT_REPIN,
-                "prompt must positively require re-pinning the CURRENT protected Skillpack",
-            )
-        )
-    if not _contains_required_positive_phrase(body, _CARRIER_FRESHNESS_PATTERNS):
-        findings.append(
-            _finding(
-                FindingCode.MISSING_CARRIER_FRESHNESS,
-                "prompt must positively require a fresh-read of the exact carrier/thread",
-            )
-        )
-    if not _contains_no_blind_retry(body):
-        findings.append(
-            _finding(
-                FindingCode.MISSING_NO_BLIND_RETRY,
-                "prompt must explicitly forbid blind retry",
-            )
-        )
-    if not _contains_lifecycle_refusal(body):
-        findings.append(
-            _finding(
-                FindingCode.MISSING_LIFECYCLE_BOUNDARY,
-                "prompt must explicitly refuse inferring Executive lifecycle from Slack delivery",
-            )
-        )
+    if body.startswith(BODY_DISCRIMINATOR):
+        findings.extend(_validate_managed_body(body, role))
+    else:
+        findings.extend(_validate_legacy_body(body, role))
 
-    if role is WatcherRole.ACTION_AUTHORITATIVE:
-        if not _contains_required_positive_phrase(body, _SAME_CARRIER_ACTION_PATTERNS):
-            findings.append(
-                _finding(
-                    FindingCode.MISSING_SAME_CARRIER_ACTION,
-                    "action-authoritative watcher must positively require the same-carrier Sol edge",
-                )
-            )
-        if not _contains_required_positive_phrase(body, _TYPED_BLOCKER_PATTERNS):
-            findings.append(
-                _finding(
-                    FindingCode.MISSING_TYPED_BLOCKER,
-                    "action-authoritative watcher must positively require a typed blocker",
-                )
-            )
-        if not _contains_required_positive_phrase(body, _TERMINAL_STOP_ORDER_PATTERNS):
-            findings.append(
-                _finding(
-                    FindingCode.MISSING_TERMINAL_STOP_ORDER,
-                    "terminal STOP must be positively ordered before child watcher disarm",
-                )
-            )
-        if _contains_positive_phrase(body, _NOTIFICATION_ONLY_PATTERNS):
-            findings.append(
-                _finding(
-                    FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK,
-                    "action-authoritative watcher cannot wait for the Sol role it already represents",
-                )
-            )
-
-    if role in {
-        WatcherRole.OBSERVER_ONLY,
-        WatcherRole.PARENT_ORCHESTRATOR,
-        WatcherRole.TRIAGE_ONLY,
-    } and _contains_positive_phrase(body, _NON_AUTHORITATIVE_MODIFICATION_PATTERNS):
-        findings.append(
-            _finding(
-                FindingCode.NON_AUTHORITATIVE_MODIFICATION_FORBIDDEN,
-                "non-authoritative watcher cannot claim modification, retry, release, or successor authority",
-            )
-        )
-
-    findings_tuple = tuple(findings)
+    frozen = tuple(findings)
     return PromptAudit(
-        valid=not any(finding.severity is Severity.ERROR for finding in findings_tuple),
+        valid=not any(finding.severity is Severity.ERROR for finding in frozen),
         role=role,
         operation_key=operation_key,
         carrier=carrier,
         latest_handled_edge=latest_handled_edge,
-        findings=findings_tuple,
+        findings=frozen,
     )
 
 
@@ -698,7 +1018,6 @@ def _extract_task_id(raw: Mapping[str, Any], index: int) -> tuple[str, list[Cont
         )
         if finding:
             findings.append(finding)
-
     if (
         normalized_id is not None
         and normalized_task_id is not None
@@ -711,7 +1030,6 @@ def _extract_task_id(raw: Mapping[str, Any], index: int) -> tuple[str, list[Cont
                 field="id",
             )
         )
-
     return normalized_id or normalized_task_id or f"invalid-task-{index}", findings
 
 
@@ -726,7 +1044,6 @@ def _extract_enabled(raw: Mapping[str, Any]) -> tuple[bool, list[ContractFinding
                 field="is_enabled",
             )
         ]
-
     normalized: dict[str, bool] = {}
     for field in fields:
         value = raw.get(field)
@@ -740,7 +1057,6 @@ def _extract_enabled(raw: Mapping[str, Any]) -> tuple[bool, list[ContractFinding
             )
         else:
             normalized[field] = value
-
     if (
         "is_enabled" in normalized
         and "enabled" in normalized
@@ -753,11 +1069,51 @@ def _extract_enabled(raw: Mapping[str, Any]) -> tuple[bool, list[ContractFinding
                 field="is_enabled",
             )
         )
-
     return normalized.get("is_enabled", normalized.get("enabled", False)), findings
 
 
-def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
+def canonical_account_export(
+    tasks: Iterable[Mapping[str, Any]],
+) -> dict[str, object]:
+    """Return a stable, secret-neutral account-export candidate for read/write replay."""
+
+    canonical: list[dict[str, object]] = []
+    for index, raw in enumerate(tasks):
+        if not isinstance(raw, Mapping):
+            raise ValueError("every task must be a mapping")
+        task_id, id_findings = _extract_task_id(raw, index)
+        enabled, enabled_findings = _extract_enabled(raw)
+        if id_findings or enabled_findings:
+            raise ValueError("task identity and enabled state must already be valid")
+        audit_kind = raw.get("audit_kind", "SOL_WATCHER")
+        if not isinstance(audit_kind, str) or audit_kind.strip().upper() not in _AUDIT_KINDS:
+            raise ValueError("audit_kind is invalid")
+        prompt = raw.get("prompt", "")
+        if not isinstance(prompt, str):
+            raise ValueError("prompt must be a string")
+        canonical.append(
+            {
+                "id": task_id,
+                "task_id": task_id,
+                "title": str(raw.get("title") or ""),
+                "is_enabled": enabled,
+                "audit_kind": audit_kind.strip().upper(),
+                "prompt": prompt,
+            }
+        )
+    canonical.sort(key=lambda item: (str(item["id"]), str(item["title"])))
+    return {
+        "payload_kind": "ACCOUNT_EXPORT",
+        "schema": ACCOUNT_EXPORT_SCHEMA,
+        "tasks": canonical,
+    }
+
+
+def audit_tasks(
+    tasks: Iterable[Mapping[str, Any]],
+    *,
+    require_managed_body: bool = False,
+) -> AuditReport:
     """Audit an account-local task export without contacting or mutating a task store."""
 
     materialized = list(tasks)
@@ -773,8 +1129,8 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
         sorted(task_id for task_id, count in Counter(candidate_ids).items() if count > 1)
     )
     duplicate_set = set(duplicate_task_ids)
-
     results: list[TaskAudit] = []
+
     for index, raw in enumerate(materialized):
         if not isinstance(raw, Mapping):
             results.append(
@@ -801,7 +1157,6 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
         enabled, enabled_findings = _extract_enabled(raw)
         wrapper_findings.extend(enabled_findings)
         title = str(raw.get("title") or "")
-
         raw_audit_kind = raw.get("audit_kind", "SOL_WATCHER")
         if not isinstance(raw_audit_kind, str):
             audit_kind = "INVALID"
@@ -857,6 +1212,18 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
             )
             continue
 
+        prompt = raw.get("prompt", "")
+        audit = validate_watcher_prompt(prompt)
+        _headers, body, _findings = _parse_prompt(prompt)
+        if require_managed_body and not body.startswith(BODY_DISCRIMINATOR):
+            audit = _with_finding(
+                audit,
+                _finding(
+                    FindingCode.NONCANONICAL_MANAGED_BODY,
+                    "managed account exports require the canonical structured watcher body",
+                    field="prompt",
+                ),
+            )
         results.append(
             TaskAudit(
                 task_id=task_id,
@@ -864,7 +1231,7 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
                 enabled=True,
                 evaluated=True,
                 audit_kind=audit_kind,
-                audit=validate_watcher_prompt(raw.get("prompt", "")),
+                audit=audit,
             )
         )
 
@@ -889,14 +1256,10 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
     invalid_export_count = sum(
         bool(
             result.audit
-            and any(
-                finding.code in _EXPORT_FINDING_CODES
-                for finding in result.audit.findings
-            )
+            and any(finding.code in _EXPORT_FINDING_CODES for finding in result.audit.findings)
         )
         for result in results
     )
-
     return AuditReport(
         valid=(
             invalid_count == 0
