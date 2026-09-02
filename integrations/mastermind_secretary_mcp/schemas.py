@@ -46,7 +46,7 @@ _PRIVATE_LOCATOR_PATTERN = rf'\b{_PRIVATE_LOCATOR_KEY_PATTERN}\s*[:=]\s*\S+'
 _EMAIL_RE = re.compile(_EMAIL_PATTERN)
 _URL_RE = re.compile(_URL_PATTERN)
 _PRIVATE_PATH_RE = re.compile(_PRIVATE_PATH_PATTERN)
-_SECRET_RE = re.compile(f'(?:^|[^A-Za-z0-9]){_CANONICAL_CREDENTIAL_PREFIX}|-----BEGIN [A-Z ]*PRIVATE KEY-----|{_SECRET_LABEL_PATTERN}')
+_SECRET_RE = re.compile(f'(?:^|[^A-Za-z0-9]){_CANONICAL_CREDENTIAL_PREFIX}|-----BEGIN [A-Z ]*PRIVATE KEY-----|{_SECRET_LABEL_PATTERN}', re.IGNORECASE)
 _PRIVATE_LOCATOR_RE = re.compile(_PRIVATE_LOCATOR_PATTERN)
 _HEX_SECRET_RE = re.compile(r'\b[A-Fa-f0-9]{32,}\b')
 _HIGH_ENTROPY_RE = re.compile(r'\b(?=[A-Za-z0-9]{32,}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\b')

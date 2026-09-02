@@ -213,6 +213,32 @@ def test_advertised_and_runtime_input_contract_reject_wrapped_credentials(
 
 
 @pytest.mark.parametrize(
+    "case_shifted_credential",
+    [
+        "SAFE-GHP_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456",
+        "SAFE-SK-ANT-ABCDEFGHIJKLMNOPQRSTUVWXYZ12",
+        "SAFE-XOXB-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234",
+        "SAFE-SB_SECRET_ZMQ4YX2KP1RT",
+    ],
+)
+def test_runtime_screens_refuse_case_shifted_wrapped_credentials(case_shifted_credential):
+    # Sol security ruling: advertised JSON-Schema patterns stay ECMA-262-portable and
+    # case-sensitive under the <160,000-byte tool-schema ceiling, so a case-shifted
+    # wrapped credential (e.g. SAFE-GHP_...) passes the advertised guard. The runtime
+    # _SECRET_RE must be the case-insensitive net for it. Dropping the original (?i:)
+    # left this half of the portability regression live; these values are otherwise
+    # accepted by the token/text contract, so only the runtime screen can refuse them.
+    from integrations.mastermind_secretary_mcp import schemas as contract_schemas
+
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        contract_schemas._normalize_public_text(case_shifted_credential, 480)
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        contract_schemas._normalize_pattern(
+            case_shifted_credential, 96, contract_schemas._PUBLIC_TOKEN_PATTERN
+        )
+
+
+@pytest.mark.parametrize(
     "source_ref",
     [
         "DEC:CHAIRMAN-CONTROL-ROOM-P0-ARCHITECTURE-ACCEPTED",
