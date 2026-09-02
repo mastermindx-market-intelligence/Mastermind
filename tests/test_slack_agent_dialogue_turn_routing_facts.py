@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import dataclasses
+import importlib
 import inspect
 
 import pytest
@@ -11,6 +13,9 @@ from integrations.slack_agent_dialogue.turn_routing_facts import (
     resolve_turn_routing_facts,
 )
 from tests.test_company_dialogue_runtime_binding import (
+    THREAD_TS,
+    caller,
+    identity,
     parent,
     resolve,
     runtime_binding,
@@ -268,3 +273,147 @@ def test_non_resolved_wp3_result_refuses_without_target_resolution() -> None:
 
     assert exc.value.code == "CURRENT_WORKER_UNRESOLVED"
     assert calls == []
+
+
+def _runtime_candidate(runtime):
+    return runtime.RelayTurnCandidate(
+        delegation_identity=identity(),
+        dialogue_parent=parent(),
+        thread_ts=THREAD_TS,
+        current_worker=snapshot(),
+        actor=caller(),
+    )
+
+
+def test_runtime_candidate_exposes_no_parallel_context_or_routing_authority() -> None:
+    runtime = importlib.import_module("integrations.slack_agent_dialogue.runtime")
+
+    assert set(runtime.RelayTurnCandidate.__dataclass_fields__) == {
+        "delegation_identity",
+        "dialogue_parent",
+        "thread_ts",
+        "current_worker",
+        "actor",
+    }
+    parameters = inspect.signature(runtime.RelayTurnCandidate).parameters
+    assert "context" not in parameters
+    assert "routing_workstream" not in parameters
+
+
+def test_runtime_derives_observer_context_and_routing_only_from_accepted_owners() -> None:
+    runtime = importlib.import_module("integrations.slack_agent_dialogue.runtime")
+    expected = resolve(dialogue_parent=parent()).binding
+    assert expected is not None
+
+    class Observer:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def reconcile_once(self, *, context, routing):
+            self.calls.append((context, routing))
+            return runtime.ObservationReceipt(
+                outcome=runtime.ObservationOutcome.NO_ACTION,
+                reason="TEST",
+                decision=None,
+                obligation=None,
+                route=None,
+            )
+
+    observer = Observer()
+    turn_runtime = runtime.AgentRelayTurnRuntime(
+        observer=observer,
+        registry=_registry(),
+        current_binding_for=_binding_for,
+        candidate_source=lambda: (_runtime_candidate(runtime),),
+    )
+
+    receipts = asyncio.run(turn_runtime.reconcile_once())
+
+    assert len(receipts) == 1
+    assert receipts[0].outcome is runtime.ObservationOutcome.NO_ACTION
+    assert len(observer.calls) == 1
+    context, routing = observer.calls[0]
+    assert context.work_ref == expected.work_ref
+    assert dict(context.commission_ref) == dict(expected.commission_ref)
+    assert context.session_ref == expected.session_ref
+    assert context.operation_key == expected.operation_key
+    assert context.watch_mode == expected.watch_mode
+    assert dict(context.actor_ref) == dict(expected.actor_ref)
+    assert dict(context.applies_to) == dict(expected.applies_to)
+    assert routing.routing_workstream is None
+    assert routing.source_workstream == parent()["work_ref"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("operation_key", "forged-operation"),
+        ("session_ref", "asd-session-forged-operation"),
+        (
+            "commission_ref",
+            {
+                **parent()["commission_ref"],
+                "content_sha256": "e" * 64,
+            },
+        ),
+        (
+            "actor_ref",
+            {
+                "kind": "worker_attempt",
+                "job_id": "JOB-200",
+                "attempt_id": "ATT-200",
+                "worker_id": "forged-worker",
+            },
+        ),
+        (
+            "applies_to",
+            {
+                "kind": "executive_attempt",
+                "job_id": "JOB-200",
+                "attempt_id": "ATT-200",
+                "worker_id": "forged-worker",
+            },
+        ),
+    ],
+)
+def test_runtime_refuses_forged_wp3_context_before_observer_or_binding_io(
+    monkeypatch,
+    field: str,
+    value,
+) -> None:
+    runtime = importlib.import_module("integrations.slack_agent_dialogue.runtime")
+    accepted = resolve(dialogue_parent=parent())
+    assert accepted.binding is not None
+    forged = dataclasses.replace(
+        accepted,
+        binding=dataclasses.replace(accepted.binding, **{field: value}),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "resolve_company_dialogue_binding",
+        lambda **_kwargs: forged,
+    )
+
+    class Observer:
+        calls = 0
+
+        async def reconcile_once(self, *, context, routing):
+            self.calls += 1
+            raise AssertionError("observer/Slack path must not run for forged identity")
+
+    binding_calls: list[str] = []
+    observer = Observer()
+    turn_runtime = runtime.AgentRelayTurnRuntime(
+        observer=observer,
+        registry=_registry(),
+        current_binding_for=lambda seat: binding_calls.append(seat),
+        candidate_source=lambda: (_runtime_candidate(runtime),),
+    )
+
+    receipts = asyncio.run(turn_runtime.reconcile_once())
+
+    assert len(receipts) == 1
+    assert receipts[0].outcome is runtime.ObservationOutcome.REFUSED
+    assert receipts[0].reason == "DIALOGUE_BINDING_MISMATCH"
+    assert observer.calls == 0
+    assert binding_calls == []
