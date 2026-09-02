@@ -73,12 +73,18 @@ def _status(spec: RepositorySpec, *, health: str = "healthy") -> RepositoryIndex
     )
 
 
-def _raw_result(*, matches: tuple[RawZoektMatch, ...] = (), truncated: bool = False):
+def _raw_result(
+    *,
+    matches: tuple[RawZoektMatch, ...] = (),
+    truncated: bool = False,
+    pinned_response_contract_digest: str | None = "e" * 64,
+) -> RawZoektResult:
     return RawZoektResult(
         matches=matches,
         total_match_count=len(matches),
         query_completed=True,
         truncated=truncated,
+        pinned_response_contract_digest=pinned_response_contract_digest,
     )
 
 
@@ -92,6 +98,7 @@ def test_search_is_status_first_sorts_deterministically_and_attaches_exact_sha()
                 RawZoektMatch(
                     repository_name="mastermindx-market-intelligence/macro",
                     branches=("main",),
+                    language="python",
                     path="engine/z.py",
                     line_start=9,
                     line_end=9,
@@ -102,6 +109,7 @@ def test_search_is_status_first_sorts_deterministically_and_attaches_exact_sha()
                 RawZoektMatch(
                     repository_name="mastermindx-market-intelligence/Mastermind",
                     branches=("master",),
+                    language="python",
                     path="engine/a.py",
                     line_start=2,
                     line_end=2,
@@ -144,6 +152,13 @@ def test_search_is_status_first_sorts_deterministically_and_attaches_exact_sha()
             "context_lines": 0,
             "case_sensitive": False,
             "regex": False,
+            "repository_names": (
+                "mastermindx-market-intelligence/Mastermind",
+                "mastermindx-market-intelligence/macro",
+            ),
+            "refs": ("master", "main"),
+            "path_prefixes": (),
+            "languages": (),
         }
     ]
 
@@ -163,13 +178,13 @@ def test_negative_authority_requires_every_selected_ref_to_be_healthy_complete_a
     healthy = DiscoveryFacade(
         manifest=manifest,
         statuses=(_status(manifest.repositories[0]),),
-        client=_Client(_raw_result()),
+        client=_Client(_raw_result(pinned_response_contract_digest="e" * 64)),
         freshness_budget_seconds=30,
     )
     stale = DiscoveryFacade(
         manifest=manifest,
         statuses=(_status(manifest.repositories[0], health="stale"),),
-        client=_Client(_raw_result()),
+        client=_Client(_raw_result(pinned_response_contract_digest=None)),
         freshness_budget_seconds=30,
     )
     truncated = DiscoveryFacade(
@@ -215,6 +230,7 @@ def test_unreviewed_selection_and_unmapped_engine_match_fail_closed() -> None:
                     RawZoektMatch(
                         repository_name="unreviewed/private",
                         branches=("main",),
+                        language="python",
                         path="secret.py",
                         line_start=1,
                         line_end=1,
@@ -262,3 +278,70 @@ def test_list_and_index_status_are_closed_non_search_calls() -> None:
         "healthy",
     ]
     assert client.calls == []
+
+
+def test_facade_refuses_returned_unselected_path_or_language_instead_of_discarding_it() -> None:
+    """A server-side filter miss cannot become a quiet partial search."""
+
+    manifest = _manifest()
+    request = validate_discovery_request(
+        "search_code",
+        {
+            "query": "needle",
+            "repositories": ["mastermind"],
+            "refs": ["master"],
+            "path_prefixes": ["engine"],
+            "languages": ["python"],
+        },
+    )
+    wrong_path = RawZoektMatch(
+        repository_name="mastermindx-market-intelligence/Mastermind",
+        branches=("master",),
+        language="python",
+        path="docs/outside.py",
+        line_start=1,
+        line_end=1,
+        preview="needle",
+        context_before=(),
+        context_after=(),
+    )
+    wrong_language = RawZoektMatch(
+        repository_name="mastermindx-market-intelligence/Mastermind",
+        branches=("master",),
+        language="javascript",
+        path="engine/outside.js",
+        line_start=1,
+        line_end=1,
+        preview="needle",
+        context_before=(),
+        context_after=(),
+    )
+    for unexpected in (wrong_path, wrong_language):
+        facade = DiscoveryFacade(
+            manifest=manifest,
+            statuses=(_status(manifest.repositories[0]),),
+            client=_Client(_raw_result(matches=(unexpected,))),
+            freshness_budget_seconds=30,
+        )
+        with pytest.raises(DiscoveryFacadeError, match="outside requested"):
+            facade.call(request)
+
+
+def test_empty_result_is_not_decision_eligible_without_pinned_response_evidence() -> None:
+    """A hand-authored fixture is not proof that the pinned binary spoke this protocol."""
+
+    manifest = _manifest()
+    response = DiscoveryFacade(
+        manifest=manifest,
+        statuses=(_status(manifest.repositories[0]),),
+        client=_Client(_raw_result(pinned_response_contract_digest=None)),
+        freshness_budget_seconds=30,
+    ).call(
+        validate_discovery_request(
+            "search_code",
+            {"query": "absent", "repositories": ["mastermind"], "refs": ["master"]},
+        )
+    )
+
+    assert response["negative_result_authority"] == "unavailable"
+    assert "pinned_response_evidence_missing" in response["negative_result_reasons"]

@@ -29,6 +29,10 @@ class _SearchClient(Protocol):
         context_lines: int,
         case_sensitive: bool,
         regex: bool,
+        repository_names: tuple[str, ...],
+        refs: tuple[str, ...],
+        path_prefixes: tuple[str, ...],
+        languages: tuple[str, ...],
     ) -> RawZoektResult: ...
 
 
@@ -85,38 +89,55 @@ class DiscoveryFacade:
             context_lines=_integer_argument(arguments, "context_lines"),
             case_sensitive=_boolean_argument(arguments, "case_sensitive"),
             regex=_boolean_argument(arguments, "regex"),
+            repository_names=tuple(spec.repository_name for spec in selected),
+            refs=tuple(spec.ref_label for spec in selected),
+            path_prefixes=_string_sequence(arguments.get("path_prefixes", ()), "path_prefixes"),
+            languages=_string_sequence(arguments.get("languages", ()), "languages"),
         )
         status_by_key = _status_map(self.statuses)
         matches: list[CodeMatch] = []
-        selected_keys = {(spec.repository_id, spec.ref_label) for spec in selected}
         for raw_match in raw_result.matches:
             mapped = _manifest_specs_for_raw_match(self.manifest.repositories, raw_match)
             if not mapped:
                 raise DiscoveryFacadeError(
                     f"unmapped engine repository/ref: {raw_match.repository_name}"
                 )
-            for spec in mapped:
-                if (spec.repository_id, spec.ref_label) not in selected_keys:
-                    continue
-                status = status_by_key.get((spec.repository_id, spec.ref_label))
-                matches.append(
-                    CodeMatch(
-                        repository_id=spec.repository_id,
-                        ref_label=spec.ref_label,
-                        indexed_commit_sha=(
-                            status.indexed_commit_sha
-                            if status is not None and status.indexed_commit_sha is not None
-                            else spec.commit_sha
-                        ),
-                        path=raw_match.path,
-                        line_start=raw_match.line_start,
-                        line_end=raw_match.line_end,
-                        preview=raw_match.preview,
-                        context_before=raw_match.context_before,
-                        context_after=raw_match.context_after,
-                        engine_score=None,
-                    )
+            if len(mapped) != 1:
+                raise DiscoveryFacadeError(
+                    f"ambiguous engine repository/ref: {raw_match.repository_name}"
                 )
+            spec = mapped[0]
+            if spec not in selected:
+                raise DiscoveryFacadeError("engine match is outside requested repository/ref")
+            if not _within_requested_prefixes(
+                raw_match.path,
+                _string_sequence(arguments.get("path_prefixes", ()), "path_prefixes"),
+            ):
+                raise DiscoveryFacadeError("engine match is outside requested path prefix")
+            if not _within_requested_languages(
+                raw_match.language,
+                _string_sequence(arguments.get("languages", ()), "languages"),
+            ):
+                raise DiscoveryFacadeError("engine match is outside requested language")
+            status = status_by_key.get((spec.repository_id, spec.ref_label))
+            matches.append(
+                CodeMatch(
+                    repository_id=spec.repository_id,
+                    ref_label=spec.ref_label,
+                    indexed_commit_sha=(
+                        status.indexed_commit_sha
+                        if status is not None and status.indexed_commit_sha is not None
+                        else spec.commit_sha
+                    ),
+                    path=raw_match.path,
+                    line_start=raw_match.line_start,
+                    line_end=raw_match.line_end,
+                    preview=raw_match.preview,
+                    context_before=raw_match.context_before,
+                    context_after=raw_match.context_after,
+                    engine_score=None,
+                )
+            )
         matches.sort(
             key=lambda match: (
                 match.repository_id,
@@ -210,6 +231,8 @@ def _negative_result_reasons(
         reasons.add("query_incomplete")
     if raw_result.truncated:
         reasons.add("response_truncated")
+    if raw_result.pinned_response_contract_digest is None:
+        reasons.add("pinned_response_evidence_missing")
     for spec in selected:
         status = statuses.get((spec.repository_id, spec.ref_label))
         if status is None:
@@ -235,6 +258,16 @@ def _status_map(
     statuses: Sequence[RepositoryIndexStatus],
 ) -> dict[tuple[str, str], RepositoryIndexStatus]:
     return {(status.repository_id, status.ref_label): status for status in statuses}
+
+
+def _within_requested_prefixes(path: str, prefixes: tuple[str, ...]) -> bool:
+    return not prefixes or any(
+        path == prefix or path.startswith(f"{prefix}/") for prefix in prefixes
+    )
+
+
+def _within_requested_languages(language: str, languages: tuple[str, ...]) -> bool:
+    return not languages or language in languages
 
 
 def _repository_sort_key(spec: RepositorySpec) -> tuple[str, str]:

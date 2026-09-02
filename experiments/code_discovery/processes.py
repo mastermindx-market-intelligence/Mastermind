@@ -7,6 +7,8 @@ import ipaddress
 import json
 import os
 import selectors
+import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -25,6 +27,7 @@ from .index_manifest import IndexManifest, RepositorySpec
 ZOEKT_SOURCE_COMMIT: Final = "5f833dde1bc4b1a8f99007617b4b721e44506c4f"
 _MAX_PROCESS_OUTPUT_BYTES: Final = 64 * 1024
 _CLOSED_ENV: Final = {"LANG": "C", "LC_ALL": "C"}
+_HOST_ROLES: Final = frozenset({"zoekt-git-index", "zoekt-webserver"})
 
 
 class ExecutableVerificationError(ValueError):
@@ -53,15 +56,18 @@ class ZoektProcessError(RuntimeError):
 
 @dataclass(frozen=True)
 class ExecutableSpec:
-    """Exact host-approved executable identity; never a PATH lookup."""
+    """Exact host-approved binary for one of the two closed Zoekt roles."""
 
     path: Path
+    role: str
     sha256: str
     source_commit: str
 
     def verify(self) -> None:
         """Check the binary before and after every invocation."""
 
+        if self.role not in _HOST_ROLES:
+            raise ExecutableVerificationError("executable role is not a closed Zoekt role")
         if not self.path.is_absolute():
             raise ExecutableVerificationError("executable path must be absolute")
         if self.source_commit != ZOEKT_SOURCE_COMMIT:
@@ -148,7 +154,7 @@ class _ProcessCapture:
                 if self._seen > self._maximum:
                     self._overflow = True
                     if self._process.poll() is None:
-                        self._process.terminate()
+                        _terminate_process_group(self._process, timeout_seconds=1.0)
 
     def raise_if_overflow(self) -> None:
         with self._lock:
@@ -176,18 +182,30 @@ class ZoektProcessSet:
             raise ValueError("startup_timeout_seconds must be positive")
         self.indexer = indexer
         self.webserver = webserver
+        self.indexer.verify()
+        self.webserver.verify()
+        if self.indexer.role != "zoekt-git-index":
+            raise ExecutableVerificationError("indexer must use role zoekt-git-index")
+        if self.webserver.role != "zoekt-webserver":
+            raise ExecutableVerificationError("webserver must use role zoekt-webserver")
         self.shard_root = _prepare_external_directory(Path(shard_root), "shard_root")
         self.log_root = _prepare_external_directory(Path(log_root), "log_root")
         self.startup_timeout_seconds = startup_timeout_seconds
         self._statuses: tuple[RepositoryIndexStatus, ...] = ()
         self._search_process: subprocess.Popen[bytes] | None = None
         self._search_capture: _ProcessCapture | None = None
+        self._endpoint: LoopbackEndpoint | None = None
+        self._closed = False
+        self._generation_id = hashlib.sha256(
+            os.urandom(32) + os.fspath(self.shard_root).encode("utf-8")
+        ).hexdigest()
 
     def build_indexes(
         self, manifest: IndexManifest
     ) -> tuple[RepositoryIndexStatus, ...]:
         """Index each source row independently into an empty logical namespace."""
 
+        self._require_open()
         _assert_external_to_sources(self.shard_root, self.log_root, manifest.repositories)
         statuses: list[RepositoryIndexStatus] = []
         for spec in manifest.repositories:
@@ -207,11 +225,13 @@ class ZoektProcessSet:
                     "commit_sha": spec.commit_sha,
                     "source_tree_digest": spec.source_tree_digest,
                     "shard_namespace": spec.shard_namespace,
+                    "parent_generation": self._generation_id,
                 },
             )
             self.indexer.verify()
             argv = _indexer_argv(self.indexer, spec, generation, metadata_path)
             _run_bounded(
+                self.indexer,
                 argv,
                 cwd=spec.source_snapshot_root,
                 timeout_seconds=self.startup_timeout_seconds,
@@ -239,6 +259,7 @@ class ZoektProcessSet:
     def start_search(self) -> LoopbackEndpoint:
         """Start one exact webserver bound to numeric loopback after receipt checks."""
 
+        self._require_open()
         if self._search_process is not None:
             self.assert_search_alive()
             raise ZoektProcessError("search process is already running")
@@ -253,13 +274,15 @@ class ZoektProcessSet:
         self.webserver.verify()
         endpoint = LoopbackEndpoint("127.0.0.1", _reserve_loopback_port())
         argv = _webserver_argv(self.webserver, endpoint, self.shard_root, self.log_root)
-        process = _spawn(
+        process = _spawn_exact(
+            self.webserver,
             argv,
             cwd=self.shard_root,
         )
         capture = _ProcessCapture(process, _MAX_PROCESS_OUTPUT_BYTES)
         self._search_process = process
         self._search_capture = capture
+        self._endpoint = endpoint
         try:
             self.webserver.verify()
             _wait_for_loopback(process, capture, endpoint, self.startup_timeout_seconds)
@@ -282,22 +305,38 @@ class ZoektProcessSet:
             )
 
     def close(self) -> None:
-        """Terminate the child once; subsequent cleanup is deliberately harmless."""
+        """Terminate the whole generation group and discard its dedicated scratch roots."""
 
+        if self._closed:
+            return
         process, capture = self._search_process, self._search_capture
         self._search_process = None
         self._search_capture = None
-        if process is None:
-            return
-        if process.poll() is None:
-            process.terminate()
+        endpoint, self._endpoint = self._endpoint, None
+        try:
+            if process is not None:
+                _terminate_process_group(process, timeout_seconds=2.0)
+            if capture is not None:
+                capture.join()
+            if endpoint is not None and _loopback_is_open(endpoint):
+                raise ZoektProcessError("Zoekt listener remained open after process cleanup")
+        finally:
+            self._discard_scratch()
+            self._closed = True
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise ZoektProcessError("disposable Zoekt generation has already been closed")
+
+    def _discard_scratch(self) -> None:
+        for root in (self.shard_root, self.log_root):
             try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=2)
-        if capture is not None:
-            capture.join()
+                if root.exists():
+                    shutil.rmtree(root)
+            except OSError as error:
+                raise ZoektProcessError(
+                    f"unable to discard disposable Zoekt scratch root: {root}"
+                ) from error
 
 
 def _indexer_argv(
@@ -341,9 +380,13 @@ def _webserver_argv(
 
 
 def _run_bounded(
-    argv: Sequence[str], *, cwd: Path, timeout_seconds: float
+    executable: ExecutableSpec,
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    timeout_seconds: float,
 ) -> tuple[bytes, bytes]:
-    process = _spawn(argv, cwd=cwd)
+    process = _spawn_exact(executable, argv, cwd=cwd)
     stdout, stderr = _collect_bounded_output(
         process, maximum=_MAX_PROCESS_OUTPUT_BYTES, timeout_seconds=timeout_seconds
     )
@@ -354,7 +397,14 @@ def _run_bounded(
     return stdout, stderr
 
 
-def _spawn(argv: Sequence[str], *, cwd: Path) -> subprocess.Popen[bytes]:
+def _spawn_exact(
+    executable: ExecutableSpec, argv: Sequence[str], *, cwd: Path
+) -> subprocess.Popen[bytes]:
+    executable.verify()
+    if not argv or argv[0] != os.fspath(executable.path):
+        raise ZoektProcessError("closed Zoekt role received an unbound argv template")
+    if not cwd.is_absolute() or cwd.is_symlink() or not cwd.is_dir():
+        raise ZoektProcessError("closed Zoekt role requires a real absolute working directory")
     return subprocess.Popen(
         list(argv),
         cwd=os.fspath(cwd),
@@ -382,7 +432,7 @@ def _collect_bounded_output(
         while selector.get_map():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                process.kill()
+                _terminate_process_group(process, timeout_seconds=1.0)
                 raise ZoektProcessTimeout("Zoekt command exceeded bounded timeout")
             events = selector.select(timeout=remaining)
             if not events:
@@ -396,7 +446,7 @@ def _collect_bounded_output(
                 if len(buffer) + len(chunk) > maximum:
                     overflow = True
                     if process.poll() is None:
-                        process.kill()
+                        _terminate_process_group(process, timeout_seconds=1.0)
                 else:
                     buffer.extend(chunk)
         process.wait(timeout=1)
@@ -426,6 +476,52 @@ def _wait_for_loopback(
         except OSError:
             time.sleep(0.02)
     raise ZoektProcessTimeout("zoekt-webserver did not bind loopback before timeout")
+
+
+def _terminate_process_group(
+    process: subprocess.Popen[bytes], *, timeout_seconds: float
+) -> None:
+    """Terminate the fresh-session process group, not merely its original parent."""
+
+    try:
+        group_id = os.getpgid(process.pid)
+    except ProcessLookupError:
+        return
+    try:
+        os.killpg(group_id, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # A host that denies a group signal still receives no parent-success path.
+        # The direct child is terminated, and callers fail if it remains alive.
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+    try:
+        process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(group_id, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as error:
+            raise ZoektProcessError("Zoekt process group survived forced cleanup") from error
+
+
+def _loopback_is_open(endpoint: LoopbackEndpoint) -> bool:
+    try:
+        with socket.create_connection((endpoint.host, endpoint.port), timeout=0.1):
+            return True
+    except OSError:
+        return False
 
 
 def _prepare_external_directory(path: Path, label: str) -> Path:

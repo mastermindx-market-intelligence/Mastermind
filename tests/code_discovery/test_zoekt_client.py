@@ -89,6 +89,46 @@ def test_pinned_search_json_is_requested_once_and_normalized() -> None:
     assert result.matches[0].path == "engine/core.py"
     assert result.matches[0].line_start == 3
     assert result.matches[0].preview == "VALUE = 'SENTINEL'"
+    assert result.pinned_response_contract_digest is None
+
+
+def test_only_a_digest_bound_pinned_response_contract_can_supply_protocol_evidence() -> None:
+    """B0 must provide a concrete digest, not an ambient claim that a parser is compatible."""
+
+    contract_digest = "a" * 64
+    with _server(_fixture_payload()) as (endpoint, _):
+        result = ZoektClient(
+            endpoint,
+            timeout_seconds=1,
+            pinned_response_contract_digest=contract_digest,
+        ).search(
+            "SENTINEL", limit=3, context_lines=1, case_sensitive=False, regex=False
+        )
+
+    assert result.pinned_response_contract_digest == contract_digest
+
+
+def test_host_selected_repository_ref_path_and_language_filters_reach_zoekt() -> None:
+    """Removing any backend filter would let unrelated high-volume results consume the limit."""
+
+    with _server(_fixture_payload()) as (endpoint, seen):
+        ZoektClient(endpoint, timeout_seconds=1).search(
+            "SENTINEL",
+            limit=3,
+            context_lines=1,
+            case_sensitive=False,
+            regex=False,
+            repository_names=("mastermindx-market-intelligence/Mastermind",),
+            refs=("master",),
+            path_prefixes=("engine",),
+            languages=("python",),
+        )
+
+    query = parse_qs(urlsplit(seen[0]).query)["q"][0]
+    assert 'repo:"mastermindx-market-intelligence/Mastermind"' in query
+    assert "branch:master" in query
+    assert "file:^engine/" in query
+    assert "lang:python" in query
 
 
 @pytest.mark.parametrize(
@@ -150,3 +190,50 @@ def test_engine_match_count_beyond_the_caller_bound_is_explicitly_truncated() ->
 
     assert result.total_match_count == 101
     assert result.truncated is True
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda payload: payload["result"]["Stats"].update(MatchCount=0),
+            "MatchCount",
+        ),
+        (
+            lambda payload: payload["result"]["FileMatches"][0].update(
+                URL="https://example.invalid/untrusted"
+            ),
+            "relative",
+        ),
+        (
+            lambda payload: payload["result"]["FileMatches"][0].update(
+                URL="/print?f=engine/core.py"
+            ),
+            "URI semantic",
+        ),
+        (
+            lambda payload: payload["result"]["FileMatches"][0]["Matches"][0].update(
+                URL="https://example.invalid/untrusted"
+            ),
+            "relative",
+        ),
+        (
+            lambda payload: payload["result"]["FileMatches"][0]["Matches"][0]["Fragments"].__setitem__(
+                0, {"Pre": "x" * 4097, "Match": "", "Post": ""}
+            ),
+            "preview",
+        ),
+    ],
+)
+def test_ambiguous_identity_count_or_unbounded_content_fails_closed(
+    mutate: object, message: str
+) -> None:
+    """Parser drift must not create a decision-eligible plausible result."""
+
+    payload = json.loads(_fixture_payload())
+    mutate(payload)  # type: ignore[operator]
+    with _server(json.dumps(payload).encode("utf-8")) as (endpoint, _):
+        with pytest.raises(ZoektResponseValidationError, match=message):
+            ZoektClient(endpoint, timeout_seconds=1).search(
+                "SENTINEL", limit=3, context_lines=1, case_sensitive=False, regex=False
+            )

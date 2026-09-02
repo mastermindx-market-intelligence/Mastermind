@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -44,6 +45,13 @@ def _manifest(tmp_path: Path) -> object:
     _git(source, "init", "-q", "-b", "master")
     _git(source, "config", "user.name", "CodeIntel test")
     _git(source, "config", "user.email", "codeintel@example.invalid")
+    _git(
+        source,
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:mastermindx-market-intelligence/Mastermind.git",
+    )
     (source / "engine").mkdir()
     (source / "engine" / "core.py").write_text("VALUE = 'source'\n")
     _git(source, "add", ".")
@@ -75,11 +83,14 @@ def _manifest(tmp_path: Path) -> object:
     return load_index_manifest(manifest_path)
 
 
-def _script(path: Path, body: str) -> ExecutableSpec:
+def _script(
+    path: Path, body: str, *, role: str = "zoekt-git-index"
+) -> ExecutableSpec:
     path.write_text("#!/usr/bin/env python3\n" + body)
     path.chmod(0o700)
     return ExecutableSpec(
         path=path,
+        role=role,
         sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
         source_commit=ZOEKT_SOURCE_COMMIT,
     )
@@ -115,6 +126,7 @@ def _webserver(path: Path, trace: Path) -> ExecutableSpec:
             f"Path({str(trace)!r}).write_text('\\n'.join(sys.argv[1:]))\n"
             "while True: time.sleep(1)\n"
         ),
+        role="zoekt-webserver",
     )
 
 
@@ -145,6 +157,7 @@ def test_executable_spec_refuses_path_lookup_symlinks_and_mutable_binaries(
     with pytest.raises(ExecutableVerificationError, match="absolute"):
         ExecutableSpec(
             path=Path("zoekt-webserver"),
+            role="zoekt-webserver",
             sha256=binary.sha256,
             source_commit=ZOEKT_SOURCE_COMMIT,
         ).verify()
@@ -154,6 +167,7 @@ def test_executable_spec_refuses_path_lookup_symlinks_and_mutable_binaries(
     with pytest.raises(ExecutableVerificationError, match="symlink"):
         ExecutableSpec(
             path=symlink,
+            role="zoekt-webserver",
             sha256=binary.sha256,
             source_commit=ZOEKT_SOURCE_COMMIT,
         ).verify()
@@ -161,6 +175,72 @@ def test_executable_spec_refuses_path_lookup_symlinks_and_mutable_binaries(
     binary.path.chmod(0o720)
     with pytest.raises(ExecutableVerificationError, match="writable"):
         binary.verify()
+
+
+def test_closed_role_and_process_group_cleanup_leave_no_child_or_scratch(
+    tmp_path: Path,
+) -> None:
+    """Only the two named Zoekt roles run, and closing one generation kills its group."""
+
+    binary = _script(tmp_path / "binary", "pass\n")
+    with pytest.raises(ExecutableVerificationError, match="role"):
+        ExecutableSpec(
+            path=binary.path,
+            role="shell",
+            sha256=binary.sha256,
+            source_commit=ZOEKT_SOURCE_COMMIT,
+        ).verify()
+
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-argv.txt"
+    child_pid = tmp_path / "descendant.pid"
+    server = _script(
+        tmp_path / "zoekt-webserver",
+        (
+            "import socket, subprocess, sys, time\n"
+            "from pathlib import Path\n"
+            "listen = next(argument.split('=', 1)[1] for argument in sys.argv "
+            "if argument.startswith('--listen='))\n"
+            "host, port = listen.rsplit(':', 1)\n"
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            f"Path({str(child_pid)!r}).write_text(str(child.pid))\n"
+            "listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+            "listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+            "listener.bind((host, int(port)))\n"
+            "listener.listen()\n"
+            "while True: time.sleep(1)\n"
+        ),
+        role="zoekt-webserver",
+    )
+    processes = _process_set(tmp_path, _indexer(tmp_path / "zoekt-git-index", trace), server)
+    processes.build_indexes(manifest)
+    endpoint = processes.start_search()
+    for _ in range(100):
+        if child_pid.exists():
+            break
+        time.sleep(0.01)
+    assert child_pid.exists()
+    descendant = int(child_pid.read_text())
+
+    processes.close()
+
+    with pytest.raises(OSError):
+        socket.create_connection((endpoint.host, endpoint.port), timeout=0.1)
+    for _ in range(100):
+        if not _pid_is_live(descendant):
+            break
+        time.sleep(0.01)
+    assert not _pid_is_live(descendant)
+    assert not (tmp_path / "disposable-shards").exists()
+    assert not (tmp_path / "disposable-logs").exists()
+
+
+def _pid_is_live(pid: int) -> bool:
+    completed = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], check=False, capture_output=True, text=True
+    )
+    state = completed.stdout.strip()
+    return bool(state) and not state.startswith("Z")
 
 
 def test_loopback_endpoint_rejects_every_non_loopback_listener() -> None:
@@ -281,6 +361,7 @@ def test_bounded_output_and_search_process_exit_are_typed_and_cleanup_is_idempot
         "sys.stderr.write('x' * (65 * 1024))\n"
         "sys.stderr.flush()\n"
         "time.sleep(2)\n",
+        role="zoekt-webserver",
     )
     noisy_server_processes = _process_set(
         tmp_path,

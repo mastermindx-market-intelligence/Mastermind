@@ -32,11 +32,23 @@ def _run_git(root: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-def _snapshot(root: Path, *, sentinel: str = "SENTINEL") -> Path:
+def _snapshot(
+    root: Path,
+    *,
+    sentinel: str = "SENTINEL",
+    repository_name: str = "mastermindx-market-intelligence/Mastermind",
+) -> Path:
     root.mkdir(parents=True)
     _run_git(root, "init", "-q", "-b", "master")
     _run_git(root, "config", "user.name", "CodeIntel test")
     _run_git(root, "config", "user.email", "codeintel@example.invalid")
+    _run_git(
+        root,
+        "remote",
+        "add",
+        "origin",
+        f"git@github.com:{repository_name}.git",
+    )
     (root / "engine").mkdir()
     (root / "engine" / "core.py").write_text(f'VALUE = "{sentinel}"\n')
     (root / "docs").mkdir()
@@ -115,7 +127,10 @@ def test_duplicate_logical_identity_and_repository_ref_pairs_fail_closed(
     """A manifest cannot merge independent rows through a convenient alias."""
 
     first = _snapshot(tmp_path / "first")
-    second = _snapshot(tmp_path / "second")
+    second = _snapshot(
+        tmp_path / "second", repository_name="mastermindx-market-intelligence/Other"
+    )
+    third = _snapshot(tmp_path / "third")
     same_id = _write_manifest(
         tmp_path / "same-id.json",
         [
@@ -131,7 +146,7 @@ def test_duplicate_logical_identity_and_repository_ref_pairs_fail_closed(
         tmp_path / "same-name-ref.json",
         [
             _record(first),
-            _record(second, repository_id="other"),
+            _record(third, repository_id="other"),
         ],
     )
 
@@ -146,8 +161,12 @@ def test_same_snapshot_basename_has_disjoint_logical_shard_namespaces(
 ) -> None:
     """Zoekt namespaces cannot derive from the mutable local basename alone."""
 
-    left = _snapshot(tmp_path / "left" / "shared", sentinel="LEFT")
-    right = _snapshot(tmp_path / "right" / "shared", sentinel="RIGHT")
+    left = _snapshot(
+        tmp_path / "left" / "shared", sentinel="LEFT", repository_name="org-left/shared"
+    )
+    right = _snapshot(
+        tmp_path / "right" / "shared", sentinel="RIGHT", repository_name="org-right/shared"
+    )
     manifest = load_index_manifest(
         _write_manifest(
             tmp_path / "manifest.json",
@@ -241,6 +260,27 @@ def test_rejects_symlink_roots_dirty_snapshots_and_changed_source_bytes(
     (root / "untracked.py").write_text("UNTRACKED = True\n")
     with pytest.raises(IndexManifestError, match="clean Git snapshot"):
         load_index_manifest(_write_manifest(tmp_path / "dirty.json", [dirty_record]))
+
+
+def test_refuses_wrong_remote_ref_and_duplicate_tracked_basename(tmp_path: Path) -> None:
+    """A matching commit alone cannot substitute for exact checkout identity and census."""
+
+    root = _snapshot(tmp_path / "snapshot")
+    wrong_ref = _record(root, ref_label="main")
+    with pytest.raises(IndexManifestError, match="ref_label"):
+        load_index_manifest(_write_manifest(tmp_path / "wrong-ref.json", [wrong_ref]))
+
+    wrong_remote = _record(root, repository_name="mastermindx-market-intelligence/Other")
+    with pytest.raises(IndexManifestError, match="remote"):
+        load_index_manifest(_write_manifest(tmp_path / "wrong-remote.json", [wrong_remote]))
+
+    duplicate = _record(root)
+    (root / "docs" / "core.py").write_text("duplicate basename\n")
+    _run_git(root, "add", ".")
+    _run_git(root, "commit", "-qm", "duplicate basename")
+    duplicate["commit_sha"] = _run_git(root, "rev-parse", "HEAD")
+    with pytest.raises(IndexManifestError, match="duplicate basename"):
+        load_index_manifest(_write_manifest(tmp_path / "duplicate.json", [duplicate]))
 
 
 def test_seed_fixture_carries_all_three_initial_logical_entries() -> None:

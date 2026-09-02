@@ -134,10 +134,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     manifest = load_index_manifest(arguments.manifest)
     indexer = ExecutableSpec(
-        arguments.indexer, arguments.indexer_sha256, ZOEKT_SOURCE_COMMIT
+        arguments.indexer, "zoekt-git-index", arguments.indexer_sha256, ZOEKT_SOURCE_COMMIT
     )
     webserver = ExecutableSpec(
-        arguments.webserver, arguments.webserver_sha256, ZOEKT_SOURCE_COMMIT
+        arguments.webserver, "zoekt-webserver", arguments.webserver_sha256, ZOEKT_SOURCE_COMMIT
     )
     processes = ZoektProcessSet(
         indexer=indexer,
