@@ -1,0 +1,141 @@
+{
+  "corpus_id": "python_sample",
+  "language": "python",
+  "source_roots": [
+    "src",
+    "tests"
+  ],
+  "discriminating_question": "Which producer implementation does consume() actually reach? A name-only text search cannot answer this: LiveProducer and DeadProducer are near-identical.",
+  "live_path": {
+    "entry": "consume",
+    "through": [
+      "make_producer",
+      "LiveProducer"
+    ],
+    "answer": "LiveProducer"
+  },
+  "dead_siblings": [
+    "DeadProducer",
+    "make_dead_producer"
+  ],
+  "definitions": [
+    {
+      "symbol": "Producer",
+      "relative_file": "src/sample/producer.py",
+      "line": 14,
+      "kind": "class"
+    },
+    {
+      "symbol": "LiveProducer",
+      "relative_file": "src/sample/producer.py",
+      "line": 20,
+      "kind": "class"
+    },
+    {
+      "symbol": "DeadProducer",
+      "relative_file": "src/sample/producer.py",
+      "line": 27,
+      "kind": "class"
+    },
+    {
+      "symbol": "make_producer",
+      "relative_file": "src/sample/producer.py",
+      "line": 34,
+      "kind": "function"
+    },
+    {
+      "symbol": "make_dead_producer",
+      "relative_file": "src/sample/producer.py",
+      "line": 39,
+      "kind": "function"
+    },
+    {
+      "symbol": "consume",
+      "relative_file": "src/sample/consumer.py",
+      "line": 8,
+      "kind": "function"
+    },
+    {
+      "symbol": "broken_helper",
+      "relative_file": "src/sample/consumer.py",
+      "line": 13,
+      "kind": "function"
+    },
+    {
+      "symbol": "test_consume_returns_live",
+      "relative_file": "tests/test_consumer.py",
+      "line": 8,
+      "kind": "function"
+    }
+  ],
+  "references": {
+    "make_producer": [
+      {
+        "relative_file": "src/sample/consumer.py",
+        "line": 5
+      },
+      {
+        "relative_file": "src/sample/consumer.py",
+        "line": 9
+      },
+      {
+        "relative_file": "src/sample/producer.py",
+        "line": 34
+      }
+    ],
+    "make_dead_producer": [
+      {
+        "relative_file": "src/sample/producer.py",
+        "line": 39
+      }
+    ],
+    "consume": [
+      {
+        "relative_file": "src/sample/consumer.py",
+        "line": 8
+      },
+      {
+        "relative_file": "tests/test_consumer.py",
+        "line": 5
+      },
+      {
+        "relative_file": "tests/test_consumer.py",
+        "line": 9
+      }
+    ],
+    "LiveProducer": [
+      {
+        "relative_file": "src/sample/producer.py",
+        "line": 20
+      },
+      {
+        "relative_file": "src/sample/producer.py",
+        "line": 36
+      }
+    ],
+    "DeadProducer": [
+      {
+        "relative_file": "src/sample/producer.py",
+        "line": 27
+      },
+      {
+        "relative_file": "src/sample/producer.py",
+        "line": 41
+      }
+    ]
+  },
+  "implementations": {
+    "Producer": [
+      "DeadProducer",
+      "LiveProducer"
+    ]
+  },
+  "diagnostics": [
+    {
+      "relative_file": "src/sample/consumer.py",
+      "line": 15,
+      "kind": "undefined-name",
+      "symbol": "undefined_symbol_for_diagnostics"
+    }
+  ]
+}
