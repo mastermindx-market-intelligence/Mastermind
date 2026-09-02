@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -55,12 +56,71 @@ def _to_uri(path: Path) -> str:
     return "file://" + str(path)
 
 
+
+_TS_DECL = re.compile(
+    r"^export\s+(?:default\s+)?(interface|class|function|type|const|enum)\s+"
+    r"([A-Za-z_$][A-Za-z0-9_$]*)"
+)
+
+
+def _source_files() -> list[Path]:
+    assert ROOT is not None
+    return sorted(
+        p for p in ROOT.rglob("*")
+        if p.is_file() and p.suffix in (".py", ".ts", ".tsx") and ".git" not in p.parts
+    )
+
+
+def _ts_defs(path: Path) -> list[tuple[str, int, str]]:
+    out = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for index, line in enumerate(text.splitlines(), start=1):
+        match = _TS_DECL.match(line.strip())
+        if match:
+            keyword, name = match.groups()
+            kind = "class" if keyword in ("interface", "class") else "function"
+            out.append((name, index, kind))
+    return out
+
+
+def _ts_occurrences(path: Path, symbol: str) -> list[int]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    pattern = re.compile(rf"\b{re.escape(symbol)}\b")
+    return [i for i, line in enumerate(text.splitlines(), start=1) if pattern.search(line)]
+
+
+def _ts_bare_return_diagnostics(path: Path) -> list[int]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    declared = {n for n, _, _ in _ts_defs(path)}
+    for line in text.splitlines():
+        imported = re.match(r"^import\s+\{([^}]*)\}", line.strip())
+        if imported:
+            declared |= {p.strip().split(" as ")[-1].strip() for p in imported.group(1).split(",")}
+    out = []
+    for index, line in enumerate(text.splitlines(), start=1):
+        m = re.match(r"^return\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*;$", line.strip())
+        if m and m.group(1) not in declared:
+            out.append(index)
+    return out
+
+
 def _py_files() -> list[Path]:
     assert ROOT is not None
-    return sorted(p for p in ROOT.rglob("*.py") if p.is_file() and ".git" not in p.parts)
+    return _source_files()
 
 
 def _defs(path: Path) -> list[tuple[str, int, str]]:
+    if path.suffix in (".ts", ".tsx"):
+        return _ts_defs(path)
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
@@ -75,6 +135,8 @@ def _defs(path: Path) -> list[tuple[str, int, str]]:
 
 
 def _occurrences(path: Path, symbol: str) -> list[int]:
+    if path.suffix in (".ts", ".tsx"):
+        return _ts_occurrences(path, symbol)
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
@@ -91,6 +153,22 @@ def _occurrences(path: Path, symbol: str) -> list[int]:
 
 
 def _methods(path: Path, class_name: str) -> set[str]:
+    if path.suffix in (".ts", ".tsx"):
+        text = path.read_text(encoding="utf-8")
+        names, capture = set(), False
+        for line in text.splitlines():
+            stripped = line.strip()
+            decl = _TS_DECL.match(stripped)
+            if decl:
+                capture = decl.group(2) == class_name
+                continue
+            if capture:
+                m = re.match(r"^([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*:", stripped)
+                if m:
+                    names.add(m.group(1))
+                if stripped == "}":
+                    capture = False
+        return names
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
@@ -237,6 +315,14 @@ def main() -> None:
 
         if method == "textDocument/diagnostic":
             path = _to_path(params["textDocument"]["uri"])
+            if path.suffix in (".ts", ".tsx"):
+                _write({"jsonrpc": "2.0", "id": request_id, "result": {"items": [
+                    {"range": {"start": {"line": ln - 1, "character": 0},
+                               "end": {"line": ln - 1, "character": 1}},
+                     "severity": 1, "message": "undefined name", "code": "undefined-name"}
+                    for ln in _ts_bare_return_diagnostics(path)
+                ]}})
+                continue
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8"))
             except (OSError, SyntaxError):

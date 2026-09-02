@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -57,12 +58,70 @@ def _tools() -> list[str]:
     return sorted(tools)
 
 
-def _py_files() -> list[Path]:
+
+_TS_DECL = re.compile(
+    r"^export\s+(?:default\s+)?(interface|class|function|type|const|enum)\s+"
+    r"([A-Za-z_$][A-Za-z0-9_$]*)"
+)
+
+
+def _source_files() -> list[Path]:
     assert ROOT is not None
-    return sorted(p for p in ROOT.rglob("*.py") if p.is_file() and ".git" not in p.parts)
+    return sorted(
+        p for p in ROOT.rglob("*")
+        if p.is_file() and p.suffix in (".py", ".ts", ".tsx") and ".git" not in p.parts
+    )
+
+
+def _ts_defs(path: Path) -> list[tuple[str, int, str]]:
+    out = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for index, line in enumerate(text.splitlines(), start=1):
+        match = _TS_DECL.match(line.strip())
+        if match:
+            keyword, name = match.groups()
+            kind = "class" if keyword in ("interface", "class") else "function"
+            out.append((name, index, kind))
+    return out
+
+
+def _ts_occurrences(path: Path, symbol: str) -> list[int]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    pattern = re.compile(rf"\b{re.escape(symbol)}\b")
+    return [i for i, line in enumerate(text.splitlines(), start=1) if pattern.search(line)]
+
+
+def _ts_bare_return_diagnostics(path: Path) -> list[int]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    declared = {n for n, _, _ in _ts_defs(path)}
+    for line in text.splitlines():
+        imported = re.match(r"^import\s+\{([^}]*)\}", line.strip())
+        if imported:
+            declared |= {p.strip().split(" as ")[-1].strip() for p in imported.group(1).split(",")}
+    out = []
+    for index, line in enumerate(text.splitlines(), start=1):
+        m = re.match(r"^return\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*;$", line.strip())
+        if m and m.group(1) not in declared:
+            out.append(index)
+    return out
+
+
+def _py_files() -> list[Path]:
+    return _source_files()
 
 
 def _defs(path: Path) -> list[tuple[str, int, str]]:
+    if path.suffix in (".ts", ".tsx"):
+        return _ts_defs(path)
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
@@ -106,6 +165,11 @@ def _semantic(tool: str, arguments: dict) -> dict:
 
     elif tool == "find_referencing_symbols":
         for path in _py_files():
+            if path.suffix in (".ts", ".tsx"):
+                for line in _ts_occurrences(path, wanted):
+                    rows.append({"name_path": wanted, "relative_path": _rel(path),
+                                 "body_start_line": line, "kind": "reference"})
+                continue
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8"))
             except (OSError, SyntaxError):

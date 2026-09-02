@@ -65,9 +65,10 @@ class DirectLspBackend:
         }
     )
 
-    def __init__(self, *, spec: ExecutableSpec, language: str) -> None:
+    def __init__(self, *, spec: ExecutableSpec, language: str, sandbox=None) -> None:
         self._spec = spec
         self._language = language
+        self._sandbox = sandbox
         self._client: JsonRpcStdioClient | None = None
         self._seal: WorkspaceSeal | None = None
         self._root: Path | None = None
@@ -108,7 +109,9 @@ class DirectLspBackend:
         self._seal = seal
         self._root = Path(seal.resolved_root)
         self._root_uri = _path_to_uri(self._root)
-        self._client = JsonRpcStdioClient(spec=self._spec, scratch=Path(scratch))
+        self._client = JsonRpcStdioClient(
+            spec=self._spec, scratch=Path(scratch), sandbox=self._sandbox
+        )
         self._client.start()
 
         result = self._request(
@@ -400,10 +403,17 @@ class DirectLspBackend:
         except (OSError, IndexError):
             return ""
         stripped = line.strip()
-        for keyword in ("class ", "def ", "async def "):
+        # TypeScript declarations are prefixed by `export`; Python ones are not.
+        if stripped.startswith("export "):
+            stripped = stripped[len("export ") :].lstrip()
+            if stripped.startswith("default "):
+                stripped = stripped[len("default ") :].lstrip()
+        for keyword in (
+            "class ", "def ", "async def ", "interface ", "function ", "type ", "enum ",
+        ):
             if stripped.startswith(keyword):
                 rest = stripped[len(keyword) :]
-                for stop in ("(", ":", " "):
+                for stop in ("(", ":", " ", "<", "{"):
                     if stop in rest:
                         rest = rest.split(stop, 1)[0]
                 return rest

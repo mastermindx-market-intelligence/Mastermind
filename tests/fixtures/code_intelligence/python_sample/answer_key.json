@@ -137,5 +137,12 @@
       "kind": "undefined-name",
       "symbol": "undefined_symbol_for_diagnostics"
     }
-  ]
+  ],
+  "task_bindings": {
+    "overview_file": "src/sample/producer.py",
+    "definition_symbol": "LiveProducer",
+    "references_symbol": "consume",
+    "implementations_symbol": "Producer",
+    "diagnostics_file": "src/sample/consumer.py"
+  }
 }

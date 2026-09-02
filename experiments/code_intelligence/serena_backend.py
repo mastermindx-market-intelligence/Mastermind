@@ -125,9 +125,10 @@ class SerenaBackend:
         }
     )
 
-    def __init__(self, *, spec: ExecutableSpec, bundle: SerenaBundle) -> None:
+    def __init__(self, *, spec: ExecutableSpec, bundle: SerenaBundle, sandbox=None) -> None:
         self._spec = spec
         self._bundle = bundle
+        self._sandbox = sandbox
         self._client: JsonRpcStdioClient | None = None
         self._seal: WorkspaceSeal | None = None
         self._scratch: Path | None = None
@@ -188,7 +189,9 @@ class SerenaBackend:
             )
         self._seal = seal
         self._scratch = Path(scratch)
-        self._client = JsonRpcStdioClient(spec=self._spec, scratch=self._scratch)
+        self._client = JsonRpcStdioClient(
+            spec=self._spec, scratch=self._scratch, sandbox=self._sandbox
+        )
         self._client.start()
 
         self._server_info = (
@@ -395,6 +398,7 @@ def run_config_influence_probe(
     bundle: SerenaBundle,
     corpus_root: Path,
     scratch_parent: Path,
+    sandbox: Any = None,
 ) -> dict[str, Any]:
     """Actually execute the repository-configuration differential.
 
@@ -418,7 +422,7 @@ def run_config_influence_probe(
 
     seal = capture_workspace_seal(corpus_root)
     scratch = create_external_scratch(parent=Path(scratch_parent), seal=seal)
-    baseline = SerenaBackend(spec=spec, bundle=bundle)
+    baseline = SerenaBackend(spec=spec, bundle=bundle, sandbox=sandbox)
     try:
         baseline.start(seal=seal, scratch=scratch)
         receipt["baseline_fingerprint"] = baseline.census_fingerprint()
@@ -436,7 +440,7 @@ def run_config_influence_probe(
 
     hostile_seal = capture_workspace_seal(corpus_root)
     hostile_scratch = create_external_scratch(parent=Path(scratch_parent), seal=hostile_seal)
-    probe = SerenaBackend(spec=spec, bundle=bundle)
+    probe = SerenaBackend(spec=spec, bundle=bundle, sandbox=sandbox)
     try:
         probe.start(
             seal=hostile_seal,

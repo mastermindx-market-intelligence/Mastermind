@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mastermind.invalid/schema/mastermind.codeintel_c0_result.v1.json",
   "title": "Mastermind Code Intelligence C0 semantic falsifier result",
-  "description": "Immutable result of the C0 exact-worktree semantic backend falsifier. A decision enum may only be published when at least one non-synthetic trial exists for every candidate: a stand-in server can never produce a backend selection.",
+  "description": "Immutable result of the C0 exact-worktree semantic backend falsifier. A decision enum may only be published when BOTH candidates carry non-synthetic coverage of every required language, case and phase: a stand-in server can never produce a backend selection. Winner-consistency that JSON Schema cannot express is enforced by cross_check_result().",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -15,84 +15,258 @@
     "corpora",
     "binding_receipt",
     "candidates",
+    "candidate_summaries",
     "hostile_results",
     "mutation_kills",
     "decision_state",
+    "decision_gates",
+    "tie_break",
+    "materiality_band",
+    "primary_cases",
+    "cleanup",
+    "semantic_evidence_digest",
     "residual_risks",
     "next_action"
   ],
   "properties": {
-    "artifact_version": { "const": "mastermind.codeintel_c0_result.v1" },
-    "operation_key": { "type": "string", "minLength": 1 },
-    "generated_unix_ms": { "type": "integer", "minimum": 0 },
-    "wave_status": { "const": "DISPOSABLE FALSIFIER / PRODUCTION_INERT" },
+    "artifact_version": {
+      "const": "mastermind.codeintel_c0_result.v1"
+    },
+    "operation_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_unix_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "wave_status": {
+      "const": "DISPOSABLE FALSIFIER / PRODUCTION_INERT"
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "branch", "head_sha", "base_sha", "changed_paths"],
+      "required": [
+        "repository",
+        "branch",
+        "head_sha",
+        "base_sha",
+        "changed_paths"
+      ],
       "properties": {
-        "repository": { "type": "string" },
-        "branch": { "type": "string" },
-        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "protected_pickup_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "changed_paths": { "type": "array", "items": { "type": "string" } }
+        "repository": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "base_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "protected_pickup_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "changed_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "environment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["platform", "python_version", "network_policy"],
+      "required": [
+        "platform",
+        "python_version",
+        "network_policy",
+        "sandbox"
+      ],
       "properties": {
-        "platform": { "type": "string" },
-        "python_version": { "type": "string" },
-        "network_policy": { "const": "disabled" },
-        "observations": { "type": "array", "items": { "type": "string" } }
+        "platform": {
+          "type": "string"
+        },
+        "python_version": {
+          "type": "string"
+        },
+        "network_policy": {
+          "enum": [
+            "enforced_and_attested",
+            "unattested"
+          ]
+        },
+        "sandbox": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "profile_digest": {
+              "type": "string"
+            },
+            "network_denied": {
+              "type": "boolean"
+            },
+            "attestation": {
+              "type": "string"
+            },
+            "enforced_limits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unenforced_limits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "corpora": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 2,
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "language"
+            ],
+            "properties": {
+              "language": {
+                "const": "python"
+              }
+            }
+          }
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "language"
+            ],
+            "properties": {
+              "language": {
+                "const": "typescript"
+              }
+            }
+          }
+        }
+      ],
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["corpus_id", "language", "manifest_digest", "answer_key_digest"],
+        "required": [
+          "corpus_id",
+          "language",
+          "manifest_digest",
+          "answer_key_digest"
+        ],
         "properties": {
-          "corpus_id": { "type": "string" },
-          "language": { "type": "string" },
-          "manifest_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "answer_key_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "corpus_id": {
+            "type": "string"
+          },
+          "language": {
+            "enum": [
+              "python",
+              "typescript"
+            ]
+          },
+          "manifest_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "answer_key_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       }
     },
     "binding_receipt": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "workspace_binding_digest",
         "facade_source_digest",
         "semantic_schema_digest"
       ],
       "properties": {
-        "workspace_binding_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "facade_source_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "semantic_schema_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "workspace_binding_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "facade_source_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "semantic_schema_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "per_execution": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
       }
     },
     "exposed_tool_census": {
       "type": "array",
       "minItems": 6,
       "maxItems": 6,
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "candidates": {
       "type": "array",
       "minItems": 2,
+      "maxItems": 2,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "status", "trials", "hard_failures"],
+        "required": [
+          "kind",
+          "status",
+          "trials",
+          "hard_failures"
+        ],
         "properties": {
-          "kind": { "enum": ["serena", "direct_lsp"] },
+          "kind": {
+            "enum": [
+              "serena",
+              "direct_lsp"
+            ]
+          },
           "status": {
             "enum": [
               "EXERCISED",
@@ -101,16 +275,35 @@
             ]
           },
           "identity": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
             "properties": {
-              "kind": { "type": "string" },
-              "source_version": { "type": "string" },
-              "source_commit": { "type": "string" },
-              "executable_sha256": { "type": "string" },
-              "configuration_digest": { "type": "string" }
+              "kind": {
+                "type": "string"
+              },
+              "source_version": {
+                "type": "string"
+              },
+              "source_commit": {
+                "type": "string"
+              },
+              "executable_sha256": {
+                "type": "string"
+              },
+              "configuration_digest": {
+                "type": "string"
+              }
             }
           },
-          "advertised_tool_census": { "type": "array", "items": { "type": "string" } },
+          "advertised_tool_census": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "trials": {
             "type": "array",
             "items": {
@@ -119,6 +312,7 @@
               "required": [
                 "case",
                 "language",
+                "phase",
                 "correct",
                 "expected",
                 "actual",
@@ -126,20 +320,157 @@
                 "synthetic"
               ],
               "properties": {
-                "case": { "type": "string" },
-                "language": { "type": "string" },
-                "correct": { "type": "boolean" },
+                "case": {
+                  "enum": [
+                    "O1_definition_live_implementation",
+                    "W1_references_across_files",
+                    "A3_implementations_of_protocol",
+                    "overview_single_file",
+                    "diagnostics_planted_undefined_name"
+                  ]
+                },
+                "language": {
+                  "enum": [
+                    "python",
+                    "typescript"
+                  ]
+                },
+                "phase": {
+                  "enum": [
+                    "cold",
+                    "warm"
+                  ]
+                },
+                "correct": {
+                  "type": "boolean"
+                },
                 "expected": {},
                 "actual": {},
-                "latency_ms": { "type": "integer", "minimum": 0 },
-                "synthetic": { "type": "boolean" },
-                "phase": { "enum": ["cold", "warm"] },
-                "error": { "type": ["string", "null"] }
+                "latency_ms": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "synthetic": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
               }
             }
           },
-          "hard_failures": { "type": "array", "items": { "type": "string" } },
-          "notes": { "type": "string" }
+          "hard_failures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "serena"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "direct_lsp"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "candidate_summaries": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "complete",
+          "correctness",
+          "hard_failures"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "serena",
+              "direct_lsp"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "primary_trials": {
+            "type": "integer"
+          },
+          "primary_correct": {
+            "type": "integer"
+          },
+          "useful": {
+            "type": "boolean"
+          },
+          "non_synthetic_trials": {
+            "type": "integer"
+          },
+          "correct": {
+            "type": "integer"
+          },
+          "correctness": {
+            "type": "number"
+          },
+          "hard_failures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "median_latency_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
         }
       }
     },
@@ -148,54 +479,314 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["check", "outcome"],
+        "required": [
+          "check",
+          "outcome"
+        ],
         "properties": {
-          "check": { "type": "string" },
-          "outcome": { "enum": ["REFUSED_AS_REQUIRED", "ALLOWED", "NOT_RUN"] },
-          "code": { "type": ["string", "null"] },
-          "detail": { "type": "string" }
+          "check": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "REFUSED_AS_REQUIRED",
+              "ALLOWED",
+              "NOT_RUN"
+            ]
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          }
         }
       }
     },
     "mutation_kills": {
       "type": "array",
+      "minItems": 4,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["mutation", "killed_by"],
+        "required": [
+          "mutation",
+          "killed_by"
+        ],
         "properties": {
-          "mutation": { "type": "string" },
-          "killed_by": { "type": "string" }
+          "mutation": {
+            "type": "string"
+          },
+          "killed_by": {
+            "type": "string"
+          }
         }
       }
     },
     "decision_state": {
-      "enum": ["DECIDED", "BLOCKED_MISSING_PINNED_DEPENDENCY"]
+      "enum": [
+        "DECIDED",
+        "BLOCKED_MISSING_PINNED_DEPENDENCY"
+      ]
     },
-    "decision": { "enum": ["SERENA", "DIRECT_LSP", "NO_SAFE_BACKEND"] },
-    "blocking_reason": { "type": "string" },
-    "residual_risks": { "type": "array", "items": { "type": "string" } },
-    "next_action": { "type": "string", "minLength": 1 }
+    "decision": {
+      "enum": [
+        "SERENA",
+        "DIRECT_LSP",
+        "NO_SAFE_BACKEND"
+      ]
+    },
+    "decision_gates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tie_break": {
+      "type": "string"
+    },
+    "materiality_band": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "primary_cases": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "string"
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scratch_files_before",
+        "removed",
+        "retained_paths"
+      ],
+      "properties": {
+        "scratch_files_before": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scratch_bytes_before": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "retained_paths": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "semantic_evidence_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "blocking_reason": {
+      "type": "string"
+    },
+    "residual_risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_action": {
+      "type": "string",
+      "minLength": 1
+    }
   },
   "allOf": [
     {
       "if": {
-        "properties": { "decision_state": { "const": "DECIDED" } },
-        "required": ["decision_state"]
+        "properties": {
+          "decision_state": {
+            "const": "DECIDED"
+          }
+        },
+        "required": [
+          "decision_state"
+        ]
       },
       "then": {
-        "required": ["decision"],
+        "required": [
+          "decision",
+          "tie_break"
+        ],
         "properties": {
           "candidates": {
             "items": {
               "properties": {
                 "trials": {
-                  "minItems": 1,
-                  "contains": {
-                    "type": "object",
-                    "required": ["synthetic"],
-                    "properties": { "synthetic": { "const": false } }
-                  }
+                  "allOf": [
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "language",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "language": {
+                            "const": "python"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "language",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "language": {
+                            "const": "typescript"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "phase",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "phase": {
+                            "const": "cold"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "phase",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "phase": {
+                            "const": "warm"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "case",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "case": {
+                            "const": "O1_definition_live_implementation"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "case",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "case": {
+                            "const": "W1_references_across_files"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "case",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "case": {
+                            "const": "A3_implementations_of_protocol"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "case",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "case": {
+                            "const": "overview_single_file"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "case",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "case": {
+                            "const": "diagnostics_planted_undefined_name"
+                          }
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -206,13 +797,23 @@
     {
       "if": {
         "properties": {
-          "decision_state": { "const": "BLOCKED_MISSING_PINNED_DEPENDENCY" }
+          "decision_state": {
+            "const": "BLOCKED_MISSING_PINNED_DEPENDENCY"
+          }
         },
-        "required": ["decision_state"]
+        "required": [
+          "decision_state"
+        ]
       },
       "then": {
-        "required": ["blocking_reason"],
-        "not": { "required": ["decision"] }
+        "required": [
+          "blocking_reason"
+        ],
+        "not": {
+          "required": [
+            "decision"
+          ]
+        }
       }
     }
   ]
