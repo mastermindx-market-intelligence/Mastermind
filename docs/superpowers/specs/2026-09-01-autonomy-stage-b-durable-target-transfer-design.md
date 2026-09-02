@@ -1,121 +1,393 @@
-# Autonomy Stage B - Durable Sol Action-Target Assignment and Transfer
+---
+schema: mastermind.autonomy_stage_b_f0_design.v5
+architecture_revision: v5.1-trusted-replay-production-call-path
+operation: stage-b0-r1-real-owner-gap-repair-20260902-sol-001
+capability: SPEC_ONLY
+production_effect: NONE
+---
 
-**Date:** 2026-09-02  
-**Owner:** Sol, AI CEO  
-**Chairman:** Chris  
-**Protected basis:** `Mastermind@cba0424f10ad6a9a917234c6740d92b19b018642`, Skillpack `mastermind.sol_skillpack.v1` 1.0.1  
-**Operation:** `stage-b0-r1-no-duplicate-owner-freeze-v4-20260902-sol-001`  
-**State:** `ARCHITECTURE_FROZEN / INITIAL_ASSIGNMENT_ONLY / SOURCE_NOT_BUILT / PRODUCTION_INERT`
+# Autonomy Stage B - Trusted Initial Sol Action-Target Assignment
 
-## Executive ruling
+## Status
 
-The first immutable `SOL_ACTION_TARGET_ASSIGNED` Runtime Event on a CEO-owned responsibility root Job is the durable root/seat/alias assignment owner. Stage B will not create a predecessor assignment table, registry, receipt stream, mutable pointer, or policy plane.
+This records-only architecture supersedes Stage-B V1-V4. It freezes one narrow future capability: after an admitted CEO responsibility root has been transactionally committed by Capacity C2 to one exact current Codex writer, the existing Executive service may append the first immutable root-scoped Sol action-target assignment and expose it through the unchanged Stage-A resolver.
 
-An Event may be appended only when current protected evidence proves:
+Current state is `SPEC_ONLY / PREDECESSORS_HELD / SOURCE_NOT_BUILT / PRODUCTION_INERT`.
 
-1. one exact CEO-owned responsibility root with accepted typed CEO provenance;
-2. one exact CEO-owned, role-null technical carrier whose current Operator Harness Attempt is the destination Sol materialization;
-3. one exact current `openai-codex` writer generation for that carrier;
-4. one exact disabled Codex CEO SessionTarget; and
-5. one derived, replay-safe initial-assignment command.
+V5.1 closes three prior authority errors:
 
-The root and carrier may be the same Job or different Jobs. Multiple roots may share the logical alias only when every assignment binds the same exact RuntimeBinding ID and generation. A different binding behind that alias is a conflict, never an election.
+1. root creation is grounded in the real protected production call path, not a test overlay;
+2. a caller, model, selected snapshot, provider identity, or destination session cannot authorize its own assignment;
+3. replay never returns an old assignment as authority without revalidating the current root, C2 commitment, target definition and binding generation.
 
-V3 correctly rejected caller overlays and fictional Wake acknowledgement fields, but its proposed predecessor root-binding owner would duplicate the assignment plane Stage B itself is meant to own. V4 supersedes V1-V3 and authorizes one bounded source wave: CEO Codex `INITIAL_ASSIGNMENT`. Succession, cross-alias transfer, ChatGPT-Sol, COO-root escalation, and production arming remain held.
-
-## Outcome and one-system model
+## One-system model
 
 ```text
-CEO-owned responsibility root Job
-+ CEO-owned role-null Codex carrier Job
-+ exact current OHF Attempt / epoch / writer generation
-+ canonical EXECUTIVE-CEO-CODEX-A target
-+ immutable root-Job assignment Event
--> full-map SessionTarget projection
--> Event-bound current RuntimeBinding projection
--> unchanged Stage-A resolver
--> exact actor may act; stale/sister/unassigned/conflicting actor is refused
+CeoIngress v2
+-> ExecutiveControlService._submit_service_intent
+-> ceo_intent.submit_intent
+-> Runtime.jobs.create_v2_orchestration_root
+-> admitted CEO responsibility root
+
+protected Capacity C1 selection
+-> Capacity C2 same-transaction reread and canonical Worker/Attempt claim
+-> immutable root-bound CAPACITY_PLACEMENT_COMMITTED Event
+
+existing ExecutiveControlService C2 completion/replay path
+-> Stage-B initial-assignment reducer
+-> immutable root-scoped SOL_ACTION_TARGET_ASSIGNED Event
+-> complete-map SessionTargetRegistry projection
+-> current RuntimeBinding projection
+-> unchanged require_sol_action_authority
 ```
 
-Executive Runtime remains the lifecycle and Event owner. SessionTarget remains the destination-definition owner. RuntimeBinding projection remains the live-writer evidence owner. Stage A remains the enforcement owner. Wake remains downstream delivery/consumption evidence. No second lifecycle, target store, binding store, authority registry, queue, or lease plane is added.
-
-## Protected-source findings
-
-- `root_job_bindings` is checked in empty and test-overlay-only.
-- `with_root_job_bindings()` replaces the complete mapping and authenticates no assignment.
-- `policy_digest()` excludes root bindings.
-- no current `target_seat=ceo` plus `reasoning_surface=codex` target exists;
-- `codex-app-server` is implemented;
-- typed CEO-owned role-null Jobs are valid and provider identity never grants the CEO seat;
-- role-null OHF materialization records current epoch/generation, observed attestation, and `OHF_LAUNCH_DECISION=ALLOW`;
-- current `current_harness_binding_source()` is exact but requires roleful `ORCHESTRATION_WORK_ADMITTED` evidence;
-- `runtime_binding_projection.py` owns `openai-codex -> codex`, binding ID derivation, and read-only projection;
-- Stage A is storeless and requires an exact root alias, one current binding, exact surface, and exact actor binding;
-- the real Wake ACK is typed `WakeAcknowledgement`, event `TARGET_ACKNOWLEDGED`, command `<wake_id>:ACK`; it cannot bootstrap initial assignment because root-scoped delivery already requires a root binding.
-
-## Capability ledger
-
-- `BUILT_NOT_PROVEN`: CEO Job provenance, role-null OHF materialization, Runtime Event/transaction primitives, Codex binding projection primitives, SessionTarget overlay, Codex transport, Stage A.
-- `PARTIAL`: role-null CEO current-writer projection and Codex CEO target are absent.
-- `SPEC_ONLY`: this V4 command/Event/fold/projection architecture.
-- `NOT_BUILT`: Stage-B assignment source and action-time composition.
-- `HELD`: succession, cross-alias, ChatGPT-Sol, COO-root escalation, production canary.
-- `REJECTED_BY_DESIGN`: predecessor binding owner, caller overlay authority, pre-assignment ACK, caller command ID/alias choice, newest-session election, implicit generation transfer, destructive map replacement, blind retry/failover.
+Executive Runtime remains the only Job, Attempt, Worker and Event owner. Capacity C2 owns worker/runtime commitment. SessionTargetRegistry owns logical destination definitions. RuntimeBinding projection owns current concrete materialization. Stage B owns only the root-to-logical-Sol action-target assignment Event. Stage A remains the sole action-time actor enforcement owner.
 
 ## Normative contract
 
 <!-- STAGE_B_F0_CORRECTION_CONTRACT_BEGIN -->
 ```json
 {
-  "schema": "mastermind.autonomy_stage_b_f0_contract.v4",
-  "protected_source_sha": "cba0424f10ad6a9a917234c6740d92b19b018642",
-  "architecture_operation": "stage-b0-r1-no-duplicate-owner-freeze-v4-20260902-sol-001",
-  "supersedes": ["mastermind.autonomy_stage_b_f0_contract.v1", "mastermind.autonomy_stage_b_f0_contract.v2", "mastermind.autonomy_stage_b_f0_contract.v3"],
-  "current_claim": "SPEC_ONLY / SOURCE_NOT_BUILT / PRODUCTION_INERT",
-  "authorized_next_wave": "STAGE-B1_CEO_CODEX_INITIAL_ASSIGNMENT_VERTICAL",
-  "supported_after_source_wave": {"modes": ["INITIAL_ASSIGNMENT"], "surfaces": ["codex"]},
-  "held": {"modes": ["SAME_ALIAS_GENERATION_SUCCESSION", "CROSS_ALIAS_RESPONSIBILITY_TRANSFER"], "surfaces": ["chatgpt-sol", "claude", "workspace-agent", "human"], "root_types": ["coo_owned_orchestration_root"]},
-  "canonical_target": {"session_alias": "EXECUTIVE-CEO-CODEX-A", "target_seat": "ceo", "reasoning_surface": "codex", "wake_transport": "codex-app-server", "allowed_transports": ["codex-app-server"], "workstream": "executive", "target_enabled": false, "production_armed": false, "caller_selectable": false},
-  "responsibility_root": {"owner": "Executive Runtime Job plus unique JOB_CREATED Event", "required": ["job_id equals root_job_id", "owner_seat equals ceo", "accepted typed CEO provenance", "status in QUEUED|RUNNING|CHECKPOINTED", "valid immutable authority policy and requested scope"], "not_required": ["root current Attempt", "Wake obligation", "Wake acknowledgement", "Slack receipt", "Agent OS attention", "provider identity"]},
-  "destination_carrier": {"owner": "role-null CEO technical root Job", "required": ["carrier job_id equals carrier root_job_id", "owner_seat equals ceo", "orchestration_role is null", "accepted typed CEO provenance", "current_attempt_id equals expected target Attempt", "lease-active OPERATOR_HARNESS Attempt", "active worker provider openai-codex", "exactly one CURRENT epoch", "exactly one current unended executive-writer generation", "sealed observed attestation", "exactly one matching OHF_LAUNCH_DECISION=ALLOW"], "does_not_require": ["ORCHESTRATION_WORK_ADMITTED", "new executive seat", "new orchestration role"]},
-  "assignment_owner": {"aggregate_type": "job", "aggregate_id": "responsibility root_job_id", "event_type": "SOL_ACTION_TARGET_ASSIGNED", "event_schema": "mastermind.sol_action_target_assignment/v1", "event_actor": "ceo", "first_revision": 1, "rule": "first immutable Event is the root/seat/alias owner", "alias_sharing": "same alias requires same binding_id and binding_generation", "implicit_generation_advance": false},
-  "command": {"schema": "mastermind.sol_action_target_assignment_command/v1", "mode": "INITIAL_ASSIGNMENT", "fields": ["schema", "mode", "root_job_id", "expected_assignment_revision", "target_carrier_job_id", "expected_target_attempt_id", "expected_session_epoch_id", "expected_process_generation_id", "expected_session_alias", "expected_binding_id", "expected_binding_generation", "expected_target_definition_fingerprint"], "caller_may_supply_command_id": false, "expected_assignment_revision": 0, "expected_session_alias": "EXECUTIVE-CEO-CODEX-A", "derived_command_id": "SOL-TARGET-<sha256(canonical semantics)[0:32]>", "identical_replay": "return identical Event", "foreign_occupancy": "COMMAND_REPLAY_CONFLICT", "same_root_race": "one append; loser EXPECTED_REVISION_MISMATCH", "effect_unknown": "reconcile same derived id only; never retry/failover"},
-  "event_required": ["schema_version", "mode", "assignment_revision", "root_job_id", "target_seat", "session_alias", "reasoning_surface", "target_definition_fingerprint", "responsibility_job_created_command_id", "responsibility_authority_fingerprint", "target_carrier_job_id", "target_carrier_job_created_command_id", "target_carrier_authority_fingerprint", "target_attempt_id", "session_epoch_id", "process_generation_id", "generation_number", "binding_id", "binding_generation", "observed_attestation_digest", "launch_decision_command_id", "command_fingerprint", "evidence_fingerprint"],
-  "event_forbidden": ["native_handle", "provider_session_id", "account_label", "pid", "pgid", "process_start_identity", "boot_id", "Slack principal", "browser title", "model output", "Wake acknowledgement token"],
-  "target_fingerprint": {"fields": ["session_alias", "target_seat", "reasoning_surface", "wake_transport", "allowed_transports", "workstream"], "excludes": ["root_job_bindings", "unrelated targets", "target_enabled", "production_armed", "policy_version"]},
-  "runtime_extension": {"read_seam": "current_ceo_harness_binding_source", "projection_seam": "project_ceo_runtime_binding", "same_connection": true, "read_only": true, "return_types": ["ActiveOperatorBindingFacts", "RuntimeBinding"], "roleful_behavior_changed": false, "new_registry": false},
-  "fold": {"root_scoped": true, "revision_start": 1, "contiguous": true, "allowed_events": ["SOL_ACTION_TARGET_ASSIGNED"], "duplicate_gap_or_branch": "ASSIGNMENT_HISTORY_CONFLICT", "unsupported_event": "UNSUPPORTED_ASSIGNMENT_MODE", "newest_event_repair": false},
-  "action_time": ["reread active CEO responsibility root", "fold root assignment", "verify global alias assignments bind one RuntimeBinding", "recompute target fingerprint", "reproject current carrier binding on one Runtime connection", "require Event binding_id and binding_generation exact match", "copy complete root_job_bindings and replace selected root ceo only", "call unchanged require_sol_action_authority"],
-  "transaction": ["parse and derive command id", "validate exact target definition", "BEGIN IMMEDIATE", "lookup command id before mutable reads", "read root authority and fold revision", "read carrier authority and current binding on same connection", "compare claims and global alias consistency", "append one Event", "reconcile ambiguous response only by same id"],
-  "failures": ["NOT_AUTHORIZED", "ROOT_JOB_NOT_FOUND", "ROOT_JOB_NOT_ROOT", "ROOT_JOB_NOT_CEO_OWNED", "ROOT_JOB_PROVENANCE_INVALID", "ROOT_JOB_TERMINAL", "TARGET_CARRIER_NOT_FOUND", "TARGET_CARRIER_NOT_ROOT", "TARGET_CARRIER_NOT_CEO_OWNED", "TARGET_CARRIER_ROLE_CONFLICT", "TARGET_CARRIER_PROVENANCE_INVALID", "TARGET_ATTEMPT_NOT_CURRENT", "TARGET_RUNTIME_UNAVAILABLE", "TARGET_RUNTIME_CONFLICT", "TARGET_PROVIDER_UNSUPPORTED", "TARGET_CATALOG_ENTRY_MISSING", "TARGET_CATALOG_DEFINITION_CONFLICT", "TARGET_ALIAS_ALREADY_BINDS_DIFFERENT_RUNTIME", "NO_ASSIGNMENT", "ASSIGNMENT_HISTORY_CONFLICT", "EXPECTED_REVISION_MISMATCH", "COMMAND_REPLAY_CONFLICT", "STALE_ASSIGNED_BINDING", "UNSUPPORTED_ASSIGNMENT_MODE", "EFFECT_UNKNOWN_RECONCILE_FIRST", "RUNTIME_TRANSACTION_UNAVAILABLE"],
-  "time_null_correction": {"timestamps": "audit only; never elect by recency", "nulls": "required evidence fails closed", "correction": "no reassignment or succession in V4; changed binding becomes unavailable", "automatic_retry": false},
-  "source_paths": ["config/wake_session_targets.json", "control_plane/executive_runtime.py", "control_plane/runtime_binding_projection.py", "control_plane/sol_action_target_assignment.py", "tests/test_autonomy_stage_b_initial_assignment.py", "tests/test_autonomy_stage_b_durable_target_transfer_source_law.py"],
-  "no_rebuild": {"tables": [], "migrations": [], "registries": [], "lifecycles": [], "job_attempt_worker_rows_mutated": false, "ohf_rows_mutated": false, "wake_rows_mutated": false, "provider_or_slack_calls_in_transaction": false, "stage_a_signature_changed": false, "production_armed": false},
-  "source_release_claim": "BUILT_NOT_PROVEN / INITIAL_ASSIGNMENT_ONLY / PRODUCTION_DISARMED"
+  "schema": "mastermind.autonomy_stage_b_f0_contract.v5",
+  "architecture_revision": "v5.1-trusted-replay-production-call-path",
+  "protected_source_sha": "0d5c80bba8c69b5d1ed86aa3d32c9003a4252c73",
+  "architecture_operation": "stage-b0-r1-real-owner-gap-repair-20260902-sol-001",
+  "supersedes": [
+    "mastermind.autonomy_stage_b_f0_contract.v1",
+    "mastermind.autonomy_stage_b_f0_contract.v2",
+    "mastermind.autonomy_stage_b_f0_contract.v3",
+    "mastermind.autonomy_stage_b_f0_contract.v4"
+  ],
+  "current_state": {
+    "claim": "SPEC_ONLY / PREDECESSORS_HELD / SOURCE_NOT_BUILT / PRODUCTION_INERT",
+    "authorized_modes_now": [],
+    "source_implementation_authorized_now": false,
+    "production_armed": false,
+    "runtime_effect": false,
+    "provider_effect": false
+  },
+  "future_supported_mode": {
+    "mode": "INITIAL_ASSIGNMENT",
+    "seat": "ceo",
+    "reasoning_surface": "codex",
+    "held_until": [
+      "CAPACITY_C1_PROTECTED",
+      "CAPACITY_C2_ROOT_BOUND_COMMITMENT_PROTECTED",
+      "EXECUTIVE_CEO_CODEX_A_TARGET_PROTECTED"
+    ]
+  },
+  "production_root_owner": {
+    "root_kind": "CEO_V2_ORCHESTRATION_ROOT",
+    "call_path": [
+      "CeoIngress v2",
+      "ExecutiveControlService._submit_service_intent",
+      "ceo_intent.submit_intent",
+      "Runtime.jobs.create_v2_orchestration_root"
+    ],
+    "required": [
+      "job_id equals root_job_id",
+      "owner_seat equals ceo",
+      "orchestration_role is null",
+      "accepted mastermind.ceo_intent.v2 provenance",
+      "unique canonical JOB_CREATED command",
+      "status in QUEUED|RUNNING|CHECKPOINTED",
+      "immutable authority policy and requested scope"
+    ],
+    "replay_owner": "ceo_intent.submit_intent command lookup plus strict v2 root reconstruction",
+    "forbidden_substitutes": [
+      "root_job_bindings overlay",
+      "Slack message",
+      "model output",
+      "provider identity",
+      "account label",
+      "browser title",
+      "caller-created Job"
+    ]
+  },
+  "placement_commitment_owner": {
+    "status": "MISSING_PREDECESSOR",
+    "owner": "CAPACITY_C2_EXISTING_EXECUTIVE_TRANSACTION_AND_CLAIM_OWNER",
+    "event_type": "CAPACITY_PLACEMENT_COMMITTED",
+    "event_schema": "mastermind.capacity_placement_commitment/v1",
+    "aggregate_type": "job",
+    "aggregate_id": "responsibility root_job_id",
+    "required": [
+      "exact root_job_id",
+      "selection_document_digest",
+      "selection_evidence_digest",
+      "selected_worker_id",
+      "committed_attempt_id",
+      "committed_runtime_binding_id",
+      "committed_runtime_binding_generation",
+      "committed_reasoning_surface equals codex",
+      "commitment_command_id",
+      "commitment_evidence_digest",
+      "canonical Worker and Attempt claim already committed"
+    ],
+    "transaction_law": [
+      "BEGIN IMMEDIATE in existing Executive Runtime",
+      "recompute and compare the C1 selection",
+      "reread capacity occupancy fence and RuntimeBinding facts",
+      "claim existing canonical Worker and Attempt owners",
+      "append one immutable root-bound commitment Event",
+      "changed stale conflicting or effect-unknown candidate aborts",
+      "do not select a second candidate inside the same modifying operation"
+    ],
+    "c1_selection_is_authority": false,
+    "runtime_binding_alone_is_authority": false,
+    "caller_destination_is_authority": false
+  },
+  "target_definition_owner": {
+    "status": "ABSENT_PROTECTED_SOURCE",
+    "owner": "SessionTargetRegistry",
+    "required_definition": {
+      "session_alias": "EXECUTIVE-CEO-CODEX-A",
+      "target_seat": "ceo",
+      "reasoning_surface": "codex",
+      "wake_transport": "codex-app-server",
+      "allowed_transports": [
+        "codex-app-server"
+      ],
+      "workstream": "executive",
+      "target_enabled": false,
+      "production_armed": false,
+      "caller_selectable": false
+    },
+    "definition_fingerprint_fields": [
+      "session_alias",
+      "target_seat",
+      "reasoning_surface",
+      "wake_transport",
+      "allowed_transports",
+      "workstream"
+    ],
+    "fingerprint_excludes": [
+      "root_job_bindings",
+      "unrelated targets",
+      "target_enabled",
+      "production_armed",
+      "policy_version"
+    ]
+  },
+  "assignment_owner": {
+    "owner": "Executive Runtime Event plane",
+    "aggregate_type": "job",
+    "aggregate_id": "responsibility root_job_id",
+    "event_type": "SOL_ACTION_TARGET_ASSIGNED",
+    "event_schema": "mastermind.sol_action_target_assignment/v1",
+    "first_revision": 1,
+    "rule": "first immutable Event is the sole root-seat-alias assignment owner",
+    "event_actor": "ceo",
+    "event_actor_is_authority": false,
+    "separate_assignment_table": false,
+    "implicit_generation_advance": false
+  },
+  "production_call_path": {
+    "owner": "ExecutiveControlService",
+    "entry": "successful or identically replayed Capacity C2 commitment completion",
+    "assignment_function": "sol_action_target_assignment.assign_initial_target",
+    "caller_exposed_destination_fields": [],
+    "caller_may_invoke_assignment_directly": false,
+    "caller_may_supply_actor_label": false,
+    "caller_may_supply_actor_binding": false,
+    "caller_may_supply_worker_attempt_or_runtime_binding": false,
+    "authority": [
+      "admitted CEO v2 root",
+      "exact protected C2 root-bound commitment Event",
+      "exact protected target definition",
+      "current committed RuntimeBinding re-projection"
+    ],
+    "crash_gap_behavior": "commitment may remain safely unassigned; identical C2 replay re-enters the same derived assignment command",
+    "new_daemon_or_scheduler": false
+  },
+  "command": {
+    "schema": "mastermind.sol_action_target_assignment_command/v1",
+    "mode": "INITIAL_ASSIGNMENT",
+    "fields": [
+      "schema",
+      "mode",
+      "root_job_id",
+      "expected_assignment_revision",
+      "placement_commitment_command_id",
+      "expected_placement_commitment_digest",
+      "expected_session_alias",
+      "expected_binding_id",
+      "expected_binding_generation",
+      "expected_target_definition_fingerprint"
+    ],
+    "caller_may_supply_command_id": false,
+    "caller_may_supply_target_carrier_job_id": false,
+    "caller_may_supply_worker_id": false,
+    "caller_may_supply_attempt_id": false,
+    "caller_may_supply_provider_account_or_native_handle": false,
+    "expected_assignment_revision": 0,
+    "expected_session_alias": "EXECUTIVE-CEO-CODEX-A",
+    "derived_command_id": "SOL-TARGET-<sha256(canonical command semantics)[0:32]>",
+    "identical_replay": "revalidate current truth then return the identical Event",
+    "changed_payload": "COMMAND_REPLAY_CONFLICT",
+    "same_root_race": "one append; loser EXPECTED_REVISION_MISMATCH",
+    "effect_unknown": "reconcile only by the same derived command id; no retry or failover"
+  },
+  "trusted_replay": {
+    "lookup_order": "derived assignment command id before mutable reads",
+    "must_revalidate": [
+      "canonical existing assignment Event shape and command fingerprint",
+      "active admitted CEO v2 root and immutable authority provenance",
+      "exact root-bound C2 commitment Event and digest",
+      "canonical current Worker and Attempt identities from the commitment",
+      "exact target definition fingerprint",
+      "current RuntimeBinding id generation and reasoning surface",
+      "global same-alias assignments bind one identical RuntimeBinding"
+    ],
+    "stale_or_moved_binding": "STALE_ASSIGNED_BINDING",
+    "foreign_commitment": "PLACEMENT_COMMITMENT_CONFLICT",
+    "historical_success_is_reusable_authority": false
+  },
+  "event_required": [
+    "schema_version",
+    "mode",
+    "assignment_revision",
+    "root_job_id",
+    "target_seat",
+    "session_alias",
+    "reasoning_surface",
+    "target_definition_fingerprint",
+    "responsibility_job_created_command_id",
+    "responsibility_authority_fingerprint",
+    "placement_commitment_command_id",
+    "placement_commitment_digest",
+    "binding_id",
+    "binding_generation",
+    "command_fingerprint",
+    "evidence_fingerprint"
+  ],
+  "event_forbidden": [
+    "native_handle",
+    "provider_session_id",
+    "account_label",
+    "pid",
+    "pgid",
+    "process_start_identity",
+    "boot_id",
+    "Slack principal",
+    "browser title",
+    "model output",
+    "caller actor label",
+    "Wake acknowledgement token"
+  ],
+  "projection_and_stage_a": {
+    "fold": "one contiguous root-scoped SOL_ACTION_TARGET_ASSIGNED revision starting at 1",
+    "duplicate_gap_or_branch": "ASSIGNMENT_HISTORY_CONFLICT",
+    "unsupported_event": "UNSUPPORTED_ASSIGNMENT_MODE",
+    "action_time": [
+      "reread active admitted CEO responsibility root",
+      "fold root assignment Event",
+      "reread and validate the exact C2 commitment",
+      "recompute target definition fingerprint",
+      "reproject current committed RuntimeBinding on one Runtime connection",
+      "require Event binding_id and binding_generation exact match",
+      "verify every root behind the alias binds one identical RuntimeBinding",
+      "copy complete root_job_bindings and replace only selected root ceo",
+      "call unchanged require_sol_action_authority with the actual actor RuntimeBinding"
+    ],
+    "stage_a_signature_changed": false,
+    "stage_a_actor_rule": "only exact RuntimeBinding identity is action-authoritative; all others are observer-only or refused"
+  },
+  "failures": [
+    "NOT_AUTHORIZED",
+    "ROOT_JOB_NOT_FOUND",
+    "ROOT_JOB_NOT_ROOT",
+    "ROOT_JOB_NOT_CEO_OWNED",
+    "ROOT_JOB_PROVENANCE_INVALID",
+    "ROOT_JOB_TERMINAL",
+    "PLACEMENT_COMMITMENT_MISSING",
+    "PLACEMENT_COMMITMENT_CONFLICT",
+    "PLACEMENT_COMMITMENT_EFFECT_UNKNOWN",
+    "TARGET_CATALOG_ENTRY_MISSING",
+    "TARGET_CATALOG_DEFINITION_CONFLICT",
+    "TARGET_RUNTIME_UNAVAILABLE",
+    "TARGET_RUNTIME_CONFLICT",
+    "TARGET_ALIAS_ALREADY_BINDS_DIFFERENT_RUNTIME",
+    "NO_ASSIGNMENT",
+    "ASSIGNMENT_HISTORY_CONFLICT",
+    "EXPECTED_REVISION_MISMATCH",
+    "COMMAND_REPLAY_CONFLICT",
+    "STALE_ASSIGNED_BINDING",
+    "UNSUPPORTED_ASSIGNMENT_MODE",
+    "EFFECT_UNKNOWN_RECONCILE_FIRST",
+    "RUNTIME_TRANSACTION_UNAVAILABLE"
+  ],
+  "time_null_correction": {
+    "timestamps": "audit only; never elect a destination by recency",
+    "nulls": "every required root commitment target and binding fact fails closed when absent",
+    "correction": "V5.1 has no reassignment or succession; a moved binding becomes unavailable",
+    "automatic_retry": false
+  },
+  "source_wave": {
+    "status": "HELD_PREDECESSORS",
+    "name": "STAGE_B1_CEO_CODEX_INITIAL_ASSIGNMENT_VERTICAL",
+    "paths": [
+      "config/wake_session_targets.json",
+      "control_plane/executive_runtime.py",
+      "control_plane/runtime_binding_projection.py",
+      "control_plane/sol_action_target_assignment.py",
+      "control_plane/executive_service.py",
+      "tests/test_autonomy_stage_b_initial_assignment.py",
+      "tests/test_autonomy_stage_b_durable_target_transfer_source_law.py"
+    ],
+    "maximum_paths": 7,
+    "release_claim": "BUILT_NOT_PROVEN / INITIAL_ASSIGNMENT_ONLY / PRODUCTION_DISARMED"
+  },
+  "no_rebuild": {
+    "tables": [],
+    "migrations": [],
+    "registries": [],
+    "lifecycles": [],
+    "queues": [],
+    "leases": [],
+    "job_attempt_worker_owners_duplicated": false,
+    "capacity_commitment_owner_duplicated": false,
+    "runtime_binding_owner_duplicated": false,
+    "wake_owner_duplicated": false,
+    "provider_or_slack_calls_in_transaction": false,
+    "production_armed": false
+  }
 }
 ```
 <!-- STAGE_B_F0_CORRECTION_CONTRACT_END -->
 
-The JSON is normative. Prose cannot widen it.
+## Critical rulings
 
-## Critical authority laws
+### Root authority is real and already protected
 
-The responsibility root owns action scope; carrier authorities never widen it. The carrier provides materialization evidence only. The additive Runtime read seam must reuse current Job/Attempt/lease/OHF sources, revalidate unique `JOB_CREATED` CEO provenance, and accept role-null CEO carriers without weakening the existing roleful COO path.
+The root does not originate from `root_job_bindings`, a test fixture or an arbitrary in-process `Job`. The accepted production path is the existing CeoIngress-to-Executive-service-to-`ceo_intent.submit_intent` chain ending in `create_v2_orchestration_root`. The immutable v2 root and its canonical `JOB_CREATED` command are the responsibility owner.
 
-Wake ACK is downstream. Assignment does not write Wake, provider, Slack, Job, Attempt, Worker, quota, or OHF rows. One Runtime Event is the only assignment write.
+### C1 selects; C2 commits; Stage B assigns
 
-The target-definition fingerprint binds destination identity but excludes arming and unrelated catalog state. The catalog adds only disabled `EXECUTIVE-CEO-CODEX-A`; existing CEO defaults remain unchanged.
+C1 remains deterministic evidence and explicitly not commitment. C2 must perform the modifying reread and canonical Worker/Attempt claim through existing Executive transaction owners, then append one root-bound placement commitment Event. Stage B may consume only that Event. RuntimeBinding identity, provider, account, title, timestamps or a caller-selected carrier cannot replace C2.
 
-The Event binds `binding_id` and `binding_generation`. Action-time projection must reread the root, check every assignment behind the alias for one coherent binding, reproject the current carrier, and require exact Event equality. A replacement generation behind the same alias receives no authority until a separately protected succession Event exists.
+The C2 Event and the Stage-B Event are not duplicate planes: the former proves which concrete worker/runtime was transactionally committed; the latter binds the CEO responsibility root to the logical Sol alias consumed by Stage A. Both use the existing Runtime Event plane.
 
-`with_root_job_bindings()` replaces the complete map. Projection copies every root/seat map, changes only selected-root `ceo`, preserves sibling seats/unrelated roots, and calls the method once with the full mapping.
+### Initial assignment is a system transition, not destination self-authorization
 
-## Proof ceiling
+The destination session does not assign itself. The internal Executive service C2 completion/replay path invokes Stage B. No public request may carry a worker, Attempt, carrier Job, RuntimeBinding, native handle, actor label or destination alias that selects the target. The command contains only comparisons to already-owned facts.
 
-Source release requires tests for exact root/carrier provenance, role-null OHF projection, unchanged roleful behavior, target definition, caller-inaccessible command ID/alias, replay, same-root concurrency, multi-root same-binding sharing, different-binding conflict, full-map preservation, exact Stage-A actor, stale-generation refusal, forbidden Event fields, and unchanged Job/Attempt/Worker/quota/OHF/Wake rows. Repository/security gates and immutable-head independent review must pass.
+### Replay is current-truth reconciliation
 
-Green CI and merge are not production proof. A separate disposable canary must use a real Codex session, append one assignment, authorize the exact actor, refuse wrong/stale actors, prove post-assignment Wake delivery/ACK, restart, and same-command replay. Succession, cross-alias, ChatGPT-Sol, and COO-root escalation remain separate waves.
+A command-id hit is not automatic success. Replaying the same logical operation revalidates the root, commitment, canonical claimed rows, target definition and current binding generation. A replaced generation is unavailable until a separately protected succession architecture exists. Historical success cannot authorize a stale session.
+
+### Stage A remains unchanged
+
+Stage B folds the immutable assignment into a complete SessionTargetRegistry overlay, then calls the existing `require_sol_action_authority`. The current actor must still match the exact RuntimeBinding identity. Assignment never turns the Event or a receipt into a reusable action token.
+
+## Capability ledger
+
+- `BUILT_NOT_PROVEN`: CEO v2 root admission/replay, Executive Runtime Event/transaction primitives, RuntimeBinding projection, SessionTarget overlay, Stage A and Codex wake transport.
+- `SPEC_ONLY`: this V5.1 Stage-B architecture.
+- `NOT_BUILT`: Capacity C2 commitment Event, disabled Codex CEO target, Stage-B assignment source and service composition.
+- `HELD`: implementation until all three predecessors protect; succession, cross-alias transfer, ChatGPT-Sol, COO-root escalation and production canary.
+- `REJECTED_BY_DESIGN`: caller/destination self-assignment, C1-as-commitment, RuntimeBinding-as-authority, arbitrary root overlays, direct public assignment call, newest-session election, implicit generation transfer, destructive map replacement and blind retry/failover.
 
 ## Stop law
 
-Stop without widening on active-writer collision, material protected-source movement, provenance-owner movement, role-null OHF evidence movement, target collision, common provider-wire change, new table/registry/lifecycle requirement, Stage-A signature change, effect uncertainty, provider action, production arming, or a seventh source path.
+Stop without widening on an active path collision, material movement of the CEO root/C2/Event/RuntimeBinding/Stage-A owners, a need for a new table/registry/lifecycle/queue/lease, common provider-wire change, Stage-A signature change, effect uncertainty, provider action, production arming or an eighth source path.
