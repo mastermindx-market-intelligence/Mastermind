@@ -278,6 +278,28 @@ def _complete_transport_handshake(
     )
 
 
+class _FrameWriteProgress:
+    """Track bytes a writer accepted without changing framing or retry law."""
+
+    def __init__(self, stream, *, expected_bytes: int):
+        self._stream = stream
+        self._expected_bytes = expected_bytes
+        self.accepted_bytes = 0
+
+    def __getattr__(self, name: str):
+        return getattr(self._stream, name)
+
+    def write(self, payload: bytes):
+        written = self._stream.write(payload)
+        if type(written) is int and 0 < written <= len(payload):
+            self.accepted_bytes += written
+        return written
+
+    @property
+    def frame_complete(self) -> bool:
+        return self.accepted_bytes >= self._expected_bytes
+
+
 def _transport_failure_code(
     error: BaseException,
     *,
@@ -323,12 +345,20 @@ def _exchange_web_sol_socket(
                 writer,
                 **handshake_kwargs,
             )
-            native.write_frame(
+            action_writer = _FrameWriteProgress(
                 writer,
-                request,
-                deadline=deadline,
-                monotonic=monotonic,
+                expected_bytes=len(native.encode_frame(request)),
             )
+            try:
+                native.write_frame(
+                    action_writer,
+                    request,
+                    deadline=deadline,
+                    monotonic=monotonic,
+                )
+            except native.NativeHostError:
+                sent = action_writer.frame_complete
+                raise
             sent = True
             response = native.read_frame(
                 reader,
