@@ -180,6 +180,14 @@ specific law.
     Codex, Claude, Fable, Grok or another surface is exempt from current protected placement procedure
     because of historical account behavior or prior `PRECOMMISSION` / `OPEN_PICKUP` /
     `CHAIRMAN_SELECTS` practice.
+21. Receiver assignment is child-specific. A terminal STOP consumes that child assignment. A
+    standing program instruction does not self-assign a successor child; each independent successor
+    requires a fresh Sol/Chairman delivery or canonical placement edge plus fresh carrier/pickup under
+    current law.
+22. For Slack reciprocal dialogue, the exact carrier includes the workspace, conversation/channel,
+    and thread-root timestamp. A same-channel top-level post is not the same carrier. When a Sol or
+    Chairman commission is the thread parent, pickup/start/return/ruling/STOP edges stay under that
+    exact parent unless current canonical transport law explicitly establishes a different carrier.
 
 ## Modification handshake
 
