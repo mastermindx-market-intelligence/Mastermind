@@ -99,6 +99,8 @@ FAILURE_CODES = frozenset(
         "SERVED_MODEL_MISMATCH",
         "THREAD_START_FAILED",
         "TURN_EFFECT_UNKNOWN",
+        "TURN_UNAUTHORIZED",
+        "TURN_PROVIDER_ERROR",
         "THREAD_READ_FAILED",
         "EVIDENCE_SECRET_SHAPE_REFUSED",
         "CLEANUP_UNPROVEN",
@@ -134,10 +136,86 @@ def _launder_paths(text: str) -> str:
     return _HOME_TILDE_RE.sub("<path>", text)
 
 
+def _redact_text(text: str) -> str:
+    """Secret-shape redaction, then path laundering, for one plain string."""
+
+    return _launder_paths(redact_untrusted(text))
+
+
 def _redact_exception_text(exc: BaseException) -> str:
     """Secret-shape redaction, then path laundering, for one exception's text."""
 
-    return _launder_paths(redact_untrusted(str(exc)))
+    return _redact_text(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# turn/completed provider-error extraction (auth-failure truthfulness repair,
+# F0 live-canary post-mortem 2026-09-01: the isolated realm's refresh token
+# was server-revoked, the turn failed `unauthorized`, and this harness
+# swallowed the `turn/completed` error payload -- the run then proceeded to
+# `thread/read`, found no candidate output, and reported the misleading
+# THREAD_READ_FAILED (candidates=[]) instead of the true cause.
+#
+# The on-wire field path for a `turn/completed` notification's error is NOT
+# confirmed against the live App Server -- only two things are: (1) ground
+# truth from a real rollout's `task_complete` event
+# (~/.codex-ohf-p0/sessions/2026/09/01/rollout-...-01a0601f...jsonl line 11),
+# which carries the error at `error.codex_error_info` (== "unauthorized" for
+# a revoked-token turn) and `error.message`; and (2) this repo's own fake
+# app-server (scripts/ohf/fake_app_server.py `turn/completed` handler),
+# which nests turn data under `params.turn`. `_extract_turn_error` checks
+# both plausible carriers (`params.error` and `params.turn.error`) rather
+# than fitting to whichever one shape a test fixture happens to emit --
+# this program has shipped three prior defects exactly that way (component
+# passes a synthetic double, breaks against the real producer).
+# ---------------------------------------------------------------------------
+
+
+def _extract_turn_error(notification: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Defensively locate a non-null provider error on a ``turn/completed``
+    notification. Returns ``None`` when no plausible carrier holds one."""
+
+    if not isinstance(notification, dict):
+        return None
+    params = notification.get("params")
+    if not isinstance(params, dict):
+        return None
+    candidates: list[Any] = [params.get("error")]
+    turn = params.get("turn")
+    if isinstance(turn, dict):
+        candidates.append(turn.get("error"))
+    for candidate in candidates:
+        if isinstance(candidate, dict) and candidate:
+            return candidate
+    return None
+
+
+def _turn_error_failure_code(error: dict[str, Any]) -> str:
+    """Ground truth (rollout line 11): a revoked/rejected refresh token
+    surfaces as ``error.codex_error_info == "unauthorized"``. Any other
+    non-null error is a generic provider failure, not an auth failure."""
+
+    info = error.get("codex_error_info")
+    if isinstance(info, str) and info.strip().lower() == "unauthorized":
+        return "TURN_UNAUTHORIZED"
+    return "TURN_PROVIDER_ERROR"
+
+
+def _turn_error_message(thread_id: str, error: dict[str, Any]) -> str:
+    info = error.get("codex_error_info")
+    detail = error.get("message")
+    parts: list[str] = []
+    if isinstance(info, str) and info:
+        parts.append(f"codex_error_info={info}")
+    if isinstance(detail, str) and detail:
+        parts.append(detail)
+    if not parts:
+        parts.append(repr(error))
+    raw = "; ".join(parts)
+    return (
+        f"turn/completed reported a provider error for thread {thread_id}: "
+        f"{_redact_text(raw)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -893,13 +971,26 @@ def run_one(
                 },
                 timeout=60.0,
             )
-            client.wait_notification("turn/completed", timeout=60.0)
+            completed = client.wait_notification("turn/completed", timeout=60.0)
         except Exception as exc:  # noqa: BLE001
             raise FreshSolEvalError(
                 "TURN_EFFECT_UNKNOWN",
                 "the scenario turn dispatch/completion is effect-unknown: "
                 f"{_redact_exception_text(exc)}",
             ) from exc
+
+        turn_error = _extract_turn_error(completed)
+        if turn_error is not None:
+            # The turn completed (no transport/timeout failure -- that is
+            # TURN_EFFECT_UNKNOWN above) but the provider rejected it. This
+            # must never fall through to thread/read: an auth-rejected turn
+            # never produced an assistant message, so thread/read would
+            # truthfully report zero candidates and mislabel an auth
+            # failure as a read failure (see module-level note above).
+            raise FreshSolEvalError(
+                _turn_error_failure_code(turn_error),
+                _turn_error_message(thread_id, turn_error),
+            )
 
         try:
             read_result = client.request(

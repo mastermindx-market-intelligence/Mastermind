@@ -328,6 +328,8 @@ class _FakeEvalClient:
         cleanup_ok: bool = True,
         allow_resume_fork: bool = False,
         fail_capability_rpc: str | None = None,
+        turn_error: dict[str, Any] | None = None,
+        turn_error_at: str = "turn",  # "turn" (params.turn.error) | "top" (params.error)
     ) -> None:
         self.workspace = workspace
         self.config_dir = config_dir
@@ -350,6 +352,8 @@ class _FakeEvalClient:
         self._cleanup_ok = cleanup_ok
         self._allow_resume_fork = allow_resume_fork
         self._fail_capability_rpc = fail_capability_rpc
+        self._turn_error = turn_error
+        self._turn_error_at = turn_error_at
         self.thread_start_calls = 0
         self.thread_resume_calls = 0
         self.thread_fork_calls = 0
@@ -443,15 +447,17 @@ class _FakeEvalClient:
         self.calls.append((method, dict(params or {})))
 
     def wait_notification(self, method: str, *, timeout: float = 15.0) -> dict[str, Any]:
-        return {
-            "method": method,
-            "params": {
-                "turn": {
-                    "id": "turn_fake",
-                    "text": "NOTIFICATION FRAGMENT MUST NEVER BE USED AS OUTPUT",
-                }
-            },
+        turn: dict[str, Any] = {
+            "id": "turn_fake",
+            "text": "NOTIFICATION FRAGMENT MUST NEVER BE USED AS OUTPUT",
         }
+        params: dict[str, Any] = {"turn": turn}
+        if self._turn_error is not None:
+            if self._turn_error_at == "top":
+                params["error"] = self._turn_error
+            else:
+                turn["error"] = self._turn_error
+        return {"method": method, "params": params}
 
     def graceful_close(self) -> object:
         self.graceful_close_calls += 1
@@ -666,6 +672,191 @@ def test_notification_fragment_never_substitutes_for_thread_read(mastermind_repo
         )
     assert excinfo.value.code == "THREAD_READ_FAILED"
     assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
+
+
+# ---------------------------------------------------------------------------
+# Auth-error truthfulness repair (F0 live-canary post-mortem 2026-09-01).
+#
+# Root cause: the isolated realm's refresh token was server-revoked, the
+# real App Server turn failed with an `unauthorized` provider error, and
+# the pre-fix harness discarded `wait_notification("turn/completed", ...)`'s
+# return value entirely -- it then fell through to thread/read, found no
+# candidate assistant text, and raised the misleading
+# THREAD_READ_FAILED (candidates=[]) instead of the true auth cause.
+#
+# Ground truth for the error SHAPE is the real rollout's `task_complete`
+# event (~/.codex-ohf-p0/sessions/2026/09/01/rollout-...-01a0601f...jsonl
+# line 11): `error.codex_error_info == "unauthorized"`, `error.message`
+# carries the human-readable cause. The live `turn/completed` notification's
+# own field path is NOT confirmed, so these tests drive BOTH plausible
+# carriers (`params.turn.error`, matching this fixture's and the repo's own
+# fake_app_server.py `turn/completed` shape; and `params.error`, the other
+# candidate path) rather than fitting the fix to one shape.
+# ---------------------------------------------------------------------------
+
+
+def test_turn_unauthorized_error_raises_turn_unauthorized_not_thread_read_failed(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    """RED on pre-fix code: the pre-fix harness discards the turn/completed
+    return value, falls through to thread/read on an empty thread, and
+    raises THREAD_READ_FAILED (candidates=[]) -- truthful-but-misleading
+    for a turn that never ran because auth was rejected. Post-fix it must
+    raise TURN_UNAUTHORIZED and never reach thread/read."""
+
+    factory = _fake_factory(
+        thread_read_turns="empty",
+        turn_error={
+            "message": (
+                "Your access token could not be refreshed because your "
+                "refresh token was revoked. Please log out and sign in again."
+            ),
+            "codex_error_info": "unauthorized",
+        },
+        turn_error_at="turn",
+    )
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "TURN_UNAUTHORIZED"
+    assert "revoked" in str(excinfo.value)
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
+
+
+def test_turn_unauthorized_error_detected_at_params_error_carrier(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    """Same scenario, error carried at the OTHER plausible field path
+    (`params.error` rather than `params.turn.error`) -- proves the
+    extraction is not fitted to a single fixture shape."""
+
+    factory = _fake_factory(
+        thread_read_turns="empty",
+        turn_error={"message": "token revoked", "codex_error_info": "unauthorized"},
+        turn_error_at="top",
+    )
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "TURN_UNAUTHORIZED"
+
+
+def test_turn_generic_provider_error_raises_turn_provider_error(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    """A non-null turn/completed error that is NOT an auth rejection (no
+    codex_error_info == "unauthorized") must be reported distinctly from
+    both an auth failure and a read failure."""
+
+    factory = _fake_factory(
+        thread_read_turns="empty",
+        turn_error={"message": "upstream provider returned 503", "codex_error_info": "server_error"},
+        turn_error_at="turn",
+    )
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "TURN_PROVIDER_ERROR"
+    assert factory.made[0].graceful_close_calls == 1
+
+
+def test_turn_error_without_codex_error_info_field_is_provider_error(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    """Defensive classification: an error dict missing codex_error_info
+    entirely must not crash and must not be misclassified as unauthorized."""
+
+    factory = _fake_factory(
+        thread_read_turns="empty",
+        turn_error={"message": "unspecified failure"},
+        turn_error_at="turn",
+    )
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "TURN_PROVIDER_ERROR"
+
+
+def test_turn_error_never_reaches_thread_read(mastermind_repo_root: Path, tmp_path: Path):
+    """An auth-rejected turn must short-circuit before thread/read is ever
+    called -- proves the fix does not merely relabel the eventual
+    THREAD_READ_FAILED but actually prevents the misleading read attempt."""
+
+    class _CountingClient(_FakeEvalClient):
+        def request(self, method, params=None, timeout=15.0):
+            if method == "thread/read":
+                raise AssertionError("thread/read must never be called after an auth-rejected turn")
+            return super().request(method, params, timeout)
+
+    def factory(workspace: Path, config_dir: Path, home: Path) -> _CountingClient:
+        return _CountingClient(
+            workspace,
+            config_dir,
+            home,
+            turn_error={"message": "revoked", "codex_error_info": "unauthorized"},
+        )
+
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "TURN_UNAUTHORIZED"
+
+
+def test_turn_error_message_redacts_secret_and_launders_path(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    """The raised failure message must go through the same redaction as
+    every other closed failure -- no raw credential-shaped text or host
+    filesystem path survives into the report."""
+
+    sentinel = "sk-testFixtureSecretShape1234567890"
+    leaky_path = "/Users/fixture-operator/.codex-ohf-p0/auth.json"
+    factory = _fake_factory(
+        thread_read_turns="empty",
+        turn_error={
+            "message": f"refresh failed near {leaky_path} leaking {sentinel}",
+            "codex_error_info": "unauthorized",
+        },
+        turn_error_at="turn",
+    )
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "TURN_UNAUTHORIZED"
+    message = str(excinfo.value)
+    assert sentinel not in message
+    assert "/Users/" not in message
+    assert "<path>" in message
 
 
 def test_cleanup_unproven_invalidates_run(mastermind_repo_root: Path, tmp_path: Path):
