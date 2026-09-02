@@ -15,10 +15,12 @@ from __future__ import annotations
 import ast
 import builtins
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterator
 
 __all__ = [
+    "source_files",
     "census_definitions",
     "census_diagnostics",
     "census_references",
@@ -36,28 +38,155 @@ def load_answer_key(corpus: Path | str) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def python_source_files(corpus: Path | str) -> list[tuple[str, Path]]:
+def source_files(corpus: Path | str) -> list[tuple[str, Path]]:
     """Sorted (repository-relative-to-corpus, path) pairs for the corpus."""
     corpus_root = Path(corpus)
     key = load_answer_key(corpus_root)
+    extensions = key.get("file_extensions", [".py"])
     found: list[tuple[str, Path]] = []
     for source_root in key["source_roots"]:
         base = corpus_root / source_root
         if not base.is_dir():
             continue
-        for path in base.rglob("*.py"):
-            if path.is_file():
+        for path in sorted(base.rglob("*")):
+            if path.is_file() and path.suffix in extensions:
                 found.append((path.relative_to(corpus_root).as_posix(), path))
     found.sort()
     return found
+
+
+def python_source_files(corpus: Path | str) -> list[tuple[str, Path]]:
+    """Backwards-compatible alias for the Python corpora."""
+    return source_files(corpus)
+
+
+# --------------------------------------------------------------- TypeScript
+#
+# There is no TypeScript AST in the standard library and the experiment may not
+# use a language server to build ground truth, so the TS census is a deliberately
+# CONSERVATIVE declaration scanner over the frozen corpus. It recognises exactly
+# the exported declaration forms the corpus uses and reports identifier
+# occurrences by word boundary. It is not a TypeScript parser and is not used for
+# anything except grading this fixed corpus, whose answer key is hand-declared
+# and cross-checked against it.
+
+_TS_DECLARATION = re.compile(
+    r"^export\s+(?:default\s+)?(interface|class|function|type|const|enum)\s+"
+    r"([A-Za-z_$][A-Za-z0-9_$]*)"
+)
+_TS_IDENTIFIER = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+
+#: Names that are part of the language or ambient environment, never "undefined".
+_TS_AMBIENT = frozenset(
+    {
+        "export", "default", "interface", "class", "function", "type", "const",
+        "let", "var", "return", "new", "import", "from", "implements", "extends",
+        "string", "number", "boolean", "void", "unknown", "any", "null",
+        "undefined", "true", "false", "this", "JSX", "Element", "Promise",
+        "Array", "Record", "Partial", "readonly", "as", "of", "in", "if", "else",
+        "span", "className",
+    }
+)
+
+
+def _ts_declared_names(text: str) -> set[str]:
+    """Every name bound in a module: declarations, imports, parameters."""
+    declared: set[str] = set()
+    for line in text.splitlines():
+        stripped = line.strip()
+        match = _TS_DECLARATION.match(stripped)
+        if match:
+            declared.add(match.group(2))
+            continue
+        local = re.match(
+            r"^(?:const|let|var|function|class|interface|type|enum)\s+"
+            r"([A-Za-z_$][A-Za-z0-9_$]*)",
+            stripped,
+        )
+        if local:
+            declared.add(local.group(1))
+        imported = re.match(r"^import\s+\{([^}]*)\}", stripped)
+        if imported:
+            for part in imported.group(1).split(","):
+                name = part.strip().split(" as ")[-1].strip()
+                if name:
+                    declared.add(name)
+        for params in re.findall(r"\(([^)]*)\)", stripped):
+            for part in params.split(","):
+                name = part.strip().split(":")[0].strip()
+                if name and _TS_IDENTIFIER.fullmatch(name):
+                    declared.add(name)
+        # Method declarations inside a class body: `produce(): string {`
+        method = re.match(r"^([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", stripped)
+        if method:
+            declared.add(method.group(1))
+    return declared
+
+
+def _ts_definitions(relative: str, text: str) -> list[dict[str, Any]]:
+    rows = []
+    for index, line in enumerate(text.splitlines(), start=1):
+        match = _TS_DECLARATION.match(line.strip())
+        if match:
+            keyword, name = match.groups()
+            kind = {"interface": "interface", "class": "class"}.get(keyword, "function")
+            rows.append(
+                {"symbol": name, "relative_file": relative, "line": index, "kind": kind}
+            )
+    return rows
+
+
+def _ts_references(relative: str, text: str, symbol: str) -> list[dict[str, Any]]:
+    pattern = re.compile(rf"\b{re.escape(symbol)}\b")
+    return [
+        {"relative_file": relative, "line": index}
+        for index, line in enumerate(text.splitlines(), start=1)
+        if pattern.search(line)
+    ]
+
+
+def _ts_diagnostics(relative: str, text: str) -> list[dict[str, Any]]:
+    """Detect exactly the planted `return <bareIdentifier>;` form.
+
+    Deliberately narrow. A broader scanner over TypeScript without a real parser
+    produces false positives on string literals, member calls and JSX (measured:
+    it flagged "live", "produce", "span" and "className"). Narrowing to a return
+    whose entire expression is one undeclared identifier cannot false-positive,
+    which is what a ground truth must guarantee. It is not a linter.
+    """
+    declared = _ts_declared_names(text) | _TS_AMBIENT
+    rows = []
+    bare_return = re.compile(r"^return\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*;$")
+    for index, line in enumerate(text.splitlines(), start=1):
+        match = bare_return.match(line.strip())
+        if match and match.group(1) not in declared:
+            rows.append(
+                {
+                    "relative_file": relative,
+                    "line": index,
+                    "kind": "undefined-name",
+                    "symbol": match.group(1),
+                }
+            )
+    return rows
 
 
 def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+def _language(corpus: Path | str) -> str:
+    return load_answer_key(corpus).get("language", "python")
+
+
 def census_definitions(corpus: Path | str) -> list[dict[str, Any]]:
     """Module-level class and function definitions across the corpus."""
+    if _language(corpus) == "typescript":
+        rows = []
+        for relative, path in source_files(corpus):
+            rows.extend(_ts_definitions(relative, path.read_text(encoding="utf-8")))
+        rows.sort(key=lambda row: (row["relative_file"], row["line"], row["symbol"]))
+        return rows
     rows: list[dict[str, Any]] = []
     for relative, path in python_source_files(corpus):
         tree = _parse(path)
@@ -82,6 +211,12 @@ def census_definitions(corpus: Path | str) -> list[dict[str, Any]]:
 
 def census_references(corpus: Path | str, symbol: str) -> list[dict[str, Any]]:
     """Every syntactic occurrence of a symbol name, definition included."""
+    if _language(corpus) == "typescript":
+        rows = []
+        for relative, path in source_files(corpus):
+            rows.extend(_ts_references(relative, path.read_text(encoding="utf-8"), symbol))
+        unique = sorted({(r["relative_file"], r["line"]) for r in rows})
+        return [{"relative_file": a, "line": b} for a, b in unique]
     rows: list[dict[str, Any]] = []
     for relative, path in python_source_files(corpus):
         for node in ast.walk(_parse(path)):
@@ -153,6 +288,12 @@ def _bound_names(tree: ast.Module) -> set[str]:
 
 def census_diagnostics(corpus: Path | str) -> list[dict[str, Any]]:
     """Conservative undefined-name census: the planted diagnostics."""
+    if _language(corpus) == "typescript":
+        rows = []
+        for relative, path in source_files(corpus):
+            rows.extend(_ts_diagnostics(relative, path.read_text(encoding="utf-8")))
+        rows.sort(key=lambda row: (row["relative_file"], row["line"], row["symbol"]))
+        return rows
     rows: list[dict[str, Any]] = []
     for relative, path in python_source_files(corpus):
         tree = _parse(path)

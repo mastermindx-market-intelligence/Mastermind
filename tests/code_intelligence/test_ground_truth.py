@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from experiments.code_intelligence.ground_truth import (
+    source_files,
     census_definitions,
     census_diagnostics,
     census_references,
@@ -153,3 +154,70 @@ class TestCorpusIsDataNotTests:
 
     def test_corpus_consumer_case_is_still_present_under_its_data_name(self) -> None:
         assert (CORPUS / "tests" / "consumer_case.py").is_file()
+
+
+TS_CORPUS = Path("tests/fixtures/code_intelligence/typescript_sample")
+
+
+class TestTypeScriptAnswerKeyIsHonest:
+    """B7 — the TS/TSX corpus needs the same LSP-independent falsification."""
+
+    @pytest.fixture
+    def ts_key(self) -> dict:
+        return load_answer_key(TS_CORPUS)
+
+    def test_declared_definitions_match_the_census(self, ts_key: dict) -> None:
+        declared = {
+            (row["symbol"], row["relative_file"], row["line"])
+            for row in ts_key["definitions"]
+        }
+        actual = {
+            (row["symbol"], row["relative_file"], row["line"])
+            for row in census_definitions(TS_CORPUS)
+        }
+        assert declared == actual
+
+    @pytest.mark.parametrize(
+        "symbol",
+        ["makeProducer", "makeDeadProducer", "consume", "LiveProducer", "DeadProducer"],
+    )
+    def test_declared_references_match_the_census(self, ts_key: dict, symbol: str) -> None:
+        declared = {
+            (row["relative_file"], row["line"]) for row in ts_key["references"][symbol]
+        }
+        actual = {
+            (row["relative_file"], row["line"])
+            for row in census_references(TS_CORPUS, symbol)
+        }
+        assert declared == actual
+
+    def test_declared_diagnostics_match_the_census(self, ts_key: dict) -> None:
+        declared = [
+            (r["relative_file"], r["line"], r["symbol"]) for r in ts_key["diagnostics"]
+        ]
+        actual = [
+            (r["relative_file"], r["line"], r["symbol"])
+            for r in census_diagnostics(TS_CORPUS)
+        ]
+        assert declared == actual
+
+    def test_exactly_one_planted_diagnostic(self) -> None:
+        assert len(census_diagnostics(TS_CORPUS)) == 1
+
+    def test_tsx_file_is_part_of_the_corpus(self) -> None:
+        files = {relative for relative, _ in source_files(TS_CORPUS)}
+        assert "src/widget.tsx" in files, "the TSX path must be exercised, not just .ts"
+
+    def test_dead_sibling_is_textually_similar(self) -> None:
+        source = (TS_CORPUS / "src" / "producer.ts").read_text()
+        assert source.count("produce(): string {") == 2
+        assert "implements Producer" in source
+
+    def test_consumer_imports_only_the_live_wrapper(self) -> None:
+        source = (TS_CORPUS / "src" / "consumer.ts").read_text()
+        assert "makeProducer" in source
+        assert "makeDeadProducer" not in source
+        assert "DeadProducer" not in source
+
+    def test_corpus_contributes_no_python_test_paths(self) -> None:
+        assert list(TS_CORPUS.rglob("test_*.py")) == []

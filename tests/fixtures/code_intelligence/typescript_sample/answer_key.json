@@ -1,0 +1,60 @@
+{
+  "corpus_id": "typescript_sample",
+  "language": "typescript",
+  "source_roots": ["src", "tests"],
+  "file_extensions": [".ts", ".tsx"],
+  "discriminating_question": "Which producer implementation does consume() actually reach? LiveProducer and DeadProducer are near-identical, so a name-only text search cannot answer it.",
+  "live_path": {
+    "entry": "consume",
+    "through": ["makeProducer", "LiveProducer"],
+    "answer": "LiveProducer"
+  },
+  "dead_siblings": ["DeadProducer", "makeDeadProducer"],
+  "definitions": [
+    {"symbol": "Producer", "relative_file": "src/producer.ts", "line": 9, "kind": "interface"},
+    {"symbol": "LiveProducer", "relative_file": "src/producer.ts", "line": 13, "kind": "class"},
+    {"symbol": "DeadProducer", "relative_file": "src/producer.ts", "line": 19, "kind": "class"},
+    {"symbol": "makeProducer", "relative_file": "src/producer.ts", "line": 25, "kind": "function"},
+    {"symbol": "makeDeadProducer", "relative_file": "src/producer.ts", "line": 29, "kind": "function"},
+    {"symbol": "consume", "relative_file": "src/consumer.ts", "line": 5, "kind": "function"},
+    {"symbol": "brokenHelper", "relative_file": "src/consumer.ts", "line": 9, "kind": "function"},
+    {"symbol": "ProducerBadge", "relative_file": "src/widget.tsx", "line": 5, "kind": "function"},
+    {"symbol": "expectsLive", "relative_file": "tests/consumer_case.ts", "line": 10, "kind": "function"}
+  ],
+  "references": {
+    "makeProducer": [
+      {"relative_file": "src/consumer.ts", "line": 3},
+      {"relative_file": "src/consumer.ts", "line": 6},
+      {"relative_file": "src/producer.ts", "line": 25}
+    ],
+    "makeDeadProducer": [
+      {"relative_file": "src/producer.ts", "line": 29}
+    ],
+    "consume": [
+      {"relative_file": "src/consumer.ts", "line": 5},
+      {"relative_file": "src/widget.tsx", "line": 3},
+      {"relative_file": "src/widget.tsx", "line": 6},
+      {"relative_file": "tests/consumer_case.ts", "line": 8},
+      {"relative_file": "tests/consumer_case.ts", "line": 11}
+    ],
+    "LiveProducer": [
+      {"relative_file": "src/producer.ts", "line": 13},
+      {"relative_file": "src/producer.ts", "line": 26}
+    ],
+    "DeadProducer": [
+      {"relative_file": "src/producer.ts", "line": 19},
+      {"relative_file": "src/producer.ts", "line": 30}
+    ]
+  },
+  "implementations": {
+    "Producer": ["DeadProducer", "LiveProducer"]
+  },
+  "diagnostics": [
+    {
+      "relative_file": "src/consumer.ts",
+      "line": 11,
+      "kind": "undefined-name",
+      "symbol": "undefinedSymbolForDiagnostics"
+    }
+  ]
+}
