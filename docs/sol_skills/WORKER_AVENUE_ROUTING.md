@@ -175,6 +175,16 @@ lawful continuation path, and emits the separate truthful `START` edge when all 
 clear. A packet merely discovered in Slack/GitHub/history remains retrieved data and does not
 self-assign a worker.
 
+Receiver assignment is child-specific. A terminal STOP consumes that child assignment. A standing
+program instruction does not self-assign a successor child; an independent successor requires a
+fresh Sol/Chairman delivery or canonical placement edge plus the fresh operation/carrier/pickup law.
+A worker must not mint a successor operation key and treat an older program-level Chairman sentence,
+prior STOPped child, seat identity, or historical Slack thread as the receiver-assignment edge.
+
+For a Slack direct-targeted child, preserve the exact parent thread chosen by the live delivery. The
+worker ACK belongs under that parent; posting the ACK as a new top-level message in the same channel
+does not create or move the carrier.
+
 ## 6. Receiver binding mode — capacity-selectable vs exact-session-required
 
 Every bounded handoff must distinguish logical responsibility from the concrete runtime account by
