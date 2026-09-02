@@ -1,0 +1,315 @@
+{
+  "schema_version": "mastermind.executive_agent_capabilities/v4",
+  "policy_version": "2026-09-01.mastermind-operator-p1-fixture",
+  "lifecycle_authority": "executive_os",
+  "production_armed": false,
+  "mcp_servers": {
+    "openai-developer-docs-v1": {
+      "config_name": "openaiDeveloperDocs",
+      "transport": "streamable-http",
+      "url": "https://developers.openai.com/mcp",
+      "required": true,
+      "auth_status": "unsupported",
+      "server_identity": "openai-docs-mcp",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "fetch_openai_doc",
+        "search_openai_docs"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "9c6e56942336e507f7fb8e3cb781288c40028b2284c2b2d629e262521d66f8e7"
+    },
+    "playwright-worker-browser-b1": {
+      "config_name": "playwrightWorkerBrowser",
+      "transport": "stdio",
+      "command": "/usr/bin/python3",
+      "args": [
+        "-I",
+        "-S",
+        "-c",
+        "import hashlib,json,os,stat\nK=(\"MASTERMIND_BROWSER_ARTIFACT_DIR\",\"MASTERMIND_BROWSER_FIXTURE_A_URL\",\"MASTERMIND_BROWSER_FIXTURE_B_URL\",\"MASTERMIND_BROWSER_FIXTURE_NONCE\",\"MASTERMIND_BROWSER_ORIGIN\",\"MASTERMIND_BROWSER_PROXY_URL\",\"MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH\",\"MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256\",\"MASTERMIND_BROWSER_RUNTIME_ROOT\",\"MASTERMIND_BROWSER_WORKSPACE_PATH\",\"PLAYWRIGHT_BROWSERS_PATH\")\nF=\"MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD\"\nN=\"worker-browser-b1-install-manifest.json\"\nd=-1; D=-1\ntry:\n e={k:os.environ[k] for k in K}\n r=e[\"MASTERMIND_BROWSER_RUNTIME_ROOT\"]\n m=e[\"MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH\"]\n if not os.path.isabs(r) or os.path.basename(r)!=\"runtime\" or m!=os.path.join(r,N): raise ValueError()\n c=os.path.dirname(r)\n q=getattr(os,\"O_NOFOLLOW\",0); z=getattr(os,\"O_DIRECTORY\",0)\n if not q or not z: raise OSError()\n d=os.open(c,os.O_RDONLY|q|z); i=os.fstat(d)\n x=os.open(\"runtime/\"+N,os.O_RDONLY|q,dir_fd=d)\n try:\n  a=os.fstat(x)\n  if not stat.S_ISREG(a.st_mode) or a.st_nlink!=1 or a.st_uid!=os.geteuid() or stat.S_IMODE(a.st_mode)!=0o400 or not 0<a.st_size<=4194304: raise OSError()\n  b=b\"\"\n  while len(b)<=4194304:\n   h=os.read(x,65536)\n   if not h: break\n   b+=h\n  j=os.fstat(x)\n finally: os.close(x)\n if len(b)>4194304 or (a.st_dev,a.st_ino,a.st_size,a.st_mtime_ns)!=(j.st_dev,j.st_ino,j.st_size,j.st_mtime_ns) or hashlib.sha256(b).hexdigest()!=e[\"MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256\"]: raise ValueError()\n v=json.loads(b.decode(\"utf-8\")); w=v[\"runtime_container\"]\n if b!=json.dumps(v,sort_keys=True,separators=(\",\",\":\"),ensure_ascii=False).encode()+b\"\\n\" or set(w)!={\"device\",\"gid\",\"inode\",\"mode\",\"uid\"} or any(type(w[k]) is not int for k in w) or w!={\"device\":i.st_dev,\"gid\":i.st_gid,\"inode\":i.st_ino,\"mode\":stat.S_IMODE(i.st_mode),\"uid\":i.st_uid} or i.st_uid!=os.geteuid() or stat.S_IMODE(i.st_mode)!=0o500: raise ValueError()\n D=os.dup(d)\n for C in (\"runtime\",\"bin\"):\n  Y=os.open(C,os.O_RDONLY|q|z,dir_fd=D); os.close(D); D=Y; U=os.fstat(D)\n  if not stat.S_ISDIR(U.st_mode) or U.st_uid!=os.geteuid() or stat.S_IMODE(U.st_mode)!=0o500: raise OSError()\n l=v[\"launcher\"]; y=os.open(\"worker-browser-b1-launcher\",os.O_RDONLY|q,dir_fd=D)\n try:\n  s=os.fstat(y); g=hashlib.sha256(); n=0\n  while n<=4194304:\n   h=os.read(y,65536)\n   if not h: break\n   n+=len(h); g.update(h)\n  t=os.fstat(y); k=os.stat(\"worker-browser-b1-launcher\",dir_fd=D,follow_symlinks=False)\n finally: os.close(y)\n P=lambda o:(o.st_dev,o.st_ino,o.st_mode,o.st_nlink,o.st_uid,o.st_gid,o.st_size,o.st_mtime_ns,o.st_ctime_ns)\n if set(l)!={\"gid\",\"mode\",\"path\",\"sha256\",\"uid\"} or l[\"path\"]!=os.path.join(r,\"bin\",\"worker-browser-b1-launcher\") or not stat.S_ISREG(s.st_mode) or s.st_nlink!=1 or s.st_uid!=os.geteuid() or stat.S_IMODE(s.st_mode)!=0o500 or n!=s.st_size or n>4194304 or P(s)!=P(t) or P(s)!=P(k) or l!={\"gid\":s.st_gid,\"mode\":0o500,\"path\":l[\"path\"],\"sha256\":g.hexdigest(),\"uid\":s.st_uid}: raise ValueError()\n os.close(D); D=-1\n os.set_inheritable(d,True); e[F]=str(d); os.fchdir(d)\n os.execve(\"runtime/bin/worker-browser-b1-launcher\",[\"runtime/bin/worker-browser-b1-launcher\"],e)\nexcept (KeyError,OSError,TypeError,UnicodeError,ValueError):\n if D>=0:\n  try: os.close(D)\n  except OSError: pass\n if d>=0:\n  try: os.close(d)\n  except OSError: pass\n raise SystemExit(\"runtime container bootstrap refused\")\n"
+      ],
+      "required": true,
+      "auth_status": "unsupported",
+      "server_identity": "playwright",
+      "server_version": "1.63.0-alpha-2026-08-05",
+      "enabled_tools": [
+        "browser_click",
+        "browser_close",
+        "browser_console_messages",
+        "browser_fill_form",
+        "browser_hover",
+        "browser_navigate",
+        "browser_network_requests",
+        "browser_resize",
+        "browser_snapshot",
+        "browser_tabs",
+        "browser_take_screenshot",
+        "browser_wait_for"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "859063beb705b4ed15b0defc2c42533d6bce1a3f18bf02c38f28f2422598fc0b"
+    }
+  },
+  "resources": {
+    "worker-browser-b1-local": {
+      "kind": "browser-devserver",
+      "manifest_path": "config/worker_browser_b1_control_room_devserver.json",
+      "manifest_digest": "de100f6c8cfbf1a77fb1c2e4c8a17193c4a51eb78d8eaf59fbed942e7d2e9e71",
+      "runtime_root": "/Volumes/Mastermind/worker-browser-b1/runtime",
+      "runtime_manifest_path": "/Volumes/Mastermind/worker-browser-b1/runtime/worker-browser-b1-install-manifest.json",
+      "runtime_manifest_digest": "ca55da0fbdd1366bfc6fd78612ebe9cc669e45ef5c21b084ad338b50e2d0e49d",
+      "artifact_root": "/Volumes/Mastermind/worker-browser-b1/artifacts",
+      "browser": "chromium",
+      "browser_revision": "1237"
+    }
+  },
+  "plugins": {},
+  "profiles": {
+    "operator.appserver.readonly.v1": {
+      "enabled": true,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [],
+      "skill_capabilities": []
+    },
+    "operator.appserver.readonly.docs-mcp.v1": {
+      "enabled": true,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "openai-developer-docs-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [],
+      "skill_capabilities": []
+    },
+    "operator.appserver.readonly.docs-mcp.native-helper.v1": {
+      "enabled": true,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "parent_read_only_ceiling",
+      "native_helper": {
+        "mechanism": "codex-multi-agent-v2-inherit-parent",
+        "default_model": "gpt-5.6-sol",
+        "default_reasoning_effort": "xhigh",
+        "inherit_parent_capabilities": true,
+        "hide_spawn_agent_metadata": true,
+        "max_concurrent_helpers": 1,
+        "max_depth": 1,
+        "max_runtime_seconds": 60
+      },
+      "skills": [],
+      "mcp_servers": [
+        "openai-developer-docs-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [],
+      "skill_capabilities": []
+    },
+    "sealed.worker.readonly.no-extensions.v1": {
+      "enabled": true,
+      "execution_surface": "codex-exec",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [],
+      "skill_capabilities": []
+    },
+    "sealed.worker.write.no-extensions.v1": {
+      "enabled": true,
+      "execution_surface": "codex-exec",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "workspace-write",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": true,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [],
+      "skill_capabilities": []
+    },
+    "operator.browser.local-review.v1": {
+      "enabled": true,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "loopback-browser-only",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "openai-developer-docs-v1",
+        "playwright-worker-browser-b1"
+      ],
+      "resources": [
+        "worker-browser-b1-local"
+      ],
+      "plugins": [],
+      "forbidden": [],
+      "skill_capabilities": []
+    },
+    "operator.appserver.readonly.mastermind-operator.v1": {
+      "enabled": true,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "DISABLED",
+      "native_helper": null,
+      "skills": [],
+      "skill_capabilities": [
+        "mastermind-operator.escalate-decision.v1",
+        "mastermind-operator.finish-operation.v1",
+        "mastermind-operator.receive-commission.v1",
+        "mastermind-operator.return-progress.v1"
+      ],
+      "mcp_servers": [],
+      "resources": [],
+      "plugins": [],
+      "forbidden": []
+    }
+  },
+  "capability_packages": {
+    "mastermind-operator.p1": {
+      "kind": "skills-only-source",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_commit": "12c2cb8993f78e81c6cb9e9a75a9829f9b194dab",
+      "source_tree_sha": "783ae81b44e9606baf13e2402a75a2130df9758a",
+      "package_root": "plugins/mastermind-operator",
+      "manifest_path": ".codex-plugin/plugin.json",
+      "generation": "mastermind-operator.p1.2026-09-01",
+      "source_state": "SOURCE_PROTECTED",
+      "revoked": false,
+      "package_content_digest": "a9781411d2642569f8b56e33bd0e0d9808a69176ccaced86642cd23948a71306",
+      "package_source_digest": "16a19d7399b8ff737b59c959cffbc9bedabee7a5fe0d6f05ced8172fd9870852",
+      "files": [
+        {
+          "relative_path": ".codex-plugin/plugin.json",
+          "sha256": "0373afdf8950226466383dff091359b81e78ea2732b5ce0ca51afad9c5d8a396",
+          "byte_length": 796,
+          "executable": false
+        },
+        {
+          "relative_path": "references/app-bindings.template.json",
+          "sha256": "a4e3e7219fa162063913aadf8cfb6c8b8d1e8ba27bfd7fead1fe007c617dea35",
+          "byte_length": 388,
+          "executable": false
+        },
+        {
+          "relative_path": "references/dialogue-boundary.md",
+          "sha256": "e2270c7a324f817b3d0307a2dc9f103615c807102ff35e1a15b8b07f63d7b1c9",
+          "byte_length": 881,
+          "executable": false
+        },
+        {
+          "relative_path": "skills/escalate-decision/SKILL.md",
+          "sha256": "1dbe6a296a96eb60c60b587816dec492d258797e42736ffd8901ecd2a81b5286",
+          "byte_length": 1636,
+          "executable": false
+        },
+        {
+          "relative_path": "skills/finish-operation/SKILL.md",
+          "sha256": "f6a91874cf4c41a7655ae31755744646fb3220185f290f118b5d3e8e92a27685",
+          "byte_length": 1816,
+          "executable": false
+        },
+        {
+          "relative_path": "skills/receive-commission/SKILL.md",
+          "sha256": "212f5253c812ca47174ca9aac92977d5f649891da28c12b6948c4e0284422c4d",
+          "byte_length": 1695,
+          "executable": false
+        },
+        {
+          "relative_path": "skills/return-progress/SKILL.md",
+          "sha256": "6e569a972075f18a5595891a3b7178520a04d0ff732cc7dcffce910c2d097d30",
+          "byte_length": 1435,
+          "executable": false
+        }
+      ],
+      "skills": {
+        "mastermind-operator.escalate-decision.v1": {
+          "runtime_name": "escalate-decision",
+          "entrypoint_path": "skills/escalate-decision/SKILL.md",
+          "closure_paths": [
+            "references/dialogue-boundary.md",
+            "skills/escalate-decision/SKILL.md"
+          ],
+          "skill_content_digest": "ca621a8cc034bf607460d81085c8d466000e38d0f4b6afa8245001374d6cc2ad",
+          "grant_digest": "9a07d625367b7fd3cbacb145ec8da984fb93266440b152dc86603f8d78d53432"
+        },
+        "mastermind-operator.finish-operation.v1": {
+          "runtime_name": "finish-operation",
+          "entrypoint_path": "skills/finish-operation/SKILL.md",
+          "closure_paths": [
+            "references/dialogue-boundary.md",
+            "skills/finish-operation/SKILL.md"
+          ],
+          "skill_content_digest": "3e689aeaa2b1579781832a854d7256c6ad8ee2ef55521b45f3af8dbe9660675e",
+          "grant_digest": "ec46684cb99f74cf895144633c36f223b75eea4072d7b399e86106e7a3d35683"
+        },
+        "mastermind-operator.receive-commission.v1": {
+          "runtime_name": "receive-commission",
+          "entrypoint_path": "skills/receive-commission/SKILL.md",
+          "closure_paths": [
+            "references/dialogue-boundary.md",
+            "skills/receive-commission/SKILL.md"
+          ],
+          "skill_content_digest": "d7953504035c797b30f434f1fdc72e864a7074179abffe7c247f1afc9c0a162c",
+          "grant_digest": "2d7c43a72b15552a075f2150d21903153412de8feb4f0527746e51255c7337ba"
+        },
+        "mastermind-operator.return-progress.v1": {
+          "runtime_name": "return-progress",
+          "entrypoint_path": "skills/return-progress/SKILL.md",
+          "closure_paths": [
+            "references/dialogue-boundary.md",
+            "skills/return-progress/SKILL.md"
+          ],
+          "skill_content_digest": "510be1ed3036f0bc1ed5f709875792ca042c350198a48e1128b4ce8ae46a6552",
+          "grant_digest": "b1ccf5356d70fdde555b126a65fd8b45a45ab526eeb3c5d0ff885ac7f1ec45bf"
+        }
+      },
+      "required_app_references": [],
+      "package_generation_digest": "37836a5986c916a58217b95d1976220eae8827e4e588a50677011c2543e43b97"
+    }
+  }
+}
