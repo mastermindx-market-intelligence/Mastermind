@@ -723,3 +723,31 @@ def test_b5_linear_mas_never_passes_as_executive_authority():
     pattern = contract_schemas._SOURCE_REF_PATTERN_BY_OWNER["executive_os"]
     assert _re.fullmatch(pattern, "MAS:194") is None
     assert "MAS" not in SOURCE_NAMESPACE_BY_OWNER["executive_os"]
+
+
+def test_canonical_output_is_invariant_under_fact_permutation():
+    """Acceptance 9: exact output is deterministic under source/fact permutation."""
+    second = [
+        dict(fact, value="WS:GS2") if fact["predicate"] == "responsibility.identity" else fact
+        for fact in _tool_facts("list_responsibilities", subject=OTHER_SUBJECT)
+    ]
+    facts = _tool_facts("list_responsibilities") + second
+    forward = canonical_json(validate_result_data(_facts_result(list(facts))))
+    reverse = canonical_json(validate_result_data(_facts_result(list(reversed(facts)))))
+    rotated = canonical_json(
+        validate_result_data(_facts_result(facts[3:] + facts[:3]))
+    )
+    assert forward == reverse == rotated
+
+
+def test_canonical_output_is_invariant_under_source_permutation():
+    corroborating = _src("agent_os", AGENT_RECEIPT)
+    second = _src("agent_os", "DEC:GS1")
+    base = _f("responsibility.title", "Make Secretary reads useful", "agent_os", AGENT_RECEIPT)
+    forward = dict(base, sources=[corroborating, second])
+    backward = dict(base, sources=[second, corroborating])
+    assert canonical_json(
+        validate_result_data({"state": "DEGRADED", "facts": [forward], "reason_codes": ["STEWARD_DEGRADED"]})
+    ) == canonical_json(
+        validate_result_data({"state": "DEGRADED", "facts": [backward], "reason_codes": ["STEWARD_DEGRADED"]})
+    )

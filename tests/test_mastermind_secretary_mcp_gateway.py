@@ -532,3 +532,57 @@ def test_malformed_runtime_inputs_return_fixed_invalid_request_without_steward_c
             "message": "INVALID_REQUEST",
         }
     assert steward.calls == []
+
+
+def _complete_responsibility_facts(subject: str) -> tuple[GroundingFact, ...]:
+    source = GroundingSource(owner="agent_os", source_ref="WS:GS1", observed_at=None)
+    rows = (
+        ("responsibility.identity", "WS:GS1"),
+        ("responsibility.title", "Make Secretary reads useful"),
+        ("responsibility.objective", "Answer what a responsibility is"),
+        ("responsibility.next_action", "Return one current-base candidate"),
+        ("responsibility.state", "ACTIVE"),
+    )
+    return tuple(
+        GroundingFact(
+            subject_ref=subject,
+            predicate=predicate,
+            value=value,
+            freshness="FRESH",
+            sources=(source,),
+        )
+        for predicate, value in rows
+    )
+
+
+def test_gateway_refuses_a_complete_answer_about_a_different_subject():
+    """The validated request subject must survive the gateway seam into validation."""
+    steward = FakeSteward(
+        StewardGrounding(
+            state="FACTS", facts=_complete_responsibility_facts("responsibility:beta")
+        )
+    )
+    envelope = _run(
+        SecretaryGroundingGateway(steward).call(
+            "get_responsibility", {"responsibility_ref": "responsibility:alpha"}
+        )
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "RESPONSE_REFUSED"
+
+
+def test_gateway_accepts_a_complete_answer_about_the_requested_subject():
+    steward = FakeSteward(
+        StewardGrounding(
+            state="FACTS", facts=_complete_responsibility_facts("responsibility:alpha")
+        )
+    )
+    envelope = _run(
+        SecretaryGroundingGateway(steward).call(
+            "get_responsibility", {"responsibility_ref": "responsibility:alpha"}
+        )
+    )
+    assert envelope["ok"] is True
+    assert {fact["subject_ref"] for fact in envelope["data"]["facts"]} == {
+        "responsibility:alpha"
+    }
