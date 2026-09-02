@@ -213,6 +213,68 @@ def test_client_uses_one_deadline_across_handshake_action_and_receipt(
     assert seen[0].ends_at == pytest.approx(10.0 + client.SOCKET_TIMEOUT_SECONDS)
 
 
+def test_complete_foreground_frame_timeout_is_effect_unknown(
+    monkeypatch,
+    tmp_path,
+):
+    request = valid_request(action="FOREGROUND")
+    clock = Clock()
+
+    class CompleteThenLateWriter:
+        def __init__(self):
+            self.payloads: list[bytes] = []
+
+        def write(self, payload: bytes) -> int:
+            material = bytes(payload)
+            self.payloads.append(material)
+            clock.advance(client.SOCKET_TIMEOUT_SECONDS + 0.1)
+            return len(material)
+
+        def flush(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    reader = io.BytesIO()
+    writer = CompleteThenLateWriter()
+
+    class FakeConnection:
+        def settimeout(self, _value):
+            return None
+
+        def connect(self, _path):
+            return None
+
+        def makefile(self, mode, buffering=0):
+            assert buffering == 0
+            return reader if mode == "rb" else writer
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(client, "_private_socket", lambda _path: None)
+    monkeypatch.setattr(client.socket, "socket", lambda *_args, **_kwargs: FakeConnection())
+    monkeypatch.setattr(
+        client,
+        "_complete_transport_handshake",
+        lambda *_args, **_kwargs: {},
+    )
+
+    with pytest.raises(client.WebSolExtensionError) as caught:
+        client._exchange_web_sol_socket(
+            request,
+            path=tmp_path / "fixture.sock",
+            expected_instance_id=INSTANCE_ID,
+            monotonic=clock,
+        )
+
+    assert caught.value.code == "foreground_effect_unknown"
+    assert isinstance(caught.value.__cause__, native.NativeHostError)
+    assert caught.value.__cause__.code == "frame_write_timeout"
+    assert b"".join(writer.payloads) == native.encode_frame(request)
+
+
 def test_guarded_client_isolates_malformed_peer_and_refuses_concurrent_peer(
     monkeypatch,
 ):
