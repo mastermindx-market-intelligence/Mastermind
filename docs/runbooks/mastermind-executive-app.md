@@ -108,6 +108,22 @@ ever run — this is what stops
 `/v1/tools/submit_ceo_intent%2Freconcile` from silently decoding into, and
 matching, the literal `.../submit_ceo_intent/reconcile` route.
 
+**Deployment contract — the fronting reverse proxy must NOT re-decode
+`raw_path`.** The fence matches single-encoded separators only
+(`%2f`/`%5c`/`//` in the exact bytes ASGI hands it). A double-encoded
+`%252f` or a Unicode fullwidth solidus (`／`, U+FF0F) never becomes an
+actual `/` inside THIS process — Starlette/uvicorn decode a path exactly
+once, so those forms simply fail to match any route and 404; they can never
+alias onto a different, differently-privileged handler here. That safety
+property depends on nothing in front of this app performing a SECOND
+decode pass before forwarding the request (a proxy that normalizes
+`%252f` → `%2f` → `/`, or that decodes Unicode look-alike separators before
+proxying, would reintroduce exactly the aliasing class this fence exists to
+close). Any reverse proxy or gateway placed in front of
+`scripts/mastermind_executive_app.py` MUST forward the original raw path
+byte-for-byte and must not apply its own path normalization/decoding ahead
+of this app's own fence.
+
 ## effect_unknown — what a caller must do
 
 If the dedicated CeoIngress connection is lost AFTER the frame was fully

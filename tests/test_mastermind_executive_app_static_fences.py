@@ -3,11 +3,15 @@
 These tests inspect SOURCE, not behavior: the app package must never import
 the general Executive control socket module, the MCP SDK, or call the
 in-process mutation sink, no matter how its runtime behavior is composed.
-They also pin the two "did this PR touch something it must not have"
+They also pin the "did this PR touch something it must not have"
 invariants named by the FROZEN SPEC: the Executive MCP schema digest is
 byte-identical to the frozen literal, and
-``control_plane/executive_service.py`` carries zero diff against this
-worktree's own HEAD (PR #265's file, reused read-only, never edited here).
+``control_plane/executive_service.py`` carries zero diff across the WHOLE
+PR (PR #265's file, reused read-only, never edited here). The scope fences
+below are anchored to this PR's merge-base with ``master``, never to
+``HEAD`` -- a HEAD-anchored diff is empty (or vacuously "no diff") the
+moment this PR's own commits land, which is not a claim about the PR's
+scope at all.
 """
 from __future__ import annotations
 
@@ -179,16 +183,65 @@ def test_schema_digest_unchanged():
     )
 
 
-def test_executive_service_file_has_zero_diff_against_head():
-    """control_plane/executive_service.py (PR #265's file) carries zero
-    working-tree diff against this checkout's own HEAD commit -- this PR
-    reused it read-only and never edited it. A rebase/merge that legitimately
-    changes HEAD would need this test re-run against the NEW head, which is
-    exactly what CI does on every push -- it is not a claim that the file can
-    never change, only that THIS diff never touched it."""
+def _rev_parse_quiet(ref: str) -> bool:
+    probe = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "--verify", "--quiet", ref],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return probe.returncode == 0
 
+
+def _merge_base_with_master() -> str:
+    """The PR's base commit against ``master`` -- NOT ``HEAD``.
+
+    A ``git diff HEAD`` (working-tree vs. the current commit) is empty the
+    moment this PR's own changes are committed, which makes a HEAD-anchored
+    scope fence either a false CI red (the diff it expects is gone, since it
+    is now baked into a commit) or a vacuous pass (nothing uncommitted, so
+    "no unexpected diff" is trivially true no matter what the PR shipped).
+    The fence that actually discriminates is base..HEAD across the WHOLE
+    PR. CI's ``actions/checkout@v4`` step uses ``fetch-depth: 0``, so
+    ``origin/master`` is already resolvable there; a local dev checkout may
+    need one fetch, attempted here as a last resort only.
+    """
+
+    for ref in ("origin/master", "master"):
+        if _rev_parse_quiet(ref):
+            result = subprocess.run(
+                ["git", "-C", str(REPO_ROOT), "merge-base", ref, "HEAD"],
+                check=True, stdout=subprocess.PIPE, text=True,
+            )
+            return result.stdout.strip()
+
+    subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "fetch", "--quiet", "origin", "master"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if _rev_parse_quiet("origin/master"):
+        result = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "merge-base", "origin/master", "HEAD"],
+            check=True, stdout=subprocess.PIPE, text=True,
+        )
+        return result.stdout.strip()
+    raise RuntimeError("cannot resolve a merge-base against master")
+
+
+def test_executive_service_file_has_zero_diff_against_base():
+    """control_plane/executive_service.py (PR #265's file) carries zero diff
+    across the WHOLE PR (base..HEAD) -- this PR reused it read-only and
+    never edited it in any commit, not merely in the working tree.
+
+    Anchored to the PR's merge-base with master, never to HEAD: once this
+    PR's own commits land, a HEAD-anchored version of this test is
+    vacuously green regardless of what the PR actually touched (the exact
+    defect an independent review caught -- see
+    ``test_ceo_request_change_is_the_only_control_plane_diff`` below for the
+    sibling fence that was outright FALSE-RED under the same mistake)."""
+
+    base = _merge_base_with_master()
     result = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "diff", "--stat", "HEAD", "--", "control_plane/executive_service.py"],
+        ["git", "-C", str(REPO_ROOT), "diff", "--stat", base, "HEAD", "--", "control_plane/executive_service.py"],
         check=True,
         stdout=subprocess.PIPE,
         text=True,
@@ -197,12 +250,19 @@ def test_executive_service_file_has_zero_diff_against_head():
 
 
 def test_ceo_request_change_is_the_only_control_plane_diff():
-    """Every path this PR touches under control_plane/ is exactly the one
-    P5-authorized 11th-path file -- no other control_plane/** file carries a
-    working-tree diff against HEAD."""
+    """Every path this PR touches under control_plane/, across the WHOLE PR
+    (base..HEAD), is exactly the one P5-authorized 11th-path file.
 
+    Anchored to the PR's merge-base with master. The pre-fix, HEAD-anchored
+    version of this test FAILED on any clean checkout of a committed head
+    (``git diff HEAD`` is empty once ceo_request.py's change is committed,
+    so ``changed == []`` never equals ``["control_plane/ceo_request.py"]``)
+    -- a false CI red on the very PR it was meant to protect, independent of
+    whether the PR's actual scope was clean."""
+
+    base = _merge_base_with_master()
     result = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "diff", "--name-only", "HEAD", "--", "control_plane/"],
+        ["git", "-C", str(REPO_ROOT), "diff", "--name-only", base, "HEAD", "--", "control_plane/"],
         check=True,
         stdout=subprocess.PIPE,
         text=True,
@@ -212,29 +272,32 @@ def test_ceo_request_change_is_the_only_control_plane_diff():
 
 
 def test_ten_ceiling_paths_are_exactly_the_new_files_this_pr_adds():
-    """The ten OWNED FILES this commission authorized, and nothing else
-    outside them plus the one 11th-path file, are new relative to HEAD's
-    parent state -- i.e. every file this PR adds is on the authorized list.
+    """The ten OWNED FILES this commission authorized are EXACTLY the files
+    ADDED across the whole PR (base..HEAD), and the full base..HEAD diff
+    (additions + the one modification) is EXACTLY those ten plus the one
+    P5-authorized 11th-path file -- eleven paths, no more, no fewer.
 
-    Untracked directories collapse to one ``git status --porcelain`` line
-    (e.g. ``integrations/mastermind_executive_app/``), so this uses
-    ``git ls-files --others`` (per-file, respects .gitignore) for additions
-    and ``git diff --name-only HEAD`` for modifications to an existing
-    tracked file, rather than trying to parse the collapsed directory form.
+    Anchored to the PR's merge-base with master. The pre-fix version used
+    ``git status --porcelain``/``git diff HEAD`` (working-tree state), which
+    is vacuously true on any clean checkout of a committed head no matter
+    what the PR shipped -- it could not have caught a twelfth file landing
+    in a commit.
     """
 
-    untracked = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "ls-files", "--others", "--exclude-standard"],
+    base = _merge_base_with_master()
+    added = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "diff", "--name-only", "--diff-filter=A", base, "HEAD"],
         check=True, stdout=subprocess.PIPE, text=True,
     ).stdout.splitlines()
-    modified = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "diff", "--name-only", "HEAD"],
+    everything = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "diff", "--name-only", base, "HEAD"],
         check=True, stdout=subprocess.PIPE, text=True,
     ).stdout.splitlines()
-    changed_paths = {line.strip() for line in [*untracked, *modified] if line.strip()}
 
-    authorized = {
-        "control_plane/ceo_request.py",
+    added_paths = {line.strip() for line in added if line.strip()}
+    all_changed_paths = {line.strip() for line in everything if line.strip()}
+
+    ten_ceiling_paths = {
         "integrations/mastermind_executive_app/__init__.py",
         "integrations/mastermind_executive_app/app.py",
         "integrations/mastermind_executive_app/gateway.py",
@@ -246,5 +309,7 @@ def test_ten_ceiling_paths_are_exactly_the_new_files_this_pr_adds():
         "tests/test_mastermind_executive_app_static_fences.py",
         "docs/runbooks/mastermind-executive-app.md",
     }
-    unexpected = changed_paths - authorized
-    assert not unexpected, f"unexpected changed path(s) outside the ceiling: {unexpected}"
+    eleven_authorized_paths = ten_ceiling_paths | {"control_plane/ceo_request.py"}
+
+    assert added_paths == ten_ceiling_paths, added_paths
+    assert all_changed_paths == eleven_authorized_paths, all_changed_paths
