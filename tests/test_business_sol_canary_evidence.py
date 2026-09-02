@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import copy
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -945,3 +946,167 @@ def test_sanitized_exec_mcp_64_sample_does_not_pass_on_its_own() -> None:
     assert "CONTROL_ROOM_STATE_MISSING" in codes
     assert "ROLLBACK_MISSING" in codes
     assert result["production_acceptance_granted"] is False
+
+
+# ---------------------------------------------------------------------------
+# Independent-review repairs (2026-09-02): required-field/timestamp
+# PRESENCE enforcement, and secret-screened values never echoed in the
+# OUTPUT (not only withheld from the issue set).
+#
+# BLOCKER-1 / MAJOR-3: prior to this fix, `_check_timestamp` defaulted to
+# `allow_missing=True` at every call site, so deleting a required
+# timestamp (top-level `observed_at`, any of the four
+# `business_membership_transition.*_observed_at` fields, either Steward
+# read's `observed_at`, or a Control Room state's `observed_at`) produced
+# verdict PASS with an empty issue set — the "TIMESTAMP_MISSING" branch
+# was dead code. Confirmed via `git stash` against the pre-fix head before
+# writing the fix: `del packet["observed_at"]` -> PASS, [].
+# ---------------------------------------------------------------------------
+
+
+def test_deleting_top_level_observed_at_does_not_pass() -> None:
+    packet = golden_packet()
+    del packet["observed_at"]
+    result = _validate(packet)
+    assert result["verdict"] != "PASS"
+    codes = _issue_codes(result)
+    assert any(code.startswith("TIMESTAMP_MISSING") or code.endswith("_MISSING") for code in codes)
+    assert "TIMESTAMP_MISSING" in codes
+
+
+def test_deleting_every_required_timestamp_does_not_pass() -> None:
+    packet = golden_packet()
+    del packet["observed_at"]
+    del packet["business_membership_transition"]["initial_observed_at"]
+    del packet["business_membership_transition"]["transitioned_observed_at"]
+    del packet["business_membership_transition"]["reverted_observed_at"]
+    del packet["business_membership_transition"]["readback_observed_at"]
+    del packet["steward_census"]["initial_read"]["observed_at"]
+    del packet["steward_census"]["post_expiry_read"]["observed_at"]
+    for surface in ("desktop", "mobile"):
+        for state in ev._ALLOWED_CONTROL_ROOM_STATES:
+            del packet["control_room_evidence"][surface][state]["observed_at"]
+    result = _validate(packet)
+    assert result["verdict"] != "PASS"
+    assert result["issues"] != []
+    assert all(issue["code"] == "TIMESTAMP_MISSING" for issue in result["issues"])
+
+
+def _delete_nested(packet: dict[str, Any], dotted_path: str) -> dict[str, Any]:
+    parts = dotted_path.split(".")
+    obj: Any = packet
+    for part in parts[:-1]:
+        obj = obj[part]
+    del obj[parts[-1]]
+    return packet
+
+
+#: Every top-level field the closed contract requires present (``correction``
+#: is legitimately nullable when ``is_correction`` is false, so it is
+#: exercised separately by the correction-lineage tests above).
+_REQUIRED_TOP_LEVEL_FIELD_SWEEP = tuple(
+    key for key in sorted(ev._REQUIRED_TOP_LEVEL_KEYS) if key != "correction"
+)
+
+#: A representative required leaf under every nested section — deep enough
+#: to prove presence is enforced at every level the contract reaches, not
+#: only at the top.
+_REQUIRED_NESTED_FIELD_SWEEP = (
+    "cockpit_selection.selected_ref",
+    "cockpit_selection.control_refs",
+    "cockpit_selection.selection_basis",
+    "personal_cockpit.separately_selectable",
+    "personal_cockpit.merged_into_business",
+    "business_membership_transition.initial_state",
+    "business_membership_transition.initial_observed_at",
+    "business_membership_transition.transitioned_observed_at",
+    "business_membership_transition.reverted_observed_at",
+    "business_membership_transition.readback_observed_at",
+    "protected_baseline.p1_commit",
+    "protected_baseline.package_inventory",
+    "protected_baseline.package_inventory_digest",
+    "steward_census.tool_names",
+    "steward_census.initial_read",
+    "steward_census.initial_read.observed_at",
+    "steward_census.initial_read.authenticated",
+    "steward_census.post_expiry_read.observed_at",
+    "steward_census.post_expiry_read.authenticated",
+    "executive_admission.operation_key",
+    "executive_admission.status",
+    "executive_admission.dispatched",
+    "executive_admission.attempt_limit",
+    "executive_admission.authorities",
+    "executive_admission.status_readback",
+    "rollback.performed",
+    "rollback.readback_confirmed",
+    "generation_identities.s1.observed_id",
+    "generation_identities.s1.source_ref_id",
+)
+
+
+@pytest.mark.parametrize("field", _REQUIRED_TOP_LEVEL_FIELD_SWEEP)
+def test_every_required_top_level_field_absence_is_not_pass(field: str) -> None:
+    packet = golden_packet()
+    del packet[field]
+    result = _validate(packet)
+    assert result["verdict"] != "PASS", f"deleting top-level {field!r} must not PASS"
+    assert result["issues"], f"deleting top-level {field!r} must produce at least one issue"
+
+
+@pytest.mark.parametrize("dotted_path", _REQUIRED_NESTED_FIELD_SWEEP)
+def test_every_required_nested_field_absence_is_not_pass(dotted_path: str) -> None:
+    packet = golden_packet()
+    _delete_nested(packet, dotted_path)
+    result = _validate(packet)
+    assert result["verdict"] != "PASS", f"deleting {dotted_path!r} must not PASS"
+    assert result["issues"], f"deleting {dotted_path!r} must produce at least one issue"
+
+
+@pytest.mark.parametrize("surface", ["desktop", "mobile"])
+@pytest.mark.parametrize("state", list(ev._ALLOWED_CONTROL_ROOM_STATES))
+def test_control_room_state_observed_at_presence_is_enforced(surface: str, state: str) -> None:
+    packet = golden_packet()
+    del packet["control_room_evidence"][surface][state]["observed_at"]
+    result = _validate(packet)
+    assert result["verdict"] != "PASS"
+    assert "TIMESTAMP_MISSING" in _issue_codes(result)
+
+
+# ---------------------------------------------------------------------------
+# BLOCKER-2: a screened secret must never be echoed in the serialized
+# OUTPUT document, not only withheld from the issue set. Confirmed via
+# `git stash` against the pre-fix head: `receipt_id="user@example.com"`
+# produced verdict REFUSED with the value withheld from `issues`, but
+# `validated_identities.receipt_id == "user@example.com"` — the secret was
+# still present in `json.dumps(result)`.
+# ---------------------------------------------------------------------------
+
+
+def test_secret_in_receipt_id_is_refused_and_absent_from_serialized_output() -> None:
+    packet = golden_packet()
+    packet["receipt_id"] = "user@example.com"
+    result = _validate(packet)
+    assert result["verdict"] == "REFUSED"
+    serialized = json.dumps(result)
+    assert "user@example.com" not in serialized
+    assert result["validated_identities"]["receipt_id"] is None
+
+
+def test_secret_in_generation_observed_id_is_refused_and_absent_from_serialized_output() -> None:
+    packet = golden_packet()
+    packet["generation_identities"]["s1"]["observed_id"] = "user@example.com"
+    result = _validate(packet)
+    assert result["verdict"] == "REFUSED"
+    serialized = json.dumps(result)
+    assert "user@example.com" not in serialized
+    assert result["validated_identities"]["generation_identities"]["s1"] is None
+
+
+def test_secret_in_source_ref_id_is_refused_and_absent_from_serialized_output() -> None:
+    packet = golden_packet()
+    packet["source_refs"][0]["ref_id"] = "CU987654321"
+    result = _validate(packet)
+    assert result["verdict"] == "REFUSED"
+    serialized = json.dumps(result)
+    assert "CU987654321" not in serialized
+    assert "CU987654321" not in result["validated_identities"]["source_ref_ids"]

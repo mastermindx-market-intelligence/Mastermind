@@ -185,6 +185,38 @@ These are constants, not discovered values — H1 never reads a live clock
 to decide what "now" or "stale" means; both bounds are compile-time
 constants applied to the caller-supplied `evaluated_at`.
 
+**Every timestamp above is a required field — presence is enforced, not
+just format.** `_check_timestamp` is fail-closed by construction (no
+`allow_missing` escape hatch): a missing top-level `observed_at`, any of
+the four `business_membership_transition.*_observed_at` fields, either
+Steward read's `observed_at`, or a Control Room state's `observed_at`
+always produces `TIMESTAMP_MISSING` (severity `UNKNOWN`), never a silent
+`PASS`. This was a confirmed defect fixed 2026-09-02 (independent review
+of PR #361): the original version defaulted to permissive and depended on
+every call site opting into strictness, so a single missed call site
+silently accepted an absent required timestamp as complete evidence. See
+`test_every_required_top_level_field_absence_is_not_pass` and
+`test_every_required_nested_field_absence_is_not_pass` for the exhaustive
+presence sweep across every required field in the contract, not only
+timestamps.
+
+## Output never echoes a screened secret
+
+A value that fails the secret/private-locator screen (see above) is
+withheld not only from the issue set but from the **entire serialized
+output document** — `validated_identities.receipt_id`,
+`.generation_id`, `.generation_identities.<component>`, and
+`.source_ref_ids` each pass through `_safe_identity`, which re-checks the
+same pattern table `_scan_for_secrets` uses and redacts to `None` (or
+drops the entry, for `source_ref_ids`) on a match. This is deliberate
+defense in depth on top of the `REFUSED` verdict: a caller that only
+checks `production_acceptance_granted` or serializes the whole result
+(logs, a receipt store, a UI) can never leak the offending substring
+through this path. This was a confirmed defect fixed 2026-09-02
+(independent review of PR #361) — see
+`test_secret_in_receipt_id_is_refused_and_absent_from_serialized_output`
+and its two siblings for the enforced invariant.
+
 ## Mandatory hostile cases (test coverage index)
 
 Every case below is a distinct, named test in
@@ -207,7 +239,7 @@ leakage, and a correction packet without exact lineage.
 ## Mutation-kill matrix
 
 `test_business_sol_canary_evidence_mutation.py` disables each enforcement
-rule in-memory (via `monkeypatch`) and proves the corresponding hostile
+unit in-memory (via `monkeypatch`) and proves the corresponding hostile
 packet would otherwise be mistaken for a clean `PASS` (or lose its
 `REFUSED` classification). The required kill set — omitted refresh proof,
 dispatched/attempt false-green, cockpit duplication, Personal merge,
@@ -215,6 +247,19 @@ inventory drift, stale evidence, issue-precedence downgrade, and secret
 screening — is covered, plus three additional kills (rollback readback,
 evidence-source provenance, correction lineage). `test_kill_matrix_is_complete`
 pins that every required rule has a named test.
+
+**Granularity is stated precisely in the file's own module docstring, not
+overstated.** Most kills patch a whole *section validator*
+(e.g. `_validate_cockpit_selection`) to a no-op, which proves the section
+matters and, via each test's specific assertion, that the named rule
+inside it is what disappears — it does not by itself distinguish that
+rule from any sibling rule folded into the same section. Four of the
+highest-risk Executive sub-rules are split into their own standalone
+functions specifically so they can be proven independently load-bearing:
+`_check_executive_authorities` (the `{READ, RESEARCH}` cardinality rule),
+`_check_executive_dispatched`, `_check_executive_attempts`, and
+`_check_executive_latest_attempt` (absent-iff-`attempts==0`), each with
+its own rule-granular kill test.
 
 ## The Executive MCP #64 sample
 

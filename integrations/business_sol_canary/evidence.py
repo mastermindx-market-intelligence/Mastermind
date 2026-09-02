@@ -334,6 +334,34 @@ def _scan_for_secrets(packet: Any) -> list[Issue]:
     return issues
 
 
+def _is_secret_like(value: str) -> bool:
+    """True if ``value`` matches any forbidden secret/private-locator pattern.
+
+    Reuses the exact same pattern table as ``_scan_for_secrets`` so the
+    output-redaction path (``_safe_identity`` below) and the REFUSED-issue
+    path can never drift apart.
+    """
+
+    return any(pattern.search(value) is not None for _, pattern in _SECRET_PATTERNS)
+
+
+def _safe_identity(value: Any) -> str | None:
+    """Return ``value`` unchanged if it is a safe string, else ``None``.
+
+    Used exclusively when projecting packet content into the OUTPUT
+    document (``validated_identities``). A value that failed secret
+    screening must never be echoed anywhere in the serialized output, not
+    only withheld from the issue set — see
+    ``test_secret_screened_values_never_appear_in_serialized_output``.
+    """
+
+    if not isinstance(value, str):
+        return None
+    if _is_secret_like(value):
+        return None
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Small structural helpers
 # ---------------------------------------------------------------------------
@@ -433,11 +461,26 @@ def _check_timestamp(
     evaluated_at: datetime,
     not_after: datetime | None = None,
     not_after_code: str = "TIMESTAMP_ORDER_INVERSION",
-    allow_missing: bool = True,
 ) -> datetime | None:
+    """Validate one required timestamp field.
+
+    Fail-closed by design: every timestamp this validator asks about is a
+    required field, so a missing value is always reported
+    (``TIMESTAMP_MISSING``, severity UNKNOWN) rather than silently skipped.
+    There is deliberately no ``allow_missing`` escape hatch — a prior
+    version defaulted to permissive and every call site had to opt in to
+    strictness, which meant a single forgotten call site (top-level
+    ``observed_at``, the membership-transition timestamps, both Steward
+    read timestamps, and the Control Room per-state timestamps) silently
+    turned an absent required timestamp into a false PASS. Absence that
+    the contract genuinely allows (e.g. the whole ``post_expiry_read``
+    section, or ``latest_attempt`` when ``attempts == 0``) is handled by
+    the caller *before* reaching this function, never by parameterizing
+    this one.
+    """
+
     if value is None:
-        if not allow_missing:
-            _issue(issues, "UNKNOWN", "TIMESTAMP_MISSING", path, "required timestamp is absent")
+        _issue(issues, "UNKNOWN", "TIMESTAMP_MISSING", path, "required timestamp is absent")
         return None
     if not isinstance(value, str):
         _issue(issues, "FAIL", "TIMESTAMP_MALFORMED", path, "timestamp must be a string")
@@ -1108,6 +1151,82 @@ def _validate_control_room_evidence(issues: list[Issue], section: Any, *, path: 
                 )
 
 
+def _check_executive_dispatched(issues: list[Issue], value: Any, *, path: str) -> bool | None:
+    """Enforce ``dispatched == false``.
+
+    Isolated as its own function (rather than inlined) so it is an
+    independently mutable/testable enforcement unit — see the
+    rule-granular mutation kills in
+    test_business_sol_canary_evidence_mutation.py.
+    """
+
+    dispatched = _require_bool(issues, value, path=f"{path}.dispatched", code="EXECUTIVE_DISPATCHED")
+    if dispatched is True:
+        _issue(issues, "FAIL", "EXECUTIVE_DISPATCHED_TRUE", f"{path}.dispatched", "nothing may be dispatched")
+    return dispatched
+
+
+def _check_executive_attempts(issues: list[Issue], value: Any, *, path: str) -> int | None:
+    """Enforce ``attempts == 0``. Isolated for rule-granular mutation testing."""
+
+    attempts = _require_int(issues, value, path=f"{path}.attempts", code="EXECUTIVE_ATTEMPTS")
+    if attempts is not None and attempts != 0:
+        _issue(issues, "FAIL", "EXECUTIVE_ATTEMPTS_NONZERO", f"{path}.attempts", "attempts must be exactly 0")
+    return attempts
+
+
+def _check_executive_latest_attempt(
+    issues: list[Issue], body: Mapping[str, Any], *, attempts: int | None, path: str
+) -> None:
+    """Enforce ``latest_attempt`` absent iff ``attempts == 0``.
+
+    Isolated for rule-granular mutation testing.
+    """
+
+    latest_attempt = body.get("latest_attempt")
+    if "latest_attempt" not in body:
+        _issue(issues, "UNKNOWN", "EXECUTIVE_LATEST_ATTEMPT_MISSING", f"{path}.latest_attempt", "required field is absent")
+    elif attempts == 0 and latest_attempt is not None:
+        _issue(
+            issues,
+            "FAIL",
+            "EXECUTIVE_WORKER_EFFECT_PRESENT",
+            f"{path}.latest_attempt",
+            "latest_attempt must be absent/null when attempts==0",
+        )
+    elif attempts != 0 and latest_attempt is None:
+        _issue(
+            issues,
+            "FAIL",
+            "EXECUTIVE_LATEST_ATTEMPT_INCONSISTENT",
+            f"{path}.latest_attempt",
+            "latest_attempt is required once attempts is non-zero",
+        )
+
+
+def _check_executive_authorities(issues: list[Issue], authorities: Any, *, path: str) -> None:
+    """Enforce ``authorities == {READ, RESEARCH}`` exactly (cardinality and
+    membership). Isolated for rule-granular mutation testing."""
+
+    auth_path = f"{path}.authorities"
+    if authorities is None:
+        _issue(issues, "UNKNOWN", "EXECUTIVE_AUTHORITIES_MISSING", auth_path, "required authorities are absent")
+    elif (
+        not isinstance(authorities, Sequence)
+        or isinstance(authorities, (str, bytes))
+        or not all(isinstance(item, str) for item in authorities)
+    ):
+        _issue(issues, "FAIL", "EXECUTIVE_AUTHORITIES_INVALID", auth_path, "expected an array of authority strings")
+    elif set(authorities) != _REQUIRED_EXECUTIVE_AUTHORITIES or len(authorities) != len(set(authorities)):
+        _issue(
+            issues,
+            "FAIL",
+            "EXECUTIVE_AUTHORITIES_INVALID",
+            auth_path,
+            "authorities must be exactly {READ, RESEARCH}, no more, no fewer",
+        )
+
+
 def _validate_executive_admission(issues: list[Issue], section: Any, *, path: str, evaluated_at: datetime) -> None:
     body = _require_mapping(issues, section, path=path, code_prefix="EXECUTIVE_ADMISSION")
     if body is None:
@@ -1152,56 +1271,15 @@ def _validate_executive_admission(issues: list[Issue], section: Any, *, path: st
     elif status != "QUEUED":
         _issue(issues, "FAIL", "EXECUTIVE_STATUS_NOT_QUEUED", f"{path}.status", "the admitted Job must be QUEUED")
 
-    dispatched = _require_bool(issues, body.get("dispatched"), path=f"{path}.dispatched", code="EXECUTIVE_DISPATCHED")
-    if dispatched is True:
-        _issue(issues, "FAIL", "EXECUTIVE_DISPATCHED_TRUE", f"{path}.dispatched", "nothing may be dispatched")
-
-    attempts = _require_int(issues, body.get("attempts"), path=f"{path}.attempts", code="EXECUTIVE_ATTEMPTS")
-    if attempts is not None and attempts != 0:
-        _issue(issues, "FAIL", "EXECUTIVE_ATTEMPTS_NONZERO", f"{path}.attempts", "attempts must be exactly 0")
-
-    latest_attempt = body.get("latest_attempt")
-    if "latest_attempt" not in body:
-        _issue(issues, "UNKNOWN", "EXECUTIVE_LATEST_ATTEMPT_MISSING", f"{path}.latest_attempt", "required field is absent")
-    elif attempts == 0 and latest_attempt is not None:
-        _issue(
-            issues,
-            "FAIL",
-            "EXECUTIVE_WORKER_EFFECT_PRESENT",
-            f"{path}.latest_attempt",
-            "latest_attempt must be absent/null when attempts==0",
-        )
-    elif attempts != 0 and latest_attempt is None:
-        _issue(
-            issues,
-            "FAIL",
-            "EXECUTIVE_LATEST_ATTEMPT_INCONSISTENT",
-            f"{path}.latest_attempt",
-            "latest_attempt is required once attempts is non-zero",
-        )
+    dispatched = _check_executive_dispatched(issues, body.get("dispatched"), path=path)
+    attempts = _check_executive_attempts(issues, body.get("attempts"), path=path)
+    _check_executive_latest_attempt(issues, body, attempts=attempts, path=path)
 
     attempt_limit = _require_int(issues, body.get("attempt_limit"), path=f"{path}.attempt_limit", code="EXECUTIVE_ATTEMPT_LIMIT")
     if attempt_limit is not None and attempt_limit != 1:
         _issue(issues, "FAIL", "EXECUTIVE_ATTEMPT_LIMIT_INVALID", f"{path}.attempt_limit", "attempt_limit must be exactly 1")
 
-    authorities = body.get("authorities")
-    auth_path = f"{path}.authorities"
-    if authorities is None:
-        _issue(issues, "UNKNOWN", "EXECUTIVE_AUTHORITIES_MISSING", auth_path, "required authorities are absent")
-    elif (
-        not isinstance(authorities, Sequence)
-        or isinstance(authorities, (str, bytes))
-        or not all(isinstance(item, str) for item in authorities)
-    ):
-        _issue(issues, "FAIL", "EXECUTIVE_AUTHORITIES_INVALID", auth_path, "expected an array of authority strings")
-    elif set(authorities) != _REQUIRED_EXECUTIVE_AUTHORITIES or len(authorities) != len(set(authorities)):
-        _issue(
-            issues,
-            "FAIL",
-            "EXECUTIVE_AUTHORITIES_INVALID",
-            auth_path,
-            "authorities must be exactly {READ, RESEARCH}, no more, no fewer",
-        )
+    _check_executive_authorities(issues, body.get("authorities"), path=path)
 
     for field, code in (
         ("write_paths", "EXECUTIVE_WRITE_PATH_PRESENT"),
@@ -1415,26 +1493,38 @@ def _capability_state_projection(packet: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _validated_identities(packet: Mapping[str, Any]) -> dict[str, Any]:
+    """Project a small set of identity fields into the output.
+
+    Every value projected here is a literal echo of caller-supplied packet
+    content, so every one of them is passed through ``_safe_identity``
+    first — a value that matches the secret/private-locator screen is
+    withheld (``None``) here exactly as it is withheld from the issue set.
+    This is deliberate defense in depth: a REFUSED verdict already tells
+    the caller the packet is unsafe, but the *serialized output* must
+    never carry the offending substring regardless of whether every call
+    site remembers to check the verdict first.
+    """
+
     generation_identities = packet.get("generation_identities")
     generation_identities = generation_identities if isinstance(generation_identities, Mapping) else {}
     projected_generation: dict[str, Any] = {}
     for component in _ALLOWED_GENERATION_COMPONENTS:
         entry = generation_identities.get(component)
-        if isinstance(entry, Mapping) and isinstance(entry.get("observed_id"), str):
-            projected_generation[component] = entry["observed_id"]
-        else:
-            projected_generation[component] = None
+        observed_id = entry.get("observed_id") if isinstance(entry, Mapping) else None
+        projected_generation[component] = _safe_identity(observed_id)
 
     source_refs = packet.get("source_refs")
     ref_ids: list[str] = []
     if isinstance(source_refs, Sequence) and not isinstance(source_refs, (str, bytes)):
         for entry in source_refs:
-            if isinstance(entry, Mapping) and isinstance(entry.get("ref_id"), str):
-                ref_ids.append(entry["ref_id"])
+            if isinstance(entry, Mapping):
+                safe_ref_id = _safe_identity(entry.get("ref_id"))
+                if safe_ref_id is not None:
+                    ref_ids.append(safe_ref_id)
 
     return {
-        "receipt_id": packet.get("receipt_id") if isinstance(packet.get("receipt_id"), str) else None,
-        "generation_id": packet.get("generation_id") if isinstance(packet.get("generation_id"), str) else None,
+        "receipt_id": _safe_identity(packet.get("receipt_id")),
+        "generation_id": _safe_identity(packet.get("generation_id")),
         "generation_identities": projected_generation,
         "source_ref_ids": sorted(ref_ids),
     }
