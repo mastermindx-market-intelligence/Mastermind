@@ -7,6 +7,7 @@ umask 077
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 CONTROL_LABEL="com.mastermind.executive.control"
 WORKER_LABEL="com.mastermind.executive.worker.codex"
+BACKUP_LABEL="com.mastermind.executive.backup"
 CONTROL_USER="_mastermind_exec"
 CONTROL_GROUP="_mastermind_exec"
 WORKER_USER="_mastermind_worker"
@@ -567,6 +568,16 @@ RUN_ROOT="$RUNTIME_ROOT/jobs/runs"
 CONTROL_RUNTIME_ROOT="$RUNTIME_ROOT/control/db"
 RECEIPTS_ROOT="$RUNTIME_ROOT/control/launch-receipts"
 BACKUP_ROOT="$RUNTIME_ROOT/control/backups"
+# Off-host DR (see ops/executive_os/DR_RUNBOOK.md). The daemon this installs
+# stays DISABLED, same as control/worker -- these paths are only laid down so
+# an operator arming ceremony has somewhere reviewed to point the key file
+# and receipts at. `DR_VAULT_REPO`/`DR_TOKEN_ENV` name what the ceremony must
+# provision; they carry no credential themselves.
+DR_KEY_FILE="$SYSTEM_ROOT/config/executive-dr-key.b64"
+DR_RECEIPTS_DIR="$RUNTIME_ROOT/control/dr-receipts"
+DR_TRANSPORT="github"
+DR_VAULT_REPO="mastermindx-market-intelligence/executive-dr-vault"
+DR_TOKEN_ENV="EXECUTIVE_DR_TOKEN"
 CANARY_RECEIPT="$RUNTIME_ROOT/control/canaries/secret-canary.json"
 CONTROL_ENV_ATTESTATION="$RUNTIME_ROOT/control/canaries/control-environment-attestation.json"
 CONTROL_SENTINEL_FILE="$SYSTEM_ROOT/config/control-env-canary"
@@ -640,8 +651,10 @@ STAGING=""
 leave_installed_services_stopped() {
   /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl disable "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
   if [ -n "${STAGING:-}" ] && [ -d "$STAGING" ]; then
     /bin/rm -rf -- "$STAGING"
   fi
@@ -649,14 +662,20 @@ leave_installed_services_stopped() {
 trap leave_installed_services_stopped EXIT
 /bin/launchctl disable "system/$CONTROL_LABEL"
 /bin/launchctl disable "system/$WORKER_LABEL"
+/bin/launchctl disable "system/$BACKUP_LABEL"
 /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
 if /bin/launchctl print "system/$CONTROL_LABEL" >/dev/null 2>&1; then
   /bin/echo "control LaunchDaemon remained loaded after bootout" >&2
   exit 65
 fi
 if /bin/launchctl print "system/$WORKER_LABEL" >/dev/null 2>&1; then
   /bin/echo "worker LaunchDaemon remained loaded after bootout" >&2
+  exit 65
+fi
+if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then
+  /bin/echo "backup LaunchDaemon remained loaded after bootout" >&2
   exit 65
 fi
 
@@ -1137,8 +1156,10 @@ PY
 
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
+BACKUP_PLIST="/Library/LaunchDaemons/$BACKUP_LABEL.plist"
 /usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$CONTROL_LABEL.plist.template" "$CONTROL_PLIST"
 /usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$WORKER_LABEL.plist.template" "$WORKER_PLIST"
+/usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$BACKUP_LABEL.plist.template" "$BACKUP_PLIST"
 
 "$PYTHON_BINARY" -I -S -B \
   "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py" \
@@ -1180,13 +1201,37 @@ WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 /usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/worker/stdout.log "$WORKER_PLIST"
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/worker/stderr.log "$WORKER_PLIST"
 
-for installed_policy_file in "$CONTROL_CONFIG" "$WORKER_CONFIG" "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_SENTINEL_FILE" "$CONTROL_PLIST" "$WORKER_PLIST"; do
+# Off-host DR nightly backup daemon. It ships DISABLED (see
+# leave_installed_services_stopped above and DR_RUNBOOK.md) exactly like
+# control/worker: this installer never arms cadence, only lays reviewed
+# material down for the Chairman ceremony.
+"$PYTHON_BINARY" -I -S -B \
+  "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py" \
+  "$BACKUP_PLIST" -- \
+  /bin/bash \
+  "$RELEASE_ROOT/ops/executive_os/run_nightly_backup.sh" \
+  --python-binary "$PYTHON_BINARY" \
+  --release-root "$RELEASE_ROOT" \
+  --config "$CONTROL_CONFIG" \
+  --key-file "$DR_KEY_FILE" \
+  --receipts-dir "$DR_RECEIPTS_DIR" \
+  --transport "$DR_TRANSPORT" \
+  --repo "$DR_VAULT_REPO" \
+  --token-env "$DR_TOKEN_ENV"
+/usr/bin/plutil -replace WorkingDirectory -string "$RELEASE_ROOT" "$BACKUP_PLIST"
+/usr/bin/plutil -replace UserName -string "$CONTROL_USER" "$BACKUP_PLIST"
+/usr/bin/plutil -replace GroupName -string "$CONTROL_GROUP" "$BACKUP_PLIST"
+/usr/bin/plutil -replace EnvironmentVariables.HOME -string "$CONTROL_HOME" "$BACKUP_PLIST"
+/usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/backup/stdout.log "$BACKUP_PLIST"
+/usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/backup/stderr.log "$BACKUP_PLIST"
+
+for installed_policy_file in "$CONTROL_CONFIG" "$WORKER_CONFIG" "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_SENTINEL_FILE" "$CONTROL_PLIST" "$WORKER_PLIST" "$BACKUP_PLIST"; do
   case "$(/usr/bin/stat -f '%Sp' "$installed_policy_file")" in
     *+) /bin/echo "installed policy file has a filesystem ACL: $installed_policy_file" >&2; exit 65 ;;
   esac
 done
 
-/usr/bin/plutil -lint "$CONTROL_PLIST" "$WORKER_PLIST"
+/usr/bin/plutil -lint "$CONTROL_PLIST" "$WORKER_PLIST" "$BACKUP_PLIST"
 (
   cd "$RELEASE_ROOT"
   /usr/bin/sudo -u "$WORKER_USER" /usr/bin/env -i \

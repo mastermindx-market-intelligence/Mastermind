@@ -1,0 +1,82 @@
+name: Executive OS DR drill
+
+# DR-D1: proves the full off-host disaster-recovery chain (backup -> verify
+# -> encrypt-then-MAC export -> ship to a GitHub release -> discard local
+# copies -> fetch on this same disposable runner -> decrypt -> restore
+# verification -> logical-state equality) with zero dependence on the
+# control host. Ships release assets under the reserved `dr-export/*` tag
+# namespace on THIS repo, authenticated by the workflow's own ephemeral,
+# repo-scoped GITHUB_TOKEN -- no long-lived credential, no enrollment.
+#
+# See research/MASTERMIND_EXECUTIVE_DR_V1_ARCHITECTURE_2026-09-01.md §9 and
+# ops/executive_os/DR_RUNBOOK.md.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Weekly, well outside the 05:00-11:00 UTC window CLAUDE.md reserves.
+    - cron: "0 15 * * 0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dr-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No `pip install` step: control_plane/executive_dr.py,
+      # control_plane/executive_backup.py, control_plane/executive_runtime.py,
+      # and scripts/dr_drill.py import stdlib only (plus the platform
+      # /usr/bin/openssl binary via subprocess), by construction of the same
+      # isolated `python3.12 -I -S` runtime the production Executive service
+      # runs under. Verified locally: `python3 -I -S -B scripts/dr_drill.py
+      # --offline` runs clean with no site-packages at all.
+
+      - name: Run the DR-D1 drill
+        env:
+          DR_DRILL_SOURCE_COMMIT: ${{ github.sha }}
+        run: python3 -I -S -B scripts/dr_drill.py --receipt-out drill-receipt.json --repo "${{ github.repository }}"
+
+      - name: Upload drill receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-drill-receipt
+          path: drill-receipt.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Summarize
+        if: always() && hashFiles('drill-receipt.json') != ''
+        run: |
+          python3 -I -S -B - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          receipt = json.load(open("drill-receipt.json", encoding="utf-8"))
+          print("# Executive OS DR-D1 drill")
+          print("")
+          print(f"- export_id: `{receipt['export_id']}`")
+          print(f"- tag: `{receipt['tag']}`")
+          print(f"- transport: `{receipt['transport']}`")
+          print(f"- logical_state_equal: **{receipt['logical_state_equal']}**")
+          print(f"- RTO (fetch start -> verified): **{receipt['rto_ms']} ms**")
+          print(f"- ciphertext byte size: {receipt['ciphertext_byte_size']}")
+          print("")
+          print("| stage | ms |")
+          print("|---|---|")
+          for name, ms in receipt["stage_timings_ms"].items():
+              print(f"| {name} | {ms} |")
+          PY
