@@ -50,6 +50,7 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "control_plane/executive_agent_capabilities.py",
     "control_plane/executive_ambient_process.py",
     "control_plane/executive_authority.py",
+    "control_plane/executive_capability_packages.py",
     "control_plane/executive_coo_policy.py",
     "control_plane/executive_inbox.py",
     "control_plane/executive_orchestration_principal.py",
