@@ -1,15 +1,18 @@
-"""BSC-E1 durable static fences for the authenticated Executive app.
+"""BSC-E1 durable source fences and self-scoping pull-request ratchet.
 
-These tests inspect source-level ownership and authority boundaries that runtime
-behavior alone cannot prove. They intentionally avoid current-branch or
-merge-base diffs: a repository-global protected test must remain valid on every
-unrelated future pull request while still killing an app-side authority bypass.
+Source-level checks protect the authenticated Executive app's permanent owner
+boundaries.  A separate local, read-only Git helper applies the historical
+BSC-E1 carrier ceiling only when the current effective delta touches that
+program's reserved surface.  Empty and wholly unrelated pull requests remain
+not applicable; a BSC-E1 touch re-arms whole-delta allowlist enforcement.
 """
 from __future__ import annotations
 
 import ast
+import inspect
 from pathlib import Path
 import subprocess
+from typing import Iterable
 
 import pytest
 
@@ -44,10 +47,43 @@ EXPECTED_CONTROL_PLANE_DEPENDENCIES = {
     "control_plane.ceo_request",
     "control_plane.executive_ceo_ingress",
 }
+BSC_E1_ALLOWED_PATHS = frozenset(
+    {
+        "config/business_mcp/executive_policy.example.json",
+        "control_plane/ceo_request.py",
+        "docs/runbooks/mastermind-executive-app.md",
+        "integrations/mastermind_executive_app/__init__.py",
+        "integrations/mastermind_executive_app/admission.py",
+        "integrations/mastermind_executive_app/app.py",
+        "integrations/mastermind_executive_app/gateway.py",
+        "scripts/mastermind_executive_app.py",
+        "tests/test_mastermind_executive_app_admission.py",
+        "tests/test_mastermind_executive_app_asgi.py",
+        "tests/test_mastermind_executive_app_static_fences.py",
+    }
+)
+# Prefixes are intentionally wider than the allowlist. A new app/control/test/
+# script/config/runbook path must trigger the ratchet and then be refused until
+# a separately reviewed source-law change ratchets it in.
+BSC_E1_TRIGGER_PREFIXES = (
+    "config/business_mcp/executive_policy",
+    "control_plane/ceo_request",
+    "docs/runbooks/mastermind-executive-app",
+    "integrations/mastermind_executive_app",
+    "scripts/mastermind_executive_app",
+    "tests/test_mastermind_executive_app",
+)
+LOCAL_READ_ONLY_GIT_COMMANDS = frozenset(
+    {"diff", "merge-base", "rev-list", "rev-parse", "show"}
+)
+
+
+class StaticFenceGitError(RuntimeError):
+    """A local Git read could not establish an unambiguous effective delta."""
 
 
 def _imported_module_names(path: Path) -> set[str]:
-    """Return every dotted module imported at any nesting level."""
+    """Return imported modules, including full ``from x import y`` candidates."""
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     names: set[str] = set()
@@ -56,6 +92,11 @@ def _imported_module_names(path: Path) -> set[str]:
             names.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             names.add(node.module)
+            names.update(
+                f"{node.module}.{alias.name}"
+                for alias in node.names
+                if alias.name != "*"
+            )
     return names
 
 
@@ -79,6 +120,165 @@ def _control_plane_dependencies(path: Path) -> set[str]:
             elif node.module.startswith("control_plane."):
                 names.add(node.module)
     return names
+
+
+def _python_source_surface(package: Path, *, root: Path) -> set[str]:
+    """Return every Python source path below ``package`` relative to ``root``."""
+
+    return {
+        path.relative_to(root).as_posix()
+        for path in package.rglob("*.py")
+        if path.is_file()
+    }
+
+
+def _bsc_e1_unexpected_paths(changed: Iterable[str]) -> set[str] | None:
+    """Return widened paths, or ``None`` when the BSC-E1 ratchet is inapplicable."""
+
+    normalized = {Path(path).as_posix().removeprefix("./") for path in changed}
+    applies = any(
+        path.startswith(prefix)
+        for path in normalized
+        for prefix in BSC_E1_TRIGGER_PREFIXES
+    )
+    if not applies:
+        return None
+    return normalized - BSC_E1_ALLOWED_PATHS
+
+
+def _git_read(
+    repo: Path,
+    command: str,
+    *args: str,
+    accepted_codes: tuple[int, ...] = (0,),
+) -> subprocess.CompletedProcess[str]:
+    """Run one allowlisted local Git read; never fetch or mutate repository state."""
+
+    if command not in LOCAL_READ_ONLY_GIT_COMMANDS:
+        raise StaticFenceGitError("BSC_E1_GIT_COMMAND_REFUSED")
+    try:
+        completed = subprocess.run(
+            ["git", command, *args],
+            cwd=str(repo),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise StaticFenceGitError("BSC_E1_GIT_READ_FAILED") from None
+    if completed.returncode not in accepted_codes:
+        raise StaticFenceGitError("BSC_E1_GIT_READ_FAILED")
+    return completed
+
+
+def _resolve_commit(repo: Path, revision: str) -> str:
+    completed = _git_read(repo, "rev-parse", "--verify", f"{revision}^{{commit}}")
+    resolved = completed.stdout.strip()
+    if len(resolved) != 40:
+        raise StaticFenceGitError("BSC_E1_GIT_IDENTITY_INVALID")
+    return resolved
+
+
+def _head_parents(repo: Path, head_sha: str) -> tuple[str, ...]:
+    completed = _git_read(repo, "show", "-s", "--format=%P", head_sha)
+    parents = tuple(completed.stdout.strip().split())
+    if any(len(parent) != 40 for parent in parents):
+        raise StaticFenceGitError("BSC_E1_GIT_IDENTITY_INVALID")
+    return parents
+
+
+def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    completed = _git_read(
+        repo,
+        "merge-base",
+        "--is-ancestor",
+        ancestor,
+        descendant,
+        accepted_codes=(0, 1),
+    )
+    return completed.returncode == 0
+
+
+def _distance_to_upstream(repo: Path, ancestor: str, upstream_sha: str) -> int:
+    completed = _git_read(repo, "rev-list", "--count", f"{ancestor}..{upstream_sha}")
+    try:
+        distance = int(completed.stdout.strip())
+    except ValueError:
+        raise StaticFenceGitError("BSC_E1_GIT_IDENTITY_INVALID") from None
+    if distance < 0:
+        raise StaticFenceGitError("BSC_E1_GIT_IDENTITY_INVALID")
+    return distance
+
+
+def _select_base_parent(
+    repo: Path,
+    *,
+    parents: tuple[str, ...],
+    upstream_sha: str,
+) -> str:
+    """Select the unique parent nearest to and ancestral to resolved upstream."""
+
+    exact = [parent for parent in parents if parent == upstream_sha]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        raise StaticFenceGitError("BSC_E1_BASE_PARENT_AMBIGUOUS")
+
+    candidates = [
+        parent for parent in parents if _is_ancestor(repo, parent, upstream_sha)
+    ]
+    if not candidates:
+        raise StaticFenceGitError("BSC_E1_BASE_PARENT_UNRESOLVED")
+
+    distance_by_parent = {
+        parent: _distance_to_upstream(repo, parent, upstream_sha)
+        for parent in candidates
+    }
+    nearest = min(distance_by_parent.values())
+    winners = [
+        parent for parent, distance in distance_by_parent.items() if distance == nearest
+    ]
+    if len(winners) != 1:
+        raise StaticFenceGitError("BSC_E1_BASE_PARENT_AMBIGUOUS")
+    return winners[0]
+
+
+def compute_pr_diff_paths(
+    repo: Path,
+    *,
+    head: str = "HEAD",
+    upstream: str = "origin/master",
+) -> set[str]:
+    """Compute the feature-side effective delta from local immutable Git facts."""
+
+    head_sha = _resolve_commit(repo, head)
+    upstream_sha = _resolve_commit(repo, upstream)
+    parents = _head_parents(repo, head_sha)
+
+    if len(parents) > 1:
+        base_sha = _select_base_parent(
+            repo,
+            parents=parents,
+            upstream_sha=upstream_sha,
+        )
+    else:
+        completed = _git_read(repo, "merge-base", upstream_sha, head_sha)
+        base_sha = completed.stdout.strip()
+        if len(base_sha) != 40:
+            raise StaticFenceGitError("BSC_E1_BASE_PARENT_UNRESOLVED")
+
+    completed = _git_read(
+        repo,
+        "diff",
+        "--name-only",
+        "--diff-filter=ACDMRTUXB",
+        base_sha,
+        head_sha,
+        "--",
+    )
+    return {line for line in completed.stdout.splitlines() if line}
 
 
 @pytest.mark.parametrize("path", ALL_OWNED_MODULES, ids=lambda path: path.name)
@@ -189,31 +389,38 @@ def test_app_control_plane_dependencies_are_closed_to_existing_owners() -> None:
 
 
 def test_bsc_e1_artifact_surface_is_present_and_package_is_closed() -> None:
-    actual_app_source = {
-        path.relative_to(REPO_ROOT).as_posix()
-        for path in APP_PACKAGE.glob("*.py")
-        if path.is_file()
-    }
+    actual_app_source = _python_source_surface(APP_PACKAGE, root=REPO_ROOT)
     assert actual_app_source == EXPECTED_APP_SOURCE_SURFACE
     for relative in EXPECTED_SUPPORT_PATHS:
         assert (REPO_ROOT / relative).is_file(), relative
 
 
-def test_static_fences_do_not_depend_on_git_history_or_current_pr_diff() -> None:
-    imported = _imported_module_names(Path(__file__))
-    assert imported.isdisjoint({"subprocess", "git", "pygit2"})
+def test_static_fence_git_reader_is_local_read_only_and_pr_identity_agnostic() -> None:
+    assert LOCAL_READ_ONLY_GIT_COMMANDS == {
+        "diff",
+        "merge-base",
+        "rev-list",
+        "rev-parse",
+        "show",
+    }
+    with pytest.raises(StaticFenceGitError, match="BSC_E1_GIT_COMMAND_REFUSED"):
+        _git_read(REPO_ROOT, "fetch")
+    helper_source = inspect.getsource(compute_pr_diff_paths) + inspect.getsource(
+        _select_base_parent
+    )
+    assert "pull/" not in helper_source
+    assert "#372" not in helper_source
 
 
-# ---------------------------------------------------------------------------
-# RED-first discriminators for the composable PR-local ratchet repair.
-# These intentionally describe the desired API before its implementation.
-# ---------------------------------------------------------------------------
-
-
-def _required_callable(name: str):
-    value = globals().get(name)
-    assert callable(value), f"missing required static-fence helper: {name}"
-    return value
+def test_current_effective_delta_respects_bsc_e1_owner_surface() -> None:
+    changed = compute_pr_diff_paths(REPO_ROOT)
+    unexpected = _bsc_e1_unexpected_paths(changed)
+    if unexpected is None:
+        return
+    assert unexpected == set(), (
+        "BSC-E1 effective delta escaped its closed owner surface: "
+        f"{sorted(unexpected)}"
+    )
 
 
 def test_import_from_member_is_normalized_to_full_forbidden_module(tmp_path: Path) -> None:
@@ -222,9 +429,7 @@ def test_import_from_member_is_normalized_to_full_forbidden_module(tmp_path: Pat
         "from integrations.executive_mcp import server\n",
         encoding="utf-8",
     )
-
     imported = _imported_module_names(candidate)
-
     assert "integrations.executive_mcp.server" in imported
 
 
@@ -234,27 +439,19 @@ def test_python_source_surface_is_recursive(tmp_path: Path) -> None:
     nested.mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
     (nested / "hidden_ingress.py").write_text("x = 1\n", encoding="utf-8")
-
-    python_source_surface = _required_callable("_python_source_surface")
-    surface = python_source_surface(package, root=tmp_path)
-
+    surface = _python_source_surface(package, root=tmp_path)
     assert surface == {
         "integrations/mastermind_executive_app/__init__.py",
         "integrations/mastermind_executive_app/subpackage/hidden_ingress.py",
     }
 
 
-def _unexpected_paths(changed: set[str]):
-    classifier = _required_callable("_bsc_e1_unexpected_paths")
-    return classifier(changed)
-
-
 def test_bsc_e1_delta_empty_is_not_applicable() -> None:
-    assert _unexpected_paths(set()) is None
+    assert _bsc_e1_unexpected_paths(set()) is None
 
 
 def test_bsc_e1_delta_foreign_only_c1_shape_is_not_applicable() -> None:
-    assert _unexpected_paths(
+    assert _bsc_e1_unexpected_paths(
         {
             "control_plane/chairman_control_room.py",
             "control_plane/executive_placement_selection.py",
@@ -266,7 +463,7 @@ def test_bsc_e1_delta_foreign_only_c1_shape_is_not_applicable() -> None:
 
 
 def test_bsc_e1_delta_allowed_subset_applies_and_passes() -> None:
-    assert _unexpected_paths(
+    assert _bsc_e1_unexpected_paths(
         {
             "integrations/mastermind_executive_app/app.py",
             "tests/test_mastermind_executive_app_static_fences.py",
@@ -276,7 +473,7 @@ def test_bsc_e1_delta_allowed_subset_applies_and_passes() -> None:
 
 
 def test_bsc_e1_delta_owned_plus_foreign_refuses_foreign_path() -> None:
-    assert _unexpected_paths(
+    assert _bsc_e1_unexpected_paths(
         {
             "integrations/mastermind_executive_app/app.py",
             "docs/unrelated_foreign.md",
@@ -285,7 +482,7 @@ def test_bsc_e1_delta_owned_plus_foreign_refuses_foreign_path() -> None:
 
 
 def test_bsc_e1_delta_owned_plus_executive_service_refuses_service() -> None:
-    assert _unexpected_paths(
+    assert _bsc_e1_unexpected_paths(
         {
             "integrations/mastermind_executive_app/app.py",
             "control_plane/executive_service.py",
@@ -293,18 +490,31 @@ def test_bsc_e1_delta_owned_plus_executive_service_refuses_service() -> None:
     ) == {"control_plane/executive_service.py"}
 
 
-def test_bsc_e1_delta_new_unratcheted_app_module_is_refused() -> None:
-    path = "integrations/mastermind_executive_app/hidden_ingress.py"
-    assert _unexpected_paths({path}) == {path}
+@pytest.mark.parametrize(
+    "path",
+    [
+        "integrations/mastermind_executive_app/hidden_ingress.py",
+        "integrations/mastermind_executive_app/subpackage/hidden_ingress.py",
+        "tests/test_mastermind_executive_app_hidden.py",
+        "scripts/mastermind_executive_app_hidden.py",
+        "config/business_mcp/executive_policy.hidden.json",
+        "docs/runbooks/mastermind-executive-app-hidden.md",
+        "control_plane/ceo_request_hidden.py",
+    ],
+)
+def test_bsc_e1_delta_new_reserved_surface_path_is_refused(path: str) -> None:
+    assert _bsc_e1_unexpected_paths({path}) == {path}
 
 
-def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
         cwd=str(repo),
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,
     )
 
 
@@ -326,6 +536,16 @@ def _git_commit_file(repo: Path, relative: str, content: str, message: str) -> s
     return _git(repo, "rev-parse", "HEAD").stdout.strip()
 
 
+def _commit_tree(repo: Path, tree: str, parents: tuple[str, ...], message: str) -> str:
+    args: list[str] = ["commit-tree", tree]
+    for parent in parents:
+        args.extend(["-p", parent])
+    args.extend(["-m", message])
+    result = _git(repo, *args)
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
 def test_compute_pr_diff_paths_linear_branch_returns_only_feature_delta(tmp_path: Path) -> None:
     repo = tmp_path / "linear"
     _git_init(repo)
@@ -338,10 +558,7 @@ def test_compute_pr_diff_paths_linear_branch_returns_only_feature_delta(tmp_path
         "x = 1\n",
         "feature",
     )
-
-    compute = _required_callable("compute_pr_diff_paths")
-
-    assert compute(repo, head="HEAD", upstream="origin/master") == {
+    assert compute_pr_diff_paths(repo, head="HEAD", upstream="origin/master") == {
         "integrations/mastermind_executive_app/app.py"
     }
 
@@ -354,7 +571,6 @@ def test_compute_pr_diff_paths_identifies_base_parent_in_both_merge_orientations
     repo = tmp_path / orientation
     _git_init(repo)
     _git_commit_file(repo, "README.md", "base\n", "base")
-
     assert _git(repo, "checkout", "-q", "-b", "feature").returncode == 0
     _git_commit_file(
         repo,
@@ -362,11 +578,9 @@ def test_compute_pr_diff_paths_identifies_base_parent_in_both_merge_orientations
         "x = 1\n",
         "feature",
     )
-
     assert _git(repo, "checkout", "-q", "master").returncode == 0
     _git_commit_file(repo, "docs/base_movement.md", "base moved\n", "base movement")
     assert _git(repo, "update-ref", "refs/remotes/origin/master", "master").returncode == 0
-
     if orientation == "base_first":
         result = _git(repo, "merge", "--no-ff", "-q", "-m", "hosted merge", "feature")
     else:
@@ -374,9 +588,39 @@ def test_compute_pr_diff_paths_identifies_base_parent_in_both_merge_orientations
         result = _git(repo, "merge", "--no-ff", "-q", "-m", "history join", "master")
     assert result.returncode == 0, result.stderr
     head = _git(repo, "rev-parse", "HEAD").stdout.strip()
-
-    compute = _required_callable("compute_pr_diff_paths")
-    changed = compute(repo, head=head, upstream="origin/master")
-
+    changed = compute_pr_diff_paths(repo, head=head, upstream="origin/master")
     assert changed == {"integrations/mastermind_executive_app/app.py"}
     assert "docs/base_movement.md" not in changed
+
+
+def test_compute_pr_diff_paths_fails_when_no_parent_is_base_side(tmp_path: Path) -> None:
+    repo = tmp_path / "unresolved"
+    _git_init(repo)
+    root = _git_commit_file(repo, "README.md", "root\n", "root")
+    assert _git(repo, "checkout", "-q", "-b", "upstream", root).returncode == 0
+    _git_commit_file(repo, "docs/upstream.md", "upstream\n", "upstream")
+    assert _git(repo, "update-ref", "refs/remotes/origin/master", "upstream").returncode == 0
+    assert _git(repo, "checkout", "-q", "-b", "left", root).returncode == 0
+    left = _git_commit_file(repo, "left.txt", "left\n", "left")
+    assert _git(repo, "checkout", "-q", "-b", "right", root).returncode == 0
+    right = _git_commit_file(repo, "right.txt", "right\n", "right")
+    tree = _git(repo, "rev-parse", f"{right}^{{tree}}").stdout.strip()
+    head = _commit_tree(repo, tree, (left, right), "unresolved merge")
+    with pytest.raises(StaticFenceGitError, match="BSC_E1_BASE_PARENT_UNRESOLVED"):
+        compute_pr_diff_paths(repo, head=head, upstream="origin/master")
+
+
+def test_compute_pr_diff_paths_fails_when_base_parent_is_ambiguous(tmp_path: Path) -> None:
+    repo = tmp_path / "ambiguous"
+    _git_init(repo)
+    root = _git_commit_file(repo, "README.md", "root\n", "root")
+    assert _git(repo, "checkout", "-q", "-b", "left", root).returncode == 0
+    left = _git_commit_file(repo, "left.txt", "left\n", "left")
+    assert _git(repo, "checkout", "-q", "-b", "right", root).returncode == 0
+    right = _git_commit_file(repo, "right.txt", "right\n", "right")
+    upstream_tree = _git(repo, "rev-parse", f"{right}^{{tree}}").stdout.strip()
+    upstream = _commit_tree(repo, upstream_tree, (left, right), "upstream merge")
+    assert _git(repo, "update-ref", "refs/remotes/origin/master", upstream).returncode == 0
+    head = _commit_tree(repo, upstream_tree, (left, right), "ambiguous merge")
+    with pytest.raises(StaticFenceGitError, match="BSC_E1_BASE_PARENT_AMBIGUOUS"):
+        compute_pr_diff_paths(repo, head=head, upstream="origin/master")
