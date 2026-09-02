@@ -14,6 +14,12 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _normalized(text: str) -> str:
+    """Make source-law prose assertions insensitive only to Markdown wrapping."""
+
+    return " ".join(text.split())
+
+
 def _json_block(text: str, begin: str, end: str) -> dict[str, object]:
     pattern = re.compile(
         re.escape(begin) + r"\s*```json\s*(.*?)\s*```\s*" + re.escape(end),
@@ -153,7 +159,7 @@ def test_persisted_target_identity_is_stable_and_secret_safe() -> None:
         "raw_model_output",
         "slack_principal",
     ]
-    design = _read(DESIGN)
+    design = _normalized(_read(DESIGN))
     assert "The caller supplies expected semantic identity" in design
     assert "comparison claims, not privileged facts" in design
     assert "never raw provider or model output" in design
@@ -177,7 +183,7 @@ def test_stage_a_remains_the_real_consumer_without_signature_or_election_widenin
     )
     assert contract["stage_a_resolver_signature_changed"] is False
 
-    design = _read(DESIGN)
+    design = _normalized(_read(DESIGN))
     for rejected in (
         "newest wall clock time",
         "Newest generation wins",
