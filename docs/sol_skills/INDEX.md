@@ -56,6 +56,20 @@ supply current intent at the human/session procedure layer. Do not require a red
 invent an impersonation theory unless current accepted source law requires another identity gate or
 there is actual conflicting evidence. All other modification gates still apply.
 
+### Child-origin and delivery-consumption boundary
+
+A `DIRECT_TARGETED — NEW CHILD` reply buried under an unrelated parent/program/previous-child root
+cannot by itself originate a new independent child or become that child's receiver-assignment event.
+The current protected dialogue law permits a new child only through its own Sol-authored top-level
+child commission root, an eligible command-create event, deliberate current live delivery into the
+actual provider interaction, or a production-proven exact native wake/resume path that binds that child
+to an exact root. A standing program, historical thread, or buried reply never makes that buried reply
+a successor-child assignment.
+
+DELIVERY_SENT or a Slack mention without a valid receiver PICKUP_ACK is DELIVERY_UNCONSUMED / PRE_START
+and must not be projected as active, STARTED, executing, waiting-on-worker, or watcher-consumed.
+Receipt and execution remain separate under the dialogue law; Executive OS remains the lifecycle owner.
+
 ## Capability-state vocabulary
 
 Use the company ledger vocabulary precisely:

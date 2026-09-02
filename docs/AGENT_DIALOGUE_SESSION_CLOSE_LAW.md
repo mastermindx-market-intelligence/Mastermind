@@ -27,6 +27,23 @@ make two different parent timestamps the same carrier, and a worker cannot creat
 by posting a new top-level ACK. Treat such a post as transport evidence to reconcile, not as a valid
 reciprocal edge for the assigned child.
 
+### 1.2 New-child origination and unconsumed delivery
+
+A `DIRECT_TARGETED — NEW CHILD` buried reply under an unrelated parent/program/previous-child root
+cannot by itself originate a new independent child and cannot by itself become that child's
+receiver-assignment event. It may carry evidence, an already-authorized child return, or a continuation
+for that existing child, but it never turns the enclosing root into a new child commission.
+
+A new independent Slack-only child may originate only through a Sol-authored top-level child commission
+root, an eligible command-create event, deliberate current live delivery into the actual provider
+interaction, or a production-proven exact native wake/resume path that binds that child to an exact root.
+These are origin/assignment edges, not a second lifecycle, router, or Slack command bus.
+
+DELIVERY_SENT or a Slack mention without a valid receiver PICKUP_ACK is DELIVERY_UNCONSUMED / PRE_START
+and must not be projected as active, STARTED, executing, waiting-on-worker, or watcher-consumed.
+PICKUP_ACK and START are separate edges. Executive OS remains the lifecycle owner: a delivery, pickup,
+watcher receipt, or this procedure does not create a Job, Attempt, or Worker state.
+
 ## 2. Mandatory Sol edge after every worker return
 
 After every worker/COO `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, Sol must emit exactly one explicit state in the same lawful carrier/thread.

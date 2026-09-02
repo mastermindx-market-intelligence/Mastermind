@@ -185,6 +185,24 @@ For a Slack direct-targeted child, preserve the exact parent thread chosen by th
 worker ACK belongs under that parent; posting the ACK as a new top-level message in the same channel
 does not create or move the carrier.
 
+### 5.4 New-child origination and unconsumed delivery
+
+A `DIRECT_TARGETED — NEW CHILD` reply buried under an unrelated parent/program/previous-child root
+cannot by itself originate a new independent child or become that child's receiver-assignment event.
+It may carry evidence or continue an already-ACKed child, but `CONTINUE`, `RULING`, and `STOP` remain
+reciprocal continuation/terminal edges on the exact root of an already-ACKed child; they cannot become
+sole assignment for a new child.
+
+A new independent Slack-only child requires its own Sol-authored top-level child commission root, an
+eligible command-create event, deliberate current live delivery into the actual provider interaction,
+or a production-proven exact native wake/resume path that binds that child to an exact root. This
+procedure preserves, rather than duplicates, Executive OS lifecycle and the accepted placement/router
+owners.
+
+DELIVERY_SENT or a Slack mention without a valid receiver PICKUP_ACK is DELIVERY_UNCONSUMED / PRE_START
+and must not be projected as active, STARTED, executing, waiting-on-worker, or watcher-consumed.
+PICKUP_ACK and START remain separate; Executive OS remains the lifecycle owner.
+
 ## 6. Receiver binding mode — capacity-selectable vs exact-session-required
 
 Every bounded handoff must distinguish logical responsibility from the concrete runtime account by
