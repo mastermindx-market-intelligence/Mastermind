@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import hashlib
 import json
@@ -1131,7 +1132,12 @@ def test_supervisor_validation_timeout_reaps_its_process_group(tmp_path: Path):
     assert "timed out" in (receipt.error or "")
 
 
-def test_supervisor_validation_cancellation_reaps_stubborn_descendant(tmp_path: Path):
+def test_supervisor_validation_cancellation_reaps_stubborn_descendant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    control = _install_cancel_race_control(monkeypatch)
+    control.mode = "off"
+
     async def exercise():
         adapter, spec, _workspace_path, run_dir = _fixture(tmp_path, grace=0.1)
         child_path = run_dir / "validation-child.pid"
@@ -1171,12 +1177,17 @@ def test_supervisor_validation_cancellation_reaps_stubborn_descendant(tmp_path: 
                     break
             await asyncio.sleep(0.01)
         assert child_pid is not None and ready_path.exists()
+        control.bind(0, os.getpgid(child_pid), asyncio.Event())
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
         return child_pid
 
     child_pid = asyncio.run(exercise())
+    # A surviving residual validation group is escalated against exactly once.
+    assert len(control.group_signals(signal.SIGKILL)) == 1, (
+        f"expected exactly one residual-group SIGKILL, got {control.signals}"
+    )
     for _ in range(100):
         try:
             os.kill(child_pid, 0)
@@ -1599,6 +1610,8 @@ class _CancelRaceControl:
         self.armed = False
         self.mode = "vanished"
         self.signals: list[tuple[int, int]] = []
+        # Unpatched killpg, so test cleanup never pollutes the signal evidence.
+        self.real_killpg = os.killpg
 
     def bind(self, pid: int, pgid: int, release: asyncio.Event) -> None:
         self.pid = pid
@@ -1615,7 +1628,7 @@ class _CancelRaceControl:
 
 def _install_cancel_race_control(monkeypatch: pytest.MonkeyPatch) -> _CancelRaceControl:
     control = _CancelRaceControl()
-    real_killpg = os.killpg
+    real_killpg = control.real_killpg
 
     def killpg(pgid, sig):
         if int(sig) == 0:
@@ -1793,3 +1806,169 @@ def test_cancel_escalation_falsifiers_remain_fail_closed(
         f"{mode} must not authorise a SIGKILL: {control.signals}"
     )
     _assert_process_gone(child_pid, "Codex descendant survived the fail-closed path")
+
+
+async def _spawn_validation_group(tmp_path: Path, tag: str, *, stubborn: bool):
+    """Spawn a real leader in its own session with one live descendant."""
+
+    child_pid_path = tmp_path / f"vg-{tag}.pid"
+    ready_path = tmp_path / f"vg-{tag}.ready"
+    ignore_sigterm = (
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); " if stubborn else ""
+    )
+    child_program = (
+        "import pathlib,signal,sys,time; "
+        + ignore_sigterm
+        + "pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(60)"
+    )
+    parent_program = (
+        "import pathlib,subprocess,sys,time; "
+        "child=subprocess.Popen(['/usr/bin/python3','-c',sys.argv[3],sys.argv[2]]); "
+        "pathlib.Path(sys.argv[1]).write_text(str(child.pid)); time.sleep(60)"
+    )
+    process = await asyncio.create_subprocess_exec(
+        "/usr/bin/python3",
+        "-c",
+        parent_program,
+        str(child_pid_path),
+        str(ready_path),
+        child_program,
+        start_new_session=True,
+    )
+    child_pid = None
+    for _ in range(500):
+        if ready_path.exists():
+            try:
+                child_pid = int(child_pid_path.read_text())
+            except (FileNotFoundError, ValueError):
+                pass
+            else:
+                break
+        await asyncio.sleep(0.01)
+    assert child_pid is not None and ready_path.exists()
+    # The leader must be its own group and session, exactly as the adapter
+    # requires before it will ever signal a group.
+    assert os.getpgid(process.pid) == process.pid
+    assert os.getsid(process.pid) == process.pid
+    assert os.getpgid(child_pid) == process.pid
+    return process, child_pid
+
+
+async def _drive_validation_termination(
+    adapter, control: _CancelRaceControl, process, *, grace: float = 0.1
+):
+    """Enter `_terminate_validation_process` with a reproducible grace boundary."""
+
+    real_inspector = adapter.inspector
+    start_identity, pgid = real_inspector.identity(process.pid)
+    boot_id = real_inspector.boot_session_id()
+    real_wait_task = asyncio.create_task(process.wait())
+    release = asyncio.Event()
+
+    async def gated() -> int:
+        await release.wait()
+        return await real_wait_task
+
+    wait_task = asyncio.create_task(gated())
+    adapter.inspector = _RaceInspector(real_inspector, control)
+    control.bind(process.pid, pgid, release)
+    return wait_task, release, pgid, start_identity, boot_id
+
+
+async def _reap_validation_group(control: _CancelRaceControl, pgid, release, wait_task):
+    """Cleanup that cannot be mistaken for product behaviour."""
+
+    control.disarm()
+    try:
+        control.real_killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    release.set()
+    with contextlib.suppress(Exception):
+        await wait_task
+
+
+def test_validation_terminate_reconciles_proven_absent_group_without_sigkill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The validation teardown twin of the worker-cancellation race.
+
+    Same root cause, same postcondition: after a verified SIGTERM, a leader and
+    residual group both proven absent are already terminated and must not be
+    escalated against.
+    """
+
+    control = _install_cancel_race_control(monkeypatch)
+
+    async def exercise():
+        adapter, _spec, _workspace_path, _run_dir = _fixture(tmp_path, prompt="success")
+        process, child_pid = await _spawn_validation_group(tmp_path, "vanish", stubborn=False)
+        wait_task, release, pgid, start_identity, boot_id = (
+            await _drive_validation_termination(adapter, control, process)
+        )
+        try:
+            await adapter._terminate_validation_process(
+                process,
+                wait_task,
+                pid=process.pid,
+                pgid=pgid,
+                start_identity=start_identity,
+                boot_id=boot_id,
+                grace_seconds=0.1,
+            )
+        finally:
+            await _reap_validation_group(control, pgid, release, wait_task)
+        return child_pid
+
+    child_pid = asyncio.run(exercise())
+
+    assert control.group_signals(signal.SIGTERM), "SIGTERM was not delivered to the group"
+    assert control.group_signals(signal.SIGKILL) == [], (
+        "an already-vanished validation group must never be escalated against"
+    )
+    _assert_process_gone(child_pid, "validation descendant survived its process group")
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("group_unavailable", "cannot inspect process group"),
+        ("identity_changed", "validation process identity changed before SIGKILL"),
+        ("boot_changed", "validation process boot identity changed before SIGKILL"),
+    ],
+)
+def test_validation_terminate_falsifiers_remain_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, expected: str
+):
+    """Reuse, rotated boot identity and unavailable observations never reconcile."""
+
+    control = _install_cancel_race_control(monkeypatch)
+
+    async def exercise():
+        adapter, _spec, _workspace_path, _run_dir = _fixture(tmp_path, prompt="success")
+        process, child_pid = await _spawn_validation_group(tmp_path, mode, stubborn=False)
+        wait_task, release, pgid, start_identity, boot_id = (
+            await _drive_validation_termination(adapter, control, process)
+        )
+        control.mode = mode
+        try:
+            with pytest.raises(cw.ProcessIdentityError, match=expected):
+                await adapter._terminate_validation_process(
+                    process,
+                    wait_task,
+                    pid=process.pid,
+                    pgid=pgid,
+                    start_identity=start_identity,
+                    boot_id=boot_id,
+                    grace_seconds=0.1,
+                )
+        finally:
+            await _reap_validation_group(control, pgid, release, wait_task)
+        return child_pid
+
+    child_pid = asyncio.run(exercise())
+
+    assert control.group_signals(signal.SIGKILL) == [], (
+        f"{mode} must not authorise a validation SIGKILL: {control.signals}"
+    )
+    _assert_process_gone(child_pid, "validation descendant survived the fail-closed path")

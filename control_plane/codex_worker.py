@@ -2512,6 +2512,7 @@ class CodexWorkerAdapter:
         boot_id: str,
         grace_seconds: float,
     ) -> None:
+        group_vanished = False
         if not wait_task.done():
             if self.inspector.boot_session_id() != boot_id:
                 raise ProcessIdentityError("validation process boot identity changed")
@@ -2533,16 +2534,24 @@ class CodexWorkerAdapter:
                     try:
                         identity, observed_pgid = self.inspector.identity(pid)
                     except ProcessIdentityError:
-                        if not _process_group_exists(pgid):
-                            raise ProcessIdentityError(
-                                "validation leader disappeared with no residual group"
-                            )
+                        # Symmetric with _terminate: a *proven* absent group means
+                        # the verified original leader and every remaining member
+                        # already exited, so the SIGTERM above reached the
+                        # terminated postcondition and there is nothing to
+                        # escalate against.  Absence is proof, not inference --
+                        # _process_group_exists raises when the observation itself
+                        # is unavailable, so an unreadable group stays fail-closed.
+                        # The result is carried forward rather than re-probed: a
+                        # second probe could observe a PGID the host has already
+                        # recycled to a foreign group, and an absent leader must
+                        # never authorise signalling a reused group.
+                        group_vanished = not _process_group_exists(pgid)
                     else:
                         if identity != start_identity or observed_pgid != pgid:
                             raise ProcessIdentityError(
                                 "validation process identity changed before SIGKILL"
                             )
-        if _process_group_exists(pgid):
+        if not group_vanished and _process_group_exists(pgid):
             try:
                 os.killpg(pgid, signal.SIGKILL)
             except ProcessLookupError:
@@ -3022,8 +3031,7 @@ class CodexWorkerAdapter:
                         # inference: _process_group_exists reports absence only for
                         # ProcessLookupError and raises when the observation itself
                         # is unavailable, so an unreadable group still fails closed.
-                        if not _process_group_exists(state.ref.pgid):
-                            group_vanished = True
+                        group_vanished = not _process_group_exists(state.ref.pgid)
                     else:
                         if (
                             identity != state.ref.process_start_identity
