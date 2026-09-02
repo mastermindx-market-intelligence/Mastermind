@@ -14,6 +14,19 @@ A worker posting `RESULT` and saying it is awaiting Sol remains nonterminal from
 
 This law is symmetric. Sol must not leave a worker hanging, and a worker must not leave Sol hanging when the protocol requires a return or terminal acknowledgement.
 
+### 1.1 Slack exact-carrier root
+
+For a Slack child, exact carrier identity is **workspace + conversation/channel + thread-root timestamp**.
+When a Sol/Chairman commission is the top-level parent, that parent timestamp is the immutable dialogue
+root for the child. `PICKUP_ACK`, `WATCH_ARMED`/`WATCH_UNAVAILABLE`, `START`, `PROGRESS`, `BLOCKED`,
+`DECISION_REQUEST`, `RESULT`, Sol `CONTINUE`/`RULING`/repair, and terminal `STOP` **must be replies under
+that exact parent** unless current canonical transport law explicitly establishes a different carrier.
+
+A **top-level post in the same channel is a carrier-root mismatch**. Same workspace and channel do not
+make two different parent timestamps the same carrier, and a worker cannot create/move its own carrier
+by posting a new top-level ACK. Treat such a post as transport evidence to reconcile, not as a valid
+reciprocal edge for the assigned child.
+
 ## 2. Mandatory Sol edge after every worker return
 
 After every worker/COO `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, Sol must emit exactly one explicit state in the same lawful carrier/thread.
@@ -227,6 +240,10 @@ Independent child operation B requires, under the currently accepted carrier voc
 
 An aggregate permanent seat/principal watcher resource may be reused as the **resource** for B if current law permits it, but an old child A source, old thread state, provider session, worker seat or prior STOP never implicitly authorizes B.
 
+A receiver assignment is exhausted with the child it assigned. General or standing program intent may
+keep Sol authorized to advance the parent program, but it does not let the worker self-mint child B or
+reuse child A's assignment. Child B needs the explicit fresh commission/delivery/placement edge above.
+
 Where the current machine schema has not yet implemented a distinct typed `START`, the human/session procedure must still keep pickup acknowledgement and actual execution start conceptually separate; do not claim a runtime `START` receipt exists when it does not.
 
 ## 8. Universal session-close checklist
@@ -260,6 +277,8 @@ The 2026-08-29 Codex fleet incident added a third failure class: native Codex ta
 
 Independent adversarial review of that repair exposed a fourth incident-causal defect: a combined Codex heartbeat serving a permanent seat inbox plus child sources was paused wholesale when one child reached terminal STOP. That conflated child-source lifetime with aggregate watcher-resource lifetime and caused a later valid Exec Ops directive to go unseen. The repair is equally explicit: child STOP removes the child source; it does not terminate the seat/principal watcher resource or sibling sources.
 
+The 2026-09-02 Fable carrier incident added a fifth defect: a worker interpreted an older standing Chairman program instruction as a surviving receiver assignment after terminal `SOL ACCEPTED / STOP`, self-minted a successor child, and posted its `PICKUP_ACK` as a new top-level message in the same Slack channel. The repair is now explicit: receiver assignment is child-local, terminal STOP consumes it, and Slack carrier identity includes the exact thread root rather than channel membership alone.
+
 Universal repair:
 
-> **Every reciprocal dialogue loop gets an explicit terminal edge, every promised continuation path must actually be armed, watcher prompts never outrank later valid carrier edges, qualifying events re-enter normal procedure, and child-source termination never silently kills an independently valid aggregate seat/principal watcher resource.**
+> **Every reciprocal dialogue loop gets an explicit terminal edge, every promised continuation path must actually be armed, watcher prompts never outrank later valid carrier edges, qualifying events re-enter normal procedure, child-source termination never silently kills an independently valid aggregate seat/principal watcher resource, terminal STOP never self-authorizes a successor child, and Slack reciprocal edges remain under the exact assigned thread root.**
