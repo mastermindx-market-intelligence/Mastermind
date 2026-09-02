@@ -465,7 +465,11 @@ def _venv_platform_info(venv_python: Path) -> tuple[str, str]:
 
 def cmd_lock(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve() if args.root else repo_root()
-    os_name, arch = detect_platform_key()
+    try:
+        os_name, arch = detect_platform_key()
+    except EnvError as exc:
+        print(f"rwe_env lock refused: {exc}", file=sys.stderr)
+        return 2
     name = PLATFORM_LOCKS.get((os_name, arch))
     if name is None:
         print(
@@ -777,7 +781,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    return int(args.func(args))
+    try:
+        return int(args.func(args))
+    except EnvError as exc:
+        # Defense in depth: individual subcommands already catch the
+        # EnvError cases they anticipate and print a clean refusal message.
+        # This catches anything raised earlier (e.g. repo_root() itself)
+        # so a refusal is always a one-line stderr message, never a
+        # traceback.
+        print(f"rwe_env refused: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
