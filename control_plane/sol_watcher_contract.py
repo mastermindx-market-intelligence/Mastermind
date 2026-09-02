@@ -242,29 +242,45 @@ _TERMINAL_STOP_ORDER_PATTERNS: tuple[Pattern[str], ...] = (
         re.IGNORECASE,
     ),
 )
-_LIFECYCLE_INFERENCE_PATTERNS: tuple[Pattern[str], ...] = (
-    re.compile(r"\binfer\b", re.IGNORECASE),
+_LIFECYCLE_INFERENCE_RE = re.compile(r"\binfer(?:ring|red|s)?\b", re.IGNORECASE)
+_POLARITY_ACTION_START = (
+    r"(?:do\s+not|don't|never|must\s+not|cannot|can't|if|when|wait|await|defer|"
+    r"escalate|pause|post|send|issue|write|emit|reply|respond|merge|release|"
+    r"enable|arm|retry|resubmit|requeue|fail|commission|start|infer|re-pin|repin|"
+    r"fresh-read|return|report)"
 )
-_NEGATION_RE = re.compile(
-    r"\b(?:no|not|never|without|cannot|can't|forbidden|prohibited|reject(?:ed)?|"
-    r"invalid|failure|fails)\b|\bdo not\b|\bdon't\b|\bmust not\b",
+_POLARITY_BOUNDARY_RE = re.compile(
+    rf"[;.!?]+|,(?!\s*(?:unless|except)\b)\s*|\b(?:then|but|however|instead|whereas)\b|"
+    rf"\band\s+(?={_POLARITY_ACTION_START}\b)",
     re.IGNORECASE,
 )
-_HARD_CLAUSE_BOUNDARY_RE = re.compile(
-    r"[;.!?]|\b(?:but|however|instead|whereas)\b",
+_NEGATOR_RE = re.compile(r"\b(?:do not|don't|never|must not|cannot|can't)\b", re.IGNORECASE)
+_SCOPE_REVERSER_RE = re.compile(
+    r"\b(?:forbid(?:s|den|ding)?|prohibit(?:s|ed|ing)?|reject(?:s|ed|ing)?|"
+    r"prevent(?:s|ed|ing)?|disallow(?:s|ed|ing)?|ban(?:s|ned|ning)?|"
+    r"fail(?:s|ed|ing)?\s+to|refuse(?:s|d|ing)?\s+to|decline(?:s|d|ing)?\s+to|"
+    r"avoid(?:s|ed|ing)?)\b",
     re.IGNORECASE,
 )
-_GOVERNING_NEGATED_ACTION_RE = re.compile(
-    r"\b(?:no|not|do not|don't|never|must not|cannot|can't|without)\s+"
-    r"(?:blind\s+)?(?:post|send|issue|write|emit|reply|respond|merge|release|"
-    r"enable|arm|retry|resubmit|requeue|fail\s*over|commission|start|wait|await|"
-    r"defer|escalate|pause|infer|re-pin|repin|fresh-read|return)\b",
+_REQUIRED_EXCEPTION_RE = re.compile(
+    r"\b(?:unless|except(?:\s+when)?|optional(?:ly)?|may\s+(?:skip|omit)|"
+    r"need\s+not|no\s+need\s+to|not\s+(?:required|necessary|mandatory)|only\s+if)\b",
     re.IGNORECASE,
 )
-_NO_BLIND_RETRY_RE = re.compile(
-    r"(?:\bno\b|\bnever\b|\bdo not\b|\bdon't\b|\bmust not\b|\bcannot\b|\bcan't\b)"
-    r"[^;.!?]{0,80}\bblind[- ]retry\b",
-    re.IGNORECASE,
+_BLIND_RETRY_OCCURRENCE_RE = re.compile(r"\b(?:blind[- ]retry|retry\s+blindly)\b", re.IGNORECASE)
+_BLIND_RETRY_DIRECT_PROHIBITIONS: tuple[Pattern[str], ...] = (
+    re.compile(
+        r"\bno\s+blind[- ]retry\b(?!\s+prohibition\b)[^;.!?]{0,80}\b(?:permitted|allowed)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bblind[- ]retry\s+(?:is\s+)?(?:forbidden|prohibited|disallowed|not\s+permitted|not\s+allowed)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:never|do not|don't|must not|cannot|can't)\s+(?:blind[- ]retry|retry\s+blindly)\b",
+        re.IGNORECASE,
+    ),
 )
 _MARKDOWN_TRANSLATION = str.maketrans("", "", "`*~")
 _EXPORT_FINDING_CODES = frozenset(
@@ -367,62 +383,109 @@ def _scan_line(raw_line: str) -> str:
     return " ".join(raw_line.casefold().translate(_MARKDOWN_TRANSLATION).split())
 
 
-def _hard_clause_bounds(text: str, start: int, end: int) -> tuple[int, int]:
-    previous_end = 0
-    next_start = len(text)
-    for boundary in _HARD_CLAUSE_BOUNDARY_RE.finditer(text):
-        if boundary.end() <= start:
-            previous_end = boundary.end()
-            continue
-        if boundary.start() >= end:
-            next_start = boundary.start()
-            break
-    return previous_end, next_start
+def _scan_clauses(text: str) -> Iterable[str]:
+    """Yield deterministic action-local clauses for polarity classification."""
 
-
-def _local_clause(text: str, start: int, end: int) -> str:
-    """Return a polarity scope without breaking a governed negated comma-list."""
-
-    hard_start, hard_end = _hard_clause_bounds(text, start, end)
-    clause = text[hard_start:hard_end]
-    relative_start = start - hard_start
-    last_comma = clause.rfind(",", 0, relative_start)
-    if last_comma >= 0:
-        prefix = clause[:last_comma]
-        if not _GOVERNING_NEGATED_ACTION_RE.search(prefix):
-            clause = clause[last_comma + 1 :]
-    return clause.strip()
-
-
-def _contains_positive_phrase(text: str, patterns: tuple[Pattern[str], ...]) -> bool:
     for raw_line in text.splitlines():
         normalized = _scan_line(raw_line)
         if not normalized:
             continue
+        start = 0
+        for boundary in _POLARITY_BOUNDARY_RE.finditer(normalized):
+            clause = normalized[start : boundary.start()].strip()
+            if clause:
+                yield clause
+            start = boundary.end()
+        clause = normalized[start:].strip()
+        if clause:
+            yield clause
+
+
+def _match_polarity(clause: str, start: int) -> str:
+    """Classify one matched action as direct positive, negated, or scope-reversed."""
+
+    prefix = clause[:start]
+    negators = list(_NEGATOR_RE.finditer(prefix))
+    if not negators:
+        return "NEGATED" if re.search(r"\bno\s*$", prefix, re.IGNORECASE) else "POSITIVE"
+    closest = negators[-1]
+    governed_prefix = prefix[closest.end() :]
+    if _SCOPE_REVERSER_RE.search(governed_prefix):
+        return "REVERSED"
+    return "NEGATED"
+
+
+def _phrase_polarities(
+    text: str, patterns: tuple[Pattern[str], ...]
+) -> tuple[bool, bool, bool, bool]:
+    positive = False
+    negated = False
+    reversed_scope = False
+    excepted = False
+    for clause in _scan_clauses(text):
         for pattern in patterns:
-            for match in pattern.finditer(normalized):
-                clause = _local_clause(normalized, match.start(), match.end())
-                if _NEGATION_RE.search(clause):
-                    continue
-                return True
-    return False
+            for match in pattern.finditer(clause):
+                if _REQUIRED_EXCEPTION_RE.search(clause):
+                    excepted = True
+                polarity = _match_polarity(clause, match.start())
+                if polarity == "NEGATED":
+                    negated = True
+                elif polarity == "REVERSED":
+                    reversed_scope = True
+                else:
+                    positive = True
+    return positive, negated, reversed_scope, excepted
+
+
+def _contains_positive_phrase(text: str, patterns: tuple[Pattern[str], ...]) -> bool:
+    positive, _negated, reversed_scope, _excepted = _phrase_polarities(text, patterns)
+    return positive or reversed_scope
+
+
+def _contains_required_positive_phrase(
+    text: str, patterns: tuple[Pattern[str], ...]
+) -> bool:
+    positive, negated, reversed_scope, excepted = _phrase_polarities(text, patterns)
+    return positive and not negated and not reversed_scope and not excepted
+
+
+def _is_lifecycle_inference_clause(clause: str) -> bool:
+    return (
+        bool(_LIFECYCLE_INFERENCE_RE.search(clause))
+        and "executive" in clause
+        and "lifecycle" in clause
+        and "slack" in clause
+    )
 
 
 def _contains_lifecycle_refusal(text: str) -> bool:
-    for raw_line in text.splitlines():
-        normalized = _scan_line(raw_line)
-        for pattern in _LIFECYCLE_INFERENCE_PATTERNS:
-            for match in pattern.finditer(normalized):
-                clause = _local_clause(normalized, match.start(), match.end())
-                if not _NEGATION_RE.search(clause):
-                    continue
-                if all(token in clause for token in ("executive job", "lifecycle", "slack")):
-                    return True
-    return False
+    saw_refusal = False
+    for clause in _scan_clauses(text):
+        if not _is_lifecycle_inference_clause(clause):
+            continue
+        if _REQUIRED_EXCEPTION_RE.search(clause):
+            return False
+        for match in _LIFECYCLE_INFERENCE_RE.finditer(clause):
+            if _match_polarity(clause, match.start()) != "NEGATED":
+                return False
+            saw_refusal = True
+    return saw_refusal
 
 
 def _contains_no_blind_retry(text: str) -> bool:
-    return any(_NO_BLIND_RETRY_RE.search(_scan_line(line)) for line in text.splitlines())
+    saw_prohibition = False
+    for clause in _scan_clauses(text):
+        occurrences = list(_BLIND_RETRY_OCCURRENCE_RE.finditer(clause))
+        if not occurrences:
+            continue
+        if _REQUIRED_EXCEPTION_RE.search(clause):
+            return False
+        if len(occurrences) != 1:
+            return False
+        if not any(pattern.search(clause) for pattern in _BLIND_RETRY_DIRECT_PROHIBITIONS):
+            return False
+        saw_prohibition = True
+    return saw_prohibition
 
 
 def _carrier_is_valid_for_role(carrier: str, role: WatcherRole | None) -> bool:
@@ -518,14 +581,14 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
                 )
             )
 
-    if not _contains_positive_phrase(body, _CURRENT_REPIN_PATTERNS):
+    if not _contains_required_positive_phrase(body, _CURRENT_REPIN_PATTERNS):
         findings.append(
             _finding(
                 FindingCode.MISSING_CURRENT_REPIN,
                 "prompt must positively require re-pinning the CURRENT protected Skillpack",
             )
         )
-    if not _contains_positive_phrase(body, _CARRIER_FRESHNESS_PATTERNS):
+    if not _contains_required_positive_phrase(body, _CARRIER_FRESHNESS_PATTERNS):
         findings.append(
             _finding(
                 FindingCode.MISSING_CARRIER_FRESHNESS,
@@ -548,21 +611,21 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
         )
 
     if role is WatcherRole.ACTION_AUTHORITATIVE:
-        if not _contains_positive_phrase(body, _SAME_CARRIER_ACTION_PATTERNS):
+        if not _contains_required_positive_phrase(body, _SAME_CARRIER_ACTION_PATTERNS):
             findings.append(
                 _finding(
                     FindingCode.MISSING_SAME_CARRIER_ACTION,
                     "action-authoritative watcher must positively require the same-carrier Sol edge",
                 )
             )
-        if not _contains_positive_phrase(body, _TYPED_BLOCKER_PATTERNS):
+        if not _contains_required_positive_phrase(body, _TYPED_BLOCKER_PATTERNS):
             findings.append(
                 _finding(
                     FindingCode.MISSING_TYPED_BLOCKER,
                     "action-authoritative watcher must positively require a typed blocker",
                 )
             )
-        if not _contains_positive_phrase(body, _TERMINAL_STOP_ORDER_PATTERNS):
+        if not _contains_required_positive_phrase(body, _TERMINAL_STOP_ORDER_PATTERNS):
             findings.append(
                 _finding(
                     FindingCode.MISSING_TERMINAL_STOP_ORDER,

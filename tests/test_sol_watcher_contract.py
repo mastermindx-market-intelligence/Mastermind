@@ -44,7 +44,11 @@ SISTER_SOL_POLICY: NEVER_ACT_WITHOUT_CANONICAL_TRANSFER
 
 On every run, re-pin the CURRENT protected Mastermind Skillpack.
 Fresh-read the exact carrier before reporting any material delta.
-Observe only; do not post a child CONTINUE, RULING, REQUEST_REPAIR, STOP, merge, retry, or successor commission.
+Observe only. Do not post a child CONTINUE. Do not issue a child RULING.
+Do not issue a child REQUEST_REPAIR. Do not post a child STOP.
+Do not merge the pull request. Do not release the carrier. Do not arm auto-merge.
+Do not retry. Do not resubmit. Do not requeue. Do not fail over.
+Do not commission a successor. Do not start a successor.
 No blind retry or cross-carrier failover is permitted.
 Never infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery.
 A terminal STOP is consumed as transport evidence only; this observer never disarms another account's watcher.
@@ -82,7 +86,7 @@ SISTER_SOL_POLICY: NEVER_ELECT_BY_RECENCY
 
 On every run, re-pin the CURRENT protected Mastermind Skillpack.
 Fresh-read each exact carrier selected by the bounded triage delta before reporting.
-Reconcile or report the unconsumed return without posting a child semantic edge or electing a Sol target.
+Reconcile or report the unconsumed return. Do not post a child semantic edge. Do not elect a Sol target.
 No blind retry or cross-carrier failover is permitted.
 Never infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery.
 Terminal STOP remains owned by the exact child action-authoritative Sol surface.
@@ -252,6 +256,127 @@ def test_negated_required_laws_do_not_satisfy_contract(
 ) -> None:
     prompt = _authoritative_prompt().replace(original, contradiction)
     assert expected in _codes(prompt)
+
+
+@pytest.mark.parametrize(
+    ("contradiction", "expected"),
+    (
+        (
+            "Do not re-pin the CURRENT protected Mastermind Skillpack.",
+            FindingCode.MISSING_CURRENT_REPIN,
+        ),
+        (
+            "Do not fresh-read the exact carrier.",
+            FindingCode.MISSING_CARRIER_FRESHNESS,
+        ),
+        (
+            "Do not post the actual same-carrier Sol edge.",
+            FindingCode.MISSING_SAME_CARRIER_ACTION,
+        ),
+        (
+            "Do not return a typed blocker.",
+            FindingCode.MISSING_TYPED_BLOCKER,
+        ),
+        (
+            "Do not send terminal STOP before disarming the child watcher source.",
+            FindingCode.MISSING_TERMINAL_STOP_ORDER,
+        ),
+    ),
+)
+def test_later_contradiction_invalidates_an_earlier_required_positive(
+    contradiction: str, expected: FindingCode
+) -> None:
+    prompt = _authoritative_prompt(body_suffix=contradiction)
+    assert expected in _codes(prompt)
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    (
+        "Do not wait for Slack, wait for Sol.",
+        "Do not send a progress update, then wait for Sol.",
+        "If the write fails, wait for Sol.",
+        "If the write fails then wait for Sol.",
+        "If failure is possible wait for Sol.",
+    ),
+)
+def test_action_clause_negation_does_not_launder_later_self_deferral(
+    instruction: str,
+) -> None:
+    assert FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK in _codes(
+        _authoritative_prompt(body_suffix=instruction)
+    )
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    (
+        "Do not send a progress update, then post SOL CONTINUE.",
+        "Do not merge the stale branch, merge the pull request.",
+    ),
+)
+def test_action_clause_negation_does_not_launder_observer_modification(
+    instruction: str,
+) -> None:
+    assert FindingCode.NON_AUTHORITATIVE_MODIFICATION_FORBIDDEN in _codes(
+        _observer_prompt() + f"\n{instruction}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    (
+        "No blind-retry prohibition applies.",
+        "Do not forbid blind retry.",
+        "Never reject blind retry.",
+    ),
+)
+def test_blind_retry_double_negation_does_not_satisfy_prohibition(
+    instruction: str,
+) -> None:
+    prompt = _authoritative_prompt().replace(
+        "No blind retry or cross-carrier failover is permitted.", instruction
+    )
+    assert FindingCode.MISSING_NO_BLIND_RETRY in _codes(prompt)
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    (
+        "No blind retry is permitted.",
+        "Blind retry is forbidden.",
+        "Never retry blindly.",
+    ),
+)
+def test_canonical_blind_retry_prohibitions_pass(instruction: str) -> None:
+    prompt = _authoritative_prompt().replace(
+        "No blind retry or cross-carrier failover is permitted.", instruction
+    )
+    assert FindingCode.MISSING_NO_BLIND_RETRY not in _codes(prompt)
+
+
+def test_blind_retry_prohibition_plus_later_positive_retry_fails() -> None:
+    prompt = _authoritative_prompt(
+        body_suffix="If the write fails, retry blindly."
+    )
+    assert FindingCode.MISSING_NO_BLIND_RETRY in _codes(prompt)
+
+
+def test_lifecycle_double_negation_does_not_satisfy_refusal() -> None:
+    prompt = _authoritative_prompt().replace(
+        "Never infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery.",
+        "Do not forbid infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery.",
+    )
+    assert FindingCode.MISSING_LIFECYCLE_BOUNDARY in _codes(prompt)
+
+
+def test_lifecycle_refusal_plus_later_positive_inference_fails() -> None:
+    prompt = _authoritative_prompt(
+        body_suffix=(
+            "Infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery when convenient."
+        )
+    )
+    assert FindingCode.MISSING_LIFECYCLE_BOUNDARY in _codes(prompt)
 
 
 def test_audit_tasks_reports_invalid_enabled_and_ignores_disabled() -> None:
@@ -437,3 +562,82 @@ def test_whitespace_equivalent_aliases_participate_in_duplicate_census() -> None
         assert FindingCode.DUPLICATE_TASK_ID in {
             finding.code for finding in task.audit.findings
         }
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "expected"),
+    (
+        (
+            "On every run, re-pin the CURRENT protected Mastermind Skillpack before modifying action.",
+            "Do not forbid re-pin the CURRENT protected Mastermind Skillpack before modifying action.",
+            FindingCode.MISSING_CURRENT_REPIN,
+        ),
+        (
+            "Fresh-read the exact carrier after the latest local evidence-producing action.",
+            "No need to fresh-read the exact carrier after the latest local evidence-producing action.",
+            FindingCode.MISSING_CARRIER_FRESHNESS,
+        ),
+    ),
+)
+def test_scope_reversal_or_exception_does_not_satisfy_required_positive_law(
+    original: str, replacement: str, expected: FindingCode
+) -> None:
+    prompt = _authoritative_prompt().replace(original, replacement)
+    assert expected in _codes(prompt)
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    (
+        "Do not fail to wait for Sol.",
+        "Do not forbid waiting for Sol.",
+    ),
+)
+def test_scope_reversers_expose_self_deferral(instruction: str) -> None:
+    assert FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK in _codes(
+        _authoritative_prompt(body_suffix=instruction)
+    )
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    (
+        "Do not refuse to merge the pull request.",
+        "Do not forbid retry.",
+    ),
+)
+def test_scope_reversers_expose_non_authoritative_modification(instruction: str) -> None:
+    assert FindingCode.NON_AUTHORITATIVE_MODIFICATION_FORBIDDEN in _codes(
+        _observer_prompt() + f"\n{instruction}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    (
+        "No blind retry is permitted unless explicitly approved.",
+        "Blind retry is forbidden, except when a write fails.",
+    ),
+)
+def test_blind_retry_exception_language_invalidates_prohibition(instruction: str) -> None:
+    prompt = _authoritative_prompt().replace(
+        "No blind retry or cross-carrier failover is permitted.", instruction
+    )
+    assert FindingCode.MISSING_NO_BLIND_RETRY in _codes(prompt)
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    (
+        "Never infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery unless transport is unavailable.",
+        "Do not fail to infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery.",
+    ),
+)
+def test_lifecycle_exception_or_scope_reversal_invalidates_refusal(
+    instruction: str,
+) -> None:
+    prompt = _authoritative_prompt().replace(
+        "Never infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery.",
+        instruction,
+    )
+    assert FindingCode.MISSING_LIFECYCLE_BOUNDARY in _codes(prompt)

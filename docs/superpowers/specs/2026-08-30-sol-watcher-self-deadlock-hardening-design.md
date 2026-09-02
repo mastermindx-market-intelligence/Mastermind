@@ -4,8 +4,9 @@
 **Owner:** Sol, AI CEO  
 **Chairman:** Chris  
 **Approval:** Current live Chairman directive; written-spec review explicitly auto-approved.  
-**Authoring procedure basis:** `mastermindx-market-intelligence/Mastermind@fefd774701ea285b466cac2646a584801f4a976a`, `mastermind.sol_skillpack.v1` v1.0.1, bootstrap major 1.  
-**Current-base reconciliation:** history-preserving join to protected `47eaa510aa0b9877d91052fbaa27156957aa963c`; the protected movement is path-disjoint from the exact nine-file watcher carrier.  
+**Historical authoring procedure basis:** `mastermindx-market-intelligence/Mastermind@fefd774701ea285b466cac2646a584801f4a976a`, `mastermind.sol_skillpack.v1` v1.0.1, bootstrap major 1.  
+**Historical reconciliation receipt:** the carrier was previously history-preservingly joined to protected `47eaa510aa0b9877d91052fbaa27156957aa963c`; this is retained as history, not current authority.  
+**Current repair procedure basis:** `mastermindx-market-intelligence/Mastermind@21a721427743fdae6d513eeb0f993ebd1c327a81`, `mastermind.sol_skillpack.v1` v1.0.1, bootstrap major 1. The current repair starts from PR #268 head `2140c4c1021868bd69331bbf254f3fe264504f89`, whose second parent is that protected base.  
 **Operation:** `sol-watcher-self-deadlock-hardening-20260830-sol-001`
 
 ## Outcome
@@ -109,6 +110,8 @@ Every non-authoritative role—observer, parent orchestrator, and triage—must 
 - clause-local positive notification-only anti-patterns without false-rejecting explicit prohibitions;
 - all non-authoritative body authority widening, including Markdown-wrapped commands and bare imperative merge forms.
 
+Polarity is relation-aware and fail-closed. Sequencing boundaries and independent comma clauses end a prior action's negation scope, so `Do not wait for Slack, wait for Sol` and `Do not send a progress update, then wait for Sol` still expose the later positive self-deferral. Failure-state words such as `fails`, `failure`, `invalid`, or `rejected` do not negate an instruction merely because they appear nearby. Canonical direct prohibitions remain valid; double-negated prohibition language such as `Do not forbid blind retry` or `Do not forbid infer ... lifecycle from Slack` does not satisfy the required prohibition/refusal. For required positive laws, blind retry, and lifecycle inference, a later contradictory occurrence invalidates an earlier compliant occurrence rather than being ignored.
+
 `scripts/audit_sol_watchers.py` accepts an account-local JSON export and emits a machine-readable report. Every wrapper entry declares `audit_kind: SOL_WATCHER | NON_WATCHER`; omission defaults to `SOL_WATCHER` for backward compatibility. Enabled `NON_WATCHER` tasks remain visible but are excluded from watcher-conformance counts.
 
 The export envelope is fail-closed:
@@ -168,12 +171,13 @@ Existing W3A/W3C/MAS-229/AD-SOL1 carriers must be continued rather than duplicat
 6. Unknown or bare header lines fail closed and cannot hide instructions.
 7. Action authority refuses an aggregate carrier; bounded observer/parent/triage aggregate scopes pass.
 8. A negated re-pin/fresh-read/action/blocker/STOP requirement or positive lifecycle inference fails.
-9. Malformed/missing carrier, operation, role, or handled-edge identity fails closed.
-10. The CLI produces stable JSON and nonzero status for invalid enabled watchers while excluding declared non-watchers from watcher counts.
-11. Missing/duplicate native IDs, non-boolean enabled flags, conflicting aliases, unknown classifications, and non-object entries fail the overall audit; whitespace-equivalent ID aliases resolve to one canonical identity.
-12. The Skillpack explicitly requires the structured contract for new/materially updated temporary Sol watchers and names notification-only self-deadlock as a K3 failure.
-13. Focused tests and repository CI are green on the exact final head.
-14. All three account-local preflight and mutation receipts plus the one-authoritative/two-observer canary exist before `PROVEN_LIVE` is claimed.
+9. Double-negated or contradicted blind-retry/lifecycle prohibitions fail; failure-state wording cannot launder a later positive action.
+10. Malformed/missing carrier, operation, role, or handled-edge identity fails closed.
+11. The CLI produces stable JSON and nonzero status for invalid enabled watchers while excluding declared non-watchers from watcher counts.
+12. Missing/duplicate native IDs, non-boolean enabled flags, conflicting aliases, unknown classifications, and non-object entries fail the overall audit; whitespace-equivalent ID aliases resolve to one canonical identity.
+13. The Skillpack explicitly requires the structured contract for new/materially updated temporary Sol watchers and names notification-only self-deadlock as a K3 failure.
+14. Focused tests and repository CI are green on the exact final head.
+15. All three account-local preflight and mutation receipts plus the one-authoritative/two-observer canary exist before `PROVEN_LIVE` is claimed.
 
 ## Non-goals
 
