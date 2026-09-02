@@ -249,18 +249,63 @@ def test_executive_service_file_has_zero_diff_against_base():
     assert result.stdout.strip() == ""
 
 
+BSC_E1_IMPLEMENTATION_SURFACE = {
+    "integrations/mastermind_executive_app/__init__.py",
+    "integrations/mastermind_executive_app/app.py",
+    "integrations/mastermind_executive_app/gateway.py",
+    "integrations/mastermind_executive_app/admission.py",
+    "scripts/mastermind_executive_app.py",
+    "config/business_mcp/executive_policy.example.json",
+    "tests/test_mastermind_executive_app_asgi.py",
+    "tests/test_mastermind_executive_app_admission.py",
+    "docs/runbooks/mastermind-executive-app.md",
+    "control_plane/ceo_request.py",
+}
+
+
+def _pr_diff_paths(base: str) -> set[str]:
+    everything = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "diff", "--name-only", base, "HEAD"],
+        check=True, stdout=subprocess.PIPE, text=True,
+    ).stdout.splitlines()
+    return {line.strip() for line in everything if line.strip()}
+
+
+def _skip_unless_pr_touches_bsc_e1_surface(base: str) -> None:
+    """FLEET-SCOPE REPAIR (2026-09-02): the two PR-shape fences below were
+    authored for the BSC-E1 PR itself but merged as permanent repository
+    tests, where "the WHOLE PR's diff is exactly BSC-E1's eleven paths" is
+    structurally false for every subsequent PR (and for any master checkout,
+    whose base..HEAD diff is empty). That made them a standing false CI red
+    on any unrelated change -- first hit in the wild by the OLS-A2 PR, whose
+    only control_plane additions were its own commissioned modules.
+
+    The fences keep their FULL original bite whenever a PR actually touches
+    the BSC-E1 implementation surface; on a PR that touches none of it they
+    skip, because they then assert nothing about that PR's commission."""
+
+    if not (_pr_diff_paths(base) & BSC_E1_IMPLEMENTATION_SURFACE):
+        pytest.skip(
+            "BSC-E1 PR-shape fence: this PR touches no BSC-E1 implementation "
+            "surface path, so the eleven-path shape assertions do not bind it"
+        )
+
+
 def test_ceo_request_change_is_the_only_control_plane_diff():
-    """Every path this PR touches under control_plane/, across the WHOLE PR
-    (base..HEAD), is exactly the one P5-authorized 11th-path file.
+    """For a PR touching the BSC-E1 surface: every path it touches under
+    control_plane/, across the WHOLE PR (base..HEAD), is exactly the one
+    P5-authorized 11th-path file.
 
     Anchored to the PR's merge-base with master. The pre-fix, HEAD-anchored
     version of this test FAILED on any clean checkout of a committed head
     (``git diff HEAD`` is empty once ceo_request.py's change is committed,
     so ``changed == []`` never equals ``["control_plane/ceo_request.py"]``)
     -- a false CI red on the very PR it was meant to protect, independent of
-    whether the PR's actual scope was clean."""
+    whether the PR's actual scope was clean. See
+    ``_skip_unless_pr_touches_bsc_e1_surface`` for the fleet-scope repair."""
 
     base = _merge_base_with_master()
+    _skip_unless_pr_touches_bsc_e1_surface(base)
     result = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "diff", "--name-only", base, "HEAD", "--", "control_plane/"],
         check=True,
@@ -285,6 +330,7 @@ def test_ten_ceiling_paths_are_exactly_the_new_files_this_pr_adds():
     """
 
     base = _merge_base_with_master()
+    _skip_unless_pr_touches_bsc_e1_surface(base)
     added = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "diff", "--name-only", "--diff-filter=A", base, "HEAD"],
         check=True, stdout=subprocess.PIPE, text=True,
