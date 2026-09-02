@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from control_plane import autonomy_control_room_projection as proj
 from control_plane import executive_steward as steward
 
@@ -185,6 +187,37 @@ def _failure(*, owner="WAKE", code="failure_code", explanation="A failure explan
         source_ref=source_ref,
         observed_at=observed_at,
     )
+
+
+def _declared(
+    *,
+    ref="WS:AD-CR1A",
+    code="blocked_by",
+    explanation="A declared blocker explanation.",
+    target_seat="coo",
+    owner="AGENT_OS",
+    observed_at="2026-09-01T00:00:00Z",
+    freshness="CURRENT",
+    source_ref=None,
+):
+    """One ``declared_blockers`` row — plain data, never a Steward fact.
+
+    Matches the exact shape :func:`declared_blockers_from_agent_os_state`
+    returns, for tests that exercise :func:`project_autonomy`'s
+    ``declared_blockers`` parameter directly without going through the
+    real-data mapper.
+    """
+    return {
+        "code": code,
+        "explanation": explanation,
+        "target_seat": target_seat,
+        "source": _source(
+            owner,
+            source_ref or f"agent_os_state.workstreams:{ref}.blocked_by",
+            observed_at=observed_at,
+            freshness=freshness,
+        ),
+    }
 
 
 def _snapshot(**overrides):
@@ -723,6 +756,129 @@ def test_healthy_responsibilities_produce_no_routine_absence_issues():
         assert card["query_status"] == "ok"
 
 
+# ---------------------------------------------------------------------------
+# Change A (repair packet, 2026-09-01): a routine `runtime_root_missing`
+# absence — an Agent-OS-owned responsibility with no Executive root job —
+# must read as a routine absence, not a refusal, when it is the ONLY
+# blocking signal on a get_current_runtime result.  Every genuinely bad
+# get_current_runtime shape (EFFECT_UNKNOWN/reconciliation_required, every
+# ambiguous_* join, and runtime_root_missing alongside a real second
+# problem) must keep refusing exactly as before.
+# ---------------------------------------------------------------------------
+
+def test_runtime_root_missing_alone_is_a_routine_absence_not_a_refusal():
+    """A responsibility with no root_job_id and no other problem reads
+    query_status "ok", not "refused" — having no Executive root job is the
+    ordinary state for an Agent-OS-owned responsibility, exactly like the
+    routine runtime_unknown/blocker_unknown/surface_unknown absences this
+    module already neutralizes.  current_worker/current_sol_target still
+    read null (get_current_runtime's `.data` is still None either way),
+    and the runtime_root_missing issue still appears on the top-level
+    `issues` list as a receipt — only query_status/is_actionable change."""
+    ref = "WS:NO-ROOT-JOB"
+    resp = _responsibility(ref=ref, root_job_id=None)
+    snap = _snapshot(responsibilities=(resp,))  # zero source_failures
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+    card = _card(doc, ref)
+
+    assert card["query_status"] == "ok"
+    assert card["current_worker"] is None
+    assert card["current_sol_target"] is None
+    assert card["root_job_id"] is None
+    assert card["actionability_reason"] != "query_refused"
+    assert any(
+        row["code"] == "runtime_root_missing" and row["responsibility_ref"] == ref
+        for row in doc["issues"]
+    )
+
+
+def test_runtime_root_missing_alone_allows_actionability_when_otherwise_healthy():
+    """The practical consequence of the fix: with no root_job_id but a
+    genuine blocker targeting a seat (and nothing else wrong), the card is
+    actually actionable — query_status "ok" is not merely cosmetic, it
+    unblocks §4.4's is_actionable the same way a routine runtime_unknown
+    already does."""
+    ref = "WS:NO-ROOT-JOB-ACTIONABLE"
+    resp = _responsibility(ref=ref, root_job_id=None)
+    blocker = _blocker(ref=ref, code="NEEDS_CHAIRMAN_INPUT", target="CHAIRMAN")
+    snap = _snapshot(responsibilities=(resp,), blockers=(blocker,))
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+    card = _card(doc, ref)
+
+    assert card["query_status"] == "ok"
+    assert card["is_actionable"] is True
+    assert card["actionability_reason"] == "actionable"
+
+
+def test_effect_unknown_still_refuses_query_status_after_change_a():
+    """Change A must never neutralize the EFFECT_UNKNOWN path: a real
+    root_job_id join with a WORKER runtime fact whose effect_state is
+    EFFECT_UNKNOWN still REFUSES via "reconciliation_required" (two issues
+    would never apply here — it is one issue, but its code is NOT
+    "runtime_root_missing", so the narrow guard never matches it) and
+    still drives the card's query_status to "refused"."""
+    ref = "WS:EFFECT-UNKNOWN-QS"
+    resp = _responsibility(ref=ref)  # real root_job_id (JOB-AD-CR1A default)
+    worker = _runtime(
+        ref=ref, seat="WORKER", attempt_id="ATT-EU-QS", effect_state="EFFECT_UNKNOWN",
+    )
+    snap = _snapshot(responsibilities=(resp,), runtimes=(worker,))
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+    card = _card(doc, ref)
+
+    assert card["query_status"] == "refused"
+    assert card["placement_state"]["value"] == "EFFECT_UNKNOWN"
+    assert card["current_worker"] is None
+    assert card["is_actionable"] is False
+
+
+def test_ambiguous_runtime_join_still_refuses_query_status_after_change_a():
+    """Change A must never neutralize an ambiguous join: two current WORKER
+    runtime candidates for the same responsibility (a real root_job_id, so
+    runtime_root_missing never fires) force "ambiguous_runtime_join",
+    which must still REFUSE and still drive the card's query_status to
+    "refused"."""
+    ref = "WS:AMBIG-RUNTIME-QS"
+    resp = _responsibility(ref=ref)
+    worker_a = _runtime(ref=ref, seat="WORKER", attempt_id="ATT-QS-A")
+    worker_b = _runtime(ref=ref, seat="WORKER", attempt_id="ATT-QS-B")
+    snap = _snapshot(responsibilities=(resp,), runtimes=(worker_a, worker_b))
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+    card = _card(doc, ref)
+
+    assert card["query_status"] == "refused"
+    assert card["current_worker"] is None
+    assert card["is_actionable"] is False
+
+
+def test_runtime_root_missing_with_a_genuine_second_problem_still_refuses():
+    """The narrow guard requires runtime_root_missing to be the SOLE
+    blocking signal.  Here root_job_id is None (so the internal
+    runtime_root_missing issue fires) AND a genuine RUNTIME_BINDING
+    SourceFailure is present — RUNTIME_BINDING is one of the three owners
+    get_current_runtime always folds into `source_issues` regardless of
+    responsibility_ref — so the REFUSED result carries two issues, not
+    one, and must stay refused."""
+    ref = "WS:NO-ROOT-JOB-PLUS-FAILURE"
+    resp = _responsibility(ref=ref, root_job_id=None)
+    failure = _failure(
+        owner="RUNTIME_BINDING", code="runtime_binding_outage",
+        explanation="A genuine, unrelated RuntimeBinding source failure.",
+        source_ref="runtime_binding:outage-1",
+    )
+    snap = _snapshot(responsibilities=(resp,), source_failures=(failure,))
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+    card = _card(doc, ref)
+
+    assert card["query_status"] == "refused"
+    assert card["current_worker"] is None
+
+
 def test_issues_list_is_deduplicated_across_call_sites():
     """Repair 7b: one SourceFailure must produce exactly one named issue row
     per responsibility, never once per internal call site that happens to
@@ -811,6 +967,41 @@ def test_counts_empty_is_true_when_genuinely_idle():
     assert doc["responsibilities"] == []
     assert doc["counts"]["total"] == 0
     assert doc["counts"]["empty"] is True
+
+
+def test_counts_empty_is_false_when_zero_mapped_but_unmapped_rows_exist():
+    """Change B (repair packet, 2026-09-01): zero mapped responsibilities
+    with non-empty unmapped_responsibilities must never read empty=True —
+    the estate was NOT idle, every workstream was suppressed for an
+    unrecognized owner.  Same law as the two membership_suppressed cases
+    above, applied to the unmapped-as-suppression case."""
+    snap = _snapshot()  # zero responsibility facts, zero source failures
+    unmapped_rows = [
+        {"responsibility_ref": "WS:UNRECOGNIZED-1", "reason": "owner_not_a_recognized_seat"},
+    ]
+
+    doc = proj.project_autonomy(
+        snap, generated_at="G", unmapped_responsibilities=unmapped_rows,
+    )
+
+    assert doc["responsibilities"] == []
+    assert doc["counts"]["total"] == 0
+    assert doc["counts"]["empty"] is False
+
+
+def test_counts_empty_stays_true_for_a_genuinely_idle_estate_with_no_unmapped_rows():
+    """Change B control case: an idle estate with nothing mapped, nothing
+    suppressed by a Steward-level issue, AND nothing suppressed as
+    unmapped (the default None — never supplied) must still read
+    empty=True."""
+    snap = _snapshot()
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+
+    assert doc["responsibilities"] == []
+    assert doc["counts"]["total"] == 0
+    assert doc["counts"]["empty"] is True
+    assert doc["unmapped_responsibilities"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -1155,15 +1346,18 @@ def test_output_keys_is_a_closed_set():
     assert proj.OUTPUT_KEYS == frozenset({
         "schema", "generated_at", "responsibilities", "owed_by_seat",
         "chairman_decisions", "source_failures", "issues", "counts",
+        "unmapped_responsibilities",
     })
+    assert doc["unmapped_responsibilities"] == []
     for card in doc["responsibilities"]:
         assert set(card.keys()) == {
             "responsibility_ref", "title", "accountable_seat", "state",
             "root_job_id", "current_worker", "current_sol_target",
             "owed_turn", "placement_state", "wake_outcome", "blocker",
-            "freshness", "is_actionable", "actionability_reason",
-            "chairman_decision_required", "chairman_decision_reason",
-            "disagreements", "source_receipts", "query_status",
+            "declared_blocker", "freshness", "is_actionable",
+            "actionability_reason", "chairman_decision_required",
+            "chairman_decision_reason", "disagreements", "source_receipts",
+            "query_status",
         }
 
 
@@ -1195,3 +1389,1137 @@ def test_purity_snapshot_is_not_mutated():
     assert snap.attention == (att,)
     assert snap.blockers == (blocker,)
     assert snap.source_failures == (failure,)
+
+
+# ---------------------------------------------------------------------------
+# declared_blocker — plain-data, honestly Agent-OS-owned (bug-fix packet,
+# 2026-09-01).  Exercises project_autonomy's declared_blockers parameter
+# directly, with hand-built ExecutiveStewardSnapshot fixtures, independent
+# of the real-data mapper tested further below.
+# ---------------------------------------------------------------------------
+
+def test_declared_blocker_present_with_ceo_target_seat_drives_owed_turn():
+    ref = "WS:DECLARED-CEO"
+    resp = _responsibility(ref=ref, seat="COO")
+    snap = _snapshot(responsibilities=(resp,))
+    declared_blockers = {ref: _declared(ref=ref, target_seat="ceo")}
+
+    doc = proj.project_autonomy(snap, generated_at="G", declared_blockers=declared_blockers)
+    card = _card(doc, ref)
+
+    assert card["declared_blocker"] is not None
+    assert card["declared_blocker"]["target_seat"] == "ceo"
+    assert card["declared_blocker"]["code"] == "blocked_by"
+    assert card["declared_blocker"]["source"]["owner"] == "agent_os"
+    assert card["owed_turn"]["seat"] == "ceo"
+    assert card["owed_turn"]["reason"] == "agent_os_declared_blocker_targets_seat"
+    # Explicitly NOT the Steward-owned blocker field — never merged.
+    assert card["blocker"] is None
+
+
+def test_declared_blocker_present_with_accountable_seat_drives_owed_turn():
+    ref = "WS:DECLARED-ACCOUNTABLE-SEAT"
+    resp = _responsibility(ref=ref, seat="COO")
+    snap = _snapshot(responsibilities=(resp,))
+    declared_blockers = {ref: _declared(ref=ref, target_seat="coo")}
+
+    doc = proj.project_autonomy(snap, generated_at="G", declared_blockers=declared_blockers)
+    card = _card(doc, ref)
+
+    assert card["declared_blocker"]["target_seat"] == "coo"
+    assert card["owed_turn"]["seat"] == "coo"
+    assert card["owed_turn"]["reason"] == "agent_os_declared_blocker_targets_seat"
+
+
+def test_declared_blocker_with_null_target_seat_is_present_but_never_sets_an_owed_seat():
+    ref = "WS:DECLARED-NULL-SEAT"
+    resp = _responsibility(ref=ref, seat="COO")
+    snap = _snapshot(responsibilities=(resp,))
+    declared_blockers = {ref: _declared(ref=ref, target_seat=None)}
+
+    doc = proj.project_autonomy(snap, generated_at="G", declared_blockers=declared_blockers)
+    card = _card(doc, ref)
+
+    # Present — the Chairman is still told the workstream is blocked.
+    assert card["declared_blocker"] is not None
+    assert card["declared_blocker"]["target_seat"] is None
+    # But it never fabricates an owed seat: no attention/current worker
+    # supplied here either, so this falls all the way through to "unknown".
+    assert card["owed_turn"]["seat"] == "unknown"
+    assert card["owed_turn"]["reason"] != "agent_os_declared_blocker_targets_seat"
+
+
+def test_declared_blocker_absent_when_no_entry_supplied():
+    ref = "WS:NO-DECLARED-BLOCKER"
+    resp = _responsibility(ref=ref)
+    snap = _snapshot(responsibilities=(resp,))
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+    card = _card(doc, ref)
+
+    assert card["declared_blocker"] is None
+    assert card["blocker"] is None
+
+
+def test_declared_blocker_ranks_after_the_steward_blocker():
+    """Frozen spec §4.2's blocker rung still wins first — a genuine Steward
+    ``BlockerFact`` outranks a declared_blocker every time."""
+    ref = "WS:DECLARED-VS-STEWARD-BLOCKER"
+    resp = _responsibility(ref=ref, seat="COO")
+    blocker = _blocker(ref=ref, target="CHAIRMAN")
+    snap = _snapshot(responsibilities=(resp,), blockers=(blocker,))
+    declared_blockers = {ref: _declared(ref=ref, target_seat="ceo")}
+
+    doc = proj.project_autonomy(snap, generated_at="G", declared_blockers=declared_blockers)
+    card = _card(doc, ref)
+
+    assert card["owed_turn"]["seat"] == "chairman"
+    assert card["owed_turn"]["reason"] == "blocker_targets_seat"
+    assert card["declared_blocker"] is not None  # still rendered, just not owed-turn-winning
+    assert card["blocker"] is not None
+
+
+def test_declared_blocker_ranks_before_attention():
+    ref = "WS:DECLARED-BEFORE-ATTENTION"
+    resp = _responsibility(ref=ref, seat="COO")
+    att = _attention(attention_id="ATT-DECLARED-1", ref=ref, target="WORKER")
+    snap = _snapshot(responsibilities=(resp,), attention=(att,))
+    declared_blockers = {ref: _declared(ref=ref, target_seat="ceo")}
+
+    doc = proj.project_autonomy(snap, generated_at="G", declared_blockers=declared_blockers)
+    card = _card(doc, ref)
+
+    assert card["owed_turn"]["seat"] == "ceo"
+    assert card["owed_turn"]["reason"] == "agent_os_declared_blocker_targets_seat"
+
+
+# ---------------------------------------------------------------------------
+# build_autonomy_snapshot — real-data mapper (Phase A wiring packet)
+# ---------------------------------------------------------------------------
+
+import json as _json
+from pathlib import Path as _Path
+
+_CCR_FIXTURES = _Path(__file__).parent / "fixtures" / "chairman_control_room"
+
+
+def _load_fixture(name: str):
+    return _json.loads((_CCR_FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def _real_inputs():
+    return dict(
+        inbox=_load_fixture("executive_inbox_v2.json"),
+        boot_packet=_load_fixture("boot_packet_v1.json"),
+        active_builds=_load_fixture("active_builds_v1.json"),
+        agent_os_state=_load_fixture("agent_os_state_v1.json"),
+        runtime_jobs=_load_fixture("runtime_jobs_v1.json"),
+        bindings=_load_fixture("bindings_v1.json"),
+    )
+
+
+def test_build_autonomy_snapshot_returns_a_snapshot():
+    snap = proj.build_autonomy_snapshot(**_real_inputs())
+    assert isinstance(snap, steward.ExecutiveStewardSnapshot)
+
+
+def test_build_autonomy_snapshot_never_constructs_runtimes():
+    """See module docstring point 8 — no genuine source for RuntimeFact.
+
+    ``responsibilities``/``blockers`` are NOT asserted empty here any more
+    (repair, 2026-09-01): the shared ``agent_os_state_v1.json`` fixture used
+    by ``_real_inputs()`` happens to be a thin, three-row test fixture whose
+    rows carry no ``owner``/``blocked_by`` fields at all (unlike the real
+    compiled artifact), so responsibilities/blockers stay empty for THIS
+    particular fixture as an honest consequence of every row's owner being
+    unrecognized (missing) — see
+    ``test_build_autonomy_snapshot_source_failure_only_when_agent_os_data_present``
+    below for that assertion, and the dedicated
+    ``test_build_autonomy_snapshot_constructs_*_from_owner_token``/
+    ``test_build_autonomy_snapshot_end_to_end_with_realistic_multi_row_artifact``
+    tests for proof the mapper DOES construct real cards from realistic rows.
+    """
+    snap = proj.build_autonomy_snapshot(**_real_inputs())
+    assert snap.runtimes == ()
+
+
+# ---------------------------------------------------------------------------
+# bug-fix packet, 2026-09-01: the mapper must NEVER construct a BlockerFact
+# from agent_os_state — BlockerFact.__post_init__ (executive_steward.py)
+# refuses any source.owner other than EXECUTIVE_OS/EXECUTIVE_INBOX/WAKE, so
+# the prior revision's SourceOwner.EXECUTIVE_OS stamp on a fact whose own
+# ref names "agent_os_state.workstreams:<key>.blocked_by" was a false
+# attribution — Agent OS data labelled as Executive OS data.
+# ---------------------------------------------------------------------------
+
+def test_build_autonomy_snapshot_never_produces_a_blocker_fact_whose_source_ref_names_agent_os():
+    """No BlockerFact this mapper ever builds may carry a source whose
+    ``ref`` names an agent_os artifact — because it must never build a
+    BlockerFact from agent_os_state at all (see the next test)."""
+    agent_os_state = _agent_os_state(
+        [
+            _ws_row(
+                "REAL-WS-STILL-BLOCKED",
+                owner="coo-fable",
+                blocked_by=["operator: rotate the R2 access key before wave 3"],
+                needs_ceo=True,
+            )
+        ]
+    )
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    for blocker in snap.blockers:
+        assert "agent_os" not in blocker.source.ref
+
+
+def test_build_autonomy_snapshot_builds_zero_blocker_facts_from_a_realistic_agent_os_artifact():
+    """The mapper must build zero BlockerFacts from agent_os_state, full
+    stop — even when the artifact carries plenty of genuine, structured
+    ``blocked_by``/``needs_ceo`` signal that a prior, buggy revision of this
+    mapper would have turned into a mislabelled BlockerFact."""
+    agent_os_state = _agent_os_state(
+        [
+            _ws_row(
+                "REAL-WS-CEO-BLOCKED", owner="coo-fable",
+                blocked_by=["operator: rotate the shared secret"], needs_ceo=True,
+            ),
+            _ws_row(
+                "REAL-WS-OWNER-BLOCKED", owner="chairman",
+                blocked_by=["operator: confirm backup retention window"],
+            ),
+            _ws_row(
+                "REAL-WS-UNOWNED-BLOCKED", owner="ops",
+                blocked_by=["operator: unresolved dependency"],
+            ),
+        ]
+    )
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    assert snap.blockers == ()
+
+
+def test_build_autonomy_snapshot_constructs_real_attention_facts():
+    snap = proj.build_autonomy_snapshot(**_real_inputs())
+    assert len(snap.attention) > 0
+    for fact in snap.attention:
+        assert isinstance(fact, steward.AttentionFact)
+        assert fact.source.owner is steward.SourceOwner.EXECUTIVE_INBOX
+        assert fact.responsibility_ref.startswith("WS:")
+
+
+def test_build_autonomy_snapshot_constructs_real_surface_facts_never_reviewed():
+    snap = proj.build_autonomy_snapshot(**_real_inputs())
+    assert len(snap.surfaces) > 0
+    for fact in snap.surfaces:
+        assert isinstance(fact, steward.SurfaceFact)
+        assert fact.source.owner is steward.SourceOwner.SURFACE_BINDINGS
+        # module docstring point 9: never fabricated as "reviewed".
+        assert fact.reviewed_at is None
+
+
+def test_build_autonomy_snapshot_never_reports_unrecognized_owners_as_source_failures():
+    """Blast-radius repair packet, 2026-09-01: the thin fixture's three rows
+    all lack an ``owner`` field, so every one is unmapped — but ``snapshot.
+    source_failures`` must stay empty regardless (a SourceFailure is a
+    global, source-level outage; an unrecognized owner is a bounded, per-row
+    mapping gap, reported instead by
+    ``unmapped_responsibilities_from_agent_os_state`` — see the dedicated
+    ``test_unmapped_responsibilities_from_agent_os_state_*`` tests below).
+    The old blanket ``accountable_seat_not_observable`` claim stays gone too
+    — a prior repair packet removed it because it was false against the
+    real compiled artifact.
+    """
+    inputs = _real_inputs()
+    with_agent_os = proj.build_autonomy_snapshot(**inputs)
+    assert with_agent_os.source_failures == ()
+
+    inputs_no_agent_os = dict(inputs, boot_packet=None, agent_os_state=None)
+    without_agent_os = proj.build_autonomy_snapshot(**inputs_no_agent_os)
+    assert without_agent_os.source_failures == ()
+
+
+def test_build_autonomy_snapshot_handles_every_input_absent():
+    """No I/O-shaped crash when every gathered input is ``None``."""
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=None, runtime_jobs=None, bindings=None,
+    )
+    assert snap.responsibilities == ()
+    assert snap.attention == ()
+    assert snap.runtimes == ()
+    assert snap.blockers == ()
+    assert snap.surfaces == ()
+    assert snap.source_failures == ()
+
+
+def test_build_autonomy_snapshot_skips_malformed_attention_rows_without_crashing():
+    inputs = _real_inputs()
+    malformed_inbox = {
+        "schema": inputs["inbox"]["schema"],
+        "generated_at": inputs["inbox"]["generated_at"],
+        "attention": [
+            {"attention_id": "eia-ok", "target": "ceo", "kind": "note",
+             "reason": "a real reason", "workstream": "REAL-ONE", "source": "agent_os"},
+            {"attention_id": "", "target": "ceo", "kind": "note",
+             "reason": "blank id", "workstream": "REAL-TWO", "source": "agent_os"},
+            {"attention_id": "eia-bad-target", "target": "not-a-seat", "kind": "note",
+             "reason": "bad target", "workstream": "REAL-THREE", "source": "agent_os"},
+            {"attention_id": "eia-no-ws", "target": "ceo", "kind": "note",
+             "reason": "no workstream", "workstream": None, "source": "agent_os"},
+            "not-a-mapping-at-all",
+        ],
+    }
+    snap = proj.build_autonomy_snapshot(**dict(inputs, inbox=malformed_inbox))
+    assert len(snap.attention) == 1
+    assert snap.attention[0].attention_id == "eia-ok"
+    assert snap.attention[0].responsibility_ref == "WS:REAL-ONE"
+
+
+def test_build_autonomy_snapshot_skips_malformed_binding_rows_without_crashing():
+    inputs = _real_inputs()
+    malformed_bindings = {
+        "schema": inputs["bindings"]["schema"],
+        "bindings": [
+            {"binding_id": "b-ok", "work_ref": "WS:REAL-ONE", "role": "worker",
+             "seat_ref": None, "provider": "codex", "locator_kind": "codex_session",
+             "observed_at": "2026-09-01T00:00:00Z", "last_verified_at": None},
+            {"binding_id": "b-bad-role", "work_ref": "WS:REAL-TWO", "role": "not-a-seat",
+             "seat_ref": None, "provider": "codex", "locator_kind": "codex_session",
+             "observed_at": "2026-09-01T00:00:00Z", "last_verified_at": None},
+            {"binding_id": "", "work_ref": "WS:REAL-THREE", "role": "worker",
+             "seat_ref": None, "provider": "codex", "locator_kind": "codex_session",
+             "observed_at": "2026-09-01T00:00:00Z", "last_verified_at": None},
+            "not-a-mapping-at-all",
+        ],
+    }
+    snap = proj.build_autonomy_snapshot(**dict(inputs, bindings=malformed_bindings))
+    assert len(snap.surfaces) == 1
+    assert snap.surfaces[0].surface_ref == "b-ok"
+
+
+def test_build_autonomy_snapshot_is_pure_and_deterministic():
+    """No I/O, no clock, no randomness: same inputs in -> an equal snapshot out."""
+    import copy as _copy
+
+    inputs = _real_inputs()
+    frozen_inputs = _copy.deepcopy(inputs)
+
+    snap_a = proj.build_autonomy_snapshot(**inputs)
+    snap_b = proj.build_autonomy_snapshot(**inputs)
+
+    # Inputs are never mutated.
+    assert inputs == frozen_inputs
+
+    def _sortable(snapshot):
+        return _json.dumps(
+            {
+                "attention": [steward._encode(f) for f in snapshot.attention],
+                "surfaces": [steward._encode(f) for f in snapshot.surfaces],
+                "source_failures": [steward._encode(f) for f in snapshot.source_failures],
+                "responsibilities": [steward._encode(f) for f in snapshot.responsibilities],
+                "runtimes": [steward._encode(f) for f in snapshot.runtimes],
+                "blockers": [steward._encode(f) for f in snapshot.blockers],
+            },
+            sort_keys=True,
+        )
+
+    assert _sortable(snap_a) == _sortable(snap_b)
+
+
+def test_build_autonomy_snapshot_feeds_project_autonomy_end_to_end():
+    """The real mapper output is a valid input to project_autonomy (integration smoke test).
+
+    The shared ``agent_os_state_v1.json`` fixture's three rows all lack an
+    ``owner`` field, so this particular run still yields zero responsibility
+    cards — an honest gap, not the old false blanket claim that no
+    compositor input ever names a seat.  Blast-radius repair packet,
+    2026-09-01: this run's ``source_failures`` must stay empty regardless
+    (an unrecognized owner is never a SourceFailure) — this test only feeds
+    the mapper's own ``build_autonomy_snapshot`` output through
+    ``project_autonomy`` without also threading
+    ``unmapped_responsibilities_from_agent_os_state``, exactly the shape an
+    existing caller that has not yet adopted the new parameter still gets.
+    See ``test_build_autonomy_snapshot_end_to_end_with_realistic_multi_row_artifact``
+    below for the proof that real owner-bearing rows DO produce real cards,
+    and for the wired-up ``unmapped_responsibilities`` assertion.
+
+    ``counts["empty"]`` reads ``True`` here (repair packet, 2026-09-01,
+    correcting this test's prior expectation): with zero SourceFailures,
+    ``snapshot.list_responsibilities()`` genuinely returns no suppression
+    signal (module docstring point re: Repair 9 — that flag exists to
+    distinguish "genuinely idle" from "we cannot see", and a bounded,
+    honest per-row mapping gap is neither of those old two states — it is
+    now its own, separately and honestly disclosed thing via
+    ``unmapped_responsibilities_from_agent_os_state``, exercised below).
+    The old ``False`` reading was itself a side effect of the same
+    over-broad ``SourceFailure`` this packet removes.
+    """
+    snap = proj.build_autonomy_snapshot(**_real_inputs())
+    doc = proj.project_autonomy(snap, generated_at="2026-09-01T00:00:00Z")
+    assert set(doc.keys()) == proj.OUTPUT_KEYS
+    assert doc["generated_at"] == "2026-09-01T00:00:00Z"
+    assert doc["responsibilities"] == []
+    assert doc["counts"]["empty"] is True
+    assert doc["source_failures"] == []
+    assert not any(
+        row["code"] == "accountable_seat_not_observable" for row in doc["source_failures"]
+    )
+    # unmapped_responsibilities was not supplied to project_autonomy here —
+    # defaults to empty, exactly like declared_blockers — but the real gap
+    # is still honestly recoverable via the dedicated mapper function.
+    assert doc["unmapped_responsibilities"] == []
+    real_unmapped = proj.unmapped_responsibilities_from_agent_os_state(
+        _real_inputs()["agent_os_state"]
+    )
+    assert len(real_unmapped) == 3
+    assert all(row["reason"] == "owner_not_a_recognized_seat" for row in real_unmapped)
+
+
+# ---------------------------------------------------------------------------
+# build_autonomy_snapshot — real-shaped rows (Phase A repair packet,
+# 2026-09-01): the mapper must build real ResponsibilityFact/BlockerFact
+# cards from structured fields the real compiled agent_os_state.json
+# artifact carries — key/title/status/owner/blocked_by/needs_ceo — and must
+# NEVER derive a seat from prose, even prose that contains seat-like words.
+# ---------------------------------------------------------------------------
+
+def _ws_row(
+    key,
+    *,
+    title="Some real workstream title",
+    status="active",
+    owner="__absent__",
+    blocked_by=None,
+    needs_ceo=None,
+):
+    row = {"key": key, "title": title, "status": status}
+    if owner != "__absent__":
+        row["owner"] = owner
+    if blocked_by is not None:
+        row["blocked_by"] = blocked_by
+    if needs_ceo is not None:
+        row["needs_ceo"] = needs_ceo
+    return row
+
+
+def _agent_os_state(rows, *, generated_at="2026-09-01T01:18:31Z"):
+    return {
+        "schema": "agent_os_state.v1",
+        "generator": "scripts/agentos.py status",
+        "generated_at": generated_at,
+        "workstreams": rows,
+    }
+
+
+@pytest.mark.parametrize(
+    "owner_token,expected_seat",
+    [
+        ("chairman", steward.Seat.CHAIRMAN),
+        ("ceo-sol", steward.Seat.CEO),
+        ("coo-fable", steward.Seat.COO),
+        ("fable", steward.Seat.COO),
+    ],
+)
+def test_build_autonomy_snapshot_maps_each_recognized_owner_token_to_its_seat(
+    owner_token, expected_seat,
+):
+    agent_os_state = _agent_os_state(
+        [_ws_row("REAL-WS-ONE", owner=owner_token, status="active")]
+    )
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    assert snap.source_failures == ()
+    assert len(snap.responsibilities) == 1
+    fact = snap.responsibilities[0]
+    assert fact.responsibility_ref == "WS:REAL-WS-ONE"
+    assert fact.accountable_seat is expected_seat
+    assert fact.state == "active"
+    assert fact.root_job_id is None
+    assert fact.source.owner is steward.SourceOwner.AGENT_OS
+    assert fact.source.observed_at == "2026-09-01T01:18:31Z"
+
+
+@pytest.mark.parametrize(
+    "key,owner_kwargs",
+    [
+        ("REAL-WS-OPS", {"owner": "ops"}),
+        ("REAL-WS-TERMINAL", {"owner": "terminal-platform"}),
+        ("REAL-WS-GROK", {"owner": "grok-cn-c"}),
+        ("REAL-WS-NO-OWNER-KEY", {}),  # owner key entirely absent
+        ("REAL-WS-EMPTY-OWNER", {"owner": ""}),
+        (
+            "REAL-WS-PROSE-OWNER",
+            {"owner": "Eval-OS session (COO Fable lane)"},
+        ),
+    ],
+)
+def test_build_autonomy_snapshot_never_maps_an_unrecognized_owner_to_a_seat(key, owner_kwargs):
+    """The prose case is the important one: it must NOT become COO merely
+    because the words "COO" and "Fable" appear inside the sentence.
+
+    Blast-radius repair packet, 2026-09-01: an unrecognized owner is now
+    reported via ``unmapped_responsibilities_from_agent_os_state`` — a
+    bounded, per-row report — never as a ``SourceFailure`` on the snapshot
+    (a SourceFailure is a global, source-level outage the Steward folds
+    into the issues of EVERY query; a per-row mapping gap must never
+    contaminate every other, correctly-owned workstream)."""
+    agent_os_state = _agent_os_state([_ws_row(key, **owner_kwargs)])
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    assert snap.responsibilities == ()
+    assert snap.source_failures == ()
+
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    assert len(unmapped) == 1
+    row = unmapped[0]
+    expected_ref = key if key.startswith("WS:") else f"WS:{key}"
+    assert row["responsibility_ref"] == expected_ref
+    assert row["reason"] == "owner_not_a_recognized_seat"
+    assert set(row.keys()) == {"responsibility_ref", "reason"}
+    # The raw owner prose must never leak anywhere in the unmapped row —
+    # only the workstream ref and the fixed machine reason are named.
+    raw_owner = owner_kwargs.get("owner")
+    row_text = repr(row)
+    if isinstance(raw_owner, str) and raw_owner:
+        assert raw_owner not in row_text
+    assert "Fable" not in row_text
+    assert "COO" not in row_text
+
+
+def test_build_autonomy_snapshot_blocked_by_and_needs_ceo_true_targets_the_ceo_seat():
+    """Bug-fix packet, 2026-09-01: this signal is now represented as a
+    ``declared_blocker`` — plain data, honestly Agent-OS-owned — not a
+    BlockerFact.  See ``declared_blockers_from_agent_os_state`` tests below
+    for the dedicated coverage of this exact fixture's target_seat/present/
+    absent behavior; this test keeps the original name and fixture to prove
+    the mapper itself builds no BlockerFact for it any more."""
+    agent_os_state = _agent_os_state(
+        [
+            _ws_row(
+                "REAL-WS-BLOCKED",
+                owner="coo-fable",  # would otherwise map to COO
+                blocked_by=["operator: rotate the R2 access key before wave 3"],
+                needs_ceo=True,
+            )
+        ]
+    )
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    assert snap.blockers == ()
+
+    declared = proj.declared_blockers_from_agent_os_state(agent_os_state)
+    entry = declared["WS:REAL-WS-BLOCKED"]
+    assert entry["target_seat"] == "ceo"
+    assert entry["code"] == "blocked_by"
+    assert entry["source"].owner is steward.SourceOwner.AGENT_OS
+    assert "REAL-WS-BLOCKED" in entry["explanation"]
+    assert "rotate the R2 access key" in entry["explanation"]
+
+
+def test_build_autonomy_snapshot_empty_blocked_by_yields_no_blocker_fact():
+    agent_os_state = _agent_os_state(
+        [
+            _ws_row("REAL-WS-UNBLOCKED-A", owner="chairman", blocked_by=[]),
+            _ws_row("REAL-WS-UNBLOCKED-B", owner="chairman"),  # blocked_by absent entirely
+        ]
+    )
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    assert snap.blockers == ()
+    assert len(snap.responsibilities) == 2
+    assert proj.declared_blockers_from_agent_os_state(agent_os_state) == {}
+
+
+def test_build_autonomy_snapshot_blocked_by_with_unrecognized_owner_and_no_needs_ceo_builds_no_blocker():
+    """No genuine seat exists to target without inventing one — the
+    BlockerFact is (still, and now always) never built for this row, and
+    the ``declared_blocker`` entry is present with a null ``target_seat``
+    rather than being suppressed: the Chairman is still told the
+    workstream is blocked even though nobody can be named accountable.
+
+    Fix 2 (adversarial-review repair packet, 2026-09-01): this test used to
+    assert that ``unmapped_responsibilities_from_agent_os_state``'s entry
+    carried ONLY ``responsibility_ref``/``reason`` — which meant the
+    ``declared_blockers_from_agent_os_state`` entry asserted just below was
+    computed correctly but never actually reached the Chairman, since
+    ``project_autonomy`` only reads ``declared_blockers`` for a ref with a
+    real card, and an unrecognized-owner row never gets one.  That was
+    the exact defect Fix 2 closes: the unmapped row itself now carries the
+    same declared-blocker information, with no raw owner text."""
+    agent_os_state = _agent_os_state(
+        [
+            _ws_row(
+                "REAL-WS-BLOCKED-UNOWNED",
+                owner="ops",
+                blocked_by=["operator: confirm backup retention window"],
+            )
+        ]
+    )
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    assert snap.blockers == ()
+    assert snap.responsibilities == ()
+    # Blast-radius repair packet, 2026-09-01: never a SourceFailure — see
+    # unmapped_responsibilities_from_agent_os_state below.
+    assert snap.source_failures == ()
+
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    assert unmapped == (
+        {
+            "responsibility_ref": "WS:REAL-WS-BLOCKED-UNOWNED",
+            "reason": "owner_not_a_recognized_seat",
+            "declared_blocker": {
+                "code": "blocked_by",
+                "explanation": (
+                    "workstream REAL-WS-BLOCKED-UNOWNED is blocked by: "
+                    "operator: confirm backup retention window"
+                ),
+                "target_seat": None,
+            },
+        },
+    )
+    # No raw owner prose ("ops") anywhere in the receipt.
+    assert "ops" not in repr(unmapped)
+
+    declared = proj.declared_blockers_from_agent_os_state(agent_os_state)
+    entry = declared["WS:REAL-WS-BLOCKED-UNOWNED"]
+    assert entry["target_seat"] is None
+    assert entry["source"].owner is steward.SourceOwner.AGENT_OS
+
+
+def test_build_autonomy_snapshot_end_to_end_with_realistic_multi_row_artifact():
+    """Feed a realistic multi-row artifact through build_autonomy_snapshot
+    then project_autonomy and assert real populated cards come out with
+    correct ordering (frozen spec §5: Chairman, then CEO, then COO, then
+    worker, then unknown)."""
+    agent_os_state = _agent_os_state(
+        [
+            _ws_row("REAL-WORKER-TARGET", owner="coo-fable", status="active"),
+            _ws_row("REAL-CHAIRMAN-WS", owner="chairman", status="active"),
+            _ws_row("REAL-CEO-WS", owner="ceo-sol", status="in_progress"),
+            _ws_row(
+                "REAL-BLOCKED-WS",
+                owner="fable",
+                status="blocked",
+                blocked_by=["operator: rotate the shared secret"],
+            ),
+            _ws_row("REAL-UNRECOGNIZED-WS", owner="grok-cn-c", status="active"),
+        ]
+    )
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    # Bug-fix packet, 2026-09-01: the real end-to-end wiring threads
+    # declared_blockers_from_agent_os_state's plain data into
+    # project_autonomy alongside the mapper's snapshot — this is exactly
+    # what a caller (e.g. the compositor) does to get the SAME real card
+    # ordering/owed-turn behavior the pre-fix BlockerFact stamp used to
+    # (dishonestly) produce.  Blast-radius repair packet, 2026-09-01: the
+    # real wiring threads unmapped_responsibilities_from_agent_os_state the
+    # exact same additive way.
+    declared_blockers = proj.declared_blockers_from_agent_os_state(agent_os_state)
+    unmapped_responsibilities = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    doc = proj.project_autonomy(
+        snap,
+        generated_at="2026-09-01T00:00:00Z",
+        declared_blockers=declared_blockers,
+        unmapped_responsibilities=unmapped_responsibilities,
+    )
+
+    assert set(doc.keys()) == proj.OUTPUT_KEYS
+    assert len(doc["responsibilities"]) == 4
+    # Sort order is frozen spec §5's full key — chairman_decision_required,
+    # then is_actionable, then owed_turn.seat rank, then responsibility_ref
+    # — NOT a raw accountable_seat sort: the one card with a declared
+    # blocker has an observable (non-"unknown") owed_turn.seat and sorts
+    # first; the remaining three all have owed_turn.seat == "unknown" (no
+    # blocker, no attention, no current worker supplied) and fall back to
+    # alphabetical responsibility_ref order.
+    refs_in_order = [row["responsibility_ref"] for row in doc["responsibilities"]]
+    assert refs_in_order == [
+        "WS:REAL-BLOCKED-WS",
+        "WS:REAL-CEO-WS",
+        "WS:REAL-CHAIRMAN-WS",
+        "WS:REAL-WORKER-TARGET",
+    ]
+    seats_in_order = [row["accountable_seat"] for row in doc["responsibilities"]]
+    assert seats_in_order == ["coo", "ceo", "chairman", "coo"]
+
+    blocked_card = doc["responsibilities"][0]
+    assert blocked_card["responsibility_ref"] == "WS:REAL-BLOCKED-WS"
+    # No genuine BlockerFact was ever built from agent_os_state (bug-fix
+    # packet) — the Steward-owned `blocker` field stays null.
+    assert blocked_card["blocker"] is None
+    assert blocked_card["declared_blocker"] is not None
+    assert blocked_card["declared_blocker"]["target_seat"] == "coo"
+    assert blocked_card["declared_blocker"]["source"]["owner"] == "agent_os"
+    assert blocked_card["owed_turn"]["seat"] == "coo"
+    assert blocked_card["owed_turn"]["reason"] == "agent_os_declared_blocker_targets_seat"
+
+    # Blast-radius repair packet, 2026-09-01: the unrecognized-owner row
+    # must produce zero SourceFailures, and none of the recognized cards'
+    # actionability_reason may read "source_failure" any more — the whole
+    # point of the fix.  (This fixture's cards are refused for an entirely
+    # different, pre-existing, out-of-scope reason — every ResponsibilityFact
+    # this mapper builds carries root_job_id=None by design, see module
+    # docstring point 8, which makes get_current_runtime REFUSE with
+    # `runtime_root_missing` regardless of source_failures; see the
+    # dedicated `test_unrecognized_owner_never_contaminates_a_sibling_cards_
+    # query_status` test below, built from manually-supplied facts with a
+    # real root_job_id, for a clean proof of "query_status: ok".)
+    assert doc["source_failures"] == []
+    assert doc["unmapped_responsibilities"] == [
+        {"responsibility_ref": "WS:REAL-UNRECOGNIZED-WS", "reason": "owner_not_a_recognized_seat"},
+    ]
+    for card in doc["responsibilities"]:
+        assert card["actionability_reason"] != "source_failure"
+    assert doc["counts"]["total"] == 4
+
+
+# ---------------------------------------------------------------------------
+# unmapped_responsibilities — blast-radius repair packet, 2026-09-01
+#
+# A SourceFailure is a global, source-level outage; executive_steward.
+# ExecutiveStewardSnapshot folds every one of them into the issues of EVERY
+# query it answers (module docstring point 7 / _source_issues), so a
+# per-row condition — an unrecognized workstream owner — must never be
+# reported as one.  These tests pin the fix: zero SourceFailures from that
+# cause, a bounded unmapped_responsibilities report instead, and zero effect
+# on any other card.
+# ---------------------------------------------------------------------------
+
+def test_unrecognized_owner_never_contaminates_a_sibling_cards_query_status():
+    """A handful of unmapped rows threaded through project_autonomy's
+    ``unmapped_responsibilities`` parameter must never contaminate a
+    recognized sibling card's ``query_status``/``actionability_reason`` —
+    the defect this repair packet fixes.  Uses manually-supplied facts
+    (each with a real ``root_job_id``) rather than the real mapper, so
+    ``query_status: "ok"`` is actually reachable: ``build_autonomy_snapshot``
+    never sets ``root_job_id`` (module docstring point 8), which
+    independently REFUSES ``get_current_runtime`` via ``runtime_root_
+    missing`` — a separate, pre-existing, out-of-scope condition this test
+    must not conflate with the fix under test.
+    """
+    refs = [f"WS:RECOGNIZED-{i}" for i in range(3)]
+    resps = tuple(_responsibility(ref=ref, root_job_id=f"JOB-{ref}") for ref in refs)
+    snap = _snapshot(responsibilities=resps)  # zero source_failures
+
+    unmapped_rows = [
+        {"responsibility_ref": f"WS:UNRECOGNIZED-{i}", "reason": "owner_not_a_recognized_seat"}
+        for i in range(4)
+    ]
+
+    doc = proj.project_autonomy(
+        snap, generated_at="G", unmapped_responsibilities=unmapped_rows,
+    )
+
+    assert doc["source_failures"] == []
+    assert len(doc["responsibilities"]) == 3
+    for card in doc["responsibilities"]:
+        assert card["query_status"] == "ok"
+        assert card["actionability_reason"] != "source_failure"
+
+    assert doc["unmapped_responsibilities"] == sorted(
+        unmapped_rows, key=lambda row: row["responsibility_ref"]
+    )
+
+
+def test_unmapped_responsibilities_lists_exactly_the_unrecognized_rows_with_no_raw_owner_text():
+    """``unmapped_responsibilities`` names exactly the unrecognized-owner
+    rows — never a recognized row, never the raw owner prose."""
+    agent_os_state = _agent_os_state([
+        _ws_row("REC-CHAIRMAN", owner="chairman"),
+        _ws_row("REC-CEO", owner="ceo-sol"),
+        _ws_row("UNREC-OPS", owner="ops"),
+        _ws_row("UNREC-PROSE", owner="Eval-OS session (COO Fable lane)"),
+        _ws_row("UNREC-EMPTY", owner=""),
+    ])
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    doc = proj.project_autonomy(snap, generated_at="G", unmapped_responsibilities=unmapped)
+
+    assert doc["unmapped_responsibilities"] == [
+        {"responsibility_ref": "WS:UNREC-EMPTY", "reason": "owner_not_a_recognized_seat"},
+        {"responsibility_ref": "WS:UNREC-OPS", "reason": "owner_not_a_recognized_seat"},
+        {"responsibility_ref": "WS:UNREC-PROSE", "reason": "owner_not_a_recognized_seat"},
+    ]
+    mapped_refs = {c["responsibility_ref"] for c in doc["responsibilities"]}
+    assert mapped_refs == {"WS:REC-CHAIRMAN", "WS:REC-CEO"}
+    unmapped_refs = {row["responsibility_ref"] for row in doc["unmapped_responsibilities"]}
+    assert mapped_refs.isdisjoint(unmapped_refs)
+
+    doc_text = repr(doc["unmapped_responsibilities"])
+    assert "ops" not in doc_text
+    assert "Eval-OS" not in doc_text
+    assert "Fable" not in doc_text
+    assert "COO" not in doc_text
+
+
+def test_unmapped_responsibilities_do_not_affect_other_cards_counts_freshness_or_actionability():
+    """The presence of unmapped rows has zero effect on any card's
+    ``query_status``, ``is_actionable``, ``actionability_reason``,
+    ``freshness`` or on the document's ``counts`` — the whole document is
+    identical whether or not ``unmapped_responsibilities`` is supplied,
+    except for the ``unmapped_responsibilities`` key itself."""
+    ref = "WS:UNCHANGED"
+    resp = _responsibility(ref=ref, root_job_id="JOB-X")
+    att = _attention(attention_id="ATT-X", ref=ref, target="CEO")
+    snap = _snapshot(responsibilities=(resp,), attention=(att,))
+
+    doc_without = proj.project_autonomy(snap, generated_at="G")
+    doc_with = proj.project_autonomy(
+        snap,
+        generated_at="G",
+        unmapped_responsibilities=[
+            {"responsibility_ref": "WS:SOME-UNMAPPED", "reason": "owner_not_a_recognized_seat"},
+        ],
+    )
+
+    assert doc_without["unmapped_responsibilities"] == []
+    assert doc_with["unmapped_responsibilities"] == [
+        {"responsibility_ref": "WS:SOME-UNMAPPED", "reason": "owner_not_a_recognized_seat"},
+    ]
+
+    without_sans_key = {k: v for k, v in doc_without.items() if k != "unmapped_responsibilities"}
+    with_sans_key = {k: v for k, v in doc_with.items() if k != "unmapped_responsibilities"}
+    assert without_sans_key == with_sans_key
+    assert doc_with["counts"] == doc_without["counts"]
+
+
+# ---------------------------------------------------------------------------
+# Adversarial-review repair packet, 2026-09-01 — five fixes found by an
+# adversarial review that blocked the merge.  See the module docstring's
+# "Fix 1"/"Fix 2"/"Fix 3"/"Fix 4"/"Fix 5" annotations for the full account
+# of each defect and its correction.
+# ---------------------------------------------------------------------------
+
+# --- Fix 1: real staleness --------------------------------------------------
+
+def test_fix1_stale_agent_os_artifact_yields_stale_card_and_counts_stale():
+    """The production defect this fix closes: an Agent OS artifact observed
+    well outside the freshness budget (48h) before the compositor's own
+    generated_at used to read freshness "current" with counts.stale == 0
+    and could even be actionable.  Now it reads "stale", the card is not
+    actionable (reason stale_history), and counts.stale counts it."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FIX1-STALE", owner="chairman", status="active")],
+        generated_at="2026-08-20T00:00:00Z",  # nine days before reference
+    )
+    reference_at = "2026-08-29T00:00:00Z"
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at=reference_at,
+    )
+    doc = proj.project_autonomy(snap, generated_at=reference_at)
+    card = _card(doc, "WS:FIX1-STALE")
+
+    assert card["freshness"] == "stale"
+    assert card["is_actionable"] is False
+    assert card["actionability_reason"] == "stale_history"
+    assert doc["counts"]["stale"] == 1
+    assert doc["counts"]["actionable"] == 0
+
+
+def test_fix1_agent_os_artifact_within_budget_stays_current():
+    """An observation inside the 48h freshness budget stays current."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FIX1-FRESH", owner="chairman", status="active")],
+        generated_at="2026-08-30T12:00:00Z",  # twelve hours before reference
+    )
+    reference_at = "2026-08-31T00:00:00Z"
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at=reference_at,
+    )
+    doc = proj.project_autonomy(snap, generated_at=reference_at)
+    card = _card(doc, "WS:FIX1-FRESH")
+
+    assert card["freshness"] == "current"
+    assert doc["counts"]["stale"] == 0
+
+
+@pytest.mark.parametrize(
+    "bad_generated_at", [None, "", "not-a-timestamp", 12345, "2026-13-99T00:00:00Z"]
+)
+def test_fix1_absent_or_unparseable_observed_at_is_unknown_never_current(bad_generated_at):
+    """An absent or unparseable observed_at reads freshness "unknown" —
+    never "current" (the old, wrong default for any non-empty string)."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FIX1-UNKNOWN", owner="chairman", status="active")],
+        generated_at=bad_generated_at,
+    )
+    reference_at = "2026-08-31T00:00:00Z"
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at=reference_at,
+    )
+    doc = proj.project_autonomy(snap, generated_at=reference_at)
+    card = _card(doc, "WS:FIX1-UNKNOWN")
+
+    assert card["freshness"] == "unknown"
+    assert card["freshness"] != "current"
+
+
+def test_fix1_unparseable_reference_timestamp_also_reads_unknown_never_current():
+    """When the injected reference itself cannot be parsed, currency cannot
+    be asserted either — unknown, not a silent fall-back to "current"."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FIX1-BAD-REFERENCE", owner="chairman", status="active")],
+        generated_at="2026-08-30T00:00:00Z",
+    )
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at="not-a-real-timestamp",
+    )
+    doc = proj.project_autonomy(snap, generated_at="not-a-real-timestamp")
+    card = _card(doc, "WS:FIX1-BAD-REFERENCE")
+
+    assert card["freshness"] == "unknown"
+
+
+def test_fix1_freshness_computation_is_deterministic():
+    """Same inputs in -> byte-identical output, twice, including the new
+    age-based freshness computation (Fix 1 must stay pure and clock-free)."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FIX1-DETERM", owner="chairman", status="active")],
+        generated_at="2026-08-20T00:00:00Z",
+    )
+    reference_at = "2026-08-29T00:00:00Z"
+
+    def _run():
+        snap = proj.build_autonomy_snapshot(
+            inbox=None, boot_packet=None, active_builds=None,
+            agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+            generated_at=reference_at,
+        )
+        doc = proj.project_autonomy(snap, generated_at=reference_at)
+        return json.dumps(doc, sort_keys=True)
+
+    assert _run() == _run()
+
+
+# --- Fix 2: an unmapped-but-blocked workstream keeps its declared block ----
+
+def test_fix2_unmapped_blocked_needs_ceo_true_gets_declared_blocker_with_ceo_seat():
+    """A blocked workstream whose owner is unrecognized AND whose
+    ``needs_ceo`` is literally ``True`` still names the CEO seat on its
+    unmapped receipt — no raw owner prose leaks."""
+    agent_os_state = _agent_os_state([
+        _ws_row(
+            "FIX2-CEO-BLOCKED", owner="grok-cn-c",
+            blocked_by=["operator: needs CEO sign-off"], needs_ceo=True,
+        )
+    ])
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+
+    assert len(unmapped) == 1
+    row = unmapped[0]
+    assert row["responsibility_ref"] == "WS:FIX2-CEO-BLOCKED"
+    assert row["reason"] == "owner_not_a_recognized_seat"
+    assert row["declared_blocker"]["code"] == "blocked_by"
+    assert row["declared_blocker"]["target_seat"] == "ceo"
+    assert "needs CEO sign-off" in row["declared_blocker"]["explanation"]
+    assert "grok-cn-c" not in repr(row)
+
+
+def test_fix2_unmapped_row_end_to_end_through_project_autonomy_carries_no_card():
+    """The unmapped-but-blocked row's declared_blocker is visible via
+    unmapped_responsibilities even after the whole document is composed —
+    it never gets a real card (owner still unrecognized), but the block is
+    not lost."""
+    agent_os_state = _agent_os_state([
+        _ws_row(
+            "FIX2-END-TO-END", owner="ops",
+            blocked_by=["operator: rotate the credential"],
+        )
+    ])
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    declared_blockers = proj.declared_blockers_from_agent_os_state(agent_os_state)
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    doc = proj.project_autonomy(
+        snap, generated_at="G",
+        declared_blockers=declared_blockers,
+        unmapped_responsibilities=unmapped,
+    )
+
+    assert doc["responsibilities"] == []
+    assert len(doc["unmapped_responsibilities"]) == 1
+    row = doc["unmapped_responsibilities"][0]
+    assert row["responsibility_ref"] == "WS:FIX2-END-TO-END"
+    assert row["declared_blocker"]["target_seat"] is None
+    assert "rotate the credential" in row["declared_blocker"]["explanation"]
+
+
+# --- Fix 3: root_job_id None with real runtime evidence must not neutralize -
+
+def test_fix3_root_job_id_none_with_a_runtime_fact_is_not_neutralized():
+    """Even though get_current_runtime always REFUSES with the SAME sole
+    runtime_root_missing issue when root_job_id is None (it short-circuits
+    before ever looking at candidates), a genuine RuntimeFact attached to
+    this responsibility must keep the card REFUSED, not silently OK."""
+    ref = "WS:FIX3-HIDDEN-RUNTIME"
+    resp = _responsibility(ref=ref, root_job_id=None)
+    worker = _runtime(ref=ref, seat="WORKER", attempt_id="ATT-FIX3-A")
+    snap = _snapshot(responsibilities=(resp,), runtimes=(worker,))
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+    card = _card(doc, ref)
+
+    assert card["query_status"] == "refused"
+    assert card["is_actionable"] is False
+    assert card["current_worker"] is None  # still unanswerable via this call
+
+
+def test_fix3_root_job_id_none_with_effect_unknown_runtime_is_not_neutralized():
+    """The EFFECT_UNKNOWN case named explicitly in the fix: a runtime fact
+    that would otherwise REFUSE via reconciliation_required is just as
+    invisible to get_current_runtime once root_job_id is None — it must
+    not be waved through as OK either."""
+    ref = "WS:FIX3-HIDDEN-EFFECT-UNKNOWN"
+    resp = _responsibility(ref=ref, root_job_id=None)
+    worker = _runtime(
+        ref=ref, seat="WORKER", attempt_id="ATT-FIX3-B", effect_state="EFFECT_UNKNOWN",
+    )
+    snap = _snapshot(responsibilities=(resp,), runtimes=(worker,))
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+    card = _card(doc, ref)
+
+    assert card["query_status"] == "refused"
+    assert card["is_actionable"] is False
+
+
+def test_fix3_root_job_id_none_and_genuinely_no_runtime_still_neutralizes():
+    """Regression guard: the ordinary, genuinely-empty case (no runtimes
+    anywhere in the snapshot) must still neutralize to OK — Fix 3 tightens
+    the guard, it does not remove the routine-absence behavior Change A
+    added it for."""
+    ref = "WS:FIX3-GENUINELY-EMPTY"
+    resp = _responsibility(ref=ref, root_job_id=None)
+    snap = _snapshot(responsibilities=(resp,))  # runtimes=() by default
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+    card = _card(doc, ref)
+
+    assert card["query_status"] == "ok"
+
+
+# --- Fix 4: source-failure code colliding with runtime_root_missing --------
+
+def test_fix4_source_failure_coded_runtime_root_missing_does_not_neutralize():
+    """A caller-authored SourceFailure whose code happens to collide with
+    "runtime_root_missing" — for an entirely unrelated outage (here,
+    SURFACE_BINDINGS, an owner get_current_runtime never even consults) —
+    must not silently neutralize a genuinely root_job_id-less card's own
+    REFUSED result to OK, mirroring _CardIssues's own collision guard."""
+    ref = "WS:FIX4-COLLISION-ROOT-MISSING"
+    resp = _responsibility(ref=ref, root_job_id=None)
+    failure = _failure(
+        owner="SURFACE_BINDINGS", code="runtime_root_missing",
+        explanation="An unrelated surface-bindings outage sharing this code string.",
+        source_ref="surface_bindings:collide-root-missing-1",
+    )
+    snap = _snapshot(responsibilities=(resp,), source_failures=(failure,))
+
+    doc = proj.project_autonomy(snap, generated_at="G")
+    card = _card(doc, ref)
+
+    assert card["query_status"] == "refused"
+    assert card["is_actionable"] is False
+
+
+# --- Fix 5: an unreadable row gets a bounded receipt, never silence --------
+
+def test_fix5_blank_key_row_gets_row_unreadable_receipt():
+    agent_os_state = _agent_os_state([
+        {"key": "", "title": "Has a title but a blank key", "status": "active"},
+    ])
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    assert unmapped == (
+        {"responsibility_ref": None, "reason": "row_unreadable"},
+    )
+
+
+def test_fix5_missing_key_row_gets_row_unreadable_receipt():
+    agent_os_state = _agent_os_state([
+        {"title": "No key field at all", "status": "active"},
+    ])
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    assert unmapped == (
+        {"responsibility_ref": None, "reason": "row_unreadable"},
+    )
+
+
+def test_fix5_blank_title_with_valid_key_gets_row_unreadable_receipt_with_ref():
+    agent_os_state = _agent_os_state([
+        _ws_row("FIX5-BLANK-TITLE", title="   ", owner="chairman"),
+    ])
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    assert unmapped == (
+        {"responsibility_ref": "WS:FIX5-BLANK-TITLE", "reason": "row_unreadable"},
+    )
+
+
+def test_fix5_construction_raise_gets_row_unreadable_receipt():
+    """A status containing whitespace passes the mapper's own blank-string
+    checks but fails ResponsibilityFact.__post_init__'s _require_text — the
+    construction-raises path this fix also covers, distinct from the
+    key/title-blank path above."""
+    agent_os_state = _agent_os_state([
+        _ws_row("FIX5-BAD-STATUS", owner="chairman", status="needs review"),
+    ])
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    assert snap.responsibilities == ()
+
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    assert unmapped == (
+        {"responsibility_ref": "WS:FIX5-BAD-STATUS", "reason": "row_unreadable"},
+    )
+
+
+def test_fix5_unreadable_rows_never_suppress_a_sibling_rows_mapping():
+    """One unreadable row must never suppress a genuinely readable sibling
+    row in the same artifact."""
+    agent_os_state = _agent_os_state([
+        {"title": "No key at all", "status": "active"},
+        _ws_row("FIX5-SIBLING-OK", owner="chairman", status="active"),
+    ])
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    assert len(snap.responsibilities) == 1
+    assert snap.responsibilities[0].responsibility_ref == "WS:FIX5-SIBLING-OK"
+
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    assert unmapped == (
+        {"responsibility_ref": None, "reason": "row_unreadable"},
+    )

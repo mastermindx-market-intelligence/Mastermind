@@ -1215,6 +1215,7 @@
   };
   var AU_TURN_REASON = {
     blocker_targets_seat: "A recorded gate names this seat.",
+    agent_os_declared_blocker_targets_seat: "Agent OS declared this workstream blocked, naming this seat.",
     attention_targets_seat: "A canonical attention fact names this seat.",
     worker_runtime_active: "A worker attempt is still running.",
     no_owed_turn_signal: "No canonical source records whose move comes next.",
@@ -1287,9 +1288,13 @@
   }
 
   // Reuses the address-book law exactly: one unambiguous, openable destination
-  // for the seat that owes the move, or nothing at all.
+  // for the seat that owes the move, or nothing at all. A hold card (see
+  // auIsHold) never yields a binding: the gate already tells the Chairman
+  // the effect is unconfirmed, so no provider-actuating control may render
+  // here either, regardless of who owes the turn.
   function auOwedBinding(card) {
     if (REMOTE_READ_ONLY) return null;
+    if (auIsHold(card)) return null;
     var seat = auOwedSeat(card);
     if (seat === "unknown") return null;
     var work = STATE.workByRef[card.responsibility_ref];
@@ -1338,7 +1343,7 @@
   function auMarks(card) {
     var marks = el("div", { className: "ccr-au-marks" });
     if (card.chairman_decision_required === true) marks.appendChild(chip("YOUR CALL", "is-brass"));
-    if (card.is_actionable === true) marks.appendChild(chip("LIVE", "is-slate"));
+    if (card.is_actionable === true && !auIsHistory(card)) marks.appendChild(chip("LIVE", "is-slate"));
     else if (auIsHistory(card)) marks.appendChild(chip("HISTORY", "is-dim"));
     else marks.appendChild(chip("NOT ACTIONABLE", "is-dim"));
     marks.appendChild(auPlacementChip(card));
@@ -1348,6 +1353,27 @@
     if (status) marks.appendChild(chip(status.text, status.variant));
     if ((card.disagreements || []).length) marks.appendChild(chip("SOURCE DRIFT", "is-danger"));
     return marks;
+  }
+
+  // A declared_blocker is plain data Agent OS itself recorded — never a
+  // Steward-owned gate (card.blocker) and never merged with one. It is
+  // rendered as its own, distinctly labelled note so the Chairman can
+  // always tell which system is making the claim.
+  function auDeclaredBlockerNote(declared) {
+    var note = el("div", { className: "ccr-au-declared" });
+    note.appendChild(el("span", { text: "Agent OS declared", className: "ccr-au-declared-label" }));
+    note.appendChild(el("p", {
+      text: safeText(declared.explanation, "Agent OS recorded a blocker without an explanation."),
+      className: "ccr-au-declared-text",
+    }));
+    var seatWords = declared.target_seat
+      ? safeText(AU_SEAT_SHORT[declared.target_seat], safeText(declared.target_seat))
+      : "no seat named";
+    note.appendChild(el("p", {
+      text: safeText(declared.code) + " · holds " + seatWords,
+      className: "ccr-au-declared-code",
+    }));
+    return note;
   }
 
   function auRow(card) {
@@ -1396,6 +1422,7 @@
     } else {
       gate.appendChild(el("p", { text: "No recorded gate. Conditions are still being watched.", className: "ccr-au-gate-text is-quiet" }));
     }
+    if (card.declared_blocker) gate.appendChild(auDeclaredBlockerNote(card.declared_blocker));
     if (auIsHold(card)) {
       gate.appendChild(el("p", {
         text: "Effect not confirmed — retry and failover are not permitted until a canonical source reads the effect.",
@@ -1517,8 +1544,19 @@
   function auGapFold(projection) {
     var failures = projection.source_failures || [];
     var issues = projection.issues || [];
-    var total = failures.length + issues.length;
+    var unmapped = projection.unmapped_responsibilities || [];
+    // readGaps counts sources that failed to answer at all. total additionally
+    // counts suppressed (unmapped-owner) workstreams, because a surface
+    // carrying hidden workstreams must never summarise itself as zero and
+    // must never claim every source answered — that would be false even
+    // though no read literally failed.
+    var readGaps = failures.length + issues.length;
+    var total = readGaps + unmapped.length;
     var fold = el("details", { className: "ccr-fold ccr-au-gaps" });
+    // When the only anomaly is suppressed workstreams (no read failures or
+    // issues), the fold must not stay collapsed-by-default: that is exactly
+    // the state that must never read as silence.
+    if (!readGaps && unmapped.length) fold.open = true;
     var summary = el("summary");
     summary.appendChild(el("span", { text: "What could not be read" }));
     summary.appendChild(el("span", { text: String(total), className: "ccr-count" }));
@@ -1526,11 +1564,11 @@
     var wrap = el("div");
     wrap.appendChild(el("p", {
       text: total
-        ? "These reads did not answer. Losing a source removes detail; it never changes what the canonical sources above already recorded."
+        ? "These reads did not answer, or workstreams were hidden below. Losing a source removes detail; it never changes what the canonical sources above already recorded."
         : "Every contributing source answered.",
       className: "ccr-au-gap-note",
     }));
-    if (total) {
+    if (readGaps) {
       var list = el("ul", { className: "ccr-au-gap-list" });
       failures.forEach(function (row) {
         var li = el("li", { className: "ccr-row" });
@@ -1551,6 +1589,26 @@
         list.appendChild(li);
       });
       wrap.appendChild(list);
+    }
+    // Not a source failure and not an alarm: a workstream whose recorded
+    // owner is not a recognized seat is simply not shown as a card. Render
+    // nothing when there are none.
+    if (unmapped.length) {
+      wrap.appendChild(el("p", {
+        text: "These workstreams are not shown as responsibility cards because their recorded owner is not a recognized seat. This does not affect any responsibility shown above.",
+        className: "ccr-au-gap-note",
+      }));
+      var unmappedList = el("ul", { className: "ccr-au-gap-list" });
+      unmapped.forEach(function (row) {
+        var li = el("li", { className: "ccr-row" });
+        li.appendChild(el("span", {
+          text: safeText(row.responsibility_ref, "snapshot-wide") + " · " + safeText(row.reason, "owner_not_a_recognized_seat"),
+          className: "ccr-row-title ccr-row-id",
+        }));
+        li.appendChild(chip("NOT MAPPED", "is-dim"));
+        unmappedList.appendChild(li);
+      });
+      wrap.appendChild(unmappedList);
     }
     fold.appendChild(wrap);
     return fold;
@@ -1620,9 +1678,20 @@
     });
     detailRail(rails, "Gate", function (node) {
       var blocker = card.blocker || null;
-      if (!blocker) { detailLine(node, "No recorded gate. Conditions are still being watched.", false); return; }
-      detailLine(node, safeText(blocker.explanation, "A gate is recorded without an explanation."), false);
-      detailLine(node, "code " + safeText(blocker.code) + " · holds " + safeText(blocker.target_seat) + " · effect " + safeText(blocker.effect_state), true);
+      if (blocker) {
+        detailLine(node, safeText(blocker.explanation, "A gate is recorded without an explanation."), false);
+        detailLine(node, "code " + safeText(blocker.code) + " · holds " + safeText(AU_SEAT_SHORT[blocker.target_seat], safeText(blocker.target_seat)) + " · effect " + safeText(blocker.effect_state), true);
+      } else if (!card.declared_blocker) {
+        detailLine(node, "No recorded gate. Conditions are still being watched.", false);
+      }
+      var declaredBlocker = card.declared_blocker || null;
+      if (declaredBlocker) {
+        detailLine(node, "Agent OS declared: " + safeText(declaredBlocker.explanation, "no explanation recorded"), false);
+        var seatWords = declaredBlocker.target_seat
+          ? safeText(AU_SEAT_SHORT[declaredBlocker.target_seat], safeText(declaredBlocker.target_seat))
+          : "no seat named";
+        detailLine(node, "code " + safeText(declaredBlocker.code) + " · holds " + seatWords, true);
+      }
     });
     detailRail(rails, "Placement", function (node) {
       var placement = card.placement_state || {};
@@ -1665,6 +1734,10 @@
     else receiptSection.appendChild(el("p", { text: "No contributing source is recorded for this responsibility.", className: "ccr-empty-line" }));
     var turnRefs = auReceiptFold("Turn evidence", (card.owed_turn || {}).source_refs);
     if (turnRefs) receiptSection.appendChild(turnRefs);
+    if (card.declared_blocker) {
+      var declaredReceipt = auReceiptFold("Agent OS declared blocker", [card.declared_blocker.source]);
+      if (declaredReceipt) receiptSection.appendChild(declaredReceipt);
+    }
     var cardIssues = ((STATE.autonomy || {}).issues || []).filter(function (row) {
       return row && row.responsibility_ref === card.responsibility_ref;
     });

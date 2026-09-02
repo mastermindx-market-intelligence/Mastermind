@@ -449,9 +449,43 @@ def test_x1_autonomy_renders_only_from_the_canonical_projection_key() -> None:
     assert "function renderAutonomy(projection)" in block
     assert 'var mount = document.getElementById("ccr-autonomy")' in block
     assert "if (!mount) return;" in block
-    # Presentation only: the section never talks to the server or re-derives truth.
-    for forbidden in ("postJSON", "getJSON", "/api/", "fetch(", "Date.now()", "Math.random"):
+    # The section never fabricates freshness or randomness locally, and it
+    # never defines a raw transport call of its own — no section-local
+    # fetch()/postJSON()/getJSON() literal, no invented Date.now()/
+    # Math.random() reading. This is narrower than "never talks to the
+    # server": the section's one legitimate write path (opening a binding)
+    # is asserted, with its indirection traced, below.
+    for forbidden in ("postJSON(", "getJSON(", "fetch(", "Date.now()", "Math.random("):
         assert forbidden not in block
+
+
+def test_x1_autonomy_writes_only_through_the_audited_binding_open_never_ad_hoc() -> None:
+    """The previous version of this test asserted "the section never talks
+    to the server or re-derives truth" by grepping literal spellings inside
+    the sliced autonomy block alone — but the section's binding-open action
+    (auOwedBinding -> openBindingButton -> openBinding -> postJSON) and its
+    post-open refresh (loadState -> getJSON) are all defined OUTSIDE that
+    slice and reached only by name, so that assertion proved nothing about
+    the real call chain. This test traces the indirection instead: the
+    section calls openBindingButton by name, and openBindingButton's own
+    definition (elsewhere in the file) is the only place that reaches
+    postJSON/getJSON on the section's behalf."""
+    source = JS.read_text(encoding="utf-8")
+    block = _autonomy_js()
+
+    # The section's only write-capable call site.
+    assert "openBindingButton(binding," in block
+
+    helper_start = source.index("function openBindingButton(binding, label)")
+    helper_end = source.index("function allBindings()")
+    helper = source[helper_start:helper_end]
+    assert "openBinding(binding, null, btn)" in helper
+    assert "loadState()" in helper
+
+    open_start = source.index("function openBinding(binding")
+    open_end = source.index("function openBindingButton")
+    open_fn = source[open_start:open_end]
+    assert 'postJSON("/api/open"' in open_fn
 
 
 def test_x1_autonomy_absent_projection_is_calm_and_truthful_not_an_error() -> None:
@@ -475,7 +509,13 @@ def test_x1_autonomy_never_presents_a_stale_card_as_live() -> None:
     block = _autonomy_js()
     assert 'return card.actionability_reason === "stale_history" || card.freshness === "stale";' in block
     marks = block[block.index("function auMarks(card)") : block.index("function auRow(card)")]
-    assert 'if (card.is_actionable === true) marks.appendChild(chip("LIVE"' in marks
+    # LIVE is not gated on is_actionable alone.  The projection currently
+    # refuses to mark a stale card actionable, but the UI must not depend on
+    # a server invariant it does not itself restate: a card that reads as
+    # history can never also wear the LIVE chip, whatever the server sent.
+    live = marks[marks.index('chip("LIVE"') - 120 : marks.index('chip("LIVE"')]
+    assert "card.is_actionable === true" in live
+    assert "!auIsHistory(card)" in live
     assert 'else if (auIsHistory(card)) marks.appendChild(chip("HISTORY"' in marks
     assert 'else marks.appendChild(chip("NOT ACTIONABLE"' in marks
 
@@ -553,6 +593,35 @@ def test_x1_autonomy_source_loss_is_bounded_and_named() -> None:
         "sources above already recorded."
     ) in gaps
     assert "Every contributing source answered." in gaps
+
+
+def test_x1_autonomy_unmapped_responsibilities_render_bounded_and_empty_safe() -> None:
+    """Blast-radius repair packet, 2026-09-01: an unrecognized-owner
+    workstream is surfaced inside the existing bounded "what could not be
+    read" fold — never as a card, never as an alarm — with copy naming why
+    it is absent and stating it does not affect anything shown above, and
+    it renders nothing at all when the list is empty."""
+    block = _autonomy_js()
+    gaps = block[block.index("function auGapFold(projection)") : block.index("function auReceiptFold")]
+
+    assert "projection.unmapped_responsibilities" in gaps
+    assert "row.responsibility_ref" in gaps
+    assert "row.reason" in gaps
+    assert (
+        "These workstreams are not shown as responsibility cards because "
+        "their recorded owner is not a recognized seat. This does not "
+        "affect any responsibility shown above."
+    ) in gaps
+
+    # Rendered only inside a guard on unmapped.length — nothing when empty.
+    assert "if (unmapped.length) {" in gaps
+    unmapped_block = gaps[gaps.index("if (unmapped.length) {") :]
+    assert 'chip("NOT MAPPED", "is-dim")' in unmapped_block
+    # Bounded, never an alarm: the unmapped rows never borrow the
+    # SOURCE-FAILED danger styling used for genuine source outages above.
+    assert "is-danger" not in unmapped_block
+    # The raw owner value is never rendered here either.
+    assert "row.owner" not in unmapped_block
 
 
 def test_x1_autonomy_disagreements_keep_both_readings_and_both_owners() -> None:
@@ -645,3 +714,42 @@ def test_x1_autonomy_keeps_the_house_semantic_colour_law() -> None:
     # No parallel palette: only tokens, never raw product hex.
     body = "\n".join(line for line in section.splitlines() if not line.strip().startswith("*"))
     assert "#" not in body
+
+
+def test_x1_autonomy_declared_blocker_is_rendered_and_labelled_as_agent_os() -> None:
+    """``declared_blocker`` (bug-fix packet, 2026-09-01) is plain data,
+    honestly Agent-OS-owned — never the Steward-owned ``blocker`` field.
+    The gate area and the detail drawer must render it from its own card
+    field, visibly labelled as declared by Agent OS, and it must reuse the
+    house tokens (never --ok, never raw hex) rather than a parallel
+    palette."""
+    block = _autonomy_js()
+
+    row = block[block.index("function auRow(card)") : block.index("function auLedger(projection)")]
+    assert "card.declared_blocker" in row
+    assert "auDeclaredBlockerNote" in row
+    # Rendered inside the same gate area as the Steward-owned blocker, from
+    # a distinct card field — never merged into `blocker`.
+    assert "var blocker = card.blocker || null;" in row
+    assert "gate.appendChild(auDeclaredBlockerNote(card.declared_blocker))" in row
+
+    note_fn = block[block.index("function auDeclaredBlockerNote(declared)") : block.index("function auRow(card)")]
+    assert "Agent OS declared" in note_fn
+    assert "declared.target_seat" in note_fn
+
+    detail = block[block.index("function renderAutonomyDetail(card)") : block.index("function openAutonomyDetail")]
+    assert "card.declared_blocker" in detail
+    assert "Agent OS declared:" in detail
+    # The receipt fold shows it alongside the card's other source receipts.
+    assert 'auReceiptFold("Agent OS declared blocker", [card.declared_blocker.source])' in detail
+
+    styles = CSS.read_text(encoding="utf-8")
+    assert ".ccr-au-declared {" in styles
+    assert ".ccr-au-declared-label {" in styles
+    section = styles[styles.index("/* autonomy — responsibilities") : styles.index("\n/* responsive */")]
+    assert "--ok" not in section
+    declared_rules = "\n".join(
+        line for line in section.splitlines()
+        if ".ccr-au-declared" in line and not line.strip().startswith("*")
+    )
+    assert "#" not in declared_rules

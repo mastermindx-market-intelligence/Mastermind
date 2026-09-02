@@ -52,6 +52,12 @@
   --au-gate-rule: 2px;
   --au-hold-weight: 500;
   --au-body-ink: var(--muted);
+  /* Section-owned secondary ink for the 7.5-11px reference/label layer
+   * (refs, seat names, ledger names, quiet mono, gate/declared codes, gap
+   * notes). Bare --faint reads fine on this dark ground but fails 4.5:1 in
+   * light (measured 2.87:1) — this token carries its own value per theme so
+   * the global --faint token, used elsewhere on the page, is untouched. */
+  --au-secondary-ink: #828485;
   --au-quiet-border: 1px dashed color-mix(in srgb, var(--line) 88%, transparent);
 
   --shadow-card: inset 0 1px 0 rgba(255,255,255,.025), 0 16px 44px -36px rgba(0,0,0,.9);
@@ -104,6 +110,9 @@ html[data-theme="light"] {
   --au-gate-rule: 3px;
   --au-hold-weight: 600;
   --au-body-ink: var(--text);
+  /* Measured >=4.5:1 against both light --panel (#fbfbf8) and light --bg
+   * (#eef0ee) — the two grounds this token renders on in this section. */
+  --au-secondary-ink: #636760;
   --au-quiet-border: 1px dashed var(--line);
   --shadow-card: 0 1px 2px rgba(28,35,28,.045), 0 18px 40px -34px rgba(30,40,30,.25);
   --shadow-drawer: -24px 0 60px rgba(30,40,30,.16);
@@ -816,7 +825,7 @@ kbd {
   font-size: 9px;
   letter-spacing: .1em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--au-secondary-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -875,7 +884,7 @@ kbd {
 }
 .ccr-au-id { min-width: 0; }
 .ccr-au-title { color: var(--text-strong); font-size: 13.5px; font-weight: 630; letter-spacing: -.012em; line-height: 1.3; }
-.ccr-au-ref { margin-top: 4px; font-family: var(--font-mono); font-size: 9px; color: var(--faint); overflow-wrap: anywhere; }
+.ccr-au-ref { margin-top: 4px; font-family: var(--font-mono); font-size: 9px; color: var(--au-secondary-ink); overflow-wrap: anywhere; }
 .ccr-au-state { margin-top: 3px; color: var(--muted); font-size: 10.5px; }
 
 .ccr-au-turn { min-width: 0; }
@@ -925,7 +934,7 @@ kbd {
   font-size: 7.5px;
   letter-spacing: 0;
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--au-secondary-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -935,8 +944,8 @@ kbd {
 
 .ccr-au-read { min-width: 0; display: grid; gap: 12px; }
 .ccr-au-gate-text { color: var(--au-body-ink); font-size: 11.5px; line-height: 1.42; }
-.ccr-au-gate-text.is-quiet { color: var(--faint); font-size: 11px; }
-.ccr-au-gate-code { margin-top: 4px; font-family: var(--font-mono); font-size: 8.5px; color: var(--faint); overflow-wrap: anywhere; }
+.ccr-au-gate-text.is-quiet { color: var(--au-secondary-ink); font-size: 11px; }
+.ccr-au-gate-code { margin-top: 4px; font-family: var(--font-mono); font-size: 8.5px; color: var(--au-secondary-ink); overflow-wrap: anywhere; }
 .ccr-au-hold {
   margin-top: 9px;
   padding: 8px 10px;
@@ -949,7 +958,34 @@ kbd {
   line-height: 1.4;
 }
 .ccr-au-mono { font-family: var(--font-mono); font-size: 9px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
-.ccr-au-mono.is-quiet { color: var(--faint); }
+.ccr-au-mono.is-quiet { color: var(--au-secondary-ink); }
+
+/* declared_blocker: Agent OS's own honest "workstream is blocked" signal —
+ * explicitly NOT the Steward-owned gate above, so it is drawn as a distinct,
+ * labelled note rather than folded into the gate text the Chairman already
+ * reads as canonical. Reuses the house slate accent, never the success
+ * token and never a raw hex value, so it reads as informational, not as a
+ * verified/live state. */
+.ccr-au-declared {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--line);
+}
+.ccr-au-declared-label {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--slate) 30%, var(--line));
+  background: var(--slate-wash);
+  color: var(--slate-ink);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.ccr-au-declared-text { color: var(--au-body-ink); font-size: 11px; line-height: 1.4; }
+.ccr-au-declared-code { margin-top: 4px; font-family: var(--font-mono); font-size: 8.5px; color: var(--au-secondary-ink); overflow-wrap: anywhere; }
 
 .ccr-au-right { min-width: 0; display: grid; gap: 9px; justify-items: end; }
 .ccr-au-marks { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
@@ -972,11 +1008,15 @@ kbd {
 .ccr-au-row.is-history .ccr-au-title { color: var(--muted); font-weight: 570; }
 .ccr-au-row.is-history .ccr-au-turn-name { color: var(--faint); font-weight: 570; }
 .ccr-au-row.is-history .ccr-au-gate-text,
-.ccr-au-row.is-history .ccr-au-turn-reason { color: var(--faint); }
+.ccr-au-row.is-history .ccr-au-turn-reason,
+.ccr-au-row.is-history .ccr-au-declared-text { color: var(--au-secondary-ink); }
 
 .ccr-au-gaps { border-top: 1px solid var(--hairline); }
-.ccr-au-gap-note { color: var(--faint); font-size: 10.5px; line-height: 1.42; max-width: 78ch; }
+.ccr-au-gap-note { color: var(--au-secondary-ink); font-size: 10.5px; line-height: 1.42; max-width: 78ch; }
 .ccr-au-gap-list { display: grid; gap: 3px; margin-top: 9px; }
+/* A second gap-note (e.g. unmapped responsibilities) after a gap-list reads
+   as its own bounded sub-report, not a continuation of the row above it. */
+.ccr-au-gap-list + .ccr-au-gap-note { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
 .ccr-au-detail-sub { margin-top: 5px; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
 
 /* absent projection — calm, not an alarm */
@@ -987,7 +1027,7 @@ kbd {
   background: color-mix(in srgb, var(--panel) 45%, transparent);
 }
 .ccr-au-quiet-title { color: var(--muted); font-family: var(--font-display); font-size: 15px; font-weight: 620; letter-spacing: -.02em; }
-.ccr-au-quiet-text { margin-top: 6px; max-width: 68ch; color: var(--faint); font-size: 11.5px; line-height: 1.5; }
+.ccr-au-quiet-text { margin-top: 6px; max-width: 68ch; color: var(--au-secondary-ink); font-size: 11.5px; line-height: 1.5; }
 
 /* responsive */
 @media (max-width: 1280px) {

@@ -25,6 +25,18 @@ ExecutiveStewardSnapshot` methods (:meth:`list_responsibilities`,
 never by reading ``snapshot.responsibilities`` / ``.attention`` / ``.runtimes``
 / ``.blockers`` / ``.surfaces`` directly (``snapshot.source_failures`` is the
 one exception: §3 of the frozen spec names it as a direct top-level read).
+Fix 3 (adversarial-review repair packet, 2026-09-01) adds one narrow second
+exception, in the SAME spirit as the ``source_failures`` one: a bare
+existence check of ``snapshot.runtimes`` by ``responsibility_ref``/``seat``,
+used only by :func:`_neutral_if_routine_absence`'s ``has_runtime_evidence``
+parameter to verify — rather than assume — that a ``root_job_id``-less
+responsibility genuinely has no runtime evidence at all, since
+``get_current_runtime`` structurally cannot answer that question itself
+once ``root_job_id`` is ``None`` (see that function's own docstring for the
+full account).  This checks bare presence only — never seat-vs-root
+matching, never candidate selection, never any of the join semantics
+``get_current_runtime`` itself owns — so it does not duplicate Steward
+logic, only answer a question the Steward's own short-circuit cannot.
 ``SourceRef``, ``Freshness``, ``Seat``, ``EffectState``, ``SourceOwner`` and
 ``QueryStatus`` are imported from :mod:`control_plane.executive_steward`,
 never redefined.  ``CapacityState`` is Law #2's fifth named type but this
@@ -102,7 +114,17 @@ literal, unambiguous mechanical binding to the Steward's typed API):
    code="runtime_unknown", ...)``), the collision must never make a real
    outage vanish from ``issues`` — the same ``code not in
    source_failure_codes`` guard used for the ``EFFECT_UNKNOWN`` fix (point
-   2) applies here too.
+   2) applies here too.  A second, narrower repair packet (2026-09-01,
+   Change A) extends :func:`_neutral_if_routine_absence` itself (not
+   :data:`_ROUTINE_ABSENCE_ISSUE_CODES`) to also neutralize a
+   ``get_current_runtime`` result whose *only* issue is
+   ``runtime_root_missing`` — the routine "this Agent-OS-owned
+   responsibility has no Executive root job" absence — while leaving that
+   issue on the top-level ``issues`` list as a receipt and leaving every
+   other REFUSED (``reconciliation_required``/EFFECT_UNKNOWN, every
+   ``ambiguous_*`` join, ``runtime_root_mismatch``, or
+   ``runtime_root_missing`` alongside any other issue) refusing exactly as
+   before.  See that function's docstring for the exact guard.
 7. **card freshness folds every Steward-internal issue's sources by
    exclusion, not by an allowlist** (§4.1, amended by the Phase A repair
    packet, Repair A, 2026-09-01): the Steward's ambiguity, mismatch and
@@ -145,10 +167,175 @@ binding over the prose above where they differ:
   binding) issues — see point 7 above.  The frozen spec's original
   eight-code ``stale_*`` allowlist under-folded five residual paths; this
   is the exclusion the second adversarial review pass proved correct.
+
+Real-data mapper — ``build_autonomy_snapshot`` (Phase A wiring packet,
+2026-09-01)
+------------------------------------------------------------------------
+:func:`build_autonomy_snapshot` is a second pure public function, added by
+the packet that wires this projection to real Chairman Control Room data.
+It takes the exact same already-gathered plain-data inputs
+:func:`control_plane.chairman_control_room.compose_control_room` itself
+receives (``inbox``, ``boot_packet``, ``active_builds``, ``agent_os_state``,
+``runtime_jobs``, ``bindings``) and returns one
+:class:`~control_plane.executive_steward.ExecutiveStewardSnapshot`.  Same
+truthfulness law as the rest of this module: no I/O, no subprocess, no
+clock read, no environment read, no randomness, no mutation of inputs — and
+a fact is constructed only when every one of its required fields is
+genuinely present in the handed input; otherwise it is omitted and, where
+the gap is a systemic one rather than a single missing row, recorded as a
+:class:`~control_plane.executive_steward.SourceFailure` instead.
+
+:func:`declared_blockers_from_agent_os_state` is a third pure public
+function, added by a bug-fix packet (2026-09-01) that removes a false
+attribution the prior revision of this mapper committed — see the
+"BlockerFact is NEVER built" bullet under point 8 below for the full
+account.  It returns plain data (never a Steward fact), keyed by
+``responsibility_ref``, meant to be handed to :func:`project_autonomy`'s
+``declared_blockers`` parameter so each card can honestly carry a
+``declared_blocker`` field alongside — never merged into — the
+Steward-owned ``blocker`` field.
+
+Two more documented interpretive decisions (evaluated against the real
+input shapes: ``tests/fixtures/chairman_control_room/*.json`` and, for the
+one genuinely cross-repo question below, Macro's own
+``agentos/workstreams/*.md`` ``owner:`` front matter):
+
+8. **``ResponsibilityFact`` IS constructed here, from
+   ``agent_os_state["workstreams"][]`` rows' own structured fields;
+   ``BlockerFact`` is NEVER constructed from this source — ``RuntimeFact``
+   is still never constructed either (bug-fix packet, 2026-09-01,
+   correcting the prior revision of this note, which wrongly claimed a
+   ``BlockerFact`` was built here too).**
+   Verified against the real compiled artifact this mapper's caller
+   actually hands it (Macro's ``data/governance/agent_os_state.json``,
+   47 rows as of 2026-09-01) rather than only
+   ``tests/fixtures/chairman_control_room/agent_os_state_v1.json`` (whose
+   thin three-row shape — ``key``/``title``/``status``/``program``/
+   ``next_action`` only — is a test fixture, not evidence the real field
+   is absent):
+   * ``agent_os_state.v1``'s ``workstreams[]`` rows carry ``owner``
+     (closed-ish token in practice, but read here as arbitrary text —
+     see below), ``blocked_by`` (a list of structured blocker-reference
+     strings), and ``needs_ceo``, in addition to ``key``/``title``/
+     ``status``/``generated_at``.  A ``ResponsibilityFact`` is built from
+     ``key``/``title``/``status`` plus a seat derived from ``owner``
+     through the EXACT, CLOSED, case-sensitive
+     :data:`_ACCOUNTABLE_SEAT_BY_OWNER` token map — never a substring,
+     regex, lowercase-normalize, strip, or fuzzy match.  Only four literal
+     ``owner`` values are recognized (``"chairman"``, ``"ceo-sol"``,
+     ``"coo-fable"``, ``"fable"``); every other value — ``"ops"``,
+     ``"terminal-platform"``, ``"grok-cn-c"``, a missing/empty owner, and
+     free-text sentences such as ``"Eval-OS session (COO Fable lane)"``
+     (measured on the real artifact, 2026-09-01: 7 of 47 rows) — is
+     deliberately NOT mapped, and NO ``ResponsibilityFact`` is built for
+     that row: :func:`_responsibility_facts_from_agent_os_state` instead
+     records one bounded, per-row ``SourceFailure``
+     (``code="workstream_owner_not_recognized"``) naming the workstream
+     key, never the raw owner text — treating an unrecognized-owner
+     sentence as seat-shaped prose would be exactly the "derive ... seat
+     ... from ... prose" the frozen spec forbids, even where the words
+     "COO" or "Fable" happen to appear inside it.
+   * A ``BlockerFact`` is NEVER built from ``agent_os_state`` data (bug-fix
+     packet, 2026-09-01).  ``BlockerFact.__post_init__``
+     (``executive_steward.py``) refuses any ``source.owner`` other than
+     ``EXECUTIVE_OS``, ``EXECUTIVE_INBOX`` or ``WAKE`` — never
+     ``AGENT_OS`` — so a row's own ``blocked_by`` genuinely cannot be
+     represented as a ``BlockerFact`` without stamping it with an owner its
+     own ``ref`` string (``agent_os_state.workstreams:<key>.blocked_by``)
+     does not support.  The prior revision of this mapper did exactly
+     that: it constructed a real ``BlockerFact`` and stamped
+     ``source.owner = SourceOwner.EXECUTIVE_OS`` anyway — a false
+     attribution, Agent OS data labelled as Executive OS data.  The lawful
+     response to a contract that cannot carry a claim honestly is to
+     decline the claim under that contract, not to relabel the owner so it
+     fits.  :func:`declared_blockers_from_agent_os_state` represents the
+     SAME real "workstream is blocked" signal instead, honestly, as plain
+     data carrying its own true ``SourceOwner.AGENT_OS`` receipt — for
+     :func:`project_autonomy`'s ``declared_blockers`` parameter to fold
+     into each card's ``declared_blocker`` field, a field that is
+     EXPLICITLY NOT the Steward-owned ``blocker`` field and must never be
+     merged into it (different owners, different authority).  Its
+     ``target_seat`` is ``"ceo"`` when the row's ``needs_ceo`` is literally
+     ``True``; otherwise the SAME closed-token seat this mapper already
+     derives for that row's ``owner`` (never re-derived from prose); and
+     ``None`` — never guessed — when neither is available.  Unlike the
+     deleted ``BlockerFact`` path, an unresolvable ``target_seat`` does NOT
+     suppress the ``declared_blocker`` entry itself — only the seat, never
+     the fact of the block, is withheld.  Getting that entry in front of the
+     Chairman for an UNRECOGNIZED-owner row additionally requires Fix 2
+     (adversarial-review repair packet, 2026-09-01): see
+     :func:`declared_blockers_from_agent_os_state`'s own docstring for the
+     corrected, two-surface account of how the block actually reaches the
+     Chairman (a real card's ``declared_blocker`` field when the owner is
+     recognized; an ``unmapped_responsibilities`` receipt otherwise).
+   * ``ceo_brief.v1``'s ``readiness.records``/``blocked``/``finished`` rows
+     (verified against ``_agent_os_workstreams`` and ``tests/fixtures/
+     chairman_control_room/boot_packet_v1.json``) still carry no seat, no
+     blocker code, no ``EffectState`` — this mapper never reads them for
+     responsibility/blocker construction; they are unused here as before.
+   * ``runtime_jobs`` rows are exactly ``job_id``/``status``/``workstream``
+     (verified against ``control_plane.chairman_control_room.
+     _read_runtime_jobs`` and ``_group_jobs_by_ref``) — nowhere near
+     ``RuntimeFact``'s required ``attempt_id``/``worker_id``/
+     ``session_alias``/``runtime_binding_id``/``binding_generation``/
+     ``continuation_state``/``effect_state``/``capacity_state``/
+     ``binding_source`` (``SourceOwner.RUNTIME_BINDING`` — a source this
+     compositor never reads at all).  ``RuntimeFact`` is still never
+     constructed by this mapper; ``current_worker``/``current_sol_target``
+     stay genuinely null.
+   * ``active_builds`` (open PRs) has no Steward fact type of its own — a
+     GitHub PR is not a responsibility, attention, runtime, blocker, or
+     surface fact in this vocabulary, and remains unread.
+   * ``root_job_id`` on every constructed ``ResponsibilityFact`` is always
+     ``None`` — no ``workstreams[]`` row carries any ``JOB-*``-shaped
+     field, so there is never a genuine job reference to attach.
+   A downstream effect worth naming plainly: because
+   :func:`project_autonomy`'s card loop iterates
+   ``snapshot.list_responsibilities()`` membership, a real, non-empty
+   ``responsibilities`` tuple now means ``project_autonomy`` emits real
+   populated cards from this mapper's snapshot, for every workstream row
+   whose ``owner`` matched the closed token map.
+9. **``SurfaceFact.reviewed_at`` is always ``None``** — deliberately, not
+   an oversight.  ``control_plane.surface_bindings`` never emits any field
+   matching the Steward's "a human/Chairman accepted this exact reviewed
+   destination" review-acceptance concept; it emits only ``observed_at``
+   (when the binding was recorded) and ``last_verified_at`` (a
+   liveness/reachability check — verified against
+   ``control_plane/surface_bindings.py``, which defines no ``reviewed_at``
+   concept anywhere).  Treating ``last_verified_at`` as ``reviewed_at``
+   would assert a review that never happened.  ``resolve_surface``
+   therefore truthfully reports every surface this mapper constructs as
+   ``surface_not_reviewed`` — a receipts-only, non-gating outcome (see
+   point 5 above), never invented as "reviewed" it was never confirmed to
+   be.
+10. **Freshness for every constructed fact kind is a genuine, clock-free age
+    comparison against an injected reference timestamp** (corrected by the
+    adversarial-review repair packet, 2026-09-01, Fix 1 — this point
+    previously claimed any non-empty ``observed_at`` reads ``CURRENT``,
+    which meant a nine-day-old Agent OS artifact composed today read as
+    "current" with zero stale cards; that was the exact failure the
+    freshness law exists to prevent).  ``_freshness_for(observed_at,
+    reference_at)`` takes the fact's own ``observed_at`` (``inbox[
+    "generated_at"]`` for an attention fact; a binding row's own
+    ``observed_at`` for a surface fact; ``agent_os_state["generated_at"]``
+    for a responsibility fact or a declared blocker) and the caller-
+    supplied ``reference_at`` — never a clock read, always
+    ``project_autonomy``'s own ``generated_at``, threaded down through
+    :func:`build_autonomy_snapshot` and every mapper helper.  ``CURRENT``
+    when ``observed_at`` parses and is within :data:`FRESHNESS_BUDGET`
+    (48h — two nightly cycles, see that constant) of ``reference_at``;
+    ``STALE`` when it parses but is older; ``UNKNOWN`` (never fabricating
+    an ``observed_at``... except the raw string is preserved when it
+    genuinely exists but is merely unparseable or uncomparable — ``SourceRef``
+    permits ``UNKNOWN`` with ``observed_at`` present) when ``observed_at``
+    is absent, blank, unparseable, or ``reference_at`` itself cannot be
+    parsed.  Comparing two already-supplied timestamps is pure; this module
+    still never reads a clock.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from control_plane.executive_steward import (
@@ -158,20 +345,26 @@ from control_plane.executive_steward import (
     ExecutiveStewardSnapshot,
     Freshness,
     QueryStatus,
+    ResponsibilityFact,
     RuntimeFact,
     Seat,
     SourceOwner,
     SourceRef,
     StewardResult,
+    SurfaceFact,
 )
 
 #: Schema version of the document this module emits.
 SCHEMA = "mastermind.autonomy_control_room.v1"
 
-#: Closed set of top-level output keys (frozen spec §2).
+#: Closed set of top-level output keys (frozen spec §2).  ``unmapped_
+#: responsibilities`` was added by the blast-radius repair packet,
+#: 2026-09-01 (see :func:`unmapped_responsibilities_from_agent_os_state`) —
+#: it is plain, bounded, per-row data and never a ``SourceFailure``.
 OUTPUT_KEYS = frozenset({
     "schema", "generated_at", "responsibilities", "owed_by_seat",
     "chairman_decisions", "source_failures", "issues", "counts",
+    "unmapped_responsibilities",
 })
 
 #: Every legal ``owed_turn.seat`` / ``owed_by_seat`` bucket, including the
@@ -295,7 +488,12 @@ def _combine_status(statuses: list[QueryStatus]) -> QueryStatus:
     return worst
 
 
-def _neutral_if_routine_absence(result: StewardResult) -> QueryStatus:
+def _neutral_if_routine_absence(
+    result: StewardResult,
+    *,
+    source_failure_codes: frozenset[str],
+    has_runtime_evidence: bool,
+) -> QueryStatus:
     """Treat a bare, source-issue-free ``UNKNOWN`` as neutral (module docstring point 6).
 
     ``get_current_runtime`` and ``explain_blocker`` return ``UNKNOWN`` in
@@ -310,8 +508,100 @@ def _neutral_if_routine_absence(result: StewardResult) -> QueryStatus:
     ``query_status`` would make ``is_actionable`` (§4.4) nearly
     unreachable — nearly every real card lacks either a CEO target or a
     blocker — so this module does not.
+
+    Repair packet (2026-09-01, Change A) — a second, narrowly-scoped
+    routine absence: ``get_current_runtime`` REFUSES with issue code
+    ``runtime_root_missing`` whenever ``responsibility.root_job_id is
+    None`` (``executive_steward.py`` lines ~823-835), unconditionally,
+    before it ever looks at a seat's runtime candidates.  For an Agent
+    OS-owned responsibility with no Executive root job — the ordinary
+    case, since no Agent OS workstream row carries a job reference — that
+    is the exact same shape as the routine UNKNOWN above: "no candidate
+    and nothing else is wrong", just surfaced as REFUSED instead of
+    UNKNOWN because the Steward's join check runs before it would ever
+    reach the "no candidates" branch.  It is not a failed read: the
+    responsibility, its owner, its state and its declared blocker are all
+    read perfectly well by the calls this module makes; only "is there a
+    recorded worker/CEO-target runtime" comes back unanswerable, and it is
+    unanswerable for the same routine reason every such card is missing a
+    runtime fact.  This is reclassified ONLY when it is the sole reason
+    the result is not OK: ``result.status`` must be REFUSED, and
+    ``result.issues`` must contain EXACTLY one issue, whose ``code`` is
+    ``"runtime_root_missing"``.  Any other issue on the same result —
+    a genuine source failure appended alongside it, an ambiguous join, a
+    root mismatch, or a reconciliation requirement — means this is no
+    longer the sole blocking signal, so the guard below leaves the result
+    REFUSED exactly as before.  This never touches ``result.data`` (still
+    ``None``, so ``current_worker``/``current_sol_target`` still read
+    ``null``) and never touches the top-level ``issues`` list (the
+    ``runtime_root_missing`` issue still folds in as a receipt via
+    :class:`_CardIssues` — unlike :data:`_ROUTINE_ABSENCE_ISSUE_CODES`,
+    this code is not added to that frozenset) — only the card's combined
+    ``query_status`` (and, downstream, ``is_actionable``) changes.
+
+    Fix 3 (adversarial-review repair packet, 2026-09-01) — tightening the
+    ``runtime_root_missing`` guard above: ``executive_steward.py``'s
+    ``get_current_runtime`` checks ``responsibility.root_job_id is None``
+    UNCONDITIONALLY, before it ever inspects ``self.runtimes`` for a
+    matching candidate (lines ~823-835) — so a responsibility with
+    ``root_job_id=None`` that nevertheless has a genuine ``RuntimeFact``
+    attached (including one whose ``effect_state`` is ``EFFECT_UNKNOWN``,
+    which would otherwise REFUSE via ``reconciliation_required``) is
+    INVISIBLE to that call: it always REFUSES with the SAME single
+    ``runtime_root_missing`` issue as the truly-empty case, and the guard
+    above — which cannot tell "genuinely no runtime evidence" apart from
+    "a runtime IS attached but the join could not even be attempted" —
+    used to neutralize both alike.  Unreachable through today's compositor
+    (:func:`build_autonomy_snapshot` always passes ``runtimes=()``, module
+    docstring point 8) but ``project_autonomy`` is a public API a future
+    caller may hand a populated ``runtimes`` tuple to, so the premise this
+    guard depends on ("every such card is genuinely missing a runtime
+    fact") must be VERIFIED, not assumed.  ``has_runtime_evidence`` is
+    that verification — a bare existence check, by ``responsibility_ref``
+    and ``seat``, of whether ``snapshot.runtimes`` contains ANY fact for
+    this exact card, computed once per call site in ``project_autonomy``'s
+    loop.  This is the one narrow exception (mirroring the already-granted
+    ``snapshot.source_failures`` exception, module docstring "Consume,
+    never duplicate") to this module's rule against reading
+    ``snapshot.runtimes`` directly: it is a plain existence check, never a
+    re-implementation of ``get_current_runtime``'s own root-job-id/seat/
+    candidate-selection join logic, so it does not duplicate anything the
+    Steward already decides — it only answers the one question the
+    Steward's own short-circuit structurally cannot: "is there evidence
+    here at all". When ``has_runtime_evidence`` is ``True``, the guard
+    below no longer neutralizes — the card stays REFUSED, exactly as a
+    genuine ``reconciliation_required``/ambiguous-join REFUSED already
+    does, because there IS something here that needs a human's attention,
+    even though this specific call path cannot say what.
+
+    Fix 4 (same repair packet) — the missing collision guard: this
+    function's ``runtime_root_missing`` branch used to compare ONLY
+    ``result.issues[0].code``, with no ``code not in source_failure_codes``
+    check — unlike :meth:`_CardIssues._is_routine_absence`, which already
+    guards its own routine-absence codes exactly that way (module
+    docstring point 6's Repair B).  A caller-authored
+    ``SourceFailure(code="runtime_root_missing", ...)`` anywhere in the
+    snapshot — regardless of owner, regardless of which responsibility it
+    is actually about — put that literal string into the snapshot-wide
+    ``source_failure_codes`` set; without this guard, a DIFFERENT,
+    genuinely root-job-id-less card would still be silently neutralized to
+    OK merely because that unrelated string happened to be live somewhere,
+    exactly the same class of false-negative Repair B already closed for
+    the ``_CardIssues`` routine-absence codes.  Mirrors that guard exactly:
+    the branch below now also requires ``"runtime_root_missing" not in
+    source_failure_codes``.
     """
-    return QueryStatus.OK if result.status is QueryStatus.UNKNOWN else result.status
+    if result.status is QueryStatus.UNKNOWN:
+        return QueryStatus.OK
+    if (
+        result.status is QueryStatus.REFUSED
+        and len(result.issues) == 1
+        and result.issues[0].code == "runtime_root_missing"
+        and "runtime_root_missing" not in source_failure_codes
+        and not has_runtime_evidence
+    ):
+        return QueryStatus.OK
+    return result.status
 
 
 class _CardIssues:
@@ -440,6 +730,24 @@ def _blocker_card(fact: BlockerFact) -> dict[str, Any]:
     }
 
 
+def _declared_blocker_card(declared: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Card shape for a plain-data ``declared_blocker`` row, or ``None``.
+
+    ``declared`` is one value from :func:`declared_blockers_from_agent_os_state`'s
+    return mapping — never a Steward fact.  Explicitly NOT the Steward-owned
+    ``blocker`` card shape (:func:`_blocker_card`) and never merged with it:
+    different owners, different authority (see module docstring point 8).
+    """
+    if declared is None:
+        return None
+    return {
+        "code": declared["code"],
+        "explanation": declared["explanation"],
+        "target_seat": declared.get("target_seat"),
+        "source": _receipt(declared["source"]),
+    }
+
+
 # ---------------------------------------------------------------------------
 # classifiers (frozen spec §4)
 # ---------------------------------------------------------------------------
@@ -454,16 +762,36 @@ def _classify_owed_turn(
     *,
     blocker: dict[str, Any] | None,
     blocker_fact: BlockerFact | None,
+    declared_blocker: Mapping[str, Any] | None,
     attention_facts: tuple[AttentionFact, ...],
     current_worker: dict[str, Any] | None,
     current_worker_fact: RuntimeFact | None,
 ) -> dict[str, Any]:
-    """Frozen spec §4.2 — evaluated in order, first match wins."""
+    """Frozen spec §4.2 — evaluated in order, first match wins.
+
+    Extended by the bug-fix packet (2026-09-01) with one new rung, between
+    the Steward-owned blocker and attention: a ``declared_blocker`` — the
+    plain-data, honestly Agent-OS-owned "workstream is blocked" signal
+    :func:`declared_blockers_from_agent_os_state` produces, since a genuine
+    Steward ``BlockerFact`` can never be built from that source (see module
+    docstring point 8) — names an owed seat too, when it carries one, under
+    its own distinct reason code so it is never confused with a real
+    Steward-owned gate.  A ``declared_blocker`` with no ``target_seat``
+    (owner unrecognized and ``needs_ceo`` not literally ``True``) must not
+    set an owed seat here — it falls through to the next rung exactly as if
+    no ``declared_blocker`` existed.
+    """
     if blocker is not None and blocker_fact is not None:
         return {
             "seat": blocker_fact.target_seat.value,
             "reason": "blocker_targets_seat",
             "source_refs": _receipts_sorted([blocker_fact.source]),
+        }
+    if declared_blocker is not None and declared_blocker.get("target_seat"):
+        return {
+            "seat": declared_blocker["target_seat"],
+            "reason": "agent_os_declared_blocker_targets_seat",
+            "source_refs": _receipts_sorted([declared_blocker["source"]]),
         }
     if attention_facts:
         winner = min(
@@ -645,6 +973,8 @@ def project_autonomy(
     snapshot: ExecutiveStewardSnapshot,
     *,
     generated_at: str,
+    declared_blockers: Mapping[str, Mapping[str, Any]] | None = None,
+    unmapped_responsibilities: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Pure, deterministic projection of one Executive Steward snapshot.
 
@@ -652,8 +982,51 @@ def project_autonomy(
     randomness.  ``generated_at`` is injected, never read from a clock.
     Calling this twice with the same arguments produces byte-identical
     ``json.dumps(doc, sort_keys=True)`` output.
+
+    ``declared_blockers`` (bug-fix packet, 2026-09-01) is optional plain
+    data — keyed by ``responsibility_ref``, one row per key from
+    :func:`declared_blockers_from_agent_os_state` — threaded straight
+    through to each matching card's ``declared_blocker`` field and into
+    :func:`_classify_owed_turn`.  It is never a Steward fact and is never
+    merged with the Steward-owned ``blocker`` field.  Defaults to ``None``
+    (treated as empty) so every existing caller that does not supply it —
+    including every card built from a snapshot with no Agent-OS-declared
+    blockers — is unaffected: ``declared_blocker`` reads ``null`` on every
+    such card.
+
+    ``unmapped_responsibilities`` (blast-radius repair packet, 2026-09-01)
+    is optional plain data — one row per
+    :func:`unmapped_responsibilities_from_agent_os_state` entry — threaded
+    the exact same way as ``declared_blockers``: a separate keyword-only
+    parameter with a safe default, never merged into any card and never a
+    ``SourceFailure``.  It is emitted verbatim (sorted for determinism) as
+    the top-level ``unmapped_responsibilities`` list and has zero effect on
+    any card's ``query_status``, ``is_actionable``, ``actionability_reason``
+    or ``freshness`` — those are computed entirely from ``membership``
+    (``snapshot.list_responsibilities()``) before this parameter is ever
+    consulted.  Defaults to ``None`` (treated as empty) so every existing
+    caller that does not supply it is unaffected.
+
+    It DOES affect one thing: ``counts["empty"]`` (repair packet,
+    2026-09-01, Change B).  Zero mapped ``responsibilities`` used to read
+    ``empty: true`` even when responsibilities were suppressed for this
+    exact reason — unrecognized Agent OS owners — reporting "the estate is
+    genuinely idle" when the truth is "every workstream was suppressed as
+    unmapped".  This is the same law Repair 9 already applies to
+    ``membership_suppressed``: "we cannot see"/"was excluded" must never
+    read as indistinguishable from "nothing to do".  ``empty`` is now
+    false whenever ``unmapped_rows`` is non-empty, in addition to staying
+    false whenever ``membership_suppressed`` is true; it reads true only
+    for a genuinely idle estate — zero mapped responsibilities, nothing
+    suppressed by a Steward-level issue, AND nothing suppressed as
+    unmapped.
     """
     source_failure_codes = frozenset(f.code for f in snapshot.source_failures)
+    declared_blockers = declared_blockers or {}
+    unmapped_rows = sorted(
+        (dict(row) for row in (unmapped_responsibilities or ())),
+        key=lambda row: (row.get("responsibility_ref") or "", row.get("reason") or ""),
+    )
 
     issues = _CardIssues(source_failure_codes)
 
@@ -690,6 +1063,12 @@ def project_autonomy(
         issues.fold(ref, bl_result)
         blocker_fact = bl_result.data if isinstance(bl_result.data, BlockerFact) else None
         blocker = _blocker_card(blocker_fact) if blocker_fact else None
+
+        # Plain data, never a Steward fact — explicitly NOT the same field
+        # as `blocker` above and never merged with it (module docstring
+        # point 8; bug-fix packet, 2026-09-01).
+        declared_blocker_data = declared_blockers.get(ref)
+        declared_blocker = _declared_blocker_card(declared_blocker_data)
 
         at_result = snapshot.get_attention(responsibility_ref=ref)
         issues.fold(ref, at_result)
@@ -764,17 +1143,51 @@ def project_autonomy(
 
         freshness = _weakest_freshness(contributing_sources)
 
+        # Fix 3: bare existence check (never a re-implementation of
+        # get_current_runtime's own root-job-id/seat/candidate join logic —
+        # see _neutral_if_routine_absence's docstring and the module
+        # docstring's "Consume, never duplicate" section for the scoped
+        # exception this narrowly relies on) of whether the snapshot has
+        # ANY RuntimeFact for this exact (ref, seat) — used only to verify,
+        # rather than assume, that a root_job_id-less responsibility is
+        # genuinely missing runtime evidence before neutralizing its
+        # get_current_runtime REFUSED result to OK.
+        worker_runtime_evidence_exists = any(
+            rt.responsibility_ref == ref and rt.seat is Seat.WORKER
+            for rt in snapshot.runtimes
+        )
+        sol_runtime_evidence_exists = any(
+            rt.responsibility_ref == ref and rt.seat is Seat.CEO
+            for rt in snapshot.runtimes
+        )
+
         query_status = _combine_status([
             gr.status,
-            _neutral_if_routine_absence(cw_result),
-            _neutral_if_routine_absence(st_result),
-            _neutral_if_routine_absence(bl_result),
+            _neutral_if_routine_absence(
+                cw_result,
+                source_failure_codes=source_failure_codes,
+                has_runtime_evidence=worker_runtime_evidence_exists,
+            ),
+            _neutral_if_routine_absence(
+                st_result,
+                source_failure_codes=source_failure_codes,
+                has_runtime_evidence=sol_runtime_evidence_exists,
+            ),
+            _neutral_if_routine_absence(
+                bl_result,
+                source_failure_codes=source_failure_codes,
+                # explain_blocker never emits "runtime_root_missing" — this
+                # only matters for the branch that code triggers, so it is
+                # inert here regardless of the value passed.
+                has_runtime_evidence=False,
+            ),
             at_result.status,
         ]).value
 
         owed_turn = _classify_owed_turn(
             blocker=blocker,
             blocker_fact=blocker_fact,
+            declared_blocker=declared_blocker_data,
             attention_facts=attention_facts,
             current_worker=current_worker,
             current_worker_fact=current_worker_fact,
@@ -846,6 +1259,7 @@ def project_autonomy(
             "placement_state": placement_state,
             "wake_outcome": wake_outcome,
             "blocker": blocker,
+            "declared_blocker": declared_blocker,
             "freshness": freshness,
             "is_actionable": is_actionable,
             "actionability_reason": actionability_reason,
@@ -894,13 +1308,27 @@ def project_autonomy(
     # from `selected`, or an AGENT_OS `SourceFailure` folded in
     # unconditionally by `_source_issues`) and empty in the genuinely-idle
     # case, so it is the exact signal to gate on.
+    #
+    # Change B (repair packet, 2026-09-01): the same law applies to
+    # responsibilities suppressed as UNMAPPED (an unrecognized Agent OS
+    # owner — `unmapped_rows`, threaded in verbatim from the caller).  Zero
+    # mapped cards plus a non-empty `unmapped_rows` means the estate was
+    # NOT idle — every responsibility was read, and every one of them was
+    # suppressed for an unrecognized owner — so `empty` must not claim
+    # "nothing is being carried".  `empty` is true only when nothing is
+    # mapped, nothing was suppressed by a Steward-level issue, AND nothing
+    # was suppressed as unmapped.
     membership_suppressed = bool(list_result.issues)
     counts = {
         "total": len(responsibilities),
         "actionable": sum(1 for c in responsibilities if c["is_actionable"]),
         "stale": sum(1 for c in responsibilities if c["freshness"] == Freshness.STALE.value),
         "blocked": sum(1 for c in responsibilities if c["blocker"] is not None),
-        "empty": len(responsibilities) == 0 and not membership_suppressed,
+        "empty": (
+            len(responsibilities) == 0
+            and not membership_suppressed
+            and not unmapped_rows
+        ),
     }
 
     doc: dict[str, Any] = {
@@ -912,6 +1340,7 @@ def project_autonomy(
         "source_failures": source_failure_rows,
         "issues": issue_rows,
         "counts": counts,
+        "unmapped_responsibilities": unmapped_rows,
     }
     if set(doc.keys()) != OUTPUT_KEYS:
         raise RuntimeError(
@@ -922,4 +1351,693 @@ def project_autonomy(
     return doc
 
 
-__all__ = ["SCHEMA", "OUTPUT_KEYS", "WAKE_OUTCOME_TOKENS", "project_autonomy"]
+# ---------------------------------------------------------------------------
+# real-data mapper: compositor inputs -> ExecutiveStewardSnapshot
+# (module docstring "Real-data mapper" section, points 8-10)
+# ---------------------------------------------------------------------------
+
+#: Every literal wire token a Steward ``Seat`` accepts, keyed by that same
+#: string — used to recognize a genuine Seat value on a raw compositor
+#: input without ever guessing at one that isn't there.
+_SEAT_BY_VALUE = {seat.value: seat for seat in Seat}
+
+
+def _seat_or_none(value: Any) -> Seat | None:
+    return _SEAT_BY_VALUE.get(value) if isinstance(value, str) else None
+
+
+#: Fix 1 (adversarial-review repair packet, 2026-09-01): the Agent OS state
+#: artifact — and every other document this mapper reads — is produced by a
+#: nightly job, so evidence older than two nightly cycles is stale rather
+#: than current.  48 hours, not 24, so a single missed/delayed nightly run
+#: does not flap every card stale and back the next morning.  A named,
+#: documented module constant rather than a bare number, so the budget is
+#: auditable and changeable in one place.
+FRESHNESS_BUDGET_HOURS = 48
+FRESHNESS_BUDGET = timedelta(hours=FRESHNESS_BUDGET_HOURS)
+
+
+def _parse_iso8601(value: Any) -> datetime | None:
+    """Best-effort, defensive ISO-8601 parse — never raises; unparseable -> ``None``.
+
+    Reuses the repo-wide ``datetime.fromisoformat(value.replace("Z",
+    "+00:00"))`` idiom already used elsewhere in this codebase (e.g.
+    ``control_plane/chairman_cognition.py:1558``,
+    ``control_plane/chairman_cognition_sources.py:645/688``) rather than
+    inventing a new parsing convention or adding a dependency.  A naive
+    (timezone-less) result is treated as UTC — every timestamp this module
+    reads is a Zulu-suffixed wire string in practice, and assuming UTC for
+    a bare ISO string (rather than refusing it) keeps this defensive
+    without silently mis-comparing offsets it was never given.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _freshness_for(observed_at: Any, reference_at: Any) -> tuple[str | None, Freshness]:
+    """``(observed_at, freshness)`` — Fix 1, see module docstring point 10.
+
+    ``reference_at`` is the injected, clock-free reference timestamp —
+    ``project_autonomy``'s own ``generated_at``, threaded down through
+    :func:`build_autonomy_snapshot` into every caller of this helper below.
+    Comparing two already-supplied timestamps is pure; this function still
+    never reads a clock, never fabricates an ``observed_at``, and never
+    reports ``CURRENT`` for a timestamp it cannot actually evaluate.
+
+    - ``observed_at`` absent/blank/non-string -> ``(None, UNKNOWN)``.
+    - ``observed_at`` present but unparseable -> ``(observed_at, UNKNOWN)``
+      — the raw string is kept as a receipt (``SourceRef`` allows
+      ``UNKNOWN`` with ``observed_at`` present) but never trusted as
+      current.
+    - ``reference_at`` absent/unparseable -> ``(observed_at, UNKNOWN)`` —
+      nothing to compare against.
+    - ``observed_at`` parses and is within :data:`FRESHNESS_BUDGET` of
+      ``reference_at`` (including ``observed_at`` at/after ``reference_at``
+      — clock skew, not staleness) -> ``(observed_at, CURRENT)``.
+    - ``observed_at`` parses and is older than the budget ->
+      ``(observed_at, STALE)``.
+    """
+    if not isinstance(observed_at, str) or not observed_at:
+        return None, Freshness.UNKNOWN
+    observed_dt = _parse_iso8601(observed_at)
+    if observed_dt is None:
+        return observed_at, Freshness.UNKNOWN
+    reference_dt = _parse_iso8601(reference_at)
+    if reference_dt is None:
+        return observed_at, Freshness.UNKNOWN
+    age = reference_dt - observed_dt
+    if age <= FRESHNESS_BUDGET:
+        return observed_at, Freshness.CURRENT
+    return observed_at, Freshness.STALE
+
+
+def _attention_responsibility_ref(item: Mapping[str, Any]) -> str | None:
+    """The item's ``workstream`` as a full ``WS:<KEY>`` ref, or ``None``.
+
+    Re-derives the exact asymmetry
+    :func:`control_plane.chairman_control_room._normalized_workstream_ref`
+    documents, rather than importing that private helper — this module has
+    no runtime dependency on ``chairman_control_room``'s private surface,
+    which a concurrent sibling PR is editing.  A ``source="runtime"``
+    item's ``workstream`` is already the full CEO-intent ``WS:<KEY>`` ref;
+    a ``source="agent_os"`` item's ``workstream`` is the bare key from the
+    Agent OS brief's own ``needs_ceo[].workstream``.  The Steward's own
+    ``WS:<key>`` shape check (starts with ``WS:``, no whitespace) still
+    runs inside ``AttentionFact.__post_init__`` when the fact is
+    constructed below — this function only normalizes the prefix.
+    """
+    workstream = item.get("workstream")
+    if not isinstance(workstream, str) or not workstream:
+        return None
+    if item.get("source") == "agent_os":
+        return workstream if workstream.startswith("WS:") else f"WS:{workstream}"
+    return workstream
+
+
+def _attention_facts_from_inbox(
+    inbox: Mapping[str, Any] | None,
+    generated_at: Any = None,
+) -> tuple[AttentionFact, ...]:
+    """Every genuine ``AttentionFact`` the Executive Inbox document supplies.
+
+    ``generated_at`` (Fix 1) is the injected reference timestamp — threaded
+    straight through to :func:`_freshness_for` so a real, aged inbox
+    document is honestly reported ``STALE``, never unconditionally
+    ``CURRENT``.
+
+    Every item read off ``inbox["attention"]`` is attributed to
+    ``SourceOwner.EXECUTIVE_INBOX`` — the whole document is produced by
+    :mod:`control_plane.executive_inbox`, regardless of an individual
+    item's own internal ``source`` field (``"agent_os"``/``"runtime"``),
+    which names an upstream PROVENANCE inside the inbox, not a different
+    Steward-owned system.  No ``SourceOwner.WAKE``-owned attention fact is
+    ever constructed here: none of the compositor's gathered inputs
+    include wake-ledger data — Wake is a different subsystem this
+    compositor never reads (see :data:`WAKE_OUTCOME_TOKENS`'s own
+    consumer, :func:`_classify_wake_outcome`, which will correctly read
+    ``"not_observable"`` for every card as a result).  A malformed row
+    (missing/blank required field, or one that fails
+    ``AttentionFact.__post_init__``'s own validation) is skipped rather
+    than raising — one bad row must never suppress every other genuine
+    fact in the same document.
+    """
+    if not isinstance(inbox, Mapping):
+        return ()
+    items = inbox.get("attention")
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+        return ()
+
+    observed_at, freshness = _freshness_for(inbox.get("generated_at"), generated_at)
+
+    facts: list[AttentionFact] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        ref = _attention_responsibility_ref(item)
+        if ref is None:
+            continue
+        target_seat = _seat_or_none(item.get("target"))
+        if target_seat is None:
+            continue
+        attention_id = item.get("attention_id")
+        kind = item.get("kind")
+        reason = item.get("reason")
+        if not isinstance(attention_id, str) or not attention_id:
+            continue
+        if not isinstance(kind, str) or not kind:
+            continue
+        if not isinstance(reason, str) or not reason.strip():
+            continue
+        try:
+            fact = AttentionFact(
+                attention_id=attention_id,
+                responsibility_ref=ref,
+                target_seat=target_seat,
+                kind=kind,
+                reason=reason,
+                source=SourceRef(
+                    owner=SourceOwner.EXECUTIVE_INBOX,
+                    ref=attention_id,
+                    observed_at=observed_at,
+                    freshness=freshness,
+                ),
+            )
+        except (TypeError, ValueError):
+            continue
+        facts.append(fact)
+    return tuple(facts)
+
+
+def _surface_facts_from_bindings(
+    bindings: Mapping[str, Any] | None,
+    generated_at: Any = None,
+) -> tuple[SurfaceFact, ...]:
+    """Every genuine ``SurfaceFact`` the surface-bindings document supplies.
+
+    See module docstring point 9 for why ``reviewed_at`` is always
+    ``None``.  Each row's own ``binding_id`` is used as both the fact's
+    ``surface_ref`` and its ``SourceRef.ref`` — it is the source's own
+    unique identifier for exactly this reviewed-destination row, not an
+    invented locator.  A malformed row is skipped rather than raising, for
+    the same reason as :func:`_attention_facts_from_inbox`.  ``generated_at``
+    (Fix 1) is the same injected reference timestamp, per row (each binding
+    row carries its own ``observed_at``, unlike the single document-level
+    timestamp attention/responsibility facts share).
+    """
+    if not isinstance(bindings, Mapping):
+        return ()
+    rows = bindings.get("bindings")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        return ()
+
+    facts: list[SurfaceFact] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        work_ref = row.get("work_ref")
+        role = _seat_or_none(row.get("role"))
+        binding_id = row.get("binding_id")
+        provider = row.get("provider")
+        locator_kind = row.get("locator_kind")
+        seat_ref = row.get("seat_ref")
+        if not isinstance(work_ref, str) or not work_ref:
+            continue
+        if role is None:
+            continue
+        if not isinstance(binding_id, str) or not binding_id:
+            continue
+        if not isinstance(provider, str) or not provider:
+            continue
+        if not isinstance(locator_kind, str) or not locator_kind:
+            continue
+        if seat_ref is not None and not isinstance(seat_ref, str):
+            continue
+        observed_at, freshness = _freshness_for(row.get("observed_at"), generated_at)
+        try:
+            fact = SurfaceFact(
+                responsibility_ref=work_ref,
+                role=role,
+                seat_ref=seat_ref,
+                surface_ref=binding_id,
+                provider=provider,
+                locator_kind=locator_kind,
+                reviewed_at=None,
+                source=SourceRef(
+                    owner=SourceOwner.SURFACE_BINDINGS,
+                    ref=binding_id,
+                    observed_at=observed_at,
+                    freshness=freshness,
+                ),
+            )
+        except (TypeError, ValueError):
+            continue
+        facts.append(fact)
+    return tuple(facts)
+
+
+#: Closed, CASE-SENSITIVE, EXACT map from a ``workstreams[]`` row's raw
+#: ``owner`` string to the :class:`Seat` it names — the only lawful way this
+#: mapper ever derives a seat from ``owner``.  Nothing outside this map is
+#: ever accepted: no substring match, no regex, no lowercase-normalize, no
+#: strip, no fuzzy match.  A value not present here — including free-text
+#: sentences that happen to *contain* a seat-like word, e.g. ``"Eval-OS
+#: session (COO Fable lane)"`` — is unrecognized, full stop (module
+#: docstring point 8).
+_ACCOUNTABLE_SEAT_BY_OWNER: dict[str, Seat] = {
+    "chairman": Seat.CHAIRMAN,
+    "ceo-sol": Seat.CEO,
+    "coo-fable": Seat.COO,
+    "fable": Seat.COO,
+}
+
+
+def _workstream_ref(key: str) -> str:
+    """The row's bare ``key`` as a full ``WS:<KEY>`` ref.
+
+    Re-derives the same asymmetry :func:`_attention_responsibility_ref`
+    already documents for an ``agent_os``-sourced attention item: a real
+    ``agent_os_state.v1`` ``workstreams[].key`` is the bare key, with no
+    ``WS:`` prefix (verified against the real compiled artifact).
+    """
+    return key if key.startswith("WS:") else f"WS:{key}"
+
+
+def _blocked_by_reasons(row: Mapping[str, Any]) -> list[str]:
+    """Every non-blank string in a workstream row's own ``blocked_by`` list.
+
+    Shared by :func:`_responsibility_facts_from_agent_os_state` (Fix 2:
+    carries this same signal into an unmapped row's own receipt, see
+    :func:`_declared_blocker_receipt`) and
+    :func:`declared_blockers_from_agent_os_state`, so the two can never
+    silently drift apart on what counts as a genuine block reason.  Never
+    invents a reason from any other field.
+    """
+    blocked_by = row.get("blocked_by")
+    if not isinstance(blocked_by, Sequence) or isinstance(blocked_by, (str, bytes)):
+        return []
+    return [item.strip() for item in blocked_by if isinstance(item, str) and item.strip()]
+
+
+def _declared_blocker_receipt(row: Mapping[str, Any], key: str) -> dict[str, Any] | None:
+    """Fix 2: the same declared-blocker signal, minus the ``source`` SourceRef.
+
+    ``unmapped_responsibilities`` rows are plain, JSON-safe data (no
+    ``SourceRef`` object) — see :func:`project_autonomy`'s own
+    ``unmapped_responsibilities`` handling, which folds these rows verbatim
+    into ``json.dumps(doc, sort_keys=True)``.  ``None`` when the row's own
+    ``blocked_by`` is genuinely empty or absent — never fabricated.
+    ``target_seat`` is ``"ceo"`` when ``needs_ceo`` is literally ``True``;
+    otherwise ``None`` (the row's ``owner`` is, by construction, always
+    unrecognized at this call site — that is exactly why the row is
+    unmapped — so there is no recognized-seat fallback to try, unlike
+    :func:`declared_blockers_from_agent_os_state`).  Never includes the raw
+    owner text.
+    """
+    reasons = _blocked_by_reasons(row)
+    if not reasons:
+        return None
+    target_seat = Seat.CEO.value if row.get("needs_ceo") is True else None
+    return {
+        "code": "blocked_by",
+        "explanation": f"workstream {key} is blocked by: " + "; ".join(reasons),
+        "target_seat": target_seat,
+    }
+
+
+def _responsibility_facts_from_agent_os_state(
+    agent_os_state: Mapping[str, Any] | None,
+    generated_at: Any = None,
+) -> tuple[tuple[ResponsibilityFact, ...], dict[str, Seat], tuple[dict[str, Any], ...]]:
+    """Real ``ResponsibilityFact`` rows, built only from structured fields.
+
+    ``generated_at`` (Fix 1) is the injected reference timestamp, threaded
+    straight through to :func:`_freshness_for` — the exact same argument
+    :func:`build_autonomy_snapshot` receives from the compositor's own
+    ``generated_at``, so a real, aged Agent OS artifact is honestly
+    reported ``STALE`` rather than unconditionally ``CURRENT``.
+
+    Returns ``(facts, seat_by_key, unmapped)``: ``seat_by_key`` is unused by
+    ``BlockerFact`` construction any more (that construction was deleted
+    outright — see module docstring point 8) but is kept in this return
+    shape and reused, the same closed-token way, by
+    :func:`declared_blockers_from_agent_os_state`'s owner-seat fallback,
+    rather than re-deriving it (or, worse, inventing one) a second time.
+
+    ``unmapped`` is one bounded, per-row plain-data entry — never a
+    :class:`SourceFailure` (blast-radius repair packet, 2026-09-01, see
+    :func:`unmapped_responsibilities_from_agent_os_state`) — for every row
+    whose ``owner`` did not match :data:`_ACCOUNTABLE_SEAT_BY_OWNER`.  A
+    ``SourceFailure`` is a global, source-level outage; ``executive_steward.
+    ExecutiveStewardSnapshot._source_issues`` folds every ``SourceFailure``
+    into the issues of EVERY query the Steward answers (every card consults
+    every owner on every call — see module docstring point 7), so a
+    per-row condition on a handful of workstreams was contaminating every
+    other card's ``query_status``/``actionability_reason`` — measured
+    2026-09-01: 7 unrecognized-owner rows made all 40 unrelated cards read
+    ``query_status: "refused"``.  ``unmapped`` rows carry the workstream's
+    normalized ``responsibility_ref`` and a short machine ``reason`` —
+    never the raw owner prose (the exact same "never derive ... seat ...
+    from ... prose" discipline point 8 already documents).  Fix 2
+    (adversarial-review repair packet, 2026-09-01) adds one more, strictly
+    optional key: when the same unrecognized-owner row's own ``blocked_by``
+    is genuinely non-empty, the entry also carries a ``declared_blocker``
+    sub-object (see :func:`_declared_blocker_receipt`) — this is the ONLY
+    place a workstream whose owner cannot be mapped to a seat still tells
+    the Chairman it is blocked: :func:`project_autonomy`'s card loop only
+    ever consults ``declared_blockers`` for a ``ref`` that has a real
+    ``ResponsibilityFact`` in Steward membership, which an unrecognized-
+    owner row never gets, so without this the block silently vanished (the
+    exact defect the module docstring used to describe as already fixed —
+    see :func:`declared_blockers_from_agent_os_state`'s own docstring for
+    the corrected account).
+
+    Fix 5 (adversarial-review repair packet, 2026-09-01): a row whose own
+    ``key``/``title`` is blank or absent, or whose ``ResponsibilityFact``
+    construction raises despite passing those checks (e.g. a ``key``
+    containing whitespace, which fails ``SourceRef``/``ResponsibilityFact``'s
+    own token-shape validation; or a ``status`` containing whitespace,
+    which fails ``_require_text``), is no longer skipped in silence — it
+    gets a bounded ``unmapped`` receipt with ``reason: "row_unreadable"``,
+    so "we could not read this row" is never indistinguishable from "this
+    row does not exist".  ``responsibility_ref`` on that receipt is the
+    normalized ref when a genuine, non-blank ``key`` is available (title
+    blank, or construction raised) and ``None`` only when even ``key``
+    itself could not be read.  A row that is not a ``Mapping`` at all is
+    still skipped with no receipt — an entirely absent index into a list is
+    not "this one row was unreadable", and every other malformed-row
+    helper in this module (:func:`_attention_facts_from_inbox`,
+    :func:`_surface_facts_from_bindings`) treats it the same way; Fix 5 is
+    scoped to a row that IS a mapping but whose content could not be used.
+    """
+    if not isinstance(agent_os_state, Mapping):
+        return (), {}, ()
+    rows = agent_os_state.get("workstreams")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        return (), {}, ()
+
+    observed_at, freshness = _freshness_for(agent_os_state.get("generated_at"), generated_at)
+
+    facts: list[ResponsibilityFact] = []
+    seat_by_key: dict[str, Seat] = {}
+    unmapped: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        key = row.get("key")
+        title = row.get("title")
+        key_ok = isinstance(key, str) and bool(key)
+        title_ok = isinstance(title, str) and bool(title.strip())
+        if not key_ok or not title_ok:
+            # Fix 5: unreadable, not nonexistent.
+            unmapped.append({
+                "responsibility_ref": _workstream_ref(key) if key_ok else None,
+                "reason": "row_unreadable",
+            })
+            continue
+
+        source_ref = f"agent_os_state.workstreams:{key}"
+        owner = row.get("owner")
+        seat = _ACCOUNTABLE_SEAT_BY_OWNER.get(owner) if isinstance(owner, str) else None
+        if seat is None:
+            unmapped_entry: dict[str, Any] = {
+                "responsibility_ref": _workstream_ref(key),
+                "reason": "owner_not_a_recognized_seat",
+            }
+            # Fix 2: an unmapped-but-blocked workstream still tells the
+            # Chairman it is blocked, and why — never the raw owner text.
+            declared = _declared_blocker_receipt(row, key)
+            if declared is not None:
+                unmapped_entry["declared_blocker"] = declared
+            unmapped.append(unmapped_entry)
+            continue
+
+        status = row.get("status")
+        state = status if isinstance(status, str) and status else None
+        try:
+            fact = ResponsibilityFact(
+                responsibility_ref=_workstream_ref(key),
+                title=title,
+                accountable_seat=seat,
+                state=state,
+                root_job_id=None,  # no workstreams[] row carries a JOB-* field
+                source=SourceRef(
+                    owner=SourceOwner.AGENT_OS,
+                    ref=source_ref,
+                    observed_at=observed_at,
+                    freshness=freshness,
+                ),
+            )
+        except (TypeError, ValueError):
+            # Fix 5: construction raised despite key/title passing the
+            # checks above (e.g. a key or status containing whitespace) —
+            # unreadable, not nonexistent.  A real key is always available
+            # here (key_ok was required to reach this branch).
+            unmapped.append({
+                "responsibility_ref": _workstream_ref(key),
+                "reason": "row_unreadable",
+            })
+            continue
+        facts.append(fact)
+        seat_by_key[key] = seat
+    return tuple(facts), seat_by_key, tuple(unmapped)
+
+
+def unmapped_responsibilities_from_agent_os_state(
+    agent_os_state: Mapping[str, Any] | None,
+    generated_at: Any = None,
+) -> tuple[dict[str, Any], ...]:
+    """Bounded, per-row report of workstreams whose ``owner`` is unmapped.
+
+    Blast-radius repair packet, 2026-09-01: this is the third pure public
+    function threaded the exact same way
+    :func:`declared_blockers_from_agent_os_state` already is — plain data,
+    never a Steward fact, never a :class:`SourceFailure`, meant to be
+    handed to :func:`project_autonomy`'s ``unmapped_responsibilities``
+    parameter.  Each entry names the workstream's normalized
+    ``responsibility_ref`` and a short machine ``reason``
+    (``"owner_not_a_recognized_seat"`` or, Fix 5, ``"row_unreadable"``) —
+    never the raw owner prose — plus, Fix 2, an optional ``declared_blocker``
+    sub-object when an unrecognized-owner row is itself genuinely blocked
+    (see :func:`_responsibility_facts_from_agent_os_state` for both).  See
+    that function for why this must never be a ``SourceFailure``: the
+    Steward folds every ``SourceFailure`` into the issues of every query it
+    answers, so seven unmappable owner strings were making forty unrelated,
+    correctly-read responsibilities unreadable.  ``generated_at`` (Fix 1) is
+    the same injected reference timestamp threaded through the mapper's
+    other public functions — unused by this function's own OUTPUT (an
+    unmapped row carries no freshness), but required to reach
+    :func:`_responsibility_facts_from_agent_os_state`, which needs it to
+    freshness-stamp the ``ResponsibilityFact``s it also builds.  Sorted by
+    ``responsibility_ref`` for determinism — a ``row_unreadable`` entry
+    whose own ``key`` could not be read at all sorts by the empty string
+    (``responsibility_ref`` is ``None`` in that one case; every entry still
+    carries the key so the sort never raises on a ``None``/``str``
+    comparison).
+    """
+    _, _, unmapped = _responsibility_facts_from_agent_os_state(agent_os_state, generated_at)
+    return tuple(sorted(unmapped, key=lambda row: row["responsibility_ref"] or ""))
+
+
+def declared_blockers_from_agent_os_state(
+    agent_os_state: Mapping[str, Any] | None,
+    generated_at: Any = None,
+) -> dict[str, dict[str, Any]]:
+    """Plain-data, honestly Agent-OS-owned blocker signal, by ``responsibility_ref``.
+
+    Bug-fix packet, 2026-09-01: replaces the deleted ``_blocker_facts_from_
+    agent_os_state``, which built a real ``BlockerFact`` from this same
+    ``blocked_by``/``needs_ceo`` data and stamped it ``source.owner =
+    SourceOwner.EXECUTIVE_OS`` — a false attribution, since
+    ``BlockerFact.__post_init__`` never accepts ``SourceOwner.AGENT_OS`` and
+    the fact's own ``ref`` string (``agent_os_state.workstreams:<key>.
+    blocked_by``) names Agent OS, not Executive OS, as its true source.  The
+    lawful response to a contract that cannot carry a claim honestly is to
+    decline the claim, not relabel the owner — so this function returns
+    plain data instead, carrying its own true ``SourceOwner.AGENT_OS``
+    receipt, for :func:`project_autonomy`'s ``declared_blockers`` parameter
+    to fold into each card's ``declared_blocker`` field.  That field is
+    EXPLICITLY NOT the Steward-owned ``blocker`` field and must never be
+    merged into it — different owners, different authority.
+
+    Never invents a blocker from ``warnings``, ``stale_days``, or any other
+    prose field — only a genuinely non-empty ``blocked_by`` list produces an
+    entry.  ``target_seat`` is ``"ceo"`` when the row's ``needs_ceo`` is
+    literally ``True``; otherwise the SAME closed-token seat
+    :func:`_responsibility_facts_from_agent_os_state` already derives for
+    that row's ``owner`` (never re-derived from prose here — this function
+    calls that one to obtain its ``seat_by_key`` return, the single source
+    of truth for the mapping, rather than re-implementing the lookup).  When
+    neither is available — ``needs_ceo`` is not literally ``True`` AND the
+    row's ``owner`` was unrecognized — ``target_seat`` is ``None``, never
+    guessed.  Unlike the deleted ``BlockerFact`` path, an unresolvable
+    ``target_seat`` does NOT suppress THIS function's own entry: it always
+    exists in the returned mapping whenever ``blocked_by`` is genuinely
+    non-empty, whether or not the row's owner was recognized.
+
+    Correction (Fix 2, adversarial-review repair packet, 2026-09-01): this
+    docstring used to stop there and claim "the Chairman is still told the
+    workstream is blocked even when nobody can be named as accountable for
+    it" — true of THIS function's own return value in isolation, but false
+    end-to-end as actually composed: :func:`project_autonomy`'s card loop
+    only ever reads ``declared_blockers`` for a ``responsibility_ref`` that
+    has a real ``ResponsibilityFact`` in Steward membership, and an
+    unrecognized-owner row never gets one (see module docstring point 8) —
+    so a blocked-but-unmapped workstream's entry here was computed
+    correctly and then silently never read.  The actual guarantee now spans
+    two surfaces: a recognized-owner row's block reaches the Chairman via
+    this function into a real card's ``declared_blocker`` field (unchanged);
+    an unrecognized-owner row's block reaches the Chairman via
+    :func:`_responsibility_facts_from_agent_os_state`'s own
+    ``unmapped_responsibilities`` receipt instead (see
+    :func:`_declared_blocker_receipt`), since that is the only surface such
+    a row ever appears on.  An entry is omitted from THIS function's return
+    value only when ``blocked_by`` itself is genuinely empty or absent —
+    unchanged.  ``generated_at`` (Fix 1) is the injected reference
+    timestamp threaded through to :func:`_freshness_for`, exactly as
+    :func:`_responsibility_facts_from_agent_os_state` uses it.
+    """
+    if not isinstance(agent_os_state, Mapping):
+        return {}
+    rows = agent_os_state.get("workstreams")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        return {}
+
+    _, seat_by_key, _ = _responsibility_facts_from_agent_os_state(agent_os_state, generated_at)
+    observed_at, freshness = _freshness_for(agent_os_state.get("generated_at"), generated_at)
+
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        key = row.get("key")
+        if not isinstance(key, str) or not key:
+            continue
+        reasons = _blocked_by_reasons(row)
+        if not reasons:
+            continue
+
+        if row.get("needs_ceo") is True:
+            target_seat: str | None = Seat.CEO.value
+        else:
+            owner_seat = seat_by_key.get(key)
+            target_seat = owner_seat.value if owner_seat is not None else None
+
+        out[_workstream_ref(key)] = {
+            "code": "blocked_by",
+            "explanation": (
+                f"workstream {key} is blocked by: " + "; ".join(reasons)
+            ),
+            "target_seat": target_seat,
+            "source": SourceRef(
+                owner=SourceOwner.AGENT_OS,
+                ref=f"agent_os_state.workstreams:{key}.blocked_by",
+                observed_at=observed_at,
+                freshness=freshness,
+            ),
+        }
+    return out
+
+
+def build_autonomy_snapshot(
+    *,
+    inbox: dict[str, Any] | None,
+    boot_packet: dict[str, Any] | None,
+    active_builds: dict[str, Any] | None,
+    agent_os_state: dict[str, Any] | None,
+    runtime_jobs: list[dict[str, Any]] | None,
+    bindings: dict[str, Any] | None,
+    generated_at: str | None = None,
+) -> ExecutiveStewardSnapshot:
+    """Pure mapping from the compositor's already-gathered inputs to a snapshot.
+
+    Takes exactly the same plain-data arguments
+    :func:`control_plane.chairman_control_room.compose_control_room` itself
+    receives (this signature mirrors that function's parameter names and
+    types on purpose) and returns one
+    :class:`~control_plane.executive_steward.ExecutiveStewardSnapshot`.
+    Gathers nothing on its own: no file I/O, no subprocess, no clock read,
+    no environment read, no randomness, and no mutation of any argument.
+    Same inputs in → an equal snapshot out, every time.
+
+    ``generated_at`` (Fix 1, adversarial-review repair packet, 2026-09-01)
+    is the same injected, clock-free reference timestamp
+    :func:`project_autonomy` itself receives — the compositor's own
+    ``generated_at`` (see ``control_plane.chairman_control_room.
+    compose_control_room``), threaded straight through to every fact-
+    construction helper below so a real, aged Agent OS/inbox/bindings
+    document is honestly reported ``STALE`` rather than unconditionally
+    ``CURRENT``.  Defaults to ``None`` (no reference — every constructed
+    fact reads ``Freshness.UNKNOWN`` rather than guessing) so an existing
+    caller that has not yet adopted this parameter degrades safely instead
+    of silently asserting currency it cannot back up.
+
+    ``active_builds`` and ``boot_packet`` are accepted (matching the
+    compositor's own call signature and to keep this function
+    forward-extensible) but not read: a GitHub open PR has no corresponding
+    Steward fact type in this vocabulary, and ``ResponsibilityFact``
+    construction is driven entirely by ``agent_os_state``'s own structured
+    ``workstreams[]`` fields — see module docstring point 8 for the full
+    evidence, and point 9 for why every constructed surface's
+    ``reviewed_at`` is ``None``.  ``RuntimeFact`` is still never
+    constructed (``runtime_jobs`` carries none of its required fields), and
+    — bug-fix packet, 2026-09-01 — ``BlockerFact`` is never constructed by
+    this function either: ``blockers`` on the returned snapshot is always
+    ``()``.  ``agent_os_state``'s ``blocked_by``/``needs_ceo`` signal is
+    real and is still surfaced, but honestly — call
+    :func:`declared_blockers_from_agent_os_state` separately (same
+    ``agent_os_state`` argument) and pass its result to
+    :func:`project_autonomy`'s ``declared_blockers`` parameter.  This
+    function's own return type stays exactly
+    :class:`~control_plane.executive_steward.ExecutiveStewardSnapshot` —
+    never a tuple, never a wrapper — so it remains a drop-in replacement
+    for its own prior revision at every existing call site.
+
+    ``source_failures`` on the returned snapshot is always ``()``
+    (blast-radius repair packet, 2026-09-01): an unrecognized-owner row is
+    a per-row mapping gap, not a genuine source-level outage, and a
+    :class:`SourceFailure` is exactly the wrong container for it — the
+    Steward folds every ``SourceFailure`` into the issues of every query it
+    answers, so a handful of unmappable owner strings previously
+    contaminated every other, correctly-read responsibility card.  Call
+    :func:`unmapped_responsibilities_from_agent_os_state` separately (same
+    ``agent_os_state`` argument) and pass its result to
+    :func:`project_autonomy`'s ``unmapped_responsibilities`` parameter —
+    the exact same shape of thread ``declared_blockers`` already uses.
+    """
+    del active_builds, boot_packet, runtime_jobs  # documented: unused (point 8)
+
+    attention_facts = _attention_facts_from_inbox(inbox, generated_at)
+    surface_facts = _surface_facts_from_bindings(bindings, generated_at)
+    responsibility_facts, _seat_by_key, _unmapped = (
+        _responsibility_facts_from_agent_os_state(agent_os_state, generated_at)
+    )
+
+    return ExecutiveStewardSnapshot(
+        responsibilities=responsibility_facts,
+        attention=attention_facts,
+        runtimes=(),
+        blockers=(),  # bug-fix packet, 2026-09-01: never fabricated here
+        surfaces=surface_facts,
+        # Blast-radius repair packet, 2026-09-01: an unrecognized owner is
+        # never a SourceFailure any more — see
+        # unmapped_responsibilities_from_agent_os_state.
+        source_failures=(),
+    )
+
+
+__all__ = [
+    "SCHEMA",
+    "OUTPUT_KEYS",
+    "WAKE_OUTCOME_TOKENS",
+    "project_autonomy",
+    "build_autonomy_snapshot",
+    "declared_blockers_from_agent_os_state",
+    "unmapped_responsibilities_from_agent_os_state",
+]

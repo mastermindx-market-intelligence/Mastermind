@@ -64,7 +64,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from control_plane import ceo_boot_packet, executive_inbox, executive_runtime, surface_bindings
+from control_plane import (
+    autonomy_control_room_projection,
+    ceo_boot_packet,
+    executive_inbox,
+    executive_runtime,
+    surface_bindings,
+)
 
 #: Schema version of the document this module emits.
 SCHEMA = "mastermind.chairman_control_room.v1"
@@ -163,7 +169,7 @@ _BINDING_SUMMARY_KEYS = (
 #: architecture doc §7 / commission FROZEN SPEC.
 OUTPUT_KEYS = frozenset({
     "schema", "generated_at", "sources", "degraded", "attention", "work",
-    "unjoined_open_prs", "unbound_surfaces", "binding_conflicts",
+    "unjoined_open_prs", "unbound_surfaces", "binding_conflicts", "autonomy",
 })
 
 
@@ -898,6 +904,52 @@ def compose_control_room(
             "disagreements": _disagreements(agent_os_entry, jobs, prs),
         })
 
+    # --- autonomy responsibility projection ---------------------------------
+    # Additive: control_plane.autonomy_control_room_projection.
+    # build_autonomy_snapshot maps these same already-gathered plain-data
+    # inputs into an ExecutiveStewardSnapshot, and project_autonomy renders
+    # it — this compositor's own generated_at is passed straight through so
+    # the whole document stays deterministic and clock-free.  Fix 1
+    # (adversarial-review repair packet, 2026-09-01): that same
+    # generated_at is now ALSO the reference timestamp every constructed
+    # fact's freshness is judged against — threaded into
+    # build_autonomy_snapshot and its two mapper siblings below, not just
+    # into project_autonomy — so a real, aged Agent OS/inbox/bindings
+    # document reads honestly STALE instead of unconditionally CURRENT.
+    autonomy_snapshot = autonomy_control_room_projection.build_autonomy_snapshot(
+        inbox=inbox,
+        boot_packet=boot_packet,
+        active_builds=active_builds,
+        agent_os_state=agent_os_state,
+        runtime_jobs=runtime_jobs,
+        bindings=bindings,
+        generated_at=generated_at,
+    )
+    # Agent-OS-declared blockers travel beside the snapshot rather than inside
+    # it: the Steward's BlockerFact contract admits only Executive OS / Inbox /
+    # Wake owners, so an agent_os-owned blocker cannot lawfully be a BlockerFact
+    # and is carried as separately-attributed plain data instead.
+    autonomy_declared_blockers = (
+        autonomy_control_room_projection.declared_blockers_from_agent_os_state(
+            agent_os_state, generated_at
+        )
+    )
+    # Blast-radius repair packet, 2026-09-01: an unrecognized workstream
+    # owner is a bounded, per-row mapping gap, never a SourceFailure — see
+    # autonomy_control_room_projection.unmapped_responsibilities_from_
+    # agent_os_state.  Threaded the same additive way as declared_blockers.
+    autonomy_unmapped_responsibilities = (
+        autonomy_control_room_projection.unmapped_responsibilities_from_agent_os_state(
+            agent_os_state, generated_at
+        )
+    )
+    autonomy = autonomy_control_room_projection.project_autonomy(
+        autonomy_snapshot,
+        generated_at=generated_at,
+        declared_blockers=autonomy_declared_blockers,
+        unmapped_responsibilities=autonomy_unmapped_responsibilities,
+    )
+
     doc = {
         "schema": SCHEMA,
         "generated_at": generated_at,
@@ -921,6 +973,7 @@ def compose_control_room(
         "unjoined_open_prs": _unjoined_open_prs(open_prs, joined_pr_identities),
         "unbound_surfaces": unbound_surfaces,
         "binding_conflicts": binding_conflicts,
+        "autonomy": autonomy,
     }
     assert set(doc.keys()) == OUTPUT_KEYS  # self-check: no "overall" field, closed set
     return doc

@@ -131,7 +131,7 @@ def test_output_keys_are_exactly_the_frozen_set(boot_packet, inbox, active_build
     doc = _compose(boot_packet, inbox, active_builds, bindings)
     assert set(doc.keys()) == {
         "schema", "generated_at", "sources", "degraded", "attention", "work",
-        "unjoined_open_prs", "unbound_surfaces", "binding_conflicts",
+        "unjoined_open_prs", "unbound_surfaces", "binding_conflicts", "autonomy",
     }
     assert set(doc["sources"].keys()) == {
         "mastermind_sha", "mastermind_branch", "macro_sha", "macro_root",
@@ -140,6 +140,127 @@ def test_output_keys_are_exactly_the_frozen_set(boot_packet, inbox, active_build
         "active_builds_schema", "active_builds_collected_at",
         "runtime_db_present", "bindings_path_present",
     }
+
+
+def test_output_keys_equal_ccr_output_keys_exactly(boot_packet, inbox, active_builds, bindings):
+    """The composed document's key set equals ``ccr.OUTPUT_KEYS`` exactly.
+
+    Unlike ``test_output_keys_are_exactly_the_frozen_set`` above (a
+    hand-written literal, so a reviewer can see the frozen contract without
+    chasing an import), this test reads the module's own live
+    ``OUTPUT_KEYS`` constant — the same self-check ``compose_control_room``
+    itself asserts before returning.  Both must agree, including on the
+    ``autonomy`` key the AD-CR1A Phase A packet added.
+    """
+    doc = _compose(boot_packet, inbox, active_builds, bindings)
+    assert set(doc.keys()) == ccr.OUTPUT_KEYS
+    assert "autonomy" in ccr.OUTPUT_KEYS
+
+
+# ---------------------------------------------------------------------------
+# autonomy responsibility projection (AD-CR1A Phase A wiring)
+# ---------------------------------------------------------------------------
+
+
+def test_autonomy_section_is_present_and_correctly_shaped(
+    boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings,
+):
+    """``doc["autonomy"]`` is a real, correctly-shaped autonomy_control_room.v1 document."""
+    from control_plane import autonomy_control_room_projection as autonomy_proj
+
+    doc = _compose_full(boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings)
+    autonomy = doc["autonomy"]
+
+    assert set(autonomy.keys()) == autonomy_proj.OUTPUT_KEYS
+    assert autonomy["schema"] == autonomy_proj.SCHEMA
+    # compose_control_room's own generated_at is passed straight through —
+    # no second clock read inside the projection.
+    assert autonomy["generated_at"] == "2026-08-21T00:10:00Z"
+    assert isinstance(autonomy["responsibilities"], list)
+    assert isinstance(autonomy["source_failures"], list)
+    assert isinstance(autonomy["issues"], list)
+    assert isinstance(autonomy["counts"], dict)
+    assert isinstance(autonomy["owed_by_seat"], dict)
+    assert isinstance(autonomy["chairman_decisions"], list)
+    assert isinstance(autonomy["unmapped_responsibilities"], list)
+
+
+def test_autonomy_section_is_produced_from_real_compositor_inputs(
+    boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings,
+):
+    """The autonomy section genuinely reacts to the real gathered inputs.
+
+    Proves this is wired to real data, not a static/hand-made payload
+    dropped into the document: with the fixtures' real Agent OS inputs
+    present, a real ``unmapped_responsibilities`` row is recorded for each
+    of the fixture's rows (control_plane.autonomy_control_room_projection
+    module docstring point 8 — the thin ``agent_os_state_v1.json``/
+    ``boot_packet_v1.json`` test fixtures' ``workstreams[]`` rows carry no
+    ``owner`` field at all, unlike the real compiled artifact, so every one
+    of this fixture's rows reads as an unrecognized owner rather than a
+    mapped seat); with BOTH of those two real inputs withheld, no such row
+    is ever recorded, because ``build_autonomy_snapshot`` (and its sibling
+    ``unmapped_responsibilities_from_agent_os_state``) only reports a gap
+    when ``agent_os_state`` is genuinely present. A hand-made/static
+    payload could not exhibit this input-dependent behavior.
+
+    Blast-radius repair packet, 2026-09-01: an unrecognized owner is never
+    a ``SourceFailure`` — ``source_failures`` must stay empty in both
+    cases, since a SourceFailure is a global, source-level outage and the
+    Steward folds every one into the issues of EVERY query it answers,
+    which would otherwise contaminate every other, correctly-read card.
+    """
+    with_agent_os = _compose_full(
+        boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings,
+    )
+    assert with_agent_os["autonomy"]["source_failures"] == []
+    unmapped_refs = {
+        row["responsibility_ref"] for row in with_agent_os["autonomy"]["unmapped_responsibilities"]
+    }
+    assert unmapped_refs  # at least one unrecognized-owner row from the thin fixture
+    assert all(
+        row["reason"] == "owner_not_a_recognized_seat"
+        for row in with_agent_os["autonomy"]["unmapped_responsibilities"]
+    )
+
+    without_agent_os = _compose(
+        None, inbox, active_builds, bindings,
+        agent_os_state=None, runtime_jobs=runtime_jobs,
+    )
+    assert without_agent_os["autonomy"]["source_failures"] == []
+    assert without_agent_os["autonomy"]["unmapped_responsibilities"] == []
+
+    # The real inbox fixture's attention items are genuinely consumed too:
+    # dropping the inbox to an empty attention document must remove every
+    # AttentionFact-derived signal the projection could otherwise report —
+    # here, that the source_receipts on any card cite EXECUTIVE_INBOX (there
+    # are still no cards for THIS thin fixture, since every one of its rows'
+    # ``owner`` is missing and so unrecognized — see module docstring
+    # point 8 — but the underlying snapshot's own consumption is exercised
+    # directly below via the public mapper, proving it reads the real
+    # attention rows rather than ignoring the ``inbox`` argument).
+    from control_plane import autonomy_control_room_projection as autonomy_proj
+
+    snapshot_with_inbox = autonomy_proj.build_autonomy_snapshot(
+        inbox=inbox, boot_packet=boot_packet, active_builds=active_builds,
+        agent_os_state=agent_os_state, runtime_jobs=runtime_jobs, bindings=bindings,
+    )
+    empty_inbox = {"schema": inbox["schema"], "generated_at": inbox["generated_at"], "attention": []}
+    snapshot_without_attention = autonomy_proj.build_autonomy_snapshot(
+        inbox=empty_inbox, boot_packet=boot_packet, active_builds=active_builds,
+        agent_os_state=agent_os_state, runtime_jobs=runtime_jobs, bindings=bindings,
+    )
+    assert len(snapshot_with_inbox.attention) > 0
+    assert snapshot_without_attention.attention == ()
+
+    # And the real bindings fixture's rows are genuinely consumed: dropping
+    # bindings to no rows removes every SurfaceFact.
+    snapshot_without_bindings = autonomy_proj.build_autonomy_snapshot(
+        inbox=inbox, boot_packet=boot_packet, active_builds=active_builds,
+        agent_os_state=agent_os_state, runtime_jobs=runtime_jobs, bindings=None,
+    )
+    assert len(snapshot_with_inbox.surfaces) > 0
+    assert snapshot_without_bindings.surfaces == ()
 
 
 def test_no_overall_or_combined_status_field_anywhere(boot_packet, inbox, active_builds, bindings):
