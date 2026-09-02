@@ -590,23 +590,50 @@ def _unlink_exact_owned_socket(
     *,
     owner_uid: int,
     identity: tuple[int, int] | None,
+    require_private_mode: bool = True,
 ) -> None:
     if identity is None:
         return
     try:
         info = path.lstat()
-    except OSError:
+    except FileNotFoundError:
         return
+    except OSError:
+        raise NativeHostError("socket_cleanup_failed") from None
     if (
-        stat.S_ISSOCK(info.st_mode)
-        and info.st_uid == owner_uid
-        and not (stat.S_IMODE(info.st_mode) & 0o077)
-        and (info.st_dev, info.st_ino) == identity
+        not stat.S_ISSOCK(info.st_mode)
+        or info.st_uid != owner_uid
+        or (info.st_dev, info.st_ino) != identity
+        or (
+            require_private_mode
+            and bool(stat.S_IMODE(info.st_mode) & 0o077)
+        )
     ):
+        return
+
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError:
         try:
-            path.unlink()
+            current = path.lstat()
+        except FileNotFoundError:
+            return
         except OSError:
-            pass
+            raise NativeHostError("socket_cleanup_failed") from None
+        if (current.st_dev, current.st_ino) != identity:
+            return
+        raise NativeHostError("socket_cleanup_failed") from None
+
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise NativeHostError("socket_cleanup_failed") from None
+    if (current.st_dev, current.st_ino) == identity:
+        raise NativeHostError("socket_cleanup_failed") from None
 
 
 def open_private_server(
@@ -648,6 +675,7 @@ def open_private_server(
             destination,
             owner_uid=owner_uid,
             identity=identity,
+            require_private_mode=False,
         )
         raise
 
@@ -937,7 +965,13 @@ def run_native_host(
                     continue
                 try:
                     try:
-                        unsolicited = read_frame(chrome_in)
+                        unsolicited_deadline = Deadline(
+                            ends_at=time.monotonic() + timeout
+                        )
+                        unsolicited = read_frame(
+                            chrome_in,
+                            deadline=unsolicited_deadline,
+                        )
                     except NativeHostError as exc:
                         if exc.code == "frame_header_missing":
                             return
