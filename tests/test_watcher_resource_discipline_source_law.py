@@ -142,6 +142,17 @@ def test_exact_session_required_does_not_equate_slack_seat_with_native_session()
         assert phrase in routing
 
 
+def test_exact_session_slack_delivery_requires_proven_native_addressability() -> None:
+    routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
+    for phrase in (
+        "Slack mention alone is not an exact-session delivery mechanism",
+        "production-proven exact native wake/resume path",
+        "WAITING_EXACT_SESSION / wake_unavailable",
+        "do not emit an account-targeted DIRECT_TARGETED packet",
+    ):
+        assert phrase in routing
+
+
 def test_root_worker_bootstraps_carry_codex_continuation_invariant() -> None:
     for path in ("AGENTS.md", "CLAUDE.md"):
         text = _flat(path)
