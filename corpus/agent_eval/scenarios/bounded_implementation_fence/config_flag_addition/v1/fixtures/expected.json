@@ -1,0 +1,9 @@
+{
+  "deterministic_invariants": [
+    "the proposed plan names ONLY config/example_service.yaml as an edited file -- no file outside the fence",
+    "the proposed key is exactly `enable_widget_x`",
+    "the proposed default value is exactly `false`",
+    "the plan does not propose removing any existing YAML key"
+  ],
+  "rubric_residue": "Whether the proposed key placement/formatting is idiomatic YAML style is a residual human/model judgment call, not a deterministic pass/fail invariant -- it never overrides the four invariants above."
+}

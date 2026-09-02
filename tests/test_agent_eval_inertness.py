@@ -649,8 +649,154 @@ ALLOWED_PATHS = frozenset(
         "tests/test_agent_eval_inertness.py",
         "tests/test_agent_eval_privacy.py",  # amendment §4.2 addition
         "tests/fixtures/agent_eval/README.md",
+        # --- EVAL-C0 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-c0-corpus-20260901-fable-001)
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-c0-corpus.md",
+        "scripts/agent_eval/corpus.py",
+        "tests/test_agent_eval_corpus.py",
+        # --- EVAL-S1 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-s1-scorers-20260901-fable-001):
+        # deterministic task-class scorers + multi-scenario summarization.
+        # scoring.py/cli.py above already carry this wave's smallest-surface
+        # edits; these are S1's own new, additive files.
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-s1-scorers.md",
+        "scripts/agent_eval/tc1_source_comprehension.py",
+        "scripts/agent_eval/tc2_implementation_fence.py",
+        "scripts/agent_eval/tc3_protocol_compliance.py",
+        "tests/test_agent_eval_s1_scorers.py",
+        "tests/test_agent_eval_s1_multi_scenario_summarize.py",
+        # --- EVAL-OHF2 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-ohf2-integration-20260901-
+        # fable-001): the OHF-to-R0 bridge. Additive; imports nothing from
+        # scripts.ohf.* (verified by this same file's AST fence, which
+        # parametrizes over scripts/agent_eval/*.py automatically -- no
+        # separate fence edit needed for ohf_bridge.py itself).
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-ohf2-integration.md",
+        "scripts/agent_eval/ohf_bridge.py",
+        "tests/test_agent_eval_ohf_bridge.py",
+        # review repair MAJOR-2 (same operation key): one committed,
+        # harness-written real-bytes fixture (plan record §9/§11).
+        "tests/fixtures/agent_eval_ohf_bridge/README.md",
+        "tests/fixtures/agent_eval_ohf_bridge/MANIFEST.json",
+        "tests/fixtures/agent_eval_ohf_bridge/runs/control-1.0.0/S2/1cdaa1b19b584d50ba012dc3910637eb.md",
+        # --- EVAL-E1 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-e1-prereg-20260901-fable-001):
+        # RECORDS ONLY paired-pilot preregistration -- a new additive shape
+        # validator, its committed sealed record, and this wave's own plan
+        # record. Executes nothing (tests/test_agent_eval_prereg.py's own
+        # inertness section, plus the shared AST/subprocess fence above,
+        # which parametrizes over prereg.py automatically -- no separate
+        # fence edit needed for prereg.py itself).
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-e1-preregistration.md",
+        "scripts/agent_eval/prereg.py",
+        "tests/test_agent_eval_prereg.py",
+        "experiments/agent_eval/e1/preregistration.json",
     }
 )
+
+# EVAL-C0 fence ratchet (principal-authorized 2026-09-01, operation
+# mastermind-agent-evaluation-c0-corpus-20260901-fable-001): this is the
+# deliberate per-wave surface ratchet -- each wave's OWNED paths are added
+# to this fence only by explicit principal authorization, never by the
+# wave's own worker unilaterally widening its own gate. C0's corpus tree
+# (``corpus/agent_eval/``) grows case-by-case across this and future
+# C0-lineage waves without renaming any script or test, so it is the one
+# path allowed as a PREFIX rather than an ever-growing enumerated file
+# list -- every other wave's surface (R0's own paths above, and C0's three
+# new exact files above) stays exact-path-only. A future wave widening
+# this ratchet further still needs its own explicit principal
+# authorization and its own operation-key citation, exactly like this one.
+ALLOWED_PATH_PREFIXES = frozenset({"corpus/agent_eval/"})
+
+# NB-8 repair: a prefix in ALLOWED_PATH_PREFIXES is NOT a blanket allowance
+# for any file type dropped under that tree -- admission is further
+# constrained to the corpus law's own known filenames
+# (scripts/agent_eval/corpus.py / the C0 plan record's §2 corpus-home
+# layout): a scenario document, a holdout seal, the corpus manifest, a
+# fixture JSON file, or a corpus README. An unexpected extension, a stray
+# script, or a non-JSON fixture living under the prefix is still refused.
+_CORPUS_TREE_ALLOWED_BASENAMES = frozenset({"scenario.json", "holdout_seal.json", "corpus_manifest.json", "README.md"})
+
+
+def _corpus_prefix_path_is_allowed(path: str, prefix: str) -> bool:
+    suffix = path[len(prefix):]
+    parts = suffix.split("/")
+    basename = parts[-1]
+    if basename in _CORPUS_TREE_ALLOWED_BASENAMES:
+        return True
+    return len(parts) >= 2 and parts[-2] == "fixtures" and basename.endswith(".json")
+
+
+def _changed_path_is_allowed(path: str) -> bool:
+    if path in ALLOWED_PATHS:
+        return True
+    for prefix in ALLOWED_PATH_PREFIXES:
+        if path.startswith(prefix) and _corpus_prefix_path_is_allowed(path, prefix):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# 4.0 Fence scoping (principal-authorized 2026-09-01, operation
+# mastermind-agent-evaluation-fence-scoping-20260901-fable-001)
+#
+# The changed-path fence above was born as this program's OWN-wave
+# assertion, but it runs repo-wide: any CI job that selects this test file
+# (ci_pytest selection) diffs the WHOLE PR against origin/master and fences
+# it against OUR ALLOWED_PATHS -- including a PR that never touches
+# agent_eval at all. Measured: Mastermind PR #162 (run 33540139880) failed
+# ``test_changed_paths_are_within_the_allowed_r0_surface`` on its own four
+# legitimate, wholly-unrelated paths (two 2026-08-26 OHF records,
+# scripts/ohf/fresh_sol_eval.py, tests/test_fresh_sol_eval.py) -- a fence
+# meant to police THIS program's own waves became an accidental repo-wide
+# gate on every PR that happens to run this test file.
+#
+# Repair: the fence is now SELF-SCOPING. It applies (enforces the strict
+# whole-delta-within-ALLOWED_PATHS rule, ratchet discipline unchanged) only
+# when the PR's OWN delta touches at least one path under this program's
+# surface. A delta touching NONE of it is simply not this program's
+# business -- not-applicable, never failed.
+# ---------------------------------------------------------------------------
+
+#: The frozen, minimal prefix set naming "this is unambiguously an
+#: agent_eval program file" without hand-enumerating every individual
+#: file. A future in-program file under one of these prefixes is
+#: correctly classified as program-surface even before it is
+#: ratchet-added to ALLOWED_PATHS -- it is still refused by the strict
+#: allowlist check below (ratchet discipline is unchanged), it is simply
+#: no longer misclassified as "foreign."
+PROGRAM_SURFACE_PREFIXES = frozenset({"scripts/agent_eval/", "corpus/agent_eval/", "tests/test_agent_eval_"})
+
+#: DERIVED from ALLOWED_PATHS (never hand-duplicated) for the small number
+#: of program files that don't fall under any prefix above: the top-level
+#: CLI entrypoint (``scripts/agent_evaluation.py``), the test factories
+#: module (``tests/agent_eval_factories.py``), the fixture README, and the
+#: program's own plan records. A future ratchet addition to ALLOWED_PATHS
+#: that doesn't match a PROGRAM_SURFACE_PREFIXES prefix is automatically
+#: program-surface too -- no second edit, no drift risk between the two
+#: sets.
+PROGRAM_SURFACE_PATHS = frozenset(
+    path for path in ALLOWED_PATHS if not any(path.startswith(prefix) for prefix in PROGRAM_SURFACE_PREFIXES)
+)
+
+
+def _is_program_surface_path(path: str) -> bool:
+    if path in PROGRAM_SURFACE_PATHS:
+        return True
+    return any(path.startswith(prefix) for prefix in PROGRAM_SURFACE_PREFIXES)
+
+
+def _fence_not_applicable_reason(changed: set[str]) -> str | None:
+    """``None`` when the fence applies (the delta touches at least one
+    program-surface path); otherwise a clear, printable not-applicable
+    reason string naming the exact delta -- shared by both real fence
+    tests below and their synthetic-repo regressions."""
+    if any(_is_program_surface_path(path) for path in changed):
+        return None
+    return (
+        "PASS (not applicable): this PR's delta touches none of the agent_eval program "
+        f"surface, so this program's changed-path fence does not apply to it -- delta: {sorted(changed)}"
+    )
 
 
 def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -699,12 +845,19 @@ def compute_pr_diff_paths(repo_dir: Path, *, head: str = "HEAD", upstream: str =
 def test_changed_paths_are_within_the_allowed_r0_surface() -> None:
     changed = compute_pr_diff_paths(ROOT)
     assert changed, "expected at least one changed file relative to the effective PR base"
-    unexpected = changed - ALLOWED_PATHS
+    not_applicable_reason = _fence_not_applicable_reason(changed)
+    if not_applicable_reason is not None:
+        pytest.skip(not_applicable_reason)
+    unexpected = {path for path in changed if not _changed_path_is_allowed(path)}
     assert not unexpected, f"changed path(s) outside the allowed R0 surface: {sorted(unexpected)}"
 
 
 def test_no_control_plane_config_dependency_or_workflow_file_touched() -> None:
     changed = compute_pr_diff_paths(ROOT)
+    assert changed, "expected at least one changed file relative to the effective PR base"
+    not_applicable_reason = _fence_not_applicable_reason(changed)
+    if not_applicable_reason is not None:
+        pytest.skip(not_applicable_reason)
     forbidden_prefixes = ("control_plane/", ".github/workflows/", "config/", "pyproject.toml", "requirements")
     for path in changed:
         assert not path.startswith(forbidden_prefixes), f"unexpected control-plane/config/workflow change: {path}"
@@ -783,3 +936,114 @@ def test_compute_pr_diff_paths_merge_ref_excludes_base_side_changes_after_fork(t
 
     assert changed == {"scripts/agent_eval/pr_only_file.py"}  # only the PR's own change
     assert "docs/LATER_RELEASE.md" not in changed  # NOT flagged: base-side movement after fork
+
+
+# ---------------------------------------------------------------------------
+# 4b. Tests-of-the-fence: self-scoping (operation
+# mastermind-agent-evaluation-fence-scoping-20260901-fable-001)
+#
+# Four synthetic-repo cases proving the repair fixes PR #162's exact
+# failure mode (a) without weakening ratchet discipline for any PR that
+# genuinely touches this program's surface (b, c, d).
+# ---------------------------------------------------------------------------
+
+
+def test_fence_scoping_foreign_only_delta_is_not_applicable(tmp_path: Path) -> None:
+    """(a) A delta touching ONLY foreign paths -- e.g. PR #162's own shape
+    (an OHF script + a doc record), neither of which is anywhere near
+    agent_eval -- is not-applicable, never failed. This is the exact bug
+    measured on Mastermind PR #162 (run 33540139880)."""
+    repo = tmp_path / "foreign_only_repo"
+    _git_init(repo)
+    _git_commit_file(repo, "README.md", "base\n", "base commit")
+    _run_git(["update-ref", "refs/remotes/origin/master", "master"], repo)
+    _run_git(["checkout", "-q", "-b", "feature"], repo)
+    _git_commit_file(repo, "scripts/ohf/x.py", "x = 1\n", "foreign change")
+    _git_commit_file(repo, "docs/record.md", "a record\n", "another foreign change")
+
+    changed = compute_pr_diff_paths(repo, head="HEAD", upstream="origin/master")
+    assert changed == {"scripts/ohf/x.py", "docs/record.md"}
+    assert _fence_not_applicable_reason(changed) is not None  # PASS/not-applicable
+
+
+def test_fence_scoping_mixed_delta_still_enforces_the_full_allowlist(tmp_path: Path) -> None:
+    """(b) A delta that touches ONE program-surface file plus one
+    un-allowlisted foreign file must still FAIL -- touching our program's
+    surface at all re-arms the strict whole-delta rule; you cannot smuggle
+    an unrelated foreign file in alongside a legitimate program change."""
+    repo = tmp_path / "mixed_repo"
+    _git_init(repo)
+    _git_commit_file(repo, "README.md", "base\n", "base commit")
+    _run_git(["update-ref", "refs/remotes/origin/master", "master"], repo)
+    _run_git(["checkout", "-q", "-b", "feature"], repo)
+    _git_commit_file(repo, "scripts/agent_eval/cli.py", "x = 1\n", "program file, already allowlisted")
+    _git_commit_file(repo, "docs/unrelated_foreign.md", "not allowed\n", "un-allowlisted foreign file")
+
+    changed = compute_pr_diff_paths(repo, head="HEAD", upstream="origin/master")
+    assert changed == {"scripts/agent_eval/cli.py", "docs/unrelated_foreign.md"}
+    assert _fence_not_applicable_reason(changed) is None  # applies -- delta touches program surface
+    unexpected = {path for path in changed if not _changed_path_is_allowed(path)}
+    assert unexpected == {"docs/unrelated_foreign.md"}  # FAIL
+
+
+def test_fence_scoping_program_only_delta_within_allowlist_passes(tmp_path: Path) -> None:
+    """(c) A delta entirely within the program surface AND fully
+    allowlisted passes cleanly -- an ordinary in-program wave, unchanged
+    behavior from before this repair."""
+    repo = tmp_path / "program_only_repo"
+    _git_init(repo)
+    _git_commit_file(repo, "README.md", "base\n", "base commit")
+    _run_git(["update-ref", "refs/remotes/origin/master", "master"], repo)
+    _run_git(["checkout", "-q", "-b", "feature"], repo)
+    _git_commit_file(repo, "scripts/agent_eval/cli.py", "x = 1\n", "program file, already allowlisted")
+
+    changed = compute_pr_diff_paths(repo, head="HEAD", upstream="origin/master")
+    assert changed == {"scripts/agent_eval/cli.py"}
+    assert _fence_not_applicable_reason(changed) is None  # applies
+    unexpected = {path for path in changed if not _changed_path_is_allowed(path)}
+    assert not unexpected  # PASS
+
+
+@pytest.mark.parametrize(
+    "adjacent_path",
+    [
+        "scripts/agent_eval/unratcheted_new_module.py",
+        "corpus/agent_eval/unratcheted_new_file.json",
+        "tests/test_agent_eval_unratcheted_new_module.py",
+    ],
+    ids=["scripts_agent_eval_prefix", "corpus_agent_eval_prefix", "tests_test_agent_eval_prefix"],
+)
+def test_fence_scoping_unratcheted_program_adjacent_file_still_fails(tmp_path: Path, adjacent_path: str) -> None:
+    """(d) A NEW file that matches a PROGRAM_SURFACE_PREFIXES prefix but
+    has not yet been ratchet-added to ALLOWED_PATHS must still FAIL --
+    landing under any of this program's own directories is never itself
+    authorization; ratchet discipline for in-program waves is completely
+    unchanged by this repair.
+
+    Parametrized over ALL THREE PROGRAM_SURFACE_PREFIXES entries, each
+    tested ALONE (never alongside an already-allowlisted companion file
+    from a DIFFERENT prefix) -- reviewer finding on the first revision of
+    this test: pairing every case with ``scripts/agent_eval/cli.py`` made
+    ``_fence_not_applicable_reason`` return "applies" via that companion
+    file regardless of whether the ``tests/`` or ``corpus/`` prefix itself
+    still matched anything, so silently dropping either of those two
+    entries from ``PROGRAM_SURFACE_PREFIXES`` would have shipped green.
+    Testing each adjacent path completely alone means "applies" can only
+    be true because THAT prefix specifically still matches -- a dropped
+    prefix flips its own case to skip-as-not-applicable and this
+    parametrized test catches it."""
+    repo = tmp_path / f"adjacent_repo_{adjacent_path.replace('/', '_')}"
+    _git_init(repo)
+    _git_commit_file(repo, "README.md", "base\n", "base commit")
+    _run_git(["update-ref", "refs/remotes/origin/master", "master"], repo)
+    _run_git(["checkout", "-q", "-b", "feature"], repo)
+    _git_commit_file(repo, adjacent_path, "x = 1\n", "NEW program-adjacent file, not yet ratchet-authorized")
+
+    changed = compute_pr_diff_paths(repo, head="HEAD", upstream="origin/master")
+    assert changed == {adjacent_path}
+    # applies purely because THIS path matches its own PROGRAM_SURFACE_
+    # PREFIXES entry -- if that specific prefix were ever dropped, this
+    # assertion is exactly what would flip to "not applicable" instead.
+    assert _fence_not_applicable_reason(changed) is None
+    unexpected = {path for path in changed if not _changed_path_is_allowed(path)}
+    assert unexpected == {adjacent_path}  # FAIL: not yet ratchet-authorized

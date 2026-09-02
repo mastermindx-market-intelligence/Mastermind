@@ -21,7 +21,7 @@ import os
 import sys
 from pathlib import Path
 
-from scripts.agent_eval import MAX_CANONICAL_ARTIFACT_BYTES, contracts, scoring, store, validity
+from scripts.agent_eval import MAX_CANONICAL_ARTIFACT_BYTES, contracts, corpus, scoring, store, validity
 from scripts.agent_eval.canonical import canonical_json_bytes
 from scripts.agent_eval.errors import ArtifactConflictError, ContractError, VerificationContextError
 
@@ -204,10 +204,6 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
     if experiment is None:
         raise CliUsageError(f"experiment could not be resolved from --root: {args.experiment_id}")
     scenario_refs = sorted(experiment["scenario_refs"], key=lambda ref: (ref["scenario_id"], ref["scenario_version"]))
-    primary_scenario_ref = scenario_refs[0]
-    scenario = artifact_store.resolve_scenario(primary_scenario_ref["scenario_id"], primary_scenario_ref["scenario_version"])
-    if scenario is None:
-        raise CliUsageError("experiment's scenario could not be resolved from --root")
 
     # plan §5.6 complete-enumeration law: one deterministic, read-only,
     # sorted enumeration of the trusted root -- never a caller-selected
@@ -215,9 +211,67 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
     runs = artifact_store.enumerate_runs()
     scorer_passes = artifact_store.enumerate_scorer_passes()
 
-    evidence = scoring.summarize_experiment(
+    if len(scenario_refs) <= 1:
+        # UNCHANGED single-scenario path (byte-stable): scenario_refs[0] is
+        # correct here because there is only ever one scenario to pick.
+        primary_scenario_ref = scenario_refs[0]
+        scenario = artifact_store.resolve_scenario(
+            primary_scenario_ref["scenario_id"], primary_scenario_ref["scenario_version"]
+        )
+        if scenario is None:
+            raise CliUsageError("experiment's scenario could not be resolved from --root")
+
+        evidence = scoring.summarize_experiment(
+            experiment,
+            scenario,
+            runs,
+            scorer_passes,
+            evidence_ref_id=args.id,
+            intended_owner=args.owner,
+            review_at=args.review_at,
+            created_at=args.created_at,
+            analysis_version=DEFAULT_ANALYSIS_VERSION,
+        )
+        result = artifact_store.create(evidence)
+        _print_json(
+            {
+                "scope": "EVALUATION_GRAPH_VERIFIED",
+                "disposition": result.disposition.value,
+                "evidence_ref_id": evidence["evidence_ref_id"],
+                "evidence_grade": evidence["evidence_grade"],
+                "verification_scopes": list(evidence["verification_scopes"]),
+                "counts": evidence["counts"],
+                "external_content_unverified": True,
+            }
+        )
+        # R0's evidence grade is always INSUFFICIENT_EVIDENCE (external
+        # content is never verified) -- report that honestly rather than
+        # as a clean 0.
+        return _EXIT_INCOMPLETE
+
+    # EVAL-S1: multi-scenario experiment. The R0 scenario_refs[0] shortcut
+    # above would silently apply the WRONG scenario's required_dimensions
+    # to every other scenario's runs -- see docs/superpowers/plans/2026-09-
+    # 01-agent-evaluation-s1-scorers.md. This path resolves EVERY declared
+    # scenario and groups runs by their OWN scenario. Store-integration
+    # wave (same operation): published through the SAME governed create-
+    # only ``ArtifactStore.create()`` path the single-scenario branch above
+    # uses -- store.py now dispatches the multi-scenario schema too, with
+    # the same enumeration-equality anti-laundering guarantee (a caller-
+    # selected subset of scenarios/runs is refused at create, never
+    # silently accepted).
+    scenarios = []
+    for ref in scenario_refs:
+        scenario = artifact_store.resolve_scenario(ref["scenario_id"], ref["scenario_version"])
+        if scenario is None:
+            raise CliUsageError(
+                f"experiment's scenario could not be resolved from --root: {ref['scenario_id']} v{ref['scenario_version']}"
+            )
+        scenarios.append(scenario)
+
+    evidence = scoring.summarize_multi_scenario_experiment(
         experiment,
-        scenario,
+        tuple(scenarios),
         runs,
         scorer_passes,
         evidence_ref_id=args.id,
@@ -235,12 +289,40 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
             "evidence_grade": evidence["evidence_grade"],
             "verification_scopes": list(evidence["verification_scopes"]),
             "counts": evidence["counts"],
+            "scenario_groups": [
+                {"scenario_id": group["scenario_id"], "scenario_version": group["scenario_version"], "counts": group["counts"]}
+                for group in evidence["scenario_groups"]
+            ],
             "external_content_unverified": True,
         }
     )
-    # R0's evidence grade is always INSUFFICIENT_EVIDENCE (external content
-    # is never verified) -- report that honestly rather than as a clean 0.
+    # R0/S1's evidence grade is always INSUFFICIENT_EVIDENCE (external
+    # content is never verified) -- report that honestly rather than as a
+    # clean 0.
     return _EXIT_INCOMPLETE
+
+
+def _cmd_corpus_verify(args: argparse.Namespace) -> int:
+    """EVAL-C0: scenario-vs-corpus consistency check over a committed public
+    corpus tree (never one of R0's three verification scopes -- this is a
+    narrower, additive governance check; see scripts/agent_eval/corpus.py)."""
+    corpus_root = Path(args.corpus_root)
+    repo_root = Path(args.repo_root) if args.repo_root else Path.cwd()
+    if not corpus_root.is_dir():
+        raise CliUsageError(f"no such corpus directory: {corpus_root}")
+    report = corpus.verify_corpus_tree_consistency(corpus_root, repo_root)
+    _print_json(
+        {
+            "result": report.result,
+            "corpus_revision": report.corpus_revision,
+            "corpus_tree_digest": report.corpus_tree_digest,
+            "scenario_count": report.scenario_count,
+            "holdout_count": report.holdout_count,
+            "defect_count": len(report.defects),
+            "defects": [{"path": d.path, "code": d.code, "message": d.message} for d in report.defects],
+        }
+    )
+    return _EXIT_OK if report.result == "CONSISTENT" else _EXIT_ERROR
 
 
 def _cmd_verify_tree_graph(args: argparse.Namespace) -> int:
@@ -323,6 +405,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     verify_tree_graph.add_argument("--root", required=True)
     verify_tree_graph.set_defaults(func=_cmd_verify_tree_graph)
+
+    corpus_verify = subparsers.add_parser(
+        "corpus-verify",
+        help="EVAL-C0: scenario-vs-corpus consistency check over a committed public corpus tree; never repairs",
+    )
+    corpus_verify.add_argument("--corpus-root", required=True, help="path to the corpus/agent_eval directory")
+    corpus_verify.add_argument(
+        "--repo-root", required=False, help="repository root fixture artifact_refs resolve against (default: cwd)"
+    )
+    corpus_verify.set_defaults(func=_cmd_corpus_verify)
 
     return parser
 
