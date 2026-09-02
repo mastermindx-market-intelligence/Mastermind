@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mastermind.invalid/schema/mastermind.codeintel_c0_result.v1.json",
+  "title": "Mastermind Code Intelligence C0 semantic falsifier result",
+  "description": "Immutable result of the C0 exact-worktree semantic backend falsifier. A decision enum may only be published when at least one non-synthetic trial exists for every candidate: a stand-in server can never produce a backend selection.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_version",
+    "operation_key",
+    "generated_unix_ms",
+    "wave_status",
+    "source",
+    "environment",
+    "corpora",
+    "binding_receipt",
+    "candidates",
+    "hostile_results",
+    "mutation_kills",
+    "decision_state",
+    "residual_risks",
+    "next_action"
+  ],
+  "properties": {
+    "artifact_version": { "const": "mastermind.codeintel_c0_result.v1" },
+    "operation_key": { "type": "string", "minLength": 1 },
+    "generated_unix_ms": { "type": "integer", "minimum": 0 },
+    "wave_status": { "const": "DISPOSABLE FALSIFIER / PRODUCTION_INERT" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "branch", "head_sha", "base_sha", "changed_paths"],
+      "properties": {
+        "repository": { "type": "string" },
+        "branch": { "type": "string" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "protected_pickup_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "changed_paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "python_version", "network_policy"],
+      "properties": {
+        "platform": { "type": "string" },
+        "python_version": { "type": "string" },
+        "network_policy": { "const": "disabled" },
+        "observations": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "corpora": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["corpus_id", "language", "manifest_digest", "answer_key_digest"],
+        "properties": {
+          "corpus_id": { "type": "string" },
+          "language": { "type": "string" },
+          "manifest_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "answer_key_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "binding_receipt": {
+      "type": "object",
+      "required": [
+        "workspace_binding_digest",
+        "facade_source_digest",
+        "semantic_schema_digest"
+      ],
+      "properties": {
+        "workspace_binding_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "facade_source_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "semantic_schema_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "exposed_tool_census": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "type": "string" }
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "status", "trials", "hard_failures"],
+        "properties": {
+          "kind": { "enum": ["serena", "direct_lsp"] },
+          "status": {
+            "enum": [
+              "EXERCISED",
+              "UNEXERCISED_MISSING_BUNDLE",
+              "REJECTED_BY_C0"
+            ]
+          },
+          "identity": {
+            "type": ["object", "null"],
+            "properties": {
+              "kind": { "type": "string" },
+              "source_version": { "type": "string" },
+              "source_commit": { "type": "string" },
+              "executable_sha256": { "type": "string" },
+              "configuration_digest": { "type": "string" }
+            }
+          },
+          "advertised_tool_census": { "type": "array", "items": { "type": "string" } },
+          "trials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "case",
+                "language",
+                "correct",
+                "expected",
+                "actual",
+                "latency_ms",
+                "synthetic"
+              ],
+              "properties": {
+                "case": { "type": "string" },
+                "language": { "type": "string" },
+                "correct": { "type": "boolean" },
+                "expected": {},
+                "actual": {},
+                "latency_ms": { "type": "integer", "minimum": 0 },
+                "synthetic": { "type": "boolean" },
+                "phase": { "enum": ["cold", "warm"] },
+                "error": { "type": ["string", "null"] }
+              }
+            }
+          },
+          "hard_failures": { "type": "array", "items": { "type": "string" } },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "hostile_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check", "outcome"],
+        "properties": {
+          "check": { "type": "string" },
+          "outcome": { "enum": ["REFUSED_AS_REQUIRED", "ALLOWED", "NOT_RUN"] },
+          "code": { "type": ["string", "null"] },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "mutation_kills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mutation", "killed_by"],
+        "properties": {
+          "mutation": { "type": "string" },
+          "killed_by": { "type": "string" }
+        }
+      }
+    },
+    "decision_state": {
+      "enum": ["DECIDED", "BLOCKED_MISSING_PINNED_DEPENDENCY"]
+    },
+    "decision": { "enum": ["SERENA", "DIRECT_LSP", "NO_SAFE_BACKEND"] },
+    "blocking_reason": { "type": "string" },
+    "residual_risks": { "type": "array", "items": { "type": "string" } },
+    "next_action": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "decision_state": { "const": "DECIDED" } },
+        "required": ["decision_state"]
+      },
+      "then": {
+        "required": ["decision"],
+        "properties": {
+          "candidates": {
+            "items": {
+              "properties": {
+                "trials": {
+                  "minItems": 1,
+                  "contains": {
+                    "type": "object",
+                    "required": ["synthetic"],
+                    "properties": { "synthetic": { "const": false } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision_state": { "const": "BLOCKED_MISSING_PINNED_DEPENDENCY" }
+        },
+        "required": ["decision_state"]
+      },
+      "then": {
+        "required": ["blocking_reason"],
+        "not": { "required": ["decision"] }
+      }
+    }
+  ]
+}

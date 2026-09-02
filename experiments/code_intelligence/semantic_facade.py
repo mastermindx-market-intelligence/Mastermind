@@ -41,7 +41,7 @@ from experiments.code_intelligence.workspace_seal import (
     workspace_binding_digest,
 )
 
-__all__ = ["FacadeError", "SemanticFacade"]
+__all__ = ["FacadeError", "SemanticFacade", "facade_source_digest"]
 
 _PACKAGE = Path(__file__).parent
 
@@ -55,7 +55,7 @@ class FacadeError(Exception):
         super().__init__(f"{code}: {detail}" if detail else code)
 
 
-def _facade_source_digest() -> str:
+def facade_source_digest() -> str:
     """Digest of the experiment's own source, so a wrapper swap is visible."""
     digest = hashlib.sha256()
     for path in sorted(_PACKAGE.glob("*.py")):
@@ -92,7 +92,7 @@ class SemanticFacade:
         identity = self._backend.identity
         self._receipt = {
             "workspace_binding_digest": workspace_binding_digest(self.seal),
-            "facade_source_digest": _facade_source_digest(),
+            "facade_source_digest": facade_source_digest(),
             "semantic_schema_digest": semantic_tool_schema_digest(),
             "backend_identity_digest": backend_identity_digest(identity),
             "backend_kind": identity.kind,
