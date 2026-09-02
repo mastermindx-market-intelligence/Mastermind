@@ -20,6 +20,7 @@ from experiments.code_intelligence.backend import (
     BackendIdentity,
     ExecutableSpec,
     guard_payload,
+    guard_wire_payload,
 )
 from experiments.code_intelligence.jsonrpc_stdio import JsonRpcError, JsonRpcStdioClient
 from experiments.code_intelligence.semantic_contract import MAX_LIMIT, canonical_json
@@ -145,7 +146,10 @@ class DirectLspBackend:
         if method not in self.ADMITTED_METHODS:
             raise LspBackendError("METHOD_NOT_ADMITTED", method)
         self.methods_used.add(method)
-        return self._require_client().request(method, params, timeout=timeout)
+        # Bound the RAW wire response before any mapping or file access.
+        return guard_wire_payload(
+            self._require_client().request(method, params, timeout=timeout)
+        )
 
     def _notify(self, method: str, params: Mapping[str, Any]) -> None:
         if method not in self.ADMITTED_METHODS:
@@ -181,11 +185,30 @@ class DirectLspBackend:
             raise LspBackendError("FILE_NOT_IN_SEAL", relative_file)
         return resolved
 
+    def _resolve_uri(self, uri: str) -> Path:
+        """Strict containment: resolve, then prove it is a regular file in the seal.
+
+        Lexical checks are not enough — a percent-encoded `..` or a symlink is
+        lexically "inside" the root and physically outside it.
+        """
+        assert self._root is not None
+        parsed = urlparse(uri)
+        if parsed.scheme not in ("file", ""):
+            raise LspBackendError("LSP_URI_TRAVERSAL", uri[:160])
+        candidate = Path(unquote(parsed.path))
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise LspBackendError("LSP_FOREIGN_LOCATION", uri[:160]) from exc
+        if not resolved.is_relative_to(self._root):
+            raise LspBackendError("LSP_URI_TRAVERSAL", uri[:160])
+        if not resolved.is_file():
+            raise LspBackendError("LSP_FOREIGN_LOCATION", f"not a regular file: {uri[:120]}")
+        return resolved
+
     def _row(self, location: Mapping[str, Any], symbol: str | None = None) -> dict[str, Any]:
         assert self._root is not None
-        path = _uri_to_path(location["uri"])
-        if not path.is_relative_to(self._root):
-            raise LspBackendError("LSP_FOREIGN_LOCATION", str(path)[:160])
+        path = self._resolve_uri(location["uri"])
         start = location["range"]["start"]
         row: dict[str, Any] = {
             "relative_file": path.relative_to(self._root).as_posix(),
@@ -273,7 +296,19 @@ class DirectLspBackend:
                 {"textDocument": {"uri": _path_to_uri(path)}},
                 timeout=timeout,
             ) or []
-            rows = [self._row(item["location"], item.get("name")) for item in result]
+            rows = []
+            for item in result:
+                location = item.get("location")
+                if location is None:
+                    # Real LSP DocumentSymbol: range/selectionRange, no uri. The
+                    # document is the one we asked about.
+                    span = item.get("selectionRange") or item.get("range")
+                    if span is None:
+                        raise LspBackendError(
+                            "LSP_MALFORMED_RESULT", "symbol has neither location nor range"
+                        )
+                    location = {"uri": _path_to_uri(path), "range": span}
+                rows.append(self._row(location, item.get("name")))
         else:
             rows = self._workspace_symbols(query or "", timeout)
         if query:

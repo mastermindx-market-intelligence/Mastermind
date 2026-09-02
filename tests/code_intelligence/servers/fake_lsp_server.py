@@ -115,8 +115,14 @@ def _symbol_at(path: Path, zero_based_line: int) -> str:
 
 def _location(path: Path, line: int) -> dict:
     base = Path("/somewhere/else") if MODE == "wrong_root" else path
+    uri = _to_uri(base)
+    if MODE == "traversal" and ROOT is not None:
+        # Percent-encoded traversal: lexically "inside" the root, actually outside.
+        uri = _to_uri(ROOT) + "/src/%2e%2e/%2e%2e/%2e%2e/etc/passwd"
+    if MODE == "symlink_escape" and ROOT is not None:
+        uri = _to_uri(ROOT) + "/escape_link"
     return {
-        "uri": _to_uri(base),
+        "uri": uri,
         "range": {
             "start": {"line": line - 1, "character": 0},
             "end": {"line": line - 1, "character": 1},
@@ -164,6 +170,24 @@ def main() -> None:
             if MODE == "slow":
                 continue
             path = _to_path(params["textDocument"]["uri"])
+            if MODE == "docsym_range":
+                # The REAL LSP DocumentSymbol shape: range/selectionRange, no uri.
+                _write({"jsonrpc": "2.0", "id": request_id, "result": [
+                    {"name": name, "kind": 5 if kind == "class" else 12,
+                     "range": {"start": {"line": line - 1, "character": 0},
+                               "end": {"line": line - 1, "character": 1}},
+                     "selectionRange": {"start": {"line": line - 1, "character": 0},
+                                        "end": {"line": line - 1, "character": 1}}}
+                    for name, line, kind in _defs(path)
+                ]})
+                continue
+            if MODE == "wide":
+                _write({"jsonrpc": "2.0", "id": request_id, "result": [
+                    {"name": "x" * 200, "kind": 12, "location": _location(path, 1),
+                     "children": [{"pad": "y" * 400} for _ in range(5000)]}
+                    for _ in range(50)
+                ]})
+                continue
             _write({"jsonrpc": "2.0", "id": request_id, "result": [
                 {"name": name, "kind": 5 if kind == "class" else 12,
                  "location": _location(path, line)}

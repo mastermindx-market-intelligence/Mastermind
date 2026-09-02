@@ -23,6 +23,7 @@ from typing import Any, Mapping
 from experiments.code_intelligence.backend import (
     BackendPayloadError,
     backend_identity_digest,
+    guard_payload,
 )
 from experiments.code_intelligence.jsonrpc_stdio import JsonRpcError
 from experiments.code_intelligence.lsp_backend import LspBackendError
@@ -189,6 +190,13 @@ class SemanticFacade:
         except (LspBackendError, SerenaBackendError, JsonRpcError, BackendPayloadError) as exc:
             # One typed failure. Never retried, never downgraded to an empty result.
             raise FacadeError(getattr(exc, "code", "BACKEND_FAILED"), str(exc)[:300]) from exc
+
+        # Universal publication guard: every backend response passes the same
+        # bounded, leak-refusing check before it can be published.
+        try:
+            payload = guard_payload(payload)
+        except BackendPayloadError as exc:
+            raise FacadeError(exc.code, exc.detail) from exc
 
         # Publication gate: the tree must be untouched by the work just done.
         self._verify_seal()

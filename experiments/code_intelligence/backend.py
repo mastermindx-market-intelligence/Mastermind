@@ -19,6 +19,8 @@ from experiments.code_intelligence.semantic_contract import MAX_LIMIT, canonical
 from experiments.code_intelligence.workspace_seal import WorkspaceSeal
 
 __all__ = [
+    "MAX_COLLECTION_WIDTH",
+    "MAX_PAYLOAD_BYTES",
     "MAX_PAYLOAD_DEPTH",
     "BackendIdentity",
     "BackendPayloadError",
@@ -26,9 +28,12 @@ __all__ = [
     "SemanticBackend",
     "backend_identity_digest",
     "guard_payload",
+    "guard_wire_payload",
 ]
 
 MAX_PAYLOAD_DEPTH = 20
+MAX_PAYLOAD_BYTES = 1024 * 1024
+MAX_COLLECTION_WIDTH = 1000
 
 # Keys a backend may never place in a response. The contract's steering tokens,
 # plus process/host identity names that are not request-shaped.
@@ -206,6 +211,11 @@ def _walk(node: Any, depth: int, key: str | None) -> None:
             _check_key(child_key)
             _walk(child, depth + 1, child_key)
     elif isinstance(node, (list, tuple)):
+        if len(node) > MAX_COLLECTION_WIDTH:
+            raise BackendPayloadError(
+                "PAYLOAD_TOO_WIDE",
+                f"collection of {len(node)} exceeds {MAX_COLLECTION_WIDTH}",
+            )
         for child in node:
             _walk(child, depth + 1, key)
     elif isinstance(node, str):
@@ -222,6 +232,41 @@ def _walk(node: Any, depth: int, key: str | None) -> None:
         )
 
 
+def _bound_size_and_width(value: Any) -> None:
+    """Bound total canonical bytes and nested collection width."""
+    try:
+        rendered = canonical_json(value)
+    except (TypeError, ValueError) as exc:
+        raise BackendPayloadError("PAYLOAD_MALFORMED", str(exc)[:160]) from exc
+    if len(rendered.encode("utf-8")) > MAX_PAYLOAD_BYTES:
+        raise BackendPayloadError(
+            "PAYLOAD_TOO_LARGE", f"canonical payload exceeds {MAX_PAYLOAD_BYTES} bytes"
+        )
+
+    def width(node: Any, depth: int) -> None:
+        if depth > MAX_PAYLOAD_DEPTH:
+            raise BackendPayloadError("PAYLOAD_TOO_DEEP", "wire payload too deep")
+        if isinstance(node, Mapping):
+            for child in node.values():
+                width(child, depth + 1)
+        elif isinstance(node, (list, tuple)):
+            if len(node) > MAX_COLLECTION_WIDTH:
+                raise BackendPayloadError(
+                    "PAYLOAD_TOO_WIDE",
+                    f"collection of {len(node)} exceeds {MAX_COLLECTION_WIDTH}",
+                )
+            for child in node:
+                width(child, depth + 1)
+
+    width(value, 0)
+
+
+def guard_wire_payload(value: Any) -> Any:
+    """Bound a RAW backend wire response before any mapping or file access."""
+    _bound_size_and_width(value)
+    return value
+
+
 def guard_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     """Refuse — never trim — any response that breaches the sandbox."""
     if not isinstance(payload, Mapping):
@@ -236,5 +281,6 @@ def guard_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
                 "PAYLOAD_TOO_MANY_ROWS", f"{len(rows)} rows exceeds {MAX_LIMIT}"
             )
 
+    _bound_size_and_width(payload)
     _walk(payload, 0, None)
     return payload

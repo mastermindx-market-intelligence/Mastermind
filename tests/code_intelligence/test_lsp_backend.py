@@ -275,3 +275,119 @@ class TestZeroWriteAndIsolation:
         assert identity.kind == "direct_lsp"
         assert identity.executable_sha256 == _python_digest()
         assert identity.language_servers
+
+
+class TestB5Containment:
+    """B5 — containment and publication must be fail-closed, not lexical."""
+
+    def _harness(self, tmp_path: Path, mode: str) -> _Harness:
+        return _Harness(_make_corpus_repo(tmp_path / "repo"), tmp_path / "scratch", mode)
+
+    def test_percent_encoded_traversal_is_refused(self, tmp_path: Path) -> None:
+        item = self._harness(tmp_path, "traversal")
+        try:
+            with pytest.raises(LspBackendError) as excinfo:
+                item.backend.symbol_overview(
+                    relative_file="src/sample/producer.py", query=None, limit=10
+                )
+            assert excinfo.value.code in {"LSP_FOREIGN_LOCATION", "LSP_URI_TRAVERSAL"}
+        finally:
+            item.close()
+
+    def test_symlink_escape_is_refused_at_seal_time(self, tmp_path: Path) -> None:
+        # Defence in depth: a tree containing a symlink that escapes the root
+        # cannot even be SEALED, so no backend ever gets the chance to follow it.
+        from experiments.code_intelligence.workspace_seal import WorkspaceSealError
+
+        root = _make_corpus_repo(tmp_path / "repo")
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret\n", encoding="utf-8")
+        (root / "escape_link").symlink_to(outside)
+        with pytest.raises(WorkspaceSealError) as excinfo:
+            _Harness(root, tmp_path / "scratch", "symlink_escape")
+        assert excinfo.value.code == "TREE_TRAVERSAL_REFUSED"
+
+    def test_a_symlinked_uri_inside_the_seal_is_still_strictly_resolved(
+        self, tmp_path: Path
+    ) -> None:
+        # The adapter's own containment check, independent of the seal.
+        item = self._harness(tmp_path, "ok")
+        try:
+            outside = tmp_path / "elsewhere.py"
+            outside.write_text("x = 1\n", encoding="utf-8")
+            with pytest.raises(LspBackendError) as excinfo:
+                item.backend._resolve_uri("file://" + str(outside))
+            assert excinfo.value.code == "LSP_URI_TRAVERSAL"
+        finally:
+            item.close()
+
+    def test_real_document_symbol_range_shape_is_supported(self, tmp_path: Path) -> None:
+        # Real servers return DocumentSymbol{range,selectionRange}, not Location.
+        item = self._harness(tmp_path, "docsym_range")
+        try:
+            rows = item.backend.symbol_overview(
+                relative_file="src/sample/producer.py", query=None, limit=50
+            )["rows"]
+            assert sorted(r["symbol"] for r in rows) == [
+                "DeadProducer", "LiveProducer", "Producer",
+                "make_dead_producer", "make_producer",
+            ]
+        finally:
+            item.close()
+
+    def test_oversized_nested_payload_is_refused(self, tmp_path: Path) -> None:
+        item = self._harness(tmp_path, "wide")
+        try:
+            with pytest.raises(Exception) as excinfo:
+                item.backend.symbol_overview(
+                    relative_file="src/sample/producer.py", query=None, limit=100
+                )
+            # The frame ceiling refuses it before it is ever parsed - an earlier
+            # and stronger defence than the payload width bound below.
+            assert getattr(excinfo.value, "code", "") in {
+                "PROTOCOL_FRAME_TOO_LARGE", "PAYLOAD_TOO_LARGE", "PAYLOAD_TOO_WIDE",
+                "PAYLOAD_TOO_MANY_ROWS", "LSP_FOREIGN_LOCATION",
+            }
+        finally:
+            item.close()
+
+    def test_implementation_name_lookup_cannot_read_outside_the_seal(
+        self, tmp_path: Path
+    ) -> None:
+        # _symbol_name_at() used to read root/relative_file before any universal
+        # publication guard: a foreign row would have been read from disk.
+        item = self._harness(tmp_path, "traversal")
+        try:
+            with pytest.raises(LspBackendError):
+                item.backend.find_implementations(
+                    name="Producer", relative_file=None, limit=10
+                )
+        finally:
+            item.close()
+
+
+class TestB5WirePayloadBounds:
+    """The width/size bound is proven directly, not only via the frame ceiling."""
+
+    def test_wide_collection_is_refused(self) -> None:
+        from experiments.code_intelligence.backend import (
+            MAX_COLLECTION_WIDTH, BackendPayloadError, guard_wire_payload,
+        )
+
+        with pytest.raises(BackendPayloadError) as excinfo:
+            guard_wire_payload({"rows": [{"i": i} for i in range(MAX_COLLECTION_WIDTH + 1)]})
+        assert excinfo.value.code == "PAYLOAD_TOO_WIDE"
+
+    def test_oversized_canonical_payload_is_refused(self) -> None:
+        from experiments.code_intelligence.backend import (
+            BackendPayloadError, guard_wire_payload,
+        )
+
+        with pytest.raises(BackendPayloadError) as excinfo:
+            guard_wire_payload({"blob": "x" * (2 * 1024 * 1024)})
+        assert excinfo.value.code == "PAYLOAD_TOO_LARGE"
+
+    def test_a_normal_payload_passes(self) -> None:
+        from experiments.code_intelligence.backend import guard_wire_payload
+
+        assert guard_wire_payload({"rows": [{"relative_file": "a.py", "line": 1}]})
