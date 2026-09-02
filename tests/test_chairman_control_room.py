@@ -1371,3 +1371,44 @@ def test_compose_still_renders_a_genuine_selection_verbatim_after_the_repair(
     assert json.dumps(doc["placement_selection"], sort_keys=True) == json.dumps(wire, sort_keys=True)
     assert not _placement_degraded(doc)
     assert doc["placement_selection"]["selection_is_commitment"] is False
+
+
+def test_compose_never_echoes_a_secret_shaped_key_nested_in_selected(
+    boot_packet, inbox, active_builds, bindings
+):
+    """Found by the exact-head review of the first repair pass: fixing only
+    the TOP-LEVEL key error left a sibling echo. `selected` is an equally
+    caller-controlled sub-mapping, validated by
+    `executive_orchestration_principal.validate_placement_snapshot`, whose
+    closed-key error renders `sorted(value)` and whose
+    `OrchestrationPrincipalError` is a ValueError — so it landed in
+    Chairman-visible `degraded` verbatim."""
+    secret = "AWS_SECRET_ACCESS_KEY_AKIA5EXAMPLE"
+    token = "sk-ant-api03-LEAKED-TOKEN-TAIL"
+    forged = dict(_valid_placement_selection_wire_dict())
+    forged["selected"] = {secret: 1, token: 2}
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=forged)
+
+    assert doc["placement_selection"] is None
+    assert _placement_degraded(doc)
+    rendered = json.dumps(doc, sort_keys=True)
+    assert secret not in rendered
+    assert token not in rendered
+    assert "AKIA5EXAMPLE" not in rendered
+    assert doc["schema"] == ccr.SCHEMA
+
+
+def test_compose_degraded_reason_for_a_bad_selected_snapshot_is_constant(
+    boot_packet, inbox, active_builds, bindings
+):
+    reasons = []
+    for keys in (
+        {"AWS_SECRET_ACCESS_KEY_AKIA5EXAMPLE": 1},
+        {"a_totally_different_caller_key": 1, "and_another": 2},
+    ):
+        forged = dict(_valid_placement_selection_wire_dict())
+        forged["selected"] = keys
+        doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=forged)
+        reasons.append(_placement_degraded(doc))
+    assert reasons[0] == reasons[1]
+    assert reasons[0]

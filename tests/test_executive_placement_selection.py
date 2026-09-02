@@ -1852,3 +1852,68 @@ def test_permutation_invariance_survives_the_repair():
         if baseline is None:
             baseline = payload
         assert payload == baseline
+
+
+def test_nested_selected_snapshot_error_never_echoes_caller_supplied_key_names():
+    """Sibling of the top-level echo, found by the exact-head review: the
+    `selected` sub-mapping is ALSO caller-controlled, and it is validated by
+    `executive_orchestration_principal.validate_placement_snapshot`, whose
+    own closed-key error still renders `sorted(value)`. Its
+    `OrchestrationPrincipalError` subclasses ValueError, so
+    `compose_control_room()` appends it to Chairman-visible `degraded` just
+    like any other. This module owns the boundary, so it re-raises a
+    constant field-only error rather than relaying that text."""
+    secret = "AWS_SECRET_ACCESS_KEY_AKIA5EXAMPLE"
+    token = "sk-ant-api03-LEAKED-TOKEN-TAIL"
+    payload = _selected_payload(worker_id="worker-a")
+    payload["selected"] = {secret: 1, token: 2}
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    message = str(excinfo.value)
+    assert secret not in message
+    assert token not in message
+
+
+def test_nested_selected_snapshot_error_never_echoes_a_caller_value():
+    """The same boundary for a non-mapping and for a valid-shaped snapshot
+    carrying a bad VALUE — neither may relay caller text."""
+    payload = _selected_payload(worker_id="worker-a")
+    payload["selected"] = {
+        "schema_version": "mastermind.executive_placement_snapshot/v1",
+        "worker_id": "worker-a",
+        "quota_class": "standard",
+        "provider": "acme",
+        "account_label": "SUPER-SECRET-ACCOUNT-VALUE",
+        "observed_at_ms": "not-an-int",
+    }
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert "SUPER-SECRET-ACCOUNT-VALUE" not in str(excinfo.value)
+
+
+#: The constant this module raises when `selected` fails the Phase-B
+#: snapshot contract. Asserted BY TEXT on purpose: merely asserting
+#: "some ValueError" cannot tell a real refusal apart from silently
+#: swallowing the error and setting `selected = None`, which then trips the
+#: unrelated present-iff-state rule and raises a DIFFERENT ValueError. A
+#: mutation probe proved that weaker assertion passes for the wrong reason.
+_BAD_SNAPSHOT_MESSAGE = "selected is not a well-formed placement snapshot"
+
+
+@pytest.mark.parametrize(
+    "bad_selected",
+    [
+        {"totally": "wrong"},
+        "not even a mapping",
+        {"AWS_SECRET_ACCESS_KEY_AKIA5EXAMPLE": 1},
+        None.__class__,  # a type object, not a mapping
+    ],
+)
+def test_selected_must_still_be_a_wellformed_snapshot(bad_selected):
+    """The constant re-raise must REFUSE, not silently become an accept —
+    and it must refuse at the snapshot boundary specifically."""
+    payload = _selected_payload(worker_id="worker-a")
+    payload["selected"] = bad_selected
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _BAD_SNAPSHOT_MESSAGE

@@ -870,9 +870,8 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
     ``evaluated_candidates`` equals ``len(evidence)`` exactly and is never
     smaller than ``len(exclusions)``.
 
-    Beyond those, it enforces SOURCE-AUTHORITY BINDING — the parts of a
-    decision must refer to one another, so that only a document
-    :func:`select_placement` could coherently have produced is accepted: a
+    Beyond those, it enforces SOURCE-AUTHORITY BINDING over the decision's
+    IDENTITY fields — the parts of a decision must refer to one another: a
     ``selected`` snapshot must correspond to exactly ONE ``evidence`` row
     for the same ``worker_id`` (zero rows means the decision never observed
     that worker; more than one is duplicate identity, which fails closed
@@ -880,6 +879,20 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
     equal that row's ``mode``, the selected worker may not simultaneously
     appear in ``exclusions``/``tied_worker_ids``, and every exclusion/tied
     id must be represented in ``evidence``.
+
+    SCOPE — stated explicitly so a consumer does not OVER-trust this gate.
+    The binding above is over identity (``worker_id``) and ``mode`` only;
+    it is deliberately NOT a re-derivation of the selector. This function
+    does not check that ``state`` is the aggregate :func:`select_placement`
+    would have computed from the same evidence, that an exclusion's
+    ``reason`` agrees with that worker's own evidence row, that tied
+    candidates share a capacity rank, that a worker appears at most once in
+    ``exclusions``, or that the ``selected`` snapshot's ``provider``/
+    ``account_label``/``quota_class``/``observed_at_ms`` correspond to
+    anything (``evidence`` rows do not carry those fields at all). A
+    document can therefore satisfy every rule here and still not be one
+    this selector would produce: passing this validator is a well-formedness
+    and identity-coherence result, NEVER proof of provenance.
     """
     if not isinstance(value, Mapping) or set(value) != _SELECTION_KEYS:
         # Review 5084378111 MAJOR 3: this previously rendered
@@ -905,7 +918,25 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
         raise ValueError("state is not a recognized SelectionState value") from exc
 
     selected_raw = value["selected"]
-    selected = validate_placement_snapshot(selected_raw) if selected_raw is not None else None
+    if selected_raw is None:
+        selected = None
+    else:
+        try:
+            selected = validate_placement_snapshot(selected_raw)
+        except (ValueError, TypeError) as exc:
+            # Sibling of the top-level echo closed above, and the reason
+            # fixing only that one was not enough: `selected` is an equally
+            # caller-controlled sub-mapping, and
+            # executive_orchestration_principal._closed() still renders
+            # `sorted(value)` / `type(value).__name__` in ITS message.
+            # OrchestrationPrincipalError subclasses ValueError, so
+            # compose_control_room()'s `except (ValueError, TypeError)`
+            # would append that text — caller key names included — verbatim
+            # to its Chairman-visible `degraded` list. This module owns THIS
+            # boundary: refuse with a constant, field-only message and never
+            # relay the underlying text. (`from exc` keeps the chain for a
+            # debugger; only `str()` of THIS error is ever rendered.)
+            raise ValueError("selected is not a well-formed placement snapshot") from exc
 
     selected_mode_raw = value["selected_mode"]
     if selected_mode_raw is not None:
@@ -1009,7 +1040,10 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
                 "selected must correspond to exactly one evidence row for the "
                 "same worker_id"
             )
-        if selected_mode is not None and matching[0]["mode"] != selected_mode.value:
+        # `selected_mode` is necessarily non-None here: the two iff checks
+        # above tie BOTH `selected` and `selected_mode` to
+        # `state == "selected"`, so the mode binding is unconditional.
+        if matching[0]["mode"] != selected_mode.value:
             raise ValueError(
                 "selected_mode must equal the selected worker's evidence mode"
             )
