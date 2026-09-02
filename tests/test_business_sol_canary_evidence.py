@@ -75,7 +75,7 @@ def valid_receipt() -> dict:
         },
         "package": {
             "protected_commit": P1_COMMIT,
-            "inventory_digest": "1" * 64,
+            "inventory_digest": "3847c8ac04fbd6354a4a352c8eb7bb1fd98c92e24f2c1e3e13c2051f891834df",
             "plugins": ["mastermind-operator", "mastermind-sol"],
         },
         "generations": {
@@ -192,6 +192,7 @@ def test_order_insensitive_collections_are_canonicalized_before_digesting():
         (lambda row: row["personal_workspace"].update(merged_into_business=True), "FAIL", "PERSONAL_WORKSPACE_MERGED"),
         (lambda row: row["personal_workspace"].update(transition=["PERSONAL", "BUSINESS"]), "FAIL", "REVERSIBILITY_NOT_PROVEN"),
         (lambda row: row["package"].update(protected_commit="0" * 40), "FAIL", "PACKAGE_COMMIT_MISMATCH"),
+        (lambda row: row["package"].update(inventory_digest="0" * 64), "FAIL", "PACKAGE_INVENTORY_MISMATCH"),
         (lambda row: row["package"]["plugins"].append("unexpected-plugin"), "FAIL", "PACKAGE_INVENTORY_MISMATCH"),
         (lambda row: row["steward"].pop("refresh_read"), "UNKNOWN", "MISSING_REFRESH_READ"),
         (lambda row: row["control_room"].update(text_fallback=False), "FAIL", "CONTROL_ROOM_FALLBACK_MISSING"),
@@ -256,6 +257,26 @@ def test_time_contract_fails_closed(path, value, issue):
     result = module.validate_one_cockpit_receipt(receipt, evaluated_at=EVALUATED_AT)
     assert result["verdict"] in {"FAIL", "REFUSED"}
     assert issue in result["issues"]
+
+
+def test_source_owner_ref_mismatch_and_post_receipt_evidence_fail():
+    module = _module()
+
+    mismatched = valid_receipt()
+    mismatched["source_refs"][0]["ref"] = "control-room:not-github"
+    mismatch_result = module.validate_one_cockpit_receipt(
+        mismatched, evaluated_at=EVALUATED_AT
+    )
+    assert mismatch_result["verdict"] == "FAIL"
+    assert "SOURCE_OWNER_REF_MISMATCH" in mismatch_result["issues"]
+
+    late = valid_receipt()
+    late["source_refs"][0]["observed_at"] = "2026-09-02T03:59:55Z"
+    late_result = module.validate_one_cockpit_receipt(
+        late, evaluated_at=EVALUATED_AT
+    )
+    assert late_result["verdict"] == "FAIL"
+    assert "SOURCE_AFTER_RECEIPT" in late_result["issues"]
 
 
 def test_correction_requires_exact_append_only_lineage():
