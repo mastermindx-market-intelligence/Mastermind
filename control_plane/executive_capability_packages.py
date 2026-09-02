@@ -1008,9 +1008,6 @@ def verify_capability_package_source(
                             # undeclared-shape mismatch.
                             continue
 
-                        if _before_file_open is not None:
-                            _before_file_open(child_rel)
-
                         try:
                             file_fd = os.open(
                                 name,
@@ -1070,6 +1067,18 @@ def verify_capability_package_source(
                         retained_file_fds[child_rel] = file_fd
                         file_parent_link[child_rel] = (dir_fd, name)
                         file_open_stat[child_rel] = opened_stat
+
+                        # The deterministic race seam fires only AFTER this
+                        # file's descriptor is retained (Sol correction
+                        # 5087236388): the retained fd pins the inode, so an
+                        # unlink+recreate in the seam window provably lands on
+                        # a DIFFERENT object, and the post-census fresh-lstat
+                        # in _check_retained_file_identity() refuses it on
+                        # every platform — numeric (dev, ino) census/open
+                        # comparison alone is defeated by immediate inode
+                        # recycling on Linux when the swap precedes the open.
+                        if _before_file_open is not None:
+                            _before_file_open(child_rel)
                     else:
                         _refuse("package_root", "package_non_regular_file_refused")
             finally:

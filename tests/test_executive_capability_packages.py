@@ -2928,8 +2928,17 @@ def test_wave3_partA_disabling_identity_fence_lets_reused_inode_swap_through(tmp
     # directory's own mtime bumps when a file underneath it is unlinked and
     # recreated) and mask whether disabling `_same_object` is what actually
     # lets the swap through.
+    # Since the race seam moved AFTER descriptor retention (Sol correction
+    # 5087236388: the retained fd pins the census object's inode), a genuine
+    # seam-window swap is caught by TWO independent fences: the fresh-lstat
+    # _same_object comparison against the retained fd, and the retained fd's
+    # own fstat drift (the unlink drops its st_nlink to zero). This bite
+    # check therefore disables BOTH fences -- _same_object forced to match,
+    # and the drift identity tuple reduced to fields the swap cannot move
+    # (nlink, size and timestamps all excluded) -- so ONLY the identity
+    # fence family under test decides the outcome.
     def _identity_without_timestamps(st):
-        return (st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_uid, st.st_gid, st.st_size)
+        return (st.st_dev, st.st_ino, st.st_uid, st.st_gid)
 
     monkeypatch.setattr(scf_pkg, "_stat_identity", _identity_without_timestamps)
     monkeypatch.setattr(scf_pkg, "_same_object", lambda a, b: True)
