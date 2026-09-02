@@ -54,7 +54,7 @@ _PUBLIC_TEXT_PATTERN = rf'^(?=\S(?:.*\S)?$)(?!.*[\x00-\x1f\x7f])(?!.*{_URL_PATTE
 _PUBLIC_TOKEN_PATTERN = f'^{_CREDENTIAL_ANY_GUARD}[A-Za-z0-9][A-Za-z0-9._-]{{0,95}}{_ABSOLUTE_END}'
 _PUBLIC_TOKEN_RE = re.compile(_PUBLIC_TOKEN_PATTERN)
 _SAFE_REF_TOKEN = '[A-Za-z0-9][A-Za-z0-9._-]{0,223}'
-_SAFE_RECEIPT_TOKEN = '[A-Za-z0-9][A-Za-z0-9._-]{0,223}'
+_SAFE_RECEIPT_TOKEN = '[A-Za-z0-9][A-Za-z0-9._:-]{0,223}'
 _UUID_PATTERN = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}'
 
 def _guarded_pattern(body: str) -> str:
@@ -113,7 +113,7 @@ def _normalize_public_text(value: Any, maximum: int) -> str:
     return value
 
 def _normalize_pattern(value: Any, maximum: int, pattern: str) -> str:
-    if not isinstance(value, str) or not 1 <= len(value) <= maximum or value != value.strip() or _CONTROL_RE.search(value) or (re.fullmatch(pattern, value) is None):
+    if not isinstance(value, str) or not 1 <= len(value) <= maximum or value != value.strip() or _CONTROL_RE.search(value) or _SECRET_RE.search(value) or (re.fullmatch(pattern, value) is None):
         raise GatewayError('RESPONSE_REFUSED')
     return value
 
@@ -343,7 +343,7 @@ def _validated_source(value: Any) -> dict[str, Any]:
     source_ref = value['source_ref']
     if not isinstance(owner, str) or owner not in SOURCE_OWNERS:
         raise GatewayError('RESPONSE_REFUSED')
-    if not isinstance(source_ref, str) or not 1 <= len(source_ref) <= 256 or source_ref != source_ref.strip() or _CONTROL_RE.search(source_ref) or (_SOURCE_REF_RE_BY_OWNER[owner].fullmatch(source_ref) is None):
+    if not isinstance(source_ref, str) or not 1 <= len(source_ref) <= 256 or source_ref != source_ref.strip() or _CONTROL_RE.search(source_ref) or _SECRET_RE.search(source_ref) or (_SOURCE_REF_RE_BY_OWNER[owner].fullmatch(source_ref) is None):
         raise GatewayError('RESPONSE_REFUSED')
     observed_at = _validated_timestamp(value['observed_at'])
     return {'owner': owner, 'source_ref': source_ref, 'observed_at': observed_at}
@@ -554,8 +554,8 @@ def tool_schema_snapshot() -> list[dict[str, Any]]:
 
 def tool_schema_digest() -> str:
     return hashlib.sha256(canonical_json(tool_schema_snapshot())).hexdigest()
-SCHEMA_SNAPSHOT_SHA256 = '4aa40f21dff5951a476e302eea75e36560fe90d884e6f95c5b2f541a80bb74e6'
-TOOL_SCHEMA_DIGEST = '1316177ffe30b15b2253fe4ce4a5bbb70f0da8966a597948dfc65ed1215e5163'
+SCHEMA_SNAPSHOT_SHA256 = 'de00f66d75e1132f94c137344ff197cf4e425f95a66b5aceaec5b64b6b8a8030'
+TOOL_SCHEMA_DIGEST = '3c78f872e77f4939c97533967c6ad53d37afbf71a06cabb01faaa4c1ddbad1fa'
 
 def assert_contract_integrity() -> None:
     if schema_snapshot_sha256() != SCHEMA_SNAPSHOT_SHA256 or tool_schema_digest() != TOOL_SCHEMA_DIGEST:
