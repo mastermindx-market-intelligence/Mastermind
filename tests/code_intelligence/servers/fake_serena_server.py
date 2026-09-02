@@ -9,6 +9,7 @@ Modes (argv[1]): clean | wide | config_influenced | writes
 
 from __future__ import annotations
 
+import ast
 import json
 import sys
 from pathlib import Path
@@ -56,6 +57,77 @@ def _tools() -> list[str]:
     return sorted(tools)
 
 
+def _py_files() -> list[Path]:
+    assert ROOT is not None
+    return sorted(p for p in ROOT.rglob("*.py") if p.is_file() and ".git" not in p.parts)
+
+
+def _defs(path: Path) -> list[tuple[str, int, str]]:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return []
+    out = []
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            out.append((node.name, node.lineno, "class"))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out.append((node.name, node.lineno, "function"))
+    return out
+
+
+def _rel(path: Path) -> str:
+    assert ROOT is not None
+    return path.relative_to(ROOT).as_posix()
+
+
+def _semantic(tool: str, arguments: dict) -> dict:
+    """Serena-shaped semantic answers, so adapter MAPPING can be falsified."""
+    assert ROOT is not None
+    wanted = arguments.get("name_path") or arguments.get("query") or ""
+    target = arguments.get("relative_path")
+    rows = []
+
+    if tool == "get_symbols_overview":
+        files = [ROOT / target] if target else _py_files()
+        for path in files:
+            if not path.is_file():
+                continue
+            for name, line, kind in _defs(path):
+                rows.append({"name_path": name, "relative_path": _rel(path),
+                             "body_start_line": line, "kind": kind})
+
+    elif tool == "find_symbol":
+        for path in _py_files():
+            for name, line, kind in _defs(path):
+                if name == wanted:
+                    rows.append({"name_path": name, "relative_path": _rel(path),
+                                 "body_start_line": line, "kind": kind})
+
+    elif tool == "find_referencing_symbols":
+        for path in _py_files():
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError):
+                continue
+            lines = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name) and node.id == wanted:
+                    lines.add(node.lineno)
+                elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == wanted:
+                    lines.add(node.lineno)
+                elif isinstance(node, ast.alias) and wanted in (node.name, node.asname):
+                    lines.add(node.lineno)
+            for line in sorted(lines):
+                rows.append({"name_path": wanted, "relative_path": _rel(path),
+                             "body_start_line": line, "kind": "reference"})
+
+    elif tool == "list_dir":
+        rows = [{"relative_path": _rel(p)} for p in _py_files()]
+
+    return {"symbols": rows}
+
+
 def main() -> None:
     global ROOT
     while True:
@@ -94,8 +166,9 @@ def main() -> None:
                 _write({"jsonrpc": "2.0", "id": request_id,
                         "error": {"code": -32601, "message": f"no tool {name}"}})
                 continue
+            payload = _semantic(name, params.get("arguments") or {})
             _write({"jsonrpc": "2.0", "id": request_id, "result": {
-                "content": [{"type": "text", "text": json.dumps({"rows": []})}]
+                "content": [{"type": "text", "text": json.dumps(payload)}]
             }})
             continue
 

@@ -12,20 +12,24 @@ when metadata lands inside the candidate tree.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 from experiments.code_intelligence.backend import (
+    MAX_LIMIT,
     BackendIdentity,
     ExecutableSpec,
     guard_payload,
+    guard_wire_payload,
 )
 from experiments.code_intelligence.jsonrpc_stdio import JsonRpcError, JsonRpcStdioClient
 from experiments.code_intelligence.semantic_contract import canonical_json
 from experiments.code_intelligence.workspace_seal import WorkspaceSeal
 
 __all__ = [
+    "run_config_influence_probe",
     "SERENA_PINNED_COMMIT",
     "SERENA_PINNED_VERSION",
     "SerenaBackend",
@@ -169,7 +173,19 @@ class SerenaBackend:
 
     # ------------------------------------------------------------------- start
 
-    def start(self, *, seal: WorkspaceSeal, scratch: Path) -> None:
+    def start(
+        self,
+        *,
+        seal: WorkspaceSeal,
+        scratch: Path,
+        baseline_census_fingerprint: str | None = None,
+    ) -> None:
+        observed_bundle = bundle_digest(self._bundle.root)
+        if observed_bundle != self._bundle.sha256:
+            raise SerenaBackendError(
+                "SERENA_BUNDLE_DIGEST_MISMATCH",
+                f"expected {self._bundle.sha256}, found {observed_bundle}",
+            )
         self._seal = seal
         self._scratch = Path(scratch)
         self._client = JsonRpcStdioClient(spec=self._spec, scratch=self._scratch)
@@ -194,6 +210,8 @@ class SerenaBackend:
         result = self._client.request("tools/list", {}, timeout=30) or {}
         self._census = sorted(str(tool["name"]) for tool in result.get("tools", []))
         self._enforce_tool_surface()
+        if baseline_census_fingerprint is not None:
+            self.assert_no_config_influence(baseline_census_fingerprint)
 
     def _enforce_tool_surface(self) -> None:
         offending = []
@@ -233,8 +251,12 @@ class SerenaBackend:
         if tool not in self.ADMITTED_UPSTREAM_TOOLS:
             raise SerenaBackendError("UPSTREAM_TOOL_NOT_ADMITTED", tool)
         try:
-            return self._require_client().request(
-                "tools/call", {"name": tool, "arguments": dict(arguments)}, timeout=timeout
+            return guard_wire_payload(
+                self._require_client().request(
+                    "tools/call",
+                    {"name": tool, "arguments": dict(arguments)},
+                    timeout=timeout,
+                )
             )
         except JsonRpcError as exc:
             raise SerenaBackendError("SERENA_CALL_FAILED", f"{tool}: {exc.code}") from exc
@@ -251,30 +273,180 @@ class SerenaBackend:
         )
 
     def symbol_overview(self, *, relative_file, query, limit, timeout=None):
-        return self._rows("get_symbols_overview", limit, timeout)
+        arguments: dict[str, Any] = {}
+        if relative_file is not None:
+            arguments["relative_path"] = self._bounded_location(relative_file)
+        rows = self._semantic_rows("get_symbols_overview", arguments, timeout)
+        if query:
+            rows = [row for row in rows if query in row.get("symbol", "")]
+        return self._finalize(rows, limit)
 
     def find_symbol(self, *, name, relative_file, limit, timeout=None):
-        return self._rows("find_symbol", limit, timeout)
+        arguments: dict[str, Any] = {"name_path": self._bounded_name(name)}
+        if relative_file is not None:
+            arguments["relative_path"] = self._bounded_location(relative_file)
+        rows = self._semantic_rows("find_symbol", arguments, timeout)
+        return self._finalize(rows, limit)
 
     def find_references(self, *, name, relative_file, limit, timeout=None):
-        return self._rows("find_referencing_symbols", limit, timeout)
+        arguments: dict[str, Any] = {"name_path": self._bounded_name(name)}
+        if relative_file is not None:
+            arguments["relative_path"] = self._bounded_location(relative_file)
+        rows = self._semantic_rows("find_referencing_symbols", arguments, timeout)
+        return self._finalize(rows, limit)
 
     def find_implementations(self, *, name, relative_file, limit, timeout=None):
-        return self._rows("find_symbol", limit, timeout)
-
-    def diagnostics(self, *, relative_file, limit, timeout=None):
-        # Upstream Serena exposes no diagnostics tool in the admitted set.
+        # The pinned upstream's admitted read-only tool set exposes no
+        # implementation/subtype relation. Degradation is explicit and typed; it
+        # is never a silently empty answer that could read as "no implementations".
         raise SerenaBackendError(
             "SERENA_CAPABILITY_UNAVAILABLE",
-            "no admitted upstream diagnostics tool; degradation is explicit",
+            "no admitted upstream implementations tool",
         )
 
-    def _rows(self, tool: str, limit: int, timeout: float | None) -> Mapping[str, object]:
-        self._call(tool, {}, timeout)
-        # Real result mapping is only meaningful against the real bundle; the
-        # adapter returns an explicitly empty, bounded payload otherwise.
-        return guard_payload({"rows": [], "truncated": False})
+    def diagnostics(self, *, relative_file, limit, timeout=None):
+        raise SerenaBackendError(
+            "SERENA_CAPABILITY_UNAVAILABLE",
+            "no admitted upstream diagnostics tool",
+        )
+
+    # ------------------------------------------------------------- mapping
+
+    @staticmethod
+    def _bounded_name(name: str) -> str:
+        if not isinstance(name, str) or not name or len(name.encode("utf-8")) > 4096:
+            raise SerenaBackendError("INVALID_ARGUMENT", "name")
+        return name
+
+    @staticmethod
+    def _bounded_location(relative_file: str) -> str:
+        parts = relative_file.split("/")
+        if relative_file.startswith("/") or any(p in ("", ".", "..") for p in parts):
+            raise SerenaBackendError("INVALID_LOCATION", relative_file[:120])
+        return relative_file
+
+    def _semantic_rows(
+        self, tool: str, arguments: Mapping[str, Any], timeout: float | None
+    ) -> list[dict[str, Any]]:
+        """Map a pinned Serena tool result into the closed facade row shape."""
+        raw = self._call(tool, arguments, timeout)
+        payload = self._decode_content(raw)
+        rows: list[dict[str, Any]] = []
+        for item in payload.get("symbols", []):
+            relative = str(item.get("relative_path", ""))
+            self._bounded_location(relative)
+            resolved = (Path(self._seal.resolved_root) / relative).resolve()
+            if not resolved.is_relative_to(Path(self._seal.resolved_root)):
+                raise SerenaBackendError("SERENA_FOREIGN_LOCATION", relative[:120])
+            rows.append(
+                {
+                    "symbol": str(item.get("name_path", "")),
+                    "relative_file": relative,
+                    "line": int(item.get("body_start_line", 0)),
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _decode_content(raw: Any) -> dict[str, Any]:
+        """Serena answers as MCP content blocks; decode exactly one JSON block."""
+        if not isinstance(raw, Mapping):
+            raise SerenaBackendError("SERENA_MALFORMED_RESULT", "result is not an object")
+        content = raw.get("content") or []
+        for block in content:
+            if isinstance(block, Mapping) and block.get("type") == "text":
+                try:
+                    decoded = json.loads(block.get("text") or "{}")
+                except ValueError as exc:
+                    raise SerenaBackendError(
+                        "SERENA_MALFORMED_RESULT", str(exc)[:160]
+                    ) from exc
+                if not isinstance(decoded, dict):
+                    raise SerenaBackendError(
+                        "SERENA_MALFORMED_RESULT", "content is not an object"
+                    )
+                return decoded
+        return {}
+
+    @staticmethod
+    def _finalize(rows, limit: int) -> Mapping[str, object]:
+        seen: set[tuple] = set()
+        unique: list[dict[str, Any]] = []
+        for row in rows:
+            key = (row["relative_file"], row["line"], row.get("symbol", ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(dict(row))
+        unique.sort(key=lambda r: (r["relative_file"], r["line"], r.get("symbol", "")))
+        bounded = unique[: min(int(limit), MAX_LIMIT)]
+        return guard_payload(
+            {"rows": bounded, "truncated": len(unique) > len(bounded)}
+        )
 
     def close(self) -> None:
         if self._client is not None:
             self._client.close()
+
+
+def run_config_influence_probe(
+    *,
+    spec: ExecutableSpec,
+    bundle: SerenaBundle,
+    corpus_root: Path,
+    scratch_parent: Path,
+) -> dict[str, Any]:
+    """Actually execute the repository-configuration differential.
+
+    Starts the candidate against a DISPOSABLE corpus, records the tool census,
+    plants a hostile repository-controlled `.serena` configuration, restarts, and
+    compares. A census that moves means the repository can steer the backend, and
+    Candidate S is rejected rather than patched.
+
+    Never run against the real sealed workspace: it writes into the tree.
+    """
+    from experiments.code_intelligence.workspace_seal import (
+        capture_workspace_seal,
+        create_external_scratch,
+    )
+
+    corpus_root = Path(corpus_root)
+    receipt: dict[str, Any] = {
+        "ran": False, "influenced": False, "code": None,
+        "baseline_fingerprint": None, "hostile_fingerprint": None, "detail": "",
+    }
+
+    seal = capture_workspace_seal(corpus_root)
+    scratch = create_external_scratch(parent=Path(scratch_parent), seal=seal)
+    baseline = SerenaBackend(spec=spec, bundle=bundle)
+    try:
+        baseline.start(seal=seal, scratch=scratch)
+        receipt["baseline_fingerprint"] = baseline.census_fingerprint()
+    except SerenaBackendError as exc:
+        receipt.update(ran=True, influenced=True, code=exc.code, detail=exc.detail[:200])
+        return receipt
+    finally:
+        baseline.close()
+
+    hostile_dir = corpus_root / ".serena"
+    hostile_dir.mkdir(exist_ok=True)
+    (hostile_dir / "project.yml").write_text(
+        "language: python\nexcluded_tools: []\n", encoding="utf-8"
+    )
+
+    hostile_seal = capture_workspace_seal(corpus_root)
+    hostile_scratch = create_external_scratch(parent=Path(scratch_parent), seal=hostile_seal)
+    probe = SerenaBackend(spec=spec, bundle=bundle)
+    try:
+        probe.start(
+            seal=hostile_seal,
+            scratch=hostile_scratch,
+            baseline_census_fingerprint=receipt["baseline_fingerprint"],
+        )
+        receipt["hostile_fingerprint"] = probe.census_fingerprint()
+        receipt.update(ran=True, influenced=False, detail="census unchanged under hostile config")
+    except SerenaBackendError as exc:
+        receipt.update(ran=True, influenced=True, code=exc.code, detail=exc.detail[:200])
+    finally:
+        probe.close()
+    return receipt

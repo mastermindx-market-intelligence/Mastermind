@@ -255,3 +255,139 @@ class TestIdentityAndConfiguration:
             assert not str(backend.scratch).startswith(seal.resolved_root)
         finally:
             backend.close()
+
+
+class TestB3RealMapping:
+    """B3 — Candidate S must map real protocol results, not return empty stubs."""
+
+    def _start_clean(self, tmp_path: Path):
+        root = _make_repo(tmp_path / "repo")
+        bundle = _make_bundle(tmp_path)
+        return _start(root, tmp_path / "scratch", "clean", bundle)
+
+    def test_find_symbol_returns_mapped_rows(self, tmp_path: Path) -> None:
+        backend, _ = self._start_clean(tmp_path)
+        try:
+            rows = backend.find_symbol(
+                name="LiveProducer", relative_file=None, limit=10
+            )["rows"]
+            assert rows, "Candidate S must actually answer, not return an empty stub"
+            assert rows[0]["relative_file"] == "src/sample/producer.py"
+            assert rows[0]["line"] == 20
+            assert rows[0]["symbol"] == "LiveProducer"
+        finally:
+            backend.close()
+
+    def test_symbol_overview_returns_mapped_rows(self, tmp_path: Path) -> None:
+        backend, _ = self._start_clean(tmp_path)
+        try:
+            rows = backend.symbol_overview(
+                relative_file="src/sample/producer.py", query=None, limit=50
+            )["rows"]
+            assert sorted(r["symbol"] for r in rows) == [
+                "DeadProducer", "LiveProducer", "Producer",
+                "make_dead_producer", "make_producer",
+            ]
+        finally:
+            backend.close()
+
+    def test_find_references_returns_mapped_rows(self, tmp_path: Path) -> None:
+        backend, _ = self._start_clean(tmp_path)
+        try:
+            rows = backend.find_references(
+                name="make_producer", relative_file=None, limit=50
+            )["rows"]
+            found = sorted({(r["relative_file"], r["line"]) for r in rows})
+            assert ("src/sample/producer.py", 34) in found
+            assert ("src/sample/consumer.py", 9) in found
+        finally:
+            backend.close()
+
+    def test_arguments_are_forwarded_not_dropped(self, tmp_path: Path) -> None:
+        backend, _ = self._start_clean(tmp_path)
+        try:
+            # A name that exists must differ from one that does not; a stub that
+            # discards arguments would return the same thing for both.
+            hit = backend.find_symbol(name="LiveProducer", relative_file=None, limit=10)["rows"]
+            miss = backend.find_symbol(name="NoSuchSymbol", relative_file=None, limit=10)["rows"]
+            assert hit and not miss
+        finally:
+            backend.close()
+
+    def test_rows_are_bounded_by_limit(self, tmp_path: Path) -> None:
+        backend, _ = self._start_clean(tmp_path)
+        try:
+            rows = backend.symbol_overview(relative_file=None, query=None, limit=2)["rows"]
+            assert len(rows) <= 2
+        finally:
+            backend.close()
+
+    def test_unsupported_capabilities_are_typed_not_silently_empty(
+        self, tmp_path: Path
+    ) -> None:
+        backend, _ = self._start_clean(tmp_path)
+        try:
+            for call in (
+                lambda: backend.diagnostics(relative_file=None, limit=10),
+                lambda: backend.find_implementations(
+                    name="Producer", relative_file=None, limit=10
+                ),
+            ):
+                with pytest.raises(SerenaBackendError) as excinfo:
+                    call()
+                assert excinfo.value.code == "SERENA_CAPABILITY_UNAVAILABLE"
+        finally:
+            backend.close()
+
+
+class TestB3BundleDigestEnforced:
+    def test_start_refuses_a_tampered_bundle(self, tmp_path: Path) -> None:
+        root = _make_repo(tmp_path / "repo")
+        bundle = _make_bundle(tmp_path)
+        (bundle.root / "tampered.py").write_text("x = 1\n", encoding="utf-8")
+        backend = SerenaBackend(spec=_spec("clean"), bundle=bundle)
+        seal = capture_workspace_seal(root)
+        scratch = create_external_scratch(parent=tmp_path / "scratch", seal=seal)
+        with pytest.raises(SerenaBackendError) as excinfo:
+            backend.start(seal=seal, scratch=scratch)
+        assert excinfo.value.code == "SERENA_BUNDLE_DIGEST_MISMATCH"
+        backend.close()
+
+
+class TestB3ConfigInfluenceDifferential:
+    def test_differential_is_actually_executed_and_detects_influence(
+        self, tmp_path: Path
+    ) -> None:
+        from experiments.code_intelligence.serena_backend import (
+            run_config_influence_probe,
+        )
+
+        bundle = _make_bundle(tmp_path)
+        receipt = run_config_influence_probe(
+            spec=_spec("config_influenced"),
+            bundle=bundle,
+            corpus_root=_make_repo(tmp_path / "probe"),
+            scratch_parent=tmp_path / "scratch",
+        )
+        assert receipt["ran"] is True
+        assert receipt["influenced"] is True
+        assert receipt["code"] in {
+            "SERENA_REPOSITORY_CONFIG_INFLUENCE", "SERENA_TOOL_SURFACE_WIDENED"
+        }
+
+    def test_differential_reports_no_influence_for_a_clean_backend(
+        self, tmp_path: Path
+    ) -> None:
+        from experiments.code_intelligence.serena_backend import (
+            run_config_influence_probe,
+        )
+
+        bundle = _make_bundle(tmp_path)
+        receipt = run_config_influence_probe(
+            spec=_spec("clean"),
+            bundle=bundle,
+            corpus_root=_make_repo(tmp_path / "probe"),
+            scratch_parent=tmp_path / "scratch",
+        )
+        assert receipt["ran"] is True
+        assert receipt["influenced"] is False
