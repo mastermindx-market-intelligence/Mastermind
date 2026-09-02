@@ -15,10 +15,17 @@ import control_plane.codex_operator_adapter as codex_operator_adapter
 from control_plane.codex_operator_adapter import (
     CodexAdapterError,
     CodexOperatorAdapter,
+    CodexSkillCanaryBinding,
+    CodexSkillTurnInput,
+    CodexTurnInputEnvelope,
 )
 from control_plane.executive_agent_capabilities import (
+    ExecutionCapabilityRegistry,
     NativeHelperGrant,
     app_server_security_config_digest,
+)
+from control_plane.executive_capability_packages import (
+    build_capability_package_generation,
 )
 from control_plane.operator_harness_contract import (
     AdapterFailureClass,
@@ -45,12 +52,166 @@ from control_plane.operator_harness_contract import (
     compare_launch,
 )
 from control_plane.operator_harness_orchestrator import OperatorHarnessOrchestrator
+from scripts.ohf.capability_skill_projection import (
+    ORIGIN_INSTALLED_RELEASE,
+    stage_skill_projection,
+)
 from scripts.ohf.fixtures import OHF_PROBE_MCP_SERVER
 from scripts.ohf.laboratory import AppServerClient, PrivateRawTurnPage
 from scripts.ohf.redaction import REDACTED
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _CREATED_ADAPTERS: list[CodexOperatorAdapter] = []
+
+# ---------------------------------------------------------------------------
+# CAP-S1 Codex skill-canary fixtures (protocol-attestation amendment §5-§8)
+# ---------------------------------------------------------------------------
+
+CAP_S1_V4_FIXTURE = (
+    REPO_ROOT / "scripts" / "ohf" / "fixtures"
+    / "executive_agent_capabilities_v4_mastermind_operator.json"
+)
+CAP_S1_PACKAGE_CAPABILITY_ID = "mastermind-operator.p1"
+CAP_S1_PROFILE_ID = "operator.appserver.readonly.mastermind-operator.v1"
+CAP_S1_OPERATION_ID = "mastermind-cap-s1-complete-vertical-20260901-sol-001"
+
+
+def _load_cap_s1_generation():
+    raw_document = json.loads(CAP_S1_V4_FIXTURE.read_text(encoding="utf-8"))
+    raw_package = raw_document["capability_packages"][CAP_S1_PACKAGE_CAPABILITY_ID]
+    return build_capability_package_generation(
+        capability_id=CAP_S1_PACKAGE_CAPABILITY_ID, raw=raw_package
+    )
+
+
+def _load_cap_s1_profile():
+    registry = ExecutionCapabilityRegistry.load(CAP_S1_V4_FIXTURE, source_root=REPO_ROOT)
+    return registry.resolve(CAP_S1_PROFILE_ID)
+
+
+def _stage_cap_s1_binding(
+    tmp_path: Path,
+    *,
+    owning_process_generation: str = "gen-1",
+    schema_supports_skill_input_path: bool = True,
+) -> CodexSkillCanaryBinding:
+    generation = _load_cap_s1_generation()
+    profile = _load_cap_s1_profile()
+    attempt_root = tmp_path / "cap-s1-attempt-root"
+    attempt_root.mkdir(parents=True, exist_ok=True)
+    projection = stage_skill_projection(
+        generation=generation,
+        origin_mode=ORIGIN_INSTALLED_RELEASE,
+        origin_root=REPO_ROOT,
+        attempt_root=attempt_root,
+        owning_operation_id=CAP_S1_OPERATION_ID,
+        owning_process_generation=owning_process_generation,
+    )
+    return CodexSkillCanaryBinding(
+        generation=generation,
+        profile=profile,
+        projection=projection,
+        schema_receipt_digest="b" * 64,
+        schema_supports_skill_input_path=schema_supports_skill_input_path,
+    )
+
+
+def _skill_capability_requested(harness: "Harness", binding: CodexSkillCanaryBinding):
+    manifest = binding.profile.capability_manifest(
+        harness_binary_digest=harness.adapter.binary_digest
+    )
+    return replace(
+        harness.requested,
+        capabilities=CapabilityManifest(
+            required=manifest.required,
+            unclassified_policy="lab_allow_unclassified_readonly",
+        ),
+    )
+
+
+class _RecordingSkillsClient:
+    """Wraps a real ``AppServerClient``.
+
+    Records every RPC call (method, params) so tests can assert the exact
+    causal order and wire shape, and can optionally substitute scripted
+    sequential ``skills/list`` responses -- used only for the malformed row
+    shapes (duplicate names, mixed path presence, a wrong path) that the
+    real row-faithful fake server cannot itself produce from genuine
+    filesystem roots without also disturbing the empty-baseline law every
+    other case here depends on.  Every other RPC always reaches the real
+    fake App Server subprocess.
+    """
+
+    def __init__(self, inner: AppServerClient, skills_list_script=None) -> None:
+        self._inner = inner
+        self._skills_list_script = list(skills_list_script or [])
+        self.calls: list[tuple[str, dict]] = []
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def request(self, method, params=None, *, timeout=15.0):
+        self.calls.append((method, dict(params or {})))
+        if method == "skills/list" and self._skills_list_script:
+            return self._skills_list_script.pop(0)
+        return self._inner.request(method, params, timeout=timeout)
+
+
+def _recording_client_factory(skills_list_script=None):
+    def factory(argv, env, cwd):
+        inner = AppServerClient(argv, env=env, cwd=cwd, start_new_session=True)
+        return _RecordingSkillsClient(inner, skills_list_script=skills_list_script)
+
+    return factory
+
+
+def _strict_skills_list_result(cwd: str, rows: list[dict]) -> dict:
+    return {"data": [{"cwd": cwd, "skills": rows, "errors": []}]}
+
+
+def _skill_row(name: str, *, path: str | None, enabled: bool = True) -> dict:
+    row: dict[str, object] = {"name": name, "enabled": enabled}
+    if path is not None:
+        row["path"] = path
+    return row
+
+
+def _make_skill_harness(
+    tmp_path: Path,
+    binding: CodexSkillCanaryBinding,
+    *,
+    extra_env: dict[str, str] | None = None,
+    client_factory=None,
+    turn_input: str = "Reply with the probe acknowledgement.",
+) -> "Harness":
+    merged_env = {"OHF_FAKE_SKILL_ROOT": str(tmp_path / "cap-s1-no-ambient-skills")}
+    merged_env.update(extra_env or {})
+    harness = _make_harness(
+        tmp_path,
+        extra_env=merged_env,
+        skill_canary_binding=binding,
+        client_factory=client_factory or _recording_client_factory(),
+        turn_input=turn_input,
+    )
+    harness.requested = _skill_capability_requested(harness, binding)
+    return harness
+
+
+def _cap_s1_envelope(binding: CodexSkillCanaryBinding, *, grant_index: int = 0):
+    grant = binding.profile.skill_grants[grant_index]
+    final_path = f"{binding.projection.skills_root}/{grant.runtime_name}/SKILL.md"
+    return CodexTurnInputEnvelope(
+        text=f"${grant.runtime_name} synthetic bounded instruction",
+        skills=(
+            CodexSkillTurnInput(
+                capability_id=grant.capability_id,
+                runtime_name=grant.runtime_name,
+                skill_md_path=final_path,
+                skill_content_digest=grant.skill_content_digest,
+                package_generation_digest=binding.generation.package_generation_digest,
+            ),
+        ),
+    ), final_path
 
 
 def _op(suffix: str) -> OperationId:
@@ -80,6 +241,7 @@ def _make_harness(
     harness_version: str = "ohf-fake-app-server/p0b",
     network_policy: str = "disabled",
     native_helper: bool = False,
+    skill_canary_binding: "CodexSkillCanaryBinding | None" = None,
 ) -> Harness:
     codex_home = tmp_path / "codex-home"
     workspace = tmp_path / "workspace"
@@ -174,6 +336,7 @@ def _make_harness(
         base_sha_resolver=lambda path: "b" * 40,
         process_identity_observer=_process,
         extra_env=env,
+        skill_canary_binding=skill_canary_binding,
         **kwargs,
     )
     stat = workspace.stat()
@@ -1497,3 +1660,567 @@ def test_constructor_and_import_do_not_start_or_register_provider(
     )
     assert harness.adapter.describe_capabilities().supports_native_fork is False
     assert not harness.adapter.describe_capabilities().supports_config_staging
+
+
+# ---------------------------------------------------------------------------
+# CAP-S1: skill_canary_binding constructor validation (protocol-attestation
+# amendment §7)
+# ---------------------------------------------------------------------------
+
+
+def test_skill_canary_binding_constructor_validation_matrix(tmp_path: Path) -> None:
+    good_binding = _stage_cap_s1_binding(tmp_path)
+    scaffold = _make_harness(tmp_path / "ctor-scaffold")
+
+    def _adapter(binding: CodexSkillCanaryBinding) -> CodexOperatorAdapter:
+        return CodexOperatorAdapter(
+            binary_path=scaffold.adapter.binary_path,
+            codex_home=scaffold.adapter.codex_home,
+            workspace_root=scaffold.adapter.workspace_root,
+            worker_id="slot-a",
+            expected_harness_version=scaffold.requested.harness_version,
+            base_sha_resolver=lambda path: "b" * 40,
+            skill_canary_binding=binding,
+        )
+
+    # The unmodified binding constructs cleanly.
+    _adapter(good_binding)
+
+    mismatched = replace(
+        good_binding,
+        projection=replace(
+            good_binding.projection,
+            skill_content_digests=(
+                ("mastermind-operator.escalate-decision.v1", "0" * 64),
+            ),
+        ),
+    )
+    with pytest.raises(CodexAdapterError, match="grants do not match"):
+        _adapter(mismatched)
+
+    bad_generation_digest = replace(
+        good_binding,
+        projection=replace(
+            good_binding.projection, package_generation_digest="1" * 64
+        ),
+    )
+    with pytest.raises(CodexAdapterError, match="does not match the package generation"):
+        _adapter(bad_generation_digest)
+
+    bad_schema = replace(good_binding, schema_receipt_digest="not-a-digest")
+    with pytest.raises(CodexAdapterError, match="schema receipt digest is invalid"):
+        _adapter(bad_schema)
+
+    symlinked_root = tmp_path / "symlinked-skills-root"
+    symlinked_root.symlink_to(good_binding.projection.skills_root)
+    via_symlink = replace(
+        good_binding,
+        projection=replace(good_binding.projection, skills_root=str(symlinked_root)),
+    )
+    with pytest.raises(CodexAdapterError, match="must be a real directory"):
+        _adapter(via_symlink)
+
+    missing_root = replace(
+        good_binding,
+        projection=replace(
+            good_binding.projection, skills_root=str(tmp_path / "does-not-exist")
+        ),
+    )
+    with pytest.raises(CodexAdapterError, match="not observable"):
+        _adapter(missing_root)
+
+    for state in scaffold.adapter._generations.values():
+        state.client.close()
+
+
+# ---------------------------------------------------------------------------
+# CAP-S1: binding-gated causal launch sequence (protocol-attestation
+# amendment §5-§6)
+# ---------------------------------------------------------------------------
+
+
+def test_skill_canary_causal_launch_happy_path_mode_a_real_server(
+    tmp_path: Path,
+) -> None:
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="mode-a-happy")
+    harness = _make_skill_harness(tmp_path, binding)
+
+    observation, observed, launch = _start(harness)
+
+    assert launch.decision is LaunchDecision.ALLOW
+    required_names = tuple(
+        sorted(grant.runtime_name for grant in binding.profile.skill_grants)
+    )
+    assert observed.effective_skills == required_names
+    digest_by_name = {
+        grant.runtime_name: grant.skill_content_digest
+        for grant in binding.profile.skill_grants
+    }
+    skill_rows = [item for item in observed.capabilities if item.kind == "skill"]
+    assert {row.name for row in skill_rows} == set(required_names)
+    for row in skill_rows:
+        assert row.skill_content_digest == digest_by_name[row.name]
+
+    client = harness.adapter._state(harness.generation).client
+    extra_root_calls = [
+        params for method, params in client.calls if method == "skills/extraRoots/set"
+    ]
+    assert extra_root_calls == [
+        {"extraRoots": []},
+        {"extraRoots": [binding.projection.skills_root]},
+    ]
+
+
+def test_skill_canary_causal_launch_happy_path_mode_b_pathless(
+    tmp_path: Path,
+) -> None:
+    binding = _stage_cap_s1_binding(
+        tmp_path,
+        owning_process_generation="mode-b-happy",
+        schema_supports_skill_input_path=True,
+    )
+    harness = _make_skill_harness(
+        tmp_path, binding, extra_env={"OHF_FAKE_SKILLS_OMIT_PATH": "1"}
+    )
+
+    _observation, observed, launch = _start(harness)
+
+    assert launch.decision is LaunchDecision.ALLOW
+    required_names = tuple(
+        sorted(grant.runtime_name for grant in binding.profile.skill_grants)
+    )
+    assert observed.effective_skills == required_names
+
+
+def test_skill_canary_mode_b_without_schema_support_refuses(tmp_path: Path) -> None:
+    binding = _stage_cap_s1_binding(
+        tmp_path,
+        owning_process_generation="mode-b-unsupported",
+        schema_supports_skill_input_path=False,
+    )
+    harness = _make_skill_harness(
+        tmp_path, binding, extra_env={"OHF_FAKE_SKILLS_OMIT_PATH": "1"}
+    )
+
+    with pytest.raises(CodexAdapterError, match="skill_path_attestation_unavailable"):
+        _start(harness)
+
+
+def test_skill_canary_ambient_row_at_baseline_refuses(tmp_path: Path) -> None:
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="ambient")
+    harness = _make_skill_harness(
+        tmp_path, binding, extra_env={"OHF_FAKE_AMBIENT_SKILL": "rogue-skill"}
+    )
+
+    with pytest.raises(CodexAdapterError, match="ambient_skill_surface_not_empty"):
+        _start(harness)
+
+
+def _shape_test_harness(tmp_path: Path, binding: CodexSkillCanaryBinding, rows: list):
+    """A harness whose ``skills/list`` responses are fully scripted.
+
+    Three calls occur before ``start_session`` returns when a binding is
+    present: the ordinary (lenient) attestation call, the causal baseline
+    (must be empty), then the post-add causal call -- which is where ``rows``
+    is substituted.
+    """
+
+    cwd = str(tmp_path / "workspace")
+    script = [
+        _strict_skills_list_result(cwd, []),
+        _strict_skills_list_result(cwd, []),
+        _strict_skills_list_result(cwd, rows),
+    ]
+    return _make_skill_harness(
+        tmp_path, binding, client_factory=_recording_client_factory(script)
+    )
+
+
+def test_skill_canary_duplicate_same_name_row_refuses(tmp_path: Path) -> None:
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="duplicate")
+    skills_root = binding.projection.skills_root
+    names = [grant.runtime_name for grant in binding.profile.skill_grants]
+    rows = [_skill_row(name, path=f"{skills_root}/{name}") for name in names]
+    rows.append(_skill_row(names[0], path=f"{skills_root}/{names[0]}"))
+    harness = _shape_test_harness(tmp_path, binding, rows)
+
+    with pytest.raises(CodexAdapterError, match="duplicate_skill_row"):
+        _start(harness)
+
+
+def test_skill_canary_missing_one_of_four_refuses(tmp_path: Path) -> None:
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="missing-one")
+    skills_root = binding.projection.skills_root
+    names = [grant.runtime_name for grant in binding.profile.skill_grants][:-1]
+    rows = [_skill_row(name, path=f"{skills_root}/{name}") for name in names]
+    harness = _shape_test_harness(tmp_path, binding, rows)
+
+    with pytest.raises(CodexAdapterError, match="skill_set_causality_failed"):
+        _start(harness)
+
+
+def test_skill_canary_mode_a_wrong_path_refuses(tmp_path: Path) -> None:
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="wrong-path")
+    skills_root = binding.projection.skills_root
+    names = [grant.runtime_name for grant in binding.profile.skill_grants]
+    rows = [_skill_row(name, path=f"{skills_root}/{name}") for name in names[1:]]
+    rows.append(_skill_row(names[0], path="/totally/unrelated/root/" + names[0]))
+    harness = _shape_test_harness(tmp_path, binding, rows)
+
+    with pytest.raises(CodexAdapterError, match="skill_path_mismatch"):
+        _start(harness)
+
+
+def test_skill_canary_mixed_path_presence_refuses(tmp_path: Path) -> None:
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="mixed-path")
+    skills_root = binding.projection.skills_root
+    names = [grant.runtime_name for grant in binding.profile.skill_grants]
+    rows = [
+        _skill_row(names[0], path=f"{skills_root}/{names[0]}"),
+        _skill_row(names[1], path=f"{skills_root}/{names[1]}"),
+        _skill_row(names[2], path=None),
+        _skill_row(names[3], path=None),
+    ]
+    harness = _shape_test_harness(tmp_path, binding, rows)
+
+    with pytest.raises(CodexAdapterError, match="skill_path_precision_inconsistent"):
+        _start(harness)
+
+
+# ---------------------------------------------------------------------------
+# CAP-S1: closed structured Skill turn-input seam (protocol-attestation
+# amendment §7)
+# ---------------------------------------------------------------------------
+
+
+def test_skill_envelope_happy_path_produces_the_exact_two_item_wire(
+    tmp_path: Path,
+) -> None:
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="envelope-ok")
+    harness = _make_skill_harness(tmp_path, binding)
+    _observation, _observed, launch = _start(harness)
+
+    envelope, final_path = _cap_s1_envelope(binding)
+    harness.adapter.turn_input_loader = lambda turn: envelope
+    turn = TurnRef(
+        "turn-skill-envelope",
+        harness.epoch.session_epoch_id,
+        harness.generation.process_generation_id,
+        harness.epoch.attempt_id,
+    )
+
+    started = harness.adapter.begin_turn(
+        operation_id=_op("skill-envelope"),
+        turn=turn,
+        generation=harness.generation,
+        launch=launch,
+    )
+
+    assert started.acknowledged
+    client = harness.adapter._state(harness.generation).client
+    turn_start_calls = [
+        params for method, params in client.calls if method == "turn/start"
+    ]
+    grant = binding.profile.skill_grants[0]
+    assert turn_start_calls[-1]["input"] == [
+        {"type": "text", "text": envelope.text},
+        {"type": "skill", "name": grant.runtime_name, "path": final_path},
+    ]
+
+
+def test_skill_envelope_without_binding_refuses(tmp_path: Path) -> None:
+    harness = _make_harness(tmp_path)
+    _observation, _observed, launch = _start(harness)
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="no-binding")
+    envelope, _final_path = _cap_s1_envelope(binding)
+    harness.adapter.turn_input_loader = lambda turn: envelope
+    turn = TurnRef("turn-no-binding", "epoch-1", "gen-1", "attempt-1")
+
+    with pytest.raises(CodexAdapterError, match="skill_envelope_without_binding"):
+        harness.adapter.begin_turn(
+            operation_id=_op("no-binding-turn"),
+            turn=turn,
+            generation=harness.generation,
+            launch=launch,
+        )
+
+
+@pytest.mark.parametrize("skill_count", [0, 2])
+def test_skill_envelope_cardinality_refuses(tmp_path: Path, skill_count: int) -> None:
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="cardinality")
+    harness = _make_skill_harness(tmp_path, binding)
+    _observation, _observed, launch = _start(harness)
+
+    envelope, _final_path = _cap_s1_envelope(binding)
+    bad_envelope = replace(envelope, skills=envelope.skills * skill_count)
+    harness.adapter.turn_input_loader = lambda turn: bad_envelope
+    turn = TurnRef(
+        "turn-cardinality",
+        harness.epoch.session_epoch_id,
+        harness.generation.process_generation_id,
+        harness.epoch.attempt_id,
+    )
+
+    with pytest.raises(CodexAdapterError, match="skill_envelope_cardinality"):
+        harness.adapter.begin_turn(
+            operation_id=_op("cardinality-turn"),
+            turn=turn,
+            generation=harness.generation,
+            launch=launch,
+        )
+
+
+def test_skill_envelope_identity_mismatch_refuses(tmp_path: Path) -> None:
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="identity")
+    harness = _make_skill_harness(tmp_path, binding)
+    _observation, _observed, launch = _start(harness)
+
+    envelope, _final_path = _cap_s1_envelope(binding)
+    bad_item = replace(envelope.skills[0], skill_content_digest="0" * 64)
+    bad_envelope = replace(envelope, skills=(bad_item,))
+    harness.adapter.turn_input_loader = lambda turn: bad_envelope
+    turn = TurnRef(
+        "turn-identity",
+        harness.epoch.session_epoch_id,
+        harness.generation.process_generation_id,
+        harness.epoch.attempt_id,
+    )
+
+    with pytest.raises(CodexAdapterError, match="skill_envelope_identity_mismatch"):
+        harness.adapter.begin_turn(
+            operation_id=_op("identity-turn"),
+            turn=turn,
+            generation=harness.generation,
+            launch=launch,
+        )
+
+
+def test_skill_envelope_path_mismatch_refuses(tmp_path: Path) -> None:
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="path-mismatch")
+    harness = _make_skill_harness(tmp_path, binding)
+    _observation, _observed, launch = _start(harness)
+
+    envelope, _final_path = _cap_s1_envelope(binding)
+    bad_item = replace(envelope.skills[0], skill_md_path="/not/the/right/path/SKILL.md")
+    bad_envelope = replace(envelope, skills=(bad_item,))
+    harness.adapter.turn_input_loader = lambda turn: bad_envelope
+    turn = TurnRef(
+        "turn-path-mismatch",
+        harness.epoch.session_epoch_id,
+        harness.generation.process_generation_id,
+        harness.epoch.attempt_id,
+    )
+
+    with pytest.raises(CodexAdapterError, match="skill_input_path_mismatch"):
+        harness.adapter.begin_turn(
+            operation_id=_op("path-mismatch-turn"),
+            turn=turn,
+            generation=harness.generation,
+            launch=launch,
+        )
+
+
+def test_skill_envelope_refuses_alongside_a_bound_attempt_resource(
+    tmp_path: Path,
+) -> None:
+    binding = _stage_cap_s1_binding(
+        tmp_path, owning_process_generation="resource-conflict"
+    )
+    harness = _make_skill_harness(tmp_path, binding)
+    manifest = binding.profile.capability_manifest(
+        harness_binary_digest=harness.adapter.binary_digest
+    )
+    resource_digest = "f" * 64
+    requested_resource = CapabilityIdentity(
+        kind="resource",
+        name="worker-browser-b1-local",
+        harness_binary_digest=harness.adapter.binary_digest,
+        resource_contract_digest=resource_digest,
+    )
+    harness.requested = replace(
+        harness.requested,
+        capabilities=CapabilityManifest(
+            required=(*manifest.required, requested_resource),
+            unclassified_policy="lab_allow_unclassified_readonly",
+        ),
+    )
+    resource_environment = {
+        "MASTERMIND_BROWSER_ARTIFACT_DIR": str(tmp_path / "artifacts"),
+        "MASTERMIND_BROWSER_FIXTURE_A_URL": (
+            "http://127.0.0.1:43123/__mastermind_browser_visual_fixture__/" + "a" * 32
+        ),
+        "MASTERMIND_BROWSER_FIXTURE_B_URL": (
+            "http://127.0.0.1:43123/__mastermind_browser_visual_fixture__/" + "b" * 32
+        ),
+        "MASTERMIND_BROWSER_FIXTURE_NONCE": "c" * 32,
+        "MASTERMIND_BROWSER_ORIGIN": "http://127.0.0.1:43123",
+        "MASTERMIND_BROWSER_PROXY_URL": "http://127.0.0.1:43124",
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH": str(
+            tmp_path / "runtime" / "worker-browser-b1-install-manifest.json"
+        ),
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256": "d" * 64,
+        "MASTERMIND_BROWSER_RUNTIME_ROOT": str(tmp_path / "runtime"),
+        "MASTERMIND_BROWSER_WORKSPACE_PATH": str(tmp_path),
+        "PLAYWRIGHT_BROWSERS_PATH": str(tmp_path / "runtime" / "browsers"),
+    }
+
+    class Resource:
+        attempt_id = harness.epoch.attempt_id
+        session_epoch_id = harness.epoch.session_epoch_id
+        process_generation_id = harness.generation.process_generation_id
+        network_state = "disabled"
+        environment = resource_environment
+        observed_capability = ObservedCapabilityIdentity(
+            kind="resource",
+            name="worker-browser-b1-local",
+            resource_contract_digest=resource_digest,
+        )
+
+    harness.adapter.bind_attempt_resource(
+        Resource(),
+        requested=harness.requested,
+        epoch=harness.epoch,
+        generation=harness.generation,
+    )
+    _observation, _observed, launch = _start(harness)
+
+    envelope, _final_path = _cap_s1_envelope(binding)
+    harness.adapter.turn_input_loader = lambda turn: envelope
+    turn = TurnRef(
+        "turn-resource-conflict",
+        harness.epoch.session_epoch_id,
+        harness.generation.process_generation_id,
+        harness.epoch.attempt_id,
+    )
+
+    with pytest.raises(CodexAdapterError, match="skill_envelope_resource_conflict"):
+        harness.adapter.begin_turn(
+            operation_id=_op("resource-conflict-turn"),
+            turn=turn,
+            generation=harness.generation,
+            launch=launch,
+        )
+
+
+# ---------------------------------------------------------------------------
+# CAP-S1: skills/changed invalidation and post-turn drift (protocol-
+# attestation amendment §8)
+# ---------------------------------------------------------------------------
+
+
+def test_skills_changed_notification_invalidates_the_launch_attestation(
+    tmp_path: Path,
+) -> None:
+    binding = _stage_cap_s1_binding(
+        tmp_path, owning_process_generation="skills-changed"
+    )
+    harness = _make_skill_harness(tmp_path, binding)
+    _observation, _observed, launch = _start(harness)
+
+    state = harness.adapter._state(harness.generation)
+    turn = TurnRef(
+        "turn-skills-changed",
+        harness.epoch.session_epoch_id,
+        harness.generation.process_generation_id,
+        harness.epoch.attempt_id,
+    )
+    harness.adapter._ingest_turn_notifications(
+        state, turn, [{"method": "skills/changed", "params": {}}]
+    )
+    assert state.skills_changed is True
+
+    envelope, _final_path = _cap_s1_envelope(binding)
+    harness.adapter.turn_input_loader = lambda turn: envelope
+
+    with pytest.raises(CodexAdapterError, match="skills_changed_during_canary"):
+        harness.adapter.begin_turn(
+            operation_id=_op("skills-changed-turn"),
+            turn=turn,
+            generation=harness.generation,
+            launch=launch,
+        )
+
+
+def test_collect_candidate_result_refuses_on_post_turn_skill_drift(
+    tmp_path: Path,
+) -> None:
+    binding = _stage_cap_s1_binding(
+        tmp_path, owning_process_generation="post-turn-drift"
+    )
+    harness = _make_skill_harness(tmp_path, binding)
+    _observation, _observed, launch = _start(harness)
+    turn = TurnRef(
+        "turn-post-drift",
+        harness.epoch.session_epoch_id,
+        harness.generation.process_generation_id,
+        harness.epoch.attempt_id,
+    )
+    harness.adapter.begin_turn(
+        operation_id=_op("post-drift-turn"),
+        turn=turn,
+        generation=harness.generation,
+        launch=launch,
+    )
+    harness.adapter.read_events(
+        EventCursor(
+            turn.attempt_id,
+            turn.session_epoch_id,
+            turn.process_generation_id,
+            turn_id=turn.turn_id,
+        )
+    )
+
+    state = harness.adapter._state(harness.generation)
+    # Simulate an out-of-band root clear between the turn and candidate
+    # collection: the server-side skill surface no longer matches the four
+    # required Skills.
+    state.client.request("skills/extraRoots/set", {"extraRoots": []})
+
+    with pytest.raises(CodexAdapterError, match="post_turn_skill_state_mismatch"):
+        harness.adapter.collect_candidate_result(turn)
+
+
+def test_str_loader_wire_is_byte_identical_with_and_without_binding(
+    tmp_path: Path,
+) -> None:
+    plain_harness = _make_harness(
+        tmp_path / "plain", client_factory=_recording_client_factory()
+    )
+    _observation, _observed, plain_launch = _start(plain_harness)
+    plain_turn = TurnRef("turn-plain", "epoch-1", "gen-1", "attempt-1")
+    plain_harness.adapter.begin_turn(
+        operation_id=_op("plain-wire"),
+        turn=plain_turn,
+        generation=plain_harness.generation,
+        launch=plain_launch,
+    )
+    plain_client = plain_harness.adapter._state(plain_harness.generation).client
+    plain_wire = next(
+        params["input"] for method, params in plain_client.calls if method == "turn/start"
+    )
+
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="wire-parity")
+    bound_harness = _make_skill_harness(tmp_path, binding)
+    _observation, _observed, bound_launch = _start(bound_harness)
+    bound_turn = TurnRef(
+        "turn-bound",
+        bound_harness.epoch.session_epoch_id,
+        bound_harness.generation.process_generation_id,
+        bound_harness.epoch.attempt_id,
+    )
+    bound_harness.adapter.begin_turn(
+        operation_id=_op("bound-wire"),
+        turn=bound_turn,
+        generation=bound_harness.generation,
+        launch=bound_launch,
+    )
+    bound_client = bound_harness.adapter._state(bound_harness.generation).client
+    bound_wire = next(
+        params["input"] for method, params in bound_client.calls if method == "turn/start"
+    )
+
+    assert (
+        plain_wire
+        == bound_wire
+        == [{"type": "text", "text": "Reply with the probe acknowledgement."}]
+    )
