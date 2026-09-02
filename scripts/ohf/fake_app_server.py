@@ -22,6 +22,19 @@ from scripts.ohf.fixtures import (
     OHF_PROBE_TURN_ACK,
 )
 
+# CAP-S1 addendum (Sol wave-3 review 5087373998, finding 1): turn-specific,
+# closed-marker-compliant replies keyed by the captured Skill turn-input's
+# ``name`` -- gated behind ``OHF_FAKE_CAP_S1_TURN_REPLIES=1`` so every other
+# fake-App-Server caller (including this module's own default behavior) is
+# unaffected. Each reply carries its turn's required standalone token and
+# withholds its forbidden one, per the vertical amendment's closed marker law.
+CAP_S1_TURN_REPLIES: dict[str, str] = {
+    "receive-commission": "PICKUP-ACK: synthetic operation acknowledged; work not begun.",
+    "return-progress": "PROGRESS: synthetic operation moving forward, not finished.",
+    "escalate-decision": "DECISION-REQUEST: ambiguity found, awaiting explicit ruling.",
+    "finish-operation": "RESULT: synthetic operation output recorded.",
+}
+
 
 class FakeAppServer:
     def __init__(self) -> None:
@@ -37,6 +50,7 @@ class FakeAppServer:
         self.ambient_skill = os.environ.get("OHF_FAKE_AMBIENT_SKILL") or ""
         self.skills_changed_notify = os.environ.get("OHF_FAKE_SKILLS_CHANGED") == "1"
         self.bundled_disabled = os.environ.get("OHF_FAKE_BUNDLED_DISABLED") == "1"
+        self.cap_s1_turn_replies = os.environ.get("OHF_FAKE_CAP_S1_TURN_REPLIES") == "1"
         self.native_helper = os.environ.get("OHF_FAKE_NATIVE_HELPER") == "1"
         self.native_helper_depth = int(
             os.environ.get("OHF_FAKE_NATIVE_HELPER_DEPTH") or "1"
@@ -286,8 +300,15 @@ class FakeAppServer:
                     text_in += skill_name
                     input_skills.append(dict(item))
             turn_id = f"turn_{uuid.uuid4().hex[:8]}"
+            cap_s1_reply = None
+            if self.cap_s1_turn_replies and input_skills:
+                skill_name = str(input_skills[-1].get("name") or "")
+                cap_s1_reply = CAP_S1_TURN_REPLIES.get(skill_name)
             fixture_reply = os.environ.get("OHF_FAKE_TURN_REPLY")
-            if fixture_reply is not None:
+            if cap_s1_reply is not None:
+                reply = cap_s1_reply
+                item_type = "agent_message"
+            elif fixture_reply is not None:
                 reply = fixture_reply
                 item_type = "agent_message"
             elif OHF_PROBE_SKILL_NAME in text_in or "$ohf-probe" in text_in:
