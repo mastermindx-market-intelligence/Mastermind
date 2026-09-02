@@ -20,6 +20,8 @@ from control_plane.codex_operator_adapter import (
     CodexSkillCanaryBinding,
     CodexSkillTurnInput,
     CodexTurnInputEnvelope,
+    build_protocol_attestation_receipt,
+    compute_protocol_attestation_receipt_digest,
 )
 from control_plane.executive_agent_capabilities import (
     ExecutionCapabilityRegistry,
@@ -139,7 +141,7 @@ def _stage_cap_s1_binding(
         generation=generation,
         profile=profile,
         projection=projection,
-        protocol_receipt=CodexProtocolAttestationReceipt(
+        protocol_receipt=build_protocol_attestation_receipt(
             binary_path=str(Path(sys.executable).resolve()),
             binary_digest=_test_binary_digest(),
             binary_version=CAP_S1_HARNESS_VERSION,
@@ -151,7 +153,7 @@ def _stage_cap_s1_binding(
                 if schema_supports_skill_input_path
                 else ""
             ),
-            probe_user_agent="",
+            probe_user_agent=CAP_S1_HARNESS_VERSION,
         ),
     )
 
@@ -1825,6 +1827,130 @@ def test_skill_canary_binding_constructor_validation_matrix(tmp_path: Path) -> N
     )
     with pytest.raises(CodexAdapterError, match="schema evidence is required"):
         _adapter(missing_schema_evidence)
+
+    # --- CAP-S1 Sol review item 1: splice-proof, producer-bound receipt ----
+    #
+    # Every mutant below is refused BEFORE ``thread/start`` -- indeed before
+    # any process is ever launched, since ``_adapter`` only exercises the
+    # constructor-time ``_validate_skill_canary_binding`` pass.
+
+    # A receipt whose ``binary_digest`` correctly matches THIS adapter's own
+    # binary (so the pre-existing digest-vs-``self.binary_path`` check alone
+    # would pass) but whose ``binary_path`` field names a completely
+    # different, real, on-disk executable -- the exact "schema generated
+    # from binary A can authorize adapter binary B" splice Sol's review
+    # named. Every OTHER field is a fully self-consistent receipt (built via
+    # the one lawful constructor), so only the new binary-path identity
+    # check can catch it.
+    other_real_binary = Path(shutil.which("true") or "/usr/bin/true").resolve()
+    assert other_real_binary != scaffold.adapter.binary_path
+    cross_binary_receipt = build_protocol_attestation_receipt(
+        binary_path=str(other_real_binary),
+        binary_digest=_test_binary_digest(),
+        binary_version=CAP_S1_HARNESS_VERSION,
+        stable_inventory_digest="c" * 64,
+        experimental_inventory_digest="d" * 64,
+        supports_skill_input_path=True,
+        skill_input_schema_evidence="skill_turn_input_schema_node_detected",
+        probe_user_agent=CAP_S1_HARNESS_VERSION,
+    )
+    cross_binary_splice = replace(good_binding, protocol_receipt=cross_binary_receipt)
+    with pytest.raises(CodexAdapterError, match="binary path mismatch"):
+        _adapter(cross_binary_splice)
+
+    # A receipt bound to a genuinely distinct (but same-shaped) inventory --
+    # ``build_protocol_attestation_receipt`` computes a fully self-consistent
+    # digest for it, so only the dedicated non-distinctness check (never the
+    # digest check) can catch it.
+    non_distinct_inventory_receipt = build_protocol_attestation_receipt(
+        binary_path=good_binding.protocol_receipt.binary_path,
+        binary_digest=good_binding.protocol_receipt.binary_digest,
+        binary_version=good_binding.protocol_receipt.binary_version,
+        stable_inventory_digest="e" * 64,
+        experimental_inventory_digest="e" * 64,
+        supports_skill_input_path=True,
+        skill_input_schema_evidence="skill_turn_input_schema_node_detected",
+        probe_user_agent=good_binding.protocol_receipt.probe_user_agent,
+    )
+    non_distinct_inventory = replace(
+        good_binding, protocol_receipt=non_distinct_inventory_receipt
+    )
+    with pytest.raises(CodexAdapterError, match="must be distinct"):
+        _adapter(non_distinct_inventory)
+
+    # Every remaining mutant leaves the digest stale after a bare
+    # ``dataclasses.replace`` -- the producer-bound receipt-digest
+    # recomputation is what catches each of these, since none of the
+    # individually-named checks above inspect ``probe_user_agent`` or the
+    # digest field itself.
+    spliced_probe_user_agent = replace(
+        good_binding,
+        protocol_receipt=replace(
+            good_binding.protocol_receipt, probe_user_agent="spliced/1.0"
+        ),
+    )
+    with pytest.raises(
+        CodexAdapterError,
+        match="probe user agent mismatch|protocol receipt digest mismatch",
+    ):
+        _adapter(spliced_probe_user_agent)
+
+    empty_probe_user_agent = replace(
+        good_binding,
+        protocol_receipt=replace(good_binding.protocol_receipt, probe_user_agent=""),
+    )
+    with pytest.raises(
+        CodexAdapterError,
+        match="probe user agent mismatch|protocol receipt digest mismatch",
+    ):
+        _adapter(empty_probe_user_agent)
+
+    tampered_receipt_digest = replace(
+        good_binding,
+        protocol_receipt=replace(good_binding.protocol_receipt, receipt_digest="0" * 64),
+    )
+    with pytest.raises(CodexAdapterError, match="protocol receipt digest mismatch"):
+        _adapter(tampered_receipt_digest)
+
+    # A receipt hand-built without the producer (``CodexProtocolAttestation
+    # Receipt`` constructed directly, never through
+    # ``build_protocol_attestation_receipt``) with an arbitrary, wrong
+    # digest -- refused the same way.
+    hand_built_receipt = CodexProtocolAttestationReceipt(
+        binary_path=good_binding.protocol_receipt.binary_path,
+        binary_digest=good_binding.protocol_receipt.binary_digest,
+        binary_version=good_binding.protocol_receipt.binary_version,
+        stable_inventory_digest=good_binding.protocol_receipt.stable_inventory_digest,
+        experimental_inventory_digest=good_binding.protocol_receipt.experimental_inventory_digest,
+        supports_skill_input_path=good_binding.protocol_receipt.supports_skill_input_path,
+        skill_input_schema_evidence=good_binding.protocol_receipt.skill_input_schema_evidence,
+        probe_user_agent=good_binding.protocol_receipt.probe_user_agent,
+        receipt_digest="9" * 64,
+    )
+    hand_built = replace(good_binding, protocol_receipt=hand_built_receipt)
+    with pytest.raises(CodexAdapterError, match="protocol receipt digest mismatch"):
+        _adapter(hand_built)
+
+    # Sanity: the shared digest function really is what the adapter
+    # recomputes -- a receipt whose digest was correctly recomputed via
+    # ``dataclasses.replace`` PLUS a fresh digest call constructs cleanly.
+    honestly_updated_receipt = replace(
+        good_binding.protocol_receipt, probe_user_agent=CAP_S1_HARNESS_VERSION
+    )
+    honestly_updated_receipt = replace(
+        honestly_updated_receipt,
+        receipt_digest=compute_protocol_attestation_receipt_digest(
+            binary_path=honestly_updated_receipt.binary_path,
+            binary_digest=honestly_updated_receipt.binary_digest,
+            binary_version=honestly_updated_receipt.binary_version,
+            stable_inventory_digest=honestly_updated_receipt.stable_inventory_digest,
+            experimental_inventory_digest=honestly_updated_receipt.experimental_inventory_digest,
+            supports_skill_input_path=honestly_updated_receipt.supports_skill_input_path,
+            skill_input_schema_evidence=honestly_updated_receipt.skill_input_schema_evidence,
+            probe_user_agent=honestly_updated_receipt.probe_user_agent,
+        ),
+    )
+    _adapter(replace(good_binding, protocol_receipt=honestly_updated_receipt))
 
     # --- B1: projection_root is the only identity re-checked here; a
     # caller-substituted ``skills_root`` is never trusted or even inspected

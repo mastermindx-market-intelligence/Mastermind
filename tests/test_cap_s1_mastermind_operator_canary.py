@@ -906,21 +906,28 @@ import shutil
 import subprocess as _subprocess
 import sys as _sys
 
+from control_plane.codex_operator_adapter import CodexProtocolAttestationReceipt
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
 from control_plane.operator_harness_contract import LaunchDecision
 from scripts.ohf.cap_s1_mastermind_operator_canary import (
     PROFILE_ID as _CANARY_PROFILE_ID,
+    CANARY_EVIDENCE_SCHEMA_VERSION,
+    RESULT_CONTRACT_MARKER,
+    RESULT_CONTRACT_SCHEMA,
     CanaryCleanupRecord,
     CanaryEvidence,
     CanaryStop,
+    CapS1Result,
+    CapS1ResultError,
     FAKE_HARNESS_VERSION,
     FROZEN_STOP_CODES,
-    SchemaAttestation,
     _SCHEMA_FIXTURE_BINARY_SOURCE,
     attest_protocol_schema,
+    build_cap_s1_result,
     build_synthetic_workspace,
     main as canary_main,
     run_canary,
+    validate_cap_s1_result,
 )
 from scripts.ohf.laboratory import AppServerClient, default_user_codex_home
 
@@ -1210,22 +1217,56 @@ def _skill_row(name: str, *, path: "str | None" = None, enabled: bool = True) ->
 # ---------------------------------------------------------------------------
 
 
+def _write_launchable_single_binary(path: Path) -> None:
+    """A REAL, launchable copy of the committed single-binary fixture
+    (CAP-S1 Sol review item 1): unlike the old plain-bytes stub, the
+    receipt's own ``probe_user_agent`` now comes from a genuine
+    ``initialize`` RPC against this exact file, so ``attest_protocol_schema``
+    callers need a binary that can actually be launched as an App Server."""
+
+    path.write_text(_SCHEMA_FIXTURE_BINARY_SOURCE, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _probe_env(probe_root: Path) -> dict:
+    codex_home = probe_root / "codex-home"
+    codex_home.mkdir(parents=True, exist_ok=True)
+    return {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(codex_home),
+        "CODEX_HOME": str(codex_home),
+        "PYTHONPATH": str(REPO_ROOT),
+        "OHF_FAKE_STATE": str(probe_root / "fake-state.json"),
+        "OHF_FAKE_MODEL": "gpt-5.6-sol",
+        "OHF_FAKE_MCP_GONE": "1",
+        "LC_ALL": "C",
+    }
+
+
 def test_attest_protocol_schema_with_skill_path_supports_true_and_is_deterministic(
     tmp_path,
 ) -> None:
     scratch = tmp_path / "scratch-a"
     scratch.mkdir()
     binary = tmp_path / "fixture-binary-a"
-    binary.write_bytes(b"fixture codex binary bytes")
+    _write_launchable_single_binary(binary)
+    probe_root = tmp_path / "probe-a"
+    probe_root.mkdir()
+    env = _probe_env(probe_root)
 
     first = attest_protocol_schema(
         binary_path=binary,
         scratch_root=scratch,
         run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        probe_env=env,
+        probe_cwd=probe_root,
     )
-    assert isinstance(first, SchemaAttestation)
+    assert isinstance(first, CodexProtocolAttestationReceipt)
     assert first.supports_skill_input_path is True
     assert first.binary_digest
+    assert first.probe_user_agent == FAKE_HARNESS_VERSION
+    assert first.binary_version == FAKE_HARNESS_VERSION
+    assert first.receipt_digest
 
     scratch_2 = tmp_path / "scratch-a-2"
     scratch_2.mkdir()
@@ -1233,24 +1274,32 @@ def test_attest_protocol_schema_with_skill_path_supports_true_and_is_determinist
         binary_path=binary,
         scratch_root=scratch_2,
         run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        probe_env=env,
+        probe_cwd=probe_root,
     )
     assert second.stable_inventory_digest == first.stable_inventory_digest
     assert second.experimental_inventory_digest == first.experimental_inventory_digest
     assert second.binary_digest == first.binary_digest
+    assert second.receipt_digest == first.receipt_digest
 
 
 def test_attest_protocol_schema_missing_path_evidence_supports_false(tmp_path) -> None:
     scratch = tmp_path / "scratch-b"
     scratch.mkdir()
     binary = tmp_path / "fixture-binary-b"
-    binary.write_bytes(b"fixture codex binary bytes")
+    _write_launchable_single_binary(binary)
+    probe_root = tmp_path / "probe-b"
+    probe_root.mkdir()
 
     attestation = attest_protocol_schema(
         binary_path=binary,
         scratch_root=scratch,
         run_command=_fake_schema_run_command(_SCHEMA_WITHOUT_SKILL_PATH),
+        probe_env=_probe_env(probe_root),
+        probe_cwd=probe_root,
     )
     assert attestation.supports_skill_input_path is False
+    assert attestation.skill_input_schema_evidence == ""
 
 
 def test_canary_stop_only_accepts_a_frozen_code() -> None:
@@ -1272,6 +1321,33 @@ def test_attest_protocol_schema_failing_command_stops_unattested(tmp_path) -> No
             binary_path=binary, scratch_root=scratch, run_command=_failing_schema_run_command
         )
     assert excinfo.value.code == "SKILL_PROTOCOL_SCHEMA_UNATTESTED"
+
+
+def test_attest_protocol_schema_unlaunchable_binary_stops_unattested(tmp_path) -> None:
+    """The schema-generation half can succeed via an injected ``run_command``
+    fake while the binary itself is not genuinely launchable -- the REAL
+    initialize probe (CAP-S1 Sol review item 1) must still refuse, never
+    fabricate a ``probe_user_agent``."""
+
+    scratch = tmp_path / "scratch-unlaunchable"
+    scratch.mkdir()
+    binary = tmp_path / "fixture-binary-unlaunchable"
+    binary.write_bytes(b"not an executable")
+    probe_root = tmp_path / "probe-unlaunchable"
+    probe_root.mkdir()
+
+    with pytest.raises(CanaryStop) as excinfo:
+        attest_protocol_schema(
+            binary_path=binary,
+            scratch_root=scratch,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+            probe_env=_probe_env(probe_root),
+            probe_cwd=probe_root,
+        )
+    assert excinfo.value.code == "SKILL_PROTOCOL_SCHEMA_UNATTESTED"
+    # Sol wave-3 review finding B4 self-cleanup still applies to the new
+    # probe failure path: the sealed schema dir never survives the stop.
+    assert not (scratch / "schema-attestation").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -1696,6 +1772,97 @@ def test_run_canary_skills_changed_notification_stops_before_the_next_turn(tmp_p
     client = _CREATED_CANARY_CLIENTS[0]
     turn_start_calls = [call for call in client.calls if call[0] == "turn/start"]
     assert len(turn_start_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# residual refusal rows (CAP-S1 Sol review item 3)
+# ---------------------------------------------------------------------------
+
+
+def test_run_canary_empty_candidate_identity_refuses_before_provider_start(
+    tmp_path, monkeypatch
+) -> None:
+    """An empty/whitespace candidate identity -- a doctored generation whose
+    ``source_commit``/``source_tree_sha`` a real reviewed source can never
+    actually produce (``build_capability_package_generation`` itself already
+    refuses those at the field-format level; this proves the runner's OWN
+    independent check closes the gap even if that upstream guarantee ever
+    weakened) -- refuses as a TYPED, deterministic ``CanaryStop`` before any
+    provider process starts (CAP-S1 Sol review item 3).
+    """
+
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    real_generation = _load_real_generation()
+    doctored_generation = dataclasses.replace(
+        real_generation, source_commit="", source_tree_sha=""
+    )
+    monkeypatch.setattr(
+        canary_module, "build_capability_package_generation", lambda **_kwargs: doctored_generation
+    )
+
+    scratch = tmp_path / "scratch-empty-candidate"
+    scratch.mkdir()
+    factory = _canary_client_factory()
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-empty-candidate",
+            client_factory=factory,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    assert len(_CREATED_CANARY_CLIENTS) == 0
+
+
+def test_run_canary_workspace_git_commit_failure_is_provider_realm_unavailable(
+    tmp_path,
+) -> None:
+    """A workspace whose git commit could not be created is a bounded
+    ``PROVIDER_REALM_UNAVAILABLE`` refusal, and cleanup still runs for every
+    resource already registered by the time the failure occurs (CAP-S1 Sol
+    review item 3)."""
+
+    scratch = tmp_path / "scratch-ws-commit-fail"
+    scratch.mkdir()
+    schema_run_command = _fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH)
+
+    def failing_workspace_run_command(argv, **kwargs):
+        if argv and argv[0] == "git" and "commit" in argv:
+            return _subprocess.CompletedProcess(
+                argv, 1, stdout="", stderr="synthetic commit failure"
+            )
+        if argv and argv[0] == "git":
+            return _subprocess.run(argv, **kwargs)
+        return schema_run_command(argv, **kwargs)
+
+    factory = _canary_client_factory()
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-ws-commit-fail",
+            client_factory=factory,
+            run_command=failing_workspace_run_command,
+        )
+    assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    # No provider process was ever started.
+    assert len(_CREATED_CANARY_CLIENTS) == 0
+    # The schema-attestation cleanup action, registered BEFORE the
+    # workspace-build step that failed, still ran via the outer ledger; the
+    # partially-built workspace tore itself down via its own internal
+    # CanaryStop handler.
+    assert not (scratch / "schema-attestation").exists()
+    assert not (scratch / "synthetic-workspace").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -2345,9 +2512,15 @@ def test_cli_main_live_backend_seam_probe_reaches_client_construction_and_refuse
     assert "CANARY_STOP:" in result.stdout
     assert record_path.is_file(), result.stdout + result.stderr
     record = json.loads(record_path.read_text(encoding="utf-8"))
+    # CAP-S1 Sol review item 2 residual: the seam probe must construct the
+    # REAL AppServerClient class -- not a callback-only substitute -- and
+    # genuinely spawn a process through it.
+    assert record["constructed"] == "AppServerClient", record
     assert record["argv"], record
     assert Path(record["argv"][0]) == fixture_binary.resolve()
+    assert record["argv0"] == str(fixture_binary.resolve())
     assert record["cwd"]
+    assert record["pid"]
 
 
 # ---------------------------------------------------------------------------
@@ -2374,3 +2547,189 @@ def test_this_test_module_never_references_the_real_codex_binary_as_an_executabl
     assert "/nonexistent/synthetic-codex-binary" in source
     assert "scripts.ohf.fake_app_server" in source
     assert _sys.executable  # sanity: fake backend always launches this interpreter
+
+
+# ---------------------------------------------------------------------------
+# Closed CAP-S1 result contract (CAP-S1 Sol review item 5)
+# ---------------------------------------------------------------------------
+
+
+def _happy_cap_s1_result_kwargs() -> dict:
+    return dict(
+        operation="mastermind-cap-s1-complete-vertical-20260901-sol-001",
+        receiver="fable-cap-s1",
+        carrier="C0BSBM78V1N/1788258398.440699",
+        exact_head="a" * 40,
+        exact_tree="b" * 40,
+        current_protected_join="c" * 40,
+        changed_path_census=("control_plane/x.py", "scripts/ohf/y.py"),
+        package_identities={
+            "package_content_digest": "1" * 64,
+            "package_source_digest": "2" * 64,
+            "package_generation_digest": "3" * 64,
+            "closures": {"skill.a": "4" * 64, "skill.b": "5" * 64},
+        },
+        canary_evidence={"schema_version": CANARY_EVIDENCE_SCHEMA_VERSION, "launch_decision": "ALLOW"},
+        provider_attempt={"state": "COMPLETED"},
+        local_proof={"tests/test_x.py": {"passed": 12, "skipped": 0}},
+        hosted_proof={"run_id": "123456", "conclusion": "success"},
+        security_proof={"security_review": "clean"},
+        mutation_proof={},
+        cleanup_proof={"all_removed": True},
+        review_state={"sol_review": "5088584089", "status": "CHANGES_REQUESTED"},
+        held_non_goals=("Ready/merge", "CAP-PROMOTE1", "default-V4", "production"),
+    )
+
+
+def test_build_cap_s1_result_happy_path_round_trips_through_json() -> None:
+    result = build_cap_s1_result(**_happy_cap_s1_result_kwargs())
+    assert result.schema_version == RESULT_CONTRACT_SCHEMA
+    assert result.marker == RESULT_CONTRACT_MARKER
+    validate_cap_s1_result(result)  # never raises on an already-built result
+    payload = dataclasses.asdict(result)
+    reloaded = json.loads(json.dumps(payload))
+    assert reloaded["schema_version"] == RESULT_CONTRACT_SCHEMA
+    assert reloaded["marker"] == RESULT_CONTRACT_MARKER
+
+
+def test_cap_s1_result_schema_and_marker_are_exact() -> None:
+    kwargs = _happy_cap_s1_result_kwargs()
+    with pytest.raises(CapS1ResultError, match="schema_mismatch"):
+        validate_cap_s1_result(CapS1Result(schema_version="wrong/v1", marker=RESULT_CONTRACT_MARKER, **kwargs))
+    with pytest.raises(CapS1ResultError, match="marker_mismatch"):
+        validate_cap_s1_result(
+            CapS1Result(schema_version=RESULT_CONTRACT_SCHEMA, marker="wrong-marker", **kwargs)
+        )
+
+
+def test_cap_s1_result_hex_fields_are_fullmatched() -> None:
+    for field_name in ("exact_head", "exact_tree", "current_protected_join"):
+        kwargs = _happy_cap_s1_result_kwargs()
+        kwargs[field_name] = "not-40-hex"
+        with pytest.raises(CapS1ResultError, match=f"{field_name}_invalid"):
+            build_cap_s1_result(**kwargs)
+        kwargs2 = _happy_cap_s1_result_kwargs()
+        kwargs2[field_name] = "a" * 41  # one char too many
+        with pytest.raises(CapS1ResultError, match=f"{field_name}_invalid"):
+            build_cap_s1_result(**kwargs2)
+
+
+def test_cap_s1_result_changed_path_census_must_be_nonempty_sorted_and_unique() -> None:
+    empty = _happy_cap_s1_result_kwargs()
+    empty["changed_path_census"] = ()
+    with pytest.raises(CapS1ResultError, match="changed_path_census_empty"):
+        build_cap_s1_result(**empty)
+
+    unsorted = _happy_cap_s1_result_kwargs()
+    unsorted["changed_path_census"] = ("z.py", "a.py")
+    with pytest.raises(CapS1ResultError, match="changed_path_census_unsorted"):
+        build_cap_s1_result(**unsorted)
+
+    duplicated = _happy_cap_s1_result_kwargs()
+    duplicated["changed_path_census"] = ("a.py", "a.py")
+    with pytest.raises(CapS1ResultError, match="changed_path_census_duplicate"):
+        build_cap_s1_result(**duplicated)
+
+
+def test_cap_s1_result_package_identities_must_be_nonempty_and_all_hex64() -> None:
+    empty = _happy_cap_s1_result_kwargs()
+    empty["package_identities"] = {}
+    with pytest.raises(CapS1ResultError, match="package_identities_invalid"):
+        build_cap_s1_result(**empty)
+
+    bad_leaf = _happy_cap_s1_result_kwargs()
+    bad_leaf["package_identities"] = {"digest": "not-a-digest"}
+    with pytest.raises(CapS1ResultError, match="package_identities_digest_invalid"):
+        build_cap_s1_result(**bad_leaf)
+
+    nested_bad_leaf = _happy_cap_s1_result_kwargs()
+    nested_bad_leaf["package_identities"] = {"closures": {"skill.a": "short"}}
+    with pytest.raises(CapS1ResultError, match="package_identities_digest_invalid"):
+        build_cap_s1_result(**nested_bad_leaf)
+
+
+def test_cap_s1_result_provider_attempt_state_is_closed() -> None:
+    bad_state = _happy_cap_s1_result_kwargs()
+    bad_state["provider_attempt"] = {"state": "RUNNING"}
+    with pytest.raises(CapS1ResultError, match="provider_attempt_state_invalid"):
+        build_cap_s1_result(**bad_state)
+
+
+def test_cap_s1_result_hold_requires_frozen_hold_code_detail_and_empty_evidence() -> None:
+    hold_kwargs = _happy_cap_s1_result_kwargs()
+    hold_kwargs["provider_attempt"] = {
+        "state": "HOLD",
+        "hold_code": "AMBIENT_SKILL_SURFACE_NOT_EMPTY",
+        "detail": "synthetic hold detail",
+    }
+    hold_kwargs["canary_evidence"] = {}
+    build_cap_s1_result(**hold_kwargs)  # a well-formed HOLD constructs cleanly
+
+    unknown_code = dict(hold_kwargs)
+    unknown_code["provider_attempt"] = {
+        "state": "HOLD",
+        "hold_code": "NOT_A_FROZEN_CODE",
+        "detail": "synthetic hold detail",
+    }
+    with pytest.raises(CapS1ResultError, match="provider_attempt_hold_code_invalid"):
+        build_cap_s1_result(**unknown_code)
+
+    missing_detail = dict(hold_kwargs)
+    missing_detail["provider_attempt"] = {
+        "state": "HOLD",
+        "hold_code": "GATES_NOT_GREEN",
+        "detail": "",
+    }
+    with pytest.raises(CapS1ResultError, match="provider_attempt_detail_invalid"):
+        build_cap_s1_result(**missing_detail)
+
+    evidence_on_hold = dict(hold_kwargs)
+    evidence_on_hold["canary_evidence"] = {"schema_version": CANARY_EVIDENCE_SCHEMA_VERSION}
+    with pytest.raises(CapS1ResultError, match="canary_evidence_must_be_empty_on_hold"):
+        build_cap_s1_result(**evidence_on_hold)
+
+
+def test_cap_s1_result_completed_requires_nonempty_matching_canary_evidence() -> None:
+    empty_evidence = _happy_cap_s1_result_kwargs()
+    empty_evidence["canary_evidence"] = {}
+    with pytest.raises(CapS1ResultError, match="canary_evidence_required_on_completed"):
+        build_cap_s1_result(**empty_evidence)
+
+    wrong_schema = _happy_cap_s1_result_kwargs()
+    wrong_schema["canary_evidence"] = {"schema_version": "wrong/v1"}
+    with pytest.raises(CapS1ResultError, match="canary_evidence_schema_mismatch"):
+        build_cap_s1_result(**wrong_schema)
+
+
+def test_cap_s1_result_local_and_hosted_proof_shapes_are_enforced() -> None:
+    empty_local = _happy_cap_s1_result_kwargs()
+    empty_local["local_proof"] = {}
+    with pytest.raises(CapS1ResultError, match="local_proof_empty"):
+        build_cap_s1_result(**empty_local)
+
+    malformed_local = _happy_cap_s1_result_kwargs()
+    malformed_local["local_proof"] = {"suite": {"passed": "12", "skipped": 0}}
+    with pytest.raises(CapS1ResultError, match="local_proof_invalid"):
+        build_cap_s1_result(**malformed_local)
+
+    empty_hosted = _happy_cap_s1_result_kwargs()
+    empty_hosted["hosted_proof"] = {}
+    with pytest.raises(CapS1ResultError, match="hosted_proof_empty"):
+        build_cap_s1_result(**empty_hosted)
+
+    missing_run_id = _happy_cap_s1_result_kwargs()
+    missing_run_id["hosted_proof"] = {"run_id": "", "conclusion": "success"}
+    with pytest.raises(CapS1ResultError, match="hosted_proof_run_id_invalid"):
+        build_cap_s1_result(**missing_run_id)
+
+    missing_conclusion = _happy_cap_s1_result_kwargs()
+    missing_conclusion["hosted_proof"] = {"run_id": "123", "conclusion": ""}
+    with pytest.raises(CapS1ResultError, match="hosted_proof_conclusion_invalid"):
+        build_cap_s1_result(**missing_conclusion)
+
+
+def test_cap_s1_result_held_non_goals_must_be_nonempty() -> None:
+    empty_held = _happy_cap_s1_result_kwargs()
+    empty_held["held_non_goals"] = ()
+    with pytest.raises(CapS1ResultError, match="held_non_goals_empty"):
+        build_cap_s1_result(**empty_held)
