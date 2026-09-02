@@ -349,7 +349,28 @@ def test_truncated_record_digest_is_marked_as_a_prefix_not_a_full_digest() -> No
     assert exc.value.reason_code == "SOURCE_TRUNCATED"
 
 
-def test_truncated_source_marked_in_compiled_model_notes_when_present_as_a_sibling() -> None:
+def test_truncated_target_digest_prefix_marker_is_pinned_at_the_adapter_level() -> None:
+    # a truncated TARGET never reaches source_snapshot at all — see
+    # test_truncated_target_refuses_with_source_truncated above, which pins
+    # the SOURCE_TRUNCATED refusal; the digest-prefix marker itself is
+    # pinned directly against the adapter in
+    # tests/test_operation_assurance_a2_sources.py.
+    from control_plane.operation_assurance_sources import STATUS_SOURCE_TRUNCATED
+
+    facts = _facts("truncated")
+    fact = facts.facts[0]
+    assert fact.status == STATUS_SOURCE_TRUNCATED
+    assert fact.content_digest.startswith("prefix-sha256:")
+
+
+def test_non_target_sibling_workstream_fact_is_excluded_from_source_snapshot_and_notes() -> None:
+    """REPAIR FIX 7 (coordinator REQUEST_REPAIR, real-gather proof):
+    source_snapshot.sources and abstraction_contract.notes carry ONLY
+    derivation-relevant sources — the target workstream record plus
+    same-key handoffs. An unrelated sibling workstream record (even a
+    truncated one) must be scoped OUT of both, never crash compilation, and
+    still be reflected (bounded, not per-record) via the family census
+    notes."""
     import dataclasses
 
     from control_plane.operation_assurance_sources import STATUS_SOURCE_TRUNCATED, SourceFact
@@ -370,8 +391,8 @@ def test_truncated_source_marked_in_compiled_model_notes_when_present_as_a_sibli
     )
     with_sibling = dataclasses.replace(facts, facts=facts.facts + (sibling,))
     model = compile_operation_assurance_model(with_sibling)
-    sibling_record = next(s for s in model.source_snapshot.sources if s.source_identity == sibling.path)
-    assert sibling_record.digest.startswith("prefix-sha256:")
+    assert not any(s.source_identity == sibling.path for s in model.source_snapshot.sources)
+    assert not any(sibling.path in note for note in model.abstraction_contract.notes)
 
 
 # ---------------------------------------------------------------------------
@@ -382,7 +403,7 @@ def test_truncated_source_marked_in_compiled_model_notes_when_present_as_a_sibli
 # ---------------------------------------------------------------------------
 
 
-def test_sibling_source_missing_fact_is_visible_and_does_not_crash_compile() -> None:
+def test_sibling_source_missing_fact_does_not_crash_compile_and_is_scoped_out() -> None:
     import dataclasses
 
     from control_plane.operation_assurance_sources import STATUS_SOURCE_MISSING, SourceFact
@@ -403,7 +424,74 @@ def test_sibling_source_missing_fact_is_visible_and_does_not_crash_compile() -> 
     )
     with_sibling = dataclasses.replace(facts, facts=facts.facts + (sibling,))
     model = compile_operation_assurance_model(with_sibling)  # must not crash
-    assert any(s.source_identity == sibling.path for s in model.source_snapshot.sources)
+    # FIX 7: a non-target sibling (even one registered as a Steward
+    # SourceFailure per FIX 6) is scoped OUT of the materialized snapshot —
+    # it is not derivation-relevant to the compiled WS:OPERATION-ASSURANCE
+    # model.
+    assert not any(s.source_identity == sibling.path for s in model.source_snapshot.sources)
+
+
+# ---------------------------------------------------------------------------
+# REPAIR FIX 7: family-wide census moves to bounded per-family counts, never
+# one note per record.
+# ---------------------------------------------------------------------------
+
+
+def test_family_census_notes_report_bounded_per_family_counts() -> None:
+    model = _compile("hostile")
+    census_notes = [n for n in model.abstraction_contract.notes if n.startswith("family census ")]
+    assert len(census_notes) == 2  # workstream family + handoff family, never per-record
+    ws_note = next(n for n in census_notes if "agentos.workstream.v1" in n)
+    ho_note = next(n for n in census_notes if "agentos.handoff.v1" in n)
+    assert "attempted=1" in ws_note and "ok=1" in ws_note
+    assert "attempted=1" in ho_note and "ok=1" in ho_note
+
+
+def test_notes_stay_within_the_protected_parser_ceiling_for_a_wide_family() -> None:
+    """A synthetic stand-in for the real-tree proof: hundreds of sibling
+    workstream/handoff facts (none matching the target) must never expand
+    notes past the protected model's per-collection ceiling."""
+    import dataclasses
+
+    from control_plane.operation_assurance_sources import STATUS_OK, SourceFact
+
+    facts = _facts("hostile")
+    extra = []
+    for i in range(500):
+        extra.append(
+            SourceFact(
+                source_owner="AGENT_OS",
+                repo=facts.repo,
+                revision=facts.revision,
+                path=f"agentos/handoffs/OTHER-{i:04d}-2026-01-01.md",
+                record_schema="agentos.handoff.v1",
+                content_digest="ab" * 32,
+                observed_at=facts.observed_at,
+                status=STATUS_OK,
+                reason=None,
+                payload={
+                    "schema": "agentos.handoff.v1",
+                    "workstream": "WS:SOME-OTHER-KEY",
+                    "session": "s",
+                    "model": "sonnet",
+                    "ended_because": "complete",
+                    "mission": "m",
+                    "state_before": "b",
+                    "changed": [],
+                    "verified": [],
+                    "unverified": [],
+                    "unresolved": [],
+                    "next_actions": [],
+                    "do_not_redo": [],
+                    "danger_areas": [],
+                },
+                conflict="NONE",
+            )
+        )
+    wide = dataclasses.replace(facts, facts=facts.facts + tuple(extra))
+    model = compile_operation_assurance_model(wide)  # must not raise COLLECTION_TOO_LARGE
+    assert len(model.abstraction_contract.notes) < 256
+    assert len(model.source_snapshot.sources) < 256
 
 
 def test_target_entirely_missing_refuses_typed_even_with_source_failures_populated() -> None:

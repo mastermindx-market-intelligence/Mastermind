@@ -569,13 +569,25 @@ def _parse_frontmatter_by_shape(block: str, shapes: dict[str, str], required: fr
             else:
                 raise _RecordParseError("UNSUPPORTED_SEMANTICS", f"{key} must be a flow or block list")
         elif shape == "flow_mappings":
-            if rest != "":
-                raise _RecordParseError("UNSUPPORTED_SEMANTICS", f"{key} must be a block sequence")
-            item_indent = _next_line_indent(lines, i + 1)
-            if item_indent is None or item_indent <= _indent_of(line):
-                raise _RecordParseError("UNSUPPORTED_SEMANTICS", f"{key} must be a non-empty block sequence")
-            items, i = _parse_block_sequence_of_flow_mappings(lines, i + 1, item_indent)
-            result[key] = items
+            # an EMPTY list is a valid answer for these fields (e.g. the
+            # real agentos.handoff.v1 schema's own "unverified" contract) —
+            # both the inline `key: []` and the bare `key:` (with no deeper
+            # block following) spellings mean zero items, matching every
+            # other list shape in this reader rather than refusing a
+            # perfectly schema-valid record.
+            if rest == "[]":
+                result[key] = []
+                i += 1
+            elif rest != "":
+                raise _RecordParseError("UNSUPPORTED_SEMANTICS", f"{key} must be a block sequence or '[]'")
+            else:
+                item_indent = _next_line_indent(lines, i + 1)
+                if item_indent is None or item_indent <= _indent_of(line):
+                    result[key] = []
+                    i += 1
+                else:
+                    items, i = _parse_block_sequence_of_flow_mappings(lines, i + 1, item_indent)
+                    result[key] = items
         else:  # pragma: no cover - defense in depth, shape table is closed
             raise _RecordParseError("UNSUPPORTED_SEMANTICS", f"unsupported shape for {key}")
     missing = required - set(result.keys())

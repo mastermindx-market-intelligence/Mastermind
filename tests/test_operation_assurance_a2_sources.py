@@ -108,6 +108,41 @@ def test_hostile_handoff_payload_is_evidence_shaped() -> None:
     assert ho.payload["changed"][0]["path"].startswith("mastermindx-market-intelligence/Mastermind")
 
 
+def test_repair_fix7_empty_flow_mapping_lists_parse_as_zero_items() -> None:
+    # found via the FIX 7 real-tree-shaped proof: a handoff whose
+    # unverified/unresolved lists are genuinely empty (an EMPTY list is a
+    # valid, schema-documented answer) must parse, not refuse.
+    from control_plane.operation_assurance_sources import parse_handoff_frontmatter
+
+    text = """---
+schema: agentos.handoff.v1
+workstream: "WS:OPERATION-ASSURANCE"
+session: s
+model: sonnet
+ended_because: complete
+mission: >
+  m
+state_before: >
+  b
+changed: []
+verified: []
+unverified: []
+unresolved: []
+next_actions:
+  - "keep going"
+do_not_redo:
+  - "nothing yet"
+danger_areas:
+  - "none"
+---
+body
+"""
+    payload = parse_handoff_frontmatter(text)
+    assert payload["changed"] == []
+    assert payload["verified"] == []
+    assert payload["unverified"] == []
+
+
 def test_facts_are_byte_digested_and_source_ref_is_deterministic() -> None:
     facts = _gather("hostile")
     ws = next(f for f in facts.facts if f.path.endswith("WS-OPERATION-ASSURANCE.md"))

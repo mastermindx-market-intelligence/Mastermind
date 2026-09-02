@@ -128,3 +128,183 @@ def test_determinism_byte_identical_output_across_runs() -> None:
     report_a = run_checker(model_a, generated_at=OBSERVED_AT)
     report_b = run_checker(model_b, generated_at=OBSERVED_AT)
     assert report_a.to_dict() == report_b.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# REPAIR FIX 7 (coordinator REQUEST_REPAIR, real-gather proof): compiling
+# against the real macro agentos tree (57+ workstreams, ~398 handoffs)
+# refused with COLLECTION_TOO_LARGE on abstraction_contract.notes, because
+# the compiler used to materialize one note (and one source_snapshot entry)
+# per GATHERED fact — the whole family census — instead of scoping to what
+# the model actually derives from. This generates a REAL-TREE-SHAPED fixture
+# (>=60 workstream + >=300 handoff records spread across many DIFFERENT
+# keys, one of them the target) on disk and proves the full
+# gather -> compile -> protected-parse -> check pipeline succeeds within
+# every A1 ceiling.
+# ---------------------------------------------------------------------------
+
+_WAVE_STATUS_CYCLE = ("done", "todo", "in_progress", "done", "todo")
+
+
+def _write_workstream(root: Path, key: str, *, target: bool) -> None:
+    if target:
+        waves = (
+            "  - {id: R0, title: \"Recover canonical truth\", status: done, pr: 279}\n"
+            "  - {id: A1, title: \"Deterministic engine\", status: done, pr: 324}\n"
+            "  - {id: A2, title: \"Source compiler seam\", status: in_progress, "
+            "next_action: \"land the A2 implementation\"}\n"
+            "  - {id: A3, title: \"Applicability\", status: todo, depends_on: [A2]}\n"
+        )
+    else:
+        status = _WAVE_STATUS_CYCLE[hash(key) % len(_WAVE_STATUS_CYCLE)]
+        na = "" if status == "done" else ", next_action: \"keep going\""
+        waves = f'  - {{id: w1, title: "wave one", status: {status}{na}}}\n'
+    text = f"""---
+schema: agentos.workstream.v1
+key: {key}
+title: Synthetic real-tree-shaped workstream {key}
+objective: >
+  A synthetic record shaped like a real agentos workstream, for the OLS-A2
+  real-tree-scale proof (REPAIR FIX 7).
+status: active
+program: cross-repo-contract-governance
+repos: [mastermind]
+owner: Fable principal (COO seat)
+class: build
+blast_radius: reversible
+ambiguity: scoped
+waves:
+{waves}next_action: >
+  synthetic next action for {key}.
+do_not_redo:
+  - "nothing yet"
+landmines:
+  - "none"
+---
+
+# {key}
+"""
+    path = root / "agentos" / "workstreams" / f"WS-{key}.md"
+    path.write_text(text, encoding="utf-8")
+
+
+def _write_handoff(root: Path, key: str, index: int) -> None:
+    text = f"""---
+schema: agentos.handoff.v1
+workstream: "WS:{key}"
+session: synthetic-session-{index:04d}
+model: sonnet
+ended_because: complete
+mission: >
+  synthetic mission {index}.
+state_before: >
+  synthetic state before {index}.
+changed:
+  - {{path: "some/path-{index}.py", what: "synthetic change {index}"}}
+verified:
+  - {{claim: "it works", command: "pytest", result: "passed"}}
+unverified: []
+unresolved: []
+next_actions:
+  - "keep going"
+do_not_redo:
+  - "nothing yet"
+danger_areas:
+  - "none"
+---
+
+# handoff {index} for {key}
+"""
+    path = root / "agentos" / "handoffs" / f"{key}-2026-01-{(index % 28) + 1:02d}-{index:04d}.md"
+    path.write_text(text, encoding="utf-8")
+
+
+def _generate_real_tree_shaped_fixture(root: Path, *, workstream_count: int, handoff_count: int, target_key: str) -> None:
+    (root / "agentos" / "workstreams").mkdir(parents=True, exist_ok=True)
+    (root / "agentos" / "handoffs").mkdir(parents=True, exist_ok=True)
+    keys = [f"SYN-{i:03d}" for i in range(workstream_count - 1)] + [target_key]
+    for key in keys:
+        _write_workstream(root, key, target=(key == target_key))
+    for i in range(handoff_count):
+        _write_handoff(root, keys[i % len(keys)], i)
+
+
+def test_repair_fix7_real_tree_shaped_gather_compile_check_succeeds_within_a1_ceilings(tmp_path: Path) -> None:
+    workstream_count = 62
+    handoff_count = 320
+    target_key = "OPERATION-ASSURANCE"
+    _generate_real_tree_shaped_fixture(
+        tmp_path, workstream_count=workstream_count, handoff_count=handoff_count, target_key=target_key
+    )
+
+    facts = gather_agent_os_source_facts(
+        tmp_path, repo=REPO, revision=REV, observed_at=OBSERVED_AT, target_workstream_key=target_key
+    )
+    ws_coverage = next(c for c in facts.coverage if c.record_schema == "agentos.workstream.v1")
+    ho_coverage = next(c for c in facts.coverage if c.record_schema == "agentos.handoff.v1")
+    assert ws_coverage.attempted == workstream_count
+    assert ho_coverage.attempted == handoff_count
+
+    model = compile_operation_assurance_model(facts, target_workstream_key=target_key)
+
+    # only the target workstream + its own same-key handoffs materialize —
+    # never the whole (workstream_count + handoff_count)-record family.
+    assert len(model.source_snapshot.sources) < 20
+    assert len(model.abstraction_contract.notes) < 20
+
+    # round-trips through the PROTECTED parser (this is where the real probe
+    # refused with COLLECTION_TOO_LARGE before the repair).
+    import json
+
+    raw = json.dumps(model.to_dict()).encode("utf-8")
+    reparsed = parse_model_bytes(raw)
+    assert reparsed.model_hash == model.model_hash
+
+    report = run_checker(reparsed, generated_at=OBSERVED_AT)
+    assert report.model_analysis_verdict in (
+        "UNSAFE_COUNTEREXAMPLE",
+        "BOUNDED_NO_COUNTEREXAMPLE",
+        "INCONCLUSIVE_MODEL_GAP",
+    )
+
+    # the family-wide census is still visible, as BOUNDED per-family counts.
+    census_notes = [n for n in model.abstraction_contract.notes if n.startswith("family census ")]
+    assert len(census_notes) == 2
+    ws_note = next(n for n in census_notes if "agentos.workstream.v1" in n)
+    ho_note = next(n for n in census_notes if "agentos.handoff.v1" in n)
+    assert f"attempted={workstream_count}" in ws_note
+    assert f"attempted={handoff_count}" in ho_note
+    assert f"ok={handoff_count}" in ho_note  # every generated handoff parses OK, none refused
+
+    # at least one same-key handoff really did materialize (not just the
+    # target workstream record alone) — proves point (1) positively, not
+    # merely "stayed under budget".
+    handoff_sources = [s for s in model.source_snapshot.sources if "/handoffs/" in s.source_identity]
+    assert handoff_sources
+    assert all(target_key in s.source_identity for s in handoff_sources)
+
+
+def test_repair_fix7_real_tree_shaped_conflict_detection_still_survives(tmp_path: Path) -> None:
+    """Point (3): the family-wide scan for conflict detection must be
+    UNCHANGED — only the materialized snapshot/notes are scoped. A second
+    workstream file declaring the same target key, buried among 60+ other
+    unrelated records, must still refuse SOURCE_CONFLICTED."""
+    workstream_count = 61
+    target_key = "OPERATION-ASSURANCE"
+    _generate_real_tree_shaped_fixture(tmp_path, workstream_count=workstream_count, handoff_count=50, target_key=target_key)
+    # a SECOND file, buried among 60+ unrelated records, declaring the same
+    # target key with disagreeing content — a genuine source-layer conflict.
+    duplicate_path = tmp_path / "agentos" / "workstreams" / f"WS-{target_key}-DUPLICATE.md"
+    original = (tmp_path / "agentos" / "workstreams" / f"WS-{target_key}.md").read_text(encoding="utf-8")
+    duplicate_path.write_text(original.replace("status: in_progress", "status: todo", 1), encoding="utf-8")
+
+    facts = gather_agent_os_source_facts(
+        tmp_path, repo=REPO, revision=REV, observed_at=OBSERVED_AT, target_workstream_key=target_key
+    )
+    from control_plane.operation_assurance_compiler import CompilerError
+
+    try:
+        compile_operation_assurance_model(facts, target_workstream_key=target_key)
+        raise AssertionError("expected SOURCE_CONFLICTED to be refused")
+    except CompilerError as exc:
+        assert exc.reason_code == "SOURCE_CONFLICTED"

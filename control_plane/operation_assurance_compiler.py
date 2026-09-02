@@ -418,9 +418,55 @@ def _unsupported_scope_gaps(transition_ids: list[str]) -> list[dict]:
     return gaps
 
 
-def _build_source_snapshot(facts: SourceFacts) -> dict:
-    sources = []
+def _relevant_facts(facts: SourceFacts, target_fact: SourceFact, ref: str) -> list[SourceFact]:
+    """REPAIR FIX 7 (coordinator REQUEST_REPAIR, real-gather proof):
+    ``source_snapshot.sources`` and ``abstraction_contract.notes`` must carry
+    only the sources the compiled model actually DERIVES FROM — the target
+    workstream record, plus the handoff records whose own declared
+    ``workstream`` key names this exact target. Against the real macro
+    agentos tree (57+ workstreams, ~398 handoffs) presenting the WHOLE
+    gathered family blew the protected A1 parser's
+    ``MAX_NESTED_COLLECTION_ITEMS`` ceiling on ``abstraction_contract.notes``
+    (default 256). The family-wide scan itself is UNCHANGED (identity
+    resolution / conflict detection still sees every gathered fact via
+    ``_build_steward_snapshot`` above); only what gets MATERIALIZED into the
+    model is scoped down. The family-wide census is preserved as bounded
+    per-family counts via ``_family_census_notes`` instead of one entry per
+    record.
+    """
+    relevant = [target_fact]
     for fact in facts.facts:
+        if fact is target_fact:
+            continue
+        if fact.record_schema != HANDOFF_SCHEMA or fact.status != STATUS_OK or not fact.payload:
+            continue
+        if fact.payload.get("workstream") == ref:
+            relevant.append(fact)
+    relevant.sort(key=lambda f: f.path)
+    return relevant
+
+
+def _family_census_notes(facts: SourceFacts) -> list[str]:
+    """Bounded (one line per record FAMILY, never per record) disclosure of
+    the whole-tree gather census: records scanned, conflicts found,
+    truncations — satisfies "the family-wide census moves to... bounded
+    counts" without reintroducing an unbounded per-record note."""
+    conflict_counts: dict[str, int] = {}
+    for fact in facts.facts:
+        if fact.conflict == "CONFLICT":
+            conflict_counts[fact.record_schema] = conflict_counts.get(fact.record_schema, 0) + 1
+    notes = []
+    for cov in sorted(facts.coverage, key=lambda c: c.record_schema):
+        notes.append(
+            f"family census {cov.record_schema}: attempted={cov.attempted} ok={cov.ok} "
+            f"truncated_family={cov.truncated} conflicted_facts={conflict_counts.get(cov.record_schema, 0)}"
+        )
+    return notes
+
+
+def _build_source_snapshot(relevant_facts: list[SourceFact]) -> dict:
+    sources = []
+    for fact in relevant_facts:
         if fact.status == STATUS_OK:
             coverage = "COMPLETE"
         elif fact.status == STATUS_SOURCE_MISSING:
@@ -519,13 +565,16 @@ def compile_operation_assurance_model(
     transition_ids = [t["transition_id"] for t in transitions]
     known_model_gaps = _unsupported_scope_gaps(transition_ids)
 
-    notes = [_full_source_note(f) for f in sorted(facts.facts, key=lambda f: f.path)]
+    relevant_facts = _relevant_facts(facts, fact, ref)
+
+    notes = [_full_source_note(f) for f in relevant_facts]
     notes.append(f"workstream status (source-declared organizational classification): {payload.get('status')}")
     notes.append(
         "compiler-template state machine grounded in exact wave/dependency/next_action/wait "
         "fields of the accepted Agent OS record; never presented as owner-attested runtime fact "
         "or current operational proof (design Section 5)"
     )
+    notes.extend(_family_census_notes(facts))
 
     doc = {
         "schema": MODEL_SCHEMA,
@@ -540,7 +589,7 @@ def compile_operation_assurance_model(
             "version": COMPILER_VERSION,
             "invocation_mode": "AUTHORED_INPUT",
         },
-        "source_snapshot": _build_source_snapshot(facts),
+        "source_snapshot": _build_source_snapshot(relevant_facts),
         "abstraction_contract": {
             "kind": "SOUND_OVERAPPROXIMATION",
             "concrete_scope": (
