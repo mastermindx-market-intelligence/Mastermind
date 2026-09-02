@@ -39,15 +39,19 @@ def _validate(document: dict[str, object]) -> None:
     active = modes["ACTIVE_CURRENT_WORKER"]
     terminal = modes["TERMINAL_RESULT"]
     assert active["status"] == "HELD_PREDECESSOR_UNPROTECTED"
-    assert terminal["status"] == "HELD_RET2_NOT_BUILT"
+    assert terminal["status"] == "HELD_R2_TERMINAL_PROJECTION_UNPROTECTED"
     assert "EXACT_PARENT_BINDING_RECEIPT" in active["required_facts"]
     assert "CURRENT_BUSY_WORKER" in active["required_facts"]
     assert "CURRENT_RUNTIME_BINDING" in active["required_facts"]
     assert "WORKER_DIALOGUE_CALLER_REPLAY" in active["forbidden_substitutes"]
-    assert "RET2_PROJECTION_EFFECT_KNOWN" in terminal["required_facts"]
+    assert terminal["authority_owner"] == (
+        "EXISTING_ORION_R2_TERMINAL_DIALOGUE_PROJECTION_RECEIPT"
+    )
+    assert "R2_PROJECTION_EFFECT_KNOWN" in terminal["required_facts"]
     assert terminal["accepted_projection_effects"] == ["APPLIED"]
     assert "SLACK_RESULT_TEXT_ALONE" in terminal["forbidden_substitutes"]
     assert "EFFECT_UNKNOWN_PROJECTION" in terminal["forbidden_substitutes"]
+    assert "PARALLEL_RET2_PROJECTION_CARRIER" in terminal["forbidden_substitutes"]
 
     request = document["request_contract"]
     assert request["operation"] == "resolve_dialogue_observation"
@@ -155,7 +159,7 @@ def _validate(document: dict[str, object]) -> None:
     assert waiter["missing_or_failed_lookup"] == "FAIL_CLOSED_BEFORE_WAKE_PERSISTENCE"
 
     failures = document["failure_states"]
-    assert failures["RET2_EFFECT_UNKNOWN"] == "UNKNOWN_ZERO_EFFECT"
+    assert failures["R2_EFFECT_UNKNOWN"] == "UNKNOWN_ZERO_EFFECT"
     assert failures["COLLECTION_TIMEOUT"] == "UNKNOWN_ZERO_EFFECT"
     assert failures["WAITER_LOOKUP_UNAVAILABLE"] == "HELD_ZERO_EFFECT"
 
@@ -169,6 +173,7 @@ def _validate(document: dict[str, object]) -> None:
         "NO_GENERIC_EXECUTIVE_READ_GATEWAY",
         "NO_PROVIDER_PROCESS_MANAGER",
         "NO_RETRY_OR_FAILOVER_PLANE",
+        "NO_SECOND_TERMINAL_PROJECTION_OPERATION",
     } <= no_rebuild
 
     predecessors = document["implementation_predecessors"]
@@ -177,7 +182,7 @@ def _validate(document: dict[str, object]) -> None:
     ]
     assert predecessors["TERMINAL_RESULT"] == [
         "RET1_PROTECTED",
-        "RET2_TERMINAL_PROJECTION_PROTECTED",
+        "ORION_R2_TERMINAL_PROJECTION_PROTECTED",
     ]
 
 
@@ -189,12 +194,12 @@ def test_plan_freezes_owner_sequence_and_real_canary_boundary() -> None:
     text = PLAN.read_text(encoding="utf-8")
     for required in (
         "Gate A - R2 active binding source",
-        "Gate B - RET1 and RET2",
+        "Gate B - RET1 and existing ORION R2 terminal projection",
         "Gate C - dedicated listener",
         "Gate D - Relay hot waiter",
         "Wave P1 - Executive active observation",
         "Wave P2 - Relay waiter and async discovery",
-        "Wave RET2 - terminal RESULT projection",
+        "Existing ORION R2 - terminal RESULT projection",
         "Wave P3 - terminal observation extension",
         "Wave P4 - one-target canary",
         "No new lifecycle",
@@ -202,6 +207,7 @@ def test_plan_freezes_owner_sequence_and_real_canary_boundary() -> None:
         assert required.lower() in text.lower()
     assert "opening the Executive SQLite database" not in text
     assert "No Ready" not in text
+    assert "separate fresh operation" not in text
 
 
 def test_false_support_mutations_are_detected() -> None:
@@ -248,6 +254,10 @@ def test_false_support_mutations_are_detected() -> None:
         "RECOVERED",
     ]
     mutations.append(invented_recovered)
+
+    parallel_projection = copy.deepcopy(base)
+    parallel_projection["no_rebuild"].remove("NO_SECOND_TERMINAL_PROJECTION_OPERATION")
+    mutations.append(parallel_projection)
 
     effect_unknown = copy.deepcopy(base)
     effect_unknown["mode_non_interchangeability"]["effect_unknown_terminal_is"] = "RESOLVED"
