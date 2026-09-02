@@ -780,6 +780,21 @@ def _stat_identity(st: os.stat_result) -> tuple:
     )
 
 
+def _same_object(a: os.stat_result, b: os.stat_result) -> bool:
+    """dev+ino equality between two stat results, naming the same filesystem object.
+
+    Factored into its own module-level function (rather than inlined at each
+    call site) so a test can disable this exact fence deterministically via
+    monkeypatch and demonstrate that the swap it exists to catch would
+    otherwise slip through undetected -- proving the fence itself is
+    load-bearing rather than relying on this platform's inode-reuse behavior
+    (or lack of it) to make the point. Every retained-object identity check
+    in this module -- the census-time open, the post-census re-check, and
+    the terminal fence -- routes through this single comparison.
+    """
+    return (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino)
+
+
 def verify_capability_package_source(
     source_root: str | Path,
     generation: CapabilityPackageGeneration,
@@ -814,6 +829,9 @@ def verify_capability_package_source(
             _validate_relative_path(path, "skills[].closure_paths[]")
 
     declared_entries = {row.relative_path for row in generation.files}
+    declared_by_path: dict[str, CapabilityPackageFile] = {
+        row.relative_path: row for row in generation.files
+    }
     allowed_dirs = _derive_allowed_directories(declared_entries)
 
     # Bound the declared shape BEFORE any descriptor is opened beyond the
@@ -895,10 +913,23 @@ def verify_capability_package_source(
         # same-named directory (a different inode) presents an IDENTICAL
         # name set to any purely name-based census.
         dir_parent_link: dict[str, tuple[int, str]] = {}
-        # Census-time lstat identity of every declared regular file,
-        # compared against the fstat identity of the fd actually opened
-        # for hashing (census-to-open identity binding).
-        file_initial_identity: dict[str, tuple[int, int]] = {}
+        # Retained-object bookkeeping for every DECLARED regular file: the
+        # fd opened and retained for the whole verification transaction
+        # (never reopened for hashing), the (parent_fd, name) pair used by
+        # the post-census and terminal-fence freshness re-checks, and the
+        # fstat captured the moment the fd was opened (the "census" stat
+        # every later check compares against). Object retention -- not a
+        # numeric (dev, ino) snapshot compared across two separate opens --
+        # is what makes recycled-inode swaps distinguishable: as long as
+        # this fd stays open, the kernel cannot free its inode for reuse by
+        # a replacement created at the same name, so a genuine swap is
+        # GUARANTEED to surface as a fresh, distinct object rather than
+        # risking a numerically-coincident (dev, ino) collision on a
+        # filesystem that aggressively recycles freed inode numbers.
+        retained_file_fds: dict[str, int] = {}
+        file_parent_link: dict[str, tuple[int, str]] = {}
+        file_open_stat: dict[str, os.stat_result] = {}
+        byte_counts = {"total": 0}
 
         def _check_traversal_entry(name: str, child_rel: str, counts: dict) -> None:
             if _utf8_byte_length(name, "package_root") > MAX_PATH_SEGMENT_BYTES:
@@ -964,7 +995,81 @@ def verify_capability_package_source(
                         _walk(child_fd, child_rel, new_depth, file_entries, dir_entries)
                     elif stat.S_ISREG(entry_stat.st_mode):
                         file_entries.add(child_rel)
-                        file_initial_identity[child_rel] = (entry_stat.st_dev, entry_stat.st_ino)
+                        declared_row = declared_by_path.get(child_rel)
+                        if declared_row is None:
+                            # Undeclared entries refuse BEFORE opening: the
+                            # retained-descriptor budget below is spent only
+                            # on DECLARED files (already bounded to
+                            # MAX_PACKAGE_FILES by the trusted generation).
+                            # This entry is still visible to the traversal
+                            # budget above and to the first_file_entries !=
+                            # declared_entries refusal once the walk
+                            # completes, uniformly with every other kind of
+                            # undeclared-shape mismatch.
+                            continue
+
+                        if _before_file_open is not None:
+                            _before_file_open(child_rel)
+
+                        try:
+                            file_fd = os.open(
+                                name,
+                                os.O_RDONLY | _O_NOFOLLOW | _O_NONBLOCK | _O_CLOEXEC,
+                                dir_fd=dir_fd,
+                            )
+                        except FileNotFoundError:
+                            _refuse("package_root", "package_file_set_mismatch")
+                        except PermissionError:
+                            _refuse("package_root", "package_file_unreadable")
+                        except OSError:
+                            # Covers ELOOP (a symlink swapped in under
+                            # O_NOFOLLOW), ENXIO/EOPNOTSUPP (a FIFO or
+                            # socket swapped in), and any other open-time
+                            # refusal. Never blocks: O_NONBLOCK makes a
+                            # FIFO open return immediately even with no
+                            # writer attached, so a hostile swap is refused
+                            # rather than hung.
+                            _refuse("package_root", "package_open_refused")
+
+                        # RETAIN immediately: every refusal from this point
+                        # forward still closes this fd via the outer
+                        # `finally`'s all_retained sweep.
+                        _track(file_fd)
+
+                        try:
+                            opened_stat = os.fstat(file_fd)
+                        except OSError:
+                            _refuse("package_root", "package_file_unreadable")
+
+                        if not stat.S_ISREG(opened_stat.st_mode):
+                            _refuse("package_root", "package_non_regular_file_refused")
+                        if opened_stat.st_nlink != 1:
+                            _refuse("package_root", "package_hardlink_refused")
+
+                        # Census-to-open identity binding, now evaluated
+                        # against the RETAINED fd's own fstat rather than a
+                        # numeric snapshot compared across two independent
+                        # opens.
+                        if not _same_object(entry_stat, opened_stat):
+                            _refuse("package_root", "package_file_identity_mismatch")
+
+                        if opened_stat.st_size != declared_row.byte_length:
+                            _refuse("package_root", "package_file_size_mismatch")
+                        if opened_stat.st_size > MAX_PACKAGE_FILE_BYTES:
+                            _refuse("package_root", "package_too_large")
+                        byte_counts["total"] += opened_stat.st_size
+                        if byte_counts["total"] > MAX_PACKAGE_TOTAL_BYTES:
+                            _refuse("package_root", "package_too_large")
+
+                        actual_executable = bool(
+                            opened_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                        )
+                        if actual_executable != declared_row.executable:
+                            _refuse("package_root", "package_executable_mismatch")
+
+                        retained_file_fds[child_rel] = file_fd
+                        file_parent_link[child_rel] = (dir_fd, name)
+                        file_open_stat[child_rel] = opened_stat
                     else:
                         _refuse("package_root", "package_non_regular_file_refused")
             finally:
@@ -977,102 +1082,82 @@ def verify_capability_package_source(
         if first_file_entries != declared_entries or first_dir_entries != allowed_dirs:
             _refuse("package_root", "package_file_set_mismatch")
 
+        def _check_retained_file_identity() -> None:
+            """Fresh no-follow lstat of every declared file's NAME, through
+            its retained PARENT directory descriptor, required to resolve to
+            the SAME object as that file's own retained fd.
+
+            Mirrors the existing dir_parent_link check below but for files:
+            a file removed and replaced by a fresh same-named file (even one
+            with byte-for-byte identical declared content) does not
+            necessarily disturb the retained fd's OWN fstat identity (only
+            the PARENT's directory entries changed) -- only a fresh lookup
+            of the name through the parent can see it. Called once right
+            after the first census (closing races that unfold while later
+            entries are still being walked) and once more at the terminal
+            fence (closing races that unfold during hashing).
+            """
+            for child_rel, (parent_fd, name) in file_parent_link.items():
+                try:
+                    fresh_lstat = os.lstat(name, dir_fd=parent_fd)
+                except OSError:
+                    _refuse("package_root", "package_file_identity_mismatch")
+                if not stat.S_ISREG(fresh_lstat.st_mode):
+                    _refuse("package_root", "package_file_identity_mismatch")
+                if not _same_object(fresh_lstat, file_open_stat[child_rel]):
+                    _refuse("package_root", "package_file_identity_mismatch")
+
+        # Point 3 of the retained-object design: re-verify every declared
+        # file's identity immediately after the complete first census (and
+        # after every per-file race hook that fired during it), before any
+        # hashing begins.
+        _check_retained_file_identity()
+
         actual_files_by_path: dict[str, CapabilityPackageFile] = {}
-        running_total = 0
 
         for row in generation.files:
-            parent_rel, _, name = row.relative_path.rpartition("/")
-            parent_fd = package_dirs.get(parent_rel)
-            if parent_fd is None:
-                _refuse("package_root", "package_file_set_mismatch")
+            file_fd = retained_file_fds[row.relative_path]
+            first_stat = file_open_stat[row.relative_path]
+            actual_executable = bool(
+                first_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            )
 
-            if _before_file_open is not None:
-                _before_file_open(row.relative_path)
-
-            try:
-                file_fd = os.open(
-                    name,
-                    os.O_RDONLY | _O_NOFOLLOW | _O_NONBLOCK | _O_CLOEXEC,
-                    dir_fd=parent_fd,
-                )
-            except FileNotFoundError:
-                _refuse("package_root", "package_file_set_mismatch")
-            except PermissionError:
-                _refuse("package_root", "package_file_unreadable")
-            except OSError:
-                # Covers ELOOP (a symlink swapped in under O_NOFOLLOW),
-                # ENXIO/EOPNOTSUPP (a FIFO or socket swapped in), and any
-                # other open-time refusal. Never blocks: O_NONBLOCK makes a
-                # FIFO open return immediately even with no writer attached,
-                # so a hostile swap is refused rather than hung.
-                _refuse("package_root", "package_open_refused")
-
-            try:
-                first_stat = os.fstat(file_fd)
-                if not stat.S_ISREG(first_stat.st_mode):
-                    _refuse("package_root", "package_non_regular_file_refused")
-                if first_stat.st_nlink != 1:
-                    _refuse("package_root", "package_hardlink_refused")
-
-                # Census-to-open identity binding: the file actually opened
-                # must be the SAME inode the first census observed at this
-                # relative path, not merely a different regular file with
-                # byte-for-byte identical declared content (which would
-                # otherwise hash identically and pass every content-based
-                # check below).
-                census_identity = file_initial_identity.get(row.relative_path)
-                if census_identity is None:
-                    _refuse("package_root", "package_file_set_mismatch")
-                if (first_stat.st_dev, first_stat.st_ino) != census_identity:
-                    _refuse("package_root", "package_file_identity_mismatch")
-
-                if first_stat.st_size != row.byte_length:
+            # Hash and final-fstat the SAME retained fd opened during the
+            # census -- never reopen the path for hashing. The fd's read
+            # position starts at 0 (nothing has read from it before now),
+            # so streaming begins from the start of the file exactly as a
+            # fresh open would.
+            hasher = hashlib.sha256()
+            bytes_read = 0
+            while True:
+                try:
+                    chunk = os.read(file_fd, _READ_CHUNK_BYTES)
+                except OSError:
+                    _refuse("package_root", "package_file_unreadable")
+                if not chunk:
+                    break
+                bytes_read += len(chunk)
+                # Refuse the moment cumulative bytes exceed either the
+                # declared length or the absolute per-file ceiling --
+                # never read to EOF first: a file that grows mid-read
+                # (past the initial fstat above) must not be able to
+                # make this loop do unbounded work before the drift is
+                # detected.
+                if bytes_read > row.byte_length or bytes_read > MAX_PACKAGE_FILE_BYTES:
                     _refuse("package_root", "package_file_size_mismatch")
-                if first_stat.st_size > MAX_PACKAGE_FILE_BYTES:
-                    _refuse("package_root", "package_too_large")
-                running_total += first_stat.st_size
-                if running_total > MAX_PACKAGE_TOTAL_BYTES:
-                    _refuse("package_root", "package_too_large")
+                hasher.update(chunk)
+                if _between_read_chunks is not None:
+                    _between_read_chunks(row.relative_path)
 
-                actual_executable = bool(
-                    first_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                )
-                if actual_executable != row.executable:
-                    _refuse("package_root", "package_executable_mismatch")
+            if bytes_read != row.byte_length:
+                _refuse("package_root", "package_file_size_mismatch")
 
-                hasher = hashlib.sha256()
-                bytes_read = 0
-                while True:
-                    try:
-                        chunk = os.read(file_fd, _READ_CHUNK_BYTES)
-                    except OSError:
-                        _refuse("package_root", "package_file_unreadable")
-                    if not chunk:
-                        break
-                    bytes_read += len(chunk)
-                    # Refuse the moment cumulative bytes exceed either the
-                    # declared length or the absolute per-file ceiling --
-                    # never read to EOF first: a file that grows mid-read
-                    # (past the initial fstat above) must not be able to
-                    # make this loop do unbounded work before the drift is
-                    # detected.
-                    if bytes_read > row.byte_length or bytes_read > MAX_PACKAGE_FILE_BYTES:
-                        _refuse("package_root", "package_file_size_mismatch")
-                    hasher.update(chunk)
-                    if _between_read_chunks is not None:
-                        _between_read_chunks(row.relative_path)
+            if _before_final_stat is not None:
+                _before_final_stat()
 
-                if bytes_read != row.byte_length:
-                    _refuse("package_root", "package_file_size_mismatch")
-
-                if _before_final_stat is not None:
-                    _before_final_stat()
-
-                final_stat = os.fstat(file_fd)
-                if _stat_identity(final_stat) != _stat_identity(first_stat):
-                    _refuse("package_root", "package_file_identity_mismatch")
-            finally:
-                os.close(file_fd)
+            final_stat = os.fstat(file_fd)
+            if _stat_identity(final_stat) != _stat_identity(first_stat):
+                _refuse("package_root", "package_file_identity_mismatch")
 
             actual_files_by_path[row.relative_path] = CapabilityPackageFile(
                 relative_path=row.relative_path,
@@ -1160,8 +1245,14 @@ def verify_capability_package_source(
                 _refuse("package_root", "package_directory_identity_mismatch")
             retained_fd = package_dirs[child_rel]
             retained_fstat = os.fstat(retained_fd)
-            if (fresh_lstat.st_dev, fresh_lstat.st_ino) != (retained_fstat.st_dev, retained_fstat.st_ino):
+            if not _same_object(fresh_lstat, retained_fstat):
                 _refuse("package_root", "package_directory_identity_mismatch")
+
+        # Point 5 of the retained-object design: repeat the SAME
+        # retained-fd/path equality fence used post-census (point 3) once
+        # more at the terminal fence, for every declared FILE -- closing
+        # races that unfolded during the hash phase itself.
+        _check_retained_file_identity()
 
         for fd, initial_identity in all_retained:
             if _stat_identity(os.fstat(fd)) != initial_identity:

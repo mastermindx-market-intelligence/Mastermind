@@ -54,7 +54,15 @@ DEFAULT_CAPABILITY_SOURCE_ROOT = Path(__file__).resolve().parent.parent
 _MIN_CAPABILITY_PACKAGES = 1
 _MAX_CAPABILITY_PACKAGES = 16
 _MAX_SKILL_CAPABILITIES_PER_PROFILE = 32
-_MAX_DUPLICATE_KEY_ECHO_LEN = 200
+
+# Fixed, non-echoing refusal reason for every duplicate-JSON-key refusal
+# (review 5087139217 BLOCKER 4). Kept as a module constant -- rather than
+# inlined at the one raise site -- so a test can assert byte-for-byte
+# identity between the constant and the observed message without
+# re-deriving the literal, and so any future sibling duplicate-key check
+# is structurally nudged to reuse the SAME fixed token instead of growing
+# its own echoing variant.
+_DUPLICATE_JSON_KEY_REASON = "capability policy has a duplicate JSON key"
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 _CONFIG_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
@@ -214,16 +222,22 @@ def _no_duplicate_keys_object_pairs_hook(pairs: list[tuple[str, object]]) -> dic
     Applies uniformly to V3 and V4 documents (identity amendment §5.1): all
     valid V3 documents retain identical normalized objects, profile digests
     and policy digests; ambiguous duplicate-key JSON was never a valid
-    reviewed capability policy and now refuses. The error names only the
-    bounded duplicated key itself, never any value.
+    reviewed capability policy and now refuses. Review 5087139217 BLOCKER 4:
+    the refusal message is a single FIXED, non-echoing reason token -- it
+    never carries any fragment of the duplicated key (an attacker chooses
+    that key, and a JSON object key has no length or character-set bound at
+    all, unlike every other field this module validates). The token is
+    stable regardless of which key repeated, how long it was, or at what
+    depth it occurred, so it cannot be used to exfiltrate secret-shaped
+    input via str()/repr() of the raised exception, its __cause__/__context__
+    chain, or any logging/capture surface that records the exception text.
     """
 
     seen: set[str] = set()
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in seen:
-            token = key if len(key) <= _MAX_DUPLICATE_KEY_ECHO_LEN else key[:_MAX_DUPLICATE_KEY_ECHO_LEN]
-            raise CapabilityPolicyError(f"capability policy has a duplicate JSON key: {token!r}")
+            raise CapabilityPolicyError(_DUPLICATE_JSON_KEY_REASON)
         seen.add(key)
         result[key] = value
     return result
