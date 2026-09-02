@@ -3,182 +3,165 @@
 **Date:** 2026-08-30  
 **Owner:** Sol, AI CEO  
 **Chairman:** Chris  
-**Approval:** Current live Chairman directive; written-spec review explicitly auto-approved.  
-**Historical authoring procedure basis:** `mastermindx-market-intelligence/Mastermind@fefd774701ea285b466cac2646a584801f4a976a`, `mastermind.sol_skillpack.v1` v1.0.1, bootstrap major 1.  
-**Historical reconciliation receipt:** the carrier was previously history-preservingly joined to protected `47eaa510aa0b9877d91052fbaa27156957aa963c`; this is retained as history, not current authority.  
-**Current repair procedure basis:** `mastermindx-market-intelligence/Mastermind@21a721427743fdae6d513eeb0f993ebd1c327a81`, `mastermind.sol_skillpack.v1` v1.0.1, bootstrap major 1. The current repair starts from PR #268 head `2140c4c1021868bd69331bbf254f3fe264504f89`, whose second parent is that protected base.  
-**Operation:** `sol-watcher-self-deadlock-hardening-20260830-sol-001`
+**Operation:** `sol-watcher-self-deadlock-hardening-20260830-sol-001`  
+**Repair operation:** `sol-watcher-pr268-polarity-repair-20260901-sol-001`  
+**Carrier:** Mastermind PR #268 / `sol/sol-watcher-self-deadlock-hardening-20260830`
 
 ## Outcome
 
-A Sol-owned continuation watcher must never detect an in-scope worker `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, conclude that Sol owes the next decision, and then end by waiting for Sol. The exact action-authoritative Sol watcher either writes the lawful same-carrier Sol edge or returns one typed reason why it cannot. Sister Sol accounts may observe the same return but may not create a competing semantic edge without canonical action-target transfer.
+A Sol-owned continuation watcher must never detect an in-scope worker `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, conclude that Sol owes the next decision, and then wait for Sol. The exact action-authoritative Sol surface either writes the lawful same-carrier edge or returns one typed blocker. Sister Sol accounts may observe but cannot race the child without canonical action-target transfer.
 
-## Incident
+## Incident and root cause
 
-The FF/FIF principal returned `RESULT / REQUEST_CHANGES` on Macro PR #6676 and correctly re-armed its exact-thread watcher. The ChatGPT CEO watcher repeatedly recognized that the worker was waiting for Sol but emitted notification-only summaries instead of performing the already-authorized Sol ruling. Both sides therefore waited for the same Sol role, and the program stopped until an interactive Sol turn manually supplied `SOL REQUEST_REPAIR / CONTINUE`.
+The FF/FIF worker returned `RESULT / REQUEST_CHANGES` and correctly kept its continuation path alive. The CEO-side watcher repeatedly recognized that the worker was waiting for Sol but emitted notification-only summaries. Both sides waited for the same role.
 
-The protected procedure already required `DETECT -> RE-PIN -> ADJUDICATE -> ACT -> REPORT`. The failure survived because live scheduled watcher prompts were free-form and no deterministic contract rejected notification-only self-deadlock output.
+The underlying defect was not merely a missing phrase. Temporary watcher prompts were free-form English, and validity depended on a growing natural-language polarity scanner. Explicit prohibitions, double negations, sequencing clauses, Markdown, and contradictory later instructions could be misclassified. The scanner therefore became an accidental authority parser.
+
+Historical regex/polarity candidates—including quarantined commit `4454f607ae02b990c8418ab6f946ddd568fe486c`—remain evidence only. They are preserved in ancestry but are not release candidates.
 
 ## Architecture
 
-This wave adds a pure, storeless prompt-contract validator and account-local audit CLI. It does not add a watcher daemon, task registry, action-owner table, lifecycle state, queue, retry plane, cursor, database, provider session, or transport.
+This wave adds a pure standard-library renderer/validator and read-only account-export audit. It adds no watcher daemon, task store, action-owner table, lifecycle, queue, retry plane, cursor, database, provider session, or transport.
 
-The contract is embedded in each temporary Sol watcher prompt:
+The only valid managed prompt is the exact output of:
+
+```python
+render_watcher_prompt(
+    *,
+    role: WatcherRole | str,
+    operation_key: str,
+    carrier: str,
+    latest_handled_edge: str = "NONE",
+) -> str
+```
+
+The renderer derives the role contract. Callers may supply only identity fields. Output is:
 
 ```text
 MMX_SOL_WATCHER_V1
-WATCHER_ROLE: ACTION_AUTHORITATIVE | OBSERVER_ONLY | PARENT_ORCHESTRATOR | TRIAGE_ONLY
-OPERATION_KEY: <stable operation key>
-CARRIER: <slack:<channel-id>/<parent-ts> | aggregate:<stable-scope-id>>
-LATEST_HANDLED_EDGE: <semantic edge or NONE>
-ACTION_REQUIRED_EVENTS: <closed comma-separated set>
-ACTION_REQUIRED_OUTCOME: <closed value by role>
-SISTER_SOL_POLICY: <closed value by role>
+WATCHER_ROLE: <role>
+OPERATION_KEY: <operation>
+CARRIER: <carrier>
+LATEST_HANDLED_EDGE: <edge>
+ACTION_REQUIRED_EVENTS: <derived>
+ACTION_REQUIRED_OUTCOME: <derived>
+SISTER_SOL_POLICY: <derived>
+
+MMX_SOL_WATCHER_BODY_V1
+<exact frozen numbered body>
 ```
 
-The prompt body still carries current procedure, source reconciliation, scope, failure states, and terminal cleanup. The header schema is closed: the discriminator is followed by exactly those seven `KEY: value` fields and then one blank-line boundary. Unknown fields, comments, notes, or bare header lines fail closed so the header cannot become an unscanned instruction channel.
+There is no terminal newline.
 
-`ACTION_AUTHORITATIVE` always requires one exact Slack carrier. `aggregate:<stable-scope-id>` is available only to `OBSERVER_ONLY`, `PARENT_ORCHESTRATOR`, or `TRIAGE_ONLY`, and identifies a bounded read/oversight scope rather than authority over every child it contains. Aggregate observers must fresh-read each exact child carrier used for a conclusion. An exact child semantic edge still requires the current exact action target and exact lawful carrier.
+## Canonical identity law
 
-## Role law
+Validation performs only these transport normalizations:
+
+1. CRLF to LF;
+2. lone CR to LF;
+3. removal of terminal newline characters.
+
+It does not trim spaces/tabs, case-fold, Unicode-normalize, reorder fields, ignore blank lines, parse Markdown, or accept added prose. After structural identity fields are valid, the normalized document must equal renderer output byte-for-byte. Any drift returns `CANONICAL_PROMPT_MISMATCH`.
+
+Legacy finding enum values remain available for report-schema compatibility. Natural-language polarity is not a validity boundary and cannot make a noncanonical prompt valid.
+
+## Closed roles
 
 ### `ACTION_AUTHORITATIVE`
 
-The exact currently resolved Sol target for the child turn. It must declare:
-
-```text
-ACTION_REQUIRED_EVENTS: BLOCKED,DECISION_REQUEST,RESULT
-ACTION_REQUIRED_OUTCOME: SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER
-SISTER_SOL_POLICY: OBSERVE_ONLY_UNLESS_EXACT_ACTION_TARGET
-```
-
-On an action-required event, a positive terminal instruction equivalent to `Sol action required`, `waiting for Sol`, `await Sol`, `defer to Sol`, `escalate to Sol`, `pause for Sol`, or `stand by for Sol's ruling` is a contract failure. A prohibition or regression sentence such as `do not wait for Sol` is not itself a finding. Positive and negated phrases are adjudicated within their local semantic clause so a preceding unrelated `do not` or `no` cannot hide a later instruction to wait. Valid completion of that watcher turn requires one of:
-
-1. a lawful same-carrier `CONTINUE`, `RULING`, `REQUEST_REPAIR`, `PARK/HOLD`, or terminal `STOP`; or
-2. a typed blocker naming the actual boundary, such as `CHAIRMAN_ONLY`, `ATTENTION_OWNER_CONFLICT`, `EFFECT_UNKNOWN`, `CARRIER_UNREADABLE`, `WRITE_UNAVAILABLE`, or `SOURCE_LAW_CONFLICT`.
+- exact current action target only;
+- exact Slack carrier required;
+- events `BLOCKED,DECISION_REQUEST,RESULT`;
+- outcome `SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER`;
+- verifies current target authority from canonical owners;
+- writes one same-carrier Sol edge or returns a typed blocker;
+- never asks/waits/defers/escalates to Sol;
+- verifies terminal STOP before disarming.
 
 ### `OBSERVER_ONLY`
 
-May read, compare, project, and report. It must not emit child-semantic modification. It declares:
-
-```text
-ACTION_REQUIRED_EVENTS: NONE
-ACTION_REQUIRED_OUTCOME: OBSERVE_ONLY_NO_MODIFY
-SISTER_SOL_POLICY: NEVER_ACT_WITHOUT_CANONICAL_TRANSFER
-```
+- read/report only;
+- may use exact Slack or bounded `aggregate:` carrier;
+- cannot write child continuation/ruling/repair/park/hold/stop;
+- cannot merge/release/auto-merge, retry/fail over, or start a successor;
+- cannot elect authority by recency or responsiveness.
 
 ### `PARENT_ORCHESTRATOR`
 
-May act only on parent transitions that are explicitly disjoint from an active child's dedicated action watcher. It declares:
-
-```text
-ACTION_REQUIRED_EVENTS: PARENT_TRANSITION
-ACTION_REQUIRED_OUTCOME: PARENT_EDGE_ONLY_NO_CHILD_RACE
-SISTER_SOL_POLICY: NEVER_ACT_ON_DEDICATED_CHILD_RETURN
-```
-
-A parent may use an aggregate scope but cannot answer a dedicated child return.
+- acts only on canonically proven parent transitions;
+- cannot consume or answer a dedicated child return;
+- never races the child action surface.
 
 ### `TRIAGE_ONLY`
 
-May identify unconsumed returns and route or reconcile attention. It does not become action-authoritative merely because it discovered the defect. It declares:
+- detects/reconciles/reports unconsumed returns;
+- preserves unresolved owner/carrier/effect collisions;
+- never becomes action target merely because it discovered the defect.
+
+## Exact body ownership
+
+The exact numbered common prefix and role tails are source constants in `control_plane/sol_watcher_contract.py`. Procedure documentation may display them, but native prompts must be generated from source rather than copied by hand. No role may add, remove, reorder, paraphrase, annotate, quote, or append body content.
+
+Operation-specific facts remain in the seven headers and current canonical systems—not in free-form body text.
+
+## Account-export audit
+
+`scripts/audit_sol_watchers.py` remains read-only. It accepts a JSON list or an object containing `tasks`, validates each enabled `SOL_WATCHER`, and emits `mastermind.sol_watcher_audit.v1`.
+
+Wrapper law is preserved:
+
+- `id` or `task_id` must be present and nonempty;
+- aliases are trimmed independently and must agree;
+- canonical IDs must be unique, including disabled tasks;
+- enabled state must be a real JSON Boolean;
+- conflicting enabled aliases fail;
+- `audit_kind` is `SOL_WATCHER` or `NON_WATCHER`; unknown values fail;
+- non-object entries fail;
+- report separates invalid prompt, classification, export, and duplicate-ID findings.
+
+The documented clean-checkout command is:
 
 ```text
-ACTION_REQUIRED_EVENTS: UNCONSUMED_RETURN
-ACTION_REQUIRED_OUTCOME: RECONCILE_OR_REPORT_NO_DUPLICATE
-SISTER_SOL_POLICY: NEVER_ELECT_BY_RECENCY
+python3 -m scripts.audit_sol_watchers tasks.json
 ```
 
-A triage task may use an aggregate scope. The exact child action surface must act or receive canonical transfer before a modifying child edge is written.
+A green report proves prompt conformance only, not task execution, Slack I/O, Wake, acknowledgement, or source resolution.
 
-### Non-authoritative body fence
+## Three-account rollout
 
-Every non-authoritative role—observer, parent orchestrator, and triage—must also be checked for positive authority hidden in body prose. It may not post/send/issue child `CONTINUE`, `RULING`, `REQUEST_REPAIR`, or `STOP`; merge/release or arm auto-merge; retry/resubmit/requeue/fail over; or commission/start a successor. Markdown emphasis and code delimiters are stripped for policy scanning. Explicit prohibitions remain valid. The header therefore cannot be used to launder a modifying body.
+Each ChatGPT web account owns its own native task store. The one rotating Codex OAuth slot does not identify or authorize all three accounts.
 
-## Contract validation
+For each account:
 
-`control_plane.sol_watcher_contract.validate_watcher_prompt()` is deterministic and standard-library only. It verifies:
+1. export current tasks;
+2. reconcile one role per watcher and the current action target;
+3. render the complete replacement prompt;
+4. replace the complete prompt on the same native task ID;
+5. read back and compare byte-for-byte after permitted newline normalization;
+6. if effect is ambiguous, record `EFFECT_UNKNOWN` and do not retry/fail over to another account;
+7. re-export and require audit exit 0.
 
-- discriminator, exactly seven allowed header fields, and the blank-line body boundary;
-- closed role/outcome/event/policy combinations;
-- exact Slack carrier for action authority and closed aggregate scope for non-authoritative roles;
-- a positive current-procedure re-pin instruction rather than a negated keyword mention;
-- a positive exact-carrier fresh-read instruction;
-- positive same-carrier action and typed-blocker requirements;
-- an explicit blind-retry prohibition and explicit refusal to infer Executive lifecycle from Slack;
-- positive terminal-STOP-before-disarm ordering;
-- clause-local positive notification-only anti-patterns without false-rejecting explicit prohibitions;
-- all non-authoritative body authority widening, including Markdown-wrapped commands and bare imperative merge forms.
+Then run one-authoritative/two-observer canaries, unavailable-authority transfer, self-deadlock regression, and exact prompt-drift mutations.
 
-Polarity is relation-aware and fail-closed. Sequencing boundaries and independent comma clauses end a prior action's negation scope, so `Do not wait for Slack, wait for Sol` and `Do not send a progress update, then wait for Sol` still expose the later positive self-deferral. Failure-state words such as `fails`, `failure`, `invalid`, or `rejected` do not negate an instruction merely because they appear nearby. Canonical direct prohibitions remain valid; double-negated prohibition language such as `Do not forbid blind retry` or `Do not forbid infer ... lifecycle from Slack` does not satisfy the required prohibition/refusal. For required positive laws, blind retry, and lifecycle inference, a later contradictory occurrence invalidates an earlier compliant occurrence rather than being ignored.
+## No-rebuild boundaries
 
-`scripts/audit_sol_watchers.py` accepts an account-local JSON export and emits a machine-readable report. Every wrapper entry declares `audit_kind: SOL_WATCHER | NON_WATCHER`; omission defaults to `SOL_WATCHER` for backward compatibility. Enabled `NON_WATCHER` tasks remain visible but are excluded from watcher-conformance counts.
-
-The export envelope is fail-closed:
-
-- a native `id` or `task_id` must be present, non-empty, and unique;
-- `id` and `task_id` are normalized independently with `strip()` before alias comparison and duplicate census;
-- conflicting normalized aliases refuse;
-- `is_enabled` or `enabled` must be a real JSON boolean; strings, numbers, missing values, or conflicting aliases refuse;
-- unknown audit kinds refuse even when disabled;
-- duplicate canonical task IDs refuse even when disabled/non-watcher;
-- non-object task entries refuse.
-
-The report separates `invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, and `duplicate_task_ids`. A malformed wrapper cannot be coerced into a green watcher count. The CLI never connects to ChatGPT, Slack, GitHub, Executive OS, or a provider and never mutates a task.
-
-## Three-account deployment
-
-Each ChatGPT account audits only its own native task store. The accounts return receipts containing:
-
-- account/surface identity;
-- export time;
-- current protected Skillpack SHA;
-- active watcher count;
-- each watcher ID/title/role/operation/carrier;
-- validator result and finding codes;
-- exact watcher IDs changed or disabled;
-- unresolved action-authority conflicts.
-
-The three account-local stores belong to the three signed-in ChatGPT web/app account profiles. The company exposes only one concurrently active Codex OAuth/CTO slot, and that slot may rotate between ChatGPT1, ChatGPT2, and ChatGPT3 depending on the active OAuth. The rotating Codex slot is not the identity or access path for all three native Tasks/Automations stores, and Codex availability is not a prerequisite for an account-local audit. Each preflight uses an ordinary exact Sol reasoning chat in the corresponding web account and leaves any current Codex task untouched unless a separate Codex operation owns it.
-
-A sister account receipt does not grant that account authority over another account's children. Cross-account canaries require one canonical action target and observer-only behavior from the other two surfaces.
-
-The rollout uses two phases: read-only account preflight while the source carrier is DRAFT, then in-place native task mutation only after exact-head source release and a fresh same-carrier Sol continuation. Slack delivery alone is not native task consumption; exact web-account session placement or a typed unavailable result is required.
-
-## Runtime continuation program
-
-This immediate wave is transitional hardening, not the final event-driven solution. The permanent path remains the accepted owners:
-
-```text
-Agent Dialogue turn classifier
--> persisted Wake obligation/carrier
--> trusted current RuntimeBinding and exact action target
--> existing current provider writer/generation
--> exact reasoning-session Wake
--> target acknowledgement
--> source resolution
-```
-
-Existing W3A/W3C/MAS-229/AD-SOL1 carriers must be continued rather than duplicated. Temporary Class-M watcher prompts are removed only after the corresponding event-driven path is production-proven.
+Executive OS remains the sole Job/Attempt/Worker/Event owner. Agent Dialogue, Wake, RuntimeBinding, current provider writer, acknowledgement, and source resolution remain their existing owners. This wave creates no new runtime or authority plane and does not make Autonomy production-live.
 
 ## Acceptance
 
-1. The FF/FIF notification-only prompt is rejected with `NOTIFICATION_ONLY_SELF_DEADLOCK`.
-2. A valid action-authoritative watcher passes, including explicit `do not wait for Sol` and `no blind retry` law.
-3. An unrelated negation earlier in the same line cannot conceal a later positive self-deferral instruction.
-4. Every self-deferral synonym above is rejected.
-5. Every non-authoritative role rejects positive child modification/retry/release/successor instructions, including Markdown-wrapped and bare merge commands, while explicit prohibitions pass.
-6. Unknown or bare header lines fail closed and cannot hide instructions.
-7. Action authority refuses an aggregate carrier; bounded observer/parent/triage aggregate scopes pass.
-8. A negated re-pin/fresh-read/action/blocker/STOP requirement or positive lifecycle inference fails.
-9. Double-negated or contradicted blind-retry/lifecycle prohibitions fail; failure-state wording cannot launder a later positive action.
-10. Malformed/missing carrier, operation, role, or handled-edge identity fails closed.
-11. The CLI produces stable JSON and nonzero status for invalid enabled watchers while excluding declared non-watchers from watcher counts.
-12. Missing/duplicate native IDs, non-boolean enabled flags, conflicting aliases, unknown classifications, and non-object entries fail the overall audit; whitespace-equivalent ID aliases resolve to one canonical identity.
-13. The Skillpack explicitly requires the structured contract for new/materially updated temporary Sol watchers and names notification-only self-deadlock as a K3 failure.
-14. Focused tests and repository CI are green on the exact final head.
-15. All three account-local preflight and mutation receipts plus the one-authoritative/two-observer canary exist before `PROVEN_LIVE` is claimed.
+Source acceptance requires:
 
-## Non-goals
+1. exact renderer body equality for all four roles;
+2. all lawful carrier combinations and invalid renderer inputs proven;
+3. CRLF/lone-CR and terminal newline accepted; all other drift rejected;
+4. every historical B1/B2/B3/composition witness rejected through `CANONICAL_PROMPT_MISMATCH`;
+5. export identity/Boolean/classification/duplicate behavior preserved;
+6. CLI module invocation proven;
+7. Skillpack/runbook/design/plan synchronized;
+8. current protected base, exact nine-path carrier, hosted repository/security green;
+9. independent immutable-head adversarial review;
+10. PR remains DRAFT/HOLD until Sol release adjudication.
 
-No automatic task-store mutation, no cross-account login or credential handling, no account selection by model, no Executive lifecycle mutation, no Slack lifecycle authority, no provider wake, no new action-owner store, no W3C production activation, no replacement of existing W3A/W3B/AD-SOL1 carriers, and no claim that a passing prompt audit proves runtime consumption.
+Maximum source claim: `BUILT_NOT_PROVEN / PRODUCTION_INERT`.
+
+`PROVEN_LIVE` additionally requires all three native account receipts, exact prompt readback, one authoritative/two observer canary, canonical transfer test, and one real no-Chairman continuation cycle.
