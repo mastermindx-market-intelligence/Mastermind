@@ -1,0 +1,8 @@
+{
+  "existing_repository_state_note": "config/example_service.yaml and services/example_service.py already carry the flag; this task is documentation-only and must not propose any code file edit.",
+  "owned_files_fence": [
+    "docs/example_widget_x.md"
+  ],
+  "question": "Produce a change plan naming exactly the file(s) you would edit.",
+  "spec": "Update `docs/example_widget_x.md` to document the `enable_widget_x` flag (default `false`; added in a prior, already-landed change) and its default value."
+}
