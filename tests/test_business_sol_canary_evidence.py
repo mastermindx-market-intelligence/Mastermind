@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib
 import importlib.util
 import json
@@ -49,6 +50,19 @@ def _source(owner: str, ref: str, observed_at: str = "2026-09-02T03:58:00Z"):
     }
 
 
+def _state_rows(prefix: str):
+    return [
+        {
+            "state": state,
+            "evidence_digest": hashlib.sha256(
+                f"{prefix}:{state}".encode("utf-8")
+            ).hexdigest(),
+            "structured_text_equivalent": True,
+        }
+        for state in ADVERSE_STATES
+    ]
+
+
 def valid_receipt() -> dict:
     return {
         "schema": "mastermind.business_sol_one_cockpit_receipt.v1",
@@ -67,6 +81,12 @@ def valid_receipt() -> dict:
             "cockpit:pro-control-1",
             "cockpit:pro-control-2",
         ],
+        "cockpit_selection": {
+            "method": "EXPLICIT_CANARY_ASSIGNMENT",
+            "assignment_ref": "selection:chairman-canary-001",
+            "account_or_title_heuristic_used": False,
+            "recency_heuristic_used": False,
+        },
         "personal_workspace": {
             "separately_selectable": True,
             "merged_into_business": False,
@@ -108,8 +128,8 @@ def valid_receipt() -> dict:
         "control_room": {
             "structured_read": True,
             "text_fallback": True,
-            "desktop_states": list(ADVERSE_STATES),
-            "mobile_states": list(ADVERSE_STATES),
+            "desktop_states": _state_rows("desktop"),
+            "mobile_states": _state_rows("mobile"),
         },
         "executive_admission": {
             "operation_key": "business-exec-canary-001",
@@ -189,6 +209,9 @@ def test_order_insensitive_collections_are_canonicalized_before_digesting():
     [
         (lambda row: row.update(selected_cockpit_ref="cockpit:pro-control-1"), "FAIL", "COCKPIT_NOT_DISTINCT"),
         (lambda row: row["control_cockpit_refs"].__setitem__(1, "cockpit:pro-control-1"), "FAIL", "COCKPIT_NOT_DISTINCT"),
+        (lambda row: row["cockpit_selection"].update(method="RECENCY_HEURISTIC"), "FAIL", "COCKPIT_SELECTION_HEURISTIC"),
+        (lambda row: row["cockpit_selection"].update(account_or_title_heuristic_used=True), "FAIL", "COCKPIT_SELECTION_HEURISTIC"),
+        (lambda row: row["cockpit_selection"].update(recency_heuristic_used=True), "FAIL", "COCKPIT_SELECTION_HEURISTIC"),
         (lambda row: row["personal_workspace"].update(merged_into_business=True), "FAIL", "PERSONAL_WORKSPACE_MERGED"),
         (lambda row: row["personal_workspace"].update(transition=["PERSONAL", "BUSINESS"]), "FAIL", "REVERSIBILITY_NOT_PROVEN"),
         (lambda row: row["package"].update(protected_commit="0" * 40), "FAIL", "PACKAGE_COMMIT_MISMATCH"),
@@ -196,6 +219,8 @@ def test_order_insensitive_collections_are_canonicalized_before_digesting():
         (lambda row: row["package"]["plugins"].append("unexpected-plugin"), "FAIL", "PACKAGE_INVENTORY_MISMATCH"),
         (lambda row: row["steward"].pop("refresh_read"), "UNKNOWN", "MISSING_REFRESH_READ"),
         (lambda row: row["control_room"].update(text_fallback=False), "FAIL", "CONTROL_ROOM_FALLBACK_MISSING"),
+        (lambda row: row["control_room"]["desktop_states"].pop(), "FAIL", "CONTROL_ROOM_STATE_MATRIX_INCOMPLETE"),
+        (lambda row: row["control_room"]["mobile_states"][1].update(evidence_digest=row["control_room"]["mobile_states"][0]["evidence_digest"]), "FAIL", "CONTROL_ROOM_EVIDENCE_REUSED"),
         (lambda row: row["executive_admission"].update(submission_calls=True), "FAIL", "EXECUTIVE_SUBMISSION_COUNT_MISMATCH"),
         (lambda row: row["executive_admission"].update(attempts=False), "FAIL", "EXECUTIVE_ATTEMPT_OCCURRED"),
         (lambda row: row["executive_admission"].update(attempt_limit=True), "FAIL", "EXECUTIVE_ATTEMPT_LIMIT_MISMATCH"),
@@ -262,6 +287,7 @@ def test_time_contract_fails_closed(path, value, issue):
     assert issue in result["issues"]
 
 
+
 def test_source_owner_ref_mismatch_and_post_receipt_evidence_fail():
     module = _module()
 
@@ -309,6 +335,18 @@ def test_fixture_only_executive_canary_is_truthfully_incomplete():
     result = module.validate_one_cockpit_receipt(receipt, evaluated_at=EVALUATED_AT)
     assert result["verdict"] == "UNKNOWN"
     assert "RECEIPT_INCOMPLETE" in result["issues"]
+
+
+def test_receipt_digest_rejects_non_string_mapping_keys():
+    module = _module()
+    receipt = valid_receipt()
+    receipt[1] = "not-json"
+    result = module.validate_one_cockpit_receipt(
+        receipt, evaluated_at=EVALUATED_AT
+    )
+    assert result["verdict"] == "REFUSED"
+    assert result["input_digest"] is None
+    assert "INVALID_JSON" in result["issues"]
 
 
 def test_canonical_json_rejects_non_json_state():

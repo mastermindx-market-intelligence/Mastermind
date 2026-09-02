@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib
 import importlib.util
 
@@ -12,7 +13,6 @@ import pytest
 MODULE = "integrations.business_sol_canary.evidence"
 EVALUATED_AT = "2026-09-02T04:00:00Z"
 P1_COMMIT = "12c2cb8993f78e81c6cb9e9a75a9829f9b194dab"
-P1_INVENTORY_DIGEST = "3847c8ac04fbd6354a4a352c8eb7bb1fd98c92e24f2c1e3e13c2051f891834df"
 TOOLS = (
     "list_responsibilities",
     "get_responsibility",
@@ -53,6 +53,16 @@ def _receipt() -> dict:
         "fresh": True,
         "result_digest": digest,
     }
+    state_rows = lambda prefix: [
+        {
+            "state": state,
+            "evidence_digest": hashlib.sha256(
+                f"{prefix}:{state}".encode("utf-8")
+            ).hexdigest(),
+            "structured_text_equivalent": True,
+        }
+        for state in STATES
+    ]
     return {
         "schema": "mastermind.business_sol_one_cockpit_receipt.v1",
         "receipt_id": "receipt:mutation-base",
@@ -67,6 +77,12 @@ def _receipt() -> dict:
         ],
         "selected_cockpit_ref": "cockpit:business-canary",
         "control_cockpit_refs": ["cockpit:control-a", "cockpit:control-b"],
+        "cockpit_selection": {
+            "method": "EXPLICIT_CANARY_ASSIGNMENT",
+            "assignment_ref": "selection:chairman-canary-001",
+            "account_or_title_heuristic_used": False,
+            "recency_heuristic_used": False,
+        },
         "personal_workspace": {
             "separately_selectable": True,
             "merged_into_business": False,
@@ -75,7 +91,7 @@ def _receipt() -> dict:
         },
         "package": {
             "protected_commit": P1_COMMIT,
-            "inventory_digest": P1_INVENTORY_DIGEST,
+            "inventory_digest": "3847c8ac04fbd6354a4a352c8eb7bb1fd98c92e24f2c1e3e13c2051f891834df",
             "plugins": ["mastermind-operator", "mastermind-sol"],
         },
         "generations": {
@@ -100,8 +116,8 @@ def _receipt() -> dict:
         "control_room": {
             "structured_read": True,
             "text_fallback": True,
-            "desktop_states": list(STATES),
-            "mobile_states": list(STATES),
+            "desktop_states": state_rows("desktop"),
+            "mobile_states": state_rows("mobile"),
         },
         "executive_admission": {
             "operation_key": "business-exec-canary-001",
