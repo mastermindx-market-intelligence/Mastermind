@@ -2,71 +2,46 @@
 
 ## Purpose
 
-Harden temporary Sol Task/Automation/condition-watch prompts on each ChatGPT account without
-creating a watcher registry, cross-account task controller, lifecycle plane, action-owner table,
-queue, retry path or credential bridge.
+Harden temporary Sol Tasks/Automations on each ChatGPT account without creating a watcher registry, cross-account task controller, lifecycle plane, action-owner table, queue, retry path, or credential bridge.
 
-This ceremony is **account-local-only mutation**. Each ChatGPT account may inspect and repair only
-its own native task store unless a separately accepted host capability explicitly proves broader
-authority. A Slack message, GitHub branch, sister-account receipt or apparent browser access does not
-grant cross-account task mutation.
+This ceremony is **account-local-only mutation**. Each ChatGPT account may inspect and repair only its own native task store unless a separately accepted host capability proves broader authority. Slack, GitHub, a sister-account receipt, or apparent browser access does not grant cross-account task mutation.
 
-The canonical procedure is the current protected `docs/sol_skills/WATCHER_ACTION_LOOP.md`. The audit
-CLI is a read-only conformance check:
+The current protected `docs/sol_skills/WATCHER_ACTION_LOOP.md` is canonical. The audit is read-only:
 
 ```bash
-python3 scripts/audit_sol_watchers.py tasks.json > watcher-audit.json
+python3 -m scripts.audit_sol_watchers tasks.json > watcher-audit.json
 ```
 
-A passing prompt audit does not prove runtime consumption, scheduled execution, Slack read/write,
-exact-session Wake, target acknowledgement or source resolution.
+A passing prompt audit does not prove runtime consumption, scheduled execution, Slack read/write, exact-session Wake, target acknowledgement, or source resolution.
 
 ## ChatGPT web-account identity versus the rotating Codex slot
 
-The company may expose **one rotating Codex OAuth slot** at a time. That slot can currently resolve
-to ChatGPT1 and later rotate to ChatGPT2 or ChatGPT3 according to whichever account OAuth is active.
-It **does not identify or authorize all three ChatGPT web accounts** and cannot stand in for their
-three separate native Tasks/Automations stores.
+The company may expose **one rotating Codex OAuth slot** at a time. That slot can resolve to ChatGPT1, ChatGPT2, or ChatGPT3 as OAuth rotates. It **does not identify or authorize all three ChatGPT web accounts** and cannot stand in for their three native Tasks/Automations stores.
 
-For watcher hardening, audit each exact web account's native Tasks/Automations store through that
-account's signed-in ChatGPT web/app profile. Codex availability is not a watcher-store prerequisite.
-Do not create or demand three simultaneous Codex CTO sessions. Do not infer account identity from the
-currently active Codex OAuth, and do not reassign the rotating Codex slot merely to inspect a web
-account's native tasks.
+Audit each exact web account's native Tasks/Automations store through that account's signed-in profile. Codex availability is not a watcher-store prerequisite. Do not demand three simultaneous Codex sessions, infer web-account identity from the active OAuth slot, or rotate the slot merely to inspect a native task store.
 
-A ChatGPT web-account audit may use an ordinary exact Sol reasoning chat in that account. If the web
-account/profile or native Tasks surface cannot be proven, return the typed account/surface blocker
-with `effect=NONE`; do not substitute whichever Codex account is currently active.
+If an account profile or native Tasks/Automations surface cannot be proven, return the typed account/surface blocker with `effect=NONE`; do not substitute another account.
 
 ## Preconditions
 
-Before changing any watcher on an account:
+Before changing any watcher:
 
-1. Load current protected `docs/sol_skills/INDEX.md` from
-   `mastermindx-market-intelligence/Mastermind` and record the exact protected Skillpack SHA.
-2. Load same-SHA `WATCHER_ACTION_LOOP.md`, `RECONCILE_STATE.md`, and
-   `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`.
-3. Read the account's native task list directly through that account's current Task/Automation
-   surface.
-4. Do not infer an action-authoritative Sol target from account number, newest tab, latest response,
-   apparent health, remaining quota or timestamp order. The binding rule is **never elect by recency**.
-5. Preserve one operation/carrier binding. A prompt repair does not create a new logical child,
-   retry a provider effect or transfer action authority.
+1. Load current protected `docs/sol_skills/INDEX.md` and record the exact protected Skillpack SHA.
+2. Load same-SHA `WATCHER_ACTION_LOOP.md`, `RECONCILE_STATE.md`, and `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`.
+3. Read the exact account-local native task list and task IDs.
+4. Reconcile the current action target. Never infer authority from account number, newest tab, latest response, remaining quota, or timestamp. The rule is **never elect by recency**.
+5. Preserve the existing operation/carrier. Prompt hardening does not create a child, retry an effect, or transfer authority.
 
 ## Step 1 — Export the account-local task census
 
-Export every native task visible to the current account, including disabled tasks where the native
-surface exposes them. Wrap each item with an audit classification so ordinary reminders and unrelated
-scheduled work are not misrepresented as Sol watcher defects.
-
-The JSON input shape is:
+Export enabled and disabled tasks when available. Classify ordinary reminders separately:
 
 ```json
 {
   "tasks": [
     {
       "id": "native-watcher-id",
-      "title": "Human-readable title",
+      "title": "Sol continuation watcher",
       "is_enabled": true,
       "audit_kind": "SOL_WATCHER",
       "prompt": "Full current prompt text"
@@ -82,37 +57,20 @@ The JSON input shape is:
 }
 ```
 
-The native task ID must be present and unique. Normalize `id` and `task_id` independently by trimming
-leading/trailing whitespace before comparing aliases or performing the duplicate census. Do not invent
-a replacement ID when the native surface omits one, and do not collapse two returned records with the
-same canonical ID. Duplicate native task IDs are an export/identity ambiguity and fail the complete
-account audit even when both entries are disabled.
+The native task ID must be present and unique. Trim `id` and `task_id` independently before alias equality and duplicate census. Never invent a missing identity or collapse duplicate records. Duplicate native task IDs fail the complete audit even when disabled.
 
-The enabled state must be a JSON boolean (`true` or `false`). Strings such as `"false"`, numeric
-values, a missing field, or conflicting `is_enabled` and `enabled` fields fail closed; the validator
-must not coerce them with language truthiness.
+The enabled state must be a JSON boolean. Missing, string, numeric, or conflicting `is_enabled`/`enabled` values fail closed. Unknown `audit_kind` values fail closed. `SOL_WATCHER` remains the backward-compatible default only when classification is omitted.
 
-`SOL_WATCHER` is the default when `audit_kind` is omitted for backward compatibility. Use
-`NON_WATCHER` only after directly verifying that the task is not a Sol/CEO/worker continuation,
-program, parent, triage or account-hardening watcher. Unknown classifications fail closed.
+Do not export credentials, cookies, account tokens, provider payloads, raw session handles, or unrelated transcripts. The census is ephemeral audit input, not organizational truth.
 
-Do not include credentials, cookies, account tokens, private provider session payloads or unrelated
-chat transcripts. The export is an ephemeral audit input, not durable organizational truth.
+## Step 2 — Classify enabled Sol watchers
 
-Record the export time in UTC. If the native task surface cannot export JSON, transcribe only the
-five fields above into a local temporary file and preserve the direct native task read as the source
-receipt.
+Assign exactly one closed role:
 
-## Step 2 — Classify every enabled Sol watcher
-
-Assign exactly one role from the current Skillpack:
-
-- `ACTION_AUTHORITATIVE` — exact currently resolved Sol action target for one child/turn.
-- `OBSERVER_ONLY` — sister Sol/account/surface may read but cannot modify the child.
-- `PARENT_ORCHESTRATOR` — program-level loop reacts only to parent transitions and never races a
-  dedicated child watcher.
-- `TRIAGE_ONLY` — estate audit detects unconsumed returns and reconciles/reports without electing a
-  child owner.
+- `ACTION_AUTHORITATIVE` — exact current Sol action target for one child turn.
+- `OBSERVER_ONLY` — sister account/surface may read but cannot modify the child.
+- `PARENT_ORCHESTRATOR` — acts only on parent transitions and never races a child watcher.
+- `TRIAGE_ONLY` — detects and reconciles/reports unconsumed returns without becoming owner.
 
 ACTION_AUTHORITATIVE requires one exact Slack carrier:
 
@@ -120,155 +78,120 @@ ACTION_AUTHORITATIVE requires one exact Slack carrier:
 CARRIER: slack:<channel-id>/<parent-message-ts>
 ```
 
-The other three roles may use either one exact Slack carrier or a closed aggregate scope:
+The other roles may use one exact Slack carrier or `aggregate:<stable-scope-id>`. An aggregate is a bounded read scope, never child authority. If action ownership is ambiguous, keep the watcher disabled or classify it non-authoritative until canonical action-target transfer is proven.
 
-```text
-CARRIER: aggregate:<stable-scope-id>
-```
-
-An aggregate scope is only a bounded read/oversight label. It never makes the task authoritative for
-every child it can see. A parent or triage task that discovers an unconsumed child return must route
-or reconcile the attention defect; the exact child action surface acts only after current action-
-target proof or canonical transfer.
-
-If current canonical evidence cannot resolve whether a watcher is action-authoritative, classify it
-`OBSERVER_ONLY` or hold it disabled until canonical action-target transfer is proven. Do not upgrade
-an ambiguous watcher merely because the account created the task historically.
-
-## Step 3 — Run the deterministic audit
+## Step 3 — Audit the current export
 
 ```bash
-python3 scripts/audit_sol_watchers.py tasks.json > watcher-audit.json
+python3 -m scripts.audit_sol_watchers tasks.json > watcher-audit.json
 status=$?
 ```
 
 Exit codes:
 
-- `0` — every enabled `SOL_WATCHER` task conforms and the export identity/classification envelope is valid;
-- `1` — at least one watcher or export entry has a contract finding;
-- `2` — malformed/unreadable top-level audit input.
+- `0` — enabled `SOL_WATCHER` tasks conform and the export wrapper is valid;
+- `1` — at least one prompt or wrapper finding;
+- `2` — malformed or unreadable top-level input.
 
-The report summary separates `invalid_enabled_tasks`, `invalid_classification_tasks`, and
-`invalid_export_tasks`, and lists `duplicate_task_ids`. An audit is not green when wrapper identity or
-boolean typing is ambiguous merely because no enabled prompt was evaluated.
+The report separates `invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, and `duplicate_task_ids`. Enabled `NON_WATCHER` entries remain visible but are excluded from watcher-conformance counts.
 
-Enabled `NON_WATCHER` entries remain visible in the report but are excluded from watcher-conformance
-counts. The validator is intentionally unable to inspect whether a native task really fired, whether
-a scheduled surface can use Slack, or whether a Sol edge committed. Those remain direct runtime and
-transport facts.
+## Step 4 — Render and replace invalid prompts
 
-## Step 4 — Repair invalid prompts in place
+Do not patch prose. Do not prepend a header. Do not add another prohibition synonym. The only lawful mutation is to replace the complete native task prompt with renderer output.
 
 For each invalid enabled watcher:
 
-1. Re-read its exact operation and Slack carrier or closed aggregate scope.
-2. Reconcile the latest valid semantic edge and current action-target role.
-3. Preserve the existing native watcher ID, schedule, operation key and carrier whenever the task is
-   otherwise healthy.
-4. Replace or prepend the prompt with the exact `MMX_SOL_WATCHER_V1` header required by its role. The
-   header is closed: after the discriminator and before the first blank line there must be exactly the
-   seven canonical fields, one `KEY: value` per line. Unknown fields, notes, comments and bare lines
-   fail closed and must not be used as an instruction channel.
-5. Remove positive notification-only instructions that cause an action-authoritative watcher to say
-   “Sol action required,” “waiting for Sol,” “await Sol,” “defer to Sol,” “escalate to Sol,” or
-   “pause for Sol.” A prohibition such as “do not wait for Sol” is valid and should remain explicit.
-6. Add positive operative requirements for exact-carrier fresh-read, current-Skillpack re-pin,
-   same-carrier action, typed blocker fallback and terminal STOP-before-disarm. Negated versions of
-   those requirements are invalid even if they contain the same keywords.
-7. For every non-authoritative role (`OBSERVER_ONLY`, `PARENT_ORCHESTRATOR`, and `TRIAGE_ONLY`), remove
-   positive authority to emit child `CONTINUE`, `RULING`, `REQUEST_REPAIR`, `STOP`, merge/release,
-   retry/resubmit/requeue/fail over, or commission/start a successor. Markdown emphasis or code
-   delimiters do not hide a command. Explicit prohibitions remain valid and should be preserved.
-8. Save the prompt through the native task surface and read it back. A local draft or proposed text
-   is not a completed repair.
+1. Re-read the exact native task ID, schedule, operation, carrier, latest handled edge, and current role.
+2. Call the repository-owned pure renderer:
 
-Disable rather than rewrite only when the task is terminal, duplicates another same-purpose watcher,
-references an irreconcilably wrong carrier, or has no lawful current source. Disabling a child source
-must not disable an independent aggregate seat/principal watcher resource.
+   ```python
+   render_watcher_prompt(
+       role=<closed role>,
+       operation_key=<existing operation>,
+       carrier=<existing exact carrier>,
+       latest_handled_edge=<current edge or NONE>,
+   )
+   ```
 
-## Step 5 — Re-export and prove account-local convergence
+3. Confirm the output begins with `MMX_SOL_WATCHER_V1`, contains the exact role-derived seven headers, one blank line, and exact `MMX_SOL_WATCHER_BODY_V1` body.
+4. Replace the complete native task prompt on the same task ID. Preserve schedule, operation, carrier, and enabled state unless a separate terminal/duplicate ruling requires disabling.
+5. Read the task back immediately. Normalize only CRLF/lone-CR to LF and remove terminal newline characters, then compare byte-for-byte with renderer output.
+6. Any other difference—including BOM, spaces, tabs, header/body reorder, extra blank lines, comments, Markdown, examples, or appended prose—is `CANONICAL_PROMPT_MISMATCH`.
+7. If write response is lost or readback cannot establish the effect, classify `EFFECT_UNKNOWN`. Do not repeat the modification on another account and do not cross-account retry or fail over.
 
-After all native writes:
+Natural-language polarity is not a validity boundary. Renderer identity replaces synonym scanning. A non-authoritative watcher cannot gain child authority because there is no free-form body channel.
 
-1. re-export the current account task census;
-2. rerun `python3 scripts/audit_sol_watchers.py`;
-3. require exit `0` for enabled temporary Sol watchers and the export envelope;
-4. compare native watcher IDs and schedules before/after;
-5. identify every changed or disabled watcher ID;
-6. preserve any unresolved action-authority conflicts rather than forcing them green.
+Disable instead of replacing only when the task is terminal, duplicates another same-purpose watcher, has an irreconcilably wrong carrier, or lacks lawful current source. Disabling one child watcher must not disable a separate aggregate seat/principal watcher.
+
+## Step 5 — Re-export and prove convergence
+
+After account-local writes:
+
+1. re-export the account task census;
+2. rerun `python3 -m scripts.audit_sol_watchers`;
+3. require exit `0`;
+4. compare native IDs, schedules, roles, carriers, and enabled states before/after;
+5. list changed or disabled watcher IDs;
+6. preserve unresolved action-authority conflicts instead of forcing a green report.
 
 ## Required account receipt
 
-Each of the three ChatGPT accounts returns one receipt containing exactly:
+Each account returns:
 
 ```text
 ACCOUNT_WATCHER_HARDENING_RECEIPT
-account/surface identity: <pseudonymous exact account or approved surface identity>
+account/surface identity: <pseudonymous exact identity>
 export time: <UTC timestamp>
 protected Skillpack SHA: <40-hex>
 active watcher count: <integer>
-validator command/result: <command + exit status>
-watchers: <for each: id, title, role, operation key, carrier, valid/finding codes>
+validator command/result: <module command + exit status>
+watchers: <id, title, role, operation key, carrier, valid/finding codes>
 changed or disabled watcher IDs: <list or []>
 unresolved action-authority conflicts: <list or []>
-native readback proof: <bounded task-surface receipt>
+native readback proof: <bounded task-surface receipt + canonical prompt digest>
 ```
 
-Do not include credentials or raw provider-native handles. Watcher IDs are transport hot state, not
-Agent OS lifecycle authority.
+Do not include secrets or raw native handles. Watcher IDs are transport hot state, not Executive or Agent OS lifecycle authority.
 
 ## Three-account adverse canary
 
 Run only after all three account receipts are clean.
 
-### Canary A — one action target, two observers
+### Canary A — one authoritative action, two observers
 
-1. Bind one harmless watcher-enabled test child to an exact current Sol action target through the
-   accepted responsibility/action-target path.
-2. Make the same worker `DECISION_REQUEST` visible to all three Sol accounts.
-3. Require **one authoritative action** from the bound account and **two observer accounts** to
-   remain read-only.
-4. Prove exactly one same-carrier Sol edge, zero competing leaves, zero duplicate Wake, zero duplicate
-   Job and zero successor commission.
+1. Bind one harmless test child to one exact current Sol action target.
+2. Make one worker `DECISION_REQUEST` visible to all three accounts.
+3. Require **one authoritative action** from the bound account and **two observer accounts** to remain read-only.
+4. Prove exactly one same-carrier Sol edge, zero competing edges, zero duplicate Wake/Job, and zero successor commission.
 
-### Canary B — authoritative account unavailable
+### Canary B — unavailable authority
 
-1. Make the current action-authoritative account unavailable before it writes a semantic edge.
-2. Verify the two observers refuse to take over merely because they are responsive.
+1. Make the authoritative account unavailable before it writes.
+2. Verify observers refuse takeover merely because they are responsive.
 3. Perform canonical action-target transfer through the existing owner.
-4. Only after transfer, allow the newly resolved account to act.
-5. Prove timestamp order, newest tab and newest Slack responder never choose the replacement.
+4. Only the newly resolved account may act.
+5. Prove newest tab, account number, timestamp order, and newest Slack response never elect replacement authority.
 
-### Canary C — FF/FIF self-deadlock regression
+### Canary C — self-deadlock regression
 
-Present a fixture equivalent to:
+Present a fixture with worker `RESULT` or `DECISION_REQUEST`, worker waiting for Sol, current role `ACTION_AUTHORITATIVE`, and a decision inside current Chairman intent. The watcher must produce `SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER`; notification-only output fails.
 
-```text
-worker RESULT / REQUEST_CHANGES
-worker says it is waiting for Sol
-current watcher role = ACTION_AUTHORITATIVE
-findings are decidable inside current Chairman-authorized scope
-```
+### Canary D — exact prompt drift
 
-The watcher must produce `SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER`. Output equivalent to “Sol action
-required” or “waiting for Sol” fails as `NOTIFICATION_ONLY_SELF_DEADLOCK`.
+For every role, mutate one character, header order, body line, trailing space, internal blank line, Markdown quote, or appended “safe” prohibition. Require `CANONICAL_PROMPT_MISMATCH`. CRLF/lone-CR transport and terminal newline removal are the only accepted normalizations.
 
 ## Completion and rollback
 
 Account hardening is complete only when:
 
 - all three account receipts are present;
-- every enabled account-local temporary Sol watcher validates;
-- the adverse canary proves one authoritative action and two observer accounts;
-- no native task ID unexpectedly multiplied;
-- no action-authority conflict was hidden;
-- a real no-Chairman continuation canary succeeds.
+- every enabled temporary Sol watcher validates;
+- exact native readback matches renderer output;
+- one action-authoritative/two-observer canary passes;
+- no task ID unexpectedly multiplied;
+- no authority conflict is hidden;
+- one real no-Chairman continuation cycle succeeds.
 
-If a prompt repair makes a task unreadable or changes its operation/carrier identity, restore the
-previous prompt on the same native watcher ID where effect is known and safe. If native update effect
-is ambiguous, classify it `EFFECT_UNKNOWN`, do not repeat the update on another account, and reconcile
-the account-local task surface.
+If a known safe prompt replacement makes a task unreadable or changes identity, restore the previous prompt on the same task ID. If effect is ambiguous, preserve `EFFECT_UNKNOWN`, do not repeat elsewhere, and reconcile that account-local surface.
 
-Temporary prompt hardening remains transitional. Retire redundant Class-M watchers only after the
-canonical Agent Dialogue -> Wake -> exact RuntimeBinding/current writer -> acknowledgement/source-
-resolution path is production-proven for the corresponding responsibility.
+Temporary watchers remain transitional. Retire them only after the canonical Agent Dialogue -> Wake -> exact RuntimeBinding/current writer -> acknowledgement/source-resolution path is production-proven for that responsibility.
