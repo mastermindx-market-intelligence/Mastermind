@@ -20,7 +20,7 @@ state.
 2. This design and its normative contract.
 3. Existing protected Executive Runtime, Agent Dialogue, RuntimeBinding, Wake, WP-3, and AD-DLG2
    owners.
-4. Protected ORION R2 and RET2 contracts when they exist.
+4. The already-started ORION R2 terminal-to-Relay operation.
 5. PR #357 only as a partial consumer; it grants no authority to fill missing sources.
 
 ## Non-goals
@@ -31,7 +31,8 @@ state.
 - no direct Relay access to Executive SQLite;
 - no second Agent Relay daemon, Wake ledger, cursor, inbox, queue, retry, or provider process;
 - no target arming, listener install, credential, host action, or canary in P0;
-- no terminal observation before RET2 projection evidence exists.
+- no terminal observation before the existing ORION R2 projection evidence is protected;
+- no parallel RET2 terminal-projection operation.
 
 ## Dependency gates
 
@@ -41,10 +42,11 @@ The existing ORION R2 carrier must protect its admission-owned commission/dialog
 candidate-keyed Runtime resolver. Until then `ACTIVE_CURRENT_WORKER` remains held. Do not create a
 parallel parent-binding event in W3C.
 
-### Gate B - RET1 and RET2
+### Gate B - RET1 and existing ORION R2 terminal projection
 
-RET1 is protected. RET2 must protect one immutable parent/message/result projection receipt with
-known effect. Until then `TERMINAL_RESULT` remains held.
+RET1 is protected. The already-started ORION R2 operation must protect one immutable
+parent/message/result projection receipt with known `APPLIED` effect. Until then
+`TERMINAL_RESULT` remains held. Do not mint a second terminal projection carrier.
 
 ### Gate C - dedicated listener
 
@@ -122,14 +124,15 @@ observer while continuing to serve V1/V2 AF_UNIX calls.
 
 **Stop:** built-not-proven/default-disarmed; no live target.
 
-## Wave RET2 - terminal RESULT projection
+## Existing ORION R2 - terminal RESULT projection
 
 **Observable capability:** one exact terminal Runtime candidate produces one Relay-owned immutable
 RESULT frame and one effect-known projection receipt, with complete reread and no blind resend.
 
-**Owner boundary:** continue the existing ORION return/dialogue carrier architecture. Do not put
-Slack posting into Executive Runtime and do not add an outbox. Persist projection attempt/effect in
-the existing Event plane owned by the current R2 architecture.
+**Owner boundary:** continue `ad-ret1-terminal-return-transport-r2-20260830-orion-001` on its exact
+native task and preserved effect. Do not put Slack posting into Executive Runtime, add an outbox, or
+mint a parallel RET2 operation. Persist projection attempt/effect in the existing Event plane owned
+by the current R2 architecture.
 
 **Required receipt fields:** parent fingerprint, operation/session, root/job/attempt/worker,
 message key/fingerprint, terminal/result digests, projection receipt digest, and effect state.
@@ -143,22 +146,22 @@ Raw message body and provider/private identity are excluded.
 - pre-submit refusal may retry only under existing bounded law;
 - post-submit uncertainty is effect-unknown and never resent/fails over;
 - restart reconciles complete Slack history before any action;
+- recovery may establish the canonical `APPLIED` state but never invents `RECOVERED`;
 - Slack outage leaves terminal truth intact and projection pending/unknown;
 - no Wake acknowledgement/source resolution invented.
 
 ## Wave P3 - terminal observation extension
 
-Extend the same P1 resolver and listener. A terminal response is valid only for an exact RET2
-`APPLIED` receipt. Recovery may prove the exact projection and result in `APPLIED`; it is not a
-second state. `ATTEMPTED`/`EFFECT_UNKNOWN`/missing/conflicting projection remains UNKNOWN/HELD with
-zero candidate.
+Extend the same P1 resolver and listener. A terminal response is valid only for an exact ORION R2
+`APPLIED` receipt. `ATTEMPTED`/`EFFECT_UNKNOWN`/missing/conflicting projection remains UNKNOWN/HELD
+with zero candidate.
 
 The active and terminal reducers must be separate closed branches. Tests must mutate a BUSY active
 worker into a terminal result and a completed terminal result into an active worker; both refuse.
 
 ## Wave P4 - one-target canary
 
-**Prerequisites:** P1/P2/RET2/P3 protected, Agent Relay host healthy, one exact current Codex writer,
+**Prerequisites:** P1/P2/R2/P3 protected, Agent Relay host healthy, one exact current Codex writer,
 Wake target default-off except the disposable route, ACK1 protected and production gates explicit.
 
 **Journey:**
@@ -178,6 +181,6 @@ failover, Chairman message shuttle, title/account/time routing.
 
 - P0 records: authorized by current Chairman continuation.
 - P1/P2/P3/P4: not authorized by P0.
-- RET2: separate fresh operation after RET1 protection.
+- Existing ORION R2: already STARTED on its preserved exact-session carrier; P0 creates no new child.
 - PR #357: remains DRAFT/HOLD until P0 predecessors and implementation gates close.
 - Capability after P0 merge: `SPEC_ONLY / PRODUCTION_INERT`.
