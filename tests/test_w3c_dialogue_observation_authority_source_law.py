@@ -45,7 +45,7 @@ def _validate(document: dict[str, object]) -> None:
     assert "CURRENT_RUNTIME_BINDING" in active["required_facts"]
     assert "WORKER_DIALOGUE_CALLER_REPLAY" in active["forbidden_substitutes"]
     assert "RET2_PROJECTION_EFFECT_KNOWN" in terminal["required_facts"]
-    assert terminal["accepted_projection_effects"] == ["APPLIED", "RECOVERED"]
+    assert terminal["accepted_projection_effects"] == ["APPLIED"]
     assert "SLACK_RESULT_TEXT_ALONE" in terminal["forbidden_substitutes"]
     assert "EFFECT_UNKNOWN_PROJECTION" in terminal["forbidden_substitutes"]
 
@@ -241,6 +241,13 @@ def test_false_support_mutations_are_detected() -> None:
         "SLACK_RESULT_TEXT_ALONE"
     )
     mutations.append(terminal_slack)
+
+    invented_recovered = copy.deepcopy(base)
+    invented_recovered["modes"]["TERMINAL_RESULT"]["accepted_projection_effects"] = [
+        "APPLIED",
+        "RECOVERED",
+    ]
+    mutations.append(invented_recovered)
 
     effect_unknown = copy.deepcopy(base)
     effect_unknown["mode_non_interchangeability"]["effect_unknown_terminal_is"] = "RESOLVED"
