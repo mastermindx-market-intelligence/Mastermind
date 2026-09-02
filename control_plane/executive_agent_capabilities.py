@@ -486,6 +486,15 @@ def app_server_security_config_projection(
         plugin_projection = {"__invalid__": True}
 
     skill_config = skills.get("config") if isinstance(skills, Mapping) else None
+    skills_block: dict[str, object] = {
+        "config": list(skill_config) if isinstance(skill_config, list) else None
+    }
+    if isinstance(skills, Mapping) and "bundled" in skills:
+        bundled = skills.get("bundled")
+        skills_block["bundled"] = {
+            "enabled": bundled.get("enabled") if isinstance(bundled, Mapping) else None
+        }
+
     if isinstance(agents, Mapping) and agents.get("enabled") is True:
         agent_projection: dict[str, object] = {
             key: agents.get(key) for key in _AGENT_SECURITY_KEYS
@@ -509,9 +518,7 @@ def app_server_security_config_projection(
         },
         "mcp_servers": projected_servers,
         "plugins": plugin_projection,
-        "skills": {
-            "config": list(skill_config) if isinstance(skill_config, list) else None
-        },
+        "skills": skills_block,
     }
 
 

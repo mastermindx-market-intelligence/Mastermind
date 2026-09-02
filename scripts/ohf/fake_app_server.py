@@ -36,6 +36,7 @@ class FakeAppServer:
         self.skills_malformed_enabled = os.environ.get("OHF_FAKE_SKILLS_MALFORMED_ENABLED") or ""
         self.ambient_skill = os.environ.get("OHF_FAKE_AMBIENT_SKILL") or ""
         self.skills_changed_notify = os.environ.get("OHF_FAKE_SKILLS_CHANGED") == "1"
+        self.bundled_disabled = os.environ.get("OHF_FAKE_BUNDLED_DISABLED") == "1"
         self.native_helper = os.environ.get("OHF_FAKE_NATIVE_HELPER") == "1"
         self.native_helper_depth = int(
             os.environ.get("OHF_FAKE_NATIVE_HELPER_DEPTH") or "1"
@@ -498,20 +499,20 @@ class FakeAppServer:
                     "max_concurrent_threads_per_session": 2,
                     "non_code_mode_only": False,
                 }
-            self._ok(
-                request_id,
-                {
-                    "config": {
-                        "model": self.model,
-                        "approval_policy": "never",
-                        "sandbox_mode": "read-only",
-                        "agents": agents,
-                        "features": features,
-                        "mcp_servers": {name: {"command": "python3"} for name in mcp},
-                        "plugins": {},
-                    }
-                },
-            )
+            config: dict[str, Any] = {
+                "model": self.model,
+                "approval_policy": "never",
+                "sandbox_mode": "read-only",
+                "agents": agents,
+                "features": features,
+                "mcp_servers": {name: {"command": "python3"} for name in mcp},
+                "plugins": {},
+            }
+            if self.bundled_disabled:
+                skills_config = dict(config.get("skills") or {})
+                skills_config["bundled"] = {"enabled": False}
+                config["skills"] = skills_config
+            self._ok(request_id, {"config": config})
             return
         if method == "mcpServerStatus/list":
             if not self.include_mcp:

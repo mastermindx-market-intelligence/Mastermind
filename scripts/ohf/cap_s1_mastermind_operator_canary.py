@@ -540,6 +540,12 @@ def run_canary(
             # fake App Server's OHF-probe MCP fixture is unrelated to CAP-S1
             # and must not appear in the observed config/mcp surface.
             "OHF_FAKE_MCP_GONE": "1",
+            # This profile carries V4 Skill grants, so its
+            # ``expected_config_digest`` requires ``skills.bundled.enabled=
+            # false`` on ``config/read`` (protocol amendment §5). The fake
+            # App Server double must echo that block for the config-digest
+            # attestation gate to close.
+            "OHF_FAKE_BUNDLED_DISABLED": "1",
         }
 
     schema = attest_protocol_schema(
@@ -595,16 +601,21 @@ def run_canary(
         app_server_argv=adapter_argv,
         app_server_config_overrides=profile.app_server_config_overrides(),
         expected_harness_version=harness_version,
-        # Not attested here: the observed-config projection helper
-        # (``app_server_security_config_projection``) and the policy-config
-        # projection helper (``ExecutionCapabilityProfile.
-        # app_server_config_projection``) disagree on the ``skills`` shape
-        # for any V4 skill-grant profile (the observed side never emits a
-        # ``bundled`` key). The adapter's own skill-canary test harness
-        # (``tests/test_codex_operator_adapter.py::_make_skill_harness``)
-        # leaves ``expected_config_digest`` unset for exactly this reason;
-        # this runner matches that precedent rather than re-deriving a
-        # digest comparison neither side can satisfy.
+        # Config-digest attestation gate (protocol amendment §5): the
+        # observed-config projection helper
+        # (``app_server_security_config_projection``) now observes
+        # ``skills.bundled`` the same way the policy-config projection
+        # helper (``ExecutionCapabilityProfile.app_server_config_projection``)
+        # emits it, so this V4 skill-grant profile's own
+        # ``expected_config_digest`` is attestable and the gate is armed
+        # for real. The fake backend's App Server double echoes the
+        # matching ``bundled`` block (``OHF_FAKE_BUNDLED_DISABLED=1``,
+        # set below); the live backend's real binary is launched with the
+        # profile's overrides regardless, and whether it echoes the
+        # ``bundled`` table back on ``config/read`` is phase-13 evidence
+        # for Sol -- an honest CONFIG_DRIFT refusal there is the correct
+        # outcome, never special-cased away here.
+        expected_config_digest=profile.expected_config_digest,
         network_policy="disabled",
         base_sha_resolver=lambda _path: _CANARY_BASE_SHA,
         client_factory=client_factory,
@@ -639,6 +650,7 @@ def run_canary(
             required=manifest.required, unclassified_policy="lab_allow_unclassified_readonly"
         ),
         native_helper_policy=NativeHelperPolicy.DISABLED,
+        expected_config_digest=profile.expected_config_digest,
         authority_policy_hash=_CANARY_AUTHORITY_POLICY_HASH,
     )
 
