@@ -32,8 +32,14 @@ AGENT_OS gather adapter (sole I/O)
 -> immutable mastermind.operation_assurance_report.v1
 ```
 
-The mandatory Steward step is real, not decorative: the seam presents every gathered fact to the
-EXISTING `control_plane/executive_steward.py` snapshot composition, and the compiler consumes
+The mandatory Steward step is real, not decorative: the seam presents every gathered WORKSTREAM
+fact (`agentos.workstream.v1` — exactly one `ResponsibilityFact` per `WS:<KEY>` identity, with
+`source_owner=AGENT_OS`, the only owner the real API admits for that family) to the EXISTING
+`control_plane/executive_steward.py` snapshot composition. Handoff records (`agentos.handoff.v1`)
+are NEVER presented to the Steward — the real API has no lawful home for them, and presenting them
+as duplicate `WS:`-keyed facts would force `ambiguous_responsibility_join` refusals; they are
+gathered as evidence-only facts that feed coverage, supersession, and receipt context alongside
+the Steward result. The compiler consumes
 (a) the Steward result for identity grouping, currentness/degradation classification, and
 source-failure semantics, and (b) the exact owner-native wave/dependency fields of only those
 records the Steward composition accepted. The compiler performs ZERO identity resolution,
@@ -82,6 +88,19 @@ attestation; and the Steward's own `SourceOwner.AGENT_OS` fact family is the des
 exactly this owner. Frontmatter in these records is validated machine schema (`scripts/agentos.py
 validate` in the owning repository), not prose — the record BODY (human truth) is never parsed.
 
+Owner-seat derivation (closed grammar, not prose interpretation): the workstream `owner` field is
+a schema-noted accountable-seat string; the adapter derives the Steward `Seat` enum value by
+matching the closed token grammar `\((CHAIRMAN|CEO|COO|WORKER) seat\)` (case-insensitive on the
+token) against that string. Exactly one match is required; zero or multiple matches make the
+record an explicit `SOURCE_PARTIAL` fact — the seat is never guessed from free prose.
+
+Freshness derivation (closed, and deliberately humble): the AGENT_OS adapter ALWAYS emits
+`Freshness.UNKNOWN` for every fact — never `CURRENT` — because no accepted attestation capability
+exists that could establish semantic currentness from Agent-OS-only evidence. The existing Steward
+composition then mechanically raises its non-current/degraded issues for every fact, so every
+compiled model carries explicit non-current applicability by construction; nothing downstream can
+launder schema validity into currentness.
+
 Attestation and time law:
 - the pinned `revision` MUST be the full canonical SHA of the Agent OS repository commit actually
   read; the adapter records how it resolved that revision;
@@ -126,22 +145,32 @@ model):** starvation-under-declared-fairness and fairness realizability (a snaps
 scheduler/fairness assumptions), recurring-progress validity (unless a wave declares a recurring
 wait), retry/effect-unknown semantics, and runtime lifecycle conformance.
 
-**Proof ceiling (loud and binding):** a compiled workstream snapshot is never proof-eligible —
-its abstraction fidelity is declared non-exact, so the protected A1 fences cap every report at
+**Proof ceiling (loud, binding, and MECHANIZED):** the compiler MUST emit
+`abstraction_contract.kind = "SOUND_OVERAPPROXIMATION"` in every compiled model and MUST NOT emit
+`"DECLARED_EXACT"`; the protected A1 fence (`_fidelity_proof_eligible` in the checker, duplicated
+in the report validator) then mechanically forecloses proof — an enforced input contract, not a
+promise about builder behavior. Every report from this vertical is therefore capped at
 `UNSAFE_COUNTEREXAMPLE` / `BOUNDED_NO_COUNTEREXAMPLE` / `INCONCLUSIVE_MODEL_GAP`. This vertical
 DETECTS organizational black holes (a `NO_PROGRESS` wave with no dependency, wait, or next action
 yields a real witness); it never mints `PROVEN_WITHIN_FINITE_MODEL` for a live workstream.
 
 ## 6. Hostile fixture (frozen): the CURRENT stale revision
 
-The Agent OS revision current at this design's repair is itself the named hostile
-stale/coverage-incomplete case: `WS:OPERATION-ASSURANCE`'s durable `next_action` still names
-predecessor-era state (the fable-002 wave) while the fable-003 operation is active. The
-implementation MUST use that exact pinned revision as the negative fixture — expected outcome:
-explicit staleness/conflict-aware inapplicability signals, never a healthy compile presented as
-current. The positive end-to-end proof MUST use a later corrected, schema-valid pinned revision
+The hostile stale/coverage-incomplete fixture is pinned to the exact Agent OS (Macro repository)
+revision `a3f6ef40d41e6d308c8d8cdc35f76802cd0525e4`, whose `WS:OPERATION-ASSURANCE` record's
+durable `next_action` still names predecessor-era state (the fable-002 wave) while the fable-003
+operation is active. The implementation MUST use that exact full-SHA revision as the negative
+fixture — expected outcome (mechanical under the Section 4 freshness rule): every fact carries
+`Freshness.UNKNOWN`, the Steward result carries its degraded/non-current issues, and the compiled
+model's applicability is explicitly non-current — never a healthy compile presented as current. The positive end-to-end proof MUST use a later corrected, schema-valid pinned revision
 (landed through the Agent OS owner's own lawful process — not mutated by this repair). Schema
 validity is never laundered into semantic currentness.
+
+Collision review (reconciliation §5 gate 6, discharged): the fable-002/003 census and branch-diff
+review found no newer owner supplying a compiled operation-assurance model contract; the CCL-A2
+Chairman-cognition composer is a different schema family and consumer
+(`chairman_cognition_input`, not `operation_assurance_model`) and is cited here only as
+receipt-shape precedent.
 
 ## 7. Trust ceiling (unchanged, restated as binding on A2)
 

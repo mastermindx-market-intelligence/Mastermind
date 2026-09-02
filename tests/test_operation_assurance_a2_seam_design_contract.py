@@ -5,6 +5,7 @@ an imaginary predecessor wire is cited as protected, fidelity/currentness is pro
 property subset becomes unconstrained.
 """
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,11 +81,19 @@ def test_source_facts_wire_is_defined_here_not_claimed_protected() -> None:
 
 def test_property_subset_is_frozen_and_proof_ceiling_is_honest() -> None:
     text = _text()
-    for prop in SUPPORTED_PROPERTIES:
-        assert f"`{prop}`" in text, f"missing supported property {prop}"
+    raw = DESIGN.read_text(encoding="utf-8")
+    supported_block = raw.split("Supported property subset (frozen, exact):", 1)[1].split(
+        "**Unsupported", 1
+    )[0]
+    declared = set(re.findall(r"`([A-Z][A-Z0-9_]+)`", supported_block))
+    assert declared == set(SUPPORTED_PROPERTIES), (
+        f"supported-property closure violated: {sorted(declared)}"
+    )
     assert "Unsupported in this vertical (each an explicit load-bearing model gap" in text
     assert "starvation-under-declared-fairness" in text
-    assert "never proof-eligible" in text
+    assert 'abstraction_contract.kind = "SOUND_OVERAPPROXIMATION"' in text
+    assert 'MUST NOT emit `"DECLARED_EXACT"`' in text
+    assert "`_fidelity_proof_eligible` in the checker" in text
     assert "never mints `PROVEN_WITHIN_FINITE_MODEL` for a live workstream" in text
     assert "compiler-template behavior grounded in exact record fields" in text
     assert "never presented as owner-attested runtime fact" in text
@@ -97,14 +106,26 @@ def test_attestation_time_and_correction_law_is_closed() -> None:
     assert "ONE `observed_at` cutoff covers the entire gather" in text
     assert "Corrections are immutable and append-only" in text or "corrections are immutable and append-only" in text
     assert "Agent-OS-only evidence can never yield whole-operation currentness" in text
-    assert "REPORT_ONLY_PROCEED" in text  # named exactly once, as non-existent
+    assert text.count("REPORT_ONLY_PROCEED") == 1, "REPORT_ONLY_PROCEED may appear exactly once, as non-existent"
     assert "the value does not exist in the protected wire" in text
 
 
-def test_hostile_fixture_is_the_current_stale_revision() -> None:
+def test_seat_and_freshness_derivation_rules_are_closed() -> None:
     text = _text()
-    assert "itself the named hostile stale/coverage-incomplete case" in text
+    assert "closed token grammar" in text
+    assert "(CHAIRMAN|CEO|COO|WORKER) seat" in text
+    assert "the seat is never guessed from free prose" in text
+    assert "ALWAYS emits `Freshness.UNKNOWN` for every fact — never `CURRENT`" in text
+    assert "nothing downstream can launder schema validity into currentness" in text
+    assert "Handoff records (`agentos.handoff.v1`) are NEVER presented to the Steward" in text
+    assert "evidence-only facts" in text
+
+
+def test_hostile_fixture_is_sha_pinned_and_mechanical() -> None:
+    text = _text()
+    assert "a3f6ef40d41e6d308c8d8cdc35f76802cd0525e4" in text
     assert "durable `next_action` still names predecessor-era state" in text
+    assert "expected outcome (mechanical under the Section 4 freshness rule)" in text
     assert "later corrected, schema-valid pinned revision" in text
     assert "Schema validity is never laundered into semantic currentness" in text
 
