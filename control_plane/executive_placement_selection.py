@@ -335,6 +335,23 @@ _CLOSURE_SOURCE_OWNERS: tuple[SourceOwner, ...] = (
 def _require_source_owner(
     source: object, allowed: tuple[SourceOwner, ...], fact_name: str
 ) -> SourceRef:
+    """THE typed ``SourceRef`` gate — owner authority AND the token law.
+
+    Review 5086941171 BLOCKER 1: this previously checked only type and
+    owner, so :class:`CandidateEvidence` (its only other caller) validated
+    strictly less than :class:`PlacementCandidateFact` and the wire
+    validator, both of which also token-check ``.ref`` and a present
+    ``.observed_at``. The Steward's own ``SourceRef`` admits non-whitespace
+    ``@``/``/`` values, so a directly constructed evidence row could
+    serialize a source value THIS module's wire validator then rejects —
+    the same construct-but-cannot-revalidate asymmetry that already cost a
+    genuine decision once.
+
+    Centralizing all three checks here is what makes the typed and wire
+    forms provably agree: every typed construction path now runs exactly
+    this function, and the wire path runs the same ``_require_token`` over
+    the same two fields.
+    """
     if not isinstance(source, SourceRef):
         raise TypeError(f"{fact_name} must be SourceRef")
     if source.owner not in allowed:
@@ -342,6 +359,12 @@ def _require_source_owner(
             raise ValueError(f"{fact_name} owner must be {allowed[0].value}")
         values = ", ".join(owner.value for owner in allowed)
         raise ValueError(f"{fact_name} owner must be one of: {values}")
+    _require_token(f"{fact_name}.ref", source.ref)
+    # `observed_at` is optional ONLY under UNKNOWN freshness (SourceRef
+    # requires it for current/stale), so a null is legitimate and must stay
+    # accepted; a PRESENT value obeys the same token law as every other.
+    if source.observed_at is not None:
+        _require_token(f"{fact_name}.observed_at", source.observed_at)
     return source
 
 
@@ -477,24 +500,11 @@ class PlacementCandidateFact:
         # candidate could construct cleanly yet produce a decision whose
         # own to_dict() output FAILS validate_placement_selection, breaking
         # the closed round-trip this module promises everywhere else.
-        _require_token("occupancy_source.ref", self.occupancy_source.ref)
-        _require_token("capacity_source.ref", self.capacity_source.ref)
-        _require_token("closure_source.ref", self.closure_source.ref)
-        # Exact-head review: the SAME closure was missing for `observed_at`.
-        # SourceRef permits "@"/"/" there, but `_validate_source_ref_dict`
-        # token-checks it — so a candidate could construct cleanly and then
-        # produce a decision whose own to_dict() FAILED this module's
-        # validator, and the real Control Room dropped a genuine decision
-        # into `degraded`. That is the exact failure the .ref checks above
-        # exist to prevent; this completes it. `observed_at` is optional, so
-        # only a present value is checked.
-        for _name, _source in (
-            ("occupancy_source", self.occupancy_source),
-            ("capacity_source", self.capacity_source),
-            ("closure_source", self.closure_source),
-        ):
-            if _source.observed_at is not None:
-                _require_token(f"{_name}.observed_at", _source.observed_at)
+        # `.ref`/`.observed_at` token checks now live in
+        # `_require_source_owner` (review 5086941171 BLOCKER 1), which every
+        # `_require_source_owner(...)` call above already ran for all three
+        # sources — so PlacementCandidateFact, CandidateEvidence and the wire
+        # validator cannot drift apart again.
         # Reviewer M-1/M-2: eagerly enforce the Phase-B snapshot contract's
         # own canonical regexes (executive_orchestration_principal._ID_RE /
         # _PROVIDER_RE / _ACCOUNT_RE) at CONSTRUCTION time, on every

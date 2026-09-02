@@ -2565,3 +2565,130 @@ def test_a_decision_cannot_carry_a_terminal_escape_in_a_source_ref(escape):
         eps.validate_placement_selection(payload)
     # the token law, not the provenance gate
     assert "must be a non-empty token" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# review 5086941171 BLOCKER 1 — CandidateEvidence's SourceRef token asymmetry
+#
+# PlacementCandidateFact validates owner + `.ref` + non-null `.observed_at`,
+# and the wire validator does the same. CandidateEvidence only ran
+# `_require_source_owner`, which checks type and owner but NEITHER token
+# field — so a directly constructed evidence row could serialize a source
+# value this module's own wire validator then refuses.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "field, owner",
+    [
+        ("occupancy_source", SourceOwner.RUNTIME_BINDING),
+        ("capacity_source", SourceOwner.CAPACITY),
+        ("closure_source", SourceOwner.CAPACITY),
+    ],
+)
+@pytest.mark.parametrize("bad", ["has/slash", "has@at", "has\\back", "esc\x1b[31m"])
+def test_candidate_evidence_applies_the_token_law_to_source_ref(field, owner, bad):
+    with pytest.raises(ValueError):
+        _evidence(**{field: SourceRef(
+            owner=owner, ref=bad,
+            observed_at="2026-09-01T00:00:00Z", freshness=Freshness.CURRENT,
+        )})
+
+
+@pytest.mark.parametrize(
+    "field, owner",
+    [
+        ("occupancy_source", SourceOwner.RUNTIME_BINDING),
+        ("capacity_source", SourceOwner.CAPACITY),
+        ("closure_source", SourceOwner.CAPACITY),
+    ],
+)
+@pytest.mark.parametrize("bad", ["2026-09-01T00:00:00Z/run", "2026-09-01T00:00:00Z@host"])
+def test_candidate_evidence_applies_the_token_law_to_source_observed_at(field, owner, bad):
+    with pytest.raises(ValueError):
+        _evidence(**{field: SourceRef(
+            owner=owner, ref="ref-a", observed_at=bad, freshness=Freshness.CURRENT,
+        )})
+
+
+def test_candidate_evidence_still_accepts_a_null_observed_at_under_unknown_freshness():
+    """The token law applies to a PRESENT observed_at only — `SourceRef`
+    legitimately allows `None` when freshness is UNKNOWN, and tightening
+    must not turn that into a refusal."""
+    assert _evidence(capacity_source=SourceRef(
+        owner=SourceOwner.CAPACITY, ref="ref-a",
+        observed_at=None, freshness=Freshness.UNKNOWN,
+    )) is not None
+
+
+# ---------------------------------------------------------------------------
+# review 5086941171 BLOCKER 2 — unmasked source-freshness discriminators
+#
+# `_first_exclusion_reason` gate order is: CONTRADICTORY, EFFECT_UNKNOWN,
+# occupancy STALE, occupancy UNKNOWN, capacity STALE, capacity UNKNOWN,
+# capacity_state UNKNOWN, ... Each case below therefore keeps every EARLIER
+# gate clean, so the gate under test is the one that actually fires — the
+# previous stale-occupancy case was masked by EFFECT_UNKNOWN and proved
+# nothing about the stale gate.
+# ---------------------------------------------------------------------------
+
+def _sole_exclusion(**candidate_kwargs):
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=_demand(),
+        candidates=(_candidate(worker_id="worker-a", **candidate_kwargs),),
+    )
+    assert len(decision.exclusions) == 1
+    return decision, decision.exclusions[0].reason
+
+
+def test_stale_occupancy_source_is_excluded_unmasked():
+    decision, reason = _sole_exclusion(
+        occupancy_freshness=Freshness.STALE,
+        # every EARLIER gate deliberately clean
+        occupancy=eps.OccupancyState.FREE, effect_state=EffectState.NONE,
+    )
+    assert reason is eps.ExclusionReason.STALE_OCCUPANCY_FACT
+    assert decision.state is eps.SelectionState.STALE_EVIDENCE
+
+
+def test_unknown_occupancy_source_freshness_is_excluded_unmasked():
+    decision, reason = _sole_exclusion(
+        occupancy_freshness=Freshness.UNKNOWN,
+        occupancy=eps.OccupancyState.FREE, effect_state=EffectState.NONE,
+    )
+    assert reason is eps.ExclusionReason.UNKNOWN_FRESHNESS
+    assert decision.state is eps.SelectionState.STALE_EVIDENCE
+
+
+def test_unknown_capacity_source_freshness_is_excluded_unmasked():
+    decision, reason = _sole_exclusion(
+        capacity_freshness=Freshness.UNKNOWN,
+        # occupancy gates all clean so the CAPACITY-source gate is what fires
+        occupancy_freshness=Freshness.CURRENT,
+        occupancy=eps.OccupancyState.FREE, effect_state=EffectState.NONE,
+    )
+    assert reason is eps.ExclusionReason.UNKNOWN_FRESHNESS
+    assert decision.state is eps.SelectionState.STALE_EVIDENCE
+
+
+def test_stale_capacity_source_is_excluded_unmasked():
+    decision, reason = _sole_exclusion(
+        capacity_freshness=Freshness.STALE, occupancy_freshness=Freshness.CURRENT,
+        occupancy=eps.OccupancyState.FREE, effect_state=EffectState.NONE,
+    )
+    assert reason is eps.ExclusionReason.STALE_CAPACITY_FACT
+    assert decision.state is eps.SelectionState.STALE_EVIDENCE
+
+
+def test_freshness_discriminators_are_not_masked_by_an_earlier_gate():
+    """Guards the masking failure itself: with EFFECT_UNKNOWN present the
+    stale-occupancy reason is NOT reported, which is exactly why the old
+    stale case proved nothing. If a future edit reorders the gates so the
+    freshness cases stop being reachable, this pins the difference."""
+    _, masked = _sole_exclusion(
+        occupancy_freshness=Freshness.STALE, effect_state=EffectState.EFFECT_UNKNOWN,
+    )
+    assert masked is eps.ExclusionReason.EFFECT_UNKNOWN
+    _, unmasked = _sole_exclusion(
+        occupancy_freshness=Freshness.STALE, effect_state=EffectState.NONE,
+    )
+    assert unmasked is eps.ExclusionReason.STALE_OCCUPANCY_FACT

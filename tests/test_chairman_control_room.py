@@ -1535,3 +1535,183 @@ def test_compose_still_renders_a_genuine_two_candidate_selection_verbatim(
     assert doc["placement_selection"] == wire
     assert not _placement_degraded(doc)
     assert doc["placement_selection"]["selection_is_commitment"] is False
+
+
+# ---------------------------------------------------------------------------
+# review 5086941171 BLOCKER 3 — cold vs warm live-cache placement parity
+#
+# `_compose_state_doc()` passes `placement_selection_path` into
+# `ccr.build_control_room()`. Once the live active-build cache is populated
+# it instead calls `_compose_with_live_active_builds()`, which gathered
+# everything else but never read the placement facts and never passed a
+# `placement_selection=` argument — so the SAME configured C1 input silently
+# disappeared from /api/state, with no placement degradation either.
+# ---------------------------------------------------------------------------
+
+from scripts import chairman_control_room as server_mod  # noqa: E402
+
+
+def _server_config(tmp_path, facts_path=None):
+    return server_mod.ServerConfig(
+        repo_root=tmp_path, macro_root=None, bindings_path=tmp_path / "bindings.json",
+        token="t", origin="http://localhost", port=0,
+        placement_selection_path=facts_path,
+    )
+
+
+def _stub_gather(monkeypatch, boot_packet, inbox, bindings):
+    """Pin every gather call BOTH composition paths make, so a cold-vs-warm
+    difference can only come from the placement seam itself."""
+    monkeypatch.setattr(server_mod.ceo_boot_packet, "build_packet",
+                        lambda **kw: boot_packet)
+    monkeypatch.setattr(server_mod.executive_inbox, "build_inbox",
+                        lambda **kw: inbox)
+    monkeypatch.setattr(server_mod.ccr, "_read_agent_os_state", lambda root: (None, None))
+    monkeypatch.setattr(server_mod.ccr, "_read_runtime_jobs", lambda root: (None, None))
+    monkeypatch.setattr(server_mod.sb, "load_bindings", lambda path: (bindings, ()))
+
+
+def _warm_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds):
+    _stub_gather(monkeypatch, boot_packet, inbox, bindings)
+    config = _server_config(tmp_path, facts_path)
+    return server_mod._compose_with_live_active_builds(
+        config, active_builds, "2026-09-02T00:00:00Z",
+    )
+
+
+def _cold_doc(facts_path, boot_packet, inbox, bindings, active_builds):
+    """The cold path's placement contract, expressed exactly as
+    build_control_room() applies it."""
+    placement, failure = ccr._read_placement_selection(facts_path)
+    doc = ccr.compose_control_room(
+        inbox=inbox, boot_packet=boot_packet, active_builds=active_builds,
+        agent_os_state=None, runtime_jobs=None, bindings=bindings,
+        binding_problems=(), generated_at="2026-09-02T00:00:00Z",
+        placement_selection=placement,
+    )
+    if failure:
+        doc = dict(doc)
+        doc["degraded"] = sorted(list(doc["degraded"]) + [f"placement_selection: {failure}"])
+    return doc
+
+
+@pytest.mark.parametrize(
+    "responsibility_state, expected_state",
+    [
+        ("waiting_capacity", "selected"),
+    ],
+)
+def test_warm_cache_path_renders_the_same_placement_selection_as_cold(
+    monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings,
+    responsibility_state, expected_state,
+):
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(
+        json.dumps(_facts_document(responsibility_state=responsibility_state)),
+        encoding="utf-8",
+    )
+    warm = _warm_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds)
+    cold = _cold_doc(facts_path, boot_packet, inbox, bindings, active_builds)
+
+    assert cold["placement_selection"] is not None
+    assert cold["placement_selection"]["state"] == expected_state
+    # THE parity assertion: a populated live cache must not drop the section
+    assert warm["placement_selection"] == cold["placement_selection"]
+    assert [d for d in warm["degraded"] if d.startswith("placement_selection:")] == \
+           [d for d in cold["degraded"] if d.startswith("placement_selection:")]
+
+
+def test_warm_cache_path_degrades_a_malformed_facts_document_like_cold(
+    monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings,
+):
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text("{not json", encoding="utf-8")
+    warm = _warm_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds)
+    cold = _cold_doc(facts_path, boot_packet, inbox, bindings, active_builds)
+
+    assert warm["placement_selection"] is None
+    warm_rows = [d for d in warm["degraded"] if d.startswith("placement_selection:")]
+    cold_rows = [d for d in cold["degraded"] if d.startswith("placement_selection:")]
+    assert warm_rows == cold_rows
+    assert warm_rows, "a configured but unreadable facts document must degrade by name"
+    # value-free: neither the path nor the file body may be echoed
+    assert "not json" not in json.dumps(warm, sort_keys=True)
+    assert str(facts_path) not in json.dumps(warm, sort_keys=True)
+
+
+def test_warm_cache_path_composes_no_placement_section_when_unconfigured(
+    monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings,
+):
+    """An unconfigured path stays a true no-op on BOTH paths — no section
+    and no degraded row, so this repair cannot become a false alarm."""
+    warm = _warm_doc(monkeypatch, tmp_path, None, boot_packet, inbox, bindings, active_builds)
+    assert warm["placement_selection"] is None
+    assert not [d for d in warm["degraded"] if d.startswith("placement_selection:")]
+
+
+def test_server_config_placement_path_is_actually_read_by_the_warm_path(
+    monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings,
+):
+    """Passthrough pin: dropping `config.placement_selection_path` from the
+    warm seam, or hard-coding a state, must fail. The configured document
+    yields `reconciliation_required` — a state no default could invent."""
+    facts = _facts_document()
+    facts["candidates"] = [facts["candidates"][0], dict(facts["candidates"][0])]
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(facts), encoding="utf-8")
+    warm = _warm_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds)
+    assert warm["placement_selection"] is not None
+    assert warm["placement_selection"]["state"] == "reconciliation_required"
+
+
+# ---------------------------------------------------------------------------
+# review 5086941171 BLOCKER 4 — selector present, steward absent
+# ---------------------------------------------------------------------------
+
+def test_module_boots_with_selector_present_but_steward_absent(tmp_path):
+    """The ASYMMETRIC packaging case the existing regression never covered.
+
+    `_optional_control_plane_module` caught `ModuleNotFoundError` only around
+    `find_spec`. With the selector shipped and the steward absent, the
+    selector's own spec resolves fine, `import_module` then runs the
+    selector's static `from control_plane.executive_steward import ...`, and
+    the unguarded `ModuleNotFoundError` aborts the whole
+    `control_plane.chairman_control_room` import — a hard crash instead of
+    the documented fail-closed degrade.
+    """
+    import importlib
+    import sys
+
+    blocked = {"control_plane.executive_steward"}
+    dependent = "control_plane.executive_placement_selection"
+
+    class _AbsenceFinder:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname in blocked:
+                raise ModuleNotFoundError(f"blocked for test: {fullname}")
+            return None
+
+    names = blocked | {dependent, "control_plane.chairman_control_room"}
+    saved = {name: sys.modules.get(name) for name in names}
+    finder = _AbsenceFinder()
+    sys.meta_path.insert(0, finder)
+    for name in names:
+        sys.modules.pop(name, None)
+    try:
+        fresh = importlib.import_module("control_plane.chairman_control_room")
+        # fail CLOSED — both optional names absent, no crash
+        assert fresh.executive_steward is None
+        assert fresh.executive_placement_selection is None
+        facts_path = tmp_path / "facts.json"
+        facts_path.write_text("{}", encoding="utf-8")
+        result, failure = fresh._read_placement_selection(facts_path)
+        assert result is None
+        assert failure == "unavailable (module not shipped)"
+    finally:
+        sys.meta_path.remove(finder)
+        for name in names:
+            sys.modules.pop(name, None)
+        for name, module in saved.items():
+            if module is not None:
+                sys.modules[name] = module
+        importlib.import_module("control_plane.chairman_control_room")

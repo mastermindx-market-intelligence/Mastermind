@@ -85,30 +85,46 @@ from control_plane import (
 # "placement_selection: unavailable (module not shipped)" degraded path.
 
 
-def _optional_control_plane_module(name: str):
+def _optional_control_plane_module(name: str, *, requires: tuple[str, ...] = ()):
     """``None`` when the module is genuinely not shipped; loud otherwise.
 
     ``find_spec`` distinguishes the two failure classes: a missing file
     yields a ``None`` spec (→ optional capability absent, degrade by name),
     while a module that IS shipped but broken imports without a net so it
     fails loudly instead of masquerading as "not shipped".
+
+    ``requires`` names this module's own STATIC control-plane dependencies,
+    and they are resolved BEFORE the import (review 5086941171 BLOCKER 4).
+    Resolving only ``name`` was not enough: in a release that ships the
+    selector but not the steward, the selector's spec resolves fine, and the
+    unguarded ``import_module`` below then raises ``ModuleNotFoundError``
+    from the selector's own ``from control_plane.executive_steward import
+    ...`` — aborting the import of THIS module entirely instead of degrading
+    by name. Checking the dependency's spec turns that asymmetric packaging
+    into the same fail-closed "not shipped" answer.
+
+    This deliberately checks SPEC PRESENCE only. A dependency that is
+    present but broken still raises from ``import_module``, so a genuine
+    fault inside a shipped module keeps failing loudly rather than
+    masquerading as absent.
     """
     qualified = f"control_plane.{name}"
-    try:
-        spec = importlib.util.find_spec(qualified)
-    except ModuleNotFoundError:
-        spec = None
-    if spec is None:
-        return None
+    for dependency in (name, *requires):
+        try:
+            spec = importlib.util.find_spec(f"control_plane.{dependency}")
+        except ModuleNotFoundError:
+            spec = None
+        if spec is None:
+            return None
     return importlib.import_module(qualified)
 
 
+# The selector statically imports the steward, so the steward's absence must
+# make the SELECTOR absent too — declared here rather than assumed, because
+# assuming it is what let the asymmetric case crash the import (BLOCKER 4).
 executive_placement_selection = _optional_control_plane_module(
-    "executive_placement_selection"
+    "executive_placement_selection", requires=("executive_steward",)
 )
-# No separate guard is needed for executive_steward anywhere below: the
-# selector module statically imports it, so a release that lacks the steward
-# also fails the selector's find_spec/import above and BOTH names are None.
 executive_steward = _optional_control_plane_module("executive_steward")
 
 #: Schema version of the document this module emits.

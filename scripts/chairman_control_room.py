@@ -453,6 +453,16 @@ def _compose_with_live_active_builds(
     agent_os_state, agent_os_state_failure = ccr._read_agent_os_state(macro_root_resolved)
     runtime_jobs, runtime_jobs_failure = ccr._read_runtime_jobs(root)
     bindings, binding_problems = sb.load_bindings(config.bindings_path)
+    # CAP-C1 (review 5086941171 BLOCKER 3): this warm path replicates
+    # build_control_room()'s gather sequencing, and the placement read was
+    # the one step it never replicated. Without it a populated live
+    # active-build cache silently dropped a CONFIGURED placement selection
+    # from /api/state — no section and no degradation, so the omission was
+    # invisible. Same reader, same argument, same degraded row as the cold
+    # path; `placement_selection_path=None` stays a true no-op on both.
+    placement_selection, placement_selection_failure = ccr._read_placement_selection(
+        config.placement_selection_path
+    )
 
     doc = ccr.compose_control_room(
         inbox=inbox,
@@ -463,6 +473,7 @@ def _compose_with_live_active_builds(
         bindings=bindings,
         binding_problems=binding_problems,
         generated_at=generated_at,
+        placement_selection=placement_selection,
     )
 
     extra_degraded: list[str] = []
@@ -474,6 +485,8 @@ def _compose_with_live_active_builds(
         extra_degraded.append(f"agent_os_state: {agent_os_state_failure}")
     if runtime_jobs_failure:
         extra_degraded.append(f"executive_runtime: {runtime_jobs_failure}")
+    if placement_selection_failure:
+        extra_degraded.append(f"placement_selection: {placement_selection_failure}")
     if extra_degraded:
         doc = dict(doc)
         doc["degraded"] = sorted(list(doc["degraded"]) + extra_degraded)
