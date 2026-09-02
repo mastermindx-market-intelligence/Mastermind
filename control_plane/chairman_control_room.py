@@ -73,16 +73,24 @@ from control_plane import (
     surface_bindings,
 )
 
-# CAP-C1 placement selection is an OPTIONAL capability: the extracted
-# control-room-remote release stages an exact file allowlist
-# (ops/control_room_remote/install.sh + REQUIRED_RUNTIME_PATHS, both paths
-# held by active PR #255) that deliberately does not ship the selector
-# modules, so this module must boot — and compose a complete document — when
-# they are absent. The import is DELIBERATELY dynamic, not static: a static
-# import would both crash the extracted boot and widen the release's audited
-# import closure, and both of those surfaces stay at base parity until their
-# #255 owner ships the modules. Absence fails soft into the named
+# CAP-C1 placement selection is an OPTIONAL capability: an extracted
+# control-room-remote release stages an exact runtime file allowlist, and
+# that allowlist may omit the selector modules or a genuinely optional
+# dependency of theirs. This module must therefore boot — and compose a
+# complete document — when they are absent. The import is DELIBERATELY
+# dynamic, not static: a static import would both crash the extracted boot
+# and widen the release's audited import closure.
+#
+# Genuine optional absence fails SOFT, by name, into the
 # "placement_selection: unavailable (module not shipped)" degraded path.
+#
+# That softness has an exact limit. It applies only to a module the audited
+# allowlist can actually omit — one this file does not already require. A
+# dependency that is reachable through this module's own MANDATORY imports
+# is not optional in any release: its absence raises before the optional
+# block below is ever reached, and that hard failure is correct rather than
+# a gap to paper over. See _SELECTOR_CONTROL_PLANE_REQUIRES for which
+# dependencies fall on which side of that line.
 
 
 def _optional_control_plane_module(name: str, *, requires: tuple[str, ...] = ()):
