@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -201,3 +202,181 @@ def test_bsc_e1_artifact_surface_is_present_and_package_is_closed() -> None:
 def test_static_fences_do_not_depend_on_git_history_or_current_pr_diff() -> None:
     imported = _imported_module_names(Path(__file__))
     assert imported.isdisjoint({"subprocess", "git", "pygit2"})
+
+
+# ---------------------------------------------------------------------------
+# RED-first discriminators for the composable PR-local ratchet repair.
+# These intentionally describe the desired API before its implementation.
+# ---------------------------------------------------------------------------
+
+
+def _required_callable(name: str):
+    value = globals().get(name)
+    assert callable(value), f"missing required static-fence helper: {name}"
+    return value
+
+
+def test_import_from_member_is_normalized_to_full_forbidden_module(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text(
+        "from integrations.executive_mcp import server\n",
+        encoding="utf-8",
+    )
+
+    imported = _imported_module_names(candidate)
+
+    assert "integrations.executive_mcp.server" in imported
+
+
+def test_python_source_surface_is_recursive(tmp_path: Path) -> None:
+    package = tmp_path / "integrations" / "mastermind_executive_app"
+    nested = package / "subpackage"
+    nested.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (nested / "hidden_ingress.py").write_text("x = 1\n", encoding="utf-8")
+
+    python_source_surface = _required_callable("_python_source_surface")
+    surface = python_source_surface(package, root=tmp_path)
+
+    assert surface == {
+        "integrations/mastermind_executive_app/__init__.py",
+        "integrations/mastermind_executive_app/subpackage/hidden_ingress.py",
+    }
+
+
+def _unexpected_paths(changed: set[str]):
+    classifier = _required_callable("_bsc_e1_unexpected_paths")
+    return classifier(changed)
+
+
+def test_bsc_e1_delta_empty_is_not_applicable() -> None:
+    assert _unexpected_paths(set()) is None
+
+
+def test_bsc_e1_delta_foreign_only_c1_shape_is_not_applicable() -> None:
+    assert _unexpected_paths(
+        {
+            "control_plane/chairman_control_room.py",
+            "control_plane/executive_placement_selection.py",
+            "scripts/chairman_control_room.py",
+            "tests/test_chairman_control_room.py",
+            "tests/test_executive_placement_selection.py",
+        }
+    ) is None
+
+
+def test_bsc_e1_delta_allowed_subset_applies_and_passes() -> None:
+    assert _unexpected_paths(
+        {
+            "integrations/mastermind_executive_app/app.py",
+            "tests/test_mastermind_executive_app_static_fences.py",
+            "control_plane/ceo_request.py",
+        }
+    ) == set()
+
+
+def test_bsc_e1_delta_owned_plus_foreign_refuses_foreign_path() -> None:
+    assert _unexpected_paths(
+        {
+            "integrations/mastermind_executive_app/app.py",
+            "docs/unrelated_foreign.md",
+        }
+    ) == {"docs/unrelated_foreign.md"}
+
+
+def test_bsc_e1_delta_owned_plus_executive_service_refuses_service() -> None:
+    assert _unexpected_paths(
+        {
+            "integrations/mastermind_executive_app/app.py",
+            "control_plane/executive_service.py",
+        }
+    ) == {"control_plane/executive_service.py"}
+
+
+def test_bsc_e1_delta_new_unratcheted_app_module_is_refused() -> None:
+    path = "integrations/mastermind_executive_app/hidden_ingress.py"
+    assert _unexpected_paths({path}) == {path}
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def _git_init(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    result = _git(repo, "init", "-q", "-b", "master")
+    assert result.returncode == 0, result.stderr
+    assert _git(repo, "config", "user.email", "test@example.invalid").returncode == 0
+    assert _git(repo, "config", "user.name", "BSC-E1 Fence Test").returncode == 0
+
+
+def _git_commit_file(repo: Path, relative: str, content: str, message: str) -> str:
+    target = repo / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    assert _git(repo, "add", relative).returncode == 0
+    result = _git(repo, "commit", "-q", "-m", message)
+    assert result.returncode == 0, result.stderr
+    return _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def test_compute_pr_diff_paths_linear_branch_returns_only_feature_delta(tmp_path: Path) -> None:
+    repo = tmp_path / "linear"
+    _git_init(repo)
+    _git_commit_file(repo, "README.md", "base\n", "base")
+    assert _git(repo, "update-ref", "refs/remotes/origin/master", "master").returncode == 0
+    assert _git(repo, "checkout", "-q", "-b", "feature").returncode == 0
+    _git_commit_file(
+        repo,
+        "integrations/mastermind_executive_app/app.py",
+        "x = 1\n",
+        "feature",
+    )
+
+    compute = _required_callable("compute_pr_diff_paths")
+
+    assert compute(repo, head="HEAD", upstream="origin/master") == {
+        "integrations/mastermind_executive_app/app.py"
+    }
+
+
+@pytest.mark.parametrize("orientation", ["base_first", "feature_first"])
+def test_compute_pr_diff_paths_identifies_base_parent_in_both_merge_orientations(
+    tmp_path: Path,
+    orientation: str,
+) -> None:
+    repo = tmp_path / orientation
+    _git_init(repo)
+    _git_commit_file(repo, "README.md", "base\n", "base")
+
+    assert _git(repo, "checkout", "-q", "-b", "feature").returncode == 0
+    _git_commit_file(
+        repo,
+        "integrations/mastermind_executive_app/app.py",
+        "x = 1\n",
+        "feature",
+    )
+
+    assert _git(repo, "checkout", "-q", "master").returncode == 0
+    _git_commit_file(repo, "docs/base_movement.md", "base moved\n", "base movement")
+    assert _git(repo, "update-ref", "refs/remotes/origin/master", "master").returncode == 0
+
+    if orientation == "base_first":
+        result = _git(repo, "merge", "--no-ff", "-q", "-m", "hosted merge", "feature")
+    else:
+        assert _git(repo, "checkout", "-q", "feature").returncode == 0
+        result = _git(repo, "merge", "--no-ff", "-q", "-m", "history join", "master")
+    assert result.returncode == 0, result.stderr
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    compute = _required_callable("compute_pr_diff_paths")
+    changed = compute(repo, head=head, upstream="origin/master")
+
+    assert changed == {"integrations/mastermind_executive_app/app.py"}
+    assert "docs/base_movement.md" not in changed
