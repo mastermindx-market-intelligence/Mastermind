@@ -89,6 +89,7 @@ from control_plane.executive_steward import (
     EffectState,
     Freshness,
     ResponsibilityFact,
+    Seat,
     SourceOwner,
     SourceRef,
 )
@@ -511,9 +512,28 @@ class CandidateEvidence:
     ``session_creation_allowed`` mirror :class:`PlacementCandidateFact`'s
     own fields verbatim, including the same closed mode-shape rule
     (:func:`_require_mode_shape`).
+
+    Provenance wave: a row is now a COMPLETE
+    :class:`PlacementCandidateFact` projection — it carries ``provider``,
+    ``account_label``, ``quota_class``, ``capabilities`` and
+    ``observed_at_ms`` as well. That upgrade is what makes the claim above
+    ("EVERY fact that went into it") literally true, and it is load-bearing
+    rather than cosmetic: together with the decision's carried
+    :class:`PlacementDemand` and responsibility freshness, these rows are
+    exactly the closed input set :func:`validate_placement_selection` needs
+    to REBUILD the typed inputs and recompute the decision through
+    :func:`select_placement`. Without them the demand-gated fields could
+    not be re-derived and the ``selected`` snapshot's own
+    ``provider``/``account_label``/``quota_class``/``observed_at_ms`` would
+    be bound to nothing on the wire.
     """
 
     worker_id: str
+    provider: str
+    account_label: str
+    quota_class: str
+    capabilities: frozenset[str]
+    observed_at_ms: int
     occupancy: OccupancyState
     occupancy_source: SourceRef
     capacity_state: CapacityState
@@ -527,6 +547,18 @@ class CandidateEvidence:
 
     def __post_init__(self) -> None:
         _require_token("worker_id", self.worker_id)
+        # Provenance wave: an evidence row is the decision's own CANONICAL
+        # INPUT PROJECTION for one candidate, so it must carry EVERY field
+        # PlacementCandidateFact needs — otherwise validate_placement_
+        # selection() cannot rebuild the inputs and recompute the decision,
+        # and the demand-gated fields (provider/quota_class/capabilities)
+        # plus the snapshot-bearing ones (account_label/observed_at_ms)
+        # would be bound to nothing on the wire.
+        _require_token("provider", self.provider)
+        _require_account_label(self.account_label)
+        _require_token("quota_class", self.quota_class)
+        _require_capability_set("capabilities", self.capabilities)
+        _require_int_at_least("observed_at_ms", self.observed_at_ms, 1)
         _require_enum("occupancy", self.occupancy, OccupancyState)
         # Source AUTHORITY, not merely source shape: an evidence row is a
         # claim about WHO observed a fact, so it must pin the SAME owner
@@ -553,6 +585,11 @@ class CandidateEvidence:
     def to_dict(self) -> dict[str, Any]:
         return {
             "worker_id": self.worker_id,
+            "provider": self.provider,
+            "account_label": self.account_label,
+            "quota_class": self.quota_class,
+            "capabilities": sorted(self.capabilities),
+            "observed_at_ms": self.observed_at_ms,
             "mode": self.mode.value,
             "occupancy": self.occupancy.value,
             "occupancy_source": _source_ref_dict(self.occupancy_source),
@@ -575,6 +612,22 @@ def _source_ref_dict(source: SourceRef) -> dict[str, Any]:
         "ref": source.ref,
         "observed_at": source.observed_at,
         "freshness": source.freshness.value,
+    }
+
+
+def _demand_dict(demand: PlacementDemand) -> dict[str, Any]:
+    """The closed, deterministically ordered serialization of the
+    :class:`PlacementDemand` a decision was actually computed against.
+
+    Provenance wave: without the demand on the wire, the capability /
+    quota-class / provider / allowed-mode gates cannot be recomputed, so a
+    consumer has to take the exclusion set on faith.
+    """
+    return {
+        "required_capabilities": sorted(demand.required_capabilities),
+        "quota_class": demand.quota_class,
+        "provider": demand.provider,
+        "allowed_modes": sorted(mode.value for mode in demand.allowed_modes),
     }
 
 
@@ -602,6 +655,11 @@ def _evidence_sort_key(row: dict[str, Any]) -> tuple:
 
     return (
         row["worker_id"],
+        row["provider"],
+        row["account_label"],
+        row["quota_class"],
+        tuple(row["capabilities"]),
+        row["observed_at_ms"],
         row["mode"],
         row["occupancy"],
         _source_key(row["occupancy_source"]),
@@ -647,6 +705,8 @@ class PlacementSelectionDecision:
     """
 
     responsibility_ref: str
+    responsibility_freshness: Freshness
+    demand: PlacementDemand
     state: SelectionState
     selected: Mapping[str, Any] | None
     selected_mode: PlacementMode | None
@@ -658,6 +718,14 @@ class PlacementSelectionDecision:
 
     def __post_init__(self) -> None:
         _require_responsibility_ref(self.responsibility_ref)
+        # Provenance wave: the responsibility gate fact and the demand are
+        # INPUTS, carried so the decision can be recomputed from its own
+        # wire form. `responsibility_freshness` is the only responsibility
+        # attribute select_placement() actually reads besides the ref and
+        # the (always "waiting_capacity") state.
+        _require_enum("responsibility_freshness", self.responsibility_freshness, Freshness)
+        if not isinstance(self.demand, PlacementDemand):
+            raise TypeError("demand must be a PlacementDemand")
         _require_enum("state", self.state, SelectionState)
         if self.selected is not None and not isinstance(self.selected, Mapping):
             raise TypeError("selected must be a mapping or None")
@@ -711,6 +779,8 @@ class PlacementSelectionDecision:
         return {
             "schema_version": SELECTION_SCHEMA,
             "responsibility_ref": self.responsibility_ref,
+            "responsibility_freshness": self.responsibility_freshness.value,
+            "demand": _demand_dict(self.demand),
             "state": self.state.value,
             "selected": selected,
             "selected_mode": self.selected_mode.value if self.selected_mode is not None else None,
@@ -732,15 +802,33 @@ class PlacementSelectionDecision:
 # ---------------------------------------------------------------------------
 
 _SELECTION_KEYS = frozenset({
-    "schema_version", "responsibility_ref", "state", "selected", "selected_mode",
+    "schema_version", "responsibility_ref", "responsibility_freshness", "demand",
+    "state", "selected", "selected_mode",
     "tie_breaker_used", "tied_worker_ids", "exclusions", "evaluated_candidates",
     "selection_is_commitment", "evidence",
 })
 
 _EXCLUSION_KEYS = frozenset({"worker_id", "reason"})
 
+#: Fixed stand-ins for the two ResponsibilityFact attributes
+#: select_placement() never reads (it uses only `responsibility_ref`,
+#: `state`, and `source.freshness`). Constants — never caller data — so the
+#: recomputation stays a pure function of the carried inputs.
+_RECOMPUTED_RESPONSIBILITY_TITLE = "Recomputed placement selection provenance check."
+_RECOMPUTED_RESPONSIBILITY_REF = "recomputed-provenance-check"
+#: SourceRef refuses a null `observed_at` for current/stale freshness, so a
+#: fixed sentinel stands in. It is never read: select_placement() consults
+#: only `source.freshness`, and this ref never reaches any output.
+_RECOMPUTED_RESPONSIBILITY_OBSERVED_AT = "1970-01-01T00:00:00Z"
+
+_DEMAND_KEYS = frozenset({
+    "required_capabilities", "quota_class", "provider", "allowed_modes",
+})
+
 _EVIDENCE_ROW_KEYS = frozenset({
-    "worker_id", "mode", "occupancy", "occupancy_source", "capacity_state",
+    "worker_id", "provider", "account_label", "quota_class", "capabilities",
+    "observed_at_ms",
+    "mode", "occupancy", "occupancy_source", "capacity_state",
     "capacity_source", "host_source_closure_proven", "closure_source",
     "effect_state", "creation_surface_accessible", "session_creation_allowed",
 })
@@ -790,6 +878,67 @@ def _validate_source_ref_dict(
     }
 
 
+def _source_ref_from_dict(value: Mapping[str, Any]) -> SourceRef:
+    """Rebuild the typed :class:`SourceRef` from an ALREADY-VALIDATED wire
+    dict (see :func:`_validate_source_ref_dict`) so the decision can be
+    recomputed from its own wire form."""
+    return SourceRef(
+        owner=SourceOwner(value["owner"]),
+        ref=value["ref"],
+        observed_at=value["observed_at"],
+        freshness=Freshness(value["freshness"]),
+    )
+
+
+def _validate_demand_dict(value: Any) -> tuple[dict[str, Any], PlacementDemand]:
+    """Closed-key revalidation of the carried :class:`PlacementDemand`,
+    returning BOTH its canonical wire form and the typed object the
+    recomputation needs. Field-only error messages."""
+    if not isinstance(value, Mapping) or set(value) != _DEMAND_KEYS:
+        raise ValueError(f"demand must have exactly {sorted(_DEMAND_KEYS)}")
+    raw_capabilities = value["required_capabilities"]
+    if not isinstance(raw_capabilities, list):
+        raise TypeError("demand.required_capabilities must be a list")
+    for item in raw_capabilities:
+        _require_token("demand.required_capabilities item", item)
+    if raw_capabilities != sorted(raw_capabilities):
+        raise ValueError("demand.required_capabilities must be sorted")
+    if len(set(raw_capabilities)) != len(raw_capabilities):
+        raise ValueError("demand.required_capabilities must not repeat a capability")
+    quota_class = _require_token("demand.quota_class", value["quota_class"])
+    provider = value["provider"]
+    if provider is not None:
+        provider = _require_token("demand.provider", provider)
+    raw_modes = value["allowed_modes"]
+    if not isinstance(raw_modes, list) or not raw_modes:
+        raise ValueError("demand.allowed_modes must be a non-empty list")
+    modes = []
+    for item in raw_modes:
+        try:
+            modes.append(PlacementMode(item))
+        except ValueError as exc:
+            raise ValueError("demand.allowed_modes contains an unrecognized PlacementMode") from exc
+    if raw_modes != sorted(raw_modes):
+        raise ValueError("demand.allowed_modes must be sorted")
+    if len(set(raw_modes)) != len(raw_modes):
+        raise ValueError("demand.allowed_modes must not repeat a mode")
+    demand = PlacementDemand(
+        required_capabilities=frozenset(raw_capabilities),
+        quota_class=quota_class,
+        provider=provider,
+        allowed_modes=frozenset(modes),
+    )
+    return (
+        {
+            "required_capabilities": list(raw_capabilities),
+            "quota_class": quota_class,
+            "provider": provider,
+            "allowed_modes": list(raw_modes),
+        },
+        demand,
+    )
+
+
 def _validate_evidence_row(value: Any) -> dict[str, Any]:
     """Closed-key revalidation of one ``evidence`` wire row (addendum B,
     mode wave). Enum-membership + strengthened-token (``_require_token``,
@@ -799,6 +948,19 @@ def _validate_evidence_row(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping) or set(value) != _EVIDENCE_ROW_KEYS:
         raise ValueError(f"evidence row must have exactly {sorted(_EVIDENCE_ROW_KEYS)}")
     worker_id = _require_token("evidence.worker_id", value["worker_id"])
+    provider = _require_token("evidence.provider", value["provider"])
+    account_label = _require_token("evidence.account_label", value["account_label"])
+    quota_class = _require_token("evidence.quota_class", value["quota_class"])
+    raw_capabilities = value["capabilities"]
+    if not isinstance(raw_capabilities, list):
+        raise TypeError("evidence.capabilities must be a list")
+    for item in raw_capabilities:
+        _require_token("evidence.capabilities item", item)
+    if raw_capabilities != sorted(raw_capabilities):
+        raise ValueError("evidence.capabilities must be sorted")
+    if len(set(raw_capabilities)) != len(raw_capabilities):
+        raise ValueError("evidence.capabilities must not repeat a capability")
+    observed_at_ms = _require_int_at_least("evidence.observed_at_ms", value["observed_at_ms"], 1)
     try:
         mode = PlacementMode(value["mode"])
     except ValueError as exc:
@@ -836,6 +998,11 @@ def _validate_evidence_row(value: Any) -> dict[str, Any]:
     _require_mode_shape(mode, creation_surface_accessible, session_creation_allowed)
     return {
         "worker_id": worker_id,
+        "provider": provider,
+        "account_label": account_label,
+        "quota_class": quota_class,
+        "capabilities": list(raw_capabilities),
+        "observed_at_ms": observed_at_ms,
         "mode": mode.value,
         "occupancy": occupancy.value,
         "occupancy_source": occupancy_source,
@@ -880,19 +1047,25 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
     appear in ``exclusions``/``tied_worker_ids``, and every exclusion/tied
     id must be represented in ``evidence``.
 
-    SCOPE — stated explicitly so a consumer does not OVER-trust this gate.
-    The binding above is over identity (``worker_id``) and ``mode`` only;
-    it is deliberately NOT a re-derivation of the selector. This function
-    does not check that ``state`` is the aggregate :func:`select_placement`
-    would have computed from the same evidence, that an exclusion's
-    ``reason`` agrees with that worker's own evidence row, that tied
-    candidates share a capacity rank, that a worker appears at most once in
-    ``exclusions``, or that the ``selected`` snapshot's ``provider``/
-    ``account_label``/``quota_class``/``observed_at_ms`` correspond to
-    anything (``evidence`` rows do not carry those fields at all). A
-    document can therefore satisfy every rule here and still not be one
-    this selector would produce: passing this validator is a well-formedness
-    and identity-coherence result, NEVER proof of provenance.
+    Finally — and this is what makes the gate an AUTHORITY gate rather than
+    a shape gate — it enforces SELECTOR PROVENANCE. The wire carries the
+    decision's own canonical input projection (the responsibility freshness
+    actually gated on, the complete :class:`PlacementDemand`, and a
+    complete :class:`PlacementCandidateFact` projection in every
+    ``evidence`` row). Those inputs are rebuilt into typed facts and run
+    through :func:`select_placement` — the ONE existing selector, called
+    exactly once, never a second copy of the ranking or exclusion policy —
+    and the supplied document must equal the recomputed projection exactly.
+
+    So a document is accepted only if the canonical selector, given the
+    inputs that document itself declares, produces precisely it. A forged
+    ``state``, exclusion ``reason``, tie set, ineligible winner, or altered
+    ``selected`` snapshot field cannot survive, because the recomputation
+    never consults the forged half. Note what this does and does not mean:
+    it authenticates the decision against its declared INPUTS. It cannot
+    attest that those input facts are true of the world — that is the
+    source owners' job, which is why owner authority is pinned separately
+    above. No caller-supplied digest is trusted anywhere in this path.
     """
     if not isinstance(value, Mapping) or set(value) != _SELECTION_KEYS:
         # Review 5084378111 MAJOR 3: this previously rendered
@@ -911,6 +1084,13 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
         raise ValueError("unsupported placement selection schema")
 
     responsibility_ref = _require_responsibility_ref(value["responsibility_ref"])
+
+    try:
+        responsibility_freshness = Freshness(value["responsibility_freshness"])
+    except ValueError as exc:
+        raise ValueError("responsibility_freshness is not a recognized Freshness value") from exc
+
+    demand_out, demand = _validate_demand_dict(value["demand"])
 
     try:
         state = SelectionState(value["state"])
@@ -1063,9 +1243,27 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
                 "every tied worker_id must be represented in evidence"
             )
 
-    return {
+    # --- SELECTOR PROVENANCE (the decision-authenticity gate) -------------
+    # Everything above is per-field shape and cross-field identity: it can
+    # only ever catch symptoms. The authority question is whether THIS
+    # document is a projection the ONE canonical selector would actually
+    # emit from the inputs the document itself declares. So: rebuild the
+    # typed inputs, run them through `select_placement()` — the single
+    # existing owner, called exactly once, never a second reimplementation
+    # of the ranking or exclusion policy — and require equality with the
+    # supplied projection. A forged `state`, exclusion `reason`, tie set,
+    # or selected snapshot field cannot survive, because the recomputation
+    # does not consult the forged half at all.
+    #
+    # This is NOT a digest supplied by the same untrusted document: nothing
+    # here trusts a caller-provided hash. The inputs are re-derived into
+    # typed facts (each re-running its own dataclass validation) and the
+    # OUTPUT is recomputed from them.
+    normalized = {
         "schema_version": SELECTION_SCHEMA,
         "responsibility_ref": responsibility_ref,
+        "responsibility_freshness": responsibility_freshness.value,
+        "demand": demand_out,
         "state": state.value,
         "selected": selected,
         "selected_mode": selected_mode.value if selected_mode is not None else None,
@@ -1076,6 +1274,64 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
         "selection_is_commitment": False,
         "evidence": evidence,
     }
+
+    try:
+        candidates = tuple(
+            PlacementCandidateFact(
+                worker_id=row["worker_id"],
+                provider=row["provider"],
+                account_label=row["account_label"],
+                quota_class=row["quota_class"],
+                capabilities=frozenset(row["capabilities"]),
+                observed_at_ms=row["observed_at_ms"],
+                occupancy=OccupancyState(row["occupancy"]),
+                occupancy_source=_source_ref_from_dict(row["occupancy_source"]),
+                capacity_state=CapacityState(row["capacity_state"]),
+                capacity_source=_source_ref_from_dict(row["capacity_source"]),
+                host_source_closure_proven=row["host_source_closure_proven"],
+                closure_source=_source_ref_from_dict(row["closure_source"]),
+                effect_state=EffectState(row["effect_state"]),
+                mode=PlacementMode(row["mode"]),
+                creation_surface_accessible=row["creation_surface_accessible"],
+                session_creation_allowed=row["session_creation_allowed"],
+            )
+            for row in evidence
+        )
+        recomputed = select_placement(
+            responsibility=ResponsibilityFact(
+                responsibility_ref=responsibility_ref,
+                # Neither of these reaches the decision: select_placement()
+                # reads only `responsibility_ref`, `state`, and
+                # `source.freshness`. They are fixed constants so the
+                # recomputation is a pure function of the carried inputs.
+                title=_RECOMPUTED_RESPONSIBILITY_TITLE,
+                accountable_seat=Seat.COO,
+                state="waiting_capacity",
+                root_job_id=None,
+                source=SourceRef(
+                    owner=SourceOwner.AGENT_OS,
+                    ref=_RECOMPUTED_RESPONSIBILITY_REF,
+                    observed_at=_RECOMPUTED_RESPONSIBILITY_OBSERVED_AT,
+                    freshness=responsibility_freshness,
+                ),
+            ),
+            demand=demand,
+            candidates=candidates,
+        )
+    except (ValueError, TypeError) as exc:
+        # Field-only: never relay the underlying text, which may quote a
+        # caller-supplied value.
+        raise ValueError(
+            "decision inputs do not form a valid selector invocation"
+        ) from exc
+
+    if recomputed.to_dict() != normalized:
+        raise ValueError(
+            "decision does not match the result of recomputing it from its own "
+            "declared inputs"
+        )
+
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -1167,6 +1423,11 @@ def _evidence_from_candidates(
     return tuple(
         CandidateEvidence(
             worker_id=c.worker_id,
+            provider=c.provider,
+            account_label=c.account_label,
+            quota_class=c.quota_class,
+            capabilities=c.capabilities,
+            observed_at_ms=c.observed_at_ms,
             occupancy=c.occupancy,
             occupancy_source=c.occupancy_source,
             capacity_state=c.capacity_state,
@@ -1186,6 +1447,8 @@ def _decision(
     responsibility_ref: str,
     state: SelectionState,
     *,
+    responsibility_freshness: Freshness,
+    demand: PlacementDemand,
     selected: Mapping[str, Any] | None = None,
     selected_mode: PlacementMode | None = None,
     tied_worker_ids: tuple[str, ...] = (),
@@ -1195,6 +1458,8 @@ def _decision(
 ) -> PlacementSelectionDecision:
     return PlacementSelectionDecision(
         responsibility_ref=responsibility_ref,
+        responsibility_freshness=responsibility_freshness,
+        demand=demand,
         state=state,
         selected=selected,
         selected_mode=selected_mode,
@@ -1322,6 +1587,7 @@ def select_placement(
     if responsibility.source.freshness is not Freshness.CURRENT:
         return _decision(
             responsibility_ref, SelectionState.STALE_EVIDENCE,
+            responsibility_freshness=responsibility.source.freshness, demand=demand,
             evaluated_candidates=evaluated_candidates, evidence=evidence,
         )
 
@@ -1338,6 +1604,7 @@ def select_placement(
         )
         return _decision(
             responsibility_ref, SelectionState.RECONCILIATION_REQUIRED,
+            responsibility_freshness=responsibility.source.freshness, demand=demand,
             exclusions=exclusions, evaluated_candidates=evaluated_candidates,
             evidence=evidence,
         )
@@ -1367,6 +1634,7 @@ def select_placement(
             )
             return _decision(
                 responsibility_ref, SelectionState.SELECTED,
+            responsibility_freshness=responsibility.source.freshness, demand=demand,
                 selected=selected, selected_mode=winner.mode, exclusions=exclusions,
                 evaluated_candidates=evaluated_candidates, evidence=evidence,
             )
@@ -1378,6 +1646,7 @@ def select_placement(
         tied_worker_ids = tuple(sorted(c.worker_id for c in winners))
         return _decision(
             responsibility_ref, SelectionState.TIE_ABSTAINED,
+            responsibility_freshness=responsibility.source.freshness, demand=demand,
             tied_worker_ids=tied_worker_ids, exclusions=exclusions,
             evaluated_candidates=evaluated_candidates, evidence=evidence,
         )
@@ -1386,5 +1655,6 @@ def select_placement(
     state = _aggregate_state(reasons_present)
     return _decision(
         responsibility_ref, state, exclusions=exclusions,
+            responsibility_freshness=responsibility.source.freshness, demand=demand,
         evaluated_candidates=evaluated_candidates, evidence=evidence,
     )

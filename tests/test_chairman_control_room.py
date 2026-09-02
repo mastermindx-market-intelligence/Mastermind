@@ -40,6 +40,7 @@ subprocess, or Executive SQLite database is ever touched.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import os
 from pathlib import Path
@@ -1412,3 +1413,125 @@ def test_compose_degraded_reason_for_a_bad_selected_snapshot_is_constant(
         reasons.append(_placement_degraded(doc))
     assert reasons[0] == reasons[1]
     assert reasons[0]
+
+
+# ---------------------------------------------------------------------------
+# CAP-C1 provenance wave — forged decisions must not reach the Chairman
+#
+# The validator now recomputes each decision through the one canonical
+# select_placement(). These drive the REAL, unmodified compose_control_room()
+# to prove the product consequence: a decision the selector could not have
+# produced renders NOTHING and degrades value-free.
+# ---------------------------------------------------------------------------
+
+def _two_candidate_selected_wire() -> dict:
+    """A genuine SELECTED decision: worker-1 AVAILABLE beats worker-2 DEGRADED."""
+    winner = _placement_candidate("worker-1")
+    runner_up = dataclasses.replace(
+        _placement_candidate("worker-2"), capacity_state=es.CapacityState.DEGRADED
+    )
+    decision = eps.select_placement(
+        responsibility=_placement_responsibility(),
+        demand=eps.PlacementDemand(
+            required_capabilities=frozenset({"cap_a"}), quota_class="standard", provider="acme",
+            allowed_modes=frozenset({
+                eps.PlacementMode.EXISTING_SESSION_REUSE,
+                eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+            }),
+        ),
+        candidates=(winner, runner_up),
+    )
+    assert decision.state is eps.SelectionState.SELECTED
+    payload = decision.to_dict()
+    assert payload["selected"]["worker_id"] == "worker-1"
+    return payload
+
+
+def _forged(mutate) -> dict:
+    payload = _two_candidate_selected_wire()
+    mutate(payload)
+    return payload
+
+
+def _evidence_row_for(payload: dict, worker_id: str) -> dict:
+    return [r for r in payload["evidence"] if r["worker_id"] == worker_id][0]
+
+
+FORGERIES = {
+    "snapshot_provider_unbound":
+        lambda p: p["selected"].update(provider="attacker-cloud"),
+    "snapshot_account_label_unbound":
+        lambda p: p["selected"].update(account_label="victim-billing-account"),
+    "snapshot_quota_class_unbound":
+        lambda p: p["selected"].update(quota_class="unlimited"),
+    "snapshot_observed_at_unbound":
+        lambda p: p["selected"].update(observed_at_ms=999999999),
+    "winner_evidence_says_occupied":
+        lambda p: _evidence_row_for(p, "worker-1").update(occupancy="occupied"),
+    "winner_evidence_capacity_unknown":
+        lambda p: _evidence_row_for(p, "worker-1").update(capacity_state="unknown"),
+    "winner_evidence_closure_unproven":
+        lambda p: _evidence_row_for(p, "worker-1").update(host_source_closure_proven=False),
+    "winner_evidence_effect_unknown":
+        lambda p: _evidence_row_for(p, "worker-1").update(effect_state="effect_unknown"),
+    "winner_evidence_stale_capacity_source":
+        lambda p: _evidence_row_for(p, "worker-1")["capacity_source"].update(freshness="stale"),
+    "forged_aggregate_state":
+        lambda p: p.update(state="no_eligible_candidate", selected=None, selected_mode=None),
+    "exclusion_reason_contradicts_evidence":
+        lambda p: p.update(exclusions=[{"worker_id": "worker-2", "reason": "occupied"}]),
+    "tie_across_unequal_ranks":
+        lambda p: p.update(
+            state="tie_abstained", selected=None, selected_mode=None,
+            tied_worker_ids=["worker-1", "worker-2"],
+        ),
+    "demand_provider_swapped":
+        lambda p: p["demand"].update(provider="other-cloud"),
+    "demand_mode_narrowed":
+        lambda p: p["demand"].update(allowed_modes=["existing_session_reuse"]),
+    "responsibility_freshness_flipped":
+        lambda p: p.update(responsibility_freshness="stale"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(FORGERIES))
+def test_compose_refuses_every_forged_decision_and_degrades_value_free(
+    name, boot_packet, inbox, active_builds, bindings
+):
+    forged = _forged(FORGERIES[name])
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=forged)
+
+    # nothing forged reaches the Chairman
+    assert doc["placement_selection"] is None, name
+    rows = _placement_degraded(doc)
+    assert rows, name
+    # the degraded reason is value-free: it names the failure, never the data
+    for token in ("attacker-cloud", "victim-billing-account", "unlimited", "999999999"):
+        assert token not in json.dumps(doc, sort_keys=True), (name, token)
+    # compose stays total
+    assert doc["schema"] == ccr.SCHEMA
+
+
+def test_compose_forged_degraded_reasons_are_the_same_constant(
+    boot_packet, inbox, active_builds, bindings
+):
+    """Two structurally different forgeries must degrade identically —
+    otherwise the reason string is leaking which field was tampered with."""
+    seen = set()
+    for name in ("snapshot_provider_unbound", "snapshot_account_label_unbound"):
+        doc = _compose(
+            boot_packet, inbox, active_builds, bindings,
+            placement_selection=_forged(FORGERIES[name]),
+        )
+        seen.add(tuple(_placement_degraded(doc)))
+    assert len(seen) == 1
+
+
+def test_compose_still_renders_a_genuine_two_candidate_selection_verbatim(
+    boot_packet, inbox, active_builds, bindings
+):
+    wire = _two_candidate_selected_wire()
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=wire)
+    assert doc["placement_selection"] == wire
+    assert not _placement_degraded(doc)
+    assert doc["placement_selection"]["selection_is_commitment"] is False

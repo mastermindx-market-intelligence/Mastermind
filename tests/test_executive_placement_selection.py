@@ -441,11 +441,18 @@ def test_account_label_rejects_path_shape():
         _candidate(account_label="path/to/account")
 
 
+#: Provenance wave: an evidence row is now the decision's canonical INPUT
+#: PROJECTION for one candidate, so it carries every PlacementCandidateFact
+#: field — without provider/account_label/quota_class/capabilities/
+#: observed_at_ms the decision cannot be recomputed from its own wire form.
 _EVIDENCE_ROW_WIRE_KEYS = {
-    "worker_id", "mode", "occupancy", "occupancy_source", "capacity_state",
+    "worker_id", "provider", "account_label", "quota_class", "capabilities",
+    "observed_at_ms",
+    "mode", "occupancy", "occupancy_source", "capacity_state",
     "capacity_source", "host_source_closure_proven", "closure_source",
     "effect_state", "creation_surface_accessible", "session_creation_allowed",
 }
+_DEMAND_WIRE_KEYS = {"required_capabilities", "quota_class", "provider", "allowed_modes"}
 _SOURCE_REF_WIRE_KEYS = {"owner", "ref", "observed_at", "freshness"}
 
 
@@ -454,10 +461,13 @@ def test_wire_dict_keys_are_exactly_the_closed_set():
     decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
     payload = decision.to_dict()
     assert set(payload) == {
-        "schema_version", "responsibility_ref", "state", "selected",
+        "schema_version", "responsibility_ref", "responsibility_freshness",
+        "demand", "state", "selected",
         "tie_breaker_used", "tied_worker_ids", "exclusions", "evaluated_candidates",
         "selection_is_commitment", "evidence", "selected_mode",
     }
+    assert set(payload["demand"]) == _DEMAND_WIRE_KEYS
+    assert payload["responsibility_freshness"] == "current"
     assert payload["selection_is_commitment"] is False
     assert payload["selected_mode"] == "new_session_materialization"
     assert set(payload["selected"]) == {
@@ -520,6 +530,10 @@ _ALLOWED_MODULE_IMPORTS: frozenset[tuple[str | None, str]] = frozenset({
     ("control_plane.executive_steward", "EffectState"),
     ("control_plane.executive_steward", "Freshness"),
     ("control_plane.executive_steward", "ResponsibilityFact"),
+    # Provenance wave: rebuilding the responsibility gate fact for the
+    # recomputation needs Seat. Pure enum from the same already-allowed
+    # module — no clock, randomness, filesystem or network reaches here.
+    ("control_plane.executive_steward", "Seat"),
     ("control_plane.executive_steward", "SourceOwner"),
     ("control_plane.executive_steward", "SourceRef"),
 })
@@ -1021,6 +1035,8 @@ def test_tie_breaker_used_field_is_reserved_and_rejects_any_non_none_value():
     with pytest.raises(ValueError):
         eps.PlacementSelectionDecision(
             responsibility_ref="WS:CAP-C1",
+            responsibility_freshness=Freshness.CURRENT,
+            demand=_demand(),
             state=eps.SelectionState.SELECTED,
             selected=None,
             selected_mode=None,
@@ -1033,6 +1049,8 @@ def test_tie_breaker_used_field_is_reserved_and_rejects_any_non_none_value():
     with pytest.raises(ValueError):
         eps.PlacementSelectionDecision(
             responsibility_ref="WS:CAP-C1",
+            responsibility_freshness=Freshness.CURRENT,
+            demand=_demand(),
             state=eps.SelectionState.TIE_ABSTAINED,
             selected=None,
             selected_mode=None,
@@ -1144,6 +1162,11 @@ def _evidence_row(
 ) -> eps.CandidateEvidence:
     return eps.CandidateEvidence(
         worker_id=worker_id,
+        provider="acme",
+        account_label="account1",
+        quota_class="standard",
+        capabilities=frozenset({"cap_a"}),
+        observed_at_ms=1000,
         mode=mode,
         occupancy=eps.OccupancyState.FREE,
         occupancy_source=_source(SourceOwner.RUNTIME_BINDING, f"binding-{worker_id}"),
@@ -1160,6 +1183,8 @@ def _evidence_row(
 def test_to_dict_sorts_deliberately_unsorted_exclusions_tied_worker_ids_and_evidence():
     decision = eps.PlacementSelectionDecision(
         responsibility_ref="WS:CAP-C1",
+        responsibility_freshness=Freshness.CURRENT,
+        demand=_demand(),
         state=eps.SelectionState.TIE_ABSTAINED,
         selected=None,
         selected_mode=None,
@@ -1192,6 +1217,8 @@ def test_decision_construction_refuses_evidence_count_mismatching_evaluated_cand
     with pytest.raises(ValueError):
         eps.PlacementSelectionDecision(
             responsibility_ref="WS:CAP-C1",
+            responsibility_freshness=Freshness.CURRENT,
+            demand=_demand(),
             state=eps.SelectionState.NO_ELIGIBLE_CANDIDATE,
             selected=None,
             selected_mode=None,
@@ -1477,7 +1504,9 @@ def test_mode_discriminator_8_bad_selected_mode_enum_value_refused():
 def test_candidate_evidence_reuse_row_with_non_null_bools_refuses_at_construction():
     with pytest.raises(ValueError):
         eps.CandidateEvidence(
-            worker_id="worker-1", mode=eps.PlacementMode.EXISTING_SESSION_REUSE,
+            worker_id="worker-1", provider="acme", account_label="account1", quota_class="standard",
+            capabilities=frozenset({"cap_a"}), observed_at_ms=1000,
+            mode=eps.PlacementMode.EXISTING_SESSION_REUSE,
             occupancy=eps.OccupancyState.FREE,
             occupancy_source=_source(SourceOwner.RUNTIME_BINDING, "binding-worker-1"),
             capacity_state=CapacityState.AVAILABLE,
@@ -1493,7 +1522,9 @@ def test_candidate_evidence_reuse_row_with_non_null_bools_refuses_at_constructio
 def test_candidate_evidence_fresh_row_with_null_bool_refuses_at_construction():
     with pytest.raises(ValueError):
         eps.CandidateEvidence(
-            worker_id="worker-1", mode=eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+            worker_id="worker-1", provider="acme", account_label="account1", quota_class="standard",
+            capabilities=frozenset({"cap_a"}), observed_at_ms=1000,
+            mode=eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
             occupancy=eps.OccupancyState.FREE,
             occupancy_source=_source(SourceOwner.RUNTIME_BINDING, "binding-worker-1"),
             capacity_state=CapacityState.AVAILABLE,
@@ -1685,6 +1716,11 @@ def test_wire_stays_fail_closed_when_the_selected_worker_has_duplicate_evidence(
 def _evidence(**kwargs) -> eps.CandidateEvidence:
     base = dict(
         worker_id="worker-a",
+        provider="acme",
+        account_label="account1",
+        quota_class="standard",
+        capabilities=frozenset({"cap_a"}),
+        observed_at_ms=1000,
         occupancy=eps.OccupancyState.FREE,
         occupancy_source=_source(SourceOwner.RUNTIME_BINDING, "binding-a"),
         capacity_state=CapacityState.AVAILABLE,
@@ -1917,3 +1953,363 @@ def test_selected_must_still_be_a_wellformed_snapshot(bad_selected):
     with pytest.raises(ValueError) as excinfo:
         eps.validate_placement_selection(payload)
     assert str(excinfo.value) == _BAD_SNAPSHOT_MESSAGE
+
+
+# ---------------------------------------------------------------------------
+# provenance wave — the decision must be one select_placement() would emit
+#
+# Review 5084660789 BLOCKER: identity+mode binding closed symptoms, not the
+# root cause. The wire now carries its own canonical input projection
+# (responsibility freshness, the complete PlacementDemand, and a complete
+# PlacementCandidateFact projection per evidence row), and
+# validate_placement_selection() recomputes the decision through the ONE
+# existing selector and demands equality.
+#
+# Every forgery below MUTATES a genuine select_placement() output, so each
+# test proves the validator refuses it — not that the selector cannot emit it.
+# ---------------------------------------------------------------------------
+
+#: Constant, value-free refusal for a decision that is not what the selector
+#: would have produced from its own declared inputs.
+_PROVENANCE_MESSAGE = (
+    "decision does not match the result of recomputing it from its own "
+    "declared inputs"
+)
+
+
+def _two_candidate_selected() -> dict:
+    """A genuine SELECTED decision over one AVAILABLE and one DEGRADED
+    candidate — worker-a wins, worker-b is neither excluded nor tied."""
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=_demand(),
+        candidates=(
+            _candidate(worker_id="worker-a"),
+            _candidate(worker_id="worker-b", capacity_state=CapacityState.DEGRADED),
+        ),
+    )
+    assert decision.state is eps.SelectionState.SELECTED
+    payload = decision.to_dict()
+    assert payload["selected"]["worker_id"] == "worker-a"
+    return payload
+
+
+def _row(payload: dict, worker_id: str) -> dict:
+    return [r for r in payload["evidence"] if r["worker_id"] == worker_id][0]
+
+
+@pytest.mark.parametrize(
+    "field, forged",
+    [
+        ("provider", "attacker-cloud"),
+        ("account_label", "victim-billing-account"),
+        ("quota_class", "unlimited"),
+        ("observed_at_ms", 999999999),
+    ],
+)
+def test_wire_rejects_a_selected_snapshot_field_unbound_to_the_candidate(field, forged):
+    """The residual half of the staple-a-snapshot forgery: same worker_id and
+    same mode, but a snapshot field the evidence row now contradicts."""
+    payload = _two_candidate_selected()
+    assert payload["selected"][field] != forged
+    payload["selected"][field] = forged
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _PROVENANCE_MESSAGE
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"occupancy": "occupied"},
+        {"occupancy": "bound_elsewhere"},
+        {"occupancy": "contradictory"},
+        {"capacity_state": "unknown"},
+        {"host_source_closure_proven": False},
+        {"effect_state": "effect_unknown"},
+        {"creation_surface_accessible": False},
+        {"session_creation_allowed": False},
+    ],
+)
+def test_wire_rejects_a_selected_worker_its_own_evidence_makes_ineligible(mutation):
+    """Exact conditions `_first_exclusion_reason()` excludes on. Before the
+    provenance gate the validator happily accepted `state=selected` beside
+    an evidence row saying the winner was occupied/unknown/unproven."""
+    payload = _two_candidate_selected()
+    _row(payload, "worker-a").update(mutation)
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _PROVENANCE_MESSAGE
+
+
+@pytest.mark.parametrize("source_field", ["occupancy_source", "capacity_source"])
+@pytest.mark.parametrize("freshness", ["stale", "unknown"])
+def test_wire_rejects_a_selected_worker_whose_source_freshness_excludes_it(source_field, freshness):
+    payload = _two_candidate_selected()
+    _row(payload, "worker-a")[source_field]["freshness"] = freshness
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _PROVENANCE_MESSAGE
+
+
+def test_wire_rejects_a_forged_aggregate_state_over_eligible_evidence():
+    payload = _two_candidate_selected()
+    payload.update(state="no_eligible_candidate", selected=None, selected_mode=None)
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _PROVENANCE_MESSAGE
+
+
+def test_wire_rejects_a_duplicate_identity_exclusion_with_no_duplicate_in_evidence():
+    payload = _two_candidate_selected()
+    payload.update(
+        state="reconciliation_required", selected=None, selected_mode=None,
+        exclusions=[{"worker_id": "worker-a", "reason": "duplicate_identity"}],
+    )
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _PROVENANCE_MESSAGE
+
+
+def test_wire_rejects_an_exclusion_reason_its_own_evidence_row_contradicts():
+    """worker-b's evidence is free/available/current/closure-proven, so
+    `occupied` is a reason the selector could not have produced for it."""
+    payload = _two_candidate_selected()
+    payload["exclusions"] = [{"worker_id": "worker-b", "reason": "occupied"}]
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _PROVENANCE_MESSAGE
+
+
+def test_wire_rejects_a_tie_between_candidates_of_unequal_capacity_rank():
+    """worker-a is AVAILABLE and worker-b DEGRADED — `_CAPACITY_RANK` can
+    never tie them."""
+    payload = _two_candidate_selected()
+    payload.update(
+        state="tie_abstained", selected=None, selected_mode=None,
+        tied_worker_ids=["worker-a", "worker-b"],
+    )
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _PROVENANCE_MESSAGE
+
+
+def test_wire_rejects_a_forged_tie_membership_on_a_genuine_tie():
+    """Two equal candidates genuinely tie; swapping one tied id for the
+    other worker's is refused even though both ids appear in evidence."""
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=_demand(),
+        candidates=(
+            _candidate(worker_id="worker-a"),
+            _candidate(worker_id="worker-b"),
+            _candidate(worker_id="worker-c", capacity_state=CapacityState.DEGRADED),
+        ),
+    )
+    assert decision.state is eps.SelectionState.TIE_ABSTAINED
+    payload = decision.to_dict()
+    assert payload["tied_worker_ids"] == ["worker-a", "worker-b"]
+    payload["tied_worker_ids"] = ["worker-a", "worker-c"]  # still sorted
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _PROVENANCE_MESSAGE
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"required_capabilities": ["cap_zzz"]},
+        {"quota_class": "premium"},
+        {"provider": "other-cloud"},
+        {"allowed_modes": ["existing_session_reuse"]},
+    ],
+)
+def test_wire_rejects_a_demand_the_decision_was_not_computed_against(mutation):
+    """The demand is an INPUT: swapping it changes which candidates are
+    eligible, so the recomputed decision no longer matches."""
+    payload = _two_candidate_selected()
+    payload["demand"].update(mutation)
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _PROVENANCE_MESSAGE
+
+
+@pytest.mark.parametrize(
+    "relaxation",
+    [
+        {"required_capabilities": []},
+        {"provider": None},
+    ],
+)
+def test_an_outcome_preserving_demand_relaxation_is_accepted_by_design(relaxation):
+    """Pins the gate's EXACT contract, so a later reader does not mistake
+    this for a hole.
+
+    A demand relaxation that excludes nobody new leaves the recomputed
+    decision identical, so the document really is one `select_placement()`
+    would emit from the inputs it declares — which is precisely what this
+    gate authenticates. It does NOT attest that the declared demand was the
+    demand some upstream caller actually held; nothing on a self-describing
+    wire could. A consumer that cares which demand was in force must READ
+    `demand` off the document (it is carried for exactly that reason), not
+    infer it from the decision having validated.
+    """
+    payload = _two_candidate_selected()
+    payload["demand"].update(relaxation)
+    revalidated = eps.validate_placement_selection(payload)
+    # accepted, and the relaxed demand is what the consumer is shown
+    assert revalidated["demand"] == payload["demand"]
+    # the selection itself is unchanged — no new worker became selectable
+    assert revalidated["selected"] == payload["selected"]
+    assert revalidated["state"] == "selected"
+
+
+def test_wire_rejects_a_flipped_responsibility_freshness():
+    """A non-CURRENT responsibility short-circuits to STALE_EVIDENCE, so the
+    gate fact cannot be restated without changing the outcome."""
+    payload = _two_candidate_selected()
+    payload["responsibility_freshness"] = "stale"
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == _PROVENANCE_MESSAGE
+
+
+def test_provenance_refusal_is_value_free_for_a_secret_shaped_forgery():
+    payload = _two_candidate_selected()
+    payload["selected"]["account_label"] = "AKIAIOSFODNN7EXAMPLESECRET"
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert "AKIAIOSFODNN7EXAMPLESECRET" not in str(excinfo.value)
+
+
+def test_validation_calls_the_one_existing_selector_exactly_once(monkeypatch):
+    """The gate must RECOMPUTE through the single canonical owner, never
+    reimplement ranking/exclusion policy in a second validator."""
+    payload = _two_candidate_selected()
+    calls = []
+    real = eps.select_placement
+
+    def counting(**kwargs):
+        calls.append(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(eps, "select_placement", counting)
+    assert eps.validate_placement_selection(payload) == payload
+    assert len(calls) == 1
+    # and it was handed rebuilt TYPED inputs, not the raw wire dict
+    assert isinstance(calls[0]["demand"], eps.PlacementDemand)
+    assert all(isinstance(c, eps.PlacementCandidateFact) for c in calls[0]["candidates"])
+
+
+def test_every_genuine_state_round_trips_byte_identically_under_provenance():
+    """Including the correction/duplicate and tie paths the new rules talk
+    about, and every permutation of the candidate list."""
+    reuse_demand = _demand(allowed_modes=frozenset({eps.PlacementMode.EXISTING_SESSION_REUSE}))
+    cases = {
+        "selected": (_responsibility(), _demand(), (_candidate(worker_id="worker-a"),)),
+        "selected_reuse": (_responsibility(), reuse_demand, (_reuse_candidate(worker_id="worker-a"),)),
+        "tie": (_responsibility(), _demand(), (_candidate(worker_id="worker-a"), _candidate(worker_id="worker-b"))),
+        "duplicate": (_responsibility(), _demand(), (_candidate(worker_id="worker-a"), _candidate(worker_id="worker-a"))),
+        "stale": (_responsibility(freshness=Freshness.STALE), _demand(), (_candidate(worker_id="worker-a"),)),
+        "no_eligible": (_responsibility(), _demand(), (_candidate(worker_id="worker-a", capabilities=frozenset({"other"})),)),
+        "empty": (_responsibility(), _demand(), ()),
+    }
+    seen = set()
+    for name, (responsibility, demand, candidates) in cases.items():
+        decision = eps.select_placement(
+            responsibility=responsibility, demand=demand, candidates=candidates,
+        )
+        seen.add(decision.state)
+        payload = decision.to_dict()
+        assert eps.validate_placement_selection(payload) == payload, name
+        assert json.dumps(eps.validate_placement_selection(payload), sort_keys=True) == json.dumps(
+            payload, sort_keys=True
+        ), name
+    assert {
+        eps.SelectionState.SELECTED,
+        eps.SelectionState.TIE_ABSTAINED,
+        eps.SelectionState.RECONCILIATION_REQUIRED,
+        eps.SelectionState.STALE_EVIDENCE,
+    } <= seen
+
+
+def test_permutation_invariance_holds_under_the_provenance_gate():
+    candidates = (
+        _candidate(worker_id="worker-a"),
+        _candidate(worker_id="worker-b", capacity_state=CapacityState.DEGRADED),
+        _candidate(worker_id="worker-c", capabilities=frozenset({"cap_other"})),
+    )
+    baseline = None
+    for permutation in itertools.permutations(candidates):
+        payload = eps.select_placement(
+            responsibility=_responsibility(), demand=_demand(), candidates=permutation,
+        ).to_dict()
+        assert eps.validate_placement_selection(payload) == payload
+        rendered = json.dumps(payload, sort_keys=True)
+        baseline = rendered if baseline is None else baseline
+        assert rendered == baseline
+
+
+#: Passes `_require_token` (non-empty, no whitespace/'@'/'/') but fails the
+#: Phase-B snapshot's stricter `_PROVIDER_RE` (lowercase only). Lets a wire
+#: row be individually well-shaped yet unable to become a typed candidate.
+_TOKEN_OK_BUT_NOT_SNAPSHOT_SAFE = "ACME"
+
+
+def test_wire_refuses_evidence_that_cannot_be_rebuilt_into_typed_candidates():
+    """The reconstruction step must REFUSE, never fall through to accepting
+    the supplied document.
+
+    A mutation probe proved this needed its own test: making the failed
+    reconstruction return the document instead of raising survived the whole
+    suite, because every other forgery rebuilds fine and is caught later by
+    the equality check. This row cannot be rebuilt at all.
+    """
+    payload = _two_candidate_selected()
+    _row(payload, "worker-a")["provider"] = _TOKEN_OK_BUT_NOT_SNAPSHOT_SAFE
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert str(excinfo.value) == "decision inputs do not form a valid selector invocation"
+    # value-free: the offending token never appears in the message
+    assert _TOKEN_OK_BUT_NOT_SNAPSHOT_SAFE not in str(excinfo.value)
+
+
+def test_evidence_carries_the_candidates_own_values_not_fixture_defaults():
+    """Pins that each candidate fact is really CARRIED per row.
+
+    A mutation probe proved this needed its own test: hard-coding
+    `provider` to the fixture default in `CandidateEvidence.to_dict()`
+    survived the whole suite, because every other fixture used that same
+    default. These values are deliberately distinct from every default in
+    this file.
+    """
+    candidate = _candidate(
+        worker_id="worker-a",
+        provider="zeta-cloud",
+        account_label="acct-9",
+        quota_class="premium",
+        capabilities=frozenset({"cap_a", "cap_b"}),
+        observed_at_ms=4242,
+    )
+    decision = eps.select_placement(
+        responsibility=_responsibility(),
+        demand=_demand(
+            required_capabilities=frozenset({"cap_a"}),
+            quota_class="premium",
+            provider="zeta-cloud",
+        ),
+        candidates=(candidate,),
+    )
+    assert decision.state is eps.SelectionState.SELECTED
+    payload = decision.to_dict()
+
+    row = payload["evidence"][0]
+    assert row["provider"] == "zeta-cloud"
+    assert row["account_label"] == "acct-9"
+    assert row["quota_class"] == "premium"
+    assert row["capabilities"] == ["cap_a", "cap_b"]
+    assert row["observed_at_ms"] == 4242
+    # and the snapshot the Chairman sees is bound to those same values
+    assert payload["selected"]["provider"] == "zeta-cloud"
+    assert payload["selected"]["account_label"] == "acct-9"
+    assert payload["selected"]["quota_class"] == "premium"
+    assert payload["selected"]["observed_at_ms"] == 4242
+    assert eps.validate_placement_selection(payload) == payload
