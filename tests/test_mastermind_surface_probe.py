@@ -136,8 +136,14 @@ def test_only_identifier_fields_receive_keyed_fingerprints():
         assert row["usable_for_authorization"] is False
         if field in IDENTIFIER_HOST_FIELDS:
             assert re.fullmatch(r"hmac-sha256:v1:[0-9a-f]{64}", row["fingerprint"])
+            assert re.fullmatch(
+                r"hmac-sha256:v1:[0-9a-f]{64}",
+                row["comparison_fingerprint"],
+            )
+            assert row["comparison_fingerprint"] != row["fingerprint"]
         else:
             assert row["fingerprint"] is None
+            assert row["comparison_fingerprint"] is None
 
 
 def test_fingerprint_is_stable_but_domain_separated_by_field_realm_and_generation():
@@ -173,6 +179,82 @@ def test_fingerprint_is_stable_but_domain_separated_by_field_realm_and_generatio
         )
 
 
+def test_exact_runbook_apps_share_only_cross_app_comparison_fingerprints():
+    shared = {
+        "transport_profile": "secure-mcp-tunnel-readonly",
+        "fingerprint_key_id": "hc0-cohort",
+        "fingerprint_key_version": "v1",
+        "fingerprint_scope": "hc0-cross-app-probe",
+    }
+    app_a = _inspect(
+        config=_config(
+            app_realm="surface-probe-a",
+            app_generation="hc0-a-g1",
+            **shared,
+        )
+    )
+    app_b = _inspect(
+        config=_config(
+            app_realm="surface-probe-b",
+            app_generation="hc0-b-g1",
+            **shared,
+        )
+    )
+
+    for field in IDENTIFIER_HOST_FIELDS:
+        row_a = app_a["host_context"][field]
+        row_b = app_b["host_context"][field]
+        assert row_a["fingerprint"] != row_b["fingerprint"]
+        assert row_a["comparison_fingerprint"] == row_b["comparison_fingerprint"]
+        assert row_a["usable_for_authorization"] is False
+        assert row_b["usable_for_authorization"] is False
+
+
+def test_comparison_fingerprint_binds_purpose_field_key_version_scope_secret_and_value():
+    same_raw = {
+        "openai/session": "same-opaque-value",
+        "openai/subject": "same-opaque-value",
+        "openai/organization": "same-opaque-value",
+    }
+    baseline = _inspect(same_raw)
+    baseline_rows = baseline["host_context"]
+    baseline_session = baseline_rows["openai_session"]["comparison_fingerprint"]
+
+    assert len(
+        {
+            baseline_rows[field]["comparison_fingerprint"]
+            for field in IDENTIFIER_HOST_FIELDS
+        }
+    ) == 3
+    assert baseline_session != _inspect(
+        same_raw,
+        config=_config(fingerprint_key_id="hc0-cohort-b"),
+    )["host_context"]["openai_session"]["comparison_fingerprint"]
+    assert baseline_session != _inspect(
+        same_raw,
+        config=_config(fingerprint_key_version="v2"),
+    )["host_context"]["openai_session"]["comparison_fingerprint"]
+    assert baseline_session != _inspect(
+        same_raw,
+        config=_config(fingerprint_scope="other-probe-cohort"),
+    )["host_context"]["openai_session"]["comparison_fingerprint"]
+    assert baseline_session != _inspect(
+        same_raw,
+        config=_config(
+            fingerprint_secret=b"abcdef0123456789abcdef0123456789",
+        ),
+    )["host_context"]["openai_session"]["comparison_fingerprint"]
+    assert baseline_session != _inspect(
+        {**same_raw, "openai/session": "different-opaque-value"},
+    )["host_context"]["openai_session"]["comparison_fingerprint"]
+
+    # Hand-derived fixture for the exact schema + comparison-purpose domain.
+    assert _inspect()["host_context"]["openai_session"]["comparison_fingerprint"] == (
+        "hmac-sha256:v1:"
+        "20c6e9363a75a3f9db039b61fb69530146007269f4d6f989535b60b399281569"
+    )
+
+
 def test_missing_meta_is_explicit_null_not_an_empty_string_fingerprint():
     response = _inspect(None)
 
@@ -190,6 +272,7 @@ def test_missing_meta_is_explicit_null_not_an_empty_string_fingerprint():
         assert row == {
             "present": False,
             "fingerprint": None,
+            "comparison_fingerprint": None,
             "usable_for_authorization": False,
         }
 
