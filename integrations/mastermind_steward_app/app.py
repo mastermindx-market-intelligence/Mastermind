@@ -72,18 +72,17 @@ def _ascii(value: bytes) -> str | None:
 
 
 def _canonical_raw_path(scope: Scope) -> bytes:
-    """Return one ASCII path value even when the optional ASGI raw_path is absent."""
+    """Return exact raw bytes only when decoded and raw ASGI paths agree."""
 
     raw_path = scope.get("raw_path")
-    if isinstance(raw_path, bytes):
-        return raw_path
     path = scope.get("path")
-    if not isinstance(path, str):
+    if not isinstance(raw_path, bytes) or not isinstance(path, str):
         return b""
     try:
-        return path.encode("ascii")
+        decoded_path = path.encode("ascii")
     except UnicodeEncodeError:
         return b""
+    return raw_path if decoded_path == raw_path else b""
 
 
 def _host_matches(candidate: str, allowed_hosts: Sequence[str]) -> bool:
