@@ -131,6 +131,17 @@ def test_terminal_stop_consumes_receiver_assignment_for_that_child() -> None:
             assert phrase in text
 
 
+def test_exact_session_required_does_not_equate_slack_seat_with_native_session() -> None:
+    routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
+    for phrase in (
+        "Slack user/seat identity is not exact native-session identity",
+        "RECEIVER_SESSION_MISMATCH",
+        "delivery to a different session is not PICKUP_ACK",
+        "do not spawn or substitute another session",
+    ):
+        assert phrase in routing
+
+
 def test_root_worker_bootstraps_carry_codex_continuation_invariant() -> None:
     for path in ("AGENTS.md", "CLAUDE.md"):
         text = _flat(path)
