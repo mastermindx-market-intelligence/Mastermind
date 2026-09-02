@@ -154,6 +154,7 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
         "expectation_content_sha256": canonical_digest(expectation).removeprefix("sha256:"),
         "request_content_sha256": canonical_digest(request).removeprefix("sha256:"),
         "head_equals_sealed_commit": True,
+        "seal_provenance": "COMMITTED_BLOBS_VERIFIED",
     }
     validate_preflight(preflight)
     effect_calls = [

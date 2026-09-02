@@ -731,7 +731,14 @@ _PREFLIGHT_REQUIRED = {
     "expectation_content_sha256",
     "request_content_sha256",
     "head_equals_sealed_commit",
+    "seal_provenance",
 }
+#: The only valid literal (Sol REQUEST_REPAIR, 2026-09-02): presence of this exact
+#: value is the preflight's claim that expectation_blob_sha/request_blob_sha were
+#: independently resolved as real git blobs committed at sealed_commit_sha, and that
+#: expectation_content_sha256/request_content_sha256 are the canonical digests of
+#: those COMMITTED blob contents (not a local file's own uncommitted fingerprint).
+SEAL_PROVENANCE_COMMITTED_BLOBS_VERIFIED = "COMMITTED_BLOBS_VERIFIED"
 
 
 def validate_preflight(doc: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -750,6 +757,11 @@ def validate_preflight(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     _sha256_hex(item["expectation_content_sha256"], "preflight.expectation_content_sha256")
     _sha256_hex(item["request_content_sha256"], "preflight.request_content_sha256")
     _bool(item["head_equals_sealed_commit"], "preflight.head_equals_sealed_commit")
+    if item["seal_provenance"] != SEAL_PROVENANCE_COMMITTED_BLOBS_VERIFIED:
+        raise OutcomeLearningContractError(
+            "preflight.seal_provenance must be exactly "
+            f"{SEAL_PROVENANCE_COMMITTED_BLOBS_VERIFIED!r}"
+        )
     return item
 
 
@@ -1424,6 +1436,7 @@ __all__ = [
     "PRIVACY_CLASS",
     "PROJECTION_CANDIDATE_KINDS",
     "RESOLUTIONS",
+    "SEAL_PROVENANCE_COMMITTED_BLOBS_VERIFIED",
     "SELF_MODEL_SCHEMA",
     "OutcomeLearningContractError",
     "build_canary_request",

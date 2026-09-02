@@ -205,6 +205,62 @@ def _git(runner: Runner, args: Sequence[str], *, cwd: str | None = None) -> str:
     return result.stdout.strip()
 
 
+def _normalize_repo_path(path: str, *, where: str) -> str:
+    """Refuse an absolute path or any ".." segment, then collapse "." segments and
+    redundant slashes. Sol REQUEST_REPAIR: a repo-path that could escape the sealed
+    commit's own tree must never reach ``git rev-parse``."""
+    if not isinstance(path, str) or not path:
+        raise OutcomeLearningCliError(f"{where} must be a non-empty repo-relative path")
+    if path.startswith("/"):
+        raise OutcomeLearningCliError(
+            f"{where} must be a repo-relative path, not absolute: {path!r}"
+        )
+    segments = path.split("/")
+    if any(segment == ".." for segment in segments):
+        raise OutcomeLearningCliError(
+            f"{where} must not contain '..' path segments: {path!r}"
+        )
+    normalized = "/".join(segment for segment in segments if segment not in ("", "."))
+    if not normalized:
+        raise OutcomeLearningCliError(
+            f"{where} must not be empty after normalization: {path!r}"
+        )
+    return normalized
+
+
+def _resolve_committed_blob(
+    runner: Runner,
+    mastermind_root: str | None,
+    sealed_commit: str,
+    repo_path: str,
+    *,
+    where: str,
+) -> tuple[str, str]:
+    """Prove ``repo_path`` is an exact blob committed at ``sealed_commit`` — two
+    INDEPENDENT git calls, never one: first resolve `<sealed_commit>:<repo_path>` to a
+    blob id (``git rev-parse``), then separately read that blob's own bytes
+    (``git cat-file -p``). Returns ``(blob_id, committed_text)``. Both calls run with
+    an EXPLICIT cwd (``--mastermind-root``), never an implicit "wherever this process
+    happens to be running"."""
+    normalized = _normalize_repo_path(repo_path, where=f"{where} repo-path")
+    rev_parse = runner.run(
+        ["git", "rev-parse", f"{sealed_commit}:{normalized}"], cwd=mastermind_root
+    )
+    if rev_parse.returncode != 0 or not rev_parse.stdout.strip():
+        raise OutcomeLearningCliError(
+            f"{where}: sealed commit {sealed_commit} does not contain the exact "
+            f"artifact path {normalized!r} — refusing (unresolvable blob)"
+        )
+    blob_id = rev_parse.stdout.strip()
+    cat_file = runner.run(["git", "cat-file", "-p", blob_id], cwd=mastermind_root)
+    if cat_file.returncode != 0:
+        raise OutcomeLearningCliError(
+            f"{where}: could not independently read committed blob {blob_id} for "
+            f"{normalized!r}"
+        )
+    return blob_id, cat_file.stdout
+
+
 # --------------------------------------------------------------------------- compose
 
 
@@ -1055,10 +1111,63 @@ def cmd_seal(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- preflight
 
 
+def _committed_blob_content_sha256(
+    runner: Runner,
+    mastermind_root: str | None,
+    sealed_commit: str,
+    repo_path: str,
+    local_path: str,
+    *,
+    where: str,
+) -> tuple[str, str]:
+    """Sol REQUEST_REPAIR (committed-seal-before-effect): prove the SUPPLIED artifact
+    file is byte-identical, after canonicalization, to the blob actually committed at
+    ``sealed_commit:repo_path`` — never trust a local file's own fingerprint as if it
+    were a claim about what the sealed commit contains. Returns
+    ``(blob_id, committed_content_sha256)``; raises on any unresolvable path, escape
+    attempt, unreadable blob, non-JSON committed content, or digest mismatch against
+    the supplied file."""
+    blob_id, committed_text = _resolve_committed_blob(
+        runner, mastermind_root, sealed_commit, repo_path, where=where
+    )
+    try:
+        committed_obj = json.loads(committed_text)
+    except json.JSONDecodeError as exc:
+        raise OutcomeLearningCliError(
+            f"{where}: committed blob {blob_id} is not valid JSON"
+        ) from exc
+    committed_content_sha256 = canonical_digest(committed_obj).removeprefix("sha256:")
+
+    supplied_obj = json.loads(Path(local_path).read_text(encoding="utf-8"))
+    supplied_content_sha256 = canonical_digest(supplied_obj).removeprefix("sha256:")
+
+    if committed_content_sha256 != supplied_content_sha256:
+        raise OutcomeLearningCliError(
+            f"{where}: committed blob {blob_id} at {sealed_commit}:{repo_path} does "
+            "not match the supplied artifact file — refusing (committed-vs-supplied "
+            f"digest mismatch: committed={committed_content_sha256} "
+            f"supplied={supplied_content_sha256})"
+        )
+    return blob_id, committed_content_sha256
+
+
 def cmd_preflight(args: argparse.Namespace, *, runner: Runner | None = None, transport: GhTransport | None = None) -> int:
+    """Sol REQUEST_REPAIR, 2026-09-02: preflight proves ``head_equals_sealed_commit``
+    together with an independently-verified claim that the expectation/request
+    artifacts are the EXACT bytes committed at ``sealed_commit`` — never a local
+    uncommitted fingerprint standing in for that claim. There is no local-file
+    fallback; both ``--expectation-repo-path``/``--request-repo-path`` are required."""
     runner = runner or SubprocessRunner()
     transport = transport or GhCliTransport(runner)
     out_path = _refuse_inside_repo(args.out, where="preflight --out")
+
+    if not args.expectation_repo_path or not args.request_repo_path:
+        raise OutcomeLearningCliError(
+            "preflight requires both --expectation-repo-path and --request-repo-path "
+            "— there is no local-uncommitted-file fallback (Sol REQUEST_REPAIR: a "
+            "local hash-object fingerprint cannot prove the artifact is part of the "
+            "sealed commit)"
+        )
 
     status, prs = transport.get(
         f"repos/{args.repo}/pulls?head={args.repo.split('/')[0]}:{args.branch}&state=open"
@@ -1071,44 +1180,25 @@ def cmd_preflight(args: argparse.Namespace, *, runner: Runner | None = None, tra
     pr_summary = prs[0]
     _, pr = transport.get(f"repos/{args.repo}/pulls/{pr_summary['number']}")
 
-    expectation_obj = json.loads(Path(args.expectation).read_text(encoding="utf-8"))
-    request_obj = json.loads(Path(args.request).read_text(encoding="utf-8"))
-    # Content identity is over the CANONICAL bytes of the parsed document, not the raw
-    # pretty-printed file bytes — this is what evaluate_episode's pure process_quality
-    # recomputation can independently reproduce with no file I/O of its own.
-    expectation_content_sha256 = canonical_digest(expectation_obj).removeprefix("sha256:")
-    request_content_sha256 = canonical_digest(request_obj).removeprefix("sha256:")
-
-    # Blob provenance (MINORS, documented explicitly per principal review): when
-    # --expectation-repo-path/--request-repo-path is given, the blob sha is a REAL git
-    # blob committed at --sealed-commit (`git rev-parse <sealed>:<repo-path>`) — proof
-    # the exact bytes are part of that commit. Without a repo-path, the blob sha falls
-    # back to `git hash-object <local-file>`, a content-addressed fingerprint of a
-    # local file that was NEVER committed anywhere — it identifies the bytes, not
-    # their presence in any commit, and callers who need the stronger claim must pass
-    # the repo-path form. Both git calls run with an EXPLICIT --mastermind-root cwd
-    # (never an implicit "wherever this process happens to be running") so preflight's
-    # git provenance never silently depends on the operator's shell location.
-    if args.expectation_repo_path:
-        expectation_blob_sha = _git(
-            runner,
-            ["rev-parse", f"{args.sealed_commit}:{args.expectation_repo_path}"],
-            cwd=args.mastermind_root,
-        )
-    else:
-        expectation_blob_sha = _git(
-            runner, ["hash-object", args.expectation], cwd=args.mastermind_root
-        )
-    if args.request_repo_path:
-        request_blob_sha = _git(
-            runner,
-            ["rev-parse", f"{args.sealed_commit}:{args.request_repo_path}"],
-            cwd=args.mastermind_root,
-        )
-    else:
-        request_blob_sha = _git(
-            runner, ["hash-object", args.request], cwd=args.mastermind_root
-        )
+    # Two independent git calls PER artifact (blob-id resolution, then a separate
+    # content read) — see _resolve_committed_blob — proving the supplied file's
+    # canonical content matches what the sealed commit actually contains.
+    expectation_blob_sha, expectation_content_sha256 = _committed_blob_content_sha256(
+        runner,
+        args.mastermind_root,
+        args.sealed_commit,
+        args.expectation_repo_path,
+        args.expectation,
+        where="expectation",
+    )
+    request_blob_sha, request_content_sha256 = _committed_blob_content_sha256(
+        runner,
+        args.mastermind_root,
+        args.sealed_commit,
+        args.request_repo_path,
+        args.request,
+        where="request",
+    )
 
     original_title = pr["title"]
     original_title_sha256 = _sha256_hex_text(original_title)
@@ -1129,10 +1219,12 @@ def cmd_preflight(args: argparse.Namespace, *, runner: Runner | None = None, tra
         "expectation_content_sha256": expectation_content_sha256,
         "request_content_sha256": request_content_sha256,
         "head_equals_sealed_commit": head_sha == args.sealed_commit,
+        "seal_provenance": "COMMITTED_BLOBS_VERIFIED",
     }
     validate_preflight(preflight)
     _write_artifact(out_path, preflight)
     print(f"head_equals_sealed_commit={preflight['head_equals_sealed_commit']}")
+    print(f"seal_provenance={preflight['seal_provenance']}")
     return 0
 
 
@@ -1203,6 +1295,10 @@ def cmd_canary(args: argparse.Namespace, *, transport: GhTransport | None = None
 
     preflight = _read_json(args.preflight)
     request = _read_json(args.request)
+    # Sol REQUEST_REPAIR: validate_preflight (including its seal_provenance ==
+    # "COMMITTED_BLOBS_VERIFIED" check) runs BEFORE any transport call — a tampered
+    # or absent seal_provenance raises here, so the episode never issues a single GET
+    # or PATCH against a preflight this CLI cannot prove is committed-seal-verified.
     validate_preflight(preflight)
     if preflight["head_equals_sealed_commit"] is not True:
         raise OutcomeLearningCliError(
@@ -1569,12 +1665,20 @@ def _parser() -> argparse.ArgumentParser:
     p_preflight.add_argument("--sealed-commit", required=True)
     p_preflight.add_argument("--expectation", required=True)
     p_preflight.add_argument("--request", required=True)
-    p_preflight.add_argument("--expectation-repo-path", default=None)
-    p_preflight.add_argument("--request-repo-path", default=None)
+    p_preflight.add_argument(
+        "--expectation-repo-path",
+        required=True,
+        help="repo-relative path proving the expectation is committed at --sealed-commit (no local fallback)",
+    )
+    p_preflight.add_argument(
+        "--request-repo-path",
+        required=True,
+        help="repo-relative path proving the canary request is committed at --sealed-commit (no local fallback)",
+    )
     p_preflight.add_argument(
         "--mastermind-root",
         default=None,
-        help="explicit cwd for the two git blob-provenance calls (default: this process's cwd)",
+        help="explicit cwd for the git blob-provenance calls (default: this process's cwd)",
     )
     p_preflight.add_argument("--observed-at", required=True)
     p_preflight.add_argument("--out", required=True)

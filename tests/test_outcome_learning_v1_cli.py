@@ -125,6 +125,7 @@ class FakeRunner:
         brief_unhealthy=False,
         boot_generated_at="2026-09-02T12:00:00Z",
         constraints_missing=None,
+        committed_blobs: dict[str, str] | None = None,
     ):
         self.mastermind_sha = mastermind_sha
         self.macro_sha = macro_sha
@@ -133,7 +134,16 @@ class FakeRunner:
         self.brief_unhealthy = brief_unhealthy
         self.boot_generated_at = boot_generated_at
         self.constraints_missing = constraints_missing
+        # Sol REQUEST_REPAIR: repo-relative path -> raw committed text, as if it were
+        # `git cat-file -p <blob>` output at whatever sealed commit is asked for. Blob
+        # ids are deterministic sha1(path) hex, fake but stable within one test.
+        self.committed_blobs = dict(committed_blobs or {})
         self.calls: list[tuple] = []
+
+    def _blob_id_for(self, path: str) -> str:
+        import hashlib as _hashlib
+
+        return _hashlib.sha1(path.encode("utf-8")).hexdigest()
 
     def run(self, args, *, cwd=None, input=None):
         self.calls.append((tuple(args), cwd, input))
@@ -142,8 +152,19 @@ class FakeRunner:
             return cli.RunResult(0, sha + "\n", "")
         if args[:3] == ["git", "rev-parse", "--abbrev-ref"]:
             return cli.RunResult(0, self.mastermind_branch + "\n", "")
-        if args[:2] == ["git", "hash-object"]:
-            return cli.RunResult(0, "f" * 40 + "\n", "")
+        if args[:2] == ["git", "rev-parse"] and len(args) == 3 and ":" in args[2]:
+            _sealed, _, repo_path = args[2].partition(":")
+            if repo_path in self.committed_blobs:
+                return cli.RunResult(0, self._blob_id_for(repo_path) + "\n", "")
+            return cli.RunResult(
+                1, "", f"fatal: path '{repo_path}' does not exist in the given commit"
+            )
+        if args[:2] == ["git", "cat-file"]:
+            blob_id = args[-1]
+            for path, text in self.committed_blobs.items():
+                if self._blob_id_for(path) == blob_id:
+                    return cli.RunResult(0, text, "")
+            return cli.RunResult(1, "", f"fatal: not a valid object name {blob_id}")
         if len(args) >= 2 and "ceo_boot_packet.py" in args[1]:
             boot = _boot_packet(
                 mastermind_sha=self.mastermind_sha,
@@ -269,7 +290,25 @@ def _compose_and_seal(
     return outside_dir, expectation, request
 
 
-def _run_preflight(outside_dir: Path, transport: FakeTransport) -> dict:
+EXPECTATION_REPO_PATH = "research/outcome_learning/OLV1_EXPECTATION_TEST.json"
+REQUEST_REPO_PATH = "research/outcome_learning/OLV1_CANARY_REQUEST_TEST.json"
+
+
+def _committed_runner_for(outside_dir: Path) -> FakeRunner:
+    """A FakeRunner whose committed_blobs echo the actual on-disk expectation/request
+    file contents — the honest happy-path fixture: the sealed commit really does
+    contain the exact bytes preflight is being asked to prove."""
+    return FakeRunner(
+        committed_blobs={
+            EXPECTATION_REPO_PATH: (outside_dir / "expectation.json").read_text(encoding="utf-8"),
+            REQUEST_REPO_PATH: (outside_dir / "request.json").read_text(encoding="utf-8"),
+        }
+    )
+
+
+def _run_preflight(
+    outside_dir: Path, transport: FakeTransport, *, runner: FakeRunner | None = None
+) -> dict:
     rc = cli.cmd_preflight(
         cli._parser().parse_args(
             [
@@ -279,11 +318,14 @@ def _run_preflight(outside_dir: Path, transport: FakeTransport) -> dict:
                 "--sealed-commit", transport.head_sha,
                 "--expectation", str(outside_dir / "expectation.json"),
                 "--request", str(outside_dir / "request.json"),
+                "--expectation-repo-path", EXPECTATION_REPO_PATH,
+                "--request-repo-path", REQUEST_REPO_PATH,
+                "--mastermind-root", "/x",
                 "--observed-at", "2026-09-02T12:02:00Z",
                 "--out", str(outside_dir / "preflight.json"),
             ]
         ),
-        runner=FakeRunner(),
+        runner=runner or _committed_runner_for(outside_dir),
         transport=transport,
     )
     assert rc == 0
@@ -845,10 +887,14 @@ def test_preflight_out_refuses_a_path_inside_the_repository_worktree(tmp_path):
             "--sealed-commit", SHA40_B,
             "--expectation", str(outside_dir / "expectation.json"),
             "--request", str(outside_dir / "request.json"),
+            "--expectation-repo-path", EXPECTATION_REPO_PATH,
+            "--request-repo-path", REQUEST_REPO_PATH,
             "--observed-at", "2026-09-02T12:02:00Z",
             "--out", str(inside_repo_path),
         ]
     )
+    # _refuse_inside_repo fires before any git/transport call, so a bare FakeRunner()
+    # (no committed_blobs configured) is sufficient here.
     with pytest.raises(cli.OutcomeLearningCliError, match="outside the repository worktree"):
         cli.cmd_preflight(args, runner=FakeRunner(), transport=FakeTransport())
 
@@ -873,6 +919,7 @@ def test_canary_episode_dir_refuses_a_path_inside_the_repository_worktree(tmp_pa
                 "expectation_content_sha256": "c" * 64,
                 "request_content_sha256": "d" * 64,
                 "head_equals_sealed_commit": True,
+                "seal_provenance": "COMMITTED_BLOBS_VERIFIED",
             }
         )
     )
@@ -1024,3 +1071,160 @@ def test_coverage_seq_rule_positions_seq_to_index(tmp_path):
     journal = json.loads(_journal_path(outside_dir, request).read_text())
     seqs = [c["seq"] for c in journal["effect_calls"]]
     assert seqs == [1, 2]
+
+
+# --------------------------------------------------------------------------- Sol REQUEST_REPAIR
+# (committed-seal-before-effect: preflight can no longer fall back to a local,
+# uncommitted `git hash-object` fingerprint standing in for a claim about what the
+# sealed commit actually contains.)
+
+
+def test_repair_local_only_artifact_not_in_sealed_commit_refuses(tmp_path):
+    """(a) The sealed commit genuinely does not contain the artifact at the given
+    repo-path (an uncommitted local-only file) — preflight must refuse, never fall
+    back to hashing the local file as if that proved anything about the commit."""
+    runner = FakeRunner()
+    outside_dir, expectation, request = _compose_and_seal(tmp_path, runner)
+    transport = FakeTransport()
+    # committed_blobs deliberately omits REQUEST_REPO_PATH — the sealed commit has no
+    # blob at that path.
+    preflight_runner = FakeRunner(
+        committed_blobs={
+            EXPECTATION_REPO_PATH: (outside_dir / "expectation.json").read_text(encoding="utf-8"),
+        }
+    )
+    with pytest.raises(cli.OutcomeLearningCliError, match="does not contain the exact artifact path"):
+        _run_preflight(outside_dir, transport, runner=preflight_runner)
+
+
+def test_repair_forged_pairing_digest_mismatch_refuses(tmp_path):
+    """(b) The sealed commit DOES contain something at the artifact's repo-path, but
+    it is DIFFERENT bytes than the supplied local file — a forged pairing. Must
+    refuse on committed-vs-supplied digest mismatch, never silently accept whichever
+    copy is more convenient."""
+    runner = FakeRunner()
+    outside_dir, expectation, request = _compose_and_seal(tmp_path, runner)
+    transport = FakeTransport()
+    forged_expectation = json.dumps({**expectation, "decision_kind": "a_forged_pairing"})
+    preflight_runner = FakeRunner(
+        committed_blobs={
+            EXPECTATION_REPO_PATH: forged_expectation,
+            REQUEST_REPO_PATH: (outside_dir / "request.json").read_text(encoding="utf-8"),
+        }
+    )
+    with pytest.raises(cli.OutcomeLearningCliError, match="committed-vs-supplied digest mismatch"):
+        _run_preflight(outside_dir, transport, runner=preflight_runner)
+
+
+def test_repair_path_escape_refused_before_any_git_call(tmp_path):
+    """(d) An absolute repo-path, or one containing a '..' segment, is refused by
+    normalization BEFORE any git call is made — never handed to `git rev-parse` where
+    a clever escape could resolve outside the sealed commit's own tree."""
+    runner = FakeRunner()
+    outside_dir, expectation, request = _compose_and_seal(tmp_path, runner)
+    transport = FakeTransport()
+    tracking_runner = _committed_runner_for(outside_dir)
+
+    args = cli._parser().parse_args(
+        [
+            "preflight",
+            "--repo", "mastermindx-market-intelligence/Mastermind",
+            "--branch", "sol/outcome-learning-v1-complete-vertical-20260902",
+            "--sealed-commit", transport.head_sha,
+            "--expectation", str(outside_dir / "expectation.json"),
+            "--request", str(outside_dir / "request.json"),
+            "--expectation-repo-path", "../../../etc/passwd",
+            "--request-repo-path", REQUEST_REPO_PATH,
+            "--mastermind-root", "/x",
+            "--observed-at", "2026-09-02T12:02:00Z",
+            "--out", str(outside_dir / "preflight.json"),
+        ]
+    )
+    with pytest.raises(cli.OutcomeLearningCliError, match="must not contain '..' path segments"):
+        cli.cmd_preflight(args, runner=tracking_runner, transport=transport)
+    assert tracking_runner.calls == []  # zero git calls — refused by normalization alone
+
+    args_abs = cli._parser().parse_args(
+        [
+            "preflight",
+            "--repo", "mastermindx-market-intelligence/Mastermind",
+            "--branch", "sol/outcome-learning-v1-complete-vertical-20260902",
+            "--sealed-commit", transport.head_sha,
+            "--expectation", str(outside_dir / "expectation.json"),
+            "--request", str(outside_dir / "request.json"),
+            "--expectation-repo-path", "/etc/passwd",
+            "--request-repo-path", REQUEST_REPO_PATH,
+            "--mastermind-root", "/x",
+            "--observed-at", "2026-09-02T12:02:00Z",
+            "--out", str(outside_dir / "preflight.json"),
+        ]
+    )
+    with pytest.raises(cli.OutcomeLearningCliError, match="not absolute"):
+        cli.cmd_preflight(args_abs, runner=_committed_runner_for(outside_dir), transport=transport)
+
+
+def test_repair_canary_refuses_zero_patches_on_missing_seal_provenance(tmp_path):
+    """(c) A preflight JSON without (or with the wrong) seal_provenance — canary must
+    refuse before any transport call, so zero GETs and zero PATCHes are ever issued."""
+    runner = FakeRunner()
+    outside_dir, expectation, request = _compose_and_seal(tmp_path, runner)
+    transport = FakeTransport()
+    preflight = _run_preflight(outside_dir, transport)
+    del preflight["seal_provenance"]
+    (outside_dir / "preflight.json").write_text(json.dumps(preflight))
+
+    fresh_transport = FakeTransport()
+    with pytest.raises(cli.OutcomeLearningContractError, match="seal_provenance"):
+        cli.cmd_canary(
+            cli._parser().parse_args(
+                [
+                    "canary",
+                    "--preflight", str(outside_dir / "preflight.json"),
+                    "--request", str(outside_dir / "request.json"),
+                    "--recorded-at", "2026-09-02T12:03:00Z",
+                    "--episode-dir", str(outside_dir),
+                ]
+            ),
+            transport=fresh_transport,
+        )
+    assert fresh_transport.patches == 0
+    assert fresh_transport.gets == 0
+
+    # Wrong (tampered) literal, not merely absent.
+    preflight["seal_provenance"] = "TOTALLY_LEGIT_TRUST_ME"
+    (outside_dir / "preflight.json").write_text(json.dumps(preflight))
+    fresh_transport_2 = FakeTransport()
+    with pytest.raises(cli.OutcomeLearningContractError, match="seal_provenance"):
+        cli.cmd_canary(
+            cli._parser().parse_args(
+                [
+                    "canary",
+                    "--preflight", str(outside_dir / "preflight.json"),
+                    "--request", str(outside_dir / "request.json"),
+                    "--recorded-at", "2026-09-02T12:03:00Z",
+                    "--episode-dir", str(outside_dir),
+                ]
+            ),
+            transport=fresh_transport_2,
+        )
+    assert fresh_transport_2.patches == 0
+    assert fresh_transport_2.gets == 0
+
+
+def test_repair_preflight_records_seal_provenance_and_committed_blob_shas(tmp_path):
+    """Sanity: the happy path's preflight carries the literal seal_provenance and its
+    blob shas/content digests genuinely came from the (fake) committed blobs, not a
+    local fingerprint."""
+    runner = FakeRunner()
+    outside_dir, expectation, request = _compose_and_seal(tmp_path, runner)
+    transport = FakeTransport()
+    preflight = _run_preflight(outside_dir, transport)
+    assert preflight["seal_provenance"] == "COMMITTED_BLOBS_VERIFIED"
+    import hashlib as _hashlib
+
+    assert preflight["expectation_blob_sha"] == _hashlib.sha1(
+        EXPECTATION_REPO_PATH.encode("utf-8")
+    ).hexdigest()
+    assert preflight["request_blob_sha"] == _hashlib.sha1(
+        REQUEST_REPO_PATH.encode("utf-8")
+    ).hexdigest()

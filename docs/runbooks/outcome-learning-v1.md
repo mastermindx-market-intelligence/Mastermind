@@ -80,12 +80,17 @@ python3 scripts/outcome_learning_v1.py seal \
   --out-request "$OUT/OLV1_CANARY_REQUEST_2026-09-02.json"
 
 # 3. Build the external preflight receipt (refuses to write inside this checkout).
-#    --mastermind-root is an EXPLICIT cwd for the two git blob-provenance calls — never
-#    an implicit "wherever this shell happens to be". With --expectation-repo-path /
-#    --request-repo-path, the blob sha is a REAL git blob at --sealed-commit; without
-#    them it falls back to `git hash-object`, a local content fingerprint that was
-#    never committed anywhere (see the source comment in cmd_preflight for the exact
-#    distinction an auditor should draw).
+#    --expectation-repo-path / --request-repo-path are REQUIRED — there is no
+#    local-uncommitted-file fallback (Sol REQUEST_REPAIR, 2026-09-02: a
+#    `git hash-object <local-file>` fingerprint proves only that bytes exist
+#    somewhere on disk, never that they are part of --sealed-commit). For each
+#    artifact, preflight makes TWO INDEPENDENT git calls — `git rev-parse
+#    <sealed-commit>:<repo-path>` to resolve a real committed blob id, then a
+#    SEPARATE `git cat-file -p <blob-id>` to read that blob's own bytes — and proves
+#    the canonical digest of the committed bytes equals the canonical digest of the
+#    supplied artifact file. --mastermind-root is an EXPLICIT cwd for both calls,
+#    never an implicit "wherever this shell happens to be". A repo-path is refused
+#    outright (before any git call) if it is absolute or contains a ".." segment.
 python3 scripts/outcome_learning_v1.py preflight \
   --mastermind-root /path/to/Mastermind \
   --repo mastermindx-market-intelligence/Mastermind \
@@ -93,8 +98,20 @@ python3 scripts/outcome_learning_v1.py preflight \
   --sealed-commit <40-hex sealed commit> \
   --expectation "$OUT/OLV1_EXPECTATION_2026-09-02.json" \
   --request "$OUT/OLV1_CANARY_REQUEST_2026-09-02.json" \
+  --expectation-repo-path research/outcome_learning/OLV1_EXPECTATION_2026-09-02.json \
+  --request-repo-path research/outcome_learning/OLV1_CANARY_REQUEST_2026-09-02.json \
   --observed-at 2026-09-02T00:10:00Z \
   --out "$OUT/preflight.json"
+# The written preflight.json carries seal_provenance="COMMITTED_BLOBS_VERIFIED" — the
+# only valid literal; expectation_blob_sha/request_blob_sha are the sealed-commit's
+# real blob ids, and expectation_content_sha256/request_content_sha256 are the
+# canonical digests of the COMMITTED blob contents (proven equal to the supplied
+# files', never merely asserted). Refusals (all before any effect, all specific):
+#   - missing --expectation-repo-path / --request-repo-path
+#   - repo-path is absolute, or contains a ".." segment (checked before any git call)
+#   - the sealed commit does not contain the exact artifact path (unresolvable blob)
+#   - the committed blob's canonical content does not match the supplied file
+#     (committed-vs-supplied digest mismatch — a forged pairing)
 
 # 4. Apply the two-call canary. There is no --out-journal override (BLOCKER 2): the
 #    journal filename is DERIVED as
@@ -268,6 +285,20 @@ disk between `compose` and `seal` is never trusted verbatim.
   (`sealed_hash` computed over every other field, that field itself absent) before any
   canary call is made. `assumption_resolutions` is `[]` in the sealed receipt — resolving
   assumptions is an evaluation-time act, never a retroactive edit to the sealed record.
+- **Committed-seal-before-effect (Sol REQUEST_REPAIR, 2026-09-02).** `head_equals_sealed_commit
+  = True` alone never proved the sealed artifacts were the exact bytes committed at
+  `sealed_commit_sha` — a `git hash-object` fingerprint of a local, uncommitted file
+  emitted the same closed preflight shape. `preflight` now requires
+  `--expectation-repo-path`/`--request-repo-path` (no local fallback exists) and,
+  for each artifact, makes two INDEPENDENT git calls — `git rev-parse
+  <sealed_commit>:<repo-path>` for the blob id, then a separate `git cat-file -p` for
+  the blob's own bytes — and proves the committed content's canonical digest equals
+  the supplied file's. The preflight doc carries the closed field `seal_provenance`,
+  whose only valid literal is `"COMMITTED_BLOBS_VERIFIED"`; `validate_preflight`
+  enforces it exactly, and `canary` validates the preflight — seal_provenance
+  included — BEFORE its first transport call, so a tampered or absent
+  `seal_provenance` yields ZERO PATCHes (and zero GETs). A repo-path is refused
+  before any git call if it is absolute or contains a `".."` segment.
 - **`seal` does not trust `composition.json` verbatim (BLOCKER 3).** `evaluate_bundle`
   is pure and deterministic, so `seal` re-runs it over the on-disk `bundle.json` and
   requires `canonical_digest` equality against the on-disk `composition.json`; any
@@ -362,9 +393,13 @@ mechanically confirm all of the following without trusting any narrative:
    `effect_class`, `pr_selector`, `canary_token` (`"[OL-V1-CANARY]"`), `apply_rule`,
    `restore_rule`, `max_effect_calls == 2`, `retry_policy == "NONE"`,
    `ambiguity_policy == "EFFECT_UNKNOWN_STOP"`, `execution_authority_granted is False`.
-6. **The preflight receipt is external** — its path is not inside this checkout (an
-   auditor checks the path the operator hands over, not a repo-relative artifact) — and
-   `head_equals_sealed_commit` is `True` for any episode that reports an effect.
+6. **The preflight receipt is external and committed-seal-verified** — its path is not
+   inside this checkout (an auditor checks the path the operator hands over, not a
+   repo-relative artifact); `head_equals_sealed_commit` is `True` for any episode that
+   reports an effect; and `seal_provenance == "COMMITTED_BLOBS_VERIFIED"` — an auditor
+   can independently re-run `git rev-parse <sealed_commit_sha>:<repo-path>` followed by
+   `git cat-file -p <blob-id>` for each artifact and confirm the canonical digest of
+   that committed content equals `expectation_content_sha256`/`request_content_sha256`.
 7. **The outcome is bound to both prior artifacts**:
    `outcome.expectation_sealed_hash == expectation.sealed_hash` and
    `outcome.request_digest` equals the canonical digest of the canary request.
