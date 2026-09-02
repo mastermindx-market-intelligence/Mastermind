@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -22,6 +23,11 @@ def _run_git(root: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_DATE": "2026-08-30T00:00:00+00:00",
+            "GIT_COMMITTER_DATE": "2026-08-30T00:00:00+00:00",
+        },
     )
     return completed.stdout.strip()
 
