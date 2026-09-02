@@ -136,3 +136,17 @@ def test_non_200_redirect_oversized_and_timeout_responses_are_not_retried() -> N
             ZoektClient(endpoint, timeout_seconds=0.02).search(
                 "SENTINEL", limit=3, context_lines=1, case_sensitive=False, regex=False
             )
+
+
+def test_engine_match_count_beyond_the_caller_bound_is_explicitly_truncated() -> None:
+    """A broad query cannot look complete merely because one page parsed cleanly."""
+
+    payload = json.loads(_fixture_payload())
+    payload["result"]["Stats"]["MatchCount"] = 101
+    with _server(json.dumps(payload).encode("utf-8")) as (endpoint, _):
+        result = ZoektClient(endpoint, timeout_seconds=1).search(
+            "SENTINEL", limit=100, context_lines=0, case_sensitive=False, regex=False
+        )
+
+    assert result.total_match_count == 101
+    assert result.truncated is True
