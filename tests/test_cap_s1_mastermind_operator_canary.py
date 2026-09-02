@@ -486,3 +486,725 @@ def test_cleanup_reports_failure_honestly_when_parent_undeletable(tmp_path):
         final_cleanup = cleanup_skill_projection(receipt)
         assert final_cleanup.removed is True
         assert final_cleanup.verified_absent is True
+
+
+# ===========================================================================
+# CAP-S1 phase 11: the canary runner itself
+# ===========================================================================
+#
+# Covers ``scripts/ohf/cap_s1_mastermind_operator_canary.py`` per:
+#
+# - the protocol-attestation amendment §2 (schema source precedence), §5
+#   (fresh-process causal isolation), §9 (exact real-model journey and
+#   evidence receipt), §11 (failure vocabulary);
+# - the vertical amendment §9 (real canary journey and evidence).
+#
+# Every test here drives ``backend="fake"``: a REAL ``python -m
+# scripts.ohf.fake_app_server`` subprocess (the same fake-App-Server harness
+# pattern ``tests/test_codex_operator_adapter.py`` uses for its own
+# skill-canary tests), wrapped by a small scripted client that can
+# substitute individual ``skills/list``/``turn/start`` responses. The
+# real Codex binary is never referenced, imported, or invoked anywhere in
+# this section -- schema generation is driven entirely through an injected
+# ``run_command`` fake, never the real ``subprocess.run`` default, and every
+# ``client_factory`` below asserts its own argv never names a "codex"
+# executable.
+
+import shutil
+import subprocess as _subprocess
+import sys as _sys
+
+from scripts.ohf.cap_s1_mastermind_operator_canary import (
+    CanaryEvidence,
+    CanaryStop,
+    FROZEN_STOP_CODES,
+    SchemaAttestation,
+    attest_protocol_schema,
+    build_synthetic_workspace,
+    main as canary_main,
+    run_canary,
+)
+from scripts.ohf.laboratory import AppServerClient, default_user_codex_home
+
+_SCHEMA_WITH_SKILL_PATH = {
+    "$defs": {
+        "SkillTurnInputItem": {
+            "type": "object",
+            "properties": {
+                "type": {"const": "skill"},
+                "name": {"type": "string"},
+                "path": {"type": "string"},
+            },
+        }
+    }
+}
+
+_SCHEMA_WITHOUT_SKILL_PATH = {
+    "$defs": {
+        "SkillTurnInputItem": {
+            "type": "object",
+            "properties": {
+                "type": {"const": "skill"},
+                "name": {"type": "string"},
+            },
+        }
+    }
+}
+
+_HAPPY_REPLIES = [
+    "PICKUP-ACK received for cap-s1-synthetic-op.",
+    "PROGRESS: bounded synthetic steps underway.",
+    "DECISION-REQUEST: need Sol ruling on branch alpha.",
+    "RESULT: synthetic operation finished; awaiting review.",
+]
+
+
+def _asserts_never_the_real_codex_binary(argv) -> None:
+    """Refuse any argv naming a "codex" executable (basename match, never a
+    generic path-prefix match -- the interpreter running the fake backend
+    can legitimately live under a package-manager prefix that a naive
+    substring check would misclassify as a real binary path)."""
+
+    assert not any(Path(str(part)).name == "codex" for part in argv), (
+        "real Codex binary must never be invoked"
+    )
+
+
+def _fake_schema_run_command(schema_doc):
+    def run_command(argv, **_kwargs):
+        _asserts_never_the_real_codex_binary(argv)
+        out_dir = Path(argv[argv.index("--out") + 1])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "schema.json").write_text(json.dumps(schema_doc), encoding="utf-8")
+        return _subprocess.CompletedProcess(argv, 0)
+
+    return run_command
+
+
+def _failing_schema_run_command(argv, **_kwargs):
+    return _subprocess.CompletedProcess(argv, 1, stdout="", stderr="synthetic failure")
+
+
+_CREATED_CANARY_CLIENTS: list = []
+
+
+class _ScriptedCanaryClient:
+    """Wraps a real fake-App-Server ``AppServerClient``.
+
+    Records every RPC call and can substitute scripted sequential
+    ``skills/list`` responses (mirroring
+    ``tests/test_codex_operator_adapter.py::_RecordingSkillsClient``), a
+    scripted per-turn model reply keyed by call order, and a synthetic
+    transport failure on a chosen ``turn/start`` call -- used only to prove
+    the runner's ``EFFECT_UNKNOWN`` no-retry law. Every other RPC always
+    reaches the real fake App Server subprocess.
+    """
+
+    def __init__(
+        self,
+        inner,
+        *,
+        skills_list_script=None,
+        replies=None,
+        fail_turn_start_at=None,
+    ) -> None:
+        self._inner = inner
+        self._skills_list_script = list(skills_list_script or [])
+        self._replies = list(replies or [])
+        self._native_turn_replies: dict[str, str] = {}
+        self._fail_turn_start_at = fail_turn_start_at
+        self._turn_start_calls = 0
+        self.calls: list[tuple[str, dict]] = []
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def request(self, method, params=None, *, timeout: float = 15.0):
+        self.calls.append((method, dict(params or {})))
+        if method == "skills/list" and self._skills_list_script:
+            return self._skills_list_script.pop(0)
+        if method == "turn/start":
+            self._turn_start_calls += 1
+            if self._fail_turn_start_at == self._turn_start_calls:
+                raise ConnectionError("synthetic transport failure")
+        result = self._inner.request(method, params, timeout=timeout)
+        if method == "turn/start" and self._replies:
+            turn_obj = result.get("turn") if isinstance(result.get("turn"), dict) else {}
+            native_turn_id = str(turn_obj.get("id") or "")
+            if native_turn_id:
+                self._native_turn_replies[native_turn_id] = self._replies.pop(0)
+        elif method == "thread/turns/list" and isinstance(result.get("data"), list):
+            patched = []
+            for row in result["data"]:
+                native_id = str(row.get("id") or "")
+                if native_id in self._native_turn_replies:
+                    reply = self._native_turn_replies[native_id]
+                    row = dict(row)
+                    row["text"] = reply
+                    row["items"] = [
+                        {
+                            "type": "agentMessage",
+                            "text": reply,
+                            "content": [{"type": "text", "text": reply}],
+                        }
+                    ]
+                patched.append(row)
+            result = dict(result)
+            result["data"] = patched
+        return result
+
+
+def _canary_client_factory(
+    *, skills_list_script=None, replies=None, fail_turn_start_at=None, on_create=None
+):
+    def factory(argv, env, cwd):
+        _asserts_never_the_real_codex_binary(argv)
+        if on_create is not None:
+            on_create()
+        inner = AppServerClient(argv, env=env, cwd=cwd, start_new_session=True)
+        client = _ScriptedCanaryClient(
+            inner,
+            skills_list_script=skills_list_script,
+            replies=replies,
+            fail_turn_start_at=fail_turn_start_at,
+        )
+        _CREATED_CANARY_CLIENTS.append(client)
+        return client
+
+    return factory
+
+
+@pytest.fixture(autouse=True)
+def _close_created_canary_clients():
+    _CREATED_CANARY_CLIENTS.clear()
+    yield
+    for client in _CREATED_CANARY_CLIENTS:
+        try:
+            client.close()
+        except Exception:
+            pass
+    _CREATED_CANARY_CLIENTS.clear()
+
+
+def _strict_skills_list_result(cwd: str, rows: list) -> dict:
+    return {"data": [{"cwd": cwd, "skills": rows, "errors": []}]}
+
+
+def _skill_row(name: str, *, path: "str | None" = None, enabled: bool = True) -> dict:
+    row: dict[str, object] = {"name": name, "enabled": enabled}
+    if path is not None:
+        row["path"] = path
+    return row
+
+
+# ---------------------------------------------------------------------------
+# attest_protocol_schema
+# ---------------------------------------------------------------------------
+
+
+def test_attest_protocol_schema_with_skill_path_supports_true_and_is_deterministic(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "scratch-a"
+    scratch.mkdir()
+    binary = tmp_path / "fixture-binary-a"
+    binary.write_bytes(b"fixture codex binary bytes")
+
+    first = attest_protocol_schema(
+        binary_path=binary,
+        scratch_root=scratch,
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+    )
+    assert isinstance(first, SchemaAttestation)
+    assert first.supports_skill_input_path is True
+    assert first.binary_digest
+
+    scratch_2 = tmp_path / "scratch-a-2"
+    scratch_2.mkdir()
+    second = attest_protocol_schema(
+        binary_path=binary,
+        scratch_root=scratch_2,
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+    )
+    assert second.stable_inventory_digest == first.stable_inventory_digest
+    assert second.experimental_inventory_digest == first.experimental_inventory_digest
+    assert second.binary_digest == first.binary_digest
+
+
+def test_attest_protocol_schema_missing_path_evidence_supports_false(tmp_path) -> None:
+    scratch = tmp_path / "scratch-b"
+    scratch.mkdir()
+    binary = tmp_path / "fixture-binary-b"
+    binary.write_bytes(b"fixture codex binary bytes")
+
+    attestation = attest_protocol_schema(
+        binary_path=binary,
+        scratch_root=scratch,
+        run_command=_fake_schema_run_command(_SCHEMA_WITHOUT_SKILL_PATH),
+    )
+    assert attestation.supports_skill_input_path is False
+
+
+def test_canary_stop_only_accepts_a_frozen_code() -> None:
+    for code in FROZEN_STOP_CODES:
+        stop = CanaryStop(code, "detail")
+        assert stop.code == code
+    with pytest.raises(ValueError):
+        CanaryStop("NOT_A_FROZEN_CODE")
+
+
+def test_attest_protocol_schema_failing_command_stops_unattested(tmp_path) -> None:
+    scratch = tmp_path / "scratch-c"
+    scratch.mkdir()
+    binary = tmp_path / "fixture-binary-c"
+    binary.write_bytes(b"fixture codex binary bytes")
+
+    with pytest.raises(CanaryStop) as excinfo:
+        attest_protocol_schema(
+            binary_path=binary, scratch_root=scratch, run_command=_failing_schema_run_command
+        )
+    assert excinfo.value.code == "SKILL_PROTOCOL_SCHEMA_UNATTESTED"
+
+
+# ---------------------------------------------------------------------------
+# build_synthetic_workspace
+# ---------------------------------------------------------------------------
+
+
+def test_build_synthetic_workspace_is_fresh_and_contains_only_readme(tmp_path) -> None:
+    scratch = tmp_path / "scratch-ws"
+    workspace = build_synthetic_workspace(scratch)
+    assert workspace.is_dir()
+    entries = list(workspace.iterdir())
+    assert [entry.name for entry in entries] == ["README.md"]
+    assert "CAP-S1 synthetic canary workspace" in (workspace / "README.md").read_text(
+        encoding="utf-8"
+    )
+    for name in (".agents", ".codex", "plugins", "marketplace", "skills"):
+        assert not (workspace / name).exists()
+
+
+def test_build_synthetic_workspace_refuses_a_preexisting_directory(tmp_path) -> None:
+    scratch = tmp_path / "scratch-ws-2"
+    build_synthetic_workspace(scratch)
+    with pytest.raises(FileExistsError):
+        build_synthetic_workspace(scratch)
+
+
+# ---------------------------------------------------------------------------
+# run_canary: full fake journey happy path
+# ---------------------------------------------------------------------------
+
+
+def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
+    scratch = tmp_path / "scratch-happy"
+    scratch.mkdir()
+    factory = _canary_client_factory(replies=list(_HAPPY_REPLIES))
+
+    evidence = run_canary(
+        backend="fake",
+        binary_path=None,
+        codex_home=None,
+        repo_root=REPO_ROOT,
+        scratch_root=scratch,
+        operation_id="cap-s1-canary-happy",
+        client_factory=factory,
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+    )
+
+    assert isinstance(evidence, CanaryEvidence)
+    assert evidence.launch_decision == "ALLOW"
+    assert evidence.turn_marker_results == (
+        ("receive-commission", True),
+        ("return-progress", True),
+        ("escalate-decision", True),
+        ("finish-operation", True),
+    )
+    assert evidence.observed_enabled_names == (
+        "escalate-decision",
+        "finish-operation",
+        "receive-commission",
+        "return-progress",
+    )
+    assert evidence.cleanup == {
+        "projection_removed": True,
+        "projection_verified_absent": True,
+        "schema_dir_removed": True,
+        "workspace_removed": True,
+    }
+    assert evidence.served_model
+    assert evidence.terminal_process_state
+    assert evidence.package_source_digest
+    assert evidence.package_generation_digest
+    assert len(evidence.skill_grant_digests) == 4
+    assert len(evidence.skill_closure_digests) == 4
+    assert evidence.extra_roots_set_outcomes == ("cleared",)
+
+    # The whole receipt must be JSON-serializable (it is printed verbatim by
+    # the CLI).
+    json.dumps(dataclasses.asdict(evidence))
+
+    # Cleanup actually happened on disk.
+    assert not Path(evidence.workspace_root).exists()
+
+
+# ---------------------------------------------------------------------------
+# marker detection
+# ---------------------------------------------------------------------------
+
+
+def test_run_canary_records_a_false_marker_without_raising(tmp_path) -> None:
+    scratch = tmp_path / "scratch-marker"
+    scratch.mkdir()
+    non_compliant_replies = [
+        _HAPPY_REPLIES[0],
+        "PROGRESS COMPLETE synthetic operation is already done.",  # forbidden COMPLETE
+        _HAPPY_REPLIES[2],
+        _HAPPY_REPLIES[3],
+    ]
+    factory = _canary_client_factory(replies=non_compliant_replies)
+
+    evidence = run_canary(
+        backend="fake",
+        binary_path=None,
+        codex_home=None,
+        repo_root=REPO_ROOT,
+        scratch_root=scratch,
+        operation_id="cap-s1-canary-marker",
+        client_factory=factory,
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+    )
+
+    assert evidence.turn_marker_results == (
+        ("receive-commission", True),
+        ("return-progress", False),
+        ("escalate-decision", True),
+        ("finish-operation", True),
+    )
+    # main()'s exit-code behavior on a false marker is covered by
+    # test_cli_main_exits_nonzero_when_a_marker_is_false_or_cleanup_failed
+    # below; this test scopes strictly to run_canary's own non-raising
+    # recording law.
+
+
+# ---------------------------------------------------------------------------
+# ambient skill surface
+# ---------------------------------------------------------------------------
+
+
+def test_run_canary_ambient_skill_surface_stops(tmp_path) -> None:
+    scratch = tmp_path / "scratch-ambient"
+    scratch.mkdir()
+    workspace_cwd = str((scratch / "synthetic-workspace").resolve())
+    script = [
+        _strict_skills_list_result(workspace_cwd, []),
+        _strict_skills_list_result(
+            workspace_cwd,
+            [_skill_row("rogue-skill", path="/fake-ambient-skills/rogue-skill/SKILL.md")],
+        ),
+    ]
+    factory = _canary_client_factory(skills_list_script=script)
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-ambient",
+            client_factory=factory,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert excinfo.value.code == "AMBIENT_SKILL_SURFACE_NOT_EMPTY"
+
+
+# ---------------------------------------------------------------------------
+# live-backend realm validation
+# ---------------------------------------------------------------------------
+
+
+def test_run_canary_live_backend_refuses_missing_codex_home_without_running_command(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "scratch-live-1"
+    scratch.mkdir()
+
+    def _must_not_run(*_args, **_kwargs):
+        raise AssertionError("run_command must never be invoked for an unavailable realm")
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="live",
+            binary_path=Path("/nonexistent/synthetic-codex-binary"),
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-live-realm",
+            client_factory=lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("client_factory must never be invoked")
+            ),
+            run_command=_must_not_run,
+        )
+    assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
+
+
+def test_run_canary_live_backend_refuses_default_codex_home_without_running_command(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "scratch-live-2"
+    scratch.mkdir()
+
+    def _must_not_run(*_args, **_kwargs):
+        raise AssertionError("run_command must never be invoked for an unavailable realm")
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="live",
+            binary_path=Path("/nonexistent/synthetic-codex-binary"),
+            codex_home=default_user_codex_home(),
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-live-realm-2",
+            client_factory=lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("client_factory must never be invoked")
+            ),
+            run_command=_must_not_run,
+        )
+    assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
+
+
+# ---------------------------------------------------------------------------
+# EFFECT_UNKNOWN, no retry
+# ---------------------------------------------------------------------------
+
+
+def test_run_canary_transport_failure_mid_turn_is_effect_unknown_with_no_retry(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "scratch-effect-unknown"
+    scratch.mkdir()
+    factory = _canary_client_factory(fail_turn_start_at=1)
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-effect-unknown",
+            client_factory=factory,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert excinfo.value.code == "EFFECT_UNKNOWN"
+
+    assert len(_CREATED_CANARY_CLIENTS) == 1
+    client = _CREATED_CANARY_CLIENTS[0]
+    turn_start_calls = [call for call in client.calls if call[0] == "turn/start"]
+    assert len(turn_start_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# cleanup honesty
+# ---------------------------------------------------------------------------
+
+
+def test_run_canary_reports_cleanup_failure_honestly(tmp_path, monkeypatch) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses permission checks; cannot force an undeletable directory")
+
+    scratch = tmp_path / "scratch-cleanup-honesty"
+    scratch.mkdir()
+    attempt_root = scratch / "cap-s1-attempt-root"
+
+    def _lock_attempt_root() -> None:
+        # Staging (stage_skill_projection) has already completed by the time
+        # the client is constructed -- client_factory is invoked from
+        # start_session, well after the projection is staged -- so locking
+        # here cannot prevent staging, only the later cleanup rmdir.
+        os.chmod(attempt_root, 0o555)
+
+    factory = _canary_client_factory(replies=list(_HAPPY_REPLIES), on_create=_lock_attempt_root)
+
+    try:
+        evidence = run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-cleanup-honesty",
+            client_factory=factory,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    finally:
+        if attempt_root.exists():
+            os.chmod(attempt_root, 0o700)
+
+    assert evidence.cleanup["projection_removed"] is False
+    assert evidence.cleanup["projection_verified_absent"] is False
+    assert evidence.cleanup["schema_dir_removed"] is True
+    assert evidence.cleanup["workspace_removed"] is True
+
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    monkeypatch.setattr(canary_module, "run_canary", lambda **_kwargs: evidence)
+    exit_code = canary_module.main(
+        [
+            "--backend",
+            "fake",
+            "--scratch",
+            str(tmp_path / "cli-scratch-cleanup-honesty"),
+            "--operation-id",
+            "cap-s1-canary-cleanup-honesty-cli",
+        ]
+    )
+    assert exit_code != 0
+
+    shutil.rmtree(attempt_root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# CLI smoke
+# ---------------------------------------------------------------------------
+
+
+def test_cli_main_prints_evidence_json_and_exits_zero_on_a_clean_journey(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    clean_evidence = CanaryEvidence(
+        candidate_commit="a" * 40,
+        candidate_tree="b" * 40,
+        canary_operation_id="cap-s1-cli-smoke",
+        workspace_root=str(tmp_path / "workspace"),
+        process_generation="cap-s1-cli-smoke-gen1",
+        v4_policy_digest="c" * 64,
+        package_source_digest="d" * 64,
+        package_generation_digest="e" * 64,
+        skill_grant_digests=(("cap.a", "f" * 64),),
+        skill_closure_digests=(("cap.a", "0" * 64),),
+        projection_receipt_digest="1" * 64,
+        app_server_config_digest="2" * 64,
+        extra_roots_set_outcomes=("cleared",),
+        skills_list_raw_shape_digest="3" * 64,
+        observed_enabled_names=("receive-commission",),
+        launch_decision="ALLOW",
+        turn_marker_results=(
+            ("receive-commission", True),
+            ("return-progress", True),
+            ("escalate-decision", True),
+            ("finish-operation", True),
+        ),
+        served_model="gpt-5.6-sol",
+        terminal_process_state="PROVEN_DEAD",
+        artifact_inventory=("workspace:README.md",),
+        cleanup={
+            "projection_removed": True,
+            "projection_verified_absent": True,
+            "schema_dir_removed": True,
+            "workspace_removed": True,
+        },
+    )
+    monkeypatch.setattr(canary_module, "run_canary", lambda **_kwargs: clean_evidence)
+
+    exit_code = canary_module.main(
+        ["--backend", "fake", "--scratch", str(tmp_path / "cli-scratch"), "--operation-id", "cap-s1-cli-smoke"]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    printed = json.loads(captured.out)
+    assert printed["launch_decision"] == "ALLOW"
+    assert printed["canary_operation_id"] == "cap-s1-cli-smoke"
+
+
+def test_cli_main_exits_nonzero_when_a_marker_is_false_or_cleanup_failed(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    dirty_evidence = CanaryEvidence(
+        candidate_commit="a" * 40,
+        candidate_tree="b" * 40,
+        canary_operation_id="cap-s1-cli-smoke-2",
+        workspace_root=str(tmp_path / "workspace2"),
+        process_generation="cap-s1-cli-smoke-2-gen1",
+        v4_policy_digest="c" * 64,
+        package_source_digest="d" * 64,
+        package_generation_digest="e" * 64,
+        skill_grant_digests=(("cap.a", "f" * 64),),
+        skill_closure_digests=(("cap.a", "0" * 64),),
+        projection_receipt_digest="1" * 64,
+        app_server_config_digest="2" * 64,
+        extra_roots_set_outcomes=("cleared",),
+        skills_list_raw_shape_digest="3" * 64,
+        observed_enabled_names=("receive-commission",),
+        launch_decision="ALLOW",
+        turn_marker_results=(
+            ("receive-commission", True),
+            ("return-progress", False),
+            ("escalate-decision", True),
+            ("finish-operation", True),
+        ),
+        served_model="gpt-5.6-sol",
+        terminal_process_state="PROVEN_DEAD",
+        artifact_inventory=(),
+        cleanup={
+            "projection_removed": True,
+            "projection_verified_absent": True,
+            "schema_dir_removed": True,
+            "workspace_removed": True,
+        },
+    )
+    monkeypatch.setattr(canary_module, "run_canary", lambda **_kwargs: dirty_evidence)
+
+    exit_code = canary_module.main(
+        ["--backend", "fake", "--scratch", str(tmp_path / "cli-scratch-2"), "--operation-id", "cap-s1-cli-smoke-2"]
+    )
+    assert exit_code != 0
+
+
+def test_cli_main_prints_stop_code_and_exits_nonzero_on_canary_stop(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    def _raise_stop(**_kwargs):
+        raise CanaryStop("AMBIENT_SKILL_SURFACE_NOT_EMPTY", "synthetic")
+
+    monkeypatch.setattr(canary_module, "run_canary", _raise_stop)
+
+    exit_code = canary_module.main(
+        ["--backend", "fake", "--scratch", str(tmp_path / "cli-scratch-3"), "--operation-id", "cap-s1-cli-smoke-3"]
+    )
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert "AMBIENT_SKILL_SURFACE_NOT_EMPTY" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# No real binary anywhere in this module
+# ---------------------------------------------------------------------------
+
+
+def test_this_test_module_never_references_the_real_codex_binary_as_an_executable_target() -> None:
+    """Defense in depth: this file never spells out a real installed Codex
+    binary path anywhere -- every live-backend test above targets a
+    ``/nonexistent/synthetic-codex-binary`` path so ``PROVIDER_REALM_
+    UNAVAILABLE`` is proven without naming a real one -- and every
+    ``client_factory``/``run_command`` fake used in this module (exercised
+    by every other test above) launches only ``sys.executable -m
+    scripts.ohf.fake_app_server`` or writes bounded fixture bytes, guarded
+    at call time by ``_asserts_never_the_real_codex_binary``.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+    # A literal, real installed Codex path would end with the two path
+    # segments checked below; this file's only other "codex" mentions are
+    # module/symbol names or the synthetic nonexistent-binary fixture path.
+    forbidden_suffix = "/".join(("bin", "codex"))
+    assert forbidden_suffix not in source
+    assert "/nonexistent/synthetic-codex-binary" in source
+    assert "scripts.ohf.fake_app_server" in source
+    assert _sys.executable  # sanity: fake backend always launches this interpreter
