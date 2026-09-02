@@ -107,6 +107,30 @@ def test_commission_wave_child_stop_is_source_local_not_resource_shutdown() -> N
     assert "the temporary watcher must be disarmed" not in commission
 
 
+def test_slack_reciprocal_edges_are_bound_to_exact_thread_root_not_channel() -> None:
+    law = _flat("docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md")
+    for phrase in (
+        "workspace + conversation/channel + thread-root timestamp",
+        "top-level post in the same channel is a carrier-root mismatch",
+        "PICKUP_ACK",
+        "must be replies under that exact parent",
+    ):
+        assert phrase in law
+
+
+def test_terminal_stop_consumes_receiver_assignment_for_that_child() -> None:
+    index = _flat("docs/sol_skills/INDEX.md")
+    routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
+    for text in (index, routing):
+        for phrase in (
+            "receiver assignment is child-specific",
+            "terminal STOP consumes that child assignment",
+            "standing program instruction does not self-assign a successor child",
+            "fresh Sol/Chairman delivery or canonical placement edge",
+        ):
+            assert phrase in text
+
+
 def test_root_worker_bootstraps_carry_codex_continuation_invariant() -> None:
     for path in ("AGENTS.md", "CLAUDE.md"):
         text = _flat(path)
