@@ -33,7 +33,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from control_plane.codex_operator_adapter import (
     CodexAdapterError,
@@ -42,12 +42,15 @@ from control_plane.codex_operator_adapter import (
     CodexSkillCanaryBinding,
     CodexSkillTurnInput,
     CodexTurnInputEnvelope,
+    build_protocol_attestation_receipt,
 )
 from control_plane.executive_agent_capabilities import (
+    CapabilityPolicyError,
     ExecutionCapabilityRegistry,
     NativeHelperPolicy,
 )
 from control_plane.executive_capability_packages import (
+    CapabilityPackageError,
     build_capability_package_generation,
 )
 from control_plane.operator_harness_contract import (
@@ -98,57 +101,17 @@ SYNTHETIC_DECISION_BRANCH = "branch-alpha"
 CANARY_CLEANUP_SCHEMA_VERSION = "mastermind.cap_s1_canary_cleanup/v1"
 CANARY_EVIDENCE_SCHEMA_VERSION = "mastermind.cap_s1_canary_evidence/v1"
 
-# CAP-S1 Sol wave-3 review addendum (5087373998, finding 2): the fake
-# backend's default schema fixture "binary" used to be a print-only shell
-# stub that never wrote anything into the ``--out`` directory
-# ``attest_protocol_schema`` passes it -- harmless under the in-process test
-# suite (which always injects its own ``run_command`` fake) but fatal to the
-# real CLI subprocess journey (``main`` never overrides ``run_command``), so
-# ``--backend fake`` end to end always stopped at
-# ``SKILL_PROTOCOL_SCHEMA_UNATTESTED``. This is a small, real, executable
-# script: given a real ``--out <dir>`` (and an optional ``--experimental``
-# flag), it writes one minimal, valid schema document declaring the Skill
-# turn-input node so ``supports_skill_input_path`` attests True, with
-# genuinely distinct stable/experimental bytes. It also answers ``--version``
-# (used by the live-backend harness-version probe and reused verbatim by the
-# addendum's live-seam subprocess test) with a fixed, obviously-synthetic
-# token.
-_SCHEMA_FIXTURE_BINARY_SOURCE = '''#!/usr/bin/env python3
-"""CAP-S1 fixture "binary": schema generation + --version, nothing else."""
-import json
-import sys
-from pathlib import Path
-
-
-def main(argv):
-    if "--version" in argv:
-        sys.stdout.write("cap-s1-fixture-binary/0.0.0-synthetic\\n")
-        return 0
-    if "--out" not in argv:
-        return 1
-    out_dir = Path(argv[argv.index("--out") + 1])
-    out_dir.mkdir(parents=True, exist_ok=True)
-    variant = "experimental" if "--experimental" in argv else "stable"
-    doc = {
-        "variant": variant,
-        "$defs": {
-            "SkillTurnInputItem": {
-                "type": "object",
-                "properties": {
-                    "type": {"const": "skill"},
-                    "name": {"type": "string"},
-                    "path": {"type": "string"},
-                },
-            }
-        },
-    }
-    (out_dir / "schema.json").write_text(json.dumps(doc), encoding="utf-8")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
-'''
+# CAP-S1 Sol review item 1 (single-binary law): the fake realm's schema
+# fixture and its App Server used to be two DIFFERENT files -- a print/write
+# schema stub, and the running Python interpreter launched with ``-m
+# scripts.ohf.fake_app_server``. A receipt attesting one could never be
+# honestly bound to the adapter launching the other. ``fake_codex_binary.py``
+# (committed, real, executable) is now the ONE file used for both: schema
+# generation, ``--version``, and (via an internal ``os.execv`` passthrough
+# into the real fake-App-Server implementation) the App Server itself. See
+# that module's own docstring for the exact CLI shapes it answers.
+FAKE_CODEX_BINARY_PATH = Path(__file__).resolve().parent / "fake_codex_binary.py"
+_SCHEMA_FIXTURE_BINARY_SOURCE = FAKE_CODEX_BINARY_PATH.read_text(encoding="utf-8")
 
 FROZEN_STOP_CODES = (
     "SKILL_PROTOCOL_SCHEMA_UNATTESTED",
@@ -230,39 +193,61 @@ class _SeamProbeRefusal(RuntimeError):
 
 
 def _seam_probe_client_factory(argv: list, env: Mapping[str, str], cwd: Path):
-    """Live-CLI wiring seam probe (CAP-S1 addendum, finding 3).
+    """Live-CLI wiring seam probe (CAP-S1 addendum, finding 3; Sol review
+    item 2 residual: a callback-only substitute is not the production seam).
 
-    Never spawns a process and never touches the network. Wired in ONLY via
-    an explicit ``CAP_S1_LIVE_CLIENT_FACTORY=scripts.ohf.
+    Constructs the REAL ``scripts.ohf.laboratory.AppServerClient`` -- the
+    exact class the adapter's own default ``client_factory`` would have
+    constructed -- and starts it, so a harmless local process (the
+    single-binary fixture named by ``--binary-path``, never the real Codex
+    binary) is genuinely spawned through the genuine subprocess-construction
+    path. No JSON-RPC call is ever issued (no ``initialize``, no
+    ``thread/start``, no turn): the probe records that REAL construction was
+    reached -- the exact class name and the ``argv``/``cwd`` the adapter
+    would have launched -- to the file named by ``OHF_SEAM_PROBE_RECORD_PATH``
+    (when set), shuts the harmless process down, then raises deterministically
+    before any provider effect. Wired in ONLY via an explicit
+    ``CAP_S1_LIVE_CLIENT_FACTORY=scripts.ohf.
     cap_s1_mastermind_operator_canary:_seam_probe_client_factory`` override
     (see ``main``'s live-backend client-factory resolution), always against a
-    disposable, non-default ``--codex-home``. It records that construction
-    was reached -- the exact ``argv``/``cwd`` the adapter would have
-    launched -- to the file named by ``OHF_SEAM_PROBE_RECORD_PATH`` (when
-    set), then raises immediately: this is how the live wiring path is
-    proven end to end without ever invoking the real Codex binary.
+    disposable, non-default ``--codex-home``.
     """
 
-    record_path = os.environ.get("OHF_SEAM_PROBE_RECORD_PATH")
-    if record_path:
-        Path(record_path).write_text(
-            json.dumps({"argv": list(argv), "cwd": str(cwd)}, sort_keys=True),
-            encoding="utf-8",
-        )
+    probe_client = AppServerClient(list(argv), env=env, cwd=cwd, start_new_session=True)
+    try:
+        probe_client.start()
+        record_path = os.environ.get("OHF_SEAM_PROBE_RECORD_PATH")
+        if record_path:
+            Path(record_path).write_text(
+                json.dumps(
+                    {
+                        "constructed": type(probe_client).__name__,
+                        "argv": list(probe_client.argv),
+                        "argv0": str(probe_client.argv[0]) if probe_client.argv else "",
+                        "cwd": str(probe_client.cwd),
+                        "pid": probe_client.pid,
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+    finally:
+        try:
+            probe_client.close()
+        except Exception:  # noqa: BLE001 -- best-effort probe teardown
+            pass
     raise _SeamProbeRefusal(
         "cap-s1 live client-construction seam probe: refusing before any provider effect"
     )
 
 
-@dataclasses.dataclass(frozen=True)
-class SchemaAttestation:
-    binary_path: str
-    binary_digest: str
-    stable_inventory_digest: str
-    experimental_inventory_digest: str
-    supports_skill_input_path: bool
-    generated_at_dir: str
-    binary_version: str = ""
+SCHEMA_ATTESTATION_DIR_NAME = "schema-attestation"
+
+_PROBE_CLIENT_INFO = {
+    "name": "cap-s1-canary-probe",
+    "title": "CAP-S1 Protocol Attestation Probe",
+    "version": "p1b",
+}
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -394,50 +379,33 @@ def _schema_supports_skill_input_path(docs: list[Any]) -> bool:
     return any(_node_declares_skill_input(doc) for doc in docs)
 
 
-def _probe_binary_version(
-    binary_path: Path, run_command: Callable[..., Any]
-) -> str:
-    """Capture the EXACT version the binary itself reports (Sol wave-3 review
-    finding B1): a single bounded ``[binary, "--version"]`` call, never a
-    derived/fabricated digest-shaped string. There is no proven, general
-    mapping from this raw stdout token to the App Server's own ``initialize``
-    ``userAgent`` string, so this function makes none -- callers seal
-    ``expected_harness_version`` from this exact value and let the adapter's
-    existing ``initialize`` userAgent equality check be the enforcement (an
-    honest mismatch refusal at launch is the correct outcome, never a
-    fabricated equality)."""
-
-    try:
-        completed = run_command(
-            [str(binary_path), "--version"], capture_output=True, text=True, timeout=15
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise CanaryStop(
-            "SKILL_PROTOCOL_SCHEMA_UNATTESTED", "binary version probe failed"
-        ) from exc
-    if getattr(completed, "returncode", None) != 0:
-        raise CanaryStop(
-            "SKILL_PROTOCOL_SCHEMA_UNATTESTED", "binary version probe exited nonzero"
-        )
-    raw_stdout = getattr(completed, "stdout", "") or ""
-    lines = [line.strip() for line in raw_stdout.splitlines() if line.strip()]
-    if not lines:
-        raise CanaryStop(
-            "SKILL_PROTOCOL_SCHEMA_UNATTESTED", "binary version probe produced no output"
-        )
-    return lines[0]
-
-
 def attest_protocol_schema(
     *,
     binary_path: Path,
     scratch_root: Path,
     run_command: Callable[..., Any] = subprocess.run,
-    capture_binary_version: bool = False,
-) -> SchemaAttestation:
+    probe_env: "Mapping[str, str] | None" = None,
+    probe_cwd: "Path | None" = None,
+    app_server_argv: "Sequence[str] | None" = None,
+) -> CodexProtocolAttestationReceipt:
+    """The ONLY producer of :class:`CodexProtocolAttestationReceipt` (CAP-S1
+    Sol review item 1): generates the stable/experimental schema dumps, then
+    proves the receipt is bound to a real, launchable binary by starting
+    that SAME binary as an App Server (single-binary law) via the real
+    :class:`~scripts.ohf.laboratory.AppServerClient`, performing one bounded
+    ``initialize`` (never a full session -- no ``thread/start``, no turn),
+    and capturing the exact ``userAgent`` it reports. ``binary_version`` is
+    set to that same value (one truth) and the probe process is shut down
+    cleanly before this function ever returns. No field is ever trusted from
+    a caller: every value here is either freshly measured over the real
+    binary on disk or freshly observed over a real subprocess boundary.
+    """
+
     binary_path = Path(binary_path)
     scratch_root = Path(scratch_root)
     scratch_root.mkdir(parents=True, exist_ok=True)
+    resolved_probe_env = dict(probe_env) if probe_env is not None else dict(os.environ)
+    resolved_probe_cwd = Path(probe_cwd) if probe_cwd is not None else scratch_root
 
     try:
         binary_digest = _sha256_file(binary_path)
@@ -446,13 +414,13 @@ def attest_protocol_schema(
             "SKILL_PROTOCOL_SCHEMA_UNATTESTED", "binary is not observable"
         ) from exc
 
-    binary_version = ""
-    if capture_binary_version:
-        binary_version = _probe_binary_version(binary_path, run_command)
-
-    import secrets as _secrets
-
-    sealed_dir = scratch_root / f"schema-attestation-{_secrets.token_hex(8)}"
+    # Deterministic name (Sol wave-3 review finding B4 self-cleanup is
+    # preserved): every call to this function operates on its own
+    # ``scratch_root``, so a fixed subdirectory name needs no random suffix
+    # -- a second call against the SAME scratch_root correctly raises
+    # ``FileExistsError`` rather than silently shadowing a prior run's
+    # evidence.
+    sealed_dir = scratch_root / SCHEMA_ATTESTATION_DIR_NAME
     sealed_dir.mkdir(parents=False, exist_ok=False)
     # Sol wave-3 review finding B4: everything from here on operates on the
     # exclusively-created sealed_dir. ANY CanaryStop raised below is a
@@ -503,14 +471,52 @@ def attest_protocol_schema(
             stable_docs
         ) or _schema_supports_skill_input_path(experimental_docs)
 
-        return SchemaAttestation(
+        # --- protocol-attestation amendment §2 item 4: the REAL initialize
+        # probe (CAP-S1 Sol review item 1). Launches the SAME binary as an
+        # App Server (single-binary law) via the real AppServerClient,
+        # performs one bounded ``initialize``, and shuts the probe process
+        # down cleanly. For the live realm this is genuinely the only RPC
+        # the probe process ever answers -- no thread/turn is ever started.
+        probe_argv = list(app_server_argv or (str(binary_path), "app-server"))
+        probe_client = AppServerClient(
+            probe_argv,
+            env=resolved_probe_env,
+            cwd=resolved_probe_cwd,
+            start_new_session=True,
+        )
+        try:
+            probe_client.start()
+            initialized = probe_client.request(
+                "initialize",
+                {"clientInfo": _PROBE_CLIENT_INFO, "capabilities": {"experimentalApi": True}},
+            )
+        except Exception as exc:  # noqa: BLE001 -- any probe failure is unattested
+            raise CanaryStop(
+                "SKILL_PROTOCOL_SCHEMA_UNATTESTED", "protocol initialize probe failed"
+            ) from exc
+        finally:
+            try:
+                probe_client.close()
+            except Exception:  # noqa: BLE001 -- best-effort probe teardown
+                pass
+        probe_user_agent = str(initialized.get("userAgent") or "").strip()
+        if not probe_user_agent:
+            raise CanaryStop(
+                "SKILL_PROTOCOL_SCHEMA_UNATTESTED",
+                "protocol initialize probe returned no userAgent",
+            )
+
+        return build_protocol_attestation_receipt(
             binary_path=str(binary_path),
             binary_digest=binary_digest,
+            binary_version=probe_user_agent,
             stable_inventory_digest=stable_digest,
             experimental_inventory_digest=experimental_digest,
             supports_skill_input_path=supports,
-            generated_at_dir=str(sealed_dir),
-            binary_version=binary_version,
+            skill_input_schema_evidence=(
+                "skill_turn_input_schema_node_detected" if supports else ""
+            ),
+            probe_user_agent=probe_user_agent,
         )
     except CanaryStop:
         shutil.rmtree(sealed_dir, ignore_errors=True)
@@ -837,6 +843,15 @@ def run_canary(
     scratch_root.mkdir(parents=True, exist_ok=True)
 
     # --- backend-specific realm/schema/binary/codex_home wiring ------------
+    #
+    # Single-binary law (CAP-S1 Sol review item 1): in BOTH realms exactly
+    # ONE file is the schema generator, the ``--version``/initialize-probe
+    # target, AND the App Server the adapter launches -- ``single_binary_
+    # path``. The live realm already satisfied this (the operator-supplied
+    # real Codex binary); the fake realm used to launch a DIFFERENT file
+    # (the running Python interpreter, via ``-m scripts.ohf.fake_app_server``)
+    # than the one the schema probe ran against, which is exactly the gap
+    # that let a receipt attest one binary while authorizing another.
     if backend == "live":
         if binary_path is None or codex_home is None:
             raise CanaryStop(
@@ -851,24 +866,28 @@ def run_canary(
             validate_live_codex_home(codex_home)
         except RuntimeError as exc:
             raise CanaryStop("PROVIDER_REALM_UNAVAILABLE", str(exc)) from exc
-        schema_binary_path = Path(binary_path)
-        adapter_binary_path = Path(binary_path)
+        single_binary_path = Path(binary_path)
         adapter_codex_home = codex_home
         adapter_argv = None
-        capture_binary_version = True
-        extra_env: dict[str, str] = {}
+        # ``PYTHONPATH`` is in the adapter's own safe-env-key allowlist and
+        # is inert for a real Codex binary; it is required for the addendum
+        # finding-3 seam-probe test's own single-binary fixture (a Python
+        # script whose App Server mode execs into ``-m scripts.ohf.
+        # fake_app_server``) to be genuinely launchable under this realm's
+        # otherwise-minimal environment.
+        extra_env: dict[str, str] = {"PYTHONPATH": str(repo_root)}
         if client_factory is None:
             raise ValueError("live backend requires an explicit client_factory")
     else:
         if client_factory is None:
             raise ValueError("fake backend requires an explicit client_factory")
-        schema_binary_path = Path(binary_path) if binary_path is not None else (
-            scratch_root / "fixture-codex-binary"
-        )
-        if not schema_binary_path.exists():
-            schema_binary_path.write_text(_SCHEMA_FIXTURE_BINARY_SOURCE, encoding="utf-8")
-            schema_binary_path.chmod(0o755)
-        adapter_binary_path = Path(sys.executable).resolve()
+        if binary_path is not None:
+            single_binary_path = Path(binary_path)
+            if not single_binary_path.exists():
+                single_binary_path.write_text(_SCHEMA_FIXTURE_BINARY_SOURCE, encoding="utf-8")
+                single_binary_path.chmod(0o755)
+        else:
+            single_binary_path = FAKE_CODEX_BINARY_PATH
         adapter_codex_home = Path(codex_home) if codex_home is not None else (
             scratch_root / "codex-home"
         )
@@ -878,8 +897,7 @@ def run_canary(
         if not auth_path.exists():
             auth_path.write_text("fixture credential bytes", encoding="utf-8")
         auth_path.chmod(0o600)
-        adapter_argv = (str(adapter_binary_path), "-m", "scripts.ohf.fake_app_server")
-        capture_binary_version = False
+        adapter_argv = (str(single_binary_path), "app-server")
         extra_env = {
             "PYTHONPATH": str(repo_root),
             "OHF_FAKE_STATE": str(scratch_root / "fake-state.json"),
@@ -907,41 +925,57 @@ def run_canary(
     evidence_local: "CanaryEvidence | None" = None
 
     try:
-        schema = attest_protocol_schema(
-            binary_path=schema_binary_path,
+        # The probe environment mirrors the adapter's own env-building logic
+        # (``CodexOperatorAdapter._env``) closely enough to launch the SAME
+        # single binary the adapter will later launch, without yet needing
+        # the synthetic workspace (which does not exist at this point in the
+        # sequence) -- the probe only ever issues ``initialize``, which never
+        # touches the workspace.
+        # Base on the caller's own environment -- exactly what schema
+        # generation above already implicitly inherits by not passing an
+        # explicit ``env=`` to ``run_command``'s default ``subprocess.run``
+        # -- then layer the same adapter-consistent overrides
+        # ``CodexOperatorAdapter._env`` would apply. A real Codex binary
+        # ignores the extra inherited keys; the fake realm's single-binary
+        # fixture genuinely needs ``PYTHONPATH`` (carried in ``extra_env``)
+        # to exec into ``scripts.ohf.fake_app_server``.
+        probe_env = dict(os.environ)
+        probe_env.update(
+            {
+                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                "HOME": str(adapter_codex_home),
+                "CODEX_HOME": str(adapter_codex_home),
+                "LC_ALL": "C",
+            }
+        )
+        probe_env.update(extra_env)
+
+        receipt = attest_protocol_schema(
+            binary_path=single_binary_path,
             scratch_root=scratch_root,
             run_command=run_command,
-            capture_binary_version=capture_binary_version,
+            probe_env=probe_env,
+            probe_cwd=scratch_root,
+            app_server_argv=(str(single_binary_path), "app-server"),
         )
         cleanup_actions.append(
-            ("schema", lambda: _cleanup_dir_action(Path(schema.generated_at_dir)))
+            ("schema", lambda: _cleanup_dir_action(scratch_root / SCHEMA_ATTESTATION_DIR_NAME))
         )
 
-        # Harness-version binding (Sol wave-3 review finding B1): the fake
-        # backend's own App Server double always echoes exactly
-        # ``FAKE_HARNESS_VERSION`` on ``initialize`` (a fact this module
-        # controls), so that constant remains the fake-backend seal. For
-        # live, the version is sealed from what the binary ITSELF just
-        # reported via ``--version`` -- never a derived digest-shaped
-        # fabrication -- and the adapter's own ``initialize`` userAgent
-        # equality check is the enforcement of that seal at launch.
-        harness_version = FAKE_HARNESS_VERSION if backend == "fake" else schema.binary_version
+        # Harness-version binding (CAP-S1 Sol review item 1): the receipt's
+        # ``probe_user_agent`` -- the exact userAgent the SAME binary just
+        # reported over a real ``initialize`` call -- is the ONE truth for
+        # both realms now; ``receipt.binary_version`` is set to this same
+        # value by ``attest_protocol_schema``. The runner seals
+        # ``expected_harness_version`` from it so the adapter's own launch-
+        # time ``initialize`` userAgent equality check closes the loop.
+        harness_version = receipt.probe_user_agent
         if not harness_version:
             raise CanaryStop(
                 "SKILL_PROTOCOL_SCHEMA_UNATTESTED", "harness version could not be sealed"
             )
-
-        # The protocol receipt binds to the binary the ADAPTER actually
-        # launches, never the (possibly distinct, fake-backend-only) binary
-        # the schema probe ran against -- ``schema.binary_digest`` is the
-        # schema probe's own evidence and is deliberately NOT reused here
-        # (CAP-S1 Sol wave-3 review finding B3).
-        try:
-            adapter_binary_digest = _sha256_file(adapter_binary_path)
-        except OSError as exc:
-            raise CanaryStop(
-                "SKILL_PROTOCOL_SCHEMA_UNATTESTED", "adapter binary is not observable"
-            ) from exc
+        adapter_binary_path = single_binary_path
+        adapter_binary_digest = receipt.binary_digest
 
         # --- synthetic workspace: real sealed git identity (Sol B2) -------
         workspace, workspace_base_sha, _workspace_read_only_applied = build_synthetic_workspace(
@@ -952,20 +986,42 @@ def run_canary(
             extra_env["OHF_FAKE_WORKSPACE"] = str(workspace)
 
         # --- exact reviewed source package + V4 profile -------------------
-        fixture_path = repo_root / V4_FIXTURE_RELATIVE_PATH
-        registry = ExecutionCapabilityRegistry.load(fixture_path, source_root=repo_root)
-        profile = registry.resolve(PROFILE_ID)
-        raw_document = json.loads(fixture_path.read_text(encoding="utf-8"))
-        raw_package = raw_document["capability_packages"][PACKAGE_CAPABILITY_ID]
-        generation = build_capability_package_generation(
-            capability_id=PACKAGE_CAPABILITY_ID, raw=raw_package
-        )
+        # Residual refusal row (CAP-S1 Sol review item 3): every step here
+        # that can raise ``CapabilityPackageError`` -- including an empty or
+        # malformed ``source_commit``/``source_tree_sha`` in a doctored
+        # fixture -- is now a TYPED, deterministic ``CanaryStop`` rather than
+        # an uncaught internal exception escaping the runner's own closed
+        # failure vocabulary, and fires before the provider process ever
+        # starts.
+        try:
+            fixture_path = repo_root / V4_FIXTURE_RELATIVE_PATH
+            registry = ExecutionCapabilityRegistry.load(fixture_path, source_root=repo_root)
+            profile = registry.resolve(PROFILE_ID)
+            raw_document = json.loads(fixture_path.read_text(encoding="utf-8"))
+            raw_package = raw_document["capability_packages"][PACKAGE_CAPABILITY_ID]
+            generation = build_capability_package_generation(
+                capability_id=PACKAGE_CAPABILITY_ID, raw=raw_package
+            )
+        except (
+            CapabilityPackageError,
+            CapabilityPolicyError,
+            KeyError,
+            OSError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise CanaryStop(
+                "PROVIDER_REALM_UNAVAILABLE", "candidate source package is unattested"
+            ) from exc
         # Candidate identities are pinned from the already-verified fixture
         # generation BEFORE the provider process ever starts (Sol wave-3
         # review finding B5) -- never a ``git rev-parse HEAD`` read of this
         # repository's own moving working tree after execution.
         candidate_commit = generation.source_commit
         candidate_tree = generation.source_tree_sha
+        if not _HEX40_RE.fullmatch(candidate_commit) or not _HEX40_RE.fullmatch(candidate_tree):
+            raise CanaryStop(
+                "PROVIDER_REALM_UNAVAILABLE", "candidate identity is empty or malformed"
+            )
 
         attempt_root = scratch_root / "cap-s1-attempt-root"
         attempt_root.mkdir(parents=True, exist_ok=True)
@@ -1004,31 +1060,15 @@ def run_canary(
         )
         cleanup_actions.append(("projection", lambda: _cleanup_projection_action(projection)))
 
+        # The binding carries the EXACT receipt ``attest_protocol_schema``
+        # produced -- never a fresh construction (CAP-S1 Sol review item 1:
+        # ``attest_protocol_schema`` is the ONLY producer of
+        # ``CodexProtocolAttestationReceipt`` in production code).
         binding = CodexSkillCanaryBinding(
             generation=generation,
             profile=profile,
             projection=projection,
-            protocol_receipt=CodexProtocolAttestationReceipt(
-                binary_path=str(adapter_binary_path),
-                binary_digest=adapter_binary_digest,
-                binary_version=harness_version,
-                stable_inventory_digest=schema.stable_inventory_digest,
-                experimental_inventory_digest=schema.experimental_inventory_digest,
-                supports_skill_input_path=schema.supports_skill_input_path,
-                skill_input_schema_evidence=(
-                    "skill_turn_input_schema_node_detected"
-                    if schema.supports_skill_input_path
-                    else ""
-                ),
-                # There is no proven mapping from the raw ``--version``
-                # stdout token to the App Server's own ``initialize``
-                # userAgent shape (Sol wave-3 review finding B1) -- this
-                # field is left unconstructed rather than fabricated for
-                # EITHER backend; the adapter's own ``initialize`` userAgent
-                # equality check against ``expected_harness_version`` is the
-                # real enforcement.
-                probe_user_agent="",
-            ),
+            protocol_receipt=receipt,
         )
 
         # --- adapter construction --------------------------------------------
@@ -1235,7 +1275,7 @@ def run_canary(
                 )
 
         # --- artifact inventory (computed BEFORE teardown removes anything) --
-        schema_dir = Path(schema.generated_at_dir)
+        schema_dir = scratch_root / SCHEMA_ATTESTATION_DIR_NAME
         artifact_inventory = tuple(
             sorted(
                 [f"schema:{p.relative_to(schema_dir)}" for p in schema_dir.rglob("*") if p.is_file()]
@@ -1301,6 +1341,199 @@ def run_canary(
         cleanup=cleanup_record,
         terminal_process_state=process_result.get("terminal_process_state", "UNKNOWN"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Closed CAP-S1 result contract (CAP-S1 Sol review item 5)
+# ---------------------------------------------------------------------------
+#
+# Before this commission no closed result validator existed at all, and
+# ``CanaryEvidence`` alone accepted an empty candidate identity anywhere it
+# was hand-assembled outside ``run_canary``. This section delivers the
+# closed validator + constructor only -- the principal assembles the real
+# packet (from a completed ``run_canary`` call, hosted CI evidence, review
+# state, etc.) later; this module never itself calls
+# ``build_cap_s1_result``.
+
+RESULT_CONTRACT_MARKER = "cap-s1-result-contract-v1"
+RESULT_CONTRACT_SCHEMA = "mastermind.cap_s1_result/v1"
+
+_RESULT_HEX40_RE = re.compile(r"[0-9a-f]{40}")
+_RESULT_HEX64_RE = re.compile(r"[0-9a-f]{64}")
+
+_PROVIDER_ATTEMPT_HOLD_CODES = frozenset(FROZEN_STOP_CODES) | {"GATES_NOT_GREEN"}
+
+
+class CapS1ResultError(ValueError):
+    """Bounded, non-echoing refusal for the closed CAP-S1 result contract.
+
+    Never echoes the caller-supplied value that failed validation -- only a
+    fixed, closed reason token -- mirroring ``CanaryStop``'s own discipline.
+    """
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1Result:
+    """The closed ``mastermind.cap_s1_result/v1`` contract.
+
+    Construct only via :func:`build_cap_s1_result`, which validates before
+    ever returning an instance -- a bare ``CapS1Result(...)`` call is a valid
+    Python object but is never itself proof the contract holds; only a value
+    that has passed :func:`validate_cap_s1_result` may be trusted downstream.
+    """
+
+    schema_version: str
+    marker: str
+    operation: str
+    receiver: str
+    carrier: str
+    exact_head: str
+    exact_tree: str
+    current_protected_join: str
+    changed_path_census: tuple[str, ...]
+    package_identities: dict
+    canary_evidence: dict
+    provider_attempt: dict
+    local_proof: dict
+    hosted_proof: dict
+    security_proof: dict
+    mutation_proof: dict
+    cleanup_proof: dict
+    review_state: dict
+    held_non_goals: tuple[str, ...]
+
+
+def _result_is_hex40(value: object) -> bool:
+    return isinstance(value, str) and _RESULT_HEX40_RE.fullmatch(value) is not None
+
+
+def _result_is_hex64(value: object) -> bool:
+    return isinstance(value, str) and _RESULT_HEX64_RE.fullmatch(value) is not None
+
+
+def _result_leaf_strings_are_hex64(value: object) -> bool:
+    """Every STRING leaf reachable from ``value`` must be a full 64-hex
+    digest -- ``package_identities`` is documented as "digests + closures",
+    so anything else nested inside it is not a lawful member."""
+
+    if isinstance(value, str):
+        return _result_is_hex64(value)
+    if isinstance(value, dict):
+        return all(_result_leaf_strings_are_hex64(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_result_leaf_strings_are_hex64(item) for item in value)
+    return True
+
+
+def validate_cap_s1_result(result: CapS1Result) -> None:
+    """Refuse anything not conforming to the closed
+    ``mastermind.cap_s1_result/v1`` contract. Every refusal is a fixed,
+    bounded, non-echoing reason string."""
+
+    if type(result) is not CapS1Result:
+        raise CapS1ResultError("cap_s1_result_type_invalid")
+    if result.schema_version != RESULT_CONTRACT_SCHEMA:
+        raise CapS1ResultError("cap_s1_result_schema_mismatch")
+    if result.marker != RESULT_CONTRACT_MARKER:
+        raise CapS1ResultError("cap_s1_result_marker_mismatch")
+
+    for field_name in ("operation", "receiver", "carrier"):
+        value = getattr(result, field_name)
+        if not isinstance(value, str) or not value.strip():
+            raise CapS1ResultError(f"cap_s1_result_{field_name}_invalid")
+
+    for field_name in ("exact_head", "exact_tree", "current_protected_join"):
+        if not _result_is_hex40(getattr(result, field_name)):
+            raise CapS1ResultError(f"cap_s1_result_{field_name}_invalid")
+
+    census = result.changed_path_census
+    if not isinstance(census, tuple) or not census:
+        raise CapS1ResultError("cap_s1_result_changed_path_census_empty")
+    if not all(isinstance(item, str) and item for item in census):
+        raise CapS1ResultError("cap_s1_result_changed_path_census_invalid")
+    if len(set(census)) != len(census):
+        raise CapS1ResultError("cap_s1_result_changed_path_census_duplicate")
+    if list(census) != sorted(census):
+        raise CapS1ResultError("cap_s1_result_changed_path_census_unsorted")
+
+    if not isinstance(result.package_identities, dict) or not result.package_identities:
+        raise CapS1ResultError("cap_s1_result_package_identities_invalid")
+    if not _result_leaf_strings_are_hex64(result.package_identities):
+        raise CapS1ResultError("cap_s1_result_package_identities_digest_invalid")
+
+    provider_attempt = result.provider_attempt
+    if not isinstance(provider_attempt, dict):
+        raise CapS1ResultError("cap_s1_result_provider_attempt_invalid")
+    state = provider_attempt.get("state")
+    if state not in ("COMPLETED", "HOLD"):
+        raise CapS1ResultError("cap_s1_result_provider_attempt_state_invalid")
+    if state == "HOLD":
+        hold_code = provider_attempt.get("hold_code")
+        if hold_code not in _PROVIDER_ATTEMPT_HOLD_CODES:
+            raise CapS1ResultError("cap_s1_result_provider_attempt_hold_code_invalid")
+        detail = provider_attempt.get("detail")
+        if not isinstance(detail, str) or not detail.strip():
+            raise CapS1ResultError("cap_s1_result_provider_attempt_detail_invalid")
+        if result.canary_evidence:
+            raise CapS1ResultError("cap_s1_result_canary_evidence_must_be_empty_on_hold")
+    else:  # COMPLETED
+        if not isinstance(result.canary_evidence, dict) or not result.canary_evidence:
+            raise CapS1ResultError("cap_s1_result_canary_evidence_required_on_completed")
+        if result.canary_evidence.get("schema_version") != CANARY_EVIDENCE_SCHEMA_VERSION:
+            raise CapS1ResultError("cap_s1_result_canary_evidence_schema_mismatch")
+
+    for field_name in (
+        "security_proof",
+        "mutation_proof",
+        "cleanup_proof",
+        "review_state",
+    ):
+        if not isinstance(getattr(result, field_name), dict):
+            raise CapS1ResultError(f"cap_s1_result_{field_name}_invalid")
+
+    local_proof = result.local_proof
+    if not isinstance(local_proof, dict) or not local_proof:
+        raise CapS1ResultError("cap_s1_result_local_proof_empty")
+    for suite_name, counts in local_proof.items():
+        if not isinstance(suite_name, str) or not suite_name:
+            raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+        if (
+            not isinstance(counts, dict)
+            or "passed" not in counts
+            or "skipped" not in counts
+            or isinstance(counts.get("passed"), bool)
+            or isinstance(counts.get("skipped"), bool)
+            or not isinstance(counts.get("passed"), int)
+            or not isinstance(counts.get("skipped"), int)
+        ):
+            raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+
+    hosted_proof = result.hosted_proof
+    if not isinstance(hosted_proof, dict) or not hosted_proof:
+        raise CapS1ResultError("cap_s1_result_hosted_proof_empty")
+    run_id = hosted_proof.get("run_id")
+    conclusion = hosted_proof.get("conclusion")
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise CapS1ResultError("cap_s1_result_hosted_proof_run_id_invalid")
+    if not isinstance(conclusion, str) or not conclusion.strip():
+        raise CapS1ResultError("cap_s1_result_hosted_proof_conclusion_invalid")
+
+    held = result.held_non_goals
+    if not isinstance(held, tuple) or not held:
+        raise CapS1ResultError("cap_s1_result_held_non_goals_empty")
+    if not all(isinstance(item, str) and item.strip() for item in held):
+        raise CapS1ResultError("cap_s1_result_held_non_goals_invalid")
+
+
+def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
+    """Construct, then validate, a :class:`CapS1Result` -- the one lawful
+    way to obtain an instance believed to satisfy the closed contract."""
+
+    kwargs.setdefault("schema_version", RESULT_CONTRACT_SCHEMA)
+    kwargs.setdefault("marker", RESULT_CONTRACT_MARKER)
+    result = CapS1Result(**kwargs)
+    validate_cap_s1_result(result)
+    return result
 
 
 # ---------------------------------------------------------------------------

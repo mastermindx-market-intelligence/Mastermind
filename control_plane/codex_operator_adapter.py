@@ -486,6 +486,83 @@ class CodexProtocolAttestationReceipt:
     supports_skill_input_path: bool
     skill_input_schema_evidence: str
     probe_user_agent: str
+    receipt_digest: str
+
+
+def compute_protocol_attestation_receipt_digest(
+    *,
+    binary_path: str,
+    binary_digest: str,
+    binary_version: str,
+    stable_inventory_digest: str,
+    experimental_inventory_digest: str,
+    supports_skill_input_path: bool,
+    skill_input_schema_evidence: str,
+    probe_user_agent: str,
+) -> str:
+    """Canonical digest over every :class:`CodexProtocolAttestationReceipt`
+    field except ``receipt_digest`` itself (CAP-S1 Sol review item 1):
+    sort_keys/compact/utf-8/sha256, byte-identical between the sole producer
+    (``scripts.ohf.cap_s1_mastermind_operator_canary.attest_protocol_schema``)
+    and this adapter's own bind-time validator so neither can silently drift
+    from the other. Field order is frozen by ``sort_keys=True`` (alphabetical),
+    never by argument or dict-literal order.
+    """
+
+    return _canonical_digest(
+        {
+            "binary_path": binary_path,
+            "binary_digest": binary_digest,
+            "binary_version": binary_version,
+            "stable_inventory_digest": stable_inventory_digest,
+            "experimental_inventory_digest": experimental_inventory_digest,
+            "supports_skill_input_path": supports_skill_input_path,
+            "skill_input_schema_evidence": skill_input_schema_evidence,
+            "probe_user_agent": probe_user_agent,
+        }
+    )
+
+
+def build_protocol_attestation_receipt(
+    *,
+    binary_path: str,
+    binary_digest: str,
+    binary_version: str,
+    stable_inventory_digest: str,
+    experimental_inventory_digest: str,
+    supports_skill_input_path: bool,
+    skill_input_schema_evidence: str,
+    probe_user_agent: str,
+) -> CodexProtocolAttestationReceipt:
+    """The one lawful constructor for :class:`CodexProtocolAttestationReceipt`
+    (CAP-S1 Sol review item 1): computes ``receipt_digest`` itself so no
+    caller can hand-supply a digest inconsistent with the other fields.
+    ``attest_protocol_schema`` is the only production caller; test fixtures
+    that need a self-consistent receipt for adapter-level unit testing may
+    also call this directly.
+    """
+
+    digest = compute_protocol_attestation_receipt_digest(
+        binary_path=binary_path,
+        binary_digest=binary_digest,
+        binary_version=binary_version,
+        stable_inventory_digest=stable_inventory_digest,
+        experimental_inventory_digest=experimental_inventory_digest,
+        supports_skill_input_path=supports_skill_input_path,
+        skill_input_schema_evidence=skill_input_schema_evidence,
+        probe_user_agent=probe_user_agent,
+    )
+    return CodexProtocolAttestationReceipt(
+        binary_path=binary_path,
+        binary_digest=binary_digest,
+        binary_version=binary_version,
+        stable_inventory_digest=stable_inventory_digest,
+        experimental_inventory_digest=experimental_inventory_digest,
+        supports_skill_input_path=supports_skill_input_path,
+        skill_input_schema_evidence=skill_input_schema_evidence,
+        probe_user_agent=probe_user_agent,
+        receipt_digest=digest,
+    )
 
 
 @dataclass(frozen=True)
@@ -738,7 +815,43 @@ class CodexOperatorAdapter:
                     "skill canary binding protocol receipt must be the exact"
                     " closed receipt type",
                 )
-            if receipt.binary_digest != _sha256_file(self.binary_path):
+            # Splice defense (CAP-S1 Sol review item 1): a schema generated
+            # from binary A must never authorize adapter binary B. Before
+            # this fix only ``binary_digest`` (compared against a fresh hash
+            # of THIS adapter's own ``self.binary_path``) was ever checked --
+            # ``receipt.binary_path`` itself was accepted unvalidated, so a
+            # caller could supply the correct digest for ``self.binary_path``
+            # while claiming an unrelated, never-dereferenced ``binary_path``
+            # and arbitrary "evidence" fields actually produced against a
+            # different binary entirely. ``receipt.binary_path`` is now an
+            # identity that must resolve to the exact same file as
+            # ``self.binary_path`` before its digest is ever trusted.
+            if not isinstance(receipt.binary_path, str) or not receipt.binary_path:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt binary path is invalid",
+                )
+            if os.path.realpath(receipt.binary_path) != str(self.binary_path):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt binary path mismatch",
+                )
+            try:
+                receipt_path_digest = _sha256_file(Path(receipt.binary_path))
+                # ``self.binary_digest`` is not yet assigned the first time
+                # this runs (constructor-time validation happens before that
+                # attribute is set), so the adapter's own binary is always
+                # freshly re-hashed here rather than trusted from a cache.
+                fresh_self_binary_digest = _sha256_file(self.binary_path)
+            except OSError as exc:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt binary path is not observable",
+                ) from exc
+            if (
+                receipt_path_digest != receipt.binary_digest
+                or receipt.binary_digest != fresh_self_binary_digest
+            ):
                 raise CodexAdapterError(
                     AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
                     "skill canary binding protocol receipt binary digest mismatch",
@@ -773,6 +886,47 @@ class CodexOperatorAdapter:
                 raise CodexAdapterError(
                     AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
                     "skill canary binding protocol receipt schema evidence is required",
+                )
+            # Real initialize-probe binding (CAP-S1 protocol-attestation
+            # amendment §2 item 4 / Sol review item 1): the runner seals
+            # ``expected_harness_version`` FROM this exact probe value, so
+            # requiring equality here closes the loop between the schema
+            # probe's own launch and this generation's actual launch-time
+            # ``initialize`` userAgent check in ``_initialize_and_attest``.
+            if (
+                not isinstance(receipt.probe_user_agent, str)
+                or not receipt.probe_user_agent.strip()
+                or receipt.probe_user_agent != self.expected_harness_version
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt probe user agent mismatch",
+                )
+            # Producer-bound receipt digest (CAP-S1 Sol review item 1): a
+            # receipt not produced by ``attest_protocol_schema``'s own honest
+            # computation -- hand-built, or partially mutated via
+            # ``dataclasses.replace`` without recomputing the digest -- fails
+            # this recomputed equality even when every individual field above
+            # happens to look superficially well-formed. Placed last so the
+            # more specific messages above still fire for the field they
+            # actually diagnose.
+            recomputed_receipt_digest = compute_protocol_attestation_receipt_digest(
+                binary_path=receipt.binary_path,
+                binary_digest=receipt.binary_digest,
+                binary_version=receipt.binary_version,
+                stable_inventory_digest=receipt.stable_inventory_digest,
+                experimental_inventory_digest=receipt.experimental_inventory_digest,
+                supports_skill_input_path=receipt.supports_skill_input_path,
+                skill_input_schema_evidence=receipt.skill_input_schema_evidence,
+                probe_user_agent=receipt.probe_user_agent,
+            )
+            if (
+                not isinstance(receipt.receipt_digest, str)
+                or recomputed_receipt_digest != receipt.receipt_digest
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt digest mismatch",
                 )
 
             # --- source/generation binding -----------------------------------
