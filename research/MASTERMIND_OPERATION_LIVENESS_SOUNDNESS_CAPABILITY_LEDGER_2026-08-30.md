@@ -16,6 +16,9 @@ Current GitHub/SCF boundary:
 Current wire/release finalization:
 `docs/superpowers/specs/2026-08-31-operation-assurance-a1-wire-release-finalization.md`.
 
+Current A2 source-seam design:
+`docs/superpowers/specs/2026-09-01-operation-assurance-a2-source-seam-design.md`.
+
 Current diagnostic boundary:
 `docs/superpowers/specs/2026-08-30-operation-liveness-soundness-runtime-observability-reconciliation.md`.
 
