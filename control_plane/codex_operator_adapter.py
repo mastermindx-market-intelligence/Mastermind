@@ -114,6 +114,11 @@ _WAKE_ACK_MARKER_PREFIX = "MASTERMIND_WAKE_ACK "
 _WAKE_ACK_MARKER_RE = re.compile(r"^MASTERMIND_WAKE_ACK (WAKE-[A-Za-z0-9._:-]+)$")
 _CANONICAL_WAKE_ID_RE = re.compile(r"^WAKE-[0-9a-f]{32}$")
 _MARKDOWN_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_HEX64_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def _is_hex64(value: object) -> bool:
+    return isinstance(value, str) and _HEX64_RE.fullmatch(value) is not None
 
 
 class CodexAdapterError(RuntimeError):
@@ -418,6 +423,8 @@ class _GenerationState:
     audited_native_helper_turns: set[str] = field(default_factory=set)
     candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
     skills_changed: bool = False
+    accepted_skill_observation: "tuple[tuple[str, str, str | None, str], ...] | None" = None
+    accepted_skill_observation_root: "str | None" = None
 
 
 @dataclass(frozen=True)
@@ -459,6 +466,29 @@ class CodexTurnInputEnvelope:
 
 
 @dataclass(frozen=True)
+class CodexProtocolAttestationReceipt:
+    """One frozen, typed attestation of the Codex protocol schema probe.
+
+    Replaces the untyped ``schema_receipt_digest``/``schema_supports_skill_
+    input_path`` pair (CAP-S1 Sol wave-3 review finding B3): a bare 64-hex
+    string plus a bare bool let any caller construct an authorizing receipt
+    unrelated to the binary this adapter actually launches. Every field here
+    is checked by :meth:`CodexOperatorAdapter._validate_skill_canary_binding`
+    against the adapter's own observed facts before Mode-B authorization is
+    ever read.
+    """
+
+    binary_path: str
+    binary_digest: str
+    binary_version: str
+    stable_inventory_digest: str
+    experimental_inventory_digest: str
+    supports_skill_input_path: bool
+    skill_input_schema_evidence: str
+    probe_user_agent: str
+
+
+@dataclass(frozen=True)
 class CodexSkillCanaryBinding:
     """The sealed source/profile/projection evidence gating the causal
     Skill-launch sequence and the structured turn-input seam.
@@ -472,8 +502,7 @@ class CodexSkillCanaryBinding:
     generation: CapabilityPackageGeneration
     profile: ExecutionCapabilityProfile
     projection: SkillProjectionReceipt
-    schema_receipt_digest: str
-    schema_supports_skill_input_path: bool
+    protocol_receipt: CodexProtocolAttestationReceipt
 
 
 class CodexOperatorAdapter:
@@ -679,7 +708,13 @@ class CodexOperatorAdapter:
         """Bind-time proof that a supplied ``skill_canary_binding`` is closed.
 
         Never echoes a caller-supplied value; every refusal is a fixed,
-        bounded reason string (CAP-S1 protocol-attestation amendment §7).
+        bounded reason string (CAP-S1 protocol-attestation amendment §7;
+        Sol wave-3 review findings B1 and B3).
+
+        The projection's own ``skills_root`` is never inspected here -- it is
+        an identity to be re-derived and matched at launch time inside
+        :meth:`_run_skill_causal_sequence`, never a destination this
+        constructor-time pass trusts (finding B1).
         """
 
         binding = self.skill_canary_binding
@@ -694,6 +729,53 @@ class CodexOperatorAdapter:
             profile = binding.profile
             generation = binding.generation
             projection = binding.projection
+            receipt = binding.protocol_receipt
+
+            # --- B3: typed protocol attestation receipt ---------------------
+            if type(receipt) is not CodexProtocolAttestationReceipt:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt must be the exact"
+                    " closed receipt type",
+                )
+            if receipt.binary_digest != _sha256_file(self.binary_path):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt binary digest mismatch",
+                )
+            if receipt.binary_version != self.expected_harness_version:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt binary version mismatch",
+                )
+            if not _is_hex64(receipt.stable_inventory_digest) or not _is_hex64(
+                receipt.experimental_inventory_digest
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt inventory digest is invalid",
+                )
+            if receipt.stable_inventory_digest == receipt.experimental_inventory_digest:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt inventory digests must"
+                    " be distinct",
+                )
+            if not isinstance(receipt.supports_skill_input_path, bool):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt supports flag is invalid",
+                )
+            if receipt.supports_skill_input_path and not (
+                isinstance(receipt.skill_input_schema_evidence, str)
+                and receipt.skill_input_schema_evidence.strip()
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt schema evidence is required",
+                )
+
+            # --- source/generation binding -----------------------------------
             grants = tuple(profile.skill_grants)
             if not grants:
                 raise CodexAdapterError(
@@ -714,29 +796,47 @@ class CodexOperatorAdapter:
                     AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
                     "skill canary binding projection does not match the package generation",
                 )
-            schema_digest = binding.schema_receipt_digest
-            if (
-                not isinstance(schema_digest, str)
-                or re.fullmatch(r"[0-9a-f]{64}", schema_digest) is None
-            ):
+
+            # --- B1: re-validate the complete projection receipt shape ------
+            if type(projection) is not SkillProjectionReceipt:
                 raise CodexAdapterError(
                     AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                    "skill canary binding schema receipt digest is invalid",
+                    "skill canary binding projection must be the exact closed"
+                    " receipt type",
                 )
-            skills_root_path = Path(projection.skills_root)
+            projection_digests = (
+                projection.package_content_digest,
+                projection.package_source_digest,
+                projection.package_generation_digest,
+                *(digest for _name, digest in projection.skill_content_digests),
+            )
+            if not all(_is_hex64(value) for value in projection_digests):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection digest is invalid",
+                )
+            projection_root_path = Path(projection.projection_root)
             try:
-                skills_root_stat = skills_root_path.lstat()
+                projection_root_stat = projection_root_path.lstat()
             except OSError as exc:
                 raise CodexAdapterError(
                     AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                    "skill canary binding projection skills root is not observable",
+                    "skill canary binding projection root is not observable",
                 ) from exc
-            if stat.S_ISLNK(skills_root_stat.st_mode) or not stat.S_ISDIR(
-                skills_root_stat.st_mode
+            if stat.S_ISLNK(projection_root_stat.st_mode) or not stat.S_ISDIR(
+                projection_root_stat.st_mode
             ):
                 raise CodexAdapterError(
                     AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                    "skill canary binding projection skills root must be a real directory",
+                    "skill canary binding projection root must be a real directory",
+                )
+            if (
+                projection_root_stat.st_dev,
+                projection_root_stat.st_ino,
+            ) != projection.projection_root_identity:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection root identity mismatch",
                 )
         except CodexAdapterError:
             raise
@@ -1135,12 +1235,31 @@ class CodexOperatorAdapter:
                     "harness binary changed during initialization",
                     effect_unknown=True,
                 )
+            accepted_skill_observation: (
+                "tuple[tuple[str, str, str | None, str], ...] | None"
+            ) = None
+            accepted_skill_observation_root: "str | None" = None
+            skills_changed_during_launch = False
             if self.skill_canary_binding is not None:
-                skill_rows = self._run_skill_causal_sequence(
+                (
+                    skill_rows,
+                    accepted_skill_observation,
+                    accepted_skill_observation_root,
+                ) = self._run_skill_causal_sequence(
                     client, self.skill_canary_binding
                 )
                 attestation = self._attestation_with_skill_rows(
                     attestation, skill_rows
+                )
+                # M7: a skills/changed notification is fenced from the exact
+                # accepted-list boundary onward -- everything the causal
+                # sequence's own RPC calls may have already pushed into the
+                # live buffer is scanned here rather than silently discarded,
+                # so a notification landing before ``thread/start`` cannot be
+                # dropped as startup noise (CAP-S1 Sol wave-3 review M7).
+                skills_changed_during_launch = any(
+                    str(item.get("method") or "") == "skills/changed"
+                    for item in client.drain_notifications()
                 )
             if resume_session_id is None:
                 result = client.request(
@@ -1204,7 +1323,15 @@ class CodexOperatorAdapter:
                     "thread/started did not confirm the provider session",
                     effect_unknown=True,
                 )
-            client.notifications.clear()
+            # Drain (never bare-clear) so a skills/changed notification that
+            # arrived during thread/start itself -- the other half of the
+            # M7 fence -- is scanned rather than dropped as startup noise.
+            post_start_drained = client.drain_notifications()
+            if self.skill_canary_binding is not None and any(
+                str(item.get("method") or "") == "skills/changed"
+                for item in post_start_drained
+            ):
+                skills_changed_during_launch = True
         except CodexAdapterError:
             client.close()
             self._bound_resources.pop(generation.process_generation_id, None)
@@ -1226,6 +1353,9 @@ class CodexOperatorAdapter:
             resource=(
                 resource_binding.resource if resource_binding is not None else None
             ),
+            skills_changed=skills_changed_during_launch,
+            accepted_skill_observation=accepted_skill_observation,
+            accepted_skill_observation_root=accepted_skill_observation_root,
         )
         self._generations[generation.process_generation_id] = state
         self._bound_resources.pop(generation.process_generation_id, None)
@@ -1266,15 +1396,155 @@ class CodexOperatorAdapter:
         except Exception as exc:
             raise _rpc_failure(exc, effect_unknown=True) from exc
 
+    @staticmethod
+    def _derive_and_verify_skills_root(binding: CodexSkillCanaryBinding) -> str:
+        """Re-derive the only lawful skills root from server-held identities.
+
+        Never trusts ``binding.projection.skills_root`` as a destination: it
+        is checked for STRING identity against the value this adapter
+        derives itself from the already-verified ``projection_root`` and
+        ``generation.package_root``, and every path component from the
+        projection root down is confirmed to be a real, non-symlink
+        directory before any ``extraRoots`` value is ever sent to the
+        provider (CAP-S1 Sol wave-3 review finding B1: a caller could
+        previously substitute an entirely different, attacker-controlled
+        real directory tree carrying the same Skill names).
+        """
+
+        projection = binding.projection
+        projection_root = Path(projection.projection_root)
+        package_root_parts = [
+            part for part in binding.generation.package_root.split("/") if part
+        ]
+        derived_path = projection_root.joinpath(*package_root_parts, "skills")
+        derived = str(derived_path)
+        if derived != projection.skills_root:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_root_identity_mismatch",
+                effect_unknown=True,
+            )
+        try:
+            root_stat = projection_root.lstat()
+        except OSError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_root_identity_mismatch",
+                effect_unknown=True,
+            ) from exc
+        if (
+            stat.S_ISLNK(root_stat.st_mode)
+            or not stat.S_ISDIR(root_stat.st_mode)
+            or (root_stat.st_dev, root_stat.st_ino) != projection.projection_root_identity
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_root_identity_mismatch",
+                effect_unknown=True,
+            )
+        current = projection_root
+        for part in (*package_root_parts, "skills"):
+            current = current / part
+            try:
+                part_stat = current.lstat()
+            except OSError as exc:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill_root_identity_mismatch",
+                    effect_unknown=True,
+                ) from exc
+            if stat.S_ISLNK(part_stat.st_mode) or not stat.S_ISDIR(part_stat.st_mode):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill_root_identity_mismatch",
+                    effect_unknown=True,
+                )
+        return derived
+
+    @staticmethod
+    def _reduce_skill_observation(
+        rows: list[dict[str, object]],
+        *,
+        skills_root: str,
+        binding: CodexSkillCanaryBinding,
+    ) -> "tuple[tuple[tuple[str, str, str | None, str], ...], str]":
+        """One pure, canonical reduction of a strict ``skills/list`` response.
+
+        Returns ``(observation, schema_support_mode)`` where ``observation``
+        is a sorted tuple of ``(runtime_name, path_mode, exact_path_or_None,
+        closure_digest_assignment)`` rows and ``schema_support_mode`` is
+        ``"path_precise"`` (Mode A) or ``"pathless"`` (Mode B). Used
+        byte-identically at launch, pre-turn, and post-turn so Mode-A path
+        validation logic can never diverge between call sites (CAP-S1 Sol
+        wave-3 review finding B2).
+        """
+
+        path_flags = {("path" in row) for row in rows}
+        if len(path_flags) > 1:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_path_precision_inconsistent",
+                effect_unknown=True,
+            )
+        mode_a = True in path_flags
+        schema_support_mode = "path_precise" if mode_a else "pathless"
+        if mode_a:
+            for row in rows:
+                name = str(row.get("name") or "")
+                path = str(row.get("path") or "")
+                expected_md = f"{skills_root}/{name}/SKILL.md"
+                expected_dir = f"{skills_root}/{name}"
+                if path not in (expected_md, expected_dir):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                        "skill_path_mismatch",
+                        effect_unknown=True,
+                    )
+        elif not binding.protocol_receipt.supports_skill_input_path:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_path_attestation_unavailable",
+                effect_unknown=True,
+            )
+        enabled_rows = [row for row in rows if row.get("enabled") is True]
+        names = [str(row.get("name") or "") for row in enabled_rows]
+        if len(names) != len(set(names)):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "duplicate_skill_row",
+                effect_unknown=True,
+            )
+        digest_by_name = {
+            grant.runtime_name: grant.skill_content_digest
+            for grant in binding.profile.skill_grants
+        }
+        entries = tuple(
+            sorted(
+                (
+                    name,
+                    schema_support_mode,
+                    (str(row.get("path")) if mode_a else None),
+                    digest_by_name.get(name, ""),
+                )
+                for row, name in zip(enabled_rows, names)
+            )
+        )
+        return entries, schema_support_mode
+
     def _run_skill_causal_sequence(
         self, client: AppServerClient, binding: CodexSkillCanaryBinding
-    ) -> tuple[ObservedCapabilityIdentity, ...]:
+    ) -> "tuple[tuple[ObservedCapabilityIdentity, ...], tuple[tuple[str, str, str | None, str], ...], str]":
         """The frozen baseline/add/observe half of the CAP-S1 causal sequence.
 
         Only the launch-time portion (protocol-attestation amendment §5, up
         through ``compare requested vs observed``) lives in this adapter; the
         trailing clear/terminate/cleanup half belongs to the canary runner
         that owns process teardown, not to a single ``start_session`` call.
+
+        Returns ``(observed_capabilities, accepted_observation,
+        accepted_skills_root)`` so the launch-accepted reduction can be
+        sealed onto the generation state for exact pre/post-turn re-checks
+        (CAP-S1 Sol wave-3 review finding B2).
         """
 
         # -> skills/extraRoots/set []
@@ -1298,74 +1568,43 @@ class CodexOperatorAdapter:
                 "skill_source_changed",
                 effect_unknown=True,
             ) from exc
-        # -> skills/extraRoots/set [<exact package root>/skills]
-        skills_root = binding.projection.skills_root
+        # -> DERIVE the only lawful skills root server-side; the binding's own
+        #    ``skills_root`` is an identity to match, never a destination to
+        #    trust (finding B1).
+        skills_root = self._derive_and_verify_skills_root(binding)
+        # -> skills/extraRoots/set [<exact derived package root>/skills]
         self._set_skill_extra_roots(client, [skills_root])
         # -> skills/list forceReload=true == enabled set {four exact Operator Skills}
         rows = self._strict_skills_list(client)
+        observation, _mode = self._reduce_skill_observation(
+            rows, skills_root=skills_root, binding=binding
+        )
         required_names = tuple(
             grant.runtime_name for grant in binding.profile.skill_grants
         )
-        # -> construct four composite ObservedCapabilityIdentity rows
-        return self._skill_rows_to_observed(rows, skills_root, required_names, binding)
-
-    @staticmethod
-    def _skill_rows_to_observed(
-        rows: list[dict[str, object]],
-        skills_root: str,
-        required_names: tuple[str, ...],
-        binding: CodexSkillCanaryBinding,
-    ) -> tuple[ObservedCapabilityIdentity, ...]:
-        path_flags = {("path" in row) for row in rows}
-        if len(path_flags) > 1:
-            raise CodexAdapterError(
-                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                "skill_path_precision_inconsistent",
-                effect_unknown=True,
-            )
-        mode_a = True in path_flags
-        if mode_a:
-            for row in rows:
-                name = str(row.get("name") or "")
-                path = str(row.get("path") or "")
-                expected_md = f"{skills_root}/{name}/SKILL.md"
-                expected_dir = f"{skills_root}/{name}"
-                if path not in (expected_md, expected_dir):
-                    raise CodexAdapterError(
-                        AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                        "skill_path_mismatch",
-                        effect_unknown=True,
-                    )
-        elif not binding.schema_supports_skill_input_path:
-            raise CodexAdapterError(
-                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                "skill_path_attestation_unavailable",
-                effect_unknown=True,
-            )
-        enabled = enabled_skill_names(rows)
-        if len(enabled) != len(set(enabled)):
-            raise CodexAdapterError(
-                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                "duplicate_skill_row",
-                effect_unknown=True,
-            )
-        if set(enabled) != set(required_names) or len(enabled) != len(required_names):
+        observed_names = tuple(entry[0] for entry in observation)
+        if set(observed_names) != set(required_names) or len(observed_names) != len(
+            required_names
+        ):
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
                 "skill_set_causality_failed",
                 effect_unknown=True,
             )
-        digest_by_name = {
-            grant.runtime_name: grant.skill_content_digest
-            for grant in binding.profile.skill_grants
-        }
+        # -> construct four composite ObservedCapabilityIdentity rows
+        return self._skill_rows_to_observed(observation), observation, skills_root
+
+    @staticmethod
+    def _skill_rows_to_observed(
+        observation: "tuple[tuple[str, str, str | None, str], ...]",
+    ) -> tuple[ObservedCapabilityIdentity, ...]:
         return tuple(
             ObservedCapabilityIdentity(
                 kind="skill",
                 name=name,
-                skill_content_digest=digest_by_name[name],
+                skill_content_digest=digest,
             )
-            for name in required_names
+            for name, _mode, _path, digest in observation
         )
 
     @staticmethod
@@ -1393,7 +1632,9 @@ class CodexOperatorAdapter:
                 "skills_changed_during_canary",
                 effect_unknown=True,
             )
-        self._reconfirm_skill_state(state.client, binding, mismatch_reason="skill_set_causality_failed")
+        self._reconfirm_skill_state(
+            state, binding, mismatch_reason="skill_set_causality_failed"
+        )
 
     def _verify_skill_state_after_turn(
         self, state: "_GenerationState", binding: CodexSkillCanaryBinding
@@ -1405,26 +1646,40 @@ class CodexOperatorAdapter:
                 effect_unknown=True,
             )
         self._reconfirm_skill_state(
-            state.client, binding, mismatch_reason="post_turn_skill_state_mismatch"
+            state, binding, mismatch_reason="post_turn_skill_state_mismatch"
         )
 
     def _reconfirm_skill_state(
         self,
-        client: AppServerClient,
+        state: "_GenerationState",
         binding: CodexSkillCanaryBinding,
         *,
         mismatch_reason: str,
     ) -> None:
-        required_names = tuple(
-            grant.runtime_name for grant in binding.profile.skill_grants
-        )
-        rows = self._strict_skills_list(client)
-        enabled = enabled_skill_names(rows)
-        if (
-            len(enabled) != len(set(enabled))
-            or set(enabled) != set(required_names)
-            or len(enabled) != len(required_names)
-        ):
+        """Re-check the exact accepted launch observation (CAP-S1 Sol wave-3
+        review finding B2).
+
+        Uses the same :meth:`_reduce_skill_observation` reducer the launch
+        path used, against the SAME accepted ``skills_root``, and requires
+        byte-identical tuple equality with the launch-accepted reduction --
+        never just an enabled-name/cardinality check, which cannot see a
+        moved path, a Mode flip, a duplicate, or root drift.
+        """
+
+        rows = self._strict_skills_list(state.client)
+        try:
+            observation, _mode = self._reduce_skill_observation(
+                rows,
+                skills_root=state.accepted_skill_observation_root,
+                binding=binding,
+            )
+        except CodexAdapterError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                mismatch_reason,
+                effect_unknown=True,
+            ) from exc
+        if observation != state.accepted_skill_observation:
             raise CodexAdapterError(
                 AdapterFailureClass.CONFIG_DRIFT,
                 mismatch_reason,

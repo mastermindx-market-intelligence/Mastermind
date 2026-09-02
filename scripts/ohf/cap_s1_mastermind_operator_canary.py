@@ -35,6 +35,7 @@ from typing import Any, Callable, Mapping
 from control_plane.codex_operator_adapter import (
     CodexAdapterError,
     CodexOperatorAdapter,
+    CodexProtocolAttestationReceipt,
     CodexSkillCanaryBinding,
     CodexSkillTurnInput,
     CodexTurnInputEnvelope,
@@ -552,6 +553,18 @@ def run_canary(
         binary_path=schema_binary_path, scratch_root=scratch_root, run_command=run_command
     )
 
+    # The protocol receipt binds to the binary the ADAPTER actually launches,
+    # never the (possibly distinct, fake-backend-only) binary the schema
+    # probe ran against -- ``schema.binary_digest`` is the schema probe's own
+    # evidence and is deliberately NOT reused here (CAP-S1 Sol wave-3 review
+    # finding B3).
+    try:
+        adapter_binary_digest = _sha256_file(adapter_binary_path)
+    except OSError as exc:
+        raise CanaryStop(
+            "SKILL_PROTOCOL_SCHEMA_UNATTESTED", "adapter binary is not observable"
+        ) from exc
+
     # --- synthetic workspace -------------------------------------------
     workspace = build_synthetic_workspace(scratch_root)
     readme_path = workspace / "README.md"
@@ -588,8 +601,26 @@ def run_canary(
         generation=generation,
         profile=profile,
         projection=projection,
-        schema_receipt_digest=schema.stable_inventory_digest,
-        schema_supports_skill_input_path=schema.supports_skill_input_path,
+        protocol_receipt=CodexProtocolAttestationReceipt(
+            binary_path=str(adapter_binary_path),
+            binary_digest=adapter_binary_digest,
+            binary_version=harness_version,
+            stable_inventory_digest=schema.stable_inventory_digest,
+            experimental_inventory_digest=schema.experimental_inventory_digest,
+            supports_skill_input_path=schema.supports_skill_input_path,
+            skill_input_schema_evidence=(
+                "skill_turn_input_schema_node_detected"
+                if schema.supports_skill_input_path
+                else ""
+            ),
+            # The fake backend's own App Server double always echoes
+            # ``initialize``'s userAgent as exactly this ``harness_version``
+            # (asserted by the adapter's own attestation gate), so "" is the
+            # lawful fake-backend value here; the live backend has no
+            # independent probe wired by this commission (a separate wave-3
+            # runner finding), so it carries the same expected version.
+            probe_user_agent=harness_version if backend == "live" else "",
+        ),
     )
 
     # --- adapter construction --------------------------------------------
