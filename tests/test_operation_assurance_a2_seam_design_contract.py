@@ -1,4 +1,9 @@
-"""Contract pins for the OLS-A2 bounded gather/source-compiler seam design."""
+"""Discriminating contract pins for the OLS-A2 bounded gather/source-compiler seam design.
+
+Strengthened per Sol review 5086088649: these tests must FAIL if the Steward step is removed,
+an imaginary predecessor wire is cited as protected, fidelity/currentness is promoted, or the
+property subset becomes unconstrained.
+"""
 
 from pathlib import Path
 
@@ -14,6 +19,15 @@ LEDGER = (
     ROOT
     / "research"
     / "MASTERMIND_OPERATION_LIVENESS_SOUNDNESS_CAPABILITY_LEDGER_2026-08-30.md"
+)
+
+SUPPORTED_PROPERTIES = (
+    "OPTION_TO_COMPLETE",
+    "PROPER_COMPLETION",
+    "NO_DEAD_REQUIRED_TRANSITION",
+    "TERMINAL_ABSORPTION",
+    "GATE_WAIT_RETURN_VALIDITY",
+    "UNIVERSAL_PROGRESS",
 )
 
 EXPECTED_FAILURE_STATES = (
@@ -45,35 +59,54 @@ def test_design_is_the_narrow_controlling_a2_seam_record() -> None:
     assert "It authorizes no implementation by itself" in text
 
 
-def test_seam_separation_is_exact() -> None:
+def test_steward_composition_step_is_mandatory_and_real() -> None:
     text = _text()
-    assert "control_plane/operation_assurance_sources.py` — the ONLY module with read I/O" in text
-    assert "control_plane/operation_assurance_compiler.py` — pure (stdlib-only, zero I/O)" in text
-    assert "scripts/operation_assurance_compile.py" in text
-    assert "no cache, no persistence, no retry loops" in text
-    assert "protected OLS-A1 checker (unchanged; never side-reads)" in text
+    assert "existing Executive Steward pure composition (mastermind.executive_steward.result.v1)" in text
+    assert "The mandatory Steward step is real, not decorative" in text
+    assert "compiler performs ZERO identity resolution" in text
+    assert "the Steward is the only identity/source normalizer" in text
+    assert "reused, never copied, subclassed, or reimplemented" in text
 
 
-def test_first_owner_adapter_and_target_operation_are_frozen() -> None:
+def test_source_facts_wire_is_defined_here_not_claimed_protected() -> None:
     text = _text()
-    assert "exactly ONE owner adapter: **Agent OS records**" in text
-    assert "agentos.workstream.v1" in text
-    assert "read at ONE pinned git revision" in text
-    assert "`WS:OPERATION-ASSURANCE` workstream itself" in text
-    assert "the record BODY (human truth) is never parsed" in text
-    for absent_adapter in (
-        "Executive OS runtime (Job/Attempt/Worker/Event)",
-        "SCF/GitHub (whose packets OLS must never counterfeit",
-    ):
-        assert absent_adapter in text
+    assert "No protected source-bundle or predecessor \"A2-S0\" wire exists in the repository today" in text
+    assert "this design DEFINES the wire" in text
+    assert "invocation-local and non-persistent" in text
+    assert "no source store" in text
+    assert "already frozen and parsed" not in text
+    assert "protected A1/A2-S0 contract family" not in text
 
 
-def test_trust_ceiling_cannot_be_minted_by_gathering() -> None:
+def test_property_subset_is_frozen_and_proof_ceiling_is_honest() -> None:
     text = _text()
-    assert "PROVENANCE_CLOSED_UNATTESTED / AUTHOR_DECLARED_ONLY` at most" in text
-    assert "does NOT mint `CURRENT_SOURCE_ATTESTED`" in text
-    assert "REPORT_ONLY_PROCEED" not in text
-    assert "The compiler cannot self-upgrade" in text
+    for prop in SUPPORTED_PROPERTIES:
+        assert f"`{prop}`" in text, f"missing supported property {prop}"
+    assert "Unsupported in this vertical (each an explicit load-bearing model gap" in text
+    assert "starvation-under-declared-fairness" in text
+    assert "never proof-eligible" in text
+    assert "never mints `PROVEN_WITHIN_FINITE_MODEL` for a live workstream" in text
+    assert "compiler-template behavior grounded in exact record fields" in text
+    assert "never presented as owner-attested runtime fact" in text
+
+
+def test_attestation_time_and_correction_law_is_closed() -> None:
+    text = _text()
+    assert "full 40-hex commit SHA" in text
+    assert "abbreviated SHAs are refused" in text
+    assert "ONE `observed_at` cutoff covers the entire gather" in text
+    assert "Corrections are immutable and append-only" in text or "corrections are immutable and append-only" in text
+    assert "Agent-OS-only evidence can never yield whole-operation currentness" in text
+    assert "REPORT_ONLY_PROCEED" in text  # named exactly once, as non-existent
+    assert "the value does not exist in the protected wire" in text
+
+
+def test_hostile_fixture_is_the_current_stale_revision() -> None:
+    text = _text()
+    assert "itself the named hostile stale/coverage-incomplete case" in text
+    assert "durable `next_action` still names predecessor-era state" in text
+    assert "later corrected, schema-valid pinned revision" in text
+    assert "Schema validity is never laundered into semantic currentness" in text
 
 
 def test_no_rebuild_boundary_names_the_forbidden_planes() -> None:
@@ -81,6 +114,7 @@ def test_no_rebuild_boundary_names_the_forbidden_planes() -> None:
     for forbidden in (
         "parallel federated reader",
         "second Steward",
+        "copy or reimplement Steward dataclasses or identity logic",
         "side-read owners from the A1 checker",
         "elect sources by recency",
         "persist gathered facts anywhere",
@@ -96,8 +130,8 @@ def test_failure_states_are_the_exact_frozen_subset() -> None:
     assert "never degrades to an apparently healthy compilation" in text
 
 
-def test_ledger_reverse_links_to_this_design() -> None:
+def test_ledger_reverse_links_and_current_status_is_truthful() -> None:
     ledger_text = " ".join(LEDGER.read_text(encoding="utf-8").split())
-    assert "2026-09-01-operation-assurance-a2-source-seam-design.md" in ledger_text, (
-        "capability ledger must point to the current A2 seam design"
-    )
+    assert "2026-09-01-operation-assurance-a2-source-seam-design.md" in ledger_text
+    assert "A1 deterministic engine: PROTECTED at master merge `c6af57d1" in ledger_text
+    assert "A2: design-candidate under repair on PR #339" in ledger_text
