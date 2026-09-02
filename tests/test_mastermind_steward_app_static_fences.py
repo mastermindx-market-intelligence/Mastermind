@@ -144,3 +144,11 @@ def test_launcher_and_runbook_preserve_policy_resource_host_as_only_public_host(
         assert token not in launcher
         assert token not in runbook
     assert "preserve the exact Host authority from `policy.resource`" in runbook
+
+
+def test_transport_and_auth_gates_share_one_optional_raw_path_normalizer():
+    text = (PACKAGE / "app.py").read_text(encoding="utf-8")
+
+    assert "def _canonical_raw_path(scope: Scope) -> bytes:" in text
+    assert text.count("_canonical_raw_path(scope)") == 2
+    assert 'scope.get("raw_path") != self.resource' not in text
