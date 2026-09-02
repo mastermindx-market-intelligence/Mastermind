@@ -36,7 +36,7 @@ At this plan revision:
 - Macro Initiative compiler PR #6658: `BUILT_NOT_PROVEN / PRODUCTION_INERT / DRAFT`, but statically frozen at the stale 52-row epoch;
 - live Linear Initiative objects: `NOT_BUILT` (`0` observed);
 - live Initiative memberships: `NOT_BUILT` (`0` observed);
-- live Linear Project estate: `PARTIAL / STALE PROJECTION` (`50` Projects observed, ten portfolio-eligible strategy members absent);
+- live Linear Project estate: `PARTIAL / STALE PROJECTION` (`50` Projects observed, ten current strategy members absent; all ten are active at the pinned Agent OS census);
 - Project Workroom architecture: `SPEC_ONLY / PROTECTED`;
 - WR-P0 planner: `NOT_BUILT`;
 - AI Operating Hub end-to-end workflow: `NOT_BUILT`.
@@ -89,7 +89,7 @@ WS:WATCHLIST-PORTFOLIO-CEO
 Linear Project 9aef6461-306a-4a3c-911b-c6a4b6635a78 (Mastermind-X Linear OS)
 ```
 
-If the 2026-09-02 read-only Linear witness and the pinned Agent OS eligibility universe remain unchanged, ten exact Projects require creation:
+If the 2026-09-02 read-only Linear witness and the pinned Agent OS Project-plan buckets remain unchanged, ten exact Projects require creation:
 
 ```text
 WS:TOP-ANATOMY
@@ -122,7 +122,7 @@ unassigned visible exceptions: 2
 Initiatives: 7
 ```
 
-These live-estate counts must be re-derived if Linear or Agent OS changes. The 58-row strategic source does not change merely because observed create or drift counts change; a new portfolio-eligible workstream does require a new protected strategy epoch.
+These live-estate counts must be re-derived if Linear or Agent OS changes. The 58-row strategic source does not change merely because observed create or drift counts change; a new active or review-candidate workstream does require a new protected strategy epoch.
 
 ---
 
@@ -133,18 +133,24 @@ These live-estate counts must be re-derived if Linear or Agent OS changes. The 5
 **Files:** exactly the current-epoch source and this plan amendment.
 
 1. Fresh-read protected `master`, the same-SHA Skillpack, both current-epoch files and the original `d004f5bf...` design.
-2. Verify the Agent OS census at `Macro@818451ef...` and prove all portfolio-eligible direct workstreams equal:
+2. Compile or independently reproduce the Project-plan set relationships at `Macro@818451ef...`. Prove all three statements separately:
 
    ```text
-   58 strategy memberships
-   + WS:WATCHLIST-PORTFOLIO-CEO exception
+   every one of the 58 strategy membership keys exists in the complete
+     Project-plan universe (active + review candidates + excluded)
+
+   every active Project and every review candidate is either one of those
+     58 membership keys or exactly WS:WATCHLIST-PORTFOLIO-CEO
+
+   no excluded-only workstream is required to become a new strategy member
+     merely because its durable record remains in the Project-plan universe
    ```
 
-   Review candidates at `status: proposed` are subject to the same set-equality law.
+   This is not a claim that the 58 memberships are all currently active. Approved historical memberships may remain attached to excluded Projects. Review candidates at `status: proposed` are subject to the same mandatory-classification law as active Projects.
 3. Verify all eight added classifications against their current direct Agent OS objectives; no title/program/owner inference may substitute for the explicit protected mapping.
 4. Verify no open writer touches either new path and no newer accepted strategy source supersedes this epoch.
 5. History-preservingly reconcile current protected `master`; do not reset/rebase/force over the source branch.
-6. Require exact-head protected `test` success and a non-author review that checks the set census, mapping rationales, arithmetic, precedence and provenance law—not only prose quality.
+6. Require exact-head protected `test` success and a non-author review that checks the Project-plan set laws, mapping rationales, arithmetic, precedence and provenance law—not only prose quality.
 7. Merge only with immutable-head protection.
 8. Capture the exact protected merge commit. That commit becomes the `protected_revision` used by the Macro strategy companion.
 
@@ -195,10 +201,11 @@ Required changes, still within the existing five-path ceiling:
 2. Update the compiler’s closed expected source identity, membership count and exact group-count law to the same current epoch.
 3. Add discriminating RED tests proving:
    - the old `d004f5bf...` 50-row locator is rejected;
-   - the intermediate 52-row strategy is rejected against the current Project plan;
+   - the intermediate 52-row strategy is rejected against the current active/review-candidate Project set;
    - omitting or misclassifying any one of the six new rows fails closed;
    - the exact 58-row set compiles deterministically;
-   - a new eligible Project-plan workstream outside memberships/exceptions produces `strategy_unmapped_active_workstream`.
+   - a new active/review-candidate Project-plan workstream outside memberships/exceptions produces `strategy_unmapped_active_workstream`;
+   - an approved historical membership for an excluded Project remains lawful while a membership absent from the complete Project-plan universe refuses.
 4. Preserve:
    - malformed-row refusal with collection plus absolute row index;
    - immutable-ID-over-name law;
@@ -225,7 +232,8 @@ A non-author reviewer must verify on the immutable final #6658 head:
 - the companion and desired-membership digests are deterministic and independently reproducible;
 - `7 / 58 / 2` and group counts `10,16,11,5,4,7,5` are exact;
 - ten active missing Project identities are recognized when the committed/live witness contains them;
-- every eligible Project-plan workstream is mapped or exactly excepted;
+- every active/review-candidate Project-plan workstream is mapped or exactly excepted;
+- every membership key exists in the complete Project-plan universe, including lawful retained excluded Projects;
 - immutable IDs outrank names and ambiguous/malformed evidence fails closed;
 - no network, Linear write, second Project compiler, second CI job or control plane exists;
 - all exact-head required checks and the actual owner pack are green;
@@ -244,7 +252,7 @@ Only after that review may Sol make #6658 Ready and merge with expected-head pro
 **Effect:** read-only Linear plus evidence artifact only.  
 **Dependency:** #6658 merged.
 
-1. Re-pin protected Mastermind, current Macro main, the exact compiler merge and the complete current Agent OS eligibility census.
+1. Re-pin protected Mastermind, current Macro main, the exact compiler merge and the complete current Agent OS Project-plan buckets.
 2. Read every Linear Initiative including stable IDs and fields.
 3. Read every visible/archived Project needed by the deterministic Project compiler, including stable ID, exact name, summary, status, `updatedAt` and Initiative parents.
 4. Normalize to `linear_initiative_snapshot.v1` without filtering malformed rows.
@@ -257,7 +265,8 @@ Only after that review may Sol make #6658 Ready and merge with expected-head pro
    confusingly similar Initiative names: 0
    multi-parent Project memberships: 0
    exception membership violations: 0
-   unclassified eligible workstreams: 0
+   unclassified active/review-candidate workstreams: 0
+   strategy membership keys absent from the Project-plan universe: 0
    unmapped visible Projects beyond the two exceptions: 0
    ambiguous Project bindings: 0
    malformed witness rows: 0
@@ -268,11 +277,11 @@ Only after that review may Sol make #6658 Ready and merge with expected-head pro
 
 8. If the current estate still matches the plan-authoring witness, additionally require exact drift `7 / 48 / 10 / 0` and the ten exact create keys listed above.
 
-Any unexpected Initiative, manual relation, concurrent edit, malformed row, new eligible workstream or effect uncertainty stops before mutation.
+Any unexpected Initiative, manual relation, concurrent edit, malformed row, new active/review-candidate workstream or effect uncertainty stops before mutation.
 
 ---
 
-## Task 5 — Normalize existing Projects and create only currently required eligible Projects
+## Task 5 — Normalize existing Projects and create only currently required active/review-candidate Projects
 
 **Effect:** live Linear Project mutation.  
 **Carrier:** one new stable apply operation after Task 4 passes.  
@@ -288,7 +297,7 @@ Any unexpected Initiative, manual relation, concurrent edit, malformed row, new 
    ```
 
 3. Preserve priority, lead, labels, milestones, arbitrary human description text and Issue state unless a separately accepted managed-block contract explicitly owns them.
-4. Create only eligible, still-absent Projects returned as `project_create_required`. Under the unchanged witness those are the ten exact workstreams listed above.
+4. Create only active/review-candidate, still-absent Projects returned as `project_create_required`. Under the unchanged witness those are the ten exact workstreams listed above.
 5. Bind every creation by exact canonical `WS:<KEY>` identity; never approximate-search by title.
 6. Re-read every successful write. After each bounded tranche, re-list and verify exact state.
 7. On timeout or ambiguous response, classify `EFFECT_UNKNOWN`, stop the batch, re-read the exact target and never blind retry or switch carriers.
@@ -403,7 +412,7 @@ Return to Sol before further effect on any of:
 - protected source movement that changes Initiative/Workroom authority;
 - current-head or base movement on an active carrier;
 - another writer touching an owned path;
-- new portfolio-eligible Agent OS workstream after the frozen census;
+- new active or review-candidate Agent OS workstream after the frozen census;
 - unexpected Initiative or confusingly similar name;
 - malformed or filtered snapshot evidence;
 - duplicate or multi-parent Project identity;
