@@ -565,3 +565,211 @@ def test_clean_chrome_eof_remains_normal_and_removes_exact_socket(
         if destination.exists():
             os.unlink(destination)
         native._SERVER_SOCKET_IDENTITIES.clear()
+
+
+class _ActionWriteScenario:
+    def __init__(
+        self,
+        *,
+        clock: Clock,
+        mode: str,
+    ):
+        self.clock = clock
+        self.mode = mode
+        self.calls = 0
+        self.material = bytearray()
+
+    def write(self, payload: bytes):
+        self.calls += 1
+        material = bytes(payload)
+        if self.mode == "complete_then_raise":
+            self.material.extend(material)
+            raise OSError("write failed after forwarding bytes")
+        if self.mode == "partial_then_late":
+            accepted = min(2, len(material))
+            self.material.extend(material[:accepted])
+            self.clock.advance(client.SOCKET_TIMEOUT_SECONDS + 0.1)
+            return accepted
+        if self.mode == "zero":
+            return 0
+        if self.mode == "none":
+            return None
+        if self.mode == "bool":
+            return True
+        if self.mode == "negative":
+            return -1
+        if self.mode == "impossible":
+            return len(material) + 1
+        raise AssertionError(f"unknown scenario: {self.mode}")
+
+    def flush(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+def _exchange_with_action_writer(
+    monkeypatch,
+    tmp_path,
+    *,
+    request: dict,
+    writer: _ActionWriteScenario,
+    clock: Clock,
+    advance_after_handshake: float = 0.0,
+):
+    reader = io.BytesIO()
+    receipt_reads = 0
+
+    class FakeConnection:
+        def settimeout(self, _value):
+            return None
+
+        def connect(self, _path):
+            return None
+
+        def makefile(self, mode, buffering=0):
+            assert buffering == 0
+            return reader if mode == "rb" else writer
+
+        def close(self):
+            return None
+
+    def handshake(*_args, **_kwargs):
+        if advance_after_handshake:
+            clock.advance(advance_after_handshake)
+        return {}
+
+    def read_receipt(*_args, **_kwargs):
+        nonlocal receipt_reads
+        receipt_reads += 1
+        raise AssertionError("receipt read must not occur after action write failure")
+
+    monkeypatch.setattr(client, "_private_socket", lambda _path: None)
+    monkeypatch.setattr(
+        client.socket,
+        "socket",
+        lambda *_args, **_kwargs: FakeConnection(),
+    )
+    monkeypatch.setattr(client, "_complete_transport_handshake", handshake)
+    monkeypatch.setattr(native, "read_frame", read_receipt)
+
+    with pytest.raises(client.WebSolExtensionError) as caught:
+        client._exchange_web_sol_socket(
+            request,
+            path=tmp_path / "fixture.sock",
+            expected_instance_id=INSTANCE_ID,
+            monotonic=clock,
+        )
+    return caught.value, receipt_reads
+
+
+@pytest.mark.parametrize(
+    ("action", "expected_code"),
+    [
+        ("FOREGROUND", "foreground_effect_unknown"),
+        ("INSPECT", "inspect_effect_unknown"),
+    ],
+)
+def test_action_write_that_records_complete_frame_then_raises_is_effect_unknown(
+    monkeypatch,
+    tmp_path,
+    action,
+    expected_code,
+):
+    request = valid_request(action=action)
+    clock = Clock()
+    writer = _ActionWriteScenario(clock=clock, mode="complete_then_raise")
+
+    error, receipt_reads = _exchange_with_action_writer(
+        monkeypatch,
+        tmp_path,
+        request=request,
+        writer=writer,
+        clock=clock,
+    )
+
+    assert error.code == expected_code
+    assert isinstance(error.__cause__, native.NativeHostError)
+    assert error.__cause__.code == "frame_write_failed"
+    assert bytes(writer.material) == native.encode_frame(request)
+    assert writer.calls == 1
+    assert receipt_reads == 0
+
+
+def test_partial_action_frame_then_deadline_remains_unavailable(
+    monkeypatch,
+    tmp_path,
+):
+    request = valid_request(action="FOREGROUND")
+    clock = Clock()
+    writer = _ActionWriteScenario(clock=clock, mode="partial_then_late")
+
+    error, receipt_reads = _exchange_with_action_writer(
+        monkeypatch,
+        tmp_path,
+        request=request,
+        writer=writer,
+        clock=clock,
+    )
+
+    assert error.code == "extension_unavailable"
+    assert isinstance(error.__cause__, native.NativeHostError)
+    assert error.__cause__.code == "frame_write_timeout"
+    assert bytes(writer.material) == native.encode_frame(request)[:2]
+    assert writer.calls == 1
+    assert receipt_reads == 0
+
+
+def test_deadline_before_first_action_write_remains_unavailable(
+    monkeypatch,
+    tmp_path,
+):
+    request = valid_request(action="FOREGROUND")
+    clock = Clock()
+    writer = _ActionWriteScenario(clock=clock, mode="complete_then_raise")
+
+    error, receipt_reads = _exchange_with_action_writer(
+        monkeypatch,
+        tmp_path,
+        request=request,
+        writer=writer,
+        clock=clock,
+        advance_after_handshake=client.SOCKET_TIMEOUT_SECONDS + 0.1,
+    )
+
+    assert error.code == "extension_unavailable"
+    assert isinstance(error.__cause__, native.NativeHostError)
+    assert error.__cause__.code == "frame_write_timeout"
+    assert bytes(writer.material) == b""
+    assert writer.calls == 0
+    assert receipt_reads == 0
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["zero", "none", "bool", "negative", "impossible"],
+)
+def test_invalid_or_no_progress_action_write_remains_unavailable(
+    monkeypatch,
+    tmp_path,
+    mode,
+):
+    request = valid_request(action="FOREGROUND")
+    clock = Clock()
+    writer = _ActionWriteScenario(clock=clock, mode=mode)
+
+    error, receipt_reads = _exchange_with_action_writer(
+        monkeypatch,
+        tmp_path,
+        request=request,
+        writer=writer,
+        clock=clock,
+    )
+
+    assert error.code == "extension_unavailable"
+    assert isinstance(error.__cause__, native.NativeHostError)
+    assert error.__cause__.code == "frame_write_failed"
+    assert bytes(writer.material) == b""
+    assert writer.calls == 1
+    assert receipt_reads == 0
