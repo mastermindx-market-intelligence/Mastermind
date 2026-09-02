@@ -20,14 +20,20 @@ import re
 import stat
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from control_plane.executive_agent_capabilities import (
+    ExecutionCapabilityProfile,
     NativeHelperGrant,
     app_server_security_config_digest,
     observed_mcp_tool_schema_digest,
+)
+from control_plane.executive_capability_packages import (
+    CapabilityPackageError,
+    CapabilityPackageGeneration,
+    verify_capability_package_source,
 )
 from control_plane.operator_harness_contract import (
     ACCOUNT_REALM_STATUS,
@@ -77,16 +83,21 @@ from control_plane.executive_orchestration_result import (
     parse_canonical_json,
 )
 from control_plane.worker_browser_b1 import BROWSER_RESOURCE_ENV_KEYS
+from scripts.ohf.capability_skill_projection import SkillProjectionReceipt
 from scripts.ohf.laboratory import AppServerClient, AppServerStopProof, JsonRpcError
 from scripts.ohf.redaction import redact_evidence_text
 from scripts.ohf.protocol import (
+    SkillProtocolShapeError,
     config_mcp_names,
     config_plugin_names,
+    enabled_skill_names,
+    extra_roots_set_params,
     mcp_server_names,
     parse_account_read,
     parse_config_read,
     parse_mcp_status,
     parse_skills_list,
+    parse_skills_list_strict,
     skills_list_params,
     turn_texts,
 )
@@ -121,7 +132,7 @@ class CodexAdapterError(RuntimeError):
 
 
 ClientFactory = Callable[[list[str], Mapping[str, str], Path], AppServerClient]
-TurnInputLoader = Callable[[TurnRef], str]
+TurnInputLoader = Callable[[TurnRef], "str | CodexTurnInputEnvelope"]
 ProcessIdentityObserver = Callable[[int], ProcessIdentityObservation]
 BaseShaResolver = Callable[[Path], str]
 
@@ -406,6 +417,7 @@ class _GenerationState:
     turn_subordinates: dict[str, set[str]] = field(default_factory=dict)
     audited_native_helper_turns: set[str] = field(default_factory=set)
     candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
+    skills_changed: bool = False
 
 
 @dataclass(frozen=True)
@@ -416,6 +428,52 @@ class _BoundAttemptResource:
     environment: tuple[tuple[str, str], ...]
     observed_capability: ObservedCapabilityIdentity
     network_state: str
+
+
+@dataclass(frozen=True)
+class CodexSkillTurnInput:
+    """One closed Skill identity for a single ``turn/start`` input item.
+
+    Caller-supplied values are identities to be matched against the sealed
+    :class:`CodexSkillCanaryBinding`, never paths or digests to be trusted
+    directly (CAP-S1 protocol-attestation amendment §7).
+    """
+
+    capability_id: str
+    runtime_name: str
+    skill_md_path: str
+    skill_content_digest: str
+    package_generation_digest: str
+
+
+@dataclass(frozen=True)
+class CodexTurnInputEnvelope:
+    """The one closed structured alternative to a plain-string turn input.
+
+    Exactly one :class:`CodexSkillTurnInput` per envelope (CAP-S1 uses one
+    relevant Skill per turn, in the frozen four-turn order).
+    """
+
+    text: str
+    skills: tuple[CodexSkillTurnInput, ...]
+
+
+@dataclass(frozen=True)
+class CodexSkillCanaryBinding:
+    """The sealed source/profile/projection evidence gating the causal
+    Skill-launch sequence and the structured turn-input seam.
+
+    Constructed once, outside this adapter, from an already-verified
+    ``CapabilityPackageGeneration``, a resolved V4 ``ExecutionCapabilityProfile``
+    carrying non-empty ``skill_grants``, and a ``SkillProjectionReceipt`` from
+    ``scripts.ohf.capability_skill_projection.stage_skill_projection``.
+    """
+
+    generation: CapabilityPackageGeneration
+    profile: ExecutionCapabilityProfile
+    projection: SkillProjectionReceipt
+    schema_receipt_digest: str
+    schema_supports_skill_input_path: bool
 
 
 class CodexOperatorAdapter:
@@ -441,6 +499,7 @@ class CodexOperatorAdapter:
         process_identity_observer: ProcessIdentityObserver = _default_process_identity,
         client_factory: ClientFactory = _default_client_factory,
         extra_env: Mapping[str, str] | None = None,
+        skill_canary_binding: CodexSkillCanaryBinding | None = None,
     ) -> None:
         raw_binary_path = Path(binary_path).expanduser()
         raw_codex_home = Path(codex_home).expanduser()
@@ -500,6 +559,7 @@ class CodexOperatorAdapter:
         self.process_identity_observer = process_identity_observer
         self.client_factory = client_factory
         self.extra_env = dict(extra_env or {})
+        self.skill_canary_binding = skill_canary_binding
         self._generations: dict[str, _GenerationState] = {}
         self._active_workers: dict[str, str] = {}
         self._bound_resources: dict[str, _BoundAttemptResource] = {}
@@ -613,6 +673,78 @@ class CodexOperatorAdapter:
                     AdapterFailureClass.VALIDATION_FAILURE,
                     "App Server config override is unsafe",
                 )
+        self._validate_skill_canary_binding()
+
+    def _validate_skill_canary_binding(self) -> None:
+        """Bind-time proof that a supplied ``skill_canary_binding`` is closed.
+
+        Never echoes a caller-supplied value; every refusal is a fixed,
+        bounded reason string (CAP-S1 protocol-attestation amendment §7).
+        """
+
+        binding = self.skill_canary_binding
+        if binding is None:
+            return
+        if type(binding) is not CodexSkillCanaryBinding:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill canary binding must be the exact closed binding type",
+            )
+        try:
+            profile = binding.profile
+            generation = binding.generation
+            projection = binding.projection
+            grants = tuple(profile.skill_grants)
+            if not grants:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding profile carries no skill grants",
+                )
+            grant_pairs = frozenset(
+                (grant.capability_id, grant.skill_content_digest) for grant in grants
+            )
+            projection_pairs = frozenset(projection.skill_content_digests)
+            if grant_pairs != projection_pairs:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding grants do not match the verified projection",
+                )
+            if projection.package_generation_digest != generation.package_generation_digest:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection does not match the package generation",
+                )
+            schema_digest = binding.schema_receipt_digest
+            if (
+                not isinstance(schema_digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", schema_digest) is None
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding schema receipt digest is invalid",
+                )
+            skills_root_path = Path(projection.skills_root)
+            try:
+                skills_root_stat = skills_root_path.lstat()
+            except OSError as exc:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection skills root is not observable",
+                ) from exc
+            if stat.S_ISLNK(skills_root_stat.st_mode) or not stat.S_ISDIR(
+                skills_root_stat.st_mode
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection skills root must be a real directory",
+                )
+        except CodexAdapterError:
+            raise
+        except (AttributeError, TypeError) as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill canary binding shape is invalid",
+            ) from exc
 
     def _workspace_identity(self) -> WorkspaceIdentity:
         stat = self.workspace_root.stat()
@@ -1003,6 +1135,13 @@ class CodexOperatorAdapter:
                     "harness binary changed during initialization",
                     effect_unknown=True,
                 )
+            if self.skill_canary_binding is not None:
+                skill_rows = self._run_skill_causal_sequence(
+                    client, self.skill_canary_binding
+                )
+                attestation = self._attestation_with_skill_rows(
+                    attestation, skill_rows
+                )
             if resume_session_id is None:
                 result = client.request(
                     "thread/start",
@@ -1096,6 +1235,277 @@ class CodexOperatorAdapter:
             process=process,
             initialization_notes=("dedicated_codex_home", "credentials_not_read"),
         )
+
+    def _strict_skills_list(self, client: AppServerClient) -> list[dict[str, object]]:
+        """One ``skills/list forceReload=true`` call, strictly parsed.
+
+        A malformed shape never degrades to an empty list (unlike the
+        laboratory-era ``parse_skills_list``); it refuses with the bounded,
+        non-echoing ``skills_list_shape_refused`` reason.
+        """
+
+        expected_cwd = str(self.workspace_root)
+        try:
+            raw = client.request("skills/list", skills_list_params(expected_cwd))
+        except Exception as exc:
+            raise _rpc_failure(exc, effect_unknown=True) from exc
+        try:
+            return parse_skills_list_strict(raw, expected_cwd=expected_cwd)
+        except SkillProtocolShapeError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skills_list_shape_refused",
+                effect_unknown=True,
+            ) from exc
+
+    def _set_skill_extra_roots(
+        self, client: AppServerClient, paths: list[str]
+    ) -> None:
+        try:
+            client.request("skills/extraRoots/set", extra_roots_set_params(paths))
+        except Exception as exc:
+            raise _rpc_failure(exc, effect_unknown=True) from exc
+
+    def _run_skill_causal_sequence(
+        self, client: AppServerClient, binding: CodexSkillCanaryBinding
+    ) -> tuple[ObservedCapabilityIdentity, ...]:
+        """The frozen baseline/add/observe half of the CAP-S1 causal sequence.
+
+        Only the launch-time portion (protocol-attestation amendment §5, up
+        through ``compare requested vs observed``) lives in this adapter; the
+        trailing clear/terminate/cleanup half belongs to the canary runner
+        that owns process teardown, not to a single ``start_session`` call.
+        """
+
+        # -> skills/extraRoots/set []
+        self._set_skill_extra_roots(client, [])
+        # -> skills/list forceReload=true == enabled set {}
+        baseline_rows = self._strict_skills_list(client)
+        if enabled_skill_names(baseline_rows):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "ambient_skill_surface_not_empty",
+                effect_unknown=True,
+            )
+        # -> verify exact package source snapshot
+        try:
+            verify_capability_package_source(
+                binding.projection.projection_root, binding.generation
+            )
+        except CapabilityPackageError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_source_changed",
+                effect_unknown=True,
+            ) from exc
+        # -> skills/extraRoots/set [<exact package root>/skills]
+        skills_root = binding.projection.skills_root
+        self._set_skill_extra_roots(client, [skills_root])
+        # -> skills/list forceReload=true == enabled set {four exact Operator Skills}
+        rows = self._strict_skills_list(client)
+        required_names = tuple(
+            grant.runtime_name for grant in binding.profile.skill_grants
+        )
+        # -> construct four composite ObservedCapabilityIdentity rows
+        return self._skill_rows_to_observed(rows, skills_root, required_names, binding)
+
+    @staticmethod
+    def _skill_rows_to_observed(
+        rows: list[dict[str, object]],
+        skills_root: str,
+        required_names: tuple[str, ...],
+        binding: CodexSkillCanaryBinding,
+    ) -> tuple[ObservedCapabilityIdentity, ...]:
+        path_flags = {("path" in row) for row in rows}
+        if len(path_flags) > 1:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_path_precision_inconsistent",
+                effect_unknown=True,
+            )
+        mode_a = True in path_flags
+        if mode_a:
+            for row in rows:
+                name = str(row.get("name") or "")
+                path = str(row.get("path") or "")
+                expected_md = f"{skills_root}/{name}/SKILL.md"
+                expected_dir = f"{skills_root}/{name}"
+                if path not in (expected_md, expected_dir):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                        "skill_path_mismatch",
+                        effect_unknown=True,
+                    )
+        elif not binding.schema_supports_skill_input_path:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_path_attestation_unavailable",
+                effect_unknown=True,
+            )
+        enabled = enabled_skill_names(rows)
+        if len(enabled) != len(set(enabled)):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "duplicate_skill_row",
+                effect_unknown=True,
+            )
+        if set(enabled) != set(required_names) or len(enabled) != len(required_names):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_set_causality_failed",
+                effect_unknown=True,
+            )
+        digest_by_name = {
+            grant.runtime_name: grant.skill_content_digest
+            for grant in binding.profile.skill_grants
+        }
+        return tuple(
+            ObservedCapabilityIdentity(
+                kind="skill",
+                name=name,
+                skill_content_digest=digest_by_name[name],
+            )
+            for name in required_names
+        )
+
+    @staticmethod
+    def _attestation_with_skill_rows(
+        attestation: ObservedHarnessAttestation,
+        skill_rows: tuple[ObservedCapabilityIdentity, ...],
+    ) -> ObservedHarnessAttestation:
+        """Replace name-only skill rows with the digest-bearing observed set."""
+
+        non_skill = tuple(
+            item for item in attestation.capabilities if item.kind != "skill"
+        )
+        return replace(
+            attestation,
+            capabilities=non_skill + skill_rows,
+            effective_skills=tuple(sorted(item.name for item in skill_rows)),
+        )
+
+    def _revalidate_skill_state_before_turn(
+        self, state: "_GenerationState", binding: CodexSkillCanaryBinding
+    ) -> None:
+        if state.skills_changed:
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                "skills_changed_during_canary",
+                effect_unknown=True,
+            )
+        self._reconfirm_skill_state(state.client, binding, mismatch_reason="skill_set_causality_failed")
+
+    def _verify_skill_state_after_turn(
+        self, state: "_GenerationState", binding: CodexSkillCanaryBinding
+    ) -> None:
+        if state.skills_changed:
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                "skills_changed_during_canary",
+                effect_unknown=True,
+            )
+        self._reconfirm_skill_state(
+            state.client, binding, mismatch_reason="post_turn_skill_state_mismatch"
+        )
+
+    def _reconfirm_skill_state(
+        self,
+        client: AppServerClient,
+        binding: CodexSkillCanaryBinding,
+        *,
+        mismatch_reason: str,
+    ) -> None:
+        required_names = tuple(
+            grant.runtime_name for grant in binding.profile.skill_grants
+        )
+        rows = self._strict_skills_list(client)
+        enabled = enabled_skill_names(rows)
+        if (
+            len(enabled) != len(set(enabled))
+            or set(enabled) != set(required_names)
+            or len(enabled) != len(required_names)
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                mismatch_reason,
+                effect_unknown=True,
+            )
+        try:
+            verify_capability_package_source(
+                binding.projection.projection_root, binding.generation
+            )
+        except CapabilityPackageError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                mismatch_reason,
+                effect_unknown=True,
+            ) from exc
+
+    def _build_skill_envelope_wire(
+        self, state: "_GenerationState", envelope: CodexTurnInputEnvelope
+    ) -> list[dict[str, object]]:
+        binding = self.skill_canary_binding
+        if binding is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_without_binding",
+            )
+        if type(envelope) is not CodexTurnInputEnvelope:
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_shape_invalid",
+            )
+        text = envelope.text
+        if not isinstance(text, str) or not text.strip():
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_shape_invalid",
+            )
+        items = envelope.skills
+        if not isinstance(items, tuple) or any(
+            type(item) is not CodexSkillTurnInput for item in items
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_shape_invalid",
+            )
+        if len(items) != 1:
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_cardinality",
+            )
+        item = items[0]
+        grants_by_capability_id = {
+            grant.capability_id: grant for grant in binding.profile.skill_grants
+        }
+        grant = grants_by_capability_id.get(item.capability_id)
+        if (
+            grant is None
+            or grant.runtime_name != item.runtime_name
+            or grant.skill_content_digest != item.skill_content_digest
+            or item.package_generation_digest
+            != binding.generation.package_generation_digest
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_envelope_identity_mismatch",
+            )
+        final_path = f"{binding.projection.skills_root}/{item.runtime_name}/SKILL.md"
+        if item.skill_md_path != final_path:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_input_path_mismatch",
+            )
+        if state.resource is not None:
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_resource_conflict",
+            )
+        self._revalidate_skill_state_before_turn(state, binding)
+        return [
+            {"type": "text", "text": text},
+            {"type": "skill", "name": item.runtime_name, "path": final_path},
+        ]
 
     def start_session(
         self,
@@ -1295,6 +1705,11 @@ class CodexOperatorAdapter:
 
         for item in notifications:
             method = str(item.get("method") or "unknown")
+            if self.skill_canary_binding is not None and method == "skills/changed":
+                # CAP-S1 protocol-attestation amendment §8: any post-observation
+                # skills/changed notification invalidates the launch attestation
+                # for the rest of this generation's life -- no automatic rerun.
+                state.skills_changed = True
             params = (
                 item.get("params") if isinstance(item.get("params"), Mapping) else {}
             )
@@ -1586,36 +2001,45 @@ class CodexOperatorAdapter:
                 "no Executive-owned turn input loader was supplied",
             )
         prompt = self.turn_input_loader(turn)
-        if not isinstance(prompt, str) or not prompt:
+        if isinstance(prompt, str):
+            if not prompt:
+                raise CodexAdapterError(
+                    AdapterFailureClass.VALIDATION_FAILURE,
+                    "turn input loader returned no prompt",
+                )
+            resource_prompt = getattr(state.resource, "turn_prompt_suffix", None)
+            if callable(resource_prompt):
+                try:
+                    suffix = resource_prompt()
+                except Exception as exc:
+                    raise CodexAdapterError(
+                        AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                        "attempt resource could not supply its closed turn contract",
+                    ) from exc
+                if (
+                    not isinstance(suffix, str)
+                    or not suffix
+                    or len(suffix.encode("utf-8")) > 8192
+                ):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                        "attempt resource turn contract is invalid",
+                    )
+                prompt += suffix
+            wire_input: list[dict[str, object]] = [{"type": "text", "text": prompt}]
+        elif type(prompt) is CodexTurnInputEnvelope:
+            wire_input = self._build_skill_envelope_wire(state, prompt)
+        else:
             raise CodexAdapterError(
                 AdapterFailureClass.VALIDATION_FAILURE,
-                "turn input loader returned no prompt",
+                "turn input loader returned an unsupported input type",
             )
-        resource_prompt = getattr(state.resource, "turn_prompt_suffix", None)
-        if callable(resource_prompt):
-            try:
-                suffix = resource_prompt()
-            except Exception as exc:
-                raise CodexAdapterError(
-                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                    "attempt resource could not supply its closed turn contract",
-                ) from exc
-            if (
-                not isinstance(suffix, str)
-                or not suffix
-                or len(suffix.encode("utf-8")) > 8192
-            ):
-                raise CodexAdapterError(
-                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                    "attempt resource turn contract is invalid",
-                )
-            prompt += suffix
         try:
             result = state.client.request(
                 "turn/start",
                 {
                     "threadId": state.provider_session_id,
-                    "input": [{"type": "text", "text": prompt}],
+                    "input": wire_input,
                     "cwd": str(self.workspace_root),
                     "approvalPolicy": state.requested.approval_policy,
                 },
@@ -2044,6 +2468,8 @@ class CodexOperatorAdapter:
         texts = turn_texts(matching)
         summary = redact_evidence_text(texts[-1][:4000]) if texts else None
         artifact_digest = _canonical_digest(matching)
+        if self.skill_canary_binding is not None:
+            self._verify_skill_state_after_turn(state, self.skill_canary_binding)
         state.candidate_artifact_digests[turn.turn_id] = artifact_digest
         return CandidateResult(
             attempt_id=turn.attempt_id,
@@ -2342,4 +2768,10 @@ class CodexOperatorAdapter:
         return self._observation(state, failure=AdapterFailureClass.PROCESS_CRASH)
 
 
-__all__ = ["CodexAdapterError", "CodexOperatorAdapter"]
+__all__ = [
+    "CodexAdapterError",
+    "CodexOperatorAdapter",
+    "CodexSkillCanaryBinding",
+    "CodexSkillTurnInput",
+    "CodexTurnInputEnvelope",
+]
