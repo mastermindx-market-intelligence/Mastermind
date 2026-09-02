@@ -48,6 +48,12 @@ from control_plane.executive_orchestration_principal import (
     validate_placement_snapshot,
     validate_provider_home_identity,
 )
+from control_plane.executive_retry_safety import (
+    RetrySafety,
+    RetrySafetyDecision,
+    RetrySafetyEvidence,
+    classify_retry_safety,
+)
 from control_plane.operator_harness_contract import (
     AttemptExecutionMode,
     CandidateResult,
@@ -980,6 +986,32 @@ class JobRequeueOutcome:
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
+
+
+@dataclasses.dataclass(frozen=True)
+class RetrySafetyProjection:
+    """One caller expectation derived from a single Runtime snapshot."""
+
+    attempt_id: str
+    requeue_kind: str | None
+    tx9_evidence_digest: str | None
+    retry_evidence_digest: str
+    evidence: RetrySafetyEvidence
+
+
+@dataclasses.dataclass(frozen=True)
+class CooRetryMutationOutcome:
+    """Atomic COO retry decision, including no-effect reconciliation."""
+
+    action: str
+    command_id: str
+    receipt: dict[str, Any]
+
+
+@dataclasses.dataclass(frozen=True)
+class _RetrySafetyMaterial:
+    projection: RetrySafetyProjection
+    tx9_material: tuple[sqlite3.Row, dict[str, Any], str, dict[str, Any], str] | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -3632,6 +3664,377 @@ def _tx9_requeue_material(
     return attempt, evidence, evidence_digest, snapshot, orchestration_digest(snapshot)
 
 
+def _retry_safety_material(
+    connection: sqlite3.Connection,
+    *,
+    job_id: str,
+    expected_attempt_id: str,
+) -> _RetrySafetyMaterial:
+    """Project every retry-classifier input from one caller-owned snapshot."""
+
+    job_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+    ).fetchone()
+    attempt_row = connection.execute(
+        "SELECT * FROM attempts WHERE attempt_id=?", (expected_attempt_id,)
+    ).fetchone()
+    current_attempt_id = job_row["current_attempt_id"] if job_row is not None else None
+    terminal_status = str(job_row["status"]) if job_row is not None else "UNKNOWN"
+    attempt_job_id = str(attempt_row["job_id"]) if attempt_row is not None else ""
+    retry_lineage_available = bool(
+        job_row is not None
+        and attempt_row is not None
+        and current_attempt_id == expected_attempt_id
+        and attempt_job_id == job_id
+        and type(job_row["attempt_count"]) is int
+        and type(job_row["attempt_limit"]) is int
+        and job_row["attempt_count"] < job_row["attempt_limit"]
+    )
+    event_types = {
+        str(row["event_type"])
+        for row in connection.execute(
+            "SELECT event_type FROM events WHERE attempt_id=?", (expected_attempt_id,)
+        )
+    }
+    candidate_present = "OHF_CANDIDATE_RESULT_RECORDED" in event_types
+    seal_present = "ORCHESTRATION_ROLE_RESULT_SEALED" in event_types
+    operation_effect_unknown_present = (
+        "OPERATOR_OPERATION_EFFECT_UNKNOWN" in event_types
+    )
+    result_present = bool(
+        (job_row is not None and job_row["result_json"] is not None)
+        or (attempt_row is not None and attempt_row["result_json"] is not None)
+    )
+    writer_or_provider_generation_live = (
+        connection.execute(
+            """
+            SELECT 1
+            FROM harness_session_epochs h
+            LEFT JOIN process_generations g ON g.session_epoch_id=h.session_epoch_id
+            WHERE h.attempt_id=? AND (
+              h.state='CURRENT'
+              OR coalesce(g.executive_writer_held,0)=1
+              OR (
+                h.state!='ABANDONED'
+                AND coalesce(g.provider_writer_state,'UNKNOWN')!='RELEASED'
+              )
+            )
+            LIMIT 1
+            """,
+            (expected_attempt_id,),
+        ).fetchone()
+        is not None
+    )
+    effective_grant_non_modifying = False
+    if attempt_row is not None and attempt_row["effective_grant_json"] is not None:
+        try:
+            grant = _strict_canonical_json_loads(
+                str(attempt_row["effective_grant_json"]),
+                name="retry-safety effective grant",
+            )
+        except StateConflict:
+            grant = None
+        if isinstance(grant, dict):
+            authorities = grant.get("authorities")
+            effective_grant_non_modifying = bool(
+                isinstance(authorities, list)
+                and authorities
+                and all(item in {"READ", "RUN_TESTS"} for item in authorities)
+                and grant.get("write_paths") == []
+            )
+    tx9_material = None
+    if job_row is not None and terminal_status == JobStatus.LOST.value:
+        try:
+            tx9_material = _tx9_requeue_material(connection, job_row)
+        except StateConflict:
+            pass
+    tx9_evidence_digest = tx9_material[2] if tx9_material is not None else None
+    if tx9_evidence_digest is not None:
+        retry_safety = RetrySafety.SAFE_PRE_EFFECT_INFRASTRUCTURE
+        requeue_kind = "TX9_DETACHED"
+    elif terminal_status == JobStatus.FAILED.value:
+        retry_safety = RetrySafety.GENERIC_FAILED
+        requeue_kind = "ORDINARY"
+    elif terminal_status == JobStatus.LOST.value:
+        retry_safety = RetrySafety.EFFECT_UNKNOWN
+        requeue_kind = None
+    else:
+        retry_safety = RetrySafety.UNKNOWN
+        requeue_kind = None
+    provenance_digest = tx9_evidence_digest
+    if provenance_digest is None and job_row is not None:
+        raw = job_row["orchestration_provenance_digest"]
+        provenance_digest = str(raw) if raw is not None else None
+    evidence = RetrySafetyEvidence(
+        retry_safety=retry_safety,
+        terminal_status=terminal_status,
+        job_id=job_id,
+        attempt_id=expected_attempt_id,
+        attempt_job_id=attempt_job_id,
+        current_attempt_id=(
+            str(current_attempt_id) if current_attempt_id is not None else None
+        ),
+        provenance_digest=provenance_digest,
+        retry_lineage_available=retry_lineage_available,
+        effect_unknown=(
+            operation_effect_unknown_present
+            or (
+                tx9_evidence_digest is None
+                and terminal_status
+                in {JobStatus.RATE_LIMITED.value, JobStatus.LOST.value}
+            )
+        ),
+        writer_or_provider_generation_live=writer_or_provider_generation_live,
+        candidate_present=candidate_present,
+        result_present=result_present,
+        seal_present=seal_present,
+        effective_grant_non_modifying=effective_grant_non_modifying,
+    )
+    return _RetrySafetyMaterial(
+        projection=RetrySafetyProjection(
+            attempt_id=expected_attempt_id,
+            requeue_kind=requeue_kind,
+            tx9_evidence_digest=tx9_evidence_digest,
+            retry_evidence_digest=evidence.evidence_digest,
+            evidence=evidence,
+        ),
+        tx9_material=tx9_material,
+    )
+
+
+def _validated_retry_safety_receipt(
+    value: Any, *, require_safe: bool
+) -> tuple[dict[str, Any], RetrySafetyEvidence, RetrySafetyDecision]:
+    """Parse one closed retry receipt and recompute all authority-bearing fields."""
+
+    if not isinstance(value, dict) or set(value) != {
+        "schema_version",
+        "decision",
+        "evidence",
+        "evidence_digest",
+    }:
+        raise StateConflict("retry-safety receipt is not the closed wire")
+    if value.get("schema_version") != "mastermind.executive_retry_safety_receipt/v1":
+        raise StateConflict("retry-safety receipt schema is invalid")
+    raw = value.get("evidence")
+    expected_evidence_keys = {field.name for field in dataclasses.fields(RetrySafetyEvidence)}
+    if not isinstance(raw, dict) or set(raw) != expected_evidence_keys:
+        raise StateConflict("retry-safety evidence is not the closed wire")
+    bool_fields = {
+        "retry_lineage_available",
+        "effect_unknown",
+        "writer_or_provider_generation_live",
+        "candidate_present",
+        "result_present",
+        "seal_present",
+        "effective_grant_non_modifying",
+    }
+    string_fields = {"terminal_status", "job_id", "attempt_id", "attempt_job_id"}
+    if any(type(raw.get(name)) is not bool for name in bool_fields) or any(
+        not isinstance(raw.get(name), str) or not raw.get(name)
+        for name in string_fields
+    ):
+        raise StateConflict("retry-safety evidence field type is invalid")
+    if raw.get("current_attempt_id") is not None and (
+        not isinstance(raw.get("current_attempt_id"), str)
+        or not raw.get("current_attempt_id")
+    ):
+        raise StateConflict("retry-safety current Attempt identity is invalid")
+    if raw.get("provenance_digest") is not None and (
+        not isinstance(raw.get("provenance_digest"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", str(raw.get("provenance_digest"))) is None
+    ):
+        raise StateConflict("retry-safety provenance digest is invalid")
+    try:
+        evidence = RetrySafetyEvidence(
+            retry_safety=RetrySafety(str(raw["retry_safety"])),
+            terminal_status=str(raw["terminal_status"]),
+            job_id=str(raw["job_id"]),
+            attempt_id=str(raw["attempt_id"]),
+            attempt_job_id=str(raw["attempt_job_id"]),
+            current_attempt_id=(
+                str(raw["current_attempt_id"])
+                if raw["current_attempt_id"] is not None
+                else None
+            ),
+            provenance_digest=(
+                str(raw["provenance_digest"])
+                if raw["provenance_digest"] is not None
+                else None
+            ),
+            retry_lineage_available=raw["retry_lineage_available"],
+            effect_unknown=raw["effect_unknown"],
+            writer_or_provider_generation_live=raw[
+                "writer_or_provider_generation_live"
+            ],
+            candidate_present=raw["candidate_present"],
+            result_present=raw["result_present"],
+            seal_present=raw["seal_present"],
+            effective_grant_non_modifying=raw["effective_grant_non_modifying"],
+        )
+        decision = RetrySafetyDecision(str(value["decision"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise StateConflict("retry-safety receipt enum is invalid") from exc
+    if evidence.to_dict() != raw:
+        raise StateConflict("retry-safety evidence canonical form drifted")
+    if (
+        not isinstance(value.get("evidence_digest"), str)
+        or value["evidence_digest"] != evidence.evidence_digest
+        or decision is not classify_retry_safety(evidence)
+        or (require_safe and decision is not RetrySafetyDecision.SAFE_REQUEUE)
+    ):
+        raise StateConflict("retry-safety receipt classification/digest drifted")
+    return dict(value), evidence, decision
+
+
+def _validated_retry_safety_block_evidence(
+    connection: sqlite3.Connection,
+    evidence_value: dict[str, Any],
+    *,
+    selected_job_id: str,
+    attempt_id: str | None,
+) -> None:
+    """Bind an optional retry-backed block receipt to the live Runtime snapshot."""
+
+    if "retry_safety" not in evidence_value:
+        return
+    if set(evidence_value) != {"retry_safety"}:
+        raise StateConflict("COO retry block evidence is not the closed wire")
+    if not isinstance(attempt_id, str) or not attempt_id:
+        raise StateConflict("COO retry block requires one exact current Attempt")
+    _, retry_evidence, retry_decision = _validated_retry_safety_receipt(
+        evidence_value["retry_safety"], require_safe=False
+    )
+    if (
+        retry_decision is RetrySafetyDecision.SAFE_REQUEUE
+        or retry_evidence.job_id != selected_job_id
+        or retry_evidence.attempt_id != attempt_id
+        or retry_evidence.attempt_job_id != selected_job_id
+        or retry_evidence.current_attempt_id != attempt_id
+    ):
+        raise StateConflict("COO retry block receipt binding drifted")
+    observed = _retry_safety_material(
+        connection,
+        job_id=selected_job_id,
+        expected_attempt_id=attempt_id,
+    ).projection
+    if (
+        retry_evidence.to_dict() != observed.evidence.to_dict()
+        or retry_evidence.evidence_digest != observed.retry_evidence_digest
+    ):
+        raise StateConflict("COO retry block receipt no longer matches Runtime evidence")
+
+
+def _validated_coo_cycle_block_event(
+    connection: sqlite3.Connection,
+    event_row: sqlite3.Row,
+    *,
+    expected_root_id: str,
+) -> dict[str, Any]:
+    """Validate one complete durable COO block Event before replay."""
+
+    if (
+        event_row["event_type"] != "COO_CYCLE_BLOCKED"
+        or event_row["aggregate_type"] != "job"
+        or event_row["aggregate_id"] != expected_root_id
+        or event_row["job_id"] != expected_root_id
+        or event_row["actor"] != "coo"
+        or not isinstance(event_row["command_id"], str)
+        or _COMMAND_ID_RE.fullmatch(event_row["command_id"]) is None
+        or type(event_row["event_id"]) is not int
+        or event_row["event_id"] <= 0
+    ):
+        raise StateConflict("COO_CYCLE_BLOCKED Event identity is malformed")
+    payload = _strict_canonical_json_loads(
+        str(event_row["payload_json"]), name="COO_CYCLE_BLOCKED payload"
+    )
+    expected_keys = {
+        "schema_version",
+        "root_job_id",
+        "selected_job_id",
+        "reason",
+        "policy_sha",
+        "plan_digest",
+        "handoff_digest",
+        "evidence",
+        "evidence_digest",
+        "command_id",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_keys:
+        raise StateConflict("COO_CYCLE_BLOCKED payload is not the closed wire")
+    selected_id = payload.get("selected_job_id")
+    reason = payload.get("reason")
+    evidence_value = payload.get("evidence")
+    if (
+        payload.get("schema_version") != "mastermind.coo_cycle_block/v1"
+        or payload.get("root_job_id") != expected_root_id
+        or not isinstance(selected_id, str)
+        or not selected_id
+        or reason not in COO_CYCLE_BLOCK_REASONS
+        or payload.get("policy_sha") != EXPECTED_POLICY_SHA256
+        or not isinstance(evidence_value, dict)
+        or not isinstance(payload.get("evidence_digest"), str)
+        or payload["evidence_digest"] != orchestration_digest(evidence_value)
+        or payload.get("command_id") != event_row["command_id"]
+        or event_row["command_id"]
+        != f"coo-cycle:{expected_root_id}:block:{reason}:{selected_id}"
+    ):
+        raise StateConflict("COO_CYCLE_BLOCKED payload identity/digest drifted")
+    root = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (expected_root_id,)
+    ).fetchone()
+    selected = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (selected_id,)
+    ).fetchone()
+    if (
+        root is None
+        or selected is None
+        or root["root_job_id"] != expected_root_id
+        or selected["root_job_id"] != expected_root_id
+        or (reason != "invalid_root" and root["orchestration_role"] != "aggregation")
+        or event_row["attempt_id"] != selected["current_attempt_id"]
+    ):
+        raise StateConflict("COO_CYCLE_BLOCKED Job/Attempt binding drifted")
+    plan_event = connection.execute(
+        "SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
+        (expected_root_id,),
+    ).fetchone()
+    handoff_event = connection.execute(
+        """
+        SELECT payload_json FROM events
+        WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?
+        """,
+        (expected_root_id,),
+    ).fetchone()
+    plan_digest = (
+        _strict_canonical_json_loads(
+            str(plan_event["payload_json"]), name="COO_PLAN_ADMITTED payload"
+        ).get("plan_digest")
+        if plan_event is not None
+        else None
+    )
+    handoff_digest = (
+        _strict_canonical_json_loads(
+            str(handoff_event["payload_json"]),
+            name="COO_AGGREGATION_HANDOFF_READY payload",
+        ).get("handoff_digest")
+        if handoff_event is not None
+        else None
+    )
+    if (
+        payload.get("plan_digest") != plan_digest
+        or payload.get("handoff_digest") != handoff_digest
+    ):
+        raise StateConflict("COO_CYCLE_BLOCKED plan/handoff digest drifted")
+    _validated_retry_safety_block_evidence(
+        connection,
+        evidence_value,
+        selected_job_id=selected_id,
+        attempt_id=event_row["attempt_id"],
+    )
+    return dict(payload)
+
+
 def _validate_tx9_requeue_event(
     connection: sqlite3.Connection,
     event_row: sqlite3.Row,
@@ -3663,8 +4066,26 @@ def _validate_tx9_requeue_event(
         "invalidated_quota_snapshot",
         "invalidated_quota_snapshot_digest",
     }
+    if isinstance(payload, dict) and "retry_safety" in payload:
+        expected_keys.add("retry_safety")
     if not isinstance(payload, dict) or set(payload) != expected_keys:
         raise StateConflict("TX-9 JOB_REQUEUED payload is not the closed wire")
+    if "retry_safety" in payload:
+        _, retry_evidence, _ = _validated_retry_safety_receipt(
+            payload["retry_safety"], require_safe=True
+        )
+        if (
+            retry_evidence.retry_safety
+            is not RetrySafety.SAFE_PRE_EFFECT_INFRASTRUCTURE
+            or retry_evidence.terminal_status != JobStatus.LOST.value
+            or retry_evidence.job_id != expected_job_id
+            or retry_evidence.attempt_id != event_row["attempt_id"]
+            or retry_evidence.attempt_job_id != expected_job_id
+            or retry_evidence.current_attempt_id != event_row["attempt_id"]
+            or retry_evidence.provenance_digest
+            != payload.get("tx9_evidence_digest")
+        ):
+            raise StateConflict("TX-9 retry-safety receipt binding drifted")
     snapshot = payload.get("invalidated_quota_snapshot")
     snapshot_keys = {
         "schema_version",
@@ -7695,6 +8116,344 @@ class JobRegistry:
             )
             return _validated_aggregation_handoff(connection, root)
 
+    def project_retry_safety(
+        self, job_id: str, *, expected_attempt_id: str
+    ) -> RetrySafetyProjection:
+        """Return a read-only retry expectation from one exact snapshot."""
+
+        with self.store.read() as connection:
+            return _retry_safety_material(
+                connection,
+                job_id=str(job_id or "").strip(),
+                expected_attempt_id=str(expected_attempt_id or "").strip(),
+            ).projection
+
+    @staticmethod
+    def _retry_safety_receipt(
+        projection: RetrySafetyProjection,
+        decision: RetrySafetyDecision,
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": "mastermind.executive_retry_safety_receipt/v1",
+            "decision": decision.value,
+            "evidence": projection.evidence.to_dict(),
+            "evidence_digest": projection.retry_evidence_digest,
+        }
+
+    @staticmethod
+    def _retry_reconciliation(
+        *,
+        command_id: str,
+        reason: str,
+        expectation: RetrySafetyProjection,
+        observed: RetrySafetyProjection | None,
+    ) -> CooRetryMutationOutcome:
+        return CooRetryMutationOutcome(
+            action="RECONCILIATION_REQUIRED",
+            command_id=command_id,
+            receipt={
+                "schema_version": "mastermind.executive_retry_reconciliation/v1",
+                "decision": RetrySafetyDecision.NEEDS_RECONCILIATION.value,
+                "effect_state": "NONE",
+                "reason": reason,
+                "expected": {
+                    "attempt_id": expectation.attempt_id,
+                    "requeue_kind": expectation.requeue_kind,
+                    "tx9_evidence_digest": expectation.tx9_evidence_digest,
+                    "retry_evidence_digest": expectation.retry_evidence_digest,
+                },
+                "observed": (
+                    None
+                    if observed is None
+                    else {
+                        "attempt_id": observed.attempt_id,
+                        "requeue_kind": observed.requeue_kind,
+                        "tx9_evidence_digest": observed.tx9_evidence_digest,
+                        "retry_evidence_digest": observed.retry_evidence_digest,
+                    }
+                ),
+            },
+        )
+
+    def commit_coo_retry_decision(
+        self,
+        root_job_id: str,
+        *,
+        selected_job_id: str,
+        expectation: RetrySafetyProjection,
+        policy_sha: str | None = None,
+    ) -> CooRetryMutationOutcome:
+        """Atomically rederive, classify, and commit one COO retry decision."""
+
+        root_token = str(root_job_id or "").strip()
+        selected_token = str(selected_job_id or "").strip()
+        attempt_token = str(expectation.attempt_id or "").strip()
+        requeue_command = (
+            f"coo-cycle:{root_token}:requeue:{selected_token}:{attempt_token}"
+        )
+        block_command = f"coo-cycle:{root_token}:block:state_conflict:{selected_token}"
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            # Exact command receipts are reconciled before any mutable Job read.
+            existing_requeue = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (requeue_command,)
+            ).fetchone()
+            if existing_requeue is not None:
+                outcome = _requeue_outcome_from_event(
+                    connection, existing_requeue, expected_job_id=selected_token
+                )
+                stored = outcome.payload.get("retry_safety")
+                if (
+                    not isinstance(stored, dict)
+                    or stored.get("evidence_digest")
+                    != expectation.retry_evidence_digest
+                    or outcome.payload.get("invalidated_attempt_id") != attempt_token
+                    or outcome.payload.get("requeue_kind") != expectation.requeue_kind
+                    or outcome.payload.get("tx9_evidence_digest")
+                    != expectation.tx9_evidence_digest
+                ):
+                    return self._retry_reconciliation(
+                        command_id=requeue_command,
+                        reason="command_expectation_conflict",
+                        expectation=expectation,
+                        observed=None,
+                    )
+                receipt = outcome.to_dict()
+                receipt["retry_safety"] = stored
+                return CooRetryMutationOutcome(
+                    action="REQUEUED",
+                    command_id=requeue_command,
+                    receipt=receipt,
+                )
+
+            existing_block = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (block_command,)
+            ).fetchone()
+            if existing_block is not None:
+                payload = _validated_coo_cycle_block_event(
+                    connection,
+                    existing_block,
+                    expected_root_id=root_token,
+                )
+                if payload["selected_job_id"] != selected_token:
+                    raise StateConflict("COO block command is owned by another target")
+                stored_retry = payload["evidence"].get("retry_safety")
+                if (
+                    not isinstance(stored_retry, dict)
+                    or stored_retry.get("evidence_digest")
+                    != expectation.retry_evidence_digest
+                ):
+                    return self._retry_reconciliation(
+                        command_id=block_command,
+                        reason="command_expectation_conflict",
+                        expectation=expectation,
+                        observed=None,
+                    )
+                return CooRetryMutationOutcome(
+                    action="BLOCKED", command_id=block_command, receipt=payload
+                )
+
+            material = _retry_safety_material(
+                connection,
+                job_id=selected_token,
+                expected_attempt_id=attempt_token,
+            )
+            observed = material.projection
+            if (
+                expectation.retry_evidence_digest
+                != expectation.evidence.evidence_digest
+                or expectation.attempt_id != observed.attempt_id
+                or expectation.requeue_kind != observed.requeue_kind
+                or expectation.tx9_evidence_digest != observed.tx9_evidence_digest
+                or expectation.retry_evidence_digest
+                != observed.retry_evidence_digest
+            ):
+                return self._retry_reconciliation(
+                    command_id=requeue_command,
+                    reason="retry_expectation_drift",
+                    expectation=expectation,
+                    observed=observed,
+                )
+            decision = classify_retry_safety(observed.evidence)
+            retry_receipt = self._retry_safety_receipt(observed, decision)
+
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            selected = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (selected_token,)
+            ).fetchone()
+            if (
+                root is None
+                or selected is None
+                or root["root_job_id"] != root_token
+                or root["orchestration_role"] != "aggregation"
+                or selected["root_job_id"] != root_token
+                or selected["current_attempt_id"] != attempt_token
+            ):
+                return self._retry_reconciliation(
+                    command_id=requeue_command,
+                    reason="retry_target_drift",
+                    expectation=expectation,
+                    observed=observed,
+                )
+
+            prior_block = connection.execute(
+                """
+                SELECT 1 FROM events
+                WHERE event_type='COO_CYCLE_BLOCKED' AND job_id=? LIMIT 1
+                """,
+                (root_token,),
+            ).fetchone()
+            if prior_block is not None:
+                return self._retry_reconciliation(
+                    command_id=requeue_command,
+                    reason="prior_block_drift",
+                    expectation=expectation,
+                    observed=observed,
+                )
+
+            if decision is RetrySafetyDecision.SAFE_REQUEUE:
+                if (
+                    observed.requeue_kind != "TX9_DETACHED"
+                    or material.tx9_material is None
+                ):
+                    return self._retry_reconciliation(
+                        command_id=requeue_command,
+                        reason="safe_kind_unavailable",
+                        expectation=expectation,
+                        observed=observed,
+                    )
+                _assert_orchestration_requeue_eligible(connection, selected)
+                invalidated, _, evidence_digest, snapshot, snapshot_digest = (
+                    material.tx9_material
+                )
+                connection.execute(
+                    """
+                    UPDATE jobs SET status='QUEUED',assigned_worker_id=NULL,
+                      assigned_quota_class=NULL,current_attempt_id=NULL,
+                      updated_at_ms=?,version=version+1 WHERE job_id=?
+                    """,
+                    (timestamp, selected_token),
+                )
+                event_payload = {
+                    "previous_status": JobStatus.LOST.value,
+                    "requeue_kind": "TX9_DETACHED",
+                    "invalidated_attempt_id": str(invalidated["attempt_id"]),
+                    "invalidated_worker_id": str(invalidated["worker_id"]),
+                    "invalidated_quota_class": str(invalidated["quota_class"]),
+                    "tx9_evidence_digest": evidence_digest,
+                    "invalidated_quota_snapshot": snapshot,
+                    "invalidated_quota_snapshot_digest": snapshot_digest,
+                    "retry_safety": retry_receipt,
+                }
+                self.store.append_event(
+                    connection,
+                    aggregate_type="job",
+                    aggregate_id=selected_token,
+                    event_type="JOB_REQUEUED",
+                    command_id=requeue_command,
+                    actor="operator",
+                    job_id=selected_token,
+                    attempt_id=attempt_token,
+                    worker_id=str(invalidated["worker_id"]),
+                    quota_class=str(invalidated["quota_class"]),
+                    payload=event_payload,
+                    timestamp_ms=timestamp,
+                )
+                written = connection.execute(
+                    "SELECT * FROM events WHERE command_id=?", (requeue_command,)
+                ).fetchone()
+                assert written is not None
+                durable = _requeue_outcome_from_event(
+                    connection, written, expected_job_id=selected_token
+                )
+                receipt = durable.to_dict()
+                receipt["retry_safety"] = retry_receipt
+                return CooRetryMutationOutcome(
+                    action="REQUEUED",
+                    command_id=requeue_command,
+                    receipt=receipt,
+                )
+
+            plan_event = connection.execute(
+                "SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
+                (root_token,),
+            ).fetchone()
+            handoff_event = connection.execute(
+                "SELECT payload_json FROM events WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?",
+                (root_token,),
+            ).fetchone()
+            policy_digest = policy_sha or CooCyclePolicy.load().policy_sha256
+            if policy_digest != EXPECTED_POLICY_SHA256:
+                raise StateConflict("COO block policy digest is not the reviewed policy")
+            evidence_value = {"retry_safety": retry_receipt}
+            _validated_retry_safety_block_evidence(
+                connection,
+                evidence_value,
+                selected_job_id=selected_token,
+                attempt_id=attempt_token,
+            )
+            payload = {
+                "schema_version": "mastermind.coo_cycle_block/v1",
+                "root_job_id": root_token,
+                "selected_job_id": selected_token,
+                "reason": "state_conflict",
+                "policy_sha": policy_digest,
+                "plan_digest": (
+                    _json_loads(plan_event["payload_json"], fallback={}).get("plan_digest")
+                    if plan_event
+                    else None
+                ),
+                "handoff_digest": (
+                    _json_loads(handoff_event["payload_json"], fallback={}).get("handoff_digest")
+                    if handoff_event
+                    else None
+                ),
+                "evidence": evidence_value,
+                "evidence_digest": orchestration_digest(evidence_value),
+                "command_id": block_command,
+            }
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=root_token,
+                event_type="COO_CYCLE_BLOCKED",
+                command_id=block_command,
+                actor="coo",
+                job_id=root_token,
+                attempt_id=attempt_token,
+                payload=payload,
+                timestamp_ms=timestamp,
+            )
+            return CooRetryMutationOutcome(
+                action="BLOCKED", command_id=block_command, receipt=payload
+            )
+
+    def validated_cycle_block(
+        self, root_job_id: str
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Return one fully validated durable COO block for exact replay."""
+
+        root_token = str(root_job_id or "").strip()
+        with self.store.read() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM events
+                WHERE event_type='COO_CYCLE_BLOCKED' AND job_id=?
+                ORDER BY event_id
+                """,
+                (root_token,),
+            ).fetchall()
+            if not rows:
+                return None
+            if len(rows) != 1:
+                raise StateConflict("COO root has multiple durable block Events")
+            payload = _validated_coo_cycle_block_event(
+                connection, rows[0], expected_root_id=root_token
+            )
+            return str(rows[0]["command_id"]), payload
+
     def block_cycle(
         self,
         root_job_id: str,
@@ -7735,6 +8494,12 @@ class JobRegistry:
                 )
             ):
                 raise StateConflict("COO block target is outside the strict root tree")
+            _validated_retry_safety_block_evidence(
+                connection,
+                evidence_value,
+                selected_job_id=selected_token,
+                attempt_id=selected["current_attempt_id"],
+            )
             plan_event = connection.execute(
                 """SELECT payload_json FROM events
                    WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?""",
@@ -7774,24 +8539,21 @@ class JobRegistry:
                 "SELECT * FROM events WHERE command_id=?", (command_id,)
             ).fetchone()
             if existing is not None:
-                if (
-                    existing["event_type"] == "COO_CYCLE_BLOCKED"
-                    and existing["job_id"] == root_token
-                    and _strict_canonical_json_loads(
-                        str(existing["payload_json"]), name="COO block replay"
-                    )
-                    == payload
-                ):
+                if _validated_coo_cycle_block_event(
+                    connection, existing, expected_root_id=root_token
+                ) == payload:
                     return payload
                 raise StateConflict("COO block command is owned by another semantic target")
             prior = connection.execute(
-                """SELECT payload_json FROM events
+                """SELECT * FROM events
                    WHERE event_type='COO_CYCLE_BLOCKED' AND job_id=? ORDER BY event_id""",
                 (root_token,),
             ).fetchall()
             if prior:
-                prior_payload = _strict_canonical_json_loads(
-                    str(prior[0]["payload_json"]), name="prior COO block"
+                if len(prior) != 1:
+                    raise StateConflict("COO root has multiple durable block Events")
+                prior_payload = _validated_coo_cycle_block_event(
+                    connection, prior[0], expected_root_id=root_token
                 )
                 if prior_payload == payload:
                     return payload
@@ -8482,6 +9244,11 @@ class JobRegistry:
             if job_row is None:
                 raise StateConflict(f"job {job_id!r} does not exist")
             _job_from_row(job_row)
+            orchestration_role = job_row["orchestration_role"]
+            if orchestration_role is not None:
+                raise StateConflict(
+                    "fresh orchestration requeue requires atomic COO retry decision"
+                )
             status = JobStatus(job_row["status"])
             if status not in {
                 JobStatus.RATE_LIMITED,
@@ -8491,20 +9258,8 @@ class JobRegistry:
                 raise StateConflict(f"job {job_id} cannot requeue from {status.value}")
             if int(job_row["attempt_count"]) >= int(job_row["attempt_limit"]):
                 raise StateConflict(f"job {job_id} exhausted its attempt limit")
-            orchestration_role = job_row["orchestration_role"]
             attempt_id = job_row["current_attempt_id"]
-            if orchestration_role is not None:
-                if not isinstance(attempt_id, str) or not attempt_id:
-                    raise StateConflict("orchestration requeue requires its exact terminal Attempt")
-                expected_command = (
-                    f"coo-cycle:{job_row['root_job_id']}:requeue:{job_id}:{attempt_id}"
-                )
-                if command_id != expected_command:
-                    raise StateConflict(
-                        "orchestration requeue requires exact deterministic command_id"
-                    )
-                _assert_orchestration_requeue_eligible(connection, job_row)
-            elif command_id is not None:
+            if command_id is not None:
                 raise StateConflict("legacy role-null requeue does not accept a COO command")
             tx9_material: (
                 tuple[sqlite3.Row, dict[str, Any], str, dict[str, Any], str] | None
@@ -8524,32 +9279,25 @@ class JobRegistry:
                 ).fetchone()
                 if quota_row is None:
                     raise PersistenceError(f"job {job_id} lost its quota-class record")
-                if (
-                    orchestration_role is not None
-                    and status == JobStatus.LOST
-                    and quota_row["held_attempt_id"] is None
+                if status in {JobStatus.RATE_LIMITED, JobStatus.LOST} and (
+                    quota_row["held_attempt_id"] != attempt_id
                 ):
-                    tx9_material = _tx9_requeue_material(connection, job_row)
-                else:
-                    if status in {JobStatus.RATE_LIMITED, JobStatus.LOST} and (
-                        quota_row["held_attempt_id"] != attempt_id
-                    ):
-                        raise PersistenceError(
-                            f"job {job_id} terminal attempt is not held by its quota class"
-                        )
-                    connection.execute(
-                        """
-                        UPDATE worker_quota_classes
-                        SET held_attempt_id=NULL,updated_at_ms=?,version=version+1
-                        WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
-                        """,
-                        (
-                            timestamp,
-                            attempt_row["worker_id"],
-                            attempt_row["quota_class"],
-                            attempt_id,
-                        ),
+                    raise PersistenceError(
+                        f"job {job_id} terminal attempt is not held by its quota class"
                     )
+                connection.execute(
+                    """
+                    UPDATE worker_quota_classes
+                    SET held_attempt_id=NULL,updated_at_ms=?,version=version+1
+                    WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
+                    """,
+                    (
+                        timestamp,
+                        attempt_row["worker_id"],
+                        attempt_row["quota_class"],
+                        attempt_id,
+                    ),
+                )
             if tx9_material is not None:
                 connection.execute(
                     """
@@ -14568,6 +15316,7 @@ __all__ = [
     "AttemptLease",
     "AttemptRegistry",
     "AttemptStatus",
+    "CooRetryMutationOutcome",
     "Event",
     "EventRegistry",
     "ExecutiveSchemaUpgradeRequired",
@@ -14578,6 +15327,7 @@ __all__ = [
     "OperatorHarnessRegistry",
     "PersistenceError",
     "ResourceBroker",
+    "RetrySafetyProjection",
     "Runtime",
     "RuntimeProofError",
     "RuntimeStore",
