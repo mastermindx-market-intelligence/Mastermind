@@ -838,7 +838,14 @@ def main(argv: "list[str] | None" = None) -> int:
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     args = parser.parse_args(argv)
 
-    client_factory = _default_fake_client_factory if args.backend == "fake" else None
+    if args.backend == "fake":
+        client_factory = _default_fake_client_factory
+    else:
+        # Live realm: the adapter's own default factory spawns the exact real
+        # App Server process; run_canary refuses a None factory either way.
+        from control_plane.codex_operator_adapter import _default_client_factory
+
+        client_factory = _default_client_factory
 
     try:
         evidence = run_canary(
