@@ -1611,6 +1611,11 @@ class _CancelRaceControl:
         self.mode = "vanished"
         self.signals: list[tuple[int, int]] = []
         self.armed_probes = 0
+        # Learn the PGID from the first real SIGTERM, for entry points that spawn
+        # the process internally.  Those leaders are session leaders, so
+        # pid == pgid.
+        self.autobind = False
+        self.inspector = None
         # Unpatched killpg, so test cleanup never pollutes the signal evidence.
         self.real_killpg = os.killpg
 
@@ -1640,7 +1645,7 @@ def _install_cancel_race_control(monkeypatch: pytest.MonkeyPatch) -> _CancelRace
                 control.armed_probes += 1
                 if control.mode == "group_unavailable":
                     raise PermissionError(f"cannot inspect process group {pgid}")
-                if control.mode == "recycled":
+                if control.mode in {"recycled", "recycled_public"}:
                     # Proven absent at the escalation observation, then the host
                     # hands the same PGID to a foreign group.  Every later probe
                     # therefore reports "exists" -- and anything that signals on
@@ -1652,9 +1657,34 @@ def _install_cancel_race_control(monkeypatch: pytest.MonkeyPatch) -> _CancelRace
                     raise ProcessLookupError(f"no process group {pgid}")
             return real_killpg(pgid, sig)
         control.signals.append((int(pgid), int(sig)))
+        if control.mode == "recycled_public":
+            # Signals are recorded as issued but never delivered to this PGID.
+            # Two reasons, both load-bearing:
+            #   SIGTERM -- the fixture's launcher IS the group leader and dies on
+            #   SIGTERM, so delivering it would end the run before the grace
+            #   boundary and the escalation branch under test would never be
+            #   entered.  Withholding holds the leader exactly at that boundary;
+            #   the group is really killed moments later (see _RaceInspector), so
+            #   the absence the product observes is real.
+            #   Anything after arming -- the PGID now models a group the host
+            #   recycled to a stranger.  Delivering would either hit nothing (the
+            #   real group is already dead) or, worse, a real bystander.  The
+            #   recorded signal is the evidence; delivery would only obscure it.
+            if int(sig) == int(signal.SIGTERM):
+                if control.autobind and control.pgid is None:
+                    control.pid = int(pgid)
+                    control.pgid = int(pgid)
+                control.armed = True
+                return 0
+            if control.armed and int(pgid) == control.pgid:
+                return 0
         result = real_killpg(pgid, sig)
-        if int(sig) == int(signal.SIGTERM) and int(pgid) == control.pgid:
-            control.armed = True
+        if int(sig) == int(signal.SIGTERM):
+            if control.autobind and control.pgid is None:
+                control.pid = int(pgid)
+                control.pgid = int(pgid)
+            if int(pgid) == control.pgid:
+                control.armed = True
         return result
 
     monkeypatch.setattr(os, "killpg", killpg)
@@ -1679,6 +1709,13 @@ class _RaceInspector(cw.ProcessInspector):
 
     def identity(self, pid):
         if self.control.armed and pid == self.control.pid:
+            if self.control.mode == "recycled_public":
+                # Really terminate the group now, with the UNPATCHED killpg so
+                # it is never counted as product behaviour.  The group genuinely
+                # vanishes at the escalation observation, which is the state
+                # under test, and the pending wait can then complete.
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    self.control.real_killpg(self.control.pgid, signal.SIGKILL)
             if self.control.release is not None:
                 self.control.release.set()
             if self.control.mode == "identity_changed":
@@ -2059,3 +2096,49 @@ def test_validation_never_signals_or_faults_on_a_recycled_pgid(
         f"validation signalled a recycled PGID: {control.signals}"
     )
     _assert_process_gone(child_pid, "validation descendant survived its process group")
+
+
+def test_validation_caller_never_signals_a_pgid_proven_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Drive the PUBLIC entry point, not the private helper.
+
+    `_terminate_validation_process` proving the group absent is worthless if
+    `run_validation_argv` then re-probes that PGID and signals whatever now
+    answers to it.  Asserting one frame below the caller certifies the helper
+    while production still signals a stranger, so this test starts where the
+    real callers start.
+    """
+
+    control = _install_cancel_race_control(monkeypatch)
+    control.autobind = True
+    control.mode = "recycled_public"
+
+    async def exercise():
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="success", grace=0.1
+        )
+        inspector = _RaceInspector(adapter.inspector, control)
+        adapter.inspector = inspector
+        control.inspector = inspector
+        with contextlib.suppress(cw.ProcessIdentityError, cw.LaunchValidationError):
+            await adapter.run_validation_argv(
+                spec,
+                ("/bin/sleep", "30"),
+                timeout_seconds=0.3,
+            )
+
+    asyncio.run(exercise())
+
+    assert control.armed is True, "the validation group never received SIGTERM"
+    assert control.group_signals(signal.SIGTERM), "SIGTERM was not issued"
+    # Guard the seam: prove the run actually entered the vanished branch and
+    # that the caller went on to re-probe, or this test would pass vacuously.
+    assert control.inspector.absent_reports >= 1, (
+        "escalation never observed the leader absent -- the branch under test "
+        "was not reached"
+    )
+    assert control.group_signals(signal.SIGKILL) == [], (
+        "run_validation_argv signalled a PGID that termination proved absent: "
+        f"{control.signals}"
+    )

@@ -2515,7 +2515,13 @@ class CodexWorkerAdapter:
         start_identity: str,
         boot_id: str,
         grace_seconds: float,
-    ) -> None:
+    ) -> bool:
+        """Return True when the verified original group was *proven* absent.
+
+        The caller must not probe or signal that PGID afterwards: the host may
+        already have recycled it to a foreign group.
+        """
+
         group_vanished = False
         if not wait_task.done():
             if self.inspector.boot_session_id() != boot_id:
@@ -2566,9 +2572,10 @@ class CodexWorkerAdapter:
             # there is no exit to wait for and no SIGKILL that could have been
             # survived.  Re-probing here would reopen the same reused-PGID
             # window the branch above exists to close.
-            return
+            return True
         if not await _wait_for_process_group_exit(pgid):
             raise ProcessIdentityError("validation process group survived SIGKILL")
+        return False
 
     async def run_validation_argv(
         self,
@@ -2700,6 +2707,7 @@ class CodexWorkerAdapter:
         )
         exceeded_task = asyncio.create_task(output_exceeded.wait())
         timed_out = False
+        group_proven_absent = False
         error: str | None = None
         try:
             done, _ = await asyncio.wait(
@@ -2710,7 +2718,7 @@ class CodexWorkerAdapter:
             if not done:
                 timed_out = True
                 error = f"validation timed out after {timeout:g}s"
-                await self._terminate_validation_process(
+                group_proven_absent = await self._terminate_validation_process(
                     process,
                     wait_task,
                     pid=process.pid,
@@ -2721,7 +2729,7 @@ class CodexWorkerAdapter:
                 )
             elif exceeded_task in done and output_exceeded.is_set() and not wait_task.done():
                 error = "validation output exceeded its byte cap"
-                await self._terminate_validation_process(
+                group_proven_absent = await self._terminate_validation_process(
                     process,
                     wait_task,
                     pid=process.pid,
@@ -2731,7 +2739,11 @@ class CodexWorkerAdapter:
                     grace_seconds=min(float(spec.cancel_grace_seconds), 5.0),
                 )
             await wait_task
-            if _process_group_exists(pgid):
+            # A group already proven absent during termination is never probed
+            # or signalled again: the PGID may since have been recycled to a
+            # foreign group, and proven absence already means no descendant of
+            # the original group survives.
+            if not group_proven_absent and _process_group_exists(pgid):
                 os.killpg(pgid, signal.SIGKILL)
                 if not await _wait_for_process_group_exit(pgid):
                     raise ProcessIdentityError(
@@ -3049,7 +3061,9 @@ class CodexWorkerAdapter:
                         # ProcessLookupError and raises when the observation itself
                         # is unavailable, so an unreadable group still fails closed.
                         group_vanished = not _process_group_exists(state.ref.pgid)
-                        state.group_proven_absent = group_vanished
+                        state.group_proven_absent = (
+                            state.group_proven_absent or group_vanished
+                        )
                     else:
                         if (
                             identity != state.ref.process_start_identity
