@@ -242,6 +242,15 @@ For `EXACT_SESSION_REQUIRED`, a different numbered account/session is a real tar
 block or reconcile under the owning continuity/RuntimeBinding law. Capacity preference does not
 silently rewrite an exact-session target.
 
+**Slack user/seat identity is not exact native-session identity.** A mention or delivery addressed to
+an account/seat can be transport evidence without proving which provider-native reasoning session
+consumed it. When an `EXACT_SESSION_REQUIRED` packet lands in any session other than the frozen native
+session, **delivery to a different session is not PICKUP_ACK**. That landing must return
+`RECEIVER_SESSION_MISMATCH` (or the current typed equivalent), identify the actual landing session when
+safe, perform zero child effect, and **do not spawn or substitute another session**. Preserve the bound
+session and any dirty/effectful local state for canonical continuity reconciliation; a shared Slack
+identity, seat label, account nickname, or newly spawned same-model session cannot satisfy exactness.
+
 Do not label ordinary new work `EXACT_SESSION_REQUIRED` merely because Sol happened to mention or tag a
 numbered account in an earlier packet. Exactness comes from the operation's real target requirement,
 not from accidental transport wording.
