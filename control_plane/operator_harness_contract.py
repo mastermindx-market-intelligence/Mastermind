@@ -28,9 +28,13 @@ from typing import Mapping, Protocol, Sequence, get_type_hints, runtime_checkabl
 
 OPERATOR_HARNESS_INTERFACE_VERSION = "mastermind.operator_harness/v1"
 ATTENTION_TURN_INSTRUCTION = (
-    "Mastermind Wake: recover canonical Executive and Agent OS state for the supplied "
-    "opaque wake identities, then continue only within existing authority. This nudge "
-    "grants no authority, acknowledges nothing, and does not resolve the source."
+    "Mastermind Wake: recover Executive/Agent OS state for opaque identities and "
+    "continue within existing authority. This nudge "
+    "grants no authority, acknowledges nothing, and does not resolve the source. "
+    "After you have actually consumed the supplied Wake obligation(s) and recovered "
+    "canonical Executive/Agent OS state, emit one final marker line per consumed "
+    "obligation:\nMASTERMIND_WAKE_ACK <WAKE-ID>\nDo not put seat, session, binding, "
+    "provider, host, nudge, source-resolution or authority data in the marker."
 )
 CARDINALITY = "CARDINALITY_B"
 WRITER_REALM_KEY = ("worker_id", "provider_session_id")
@@ -1081,6 +1085,19 @@ class ReconcileObservation:
     observed_provider_session_id: str | None = None
     observed_config_digest: str | None = None
     recommended_failure_class: AdapterFailureClass | None = None
+    late_attention_observation: AttentionTurnObservation | None = field(
+        default=None,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if self.late_attention_observation is not None and not isinstance(
+            self.late_attention_observation,
+            AttentionTurnObservation,
+        ):
+            raise ValueError(
+                "late attention reconciliation must be a typed observation"
+            )
 
 
 @dataclass(frozen=True)
@@ -1146,6 +1163,57 @@ class TurnStartObservation:
 
 
 @dataclass(frozen=True)
+class WorkerLocalWakeAckProjection:
+    """Closed ACK evidence reduced by the exact current worker/client owner."""
+
+    target_attempt_id: str
+    process_generation_id: str
+    binding_id: str
+    binding_generation: int
+    provider_session_id: str
+    provider_native_turn_id: str
+    nudge_id: str
+    obligation_ids: tuple[str, ...]
+    terminal_ack_trailer: bool
+
+    def __post_init__(self) -> None:
+        for name in (
+            "target_attempt_id",
+            "process_generation_id",
+            "provider_session_id",
+            "provider_native_turn_id",
+            "nudge_id",
+        ):
+            value = str(getattr(self, name) or "").strip()
+            if value != getattr(self, name) or COMMAND_ID_RE.fullmatch(value) is None:
+                raise ValueError(f"WorkerLocalWakeAckProjection.{name} is malformed")
+        binding_id = str(self.binding_id or "")
+        if not binding_id.startswith("bind-") or COMMAND_ID_RE.fullmatch(binding_id) is None:
+            raise ValueError("WorkerLocalWakeAckProjection.binding_id is malformed")
+        if type(self.binding_generation) is not int or self.binding_generation < 1:
+            raise ValueError(
+                "WorkerLocalWakeAckProjection.binding_generation must be an integer >= 1"
+            )
+        obligation_ids = tuple(self.obligation_ids)
+        if (
+            not obligation_ids
+            or obligation_ids != tuple(sorted(set(obligation_ids)))
+            or any(
+                re.fullmatch(r"WAKE-[0-9a-f]{32}", item) is None
+                for item in obligation_ids
+            )
+        ):
+            raise ValueError(
+                "WorkerLocalWakeAckProjection.obligation_ids must be canonical, unique and sorted"
+            )
+        object.__setattr__(self, "obligation_ids", obligation_ids)
+        if self.terminal_ack_trailer is not True:
+            raise ValueError(
+                "WorkerLocalWakeAckProjection requires a terminal ACK trailer"
+            )
+
+
+@dataclass(frozen=True)
 class AttentionTurnObservation:
     """Closed evidence from one attention-only turn on the current writer.
 
@@ -1160,6 +1228,10 @@ class AttentionTurnObservation:
     provider_native_turn_id: str | None
     accepted: bool
     delivered: bool
+    wake_ack_projection: WorkerLocalWakeAckProjection | None = field(
+        default=None,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         for name in ("process_generation_id", "provider_session_id", "nudge_id"):
@@ -1179,6 +1251,19 @@ class AttentionTurnObservation:
             not native_turn or native_turn != self.provider_native_turn_id
         ):
             raise ValueError("accepted attention requires a trimmed provider turn id")
+        projection = self.wake_ack_projection
+        if projection is not None:
+            if not isinstance(projection, WorkerLocalWakeAckProjection):
+                raise ValueError("attention ACK projection must be worker-local and typed")
+            if not self.delivered:
+                raise ValueError("attention ACK projection requires exact delivery")
+            if (
+                projection.process_generation_id != self.process_generation_id
+                or projection.provider_session_id != self.provider_session_id
+                or projection.provider_native_turn_id != self.provider_native_turn_id
+                or projection.nudge_id != self.nudge_id
+            ):
+                raise ValueError("attention ACK projection identity disagrees with observation")
 
 
 @dataclass(frozen=True)
@@ -2880,6 +2965,7 @@ __all__ = [
     "TransactionGroup",
     "TurnRef",
     "TurnStartObservation",
+    "WorkerLocalWakeAckProjection",
     "V1_QUALITY_TRADEOFF",
     "WORKER_SLOT_AUTH_BINDING_PRODUCTION_INVARIANT",
     "WRITER_REALM_KEY",
