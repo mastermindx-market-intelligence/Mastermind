@@ -3,15 +3,10 @@
 These tests inspect SOURCE, not behavior: the app package must never import
 the general Executive control socket module, the MCP SDK, or call the
 in-process mutation sink, no matter how its runtime behavior is composed.
-They also pin the "did this PR touch something it must not have"
-invariants named by the FROZEN SPEC: the Executive MCP schema digest is
-byte-identical to the frozen literal, and
-``control_plane/executive_service.py`` carries zero diff across the WHOLE
-PR (PR #265's file, reused read-only, never edited here). The scope fences
-below are anchored to this PR's merge-base with ``master``, never to
-``HEAD`` -- a HEAD-anchored diff is empty (or vacuously "no diff") the
-moment this PR's own commits land, which is not a claim about the PR's
-scope at all.
+They also pin the exact protected BSC-E1 release payload.  Release-scope
+assertions are evaluated against the immutable protected release commit and
+its exact parent; they never reinterpret whichever unrelated pull request is
+currently running the repository suite as the historical BSC-E1 carrier.
 """
 from __future__ import annotations
 
@@ -33,6 +28,26 @@ APP_PACKAGE_FILES = [
 ]
 ENTRYPOINT_SCRIPT = REPO_ROOT / "scripts" / "mastermind_executive_app.py"
 ALL_OWNED_MODULES = APP_PACKAGE_FILES + [ENTRYPOINT_SCRIPT]
+
+BSC_E1_RELEASE_BASE = "162af533a4bcf380125895d225b6962987c3c582"
+BSC_E1_RELEASE_COMMIT = "24fa9bc4acfbffb77f09193dd50d1ee8f90bcbf8"
+BSC_E1_ADDED_PATHS = frozenset(
+    {
+        "integrations/mastermind_executive_app/__init__.py",
+        "integrations/mastermind_executive_app/app.py",
+        "integrations/mastermind_executive_app/gateway.py",
+        "integrations/mastermind_executive_app/admission.py",
+        "scripts/mastermind_executive_app.py",
+        "config/business_mcp/executive_policy.example.json",
+        "tests/test_mastermind_executive_app_asgi.py",
+        "tests/test_mastermind_executive_app_admission.py",
+        "tests/test_mastermind_executive_app_static_fences.py",
+        "docs/runbooks/mastermind-executive-app.md",
+    }
+)
+BSC_E1_CHANGED_PATHS = BSC_E1_ADDED_PATHS | {
+    "control_plane/ceo_request.py"
+}
 
 
 def _imported_module_names(path: Path) -> set[str]:
@@ -58,7 +73,12 @@ def test_never_imports_executive_service(path: Path):
     admission path to accidentally wire up."""
 
     imported = _imported_module_names(path)
-    forbidden = {m for m in imported if m == "control_plane.executive_service" or m.startswith("control_plane.executive_service.")}
+    forbidden = {
+        module
+        for module in imported
+        if module == "control_plane.executive_service"
+        or module.startswith("control_plane.executive_service.")
+    }
     assert not forbidden, f"{path.name} imports forbidden module(s): {forbidden}"
 
 
@@ -70,7 +90,7 @@ def test_never_imports_mcp_sdk(path: Path):
     process, and never needs the SDK at all."""
 
     imported = _imported_module_names(path)
-    forbidden = {m for m in imported if m == "mcp" or m.startswith("mcp.")}
+    forbidden = {module for module in imported if module == "mcp" or module.startswith("mcp.")}
     assert not forbidden, f"{path.name} imports the MCP SDK: {forbidden}"
 
 
@@ -82,7 +102,7 @@ def test_never_imports_executive_mcp_server_module(path: Path):
     transport rather than a plain authenticated HTTP edge)."""
 
     imported = _imported_module_names(path)
-    forbidden = {m for m in imported if m == "integrations.executive_mcp.server"}
+    forbidden = {module for module in imported if module == "integrations.executive_mcp.server"}
     assert not forbidden, f"{path.name} imports {forbidden}"
 
 
@@ -94,7 +114,12 @@ def test_never_imports_ceo_intent_module_directly(path: Path):
     CeoIngress socket, never an in-process call into that sink."""
 
     imported = _imported_module_names(path)
-    forbidden = {m for m in imported if m == "control_plane.ceo_intent" or m.startswith("control_plane.ceo_intent.")}
+    forbidden = {
+        module
+        for module in imported
+        if module == "control_plane.ceo_intent"
+        or module.startswith("control_plane.ceo_intent.")
+    }
     assert not forbidden, f"{path.name} imports control_plane.ceo_intent directly: {forbidden}"
 
 
@@ -168,194 +193,93 @@ def test_admission_never_widens_the_five_tool_privileged_field_list():
     assert spec.input_schema.get("additionalProperties") is False
 
 
-# ---------------------------------------------------------------------------
-# "did this PR touch something it must not have" pins
+# --------------------------------------------------------------------------
+
+# Immutable BSC-E1 release pins
 # ---------------------------------------------------------------------------
 
 
 def test_schema_digest_unchanged():
-    """The Executive MCP tool/schema surface is byte-identical to the frozen
-    literal named in the FROZEN SPEC -- this PR never touched
-    integrations/executive_mcp/schemas.py's TOOL_SPECS."""
+    """The Executive MCP tool/schema surface remains byte-identical to the
+    frozen literal named in the BSC-E1 source law."""
 
     assert mcp_schemas.schema_snapshot_sha256() == (
         "546b4345e30c24363a02ae3d4fc873e17559ffd569cde188a533fb628b284232"
     )
 
 
-def _rev_parse_quiet(ref: str) -> bool:
-    probe = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "rev-parse", "--verify", "--quiet", ref],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return probe.returncode == 0
-
-
-def _merge_base_with_master() -> str:
-    """The PR's base commit against ``master`` -- NOT ``HEAD``.
-
-    A ``git diff HEAD`` (working-tree vs. the current commit) is empty the
-    moment this PR's own changes are committed, which makes a HEAD-anchored
-    scope fence either a false CI red (the diff it expects is gone, since it
-    is now baked into a commit) or a vacuous pass (nothing uncommitted, so
-    "no unexpected diff" is trivially true no matter what the PR shipped).
-    The fence that actually discriminates is base..HEAD across the WHOLE
-    PR. CI's ``actions/checkout@v4`` step uses ``fetch-depth: 0``, so
-    ``origin/master`` is already resolvable there; a local dev checkout may
-    need one fetch, attempted here as a last resort only.
-    """
-
-    for ref in ("origin/master", "master"):
-        if _rev_parse_quiet(ref):
-            result = subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "merge-base", ref, "HEAD"],
-                check=True, stdout=subprocess.PIPE, text=True,
-            )
-            return result.stdout.strip()
-
-    subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "fetch", "--quiet", "origin", "master"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    if _rev_parse_quiet("origin/master"):
-        result = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "merge-base", "origin/master", "HEAD"],
-            check=True, stdout=subprocess.PIPE, text=True,
-        )
-        return result.stdout.strip()
-    raise RuntimeError("cannot resolve a merge-base against master")
-
-
-def test_executive_service_file_has_zero_diff_against_base():
-    """control_plane/executive_service.py (PR #265's file) carries zero diff
-    across the WHOLE PR (base..HEAD) -- this PR reused it read-only and
-    never edited it in any commit, not merely in the working tree.
-
-    Anchored to the PR's merge-base with master, never to HEAD: once this
-    PR's own commits land, a HEAD-anchored version of this test is
-    vacuously green regardless of what the PR actually touched (the exact
-    defect an independent review caught -- see
-    ``test_ceo_request_change_is_the_only_control_plane_diff`` below for the
-    sibling fence that was outright FALSE-RED under the same mistake)."""
-
-    base = _merge_base_with_master()
+def _git_stdout(*args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "diff", "--stat", base, "HEAD", "--", "control_plane/executive_service.py"],
+        ["git", "-C", str(REPO_ROOT), *args],
         check=True,
         stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
     )
-    assert result.stdout.strip() == ""
+    return result.stdout.strip()
 
 
-BSC_E1_IMPLEMENTATION_SURFACE = {
-    "integrations/mastermind_executive_app/__init__.py",
-    "integrations/mastermind_executive_app/app.py",
-    "integrations/mastermind_executive_app/gateway.py",
-    "integrations/mastermind_executive_app/admission.py",
-    "scripts/mastermind_executive_app.py",
-    "config/business_mcp/executive_policy.example.json",
-    "tests/test_mastermind_executive_app_asgi.py",
-    "tests/test_mastermind_executive_app_admission.py",
-    "docs/runbooks/mastermind-executive-app.md",
-    "control_plane/ceo_request.py",
-}
-
-
-def _pr_diff_paths(base: str) -> set[str]:
-    everything = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "diff", "--name-only", base, "HEAD"],
-        check=True, stdout=subprocess.PIPE, text=True,
-    ).stdout.splitlines()
-    return {line.strip() for line in everything if line.strip()}
-
-
-def _skip_unless_pr_touches_bsc_e1_surface(base: str) -> None:
-    """FLEET-SCOPE REPAIR (2026-09-02): the two PR-shape fences below were
-    authored for the BSC-E1 PR itself but merged as permanent repository
-    tests, where "the WHOLE PR's diff is exactly BSC-E1's eleven paths" is
-    structurally false for every subsequent PR (and for any master checkout,
-    whose base..HEAD diff is empty). That made them a standing false CI red
-    on any unrelated change -- first hit in the wild by the OLS-A2 PR, whose
-    only control_plane additions were its own commissioned modules.
-
-    The fences keep their FULL original bite whenever a PR actually touches
-    the BSC-E1 implementation surface; on a PR that touches none of it they
-    skip, because they then assert nothing about that PR's commission."""
-
-    if not (_pr_diff_paths(base) & BSC_E1_IMPLEMENTATION_SURFACE):
-        pytest.skip(
-            "BSC-E1 PR-shape fence: this PR touches no BSC-E1 implementation "
-            "surface path, so the eleven-path shape assertions do not bind it"
+def _require_bsc_e1_release_history() -> None:
+    for commit in (BSC_E1_RELEASE_BASE, BSC_E1_RELEASE_COMMIT):
+        probe = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(REPO_ROOT),
+                "cat-file",
+                "-e",
+                f"{commit}^{{commit}}",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
+        assert probe.returncode == 0, (
+            "immutable BSC-E1 release history is unavailable: " + commit
+        )
+    assert _git_stdout("rev-parse", f"{BSC_E1_RELEASE_COMMIT}^") == BSC_E1_RELEASE_BASE
 
 
-def test_ceo_request_change_is_the_only_control_plane_diff():
-    """For a PR touching the BSC-E1 surface: every path it touches under
-    control_plane/, across the WHOLE PR (base..HEAD), is exactly the one
-    P5-authorized 11th-path file.
+def _bsc_e1_release_paths(
+    *,
+    diff_filter: str | None = None,
+    pathspec: tuple[str, ...] = (),
+) -> set[str]:
+    """Read only the immutable protected BSC-E1 release delta.
 
-    Anchored to the PR's merge-base with master. The pre-fix, HEAD-anchored
-    version of this test FAILED on any clean checkout of a committed head
-    (``git diff HEAD`` is empty once ceo_request.py's change is committed,
-    so ``changed == []`` never equals ``["control_plane/ceo_request.py"]``)
-    -- a false CI red on the very PR it was meant to protect, independent of
-    whether the PR's actual scope was clean. See
-    ``_skip_unless_pr_touches_bsc_e1_surface`` for the fleet-scope repair."""
-
-    base = _merge_base_with_master()
-    _skip_unless_pr_touches_bsc_e1_surface(base)
-    result = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "diff", "--name-only", base, "HEAD", "--", "control_plane/"],
-        check=True,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    changed = [line for line in result.stdout.splitlines() if line.strip()]
-    assert changed == ["control_plane/ceo_request.py"], changed
-
-
-def test_ten_ceiling_paths_are_exactly_the_new_files_this_pr_adds():
-    """The ten OWNED FILES this commission authorized are EXACTLY the files
-    ADDED across the whole PR (base..HEAD), and the full base..HEAD diff
-    (additions + the one modification) is EXACTLY those ten plus the one
-    P5-authorized 11th-path file -- eleven paths, no more, no fewer.
-
-    Anchored to the PR's merge-base with master. The pre-fix version used
-    ``git status --porcelain``/``git diff HEAD`` (working-tree state), which
-    is vacuously true on any clean checkout of a committed head no matter
-    what the PR shipped -- it could not have caught a twelfth file landing
-    in a commit.
+    This deliberately never consults ``HEAD``, a moving branch, or the merge
+    base of whichever later pull request happens to run the repository suite.
     """
 
-    base = _merge_base_with_master()
-    _skip_unless_pr_touches_bsc_e1_surface(base)
-    added = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "diff", "--name-only", "--diff-filter=A", base, "HEAD"],
-        check=True, stdout=subprocess.PIPE, text=True,
-    ).stdout.splitlines()
-    everything = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "diff", "--name-only", base, "HEAD"],
-        check=True, stdout=subprocess.PIPE, text=True,
-    ).stdout.splitlines()
-
-    added_paths = {line.strip() for line in added if line.strip()}
-    all_changed_paths = {line.strip() for line in everything if line.strip()}
-
-    ten_ceiling_paths = {
-        "integrations/mastermind_executive_app/__init__.py",
-        "integrations/mastermind_executive_app/app.py",
-        "integrations/mastermind_executive_app/gateway.py",
-        "integrations/mastermind_executive_app/admission.py",
-        "scripts/mastermind_executive_app.py",
-        "config/business_mcp/executive_policy.example.json",
-        "tests/test_mastermind_executive_app_asgi.py",
-        "tests/test_mastermind_executive_app_admission.py",
-        "tests/test_mastermind_executive_app_static_fences.py",
-        "docs/runbooks/mastermind-executive-app.md",
+    _require_bsc_e1_release_history()
+    args = ["diff", "--name-only"]
+    if diff_filter is not None:
+        args.append(f"--diff-filter={diff_filter}")
+    args.extend((BSC_E1_RELEASE_BASE, BSC_E1_RELEASE_COMMIT))
+    if pathspec:
+        args.extend(("--", *pathspec))
+    return {
+        line.strip()
+        for line in _git_stdout(*args).splitlines()
+        if line.strip()
     }
-    eleven_authorized_paths = ten_ceiling_paths | {"control_plane/ceo_request.py"}
 
-    assert added_paths == ten_ceiling_paths, added_paths
-    assert all_changed_paths == eleven_authorized_paths, all_changed_paths
+
+def test_bsc_e1_scope_fence_is_bound_to_the_protected_release_commit():
+    _require_bsc_e1_release_history()
+
+
+def test_bsc_e1_release_did_not_modify_executive_service():
+    assert _bsc_e1_release_paths(
+        pathspec=("control_plane/executive_service.py",)
+    ) == set()
+
+
+def test_bsc_e1_release_ceo_request_is_the_only_control_plane_delta():
+    assert _bsc_e1_release_paths(pathspec=("control_plane/",)) == {
+        "control_plane/ceo_request.py"
+    }
+
+
+def test_bsc_e1_release_added_and_changed_paths_are_exact():
+    assert _bsc_e1_release_paths(diff_filter="A") == set(BSC_E1_ADDED_PATHS)
+    assert _bsc_e1_release_paths() == set(BSC_E1_CHANGED_PATHS)
