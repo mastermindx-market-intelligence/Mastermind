@@ -243,10 +243,16 @@ def test_chat_openai_and_chatgpt_aliases_share_one_exact_conversation_identity()
 CONTENT_HARNESS = r"""
 const fs = require("node:fs");
 const vm = require("node:vm");
-const { webcrypto } = require("node:crypto");
+const { webcrypto, pbkdf2 } = require("node:crypto");
 
 const source = fs.readFileSync(process.argv[1], "utf8");
 const host = process.argv[2];
+const saturate = process.argv[3] === "saturate";
+if (saturate) {
+  for (let index = 0; index < 4; index += 1) {
+    pbkdf2("a", "b", 200000, 32, "sha256", () => {});
+  }
+}
 let sent = null;
 const context = {
   chrome: {
@@ -294,11 +300,18 @@ vm.runInContext(source, context, {filename: "content.js"});
 """
 
 
-def _content_fingerprint(host: str) -> str:
+def _content_fingerprint(host: str, *, saturate_crypto: bool = False) -> str:
     node = shutil.which("node")
     assert node is not None, "Node is required for cross-language identity proof"
     completed = subprocess.run(
-        [node, "-e", CONTENT_HARNESS, str(CONTENT), host],
+        [
+            node,
+            "-e",
+            CONTENT_HARNESS,
+            str(CONTENT),
+            host,
+            "saturate" if saturate_crypto else "normal",
+        ],
         capture_output=True,
         text=True,
         timeout=20,
@@ -312,6 +325,12 @@ def test_content_script_alias_canonicalization_matches_python_exactly():
     python_value = client.conversation_fingerprint(binding(host="chatgpt.com"))
     assert _content_fingerprint("chatgpt.com") == python_value
     assert _content_fingerprint("chat.openai.com") == python_value
+
+
+@pytest.mark.parametrize("host", ["chatgpt.com", "chat.openai.com"])
+def test_content_script_probe_waits_for_crypto_completion_under_saturation(host):
+    python_value = client.conversation_fingerprint(binding(host="chatgpt.com"))
+    assert _content_fingerprint(host, saturate_crypto=True) == python_value
 
 
 @pytest.mark.parametrize("mode", ["malformed", "wrong_nonce", "wrong_action"])
