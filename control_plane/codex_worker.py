@@ -3021,6 +3021,7 @@ class CodexWorkerAdapter:
             leader_already_exited = state.process_wait_task.done()
             sent = False
             escalated = False
+            group_vanished = False
             if not leader_already_exited:
                 if not self._identity_matches(state.ref):
                     raise ProcessIdentityError(
@@ -3047,7 +3048,6 @@ class CodexWorkerAdapter:
                         raise ProcessIdentityError(
                             "process boot identity changed before SIGKILL escalation"
                         )
-                    group_vanished = False
                     try:
                         identity, observed_pgid = self.inspector.identity(state.ref.pid)
                     except ProcessIdentityError:
@@ -3087,7 +3087,15 @@ class CodexWorkerAdapter:
             if residual_killed:
                 sent = True
                 escalated = True
-            return sent, escalated, leader_already_exited and not residual_killed
+            already_exited = leader_already_exited and not residual_killed
+            if group_vanished and not sent:
+                # No signal ever left this process and the verified original
+                # group is proven absent, so the worker had already exited on
+                # its own.  Reporting "not already exited" here would describe a
+                # termination this adapter never performed.  When SIGTERM *was*
+                # delivered the flag stays False: that exit is ours.
+                already_exited = True
+            return sent, escalated, already_exited
 
     async def _monitor(self, state: _RunState) -> None:
         violation_task = asyncio.create_task(state.violation.wait())

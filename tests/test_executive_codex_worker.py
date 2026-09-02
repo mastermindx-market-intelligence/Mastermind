@@ -1657,6 +1657,15 @@ def _install_cancel_race_control(monkeypatch: pytest.MonkeyPatch) -> _CancelRace
                     raise ProcessLookupError(f"no process group {pgid}")
             return real_killpg(pgid, sig)
         control.signals.append((int(pgid), int(sig)))
+        if control.mode == "sigterm_lookup_error" and int(sig) == int(signal.SIGTERM):
+            # The verified group empties between the identity check and the
+            # signal, so SIGTERM itself finds nothing.  Recorded as attempted,
+            # never delivered -- there is nothing left to deliver to.
+            if control.autobind and control.pgid is None:
+                control.pid = int(pgid)
+                control.pgid = int(pgid)
+            control.armed = True
+            raise ProcessLookupError(f"no process group {pgid}")
         if control.mode == "recycled_public":
             # Signals are recorded as issued but never delivered to this PGID.
             # Two reasons, both load-bearing:
@@ -1709,14 +1718,18 @@ class _RaceInspector(cw.ProcessInspector):
 
     def identity(self, pid):
         if self.control.armed and pid == self.control.pid:
-            if self.control.mode == "recycled_public":
+            if self.control.mode in {
+                "recycled_public",
+                "sigterm_lookup_error",
+                "wait_pending",
+            }:
                 # Really terminate the group now, with the UNPATCHED killpg so
                 # it is never counted as product behaviour.  The group genuinely
                 # vanishes at the escalation observation, which is the state
                 # under test, and the pending wait can then complete.
                 with contextlib.suppress(ProcessLookupError, PermissionError):
                     self.control.real_killpg(self.control.pgid, signal.SIGKILL)
-            if self.control.release is not None:
+            if self.control.release is not None and self.control.mode != "wait_pending":
                 self.control.release.set()
             if self.control.mode == "identity_changed":
                 return ("reused-pid-start-identity", self.control.pgid)
@@ -2142,3 +2155,195 @@ def test_validation_caller_never_signals_a_pgid_proven_absent(
         "run_validation_argv signalled a PGID that termination proved absent: "
         f"{control.signals}"
     )
+
+
+def test_cancel_receipt_reports_already_exited_when_no_signal_was_sent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A receipt must not describe a termination this adapter never performed.
+
+    When SIGTERM itself finds the group gone and absence is then proven, nothing
+    was signalled and the worker had already exited on its own.  Reporting
+    already_exited=False there is untrue.  It must stay False whenever SIGTERM
+    really was delivered -- that exit is ours.
+    """
+
+    control = _install_cancel_race_control(monkeypatch)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        adapter.inspector = _RaceInspector(adapter.inspector, control)
+        ref, _state, _release, child_pid = await _start_with_gated_wait(
+            adapter, spec, run_dir, control
+        )
+        control.mode = "sigterm_lookup_error"
+        cancel = await adapter.cancel(ref, "operator requested")
+        receipt = await adapter.collect_result(ref)
+        return cancel, receipt, child_pid
+
+    cancel, receipt, child_pid = asyncio.run(exercise())
+
+    assert cancel.signal_sent is False, "no signal was delivered"
+    assert cancel.escalated_to_sigkill is False
+    assert cancel.already_exited is True, (
+        "no signal was sent and the verified group was proven absent, so the "
+        "worker had already exited; the receipt must say so"
+    )
+    assert control.group_signals(signal.SIGKILL) == []
+    assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
+    _assert_process_gone(child_pid, "descendant survived its process group")
+
+
+def test_cancel_receipt_keeps_already_exited_false_when_sigterm_was_delivered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The discriminator must not over-report: a delivered SIGTERM is our exit."""
+
+    control = _install_cancel_race_control(monkeypatch)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        adapter.inspector = _RaceInspector(adapter.inspector, control)
+        ref, _state, _release, _child_pid = await _start_with_gated_wait(
+            adapter, spec, run_dir, control
+        )
+        return await adapter.cancel(ref, "operator requested")
+
+    cancel = asyncio.run(exercise())
+
+    assert cancel.signal_sent is True
+    assert cancel.already_exited is False, (
+        "SIGTERM was delivered, so this exit is the adapter's own and must not "
+        "be reported as an exit that had already happened"
+    )
+
+
+async def _cancel_within(adapter, ref, budget: float):
+    """Cancel, refusing to wait forever.  Returns None if it did not terminate."""
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(asyncio.ensure_future(adapter.cancel(ref, "operator requested"))),
+            timeout=budget,
+        )
+    except asyncio.TimeoutError:
+        return None
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Open blocker: bounded termination after proven absence. Closing it "
+        "requires an Executive lifecycle ruling -- the wait task, both stream "
+        "pumps and collect_result's exit_code all hang on the same held-open "
+        "pipes -- so it is escalated as DECISION_REQUEST / "
+        "TERMINATION_WAIT_LIFECYCLE_BOUNDARY rather than fixed unilaterally. "
+        "strict=True: when the ruling lands and this passes, the suite fails "
+        "until the marker is removed."
+    ),
+)
+def test_cancel_terminates_boundedly_when_wait_task_stays_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Proven absence must not trade a false error for an unbounded wait.
+
+    The verified group is proven absent while the stored wait task stays pending
+    -- a descendant that escaped the group can hold the inherited pipes open, and
+    on Python 3.11/3.12 that keeps `Process.wait()` pending indefinitely.  The
+    pre-repair source raised here; termination must now still *terminate*, with
+    no PGID re-probe and no SIGKILL.
+    """
+
+    control = _install_cancel_race_control(monkeypatch)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        adapter.inspector = _RaceInspector(adapter.inspector, control)
+        ref, _state, release, child_pid = await _start_with_gated_wait(
+            adapter, spec, run_dir, control
+        )
+        control.mode = "wait_pending"
+        try:
+            cancel = await _cancel_within(adapter, ref, budget=6.0)
+        finally:
+            release.set()
+        return cancel, child_pid
+
+    cancel, child_pid = asyncio.run(exercise())
+
+    assert cancel is not None, (
+        "cancel() never returned: proven absence left the termination waiting on "
+        "a task that cannot complete"
+    )
+    assert control.group_signals(signal.SIGKILL) == [], (
+        f"a proven-absent PGID was signalled: {control.signals}"
+    )
+    _assert_process_gone(child_pid, "descendant survived its process group")
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Open blocker: bounded termination after proven absence. Closing it "
+        "requires an Executive lifecycle ruling -- the wait task, both stream "
+        "pumps and collect_result's exit_code all hang on the same held-open "
+        "pipes -- so it is escalated as DECISION_REQUEST / "
+        "TERMINATION_WAIT_LIFECYCLE_BOUNDARY rather than fixed unilaterally. "
+        "strict=True: when the ruling lands and this passes, the suite fails "
+        "until the marker is removed."
+    ),
+)
+def test_validation_terminates_boundedly_when_wait_task_stays_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Validation twin of the bounded-termination requirement."""
+
+    control = _install_cancel_race_control(monkeypatch)
+
+    async def exercise():
+        adapter, _spec, _workspace_path, _run_dir = _fixture(tmp_path, prompt="success")
+        process, child_pid = await _spawn_validation_group(tmp_path, "waitpend", stubborn=False)
+        wait_task, release, pgid, start_identity, boot_id = (
+            await _drive_validation_termination(adapter, control, process)
+        )
+        control.mode = "wait_pending"
+        terminated = True
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(
+                    asyncio.ensure_future(
+                        adapter._terminate_validation_process(
+                            process,
+                            wait_task,
+                            pid=process.pid,
+                            pgid=pgid,
+                            start_identity=start_identity,
+                            boot_id=boot_id,
+                            grace_seconds=0.1,
+                        )
+                    )
+                ),
+                timeout=6.0,
+            )
+        except asyncio.TimeoutError:
+            terminated = False
+        finally:
+            await _reap_validation_group(control, pgid, release, wait_task)
+        return terminated, child_pid
+
+    terminated, child_pid = asyncio.run(exercise())
+
+    assert terminated, (
+        "_terminate_validation_process never returned: proven absence left it "
+        "waiting on a task that cannot complete"
+    )
+    assert control.group_signals(signal.SIGKILL) == [], (
+        f"a proven-absent PGID was signalled: {control.signals}"
+    )
+    _assert_process_gone(child_pid, "validation descendant survived its group")
