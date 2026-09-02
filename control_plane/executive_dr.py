@@ -26,6 +26,7 @@ from __future__ import annotations
 import base64
 import binascii
 import dataclasses
+import errno
 import hashlib
 import hmac
 import json
@@ -60,17 +61,39 @@ _NONCE_NOTE = (
     "for this cipher mode; no separate nonce field is carried."
 )
 
-_OPENSSL_BINARY = "/usr/bin/openssl"
+# Injection seam for the openssl binary (adversarial review B1): the default
+# below is used unless a caller passes `openssl_binary=` explicitly or the
+# environment variable MASTERMIND_DR_OPENSSL is set. Ops uses the env var to
+# pin a specific binary on a host; tests use the explicit parameter to run
+# the SAME export through two different openssl families in one process.
+_DEFAULT_OPENSSL_BINARY = "/usr/bin/openssl"
+_OPENSSL_BINARY_ENV = "MASTERMIND_DR_OPENSSL"
 _PBKDF2_ITERATIONS = 600_000
 _HKDF_CIPHER_INFO = b"mastermind-dr-cipher-v1"
 _HKDF_MAC_INFO = b"mastermind-dr-mac-v1"
 _HKDF_SALT_BYTES = 16
-# The classic openssl `enc -S` salt is 8 bytes (64-bit) on both LibreSSL
-# (macOS system /usr/bin/openssl) and OpenSSL: LibreSSL 3.3.6 measured
-# rejects a 16-byte hex salt with "hex string is too long" while accepting
-# an 8-byte one. This is a build-time discovery, not a design choice -- see
-# DEVIATIONS in the DR-B1 packet return.
+# The classic openssl `enc -S` salt is 8 bytes -- PKCS5_SALT_LEN, a fixed
+# constant of the traditional OpenSSL/LibreSSL EVP_BytesToKey-family salted
+# format, not a LibreSSL-specific limit (LibreSSL 3.3.6 does reject a
+# 16-byte hex salt with "hex string is too long", but the 8-byte width
+# itself is the shared, decades-old convention both implementations honor).
 _OPENSSL_SALT_BYTES = 8
+# The traditional "Salted__<8-byte-salt>" magic header (adversarial review
+# B1): LibreSSL (macOS system /usr/bin/openssl, verified 3.3.6) WRITES this
+# 16-byte header even when `-S` supplies the salt explicitly; OpenSSL 3.x
+# (verified 3.6.3 and 3.0.13) OMITS it under the byte-identical invocation --
+# the PBKDF2 key+IV derivation itself is identical between the two (cipher
+# bodies match once the header is stripped), only the header differs. Left
+# unhandled, an export encrypted on macOS is undecryptable by a Linux CI
+# drill runner and vice versa. The STORED/shipped/MAC'd ciphertext is
+# therefore always normalized to the headerless form regardless of which
+# local binary produced it; a header-writing binary needs the header
+# stripped after encrypt and re-prepended before decrypt (see
+# `_detect_salted_header_family`, `_normalize_openssl_ciphertext`,
+# `_prepare_decrypt_input`).
+_SALTED_MAGIC = b"Salted__"
+_SALTED_HEADER_LEN = 8 + _OPENSSL_SALT_BYTES
+_HEADER_FAMILY_CACHE: dict[str, bool] = {}
 _MAX_ENVELOPE_BYTES = 64 * 1024
 _MAX_RELEASE_BODY_BYTES = 256 * 1024
 
@@ -207,17 +230,30 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def _reraise_enospc_as_typed(exc: OSError) -> None:
+    if exc.errno == errno.ENOSPC:
+        raise ExecutiveDRTypedError(DRFailureState.DISK_INSUFFICIENT, "not enough free disk space for a DR write") from exc
+
+
 def _write_private_json(path: Path, value: Mapping[str, Any]) -> None:
     payload = (json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0), 0o600)
     try:
         view = memoryview(payload)
         while view:
-            written = os.write(descriptor, view)
+            try:
+                written = os.write(descriptor, view)
+            except OSError as exc:
+                _reraise_enospc_as_typed(exc)
+                raise
             if written <= 0:  # pragma: no cover - defensive OS boundary
                 raise OSError("short write while persisting a DR file")
             view = view[written:]
-        os.fsync(descriptor)
+        try:
+            os.fsync(descriptor)
+        except OSError as exc:
+            _reraise_enospc_as_typed(exc)
+            raise
     finally:
         os.close(descriptor)
     _fsync_directory(path.parent)
@@ -229,7 +265,11 @@ def _copy_private_file(source: Path, destination: Path) -> None:
     try:
         with source.open("rb") as input_handle, os.fdopen(descriptor, "wb", closefd=False) as output:
             for block in iter(lambda: input_handle.read(1024 * 1024), b""):
-                output.write(block)
+                try:
+                    output.write(block)
+                except OSError as exc:
+                    _reraise_enospc_as_typed(exc)
+                    raise
             output.flush()
             os.fsync(descriptor)
     except Exception:
@@ -296,10 +336,124 @@ def _decode_master_key(master_key_b64: str) -> bytes:
     return key
 
 
-def _run_openssl(args: list[str], *, env: Mapping[str, str], input_path: Path, output_path: Path) -> None:
-    if not os.path.exists(_OPENSSL_BINARY):
-        raise ExecutiveDRTypedError(DRFailureState.VERIFIER_UNAVAILABLE, "system openssl binary is unavailable")
-    command = [_OPENSSL_BINARY, "enc", *args, "-in", str(input_path), "-out", str(output_path)]
+def resolve_openssl_binary(openssl_binary: str | None = None) -> str:
+    """Injection seam order: explicit parameter > MASTERMIND_DR_OPENSSL > default."""
+
+    if openssl_binary:
+        return openssl_binary
+    return os.environ.get(_OPENSSL_BINARY_ENV) or _DEFAULT_OPENSSL_BINARY
+
+
+def _detect_salted_header_family(binary: str) -> bool:
+    """Feature-detect ONCE per process per binary path (adversarial review B1).
+
+    Encrypts a fixed 1-byte input with a throwaway, non-secret pass/salt at
+    minimum PBKDF2 cost and observes whether the output begins with the
+    traditional ``Salted__`` magic. Deterministic and cheap (~1ms); never a
+    try-and-retry against the real export.
+    """
+
+    cached = _HEADER_FAMILY_CACHE.get(binary)
+    if cached is not None:
+        return cached
+    if not os.path.exists(binary):
+        raise ExecutiveDRTypedError(DRFailureState.VERIFIER_UNAVAILABLE, f"system openssl binary is unavailable: {binary}")
+    command = [
+        binary, "enc", "-aes-256-ctr", "-e",
+        "-pass", "pass:mastermind-dr-header-probe",  # fixed, non-secret, never real key material
+        "-pbkdf2", "-iter", "1", "-md", "sha256",
+        "-S", "00" * _OPENSSL_SALT_BYTES,
+    ]
+    try:
+        completed = subprocess.run(command, input=b"x", capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        raise ExecutiveDRTypedError(DRFailureState.VERIFIER_UNAVAILABLE, f"system openssl header-family probe could not be invoked: {binary}") from None
+    if completed.returncode != 0:
+        detail = completed.stderr[:512].decode("utf-8", errors="replace").strip()
+        raise ExecutiveDRTypedError(
+            DRFailureState.VERIFIER_UNAVAILABLE,
+            f"system openssl header-family probe exited {completed.returncode}: {detail}" if detail else
+            f"system openssl header-family probe exited {completed.returncode}",
+        )
+    family = completed.stdout[: len(_SALTED_MAGIC)] == _SALTED_MAGIC
+    _HEADER_FAMILY_CACHE[binary] = family
+    return family
+
+
+def _normalize_openssl_ciphertext(path: Path, *, header_family: bool, expected_salt: bytes) -> None:
+    """After encrypt: strip a header-writing binary's Salted__ header in place.
+
+    The stored/shipped/MAC'd ciphertext is always the HEADERLESS form,
+    regardless of which local openssl family produced it -- see the
+    `_SALTED_MAGIC` module docstring block for why.
+    """
+
+    if not header_family:
+        return
+    with path.open("rb") as handle:
+        header = handle.read(_SALTED_HEADER_LEN)
+    if len(header) != _SALTED_HEADER_LEN or header[: len(_SALTED_MAGIC)] != _SALTED_MAGIC:
+        raise ExecutiveDRTypedError(
+            DRFailureState.LOCAL_CORRUPT,
+            "openssl was detected as header-writing but did not write the expected Salted__ header",
+        )
+    if header[len(_SALTED_MAGIC) :] != expected_salt:
+        raise ExecutiveDRTypedError(
+            DRFailureState.LOCAL_CORRUPT,
+            "openssl wrote a header salt that does not match the requested -S salt",
+        )
+    temp = path.with_name(f".{path.name}.strip.tmp")
+    descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0), 0o600)
+    try:
+        with path.open("rb") as source, os.fdopen(descriptor, "wb", closefd=False) as dest:
+            source.seek(_SALTED_HEADER_LEN)
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                dest.write(block)
+            dest.flush()
+            os.fsync(descriptor)
+    except Exception:
+        try:
+            temp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    finally:
+        os.close(descriptor)
+    os.replace(temp, path)
+
+
+def _prepare_decrypt_input(ciphertext_path: Path, *, header_family: bool, salt: bytes, work_dir: Path) -> Path:
+    """Before decrypt: if the LOCAL binary expects a header, build a temp
+    input with `Salted__<salt>` re-prepended (the stored ciphertext is
+    always headerless); a headerless-family binary decrypts the stored
+    bytes directly."""
+
+    if not header_family:
+        return ciphertext_path
+    prefixed = work_dir / f".{ciphertext_path.name}.headered.tmp"
+    descriptor = os.open(prefixed, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0), 0o600)
+    try:
+        with os.fdopen(descriptor, "wb", closefd=False) as dest, ciphertext_path.open("rb") as source:
+            dest.write(_SALTED_MAGIC + salt)
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                dest.write(block)
+            dest.flush()
+            os.fsync(descriptor)
+    except Exception:
+        try:
+            prefixed.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    finally:
+        os.close(descriptor)
+    return prefixed
+
+
+def _run_openssl(args: list[str], *, binary: str, env: Mapping[str, str], input_path: Path, output_path: Path) -> None:
+    if not os.path.exists(binary):
+        raise ExecutiveDRTypedError(DRFailureState.VERIFIER_UNAVAILABLE, f"system openssl binary is unavailable: {binary}")
+    command = [binary, "enc", *args, "-in", str(input_path), "-out", str(output_path)]
     try:
         completed = subprocess.run(
             command,
@@ -309,14 +463,17 @@ def _run_openssl(args: list[str], *, env: Mapping[str, str], input_path: Path, o
             timeout=300,
         )
     except (OSError, subprocess.TimeoutExpired):
-        # Deliberately no exception detail forwarded: argv/env/stderr are the
-        # only place key material could ever leak, so this message is a
-        # static string by construction, never subprocess output.
+        # The passphrase crosses only via the child's environment (never
+        # argv), so subprocess stderr cannot echo it back -- unlike the
+        # OSError/TimeoutExpired branch (which carries no process output at
+        # all and stays a static message), a genuine non-zero exit below DOES
+        # forward a length-capped stderr excerpt: suppressing it protects
+        # nothing here and blinds the disaster-recovery operator (M3).
         raise ExecutiveDRTypedError(DRFailureState.VERIFIER_UNAVAILABLE, "system openssl could not be invoked") from None
     if completed.returncode != 0:
-        raise ExecutiveDRTypedError(
-            DRFailureState.LOCAL_CORRUPT, "system openssl reported a non-zero exit status"
-        )
+        detail = completed.stderr[:512].decode("utf-8", errors="replace").strip()
+        message = f"system openssl exited {completed.returncode}: {detail}" if detail else f"system openssl exited {completed.returncode} with no stderr"
+        raise ExecutiveDRTypedError(DRFailureState.LOCAL_CORRUPT, message)
 
 
 # --------------------------------------------------------------------------
@@ -568,8 +725,12 @@ def encrypt_export(
     retention_class: str,
     source_release_commit: str,
     key_id: str = "v1",
+    openssl_binary: str | None = None,
 ) -> ExportReceipt:
     """Verify, then client-side encrypt-then-MAC, an existing local backup."""
+
+    binary = resolve_openssl_binary(openssl_binary)
+    header_family = _detect_salted_header_family(binary)
 
     for label, candidate in (
         ("transport_target", transport_target),
@@ -626,11 +787,16 @@ def encrypt_export(
                 "-S",
                 openssl_salt.hex(),
             ],
+            binary=binary,
             env=env,
             input_path=Path(verification.database_path),
             output_path=temp_cipher,
         )
         temp_cipher.chmod(0o600)
+        _fsync_path(temp_cipher)
+        # Normalize to the headerless STORED form regardless of which local
+        # openssl family produced the file (adversarial review B1).
+        _normalize_openssl_ciphertext(temp_cipher, header_family=header_family, expected_salt=openssl_salt)
         _fsync_path(temp_cipher)
         ciphertext_sha256, byte_size = _stream_sha256_and_mac(temp_cipher, None)
         if byte_size <= 0:
@@ -694,9 +860,12 @@ def decrypt_export(
     envelope_path: str | Path,
     master_key_b64: str,
     output_path: str | Path,
+    *,
+    openssl_binary: str | None = None,
 ) -> DecryptReceipt:
     """Verify the MAC, then decrypt.  Zero plaintext output on any failure."""
 
+    binary = resolve_openssl_binary(openssl_binary)
     ciphertext_path = Path(ciphertext_path).expanduser()
     envelope_path = Path(envelope_path).expanduser()
     output_path = Path(output_path).expanduser()
@@ -734,10 +903,18 @@ def decrypt_export(
             DRFailureState.MAC_MISMATCH, "ciphertext digest/size differs from the authenticated envelope"
         )
 
+    header_family = _detect_salted_header_family(binary)
     temp_output = output_path.with_name(f".{output_path.name}.tmp")
     descriptor = os.open(temp_output, os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0), 0o600)
     os.close(descriptor)
+    decrypt_input: Path | None = None
     try:
+        # The stored ciphertext is always headerless; a header-writing local
+        # binary needs `Salted__<salt>` re-prepended before it will decrypt
+        # (adversarial review B1) -- deterministic, feature-detected once.
+        decrypt_input = _prepare_decrypt_input(
+            resolved_ciphertext, header_family=header_family, salt=openssl_salt, work_dir=output_path.parent
+        )
         env = {"PATH": "/usr/bin:/bin", "MASTERMIND_DR_PASS": base64.b64encode(cipher_subkey).decode("ascii")}
         _run_openssl(
             [
@@ -753,8 +930,9 @@ def decrypt_export(
                 "-S",
                 openssl_salt.hex(),
             ],
+            binary=binary,
             env=env,
-            input_path=resolved_ciphertext,
+            input_path=decrypt_input,
             output_path=temp_output,
         )
         temp_output.chmod(0o600)
@@ -773,6 +951,12 @@ def decrypt_export(
             except FileNotFoundError:
                 pass
         raise
+    finally:
+        if decrypt_input is not None and decrypt_input != resolved_ciphertext:
+            try:
+                decrypt_input.unlink()
+            except FileNotFoundError:
+                pass
 
     return DecryptReceipt(
         export_id=str(envelope["export_id"]),
@@ -810,7 +994,21 @@ def read_export_backup_manifest(envelope_path: str | Path) -> dict[str, Any]:
 
     envelope = _load_envelope(Path(envelope_path))
     manifest = envelope["backup_manifest"]
-    assert isinstance(manifest, dict)  # guaranteed by _validate_envelope_fields
+    if not isinstance(manifest, dict):  # guaranteed by _validate_envelope_fields; defense in depth
+        raise ExecutiveDRTypedError(DRFailureState.ENVELOPE_INVALID, "DR export embedded backup manifest is not an object")
+    database = manifest.get("database")
+    filename = database.get("filename") if isinstance(database, dict) else None
+    if (
+        not isinstance(filename, str)
+        or not filename
+        or filename in (".", "..")
+        or "/" in filename
+        or "\\" in filename
+        or os.path.basename(filename) != filename
+    ):
+        raise ExecutiveDRTypedError(
+            DRFailureState.ENVELOPE_INVALID, "DR export embedded manifest database filename is not a bare basename"
+        )
     return manifest
 
 
@@ -831,21 +1029,44 @@ def ship_export_directory(
     dest_cipher = store / f"{object_stem}.sqlite3.enc"
     dest_envelope = store / f"{object_stem}.envelope.json"
 
-    if os.path.lexists(dest_cipher) or os.path.lexists(dest_envelope):
-        if os.path.lexists(dest_envelope):
-            existing = _load_envelope(dest_envelope)
-            if existing.get("ciphertext_sha256") == envelope["ciphertext_sha256"]:
-                return ShipReceipt(
-                    export_id=str(envelope["export_id"]),
-                    tag=tag,
-                    transport="directory",
-                    duplicate=True,
-                    ciphertext_sha256=str(envelope["ciphertext_sha256"]),
-                    byte_size=int(envelope["byte_size"]),
-                    remote_ref=str(dest_cipher),
-                )
+    envelope_exists = os.path.lexists(dest_envelope)
+    cipher_exists = os.path.lexists(dest_cipher)
+
+    if envelope_exists:
+        existing = _load_envelope(dest_envelope)
+        if existing.get("ciphertext_sha256") != envelope["ciphertext_sha256"]:
+            raise ExecutiveDRTypedError(
+                DRFailureState.REMOTE_DIGEST_CONFLICT,
+                f"directory transport envelope already exists for tag {tag} with a different export",
+            )
+        # Adversarial review M1: a matching envelope alone is NOT proof of a
+        # duplicate -- the envelope could exist while its ciphertext object
+        # is missing (partial prior write) or corrupted. Re-hash the actual
+        # remote bytes before ever reporting success.
+        if not cipher_exists:
+            raise ExecutiveDRTypedError(
+                DRFailureState.OFFHOST_ABSENT,
+                f"directory transport envelope exists for tag {tag} but its ciphertext object is missing",
+            )
+        remote_digest = _sha256_path(dest_cipher)
+        if remote_digest != envelope["ciphertext_sha256"]:
+            raise ExecutiveDRTypedError(
+                DRFailureState.REMOTE_DIGEST_CONFLICT,
+                f"directory transport ciphertext for tag {tag} does not hash to its own envelope's digest",
+            )
+        return ShipReceipt(
+            export_id=str(envelope["export_id"]),
+            tag=tag,
+            transport="directory",
+            duplicate=True,
+            ciphertext_sha256=str(envelope["ciphertext_sha256"]),
+            byte_size=int(envelope["byte_size"]),
+            remote_ref=str(dest_cipher),
+        )
+    if cipher_exists:
         raise ExecutiveDRTypedError(
-            DRFailureState.REMOTE_DIGEST_CONFLICT, f"directory transport object already exists for tag {tag}"
+            DRFailureState.REMOTE_DIGEST_CONFLICT,
+            f"directory transport ciphertext already exists for tag {tag} without a matching envelope",
         )
 
     _copy_private_file(Path(ciphertext_path), dest_cipher)
@@ -940,17 +1161,42 @@ def _github_request(
 def _github_get_release_by_tag(api_base: str, repo: str, tag: str, token: str) -> dict[str, Any] | None:
     encoded = urllib.parse.quote(tag, safe="")
     status, _headers, body = _github_request("GET", f"{api_base}/repos/{repo}/releases/tags/{encoded}", token=token)
-    if status == 404:
-        return None
     if status == 200:
         return json.loads(body.decode("utf-8"))
     if status in (401, 403):
         raise ExecutiveDRTypedError(DRFailureState.CREDENTIAL_LOST, "GitHub transport credential was rejected")
-    raise ExecutiveDRTypedError(DRFailureState.REMOTE_UNAVAILABLE, f"GitHub release lookup failed with status {status}")
+    if status != 404:
+        raise ExecutiveDRTypedError(DRFailureState.REMOTE_UNAVAILABLE, f"GitHub release lookup failed with status {status}")
+    # Adversarial review M10: GitHub's "get a release by tag" endpoint never
+    # returns DRAFT releases (documented API behavior) -- the drill lane
+    # ships drafts (see `ship_export_github(draft=True)`), so a 404 here does
+    # NOT prove absence. Fall back to listing releases and filtering by
+    # tag_name, bounded to a handful of pages: drill releases are pruned to
+    # the newest 8 under `dr-export/*` by the workflow's retention step, and
+    # the bound also protects a busy vault repo from an unbounded scan.
+    for page in range(1, 6):
+        status, _headers, body = _github_request(
+            "GET", f"{api_base}/repos/{repo}/releases?per_page=100&page={page}", token=token
+        )
+        if status in (401, 403):
+            raise ExecutiveDRTypedError(DRFailureState.CREDENTIAL_LOST, "GitHub transport credential was rejected")
+        if status != 200:
+            raise ExecutiveDRTypedError(DRFailureState.REMOTE_UNAVAILABLE, f"GitHub release listing failed with status {status}")
+        releases = json.loads(body.decode("utf-8"))
+        if not isinstance(releases, list) or not releases:
+            break
+        for release in releases:
+            if isinstance(release, dict) and release.get("tag_name") == tag:
+                return release
+        if len(releases) < 100:
+            break
+    return None
 
 
-def _github_create_release(api_base: str, repo: str, tag: str, body_text: str, token: str) -> dict[str, Any]:
-    payload = json.dumps({"tag_name": tag, "name": tag, "body": body_text[:_MAX_RELEASE_BODY_BYTES], "draft": False, "prerelease": False}).encode("utf-8")
+def _github_create_release(api_base: str, repo: str, tag: str, body_text: str, token: str, *, draft: bool = False) -> dict[str, Any]:
+    payload = json.dumps(
+        {"tag_name": tag, "name": tag, "body": body_text[:_MAX_RELEASE_BODY_BYTES], "draft": draft, "prerelease": False}
+    ).encode("utf-8")
     status, _headers, body = _github_request(
         "POST", f"{api_base}/repos/{repo}/releases", token=token, data=payload, headers={"Content-Type": "application/json"}
     )
@@ -959,7 +1205,11 @@ def _github_create_release(api_base: str, repo: str, tag: str, body_text: str, t
     if status in (401, 403):
         raise ExecutiveDRTypedError(DRFailureState.CREDENTIAL_LOST, "GitHub transport credential was rejected creating a release")
     if status == 422:
-        raise ExecutiveDRTypedError(DRFailureState.REMOTE_DIGEST_CONFLICT, "GitHub release tag already exists")
+        raise ExecutiveDRTypedError(
+            DRFailureState.REMOTE_DIGEST_CONFLICT,
+            "GitHub release creation returned 422 (unprocessable) -- either the tag/release already exists, "
+            "or the request violated a repository constraint (e.g. an invalid or reserved tag/ref name)",
+        )
     raise ExecutiveDRTypedError(DRFailureState.REMOTE_UNAVAILABLE, f"GitHub release creation failed with status {status}")
 
 
@@ -989,6 +1239,10 @@ def _github_download_asset(api_base: str, repo: str, asset_id: Any, token: str) 
         location = headers.get("Location") or headers.get("location")
         if not location:
             raise ExecutiveDRTypedError(DRFailureState.REMOTE_UNAVAILABLE, "GitHub asset redirect had no Location header")
+        if not location.startswith("https://"):
+            raise ExecutiveDRTypedError(
+                DRFailureState.REMOTE_UNAVAILABLE, "GitHub asset redirect target is not an https:// URL; refusing to follow it"
+            )
         # The redirect target (a signed object-store URL) must never receive
         # our GitHub Authorization header -- second hop is unauthenticated.
         status2, _headers2, body2 = _github_request("GET", location, token=None)
@@ -1002,62 +1256,104 @@ def _github_download_asset(api_base: str, repo: str, asset_id: Any, token: str) 
     raise ExecutiveDRTypedError(DRFailureState.REMOTE_UNAVAILABLE, f"GitHub asset download failed with status {status}")
 
 
+def _resolve_transport_token(*, token: str | None, token_env: str | None) -> str:
+    """Exactly one of a literal token (already read from a 0400 file by the
+    caller -- see B3) or an env-var name may be supplied."""
+
+    if (token is None) == (token_env is None):
+        raise ExecutiveDRTypedError(
+            DRFailureState.CREDENTIAL_LOST, "exactly one of a token or a token_env name must be supplied"
+        )
+    if token is not None:
+        if not token:
+            raise ExecutiveDRTypedError(DRFailureState.CREDENTIAL_LOST, "transport credential is empty")
+        return token
+    resolved = os.environ.get(token_env)  # type: ignore[arg-type]
+    if not resolved:
+        raise ExecutiveDRTypedError(DRFailureState.CREDENTIAL_LOST, f"transport credential env var {token_env} is not set")
+    return resolved
+
+
 def ship_export_github(
     ciphertext_path: str | Path,
     envelope_path: str | Path,
     *,
     repo: str,
-    token_env: str,
+    token_env: str | None = None,
+    token: str | None = None,
     api_base: str = "https://api.github.com",
+    draft: bool = False,
 ) -> ShipReceipt:
+    """Ship to a GitHub release under `_export_tag(envelope)`.
+
+    `draft=True` (the DR-D1 drill lane only -- see `scripts/dr_drill.py`)
+    creates the release as a draft: no git tag/ref is created in the
+    repository at all until a human publishes it, so a permanent,
+    undecryptable-elsewhere tag never accumulates from routine drills. The
+    production/vault lane (the nightly backup daemon) always ships
+    `draft=False` and is never pruned.
+    """
+
     envelope = _load_envelope(Path(envelope_path))
     _assert_ciphertext_matches_envelope(Path(ciphertext_path), envelope)
-    token = os.environ.get(token_env)
-    if not token:
-        raise ExecutiveDRTypedError(DRFailureState.CREDENTIAL_LOST, f"transport credential env var {token_env} is not set")
+    resolved_token = _resolve_transport_token(token=token, token_env=token_env)
 
     tag = _export_tag(envelope)
-    existing = _github_get_release_by_tag(api_base, repo, tag, token)
+    existing = _github_get_release_by_tag(api_base, repo, tag, resolved_token)
     if existing is not None:
-        existing_digest = None
-        body_text = existing.get("body")
-        if isinstance(body_text, str):
-            try:
-                existing_digest = json.loads(body_text).get("ciphertext_sha256")
-            except json.JSONDecodeError:
-                existing_digest = None
-        if existing_digest == envelope["ciphertext_sha256"]:
-            return ShipReceipt(
-                export_id=str(envelope["export_id"]),
-                tag=tag,
-                transport="github-release",
-                duplicate=True,
-                ciphertext_sha256=str(envelope["ciphertext_sha256"]),
-                byte_size=int(envelope["byte_size"]),
-                remote_ref=f"{repo}#{tag}",
+        # Adversarial review M1: trusting the release body's declared digest
+        # is not proof -- re-download the actual ciphertext asset and hash
+        # it before ever reporting a duplicate.
+        assets = existing.get("assets") if isinstance(existing.get("assets"), list) else []
+        cipher_asset = next((a for a in assets if isinstance(a, dict) and not str(a.get("name", "")).endswith(".envelope.json")), None)
+        if cipher_asset is None:
+            raise ExecutiveDRTypedError(
+                DRFailureState.OFFHOST_ABSENT, f"GitHub release already exists for tag {tag} but has no ciphertext asset"
             )
-        raise ExecutiveDRTypedError(DRFailureState.REMOTE_DIGEST_CONFLICT, f"GitHub release tag already exists for {tag}")
+        downloaded = _github_download_asset(api_base, repo, cipher_asset["id"], resolved_token)
+        if hashlib.sha256(downloaded).hexdigest() != envelope["ciphertext_sha256"]:
+            raise ExecutiveDRTypedError(
+                DRFailureState.REMOTE_DIGEST_CONFLICT, f"GitHub release {tag} ciphertext asset digest does not match this export"
+            )
+        return ShipReceipt(
+            export_id=str(envelope["export_id"]),
+            tag=tag,
+            transport="github-release",
+            duplicate=True,
+            ciphertext_sha256=str(envelope["ciphertext_sha256"]),
+            byte_size=int(envelope["byte_size"]),
+            remote_ref=f"{repo}#{tag}",
+        )
 
-    release = _github_create_release(api_base, repo, tag, json.dumps(envelope, sort_keys=True, indent=2), token)
+    release = _github_create_release(
+        api_base, repo, tag, json.dumps(envelope, sort_keys=True, indent=2), resolved_token, draft=draft
+    )
     upload_url = release.get("upload_url")
     if not isinstance(upload_url, str) or not upload_url:
         raise ExecutiveDRTypedError(DRFailureState.REMOTE_UNAVAILABLE, "GitHub release creation returned no upload_url")
 
     cipher_asset = _github_upload_asset(
-        upload_url, Path(ciphertext_path), name=Path(ciphertext_path).name, content_type="application/octet-stream", token=token
+        upload_url, Path(ciphertext_path), name=Path(ciphertext_path).name, content_type="application/octet-stream", token=resolved_token
     )
-    _github_upload_asset(
-        upload_url, Path(envelope_path), name=Path(envelope_path).name, content_type="application/json", token=token
+    envelope_asset = _github_upload_asset(
+        upload_url, Path(envelope_path), name=Path(envelope_path).name, content_type="application/json", token=resolved_token
     )
     asset_id = cipher_asset.get("id")
-    if asset_id is None:
+    envelope_asset_id = envelope_asset.get("id")
+    if asset_id is None or envelope_asset_id is None:
         raise ExecutiveDRTypedError(DRFailureState.UPLOAD_EFFECT_UNKNOWN, "GitHub asset upload response had no asset id")
 
-    # Checksum-after-upload: re-download and compare before declaring done.
-    downloaded = _github_download_asset(api_base, repo, asset_id, token)
-    if hashlib.sha256(downloaded).hexdigest() != envelope["ciphertext_sha256"]:
+    # Checksum-after-upload (adversarial review M9): re-download BOTH assets
+    # and byte-compare before declaring done, not just the ciphertext.
+    downloaded_cipher = _github_download_asset(api_base, repo, asset_id, resolved_token)
+    if hashlib.sha256(downloaded_cipher).hexdigest() != envelope["ciphertext_sha256"]:
         raise ExecutiveDRTypedError(
-            DRFailureState.UPLOAD_EFFECT_UNKNOWN, "uploaded asset digest differs from the local ciphertext after re-download"
+            DRFailureState.UPLOAD_EFFECT_UNKNOWN, "uploaded ciphertext asset digest differs from the local file after re-download"
+        )
+    downloaded_envelope = _github_download_asset(api_base, repo, envelope_asset_id, resolved_token)
+    if downloaded_envelope != Path(envelope_path).read_bytes():
+        raise ExecutiveDRTypedError(
+            DRFailureState.UPLOAD_EFFECT_UNKNOWN, "uploaded envelope asset differs from the local file after re-download"
         )
 
     return ShipReceipt(
@@ -1076,12 +1372,12 @@ def fetch_export_github(
     *,
     repo: str,
     dest_dir: str | Path,
-    token_env: str,
+    token_env: str | None = None,
+    token: str | None = None,
     api_base: str = "https://api.github.com",
 ) -> FetchReceipt:
-    token = os.environ.get(token_env)
-    if not token:
-        raise ExecutiveDRTypedError(DRFailureState.CREDENTIAL_LOST, f"transport credential env var {token_env} is not set")
+    resolved_token = _resolve_transport_token(token=token, token_env=token_env)
+    token = resolved_token
 
     release = _github_get_release_by_tag(api_base, repo, tag, token)
     if release is None:
@@ -1103,6 +1399,12 @@ def fetch_export_github(
         if not isinstance(body_text, str) or not body_text:
             raise ExecutiveDRTypedError(DRFailureState.RELEASE_SCHEMA_MISMATCH, f"GitHub release {tag} has no envelope asset or body")
         envelope_bytes = body_text.encode("utf-8")
+
+    # Bound the ingress BEFORE anything touches disk (adversarial review
+    # minor): `_load_envelope`'s 64 KiB bound only applies to a file already
+    # on disk -- check the bytes we are about to write first.
+    if len(envelope_bytes) > _MAX_ENVELOPE_BYTES:
+        raise ExecutiveDRTypedError(DRFailureState.ENVELOPE_INVALID, f"GitHub release {tag} envelope exceeds the maximum size")
 
     dest = _ensure_private_directory(Path(dest_dir).expanduser())
     object_stem = tag.replace("/", "__")

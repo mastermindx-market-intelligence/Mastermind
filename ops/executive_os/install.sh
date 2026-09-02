@@ -570,14 +570,17 @@ RECEIPTS_ROOT="$RUNTIME_ROOT/control/launch-receipts"
 BACKUP_ROOT="$RUNTIME_ROOT/control/backups"
 # Off-host DR (see ops/executive_os/DR_RUNBOOK.md). The daemon this installs
 # stays DISABLED, same as control/worker -- these paths are only laid down so
-# an operator arming ceremony has somewhere reviewed to point the key file
-# and receipts at. `DR_VAULT_REPO`/`DR_TOKEN_ENV` name what the ceremony must
-# provision; they carry no credential themselves.
+# an operator arming ceremony has somewhere reviewed to point the key file,
+# token file, and receipts at. `DR_VAULT_REPO` names what the ceremony must
+# provision; none of these paths carry a credential themselves -- the key
+# and token FILES this wires in are created by that ceremony, 0400
+# _mastermind_exec (adversarial review B3: never a plist EnvironmentVariables
+# entry, which would be world-readable at 0644 and clobbered on reinstall).
 DR_KEY_FILE="$SYSTEM_ROOT/config/executive-dr-key.b64"
 DR_RECEIPTS_DIR="$RUNTIME_ROOT/control/dr-receipts"
 DR_TRANSPORT="github"
 DR_VAULT_REPO="mastermindx-market-intelligence/executive-dr-vault"
-DR_TOKEN_ENV="EXECUTIVE_DR_TOKEN"
+DR_TOKEN_FILE="$RUNTIME_ROOT/control/dr/executive-dr-token"
 CANARY_RECEIPT="$RUNTIME_ROOT/control/canaries/secret-canary.json"
 CONTROL_ENV_ATTESTATION="$RUNTIME_ROOT/control/canaries/control-environment-attestation.json"
 CONTROL_SENTINEL_FILE="$SYSTEM_ROOT/config/control-env-canary"
@@ -1205,6 +1208,16 @@ BACKUP_PLIST="/Library/LaunchDaemons/$BACKUP_LABEL.plist"
 # leave_installed_services_stopped above and DR_RUNBOOK.md) exactly like
 # control/worker: this installer never arms cadence, only lays reviewed
 # material down for the Chairman ceremony.
+#
+# Adversarial review M5: bootstrap-host.sh (which creates
+# /var/log/mastermind-executive/{control,worker}, each 0700 owned by that
+# job's own service account) predates this third daemon and will not have
+# created a `backup` subdirectory on a host that ran bootstrap before DR-V1
+# existed. Create it here so upgrades of an EXISTING host still get
+# somewhere the daemon can write, matching the exact ownership/mode
+# bootstrap-host.sh gives control's own log directory (same user: the
+# backup daemon also runs as CONTROL_USER).
+/usr/bin/install -d -o "$CONTROL_USER" -g "$CONTROL_GROUP" -m 0700 /var/log/mastermind-executive/backup
 "$PYTHON_BINARY" -I -S -B \
   "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py" \
   "$BACKUP_PLIST" -- \
@@ -1217,7 +1230,7 @@ BACKUP_PLIST="/Library/LaunchDaemons/$BACKUP_LABEL.plist"
   --receipts-dir "$DR_RECEIPTS_DIR" \
   --transport "$DR_TRANSPORT" \
   --repo "$DR_VAULT_REPO" \
-  --token-env "$DR_TOKEN_ENV"
+  --token-file "$DR_TOKEN_FILE"
 /usr/bin/plutil -replace WorkingDirectory -string "$RELEASE_ROOT" "$BACKUP_PLIST"
 /usr/bin/plutil -replace UserName -string "$CONTROL_USER" "$BACKUP_PLIST"
 /usr/bin/plutil -replace GroupName -string "$CONTROL_GROUP" "$BACKUP_PLIST"

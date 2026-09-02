@@ -268,6 +268,21 @@ def test_directory_ship_refuses_a_differently_digested_object_at_the_same_identi
     assert excinfo.value.state is dr.DRFailureState.REMOTE_DIGEST_CONFLICT
 
 
+def test_directory_ship_missing_ciphertext_with_existing_envelope_is_offhost_absent(tmp_path: Path) -> None:
+    """M1: an existing envelope whose ciphertext object is missing must be
+    typed OFFHOST_ABSENT, never silently reported as a duplicate."""
+
+    receipt, _key = _export(tmp_path)
+    vault = tmp_path / "vault"
+    dr.ship_export_directory(receipt.ciphertext_path, receipt.envelope_path, directory=vault)
+    tag = dr._export_tag(json.loads(Path(receipt.envelope_path).read_text()))
+    dest_cipher = vault / f"{tag.replace('/', '__')}.sqlite3.enc"
+    dest_cipher.unlink()
+    with pytest.raises(dr.ExecutiveDRTypedError) as excinfo:
+        dr.ship_export_directory(receipt.ciphertext_path, receipt.envelope_path, directory=vault)
+    assert excinfo.value.state is dr.DRFailureState.OFFHOST_ABSENT
+
+
 def test_fetch_directory_absent_tag_is_typed(tmp_path: Path) -> None:
     with pytest.raises(dr.ExecutiveDRTypedError) as excinfo:
         dr.fetch_export_directory("dr-export/does-not-exist", directory=tmp_path / "vault", dest_dir=tmp_path / "out")
@@ -315,7 +330,12 @@ def test_quarantine_renames_aside_with_a_receipt_and_never_deletes(tmp_path: Pat
 
 
 class _FakeGitHub:
-    """In-memory GitHub releases API sufficient for ship/fetch coverage."""
+    """In-memory GitHub releases API sufficient for ship/fetch coverage.
+
+    Models the real quirk B1/M10 depend on: the by-tag endpoint never
+    returns a DRAFT release (only the listing endpoint does), and DELETE
+    removes a release outright.
+    """
 
     def __init__(self) -> None:
         self.releases: dict[str, dict] = {}
@@ -323,24 +343,34 @@ class _FakeGitHub:
         self._next_asset_id = 1
         self.upload_calls = 0
         self.download_calls = 0
+        self._sequence = 0
 
     @staticmethod
     def _public_view(release: dict) -> dict:
         return {
-            **{k: v for k, v in release.items() if k != "assets"},
+            **{k: v for k, v in release.items() if k not in ("assets", "_sequence")},
             "assets": [{k: v for k, v in asset.items() if k != "_bytes"} for asset in release["assets"]],
         }
 
     def request(self, method, url, *, token=None, headers=None, data=None, timeout=30.0):
-        if method == "GET" and "/releases/tags/" in url:
-            tag = url.rsplit("/releases/tags/", 1)[1]
-            import urllib.parse as _urlparse
+        import urllib.parse as _urlparse
 
-            tag = _urlparse.unquote(tag)
+        if method == "GET" and "/releases/tags/" in url:
+            tag = _urlparse.unquote(url.rsplit("/releases/tags/", 1)[1])
             release = self.releases.get(tag)
-            if release is None:
+            if release is None or release.get("draft"):
+                # Real GitHub: by-tag never surfaces a draft release.
                 return 404, {}, b'{"message":"Not Found"}'
             return 200, {}, json.dumps(self._public_view(release)).encode("utf-8")
+
+        if method == "GET" and "/releases?" in url:
+            query = dict(_urlparse.parse_qsl(_urlparse.urlparse(url).query))
+            page = int(query.get("page", "1"))
+            per_page = int(query.get("per_page", "30"))
+            ordered = sorted(self.releases.values(), key=lambda r: r["_sequence"], reverse=True)
+            start = (page - 1) * per_page
+            page_items = ordered[start : start + per_page]
+            return 200, {}, json.dumps([self._public_view(r) for r in page_items]).encode("utf-8")
 
         if method == "POST" and url.endswith("/releases"):
             payload = json.loads(data.decode("utf-8"))
@@ -349,22 +379,24 @@ class _FakeGitHub:
                 return 422, {}, b'{"message":"tag already exists"}'
             release_id = self._next_release_id
             self._next_release_id += 1
+            self._sequence += 1
             release = {
                 "id": release_id,
                 "tag_name": tag,
                 "body": payload["body"],
+                "draft": bool(payload.get("draft", False)),
+                "created_at": f"2026-01-01T00:{self._sequence:02d}:00Z",
                 "upload_url": f"https://uploads.example.com/releases/{release_id}/assets{{?name,label}}",
                 "assets": [],
+                "_sequence": self._sequence,
             }
             self.releases[tag] = release
-            return 201, {}, json.dumps(release).encode("utf-8")
+            return 201, {}, json.dumps(self._public_view(release)).encode("utf-8")
 
         if method == "POST" and "/releases/" in url and "/assets" in url:
             self.upload_calls += 1
             release_id = int(url.split("/releases/")[1].split("/assets")[0])
             release = next(r for r in self.releases.values() if r["id"] == release_id)
-            import urllib.parse as _urlparse
-
             name = _urlparse.parse_qs(_urlparse.urlparse(url).query)["name"][0]
             if any(a["name"] == name for a in release["assets"]):
                 return 422, {}, b'{"message":"asset already exists"}'
@@ -381,6 +413,14 @@ class _FakeGitHub:
                 for asset in release["assets"]:
                     if asset["id"] == asset_id:
                         return 200, {}, asset["_bytes"]
+            return 404, {}, b'{"message":"Not Found"}'
+
+        if method == "DELETE" and "/releases/" in url:
+            release_id = int(url.rsplit("/releases/", 1)[1])
+            for tag, release in list(self.releases.items()):
+                if release["id"] == release_id:
+                    del self.releases[tag]
+                    return 204, {}, b""
             return 404, {}, b'{"message":"Not Found"}'
 
         raise AssertionError(f"unexpected fake GitHub request: {method} {url}")
@@ -405,7 +445,7 @@ def test_ship_and_fetch_github_round_trip(tmp_path: Path, fake_github: _FakeGitH
     )
     assert ship_receipt.duplicate is False
     assert fake_github.upload_calls == 2  # ciphertext + envelope
-    assert fake_github.download_calls == 1  # checksum-after-upload
+    assert fake_github.download_calls == 2  # checksum-after-upload now covers BOTH the ciphertext and envelope assets (M9)
 
     fetch_receipt = dr.fetch_export_github(
         ship_receipt.tag, repo="acme/vault", dest_dir=tmp_path / "fetched", token_env="EXECUTIVE_DR_TOKEN"
@@ -432,13 +472,33 @@ def test_ship_github_refuses_overwrite_on_tag_reuse_with_different_digest(
     monkeypatch.setenv("EXECUTIVE_DR_TOKEN", "not-a-real-token")
     receipt, _key = _export(tmp_path)
     dr.ship_export_github(receipt.ciphertext_path, receipt.envelope_path, repo="acme/vault", token_env="EXECUTIVE_DR_TOKEN")
-    # Pre-seed a conflicting body under the exact same tag by hand.
-    fake_github.releases[dr._export_tag(json.loads(Path(receipt.envelope_path).read_text()))]["body"] = json.dumps(
-        {"ciphertext_sha256": "0" * 64}
-    )
+    # M1: the duplicate-check re-downloads and re-hashes the actual remote
+    # ciphertext ASSET bytes -- tampering the release body text is no longer
+    # sufficient to fool it (that was the pre-fix bug). Tamper the asset.
+    tag = dr._export_tag(json.loads(Path(receipt.envelope_path).read_text()))
+    release = fake_github.releases[tag]
+    cipher_asset = next(a for a in release["assets"] if not a["name"].endswith(".envelope.json"))
+    cipher_asset["_bytes"] = b"tampered-remote-object"
     with pytest.raises(dr.ExecutiveDRTypedError) as excinfo:
         dr.ship_export_github(receipt.ciphertext_path, receipt.envelope_path, repo="acme/vault", token_env="EXECUTIVE_DR_TOKEN")
     assert excinfo.value.state is dr.DRFailureState.REMOTE_DIGEST_CONFLICT
+
+
+def test_ship_github_missing_asset_with_existing_release_is_offhost_absent(
+    tmp_path: Path, fake_github: _FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M1: an existing release/envelope whose ciphertext asset is missing
+    must be typed OFFHOST_ABSENT, never silently reported as a duplicate."""
+
+    monkeypatch.setenv("EXECUTIVE_DR_TOKEN", "not-a-real-token")
+    receipt, _key = _export(tmp_path)
+    dr.ship_export_github(receipt.ciphertext_path, receipt.envelope_path, repo="acme/vault", token_env="EXECUTIVE_DR_TOKEN")
+    tag = dr._export_tag(json.loads(Path(receipt.envelope_path).read_text()))
+    release = fake_github.releases[tag]
+    release["assets"] = [a for a in release["assets"] if a["name"].endswith(".envelope.json")]  # drop the ciphertext asset
+    with pytest.raises(dr.ExecutiveDRTypedError) as excinfo:
+        dr.ship_export_github(receipt.ciphertext_path, receipt.envelope_path, repo="acme/vault", token_env="EXECUTIVE_DR_TOKEN")
+    assert excinfo.value.state is dr.DRFailureState.OFFHOST_ABSENT
 
 
 def test_ship_github_checksum_after_upload_mismatch_is_typed(
@@ -635,6 +695,174 @@ def test_no_key_or_token_material_leaks_into_envelope_receipts_or_exceptions(
 
 
 # --------------------------------------------------------------------------
+# B1 (adversarial review): LibreSSL (macOS system /usr/bin/openssl) WRITES a
+# 16-byte `Salted__<salt>` header even under `-S`; OpenSSL 3.x OMITS it under
+# the byte-identical invocation. Unhandled, an export encrypted on one
+# family is undecryptable by the other. Two layers of coverage: (1) unit
+# tests of the normalize/prepend helpers against synthetic bytes -- these
+# pin the fix in CI with no second binary required; (2) a REAL cross-
+# implementation round trip against a second openssl binary when one is
+# discoverable on the host (it is, on this Mac).
+# --------------------------------------------------------------------------
+
+_HEADERED_SALT = bytes.fromhex("0102030405060708")
+
+
+def test_normalize_openssl_ciphertext_strips_a_matching_header(tmp_path: Path) -> None:
+    body = b"ciphertext-body-bytes"
+    path = tmp_path / "cipher.bin"
+    path.write_bytes(dr._SALTED_MAGIC + _HEADERED_SALT + body)
+    path.chmod(0o600)
+    dr._normalize_openssl_ciphertext(path, header_family=True, expected_salt=_HEADERED_SALT)
+    assert path.read_bytes() == body
+
+
+def test_normalize_openssl_ciphertext_is_a_noop_for_headerless_family(tmp_path: Path) -> None:
+    body = b"already-headerless-bytes"
+    path = tmp_path / "cipher.bin"
+    path.write_bytes(body)
+    path.chmod(0o600)
+    dr._normalize_openssl_ciphertext(path, header_family=False, expected_salt=_HEADERED_SALT)
+    assert path.read_bytes() == body
+
+
+def test_normalize_openssl_ciphertext_rejects_a_salt_mismatch(tmp_path: Path) -> None:
+    path = tmp_path / "cipher.bin"
+    path.write_bytes(dr._SALTED_MAGIC + _HEADERED_SALT + b"body")
+    path.chmod(0o600)
+    with pytest.raises(dr.ExecutiveDRTypedError) as excinfo:
+        dr._normalize_openssl_ciphertext(path, header_family=True, expected_salt=b"\x00" * 8)
+    assert excinfo.value.state is dr.DRFailureState.LOCAL_CORRUPT
+    # Refused, not silently corrupted -- the file is untouched.
+    assert path.read_bytes() == dr._SALTED_MAGIC + _HEADERED_SALT + b"body"
+
+
+def test_normalize_openssl_ciphertext_rejects_a_missing_header(tmp_path: Path) -> None:
+    path = tmp_path / "cipher.bin"
+    path.write_bytes(b"too-short")
+    path.chmod(0o600)
+    with pytest.raises(dr.ExecutiveDRTypedError) as excinfo:
+        dr._normalize_openssl_ciphertext(path, header_family=True, expected_salt=_HEADERED_SALT)
+    assert excinfo.value.state is dr.DRFailureState.LOCAL_CORRUPT
+
+
+def test_prepare_decrypt_input_prepends_header_for_header_family(tmp_path: Path) -> None:
+    stored = tmp_path / "cipher.bin"
+    stored.write_bytes(b"headerless-stored-body")
+    stored.chmod(0o600)
+    result = dr._prepare_decrypt_input(stored, header_family=True, salt=_HEADERED_SALT, work_dir=tmp_path)
+    assert result != stored
+    assert result.read_bytes() == dr._SALTED_MAGIC + _HEADERED_SALT + b"headerless-stored-body"
+
+
+def test_prepare_decrypt_input_is_a_noop_for_headerless_family(tmp_path: Path) -> None:
+    stored = tmp_path / "cipher.bin"
+    stored.write_bytes(b"headerless-stored-body")
+    stored.chmod(0o600)
+    result = dr._prepare_decrypt_input(stored, header_family=False, salt=_HEADERED_SALT, work_dir=tmp_path)
+    assert result == stored
+
+
+def test_detect_salted_header_family_is_cached_per_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    dr._HEADER_FAMILY_CACHE.clear()
+    calls = {"count": 0}
+    real_run = subprocess.run
+
+    def _counting_run(*args, **kwargs):
+        calls["count"] += 1
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(dr.subprocess, "run", _counting_run)
+    first = dr._detect_salted_header_family("/usr/bin/openssl")
+    second = dr._detect_salted_header_family("/usr/bin/openssl")
+    assert first == second
+    assert calls["count"] == 1  # second call served from cache
+    dr._HEADER_FAMILY_CACHE.clear()
+
+
+def test_openssl_binary_resolution_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(dr._OPENSSL_BINARY_ENV, raising=False)
+    assert dr.resolve_openssl_binary(None) == dr._DEFAULT_OPENSSL_BINARY
+    assert dr.resolve_openssl_binary("/explicit/path/openssl") == "/explicit/path/openssl"
+    monkeypatch.setenv(dr._OPENSSL_BINARY_ENV, "/env/path/openssl")
+    assert dr.resolve_openssl_binary(None) == "/env/path/openssl"
+    assert dr.resolve_openssl_binary("/explicit/path/openssl") == "/explicit/path/openssl"  # explicit still wins
+
+
+def _find_alt_openssl() -> str | None:
+    for candidate in ("/opt/homebrew/opt/openssl@3/bin/openssl", "/usr/local/bin/openssl"):
+        if Path(candidate).exists():
+            return candidate
+    return None
+
+
+@pytest.mark.skipif(_find_alt_openssl() is None, reason="no second openssl binary discoverable on this host")
+def test_cross_implementation_round_trip_both_directions(tmp_path: Path) -> None:
+    """The actual acid test: encrypt with one openssl family, decrypt with
+    the other, in BOTH directions, on real subprocess invocations of two
+    different real binaries -- no stubbing anywhere in this test."""
+
+    alt = _find_alt_openssl()
+    primary = "/usr/bin/openssl"
+    assert primary != alt
+
+    # Direction A: encrypt with the primary (macOS system) binary, decrypt
+    # with the alternate.
+    artifact_a, manifest_a = _fabricated_backup(tmp_path / "a")
+    key_a = _fresh_key()
+    receipt_a = dr.encrypt_export(
+        artifact_a, manifest_a, key_a, tmp_path / "a-staging",
+        transport_target="github-release", retention_class="drill", source_release_commit=_SHA_A,
+        openssl_binary=primary,
+    )
+    out_a = tmp_path / "a-out" / "restored.sqlite3"
+    out_a.parent.mkdir()
+    decrypt_a = dr.decrypt_export(receipt_a.ciphertext_path, receipt_a.envelope_path, key_a, out_a, openssl_binary=alt)
+    assert decrypt_a.plaintext_sha256 == receipt_a.plaintext_sha256
+
+    # Direction B: encrypt with the alternate binary, decrypt with the
+    # primary.
+    artifact_b, manifest_b = _fabricated_backup(tmp_path / "b")
+    key_b = _fresh_key()
+    receipt_b = dr.encrypt_export(
+        artifact_b, manifest_b, key_b, tmp_path / "b-staging",
+        transport_target="github-release", retention_class="drill", source_release_commit=_SHA_B,
+        openssl_binary=alt,
+    )
+    out_b = tmp_path / "b-out" / "restored.sqlite3"
+    out_b.parent.mkdir()
+    decrypt_b = dr.decrypt_export(receipt_b.ciphertext_path, receipt_b.envelope_path, key_b, out_b, openssl_binary=primary)
+    assert decrypt_b.plaintext_sha256 == receipt_b.plaintext_sha256
+
+
+# --------------------------------------------------------------------------
+# M3: a genuine openssl failure includes a length-capped, sanitized stderr
+# excerpt in the typed error -- the passphrase never crosses argv/stderr
+# with this invocation shape, so suppressing diagnostics protects nothing.
+# --------------------------------------------------------------------------
+
+
+def test_run_openssl_failure_includes_stderr_and_no_secret(tmp_path: Path) -> None:
+    missing_input = tmp_path / "does-not-exist.bin"
+    output = tmp_path / "out.bin"
+    secret_password = "correct-horse-battery-staple-not-real"
+    with pytest.raises(dr.ExecutiveDRTypedError) as excinfo:
+        dr._run_openssl(
+            ["-aes-256-ctr", "-e", "-pass", "env:MASTERMIND_DR_PASS", "-pbkdf2", "-iter", "1", "-md", "sha256", "-S", "0011223344556677"],
+            binary="/usr/bin/openssl",
+            env={"PATH": "/usr/bin:/bin", "MASTERMIND_DR_PASS": secret_password},
+            input_path=missing_input,
+            output_path=output,
+        )
+    assert excinfo.value.state is dr.DRFailureState.LOCAL_CORRUPT
+    message = str(excinfo.value)
+    assert message != ""
+    assert "system openssl exited" in message
+    assert secret_password not in message
+    assert not output.exists()
+
+
+# --------------------------------------------------------------------------
 # Integration: the offline clean-host drill end-to-end, against a fabricated
 # Runtime, asserting logical-state equality and receipt shape.
 # --------------------------------------------------------------------------
@@ -656,6 +884,7 @@ def test_offline_drill_end_to_end_logical_state_equality(tmp_path: Path) -> None
         work_root=tmp_path / "work", offline=True, repo="unused/unused", token_env="GITHUB_TOKEN", api_base="https://api.github.com"
     )
     assert receipt["schema_version"] == dr_drill.DRILL_RECEIPT_SCHEMA_VERSION
+    assert receipt["ok"] is True
     assert receipt["logical_state_equal"] is True
     assert receipt["pre_loss_state"] == receipt["post_restore_state"]
     assert receipt["transport"] == "directory"
@@ -664,7 +893,12 @@ def test_offline_drill_end_to_end_logical_state_equality(tmp_path: Path) -> None
     assert set(receipt["stage_timings_ms"]) == {
         "fabricate", "backup", "encrypt", "ship", "discard_local", "fetch", "decrypt", "verify",
     }
-    assert receipt["rto_ms"] >= 0
+    # M7: this is a COMPONENT measure of the drill's own automated fetch ->
+    # decrypt -> verify path, never the packet's ≤4h RTO target (that
+    # target additionally includes host provisioning and is measured by the
+    # full ceremony drill per DR_RUNBOOK.md, not by this script alone).
+    assert receipt["fetch_to_verified_ms"] >= 0
+    assert "rto_ms" not in receipt
     # Every logical-state bucket is non-empty -- a real workload, not a
     # vacuously-equal empty comparison.
     assert receipt["pre_loss_state"]["workers"]
@@ -685,7 +919,35 @@ def test_dr_drill_cli_exits_zero_and_writes_a_receipt(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert receipt_out.exists()
     body = json.loads(receipt_out.read_text(encoding="utf-8"))
+    assert body["ok"] is True
     assert body["logical_state_equal"] is True
+
+
+def test_dr_drill_cli_writes_a_receipt_and_exits_nonzero_on_failure(tmp_path: Path) -> None:
+    """M8: a failed drill still produces evidence -- a receipt naming the
+    stage reached and the typed error state -- and keeps a non-owned work
+    dir. Force a failure with an unreachable repo/credential (network calls
+    to a bogus host fail fast; this never touches the real GitHub API)."""
+
+    receipt_out = tmp_path / "receipt.json"
+    completed = subprocess.run(
+        [
+            sys.executable, "-I", "-S", "-B", str(_ROOT / "scripts" / "dr_drill.py"),
+            "--repo", "nonexistent/repo-does-not-exist-xyz", "--token-env", "NO_SUCH_TOKEN_ENV_VAR",
+            "--receipt-out", str(receipt_out),
+        ],
+        cwd=str(_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert completed.returncode == 65, completed.stdout + completed.stderr
+    assert receipt_out.exists()
+    body = json.loads(receipt_out.read_text(encoding="utf-8"))
+    assert body["ok"] is False
+    assert body["failed_stage"] == "ship"
+    assert body["error_state"] == "CREDENTIAL_LOST"
+    assert "work directory retained for investigation" in completed.stderr
 
 
 # --------------------------------------------------------------------------

@@ -30,9 +30,12 @@ from control_plane.executive_dr import (
     ship_export_github,
     verify_export_envelope,
 )
+from control_plane.executive_dr import _write_private_json
 
 
-def _decrypt_with_manifest(ciphertext_path: Path, envelope_path: Path, key: str, output_dir: Path) -> tuple[Path, Path, Any]:
+def _decrypt_with_manifest(
+    ciphertext_path: Path, envelope_path: Path, key: str, output_dir: Path, *, openssl_binary: str | None = None
+) -> tuple[Path, Path, Any]:
     """Decrypt into the manifest's OWN recorded filename, then materialize a
     manifest sidecar next to it.
 
@@ -53,11 +56,9 @@ def _decrypt_with_manifest(ciphertext_path: Path, envelope_path: Path, key: str,
     output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     output_dir.chmod(0o700)
     output_path = output_dir / database["filename"]
-    decrypt_receipt = decrypt_export(ciphertext_path, envelope_path, key, output_path)
+    decrypt_receipt = decrypt_export(ciphertext_path, envelope_path, key, output_path, openssl_binary=openssl_binary)
     manifest_path = output_path.with_suffix(".manifest.json")
-    payload = json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    manifest_path.write_text(payload, encoding="utf-8")
-    manifest_path.chmod(0o600)
+    _write_private_json(manifest_path, manifest)
     return output_path, manifest_path, decrypt_receipt
 
 
@@ -85,6 +86,35 @@ def _add_key_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--key-env", default=None, help="Name of an environment variable holding the base64 master key.")
 
 
+def _add_token_args(parser: argparse.ArgumentParser) -> None:
+    # Adversarial review B3: a 0644 launchd plist's EnvironmentVariables is
+    # world-readable, so a standing PAT must never live there. --token-file
+    # mirrors --key-file exactly -- a 0400 file this process reads itself;
+    # --token-env stays available for the ephemeral, repo-scoped
+    # GITHUB_TOKEN a CI workflow already injects into its own step env.
+    parser.add_argument("--token-file", type=_absolute_path, default=None, help="Absolute path to a file holding the transport credential (0400).")
+    parser.add_argument("--token-env", default=None, help="Name of an environment variable already holding the transport credential.")
+
+
+def _resolve_token_args(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    if bool(args.token_file) == bool(args.token_env):
+        raise SystemExit("exactly one of --token-file or --token-env is required")
+    if args.token_file:
+        text = Path(args.token_file).read_text(encoding="utf-8").strip()
+        if not text:
+            raise SystemExit("DR transport credential file produced no data")
+        return text, None
+    return None, args.token_env
+
+
+def _add_openssl_binary_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--openssl-binary",
+        default=None,
+        help="Override the openssl binary (default: $MASTERMIND_DR_OPENSSL or /usr/bin/openssl).",
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Encrypt, ship, fetch, and verify Executive OS off-host DR exports.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -98,24 +128,30 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--source-release-commit", required=True)
     export.add_argument("--key-id", default="v1")
     _add_key_args(export)
+    _add_openssl_binary_arg(export)
 
     ship = sub.add_parser("ship", help="Ship an already-encrypted export to a transport target.")
     ship.add_argument("--ciphertext", type=_absolute_path, required=True)
     ship.add_argument("--envelope", type=_absolute_path, required=True)
     ship.add_argument("--transport", choices=("github", "directory"), required=True)
     ship.add_argument("--repo", default=None, help="owner/repo, required for --transport github")
-    ship.add_argument("--token-env", default="GITHUB_TOKEN")
     ship.add_argument("--directory", type=_absolute_path, default=None, help="required for --transport directory")
     ship.add_argument("--api-base", default="https://api.github.com")
+    ship.add_argument(
+        "--draft",
+        action="store_true",
+        help="Create a DRAFT GitHub release (drill lane only -- no git tag is created; never for the production/vault lane).",
+    )
+    _add_token_args(ship)
 
     fetch = sub.add_parser("fetch", help="Fetch a shipped export back from a transport target.")
     fetch.add_argument("--tag", required=True)
     fetch.add_argument("--dest-dir", type=_absolute_path, required=True)
     fetch.add_argument("--transport", choices=("github", "directory"), required=True)
     fetch.add_argument("--repo", default=None)
-    fetch.add_argument("--token-env", default="GITHUB_TOKEN")
     fetch.add_argument("--directory", type=_absolute_path, default=None)
     fetch.add_argument("--api-base", default="https://api.github.com")
+    _add_token_args(fetch)
 
     verify_envelope = sub.add_parser("verify-envelope", help="Offline structural + digest check; never needs the key.")
     verify_envelope.add_argument("--envelope", type=_absolute_path, required=True)
@@ -135,6 +171,7 @@ def _parser() -> argparse.ArgumentParser:
         "--output-dir", type=_absolute_path, required=True, help="Directory to decrypt into, under the manifest's own filename."
     )
     _add_key_args(restore_verify)
+    _add_openssl_binary_arg(restore_verify)
 
     drill_local = sub.add_parser(
         "drill-local", help="Full local round trip (export -> directory ship -> fetch -> decrypt -> restore-verify), no network."
@@ -164,6 +201,7 @@ def _run_export(args: argparse.Namespace) -> int:
         retention_class=args.retention_class,
         source_release_commit=args.source_release_commit,
         key_id=args.key_id,
+        openssl_binary=args.openssl_binary,
     )
     _print(receipt.to_dict())
     return 0
@@ -173,7 +211,11 @@ def _run_ship(args: argparse.Namespace) -> int:
     if args.transport == "github":
         if not args.repo:
             raise SystemExit("--repo is required for --transport github")
-        receipt = ship_export_github(args.ciphertext, args.envelope, repo=args.repo, token_env=args.token_env, api_base=args.api_base)
+        token, token_env = _resolve_token_args(args)
+        receipt = ship_export_github(
+            args.ciphertext, args.envelope, repo=args.repo, token=token, token_env=token_env,
+            api_base=args.api_base, draft=args.draft,
+        )
     else:
         if not args.directory:
             raise SystemExit("--directory is required for --transport directory")
@@ -186,7 +228,10 @@ def _run_fetch(args: argparse.Namespace) -> int:
     if args.transport == "github":
         if not args.repo:
             raise SystemExit("--repo is required for --transport github")
-        receipt = fetch_export_github(args.tag, repo=args.repo, dest_dir=args.dest_dir, token_env=args.token_env, api_base=args.api_base)
+        token, token_env = _resolve_token_args(args)
+        receipt = fetch_export_github(
+            args.tag, repo=args.repo, dest_dir=args.dest_dir, token=token, token_env=token_env, api_base=args.api_base
+        )
     else:
         if not args.directory:
             raise SystemExit("--directory is required for --transport directory")
@@ -211,7 +256,7 @@ def _run_verify_envelope(args: argparse.Namespace) -> int:
 def _run_restore_verify(args: argparse.Namespace) -> int:
     key = _read_master_key(args)
     output_path, manifest_path, decrypt_receipt = _decrypt_with_manifest(
-        args.ciphertext, args.envelope, key, args.output_dir
+        args.ciphertext, args.envelope, key, args.output_dir, openssl_binary=args.openssl_binary
     )
     drill_receipt = verify_restore_drill(output_path, manifest_path)
     _print({"decrypt": decrypt_receipt.to_dict(), "restore_drill": drill_receipt.to_dict()})

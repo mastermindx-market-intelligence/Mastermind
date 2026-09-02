@@ -22,8 +22,8 @@
     <string>__DR_TRANSPORT__</string>
     <string>--repo</string>
     <string>__DR_VAULT_REPO__</string>
-    <string>--token-env</string>
-    <string>__DR_TOKEN_ENV__</string>
+    <string>--token-file</string>
+    <string>__DR_TOKEN_FILE__</string>
   </array>
   <key>WorkingDirectory</key>
   <string>__RELEASE_ROOT__</string>
@@ -35,6 +35,17 @@
   <false/>
   <key>KeepAlive</key>
   <false/>
+  <!-- Adversarial review minor: StartCalendarInterval fires in the HOST's
+       LOCAL time zone as macOS/launchd itself is configured; the TZ entry
+       under EnvironmentVariables below affects only the child PROCESS's own
+       environment, never launchd's own scheduling clock. 09:15 local is
+       chosen assuming a US Pacific host (America/Los_Angeles, the operator's
+       own workspace time zone; see DR_RUNBOOK.md); that is 16:15 to 17:15
+       UTC across PDT and PST, outside the reserved 05:00 to 11:00 UTC
+       render window in both cases. Re-verify with `systemsetup
+       -gettimezone` and, if this host's real time zone differs, re-pick
+       Hour/Minute so the UTC-converted fire time still lands outside
+       05:00 to 11:00 UTC. -->
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>

@@ -45,6 +45,7 @@ from control_plane.executive_dr import (  # noqa: E402
     ship_export_directory,
     ship_export_github,
 )
+from control_plane.executive_dr import _write_private_json  # noqa: E402
 from control_plane.executive_runtime import AttemptLease, Runtime  # noqa: E402
 
 DRILL_RECEIPT_SCHEMA_VERSION = "mastermind.executive_dr_drill_receipt/v1"
@@ -107,7 +108,8 @@ def _fabricate_runtime(root: Path) -> Runtime:
     # Claim and complete a couple of them so the workload is representative
     # (mixed QUEUED / RUNNING / COMPLETED status, non-empty Attempts+Events).
     lease = runtime.attempts.claim_job(job_ids[0], worker_id="dr-drill-worker-01")
-    assert isinstance(lease, AttemptLease)
+    if not isinstance(lease, AttemptLease):
+        raise ExecutiveDRError("dr-drill fixture: claim_job did not return a plain AttemptLease for job 0")
     runtime.attempts.complete_attempt(
         lease.attempt.attempt_id,
         fence_generation=lease.attempt.fence_generation,
@@ -115,7 +117,8 @@ def _fabricate_runtime(root: Path) -> Runtime:
         payload={"summary": "dr-drill synthetic completion"},
     )
     lease2 = runtime.attempts.claim_job(job_ids[1], worker_id="dr-drill-worker-02")
-    assert isinstance(lease2, AttemptLease)
+    if not isinstance(lease2, AttemptLease):
+        raise ExecutiveDRError("dr-drill fixture: claim_job did not return a plain AttemptLease for job 1")
     return runtime
 
 
@@ -161,109 +164,164 @@ def _logical_state_from_sqlite_file(path: Path) -> dict[str, Any]:
         connection.close()
 
 
+class DrillFailed(ExecutiveDRError):
+    """Carries a PARTIAL receipt (stage reached, typed state, timings so
+    far) so a failed drill still produces evidence (adversarial review M8)."""
+
+    def __init__(self, receipt: dict[str, Any]) -> None:
+        super().__init__(str(receipt.get("error_message") or "drill failed"))
+        self.receipt = receipt
+
+
 def run_drill(*, work_root: Path, offline: bool, repo: str, token_env: str, api_base: str) -> dict[str, Any]:
+    """Run the full Stage A-D chain.
+
+    On success returns the receipt dict directly. On ANY failure -- at any
+    stage -- raises `DrillFailed` carrying a partial receipt (stage reached,
+    typed error state, every timing captured before the failure); it never
+    raises a bare, evidence-free exception (adversarial review M8).
+    """
+
     stage_timings_ms: dict[str, int] = {}
     started_ms = _now_ms()
+    current_stage = "fabricate"
+    pre_loss_state: dict[str, Any] | None = None
 
-    fabricate_start = _now_ms()
-    runtime_root = work_root / "fabricated-runtime"
-    runtime = _fabricate_runtime(runtime_root)
-    pre_loss_state = _logical_state(runtime)
-    stage_timings_ms["fabricate"] = _now_ms() - fabricate_start
+    try:
+        stage_start = _now_ms()
+        runtime_root = work_root / "fabricated-runtime"
+        runtime = _fabricate_runtime(runtime_root)
+        pre_loss_state = _logical_state(runtime)
+        stage_timings_ms["fabricate"] = _now_ms() - stage_start
 
-    backup_start = _now_ms()
-    backup_dir = work_root / "backups"
-    backup_receipt = create_online_backup(runtime.store, backup_dir)
-    stage_timings_ms["backup"] = _now_ms() - backup_start
+        current_stage = "backup"
+        stage_start = _now_ms()
+        backup_dir = work_root / "backups"
+        backup_receipt = create_online_backup(runtime.store, backup_dir)
+        stage_timings_ms["backup"] = _now_ms() - stage_start
 
-    encrypt_start = _now_ms()
-    master_key = base64.b64encode(os.urandom(32)).decode("ascii")
-    staging_dir = work_root / "staging"
-    source_release_commit = _source_release_commit()
-    export_receipt = encrypt_export(
-        backup_receipt.database_path,
-        backup_receipt.manifest_path,
-        master_key,
-        staging_dir,
-        transport_target="directory" if offline else "github-release",
-        retention_class="drill",
-        source_release_commit=source_release_commit,
-    )
-    stage_timings_ms["encrypt"] = _now_ms() - encrypt_start
-
-    ship_start = _now_ms()
-    vault_dir = work_root / "vault"
-    if offline:
-        ship_receipt = ship_export_directory(export_receipt.ciphertext_path, export_receipt.envelope_path, directory=vault_dir)
-    else:
-        ship_receipt = ship_export_github(export_receipt.ciphertext_path, export_receipt.envelope_path, repo=repo, token_env=token_env, api_base=api_base)
-    stage_timings_ms["ship"] = _now_ms() - ship_start
-
-    # Discard every local copy -- the fetch below proves the off-host
-    # object, not a filesystem cache of it.
-    discard_start = _now_ms()
-    for local_path in (backup_receipt.database_path, backup_receipt.manifest_path, export_receipt.ciphertext_path, export_receipt.envelope_path):
-        try:
-            os.unlink(local_path)
-        except FileNotFoundError:
-            pass
-    stage_timings_ms["discard_local"] = _now_ms() - discard_start
-
-    # RTO measurement starts here: declared loss -> verified availability.
-    rto_start_ms = _now_ms()
-
-    fetch_start = _now_ms()
-    fetched_dir = work_root / "fetched"
-    if offline:
-        fetch_receipt = fetch_export_directory(ship_receipt.tag, directory=vault_dir, dest_dir=fetched_dir)
-    else:
-        fetch_receipt = fetch_export_github(ship_receipt.tag, repo=repo, dest_dir=fetched_dir, token_env=token_env, api_base=api_base)
-    stage_timings_ms["fetch"] = _now_ms() - fetch_start
-
-    decrypt_start = _now_ms()
-    manifest = read_export_backup_manifest(fetch_receipt.envelope_path)
-    database_filename = manifest["database"]["filename"]
-    restored_dir = work_root / "restored"
-    restored_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    restored_path = restored_dir / database_filename
-    decrypt_receipt = decrypt_export(fetch_receipt.ciphertext_path, fetch_receipt.envelope_path, master_key, restored_path)
-    manifest_path = restored_path.with_suffix(".manifest.json")
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
-    manifest_path.chmod(0o600)
-    stage_timings_ms["decrypt"] = _now_ms() - decrypt_start
-
-    verify_start = _now_ms()
-    restore_drill_receipt = verify_restore_drill(restored_path, manifest_path)
-    post_restore_state = _logical_state_from_sqlite_file(restored_path)
-    logical_state_equal = post_restore_state == pre_loss_state
-    stage_timings_ms["verify"] = _now_ms() - verify_start
-
-    rto_ms = _now_ms() - rto_start_ms
-    total_ms = _now_ms() - started_ms
-
-    if not logical_state_equal:
-        raise ExecutiveDRError(
-            "restored logical state (workers/jobs/attempts/events) differs from the pre-loss state"
+        current_stage = "encrypt"
+        stage_start = _now_ms()
+        master_key = base64.b64encode(os.urandom(32)).decode("ascii")
+        staging_dir = work_root / "staging"
+        source_release_commit = _source_release_commit()
+        export_receipt = encrypt_export(
+            backup_receipt.database_path,
+            backup_receipt.manifest_path,
+            master_key,
+            staging_dir,
+            transport_target="directory" if offline else "github-release",
+            retention_class="drill",
+            source_release_commit=source_release_commit,
         )
+        stage_timings_ms["encrypt"] = _now_ms() - stage_start
 
-    return {
-        "schema_version": DRILL_RECEIPT_SCHEMA_VERSION,
-        "offline": offline,
-        "export_id": export_receipt.export_id,
-        "tag": ship_receipt.tag,
-        "transport": ship_receipt.transport,
-        "backup_id": backup_receipt.backup_id,
-        "source_release_commit": source_release_commit,
-        "restored_database_path": str(restored_path),
-        "restore_drill": restore_drill_receipt.to_dict(),
-        "ciphertext_byte_size": export_receipt.byte_size,
-        "stage_timings_ms": stage_timings_ms,
-        "rto_ms": rto_ms,
-        "total_ms": total_ms,
-        "logical_state_equal": logical_state_equal,
-        "pre_loss_state": pre_loss_state,
-        "post_restore_state": post_restore_state,
-    }
+        current_stage = "ship"
+        stage_start = _now_ms()
+        vault_dir = work_root / "vault"
+        if offline:
+            ship_receipt = ship_export_directory(export_receipt.ciphertext_path, export_receipt.envelope_path, directory=vault_dir)
+        else:
+            # Adversarial review M10: the drill lane ALWAYS ships draft
+            # releases -- no git tag/ref is created for a draft until a
+            # human publishes it, so routine (weekly + on-demand) drills
+            # never accumulate permanent, undecryptable-elsewhere tags on
+            # the product repo. The production/vault lane (the nightly
+            # backup daemon via executive_dr_cli.py, which defaults
+            # `draft=False`) is entirely separate and never pruned.
+            ship_receipt = ship_export_github(
+                export_receipt.ciphertext_path, export_receipt.envelope_path,
+                repo=repo, token_env=token_env, api_base=api_base, draft=True,
+            )
+        stage_timings_ms["ship"] = _now_ms() - stage_start
+
+        # Discard every local copy -- the fetch below proves the off-host
+        # object, not a filesystem cache of it.
+        current_stage = "discard_local"
+        stage_start = _now_ms()
+        for local_path in (backup_receipt.database_path, backup_receipt.manifest_path, export_receipt.ciphertext_path, export_receipt.envelope_path):
+            try:
+                os.unlink(local_path)
+            except FileNotFoundError:
+                pass
+        stage_timings_ms["discard_local"] = _now_ms() - stage_start
+
+        # fetch_to_verified_ms measures ONLY this drill's own automated
+        # fetch->decrypt->verify component (adversarial review M7) -- it is
+        # NOT the packet's RTO target, which additionally includes host
+        # provisioning and is measured by the full ceremony drill in
+        # DR_RUNBOOK.md, not by this script alone.
+        fetch_to_verified_start_ms = _now_ms()
+
+        current_stage = "fetch"
+        stage_start = _now_ms()
+        fetched_dir = work_root / "fetched"
+        if offline:
+            fetch_receipt = fetch_export_directory(ship_receipt.tag, directory=vault_dir, dest_dir=fetched_dir)
+        else:
+            fetch_receipt = fetch_export_github(ship_receipt.tag, repo=repo, dest_dir=fetched_dir, token_env=token_env, api_base=api_base)
+        stage_timings_ms["fetch"] = _now_ms() - stage_start
+
+        current_stage = "decrypt"
+        stage_start = _now_ms()
+        manifest = read_export_backup_manifest(fetch_receipt.envelope_path)
+        database_filename = manifest["database"]["filename"]
+        restored_dir = work_root / "restored"
+        restored_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        restored_path = restored_dir / database_filename
+        decrypt_receipt = decrypt_export(fetch_receipt.ciphertext_path, fetch_receipt.envelope_path, master_key, restored_path)
+        manifest_path = restored_path.with_suffix(".manifest.json")
+        _write_private_json(manifest_path, manifest)
+        stage_timings_ms["decrypt"] = _now_ms() - stage_start
+
+        current_stage = "verify"
+        stage_start = _now_ms()
+        restore_drill_receipt = verify_restore_drill(restored_path, manifest_path)
+        post_restore_state = _logical_state_from_sqlite_file(restored_path)
+        logical_state_equal = post_restore_state == pre_loss_state
+        stage_timings_ms["verify"] = _now_ms() - stage_start
+        if not logical_state_equal:
+            raise ExecutiveDRError(
+                "restored logical state (workers/jobs/attempts/events) differs from the pre-loss state"
+            )
+
+        fetch_to_verified_ms = _now_ms() - fetch_to_verified_start_ms
+        total_ms = _now_ms() - started_ms
+
+        return {
+            "schema_version": DRILL_RECEIPT_SCHEMA_VERSION,
+            "ok": True,
+            "offline": offline,
+            "export_id": export_receipt.export_id,
+            "tag": ship_receipt.tag,
+            "transport": ship_receipt.transport,
+            "backup_id": backup_receipt.backup_id,
+            "source_release_commit": source_release_commit,
+            "restored_database_path": str(restored_path),
+            "restore_drill": restore_drill_receipt.to_dict(),
+            "ciphertext_byte_size": export_receipt.byte_size,
+            "stage_timings_ms": stage_timings_ms,
+            "fetch_to_verified_ms": fetch_to_verified_ms,
+            "total_ms": total_ms,
+            "logical_state_equal": logical_state_equal,
+            "pre_loss_state": pre_loss_state,
+            "post_restore_state": post_restore_state,
+        }
+    except Exception as exc:
+        total_ms = _now_ms() - started_ms
+        state = getattr(exc, "state", None)
+        failure_receipt = {
+            "schema_version": DRILL_RECEIPT_SCHEMA_VERSION,
+            "ok": False,
+            "offline": offline,
+            "failed_stage": current_stage,
+            "error_state": state.value if state is not None else "UNKNOWN",
+            "error_message": str(exc),
+            "stage_timings_ms": stage_timings_ms,
+            "total_ms": total_ms,
+            "pre_loss_state": pre_loss_state,
+        }
+        raise DrillFailed(failure_receipt) from exc
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -299,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
 
         work_root = Path(tempfile.mkdtemp(prefix="mastermind-dr-drill-"))
 
+    ok = True
     try:
         receipt = run_drill(
             work_root=work_root,
@@ -307,26 +366,49 @@ def main(argv: list[str] | None = None) -> int:
             token_env=args.token_env,
             api_base=args.api_base,
         )
+    except DrillFailed as exc:
+        receipt = exc.receipt
+        ok = False
     except ExecutiveDRError as exc:
-        sys.stderr.write(f"DR-D1 drill failed: {exc}\n")
-        return 65
-    finally:
-        if owns_work_dir:
-            import shutil
-
-            shutil.rmtree(work_root, ignore_errors=True)
+        # Should not normally happen -- run_drill wraps every failure into
+        # DrillFailed -- but never let a truly unexpected typed error escape
+        # without at least SOME receipt (adversarial review M8).
+        receipt = {
+            "schema_version": DRILL_RECEIPT_SCHEMA_VERSION,
+            "ok": False,
+            "offline": args.offline,
+            "failed_stage": "unknown",
+            "error_state": getattr(exc, "state", None).value if getattr(exc, "state", None) is not None else "UNKNOWN",
+            "error_message": str(exc),
+            "stage_timings_ms": {},
+            "total_ms": 0,
+            "pre_loss_state": None,
+        }
+        ok = False
 
     payload = json.dumps(receipt, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
     sys.stdout.write(payload)
     if args.receipt_out is not None:
         args.receipt_out.write_text(payload, encoding="utf-8")
 
-    summary = (
-        f"DR-D1 drill OK: export={receipt['export_id']} transport={receipt['transport']} "
-        f"rto_ms={receipt['rto_ms']} logical_state_equal={receipt['logical_state_equal']}"
-    )
-    sys.stdout.write(summary + "\n")
-    return 0
+    if ok:
+        if owns_work_dir:
+            import shutil
+
+            shutil.rmtree(work_root, ignore_errors=True)
+        summary = (
+            f"DR-D1 drill OK: export={receipt['export_id']} transport={receipt['transport']} "
+            f"fetch_to_verified_ms={receipt['fetch_to_verified_ms']} logical_state_equal={receipt['logical_state_equal']}"
+        )
+        sys.stdout.write(summary + "\n")
+        return 0
+
+    # Adversarial review M8: never rm -rf the work directory on failure --
+    # it is the evidence an operator needs to investigate, and CI's
+    # upload-artifact step only reaches the receipt, not this directory.
+    sys.stderr.write(f"DR-D1 drill FAILED at stage {receipt.get('failed_stage')}: {receipt.get('error_message')}\n")
+    sys.stderr.write(f"work directory retained for investigation: {work_root}\n")
+    return 65
 
 
 if __name__ == "__main__":
