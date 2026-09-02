@@ -375,15 +375,20 @@ def test_executive_mas_source_is_refused_and_capacity_source_is_supported():
                        owner="executive_os", source_ref="MAS:216")],
             ),
         )
+    # Capacity is representable and source-attributed, but B1 forbids capacity
+    # state alone from standing as a current-runtime FACTS answer, so the
+    # positive case is the contract's legal partial state.
     accepted = contract_schemas.result_envelope(
         "get_current_runtime",
         data=_data(
-            "FACTS",
+            "DEGRADED",
             [_fact("responsibility:alpha", "runtime.capacity_state", "AVAILABLE",
                    owner="capacity", source_ref="CAPACITY:REALM-1")],
+            ["STEWARD_DEGRADED"],
         ),
     )
     assert accepted["ok"] is True
+    assert accepted["data"]["facts"][0]["sources"][0]["owner"] == "capacity"
 
 
 def test_duplicate_semantic_identity_or_contradictory_alias_refuses():

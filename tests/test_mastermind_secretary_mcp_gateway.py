@@ -82,7 +82,16 @@ class FakeSteward(StewardReadPort):
 
 @pytest.mark.parametrize("tool_name", [spec.name for spec in TOOL_SPECS])
 def test_each_tool_calls_exactly_one_typed_steward_read(tool_name):
-    steward = FakeSteward(StewardGrounding(state="FACTS", facts=(_fact(),)))
+    # Subject: routing and envelope shape, not field-set completeness. DEGRADED is
+    # the contract's legal partial state, so one fact stays valid now that FACTS
+    # enforces the frozen per-tool required predicates.
+    steward = FakeSteward(
+        StewardGrounding(
+            state="DEGRADED",
+            facts=(_fact(),),
+            reason_codes=("STEWARD_DEGRADED",),
+        )
+    )
     gateway = SecretaryGroundingGateway(steward)
     arguments = (
         {}
@@ -104,7 +113,7 @@ def test_each_tool_calls_exactly_one_typed_steward_read(tool_name):
         "ok": True,
         "server_version": "1.0.0",
         "data": {
-            "state": "FACTS",
+            "state": "DEGRADED",
             "facts": [
                 {
                     "subject_ref": "responsibility:alpha",
@@ -120,7 +129,7 @@ def test_each_tool_calls_exactly_one_typed_steward_read(tool_name):
                     ],
                 }
             ],
-            "reason_codes": [],
+            "reason_codes": ["STEWARD_DEGRADED"],
         },
         "error": None,
     }
@@ -387,7 +396,13 @@ def test_long_canonical_source_references_remain_source_attributable(
     )
     envelope = _run(
         SecretaryGroundingGateway(
-            FakeSteward(StewardGrounding(state="FACTS", facts=(fact,)))
+            FakeSteward(
+                StewardGrounding(
+                    state="DEGRADED",
+                    facts=(fact,),
+                    reason_codes=("STEWARD_DEGRADED",),
+                )
+            )
         ).call("get_attention", {})
     )
     assert envelope["ok"] is True

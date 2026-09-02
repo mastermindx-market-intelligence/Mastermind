@@ -33,24 +33,24 @@ SOURCE_OWNERS = frozenset(SOURCE_NAMESPACE_BY_OWNER)
 _CANONICAL_CREDENTIAL_PREFIX = '(?:sb_secret_|sb_publishable_|sbp_|sk-ant-|sk-|github_pat_|ghp_|gho_|ghs_|xox[abeprs]-|xapp-|eyJ|AKIA|ASIA|ABIA|ACCA)'
 _CANONICAL_CREDENTIAL_FENCE = f'(?!{_CANONICAL_CREDENTIAL_PREFIX})(?![A-Za-z0-9._-]*[._-]{_CANONICAL_CREDENTIAL_PREFIX})'
 _CREDENTIAL_ANY_GUARD = f'(?!.*(?:^|[^A-Za-z0-9]){_CANONICAL_CREDENTIAL_PREFIX})'
-_ABSOLUTE_END = '(?![\s\S])'
+_ABSOLUTE_END = r'(?![\s\S])'
 _RESPONSIBILITY_REF_PATTERN = f'^responsibility:{_CANONICAL_CREDENTIAL_FENCE}[a-z0-9][a-z0-9._-]{{0,144}}{_ABSOLUTE_END}'
-_RESPONSIBILITY_REF_RE = re.compile(f'\Aresponsibility:{_CANONICAL_CREDENTIAL_FENCE}[a-z0-9][a-z0-9._-]{{0,144}}\Z')
-_CONTROL_RE = re.compile('[\x00-\x1f\x7f]')
-_EMAIL_PATTERN = '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+_RESPONSIBILITY_REF_RE = re.compile(rf'\Aresponsibility:{_CANONICAL_CREDENTIAL_FENCE}[a-z0-9][a-z0-9._-]{{0,144}}\Z')
+_CONTROL_RE = re.compile(r'[\x00-\x1f\x7f]')
+_EMAIL_PATTERN = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
 _URL_PATTERN = '://'
-_PRIVATE_PATH_PATTERN = '(?:/Users/|/home/|/private/|/tmp/|/var/|/etc/|~/|[A-Za-z]:\\)'
-_SECRET_LABEL_PATTERN = '\b(?:[Bb]earer|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Tt]oken|[Ss]ecret|[Pp]assword)\s*[:=]'
+_PRIVATE_PATH_PATTERN = r'(?:/Users/|/home/|/private/|/tmp/|/var/|/etc/|~/|[A-Za-z]:\\)'
+_SECRET_LABEL_PATTERN = r'\b(?:[Bb]earer|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Tt]oken|[Ss]ecret|[Pp]assword)\s*[:=]'
 _PRIVATE_LOCATOR_KEY_PATTERN = '(?:[Pp]rovider(?:_session)?|[Nn]ative_(?:session|handle)|[Aa]ccount(?:_id)?|[Bb]rowser_profile|[Pp]rofile_id|[Hh]ost|[Cc]hannel|[Tt]hread|[Cc]oordinates|[Pp]id|[Pp]gid|[Aa]ction|[Tt]arget)'
-_PRIVATE_LOCATOR_PATTERN = f'\b{_PRIVATE_LOCATOR_KEY_PATTERN}\s*[:=]\s*\S+'
+_PRIVATE_LOCATOR_PATTERN = rf'\b{_PRIVATE_LOCATOR_KEY_PATTERN}\s*[:=]\s*\S+'
 _EMAIL_RE = re.compile(_EMAIL_PATTERN)
 _URL_RE = re.compile(_URL_PATTERN)
 _PRIVATE_PATH_RE = re.compile(_PRIVATE_PATH_PATTERN)
 _SECRET_RE = re.compile(f'(?:^|[^A-Za-z0-9]){_CANONICAL_CREDENTIAL_PREFIX}|-----BEGIN [A-Z ]*PRIVATE KEY-----|{_SECRET_LABEL_PATTERN}')
 _PRIVATE_LOCATOR_RE = re.compile(_PRIVATE_LOCATOR_PATTERN)
-_HEX_SECRET_RE = re.compile('\b[A-Fa-f0-9]{32,}\b')
-_HIGH_ENTROPY_RE = re.compile('\b(?=[A-Za-z0-9]{32,}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\b')
-_PUBLIC_TEXT_PATTERN = f'^(?=\S(?:.*\S)?$)(?!.*[\x00-\x1f\x7f])(?!.*{_URL_PATTERN})(?!.*{_EMAIL_PATTERN})(?!.*{_PRIVATE_PATH_PATTERN}){_CREDENTIAL_ANY_GUARD}(?!.*{_SECRET_LABEL_PATTERN})(?!.*-----BEGIN [A-Z ]*PRIVATE KEY-----)(?!.*{_PRIVATE_LOCATOR_PATTERN})(?!.*\b[A-Fa-f0-9]{{32,}}\b)(?!.*\b(?=[A-Za-z0-9]{{32,}}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\b).+{_ABSOLUTE_END}'
+_HEX_SECRET_RE = re.compile(r'\b[A-Fa-f0-9]{32,}\b')
+_HIGH_ENTROPY_RE = re.compile(r'\b(?=[A-Za-z0-9]{32,}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\b')
+_PUBLIC_TEXT_PATTERN = rf'^(?=\S(?:.*\S)?$)(?!.*[\x00-\x1f\x7f])(?!.*{_URL_PATTERN})(?!.*{_EMAIL_PATTERN})(?!.*{_PRIVATE_PATH_PATTERN}){_CREDENTIAL_ANY_GUARD}(?!.*{_SECRET_LABEL_PATTERN})(?!.*-----BEGIN [A-Z ]*PRIVATE KEY-----)(?!.*{_PRIVATE_LOCATOR_PATTERN})(?!.*\b[A-Fa-f0-9]{{32,}}\b)(?!.*\b(?=[A-Za-z0-9]{{32,}}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\b).+{_ABSOLUTE_END}'
 _PUBLIC_TOKEN_PATTERN = f'^{_CREDENTIAL_ANY_GUARD}[A-Za-z0-9][A-Za-z0-9._-]{{0,95}}{_ABSOLUTE_END}'
 _PUBLIC_TOKEN_RE = re.compile(_PUBLIC_TOKEN_PATTERN)
 _SAFE_REF_TOKEN = '[A-Za-z0-9][A-Za-z0-9._-]{0,223}'
@@ -67,18 +67,33 @@ _WORKER_ID_PATTERN = _guarded_pattern('[A-Za-z][A-Za-z0-9._-]{0,223}')
 _BINDING_ID_PATTERN = _guarded_pattern('[A-Za-z][A-Za-z0-9._-]{0,223}')
 _SURFACE_ID_PATTERN = _guarded_pattern(f'(?:SURFACE:{_SAFE_REF_TOKEN}|{_UUID_PATTERN})')
 _PUBLIC_REFERENCE_PATTERN = _guarded_pattern(f'(?:(?:WS|DEC|DSC|JOB|ATTEMPT|WORKER|EVENT|EXEC|RUNTIME|CAPACITY|WAKE|DIALOGUE|SURFACE|POLICY):{_SAFE_REF_TOKEN}|JOB-{_SAFE_REF_TOKEN}|ATT-{_SAFE_REF_TOKEN}|{_UUID_PATTERN}|[A-Za-z][A-Za-z0-9._-]{{0,223}})')
-_AGENT_OS_SOURCE_PATTERN = _guarded_pattern(f'(?:(?:WS|DEC|DSC):{_SAFE_REF_TOKEN}|agentos/workstreams/(?!.*(?:/\.\.?/|/\.\.?$))[A-Za-z0-9][A-Za-z0-9._/-]{{0,220}})')
-_EXECUTIVE_OS_SOURCE_PATTERN = _guarded_pattern(f'executive-(?:runtime|event|job|attempt|worker):{_SAFE_RECEIPT_TOKEN}')
-_RUNTIME_BINDING_SOURCE_PATTERN = _guarded_pattern(f'runtime-binding:{_SAFE_RECEIPT_TOKEN}')
-_EXECUTIVE_INBOX_SOURCE_PATTERN = _guarded_pattern(f'executive-inbox:{_SAFE_RECEIPT_TOKEN}')
-_CAPACITY_SOURCE_PATTERN = _guarded_pattern(f'(?:CAPACITY:{_SAFE_REF_TOKEN}|capacity:{_SAFE_RECEIPT_TOKEN})')
-_WAKE_SOURCE_PATTERN = _guarded_pattern(f'(?:WAKE:{_SAFE_REF_TOKEN}|wake:{_SAFE_RECEIPT_TOKEN})')
-_DIALOGUE_SOURCE_PATTERN = _guarded_pattern(f'(?:DIALOGUE:{_SAFE_REF_TOKEN}|agent-dialogue:{_SAFE_RECEIPT_TOKEN})')
-_SURFACE_BINDING_SOURCE_PATTERN = _guarded_pattern(f'SURFACE:{_SAFE_REF_TOKEN}')
-_SURFACE_BINDINGS_SOURCE_PATTERN = _guarded_pattern(f'surface-binding:(?:{_UUID_PATTERN}|{_SAFE_RECEIPT_TOKEN})')
-_PROVIDER_SOURCE_PATTERN = _guarded_pattern(f'POLICY:{_SAFE_REF_TOKEN}')
-_UNKNOWN_SOURCE_PATTERN = _guarded_pattern(f'UNKNOWN:{_SAFE_REF_TOKEN}')
-_SOURCE_REF_PATTERN_BY_OWNER = MappingProxyType({'agent_os': _AGENT_OS_SOURCE_PATTERN, 'executive_os': _EXECUTIVE_OS_SOURCE_PATTERN, 'runtime_binding': _RUNTIME_BINDING_SOURCE_PATTERN, 'executive_inbox': _EXECUTIVE_INBOX_SOURCE_PATTERN, 'capacity': _CAPACITY_SOURCE_PATTERN, 'wake': _WAKE_SOURCE_PATTERN, 'agent_dialogue': _DIALOGUE_SOURCE_PATTERN, 'surface_binding': _SURFACE_BINDING_SOURCE_PATTERN, 'surface_bindings': _SURFACE_BINDINGS_SOURCE_PATTERN, 'provider_control': _PROVIDER_SOURCE_PATTERN, 'unknown': _UNKNOWN_SOURCE_PATTERN})
+# One producer vocabulary per owner. Every accepted source_ref form is built
+# from these tables, so the advertised grammar and the runtime validator cannot
+# drift apart. Frozen namespaces are the reviewed public identity vocabulary;
+# receipt bodies are the producer-native provenance vocabulary. The two are
+# advertised separately and are never conflated.
+_NATIVE_SOURCE_BODY_BY_OWNER = {
+    'agent_os': rf'(?:agentos/workstreams/(?!.*(?:/\.\.?/|/\.\.?$))[A-Za-z0-9][A-Za-z0-9._/-]{{0,220}})',
+    'executive_os': rf'executive-(?:runtime|event|job|attempt|worker):{_SAFE_RECEIPT_TOKEN}',
+    'runtime_binding': rf'runtime-binding:{_SAFE_RECEIPT_TOKEN}',
+    'executive_inbox': rf'executive-inbox:{_SAFE_RECEIPT_TOKEN}',
+    'capacity': rf'capacity:{_SAFE_RECEIPT_TOKEN}',
+    'wake': rf'wake:{_SAFE_RECEIPT_TOKEN}',
+    'agent_dialogue': rf'agent-dialogue:{_SAFE_RECEIPT_TOKEN}',
+    'surface_binding': None,
+    'surface_bindings': rf'surface-binding:(?:{_UUID_PATTERN}|{_SAFE_RECEIPT_TOKEN})',
+    'provider_control': None,
+    'unknown': None,
+}
+
+def _owner_source_pattern(owner: str) -> str:
+    """Accept the frozen namespace vocabulary and this owner's native receipts."""
+    alternatives = [f'(?:{"|".join(SOURCE_NAMESPACE_BY_OWNER[owner])}):{_SAFE_REF_TOKEN}']
+    native = _NATIVE_SOURCE_BODY_BY_OWNER[owner]
+    if native is not None:
+        alternatives.append(native)
+    return _guarded_pattern(f'(?:{"|".join(alternatives)})')
+_SOURCE_REF_PATTERN_BY_OWNER = MappingProxyType({owner: _owner_source_pattern(owner) for owner in SOURCE_NAMESPACE_BY_OWNER})
 _SOURCE_REF_RE_BY_OWNER = MappingProxyType({owner: re.compile(pattern) for owner, pattern in _SOURCE_REF_PATTERN_BY_OWNER.items()})
 _LEAP_YEAR = '(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)'
 _TIMESTAMP_PATTERN = f'^(?!0000-)(?:[0-9]{{4}}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|{_LEAP_YEAR}-02-29)T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z{_ABSOLUTE_END}'
@@ -129,6 +144,7 @@ class _PublicFactContract:
     reference_namespaces: tuple[str, ...] = ()
     corroborating_owners: tuple[str, ...] = ()
     pattern: str | None = None
+    enum_aliases: tuple[tuple[str, str], ...] = ()
 
     @property
     def value_schema(self) -> dict[str, Any]:
@@ -146,8 +162,12 @@ class _PublicFactContract:
 
     def normalize(self, value: Any) -> str | int | bool:
         if self.value_kind == 'enum':
-            if isinstance(value, str) and value in self.enum_values:
-                return value
+            if isinstance(value, str):
+                if value in self.enum_values:
+                    return value
+                for alias, canonical in self.enum_aliases:
+                    if value == alias:
+                        return canonical
         elif self.value_kind == 'boolean':
             if isinstance(value, bool):
                 return value
@@ -166,14 +186,14 @@ _RUNTIME_BINDING = ('runtime_binding',)
 _CAPACITY = ('capacity',)
 _BLOCKER_OWNERS = ('agent_os', 'executive_os', 'executive_inbox', 'wake', 'runtime_binding', 'capacity', 'surface_binding', 'surface_bindings', 'provider_control')
 _SURFACE_OWNERS = ('surface_binding', 'surface_bindings')
-_FACT_CONTRACT_ROWS = (_PublicFactContract('responsibility.identity', 'reference', max_length=256, reference_namespaces=('WS',), corroborating_owners=_AGENT_OS, pattern=_WORK_ID_PATTERN), _PublicFactContract('responsibility.title', 'text', max_length=160, corroborating_owners=_AGENT_OS), _PublicFactContract('responsibility.accountable_seat', 'enum', ('chairman', 'ceo', 'coo', 'worker'), corroborating_owners=_AGENT_OS), _PublicFactContract('responsibility.objective', 'text', max_length=480, corroborating_owners=_AGENT_OS), _PublicFactContract('responsibility.next_action', 'text', max_length=480, corroborating_owners=_AGENT_OS), _PublicFactContract('responsibility.state', 'token', max_length=96, corroborating_owners=_AGENT_OS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('responsibility.priority', 'integer', minimum=0, maximum=100, corroborating_owners=_AGENT_OS), _PublicFactContract('responsibility.requires_attention', 'boolean', corroborating_owners=_ATTENTION_OWNERS), _PublicFactContract('attention.ref', 'reference', max_length=256, corroborating_owners=_ATTENTION_OWNERS, pattern=_ATTENTION_ID_PATTERN), _PublicFactContract('attention.target_seat', 'enum', ('chairman', 'ceo', 'coo', 'worker', 'CHAIRMAN', 'CEO', 'SOL', 'COO', 'WORKER'), corroborating_owners=_ATTENTION_OWNERS), _PublicFactContract('attention.kind', 'token', max_length=96, corroborating_owners=_ATTENTION_OWNERS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('attention.reason', 'text', max_length=320, corroborating_owners=_ATTENTION_OWNERS), _PublicFactContract('attention.requested_action', 'text', max_length=320, corroborating_owners=_ATTENTION_OWNERS), _PublicFactContract('attention.state', 'enum', ('CHAIRMAN_REQUIRED', 'COO_REQUIRED', 'EXTERNAL_REQUIRED', 'NONE', 'SOL_REQUIRED', 'UNKNOWN'), corroborating_owners=_ATTENTION_OWNERS), _PublicFactContract('runtime.job_ref', 'reference', max_length=256, reference_namespaces=('JOB',), corroborating_owners=_EXECUTIVE_OS, pattern=_JOB_ID_PATTERN), _PublicFactContract('runtime.attempt_ref', 'reference', max_length=256, reference_namespaces=('ATTEMPT',), corroborating_owners=_EXECUTIVE_OS, pattern=_ATTEMPT_ID_PATTERN), _PublicFactContract('runtime.worker_ref', 'reference', max_length=256, reference_namespaces=('WORKER',), corroborating_owners=_EXECUTIVE_OS, pattern=_WORKER_ID_PATTERN), _PublicFactContract('runtime.binding_ref', 'reference', max_length=256, reference_namespaces=('RUNTIME',), corroborating_owners=_RUNTIME_BINDING, pattern=_BINDING_ID_PATTERN), _PublicFactContract('runtime.state', 'token', max_length=96, corroborating_owners=_EXECUTIVE_OS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('runtime.effect_state', 'enum', ('none', 'applied', 'effect_unknown', 'NONE', 'APPLIED', 'EFFECT_UNKNOWN'), corroborating_owners=_EXECUTIVE_OS), _PublicFactContract('runtime.continuation', 'token', max_length=96, corroborating_owners=_RUNTIME_BINDING, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('runtime.capacity_state', 'enum', ('available', 'degraded', 'unknown', 'AVAILABLE', 'DEGRADED', 'UNKNOWN'), corroborating_owners=_CAPACITY), _PublicFactContract('runtime.age_seconds', 'integer', minimum=0, maximum=31536000, corroborating_owners=('executive_os', 'runtime_binding')), _PublicFactContract('blocker.kind', 'token', max_length=96, corroborating_owners=_BLOCKER_OWNERS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('blocker.present', 'boolean', corroborating_owners=_BLOCKER_OWNERS), _PublicFactContract('blocker.explanation', 'text', max_length=480, corroborating_owners=_BLOCKER_OWNERS), _PublicFactContract('blocker.dependency_ref', 'reference', max_length=256, corroborating_owners=_BLOCKER_OWNERS, pattern=_PUBLIC_REFERENCE_PATTERN), _PublicFactContract('blocker.action_ref', 'reference', max_length=256, corroborating_owners=_BLOCKER_OWNERS, pattern=_PUBLIC_REFERENCE_PATTERN), _PublicFactContract('surface.ref', 'reference', max_length=256, reference_namespaces=('SURFACE',), corroborating_owners=_SURFACE_OWNERS, pattern=_SURFACE_ID_PATTERN), _PublicFactContract('surface.locator_kind', 'token', max_length=96, corroborating_owners=_SURFACE_OWNERS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('surface.review_state', 'enum', ('approved', 'pending', 'rejected', 'unknown', 'APPROVED', 'PENDING', 'REJECTED', 'UNKNOWN'), corroborating_owners=_SURFACE_OWNERS), _PublicFactContract('surface.health', 'token', max_length=96, corroborating_owners=_SURFACE_OWNERS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('surface.repair_required', 'boolean', corroborating_owners=_SURFACE_OWNERS), _PublicFactContract('surface.observation_age_seconds', 'integer', minimum=0, maximum=31536000, corroborating_owners=_SURFACE_OWNERS))
+_FACT_CONTRACT_ROWS = (_PublicFactContract('responsibility.identity', 'reference', max_length=256, reference_namespaces=('WS',), corroborating_owners=_AGENT_OS, pattern=_WORK_ID_PATTERN), _PublicFactContract('responsibility.title', 'text', max_length=160, corroborating_owners=_AGENT_OS), _PublicFactContract('responsibility.accountable_seat', 'enum', ('CHAIRMAN', 'CEO', 'COO', 'WORKER'), corroborating_owners=_AGENT_OS, enum_aliases=(('chairman', 'CHAIRMAN'), ('ceo', 'CEO'), ('coo', 'COO'), ('worker', 'WORKER'))), _PublicFactContract('responsibility.objective', 'text', max_length=480, corroborating_owners=_AGENT_OS), _PublicFactContract('responsibility.next_action', 'text', max_length=480, corroborating_owners=_AGENT_OS), _PublicFactContract('responsibility.state', 'token', max_length=96, corroborating_owners=_AGENT_OS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('responsibility.priority', 'integer', minimum=0, maximum=100, corroborating_owners=_AGENT_OS), _PublicFactContract('responsibility.requires_attention', 'boolean', corroborating_owners=_ATTENTION_OWNERS), _PublicFactContract('attention.ref', 'reference', max_length=256, corroborating_owners=_ATTENTION_OWNERS, pattern=_ATTENTION_ID_PATTERN), _PublicFactContract('attention.target_seat', 'enum', ('CHAIRMAN', 'CEO', 'COO', 'WORKER'), corroborating_owners=_ATTENTION_OWNERS, enum_aliases=(('chairman', 'CHAIRMAN'), ('ceo', 'CEO'), ('coo', 'COO'), ('worker', 'WORKER'), ('SOL', 'CEO'))), _PublicFactContract('attention.kind', 'token', max_length=96, corroborating_owners=_ATTENTION_OWNERS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('attention.reason', 'text', max_length=320, corroborating_owners=_ATTENTION_OWNERS), _PublicFactContract('attention.requested_action', 'text', max_length=320, corroborating_owners=_ATTENTION_OWNERS), _PublicFactContract('attention.state', 'enum', ('CHAIRMAN_REQUIRED', 'COO_REQUIRED', 'EXTERNAL_REQUIRED', 'NONE', 'SOL_REQUIRED', 'UNKNOWN'), corroborating_owners=_ATTENTION_OWNERS), _PublicFactContract('runtime.job_ref', 'reference', max_length=256, reference_namespaces=('JOB',), corroborating_owners=_EXECUTIVE_OS, pattern=_JOB_ID_PATTERN), _PublicFactContract('runtime.attempt_ref', 'reference', max_length=256, reference_namespaces=('ATTEMPT',), corroborating_owners=_EXECUTIVE_OS, pattern=_ATTEMPT_ID_PATTERN), _PublicFactContract('runtime.worker_ref', 'reference', max_length=256, reference_namespaces=('WORKER',), corroborating_owners=_EXECUTIVE_OS, pattern=_WORKER_ID_PATTERN), _PublicFactContract('runtime.binding_ref', 'reference', max_length=256, reference_namespaces=('RUNTIME',), corroborating_owners=_RUNTIME_BINDING, pattern=_BINDING_ID_PATTERN), _PublicFactContract('runtime.state', 'token', max_length=96, corroborating_owners=_EXECUTIVE_OS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('runtime.effect_state', 'enum', ('NONE', 'APPLIED', 'EFFECT_UNKNOWN'), corroborating_owners=_EXECUTIVE_OS, enum_aliases=(('none', 'NONE'), ('applied', 'APPLIED'), ('effect_unknown', 'EFFECT_UNKNOWN'))), _PublicFactContract('runtime.continuation', 'token', max_length=96, corroborating_owners=_RUNTIME_BINDING, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('runtime.capacity_state', 'enum', ('AVAILABLE', 'DEGRADED', 'UNKNOWN'), corroborating_owners=_CAPACITY, enum_aliases=(('available', 'AVAILABLE'), ('degraded', 'DEGRADED'), ('unknown', 'UNKNOWN'))), _PublicFactContract('runtime.age_seconds', 'integer', minimum=0, maximum=31536000, corroborating_owners=('executive_os', 'runtime_binding')), _PublicFactContract('blocker.kind', 'token', max_length=96, corroborating_owners=_BLOCKER_OWNERS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('blocker.present', 'boolean', corroborating_owners=_BLOCKER_OWNERS), _PublicFactContract('blocker.explanation', 'text', max_length=480, corroborating_owners=_BLOCKER_OWNERS), _PublicFactContract('blocker.dependency_ref', 'reference', max_length=256, corroborating_owners=_BLOCKER_OWNERS, pattern=_PUBLIC_REFERENCE_PATTERN), _PublicFactContract('blocker.action_ref', 'reference', max_length=256, corroborating_owners=_BLOCKER_OWNERS, pattern=_PUBLIC_REFERENCE_PATTERN), _PublicFactContract('surface.ref', 'reference', max_length=256, reference_namespaces=('SURFACE',), corroborating_owners=_SURFACE_OWNERS, pattern=_SURFACE_ID_PATTERN), _PublicFactContract('surface.locator_kind', 'token', max_length=96, corroborating_owners=_SURFACE_OWNERS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('surface.review_state', 'enum', ('APPROVED', 'PENDING', 'REJECTED', 'UNKNOWN'), corroborating_owners=_SURFACE_OWNERS, enum_aliases=(('approved', 'APPROVED'), ('pending', 'PENDING'), ('rejected', 'REJECTED'), ('unknown', 'UNKNOWN'))), _PublicFactContract('surface.health', 'token', max_length=96, corroborating_owners=_SURFACE_OWNERS, pattern=_PUBLIC_TOKEN_PATTERN), _PublicFactContract('surface.repair_required', 'boolean', corroborating_owners=_SURFACE_OWNERS), _PublicFactContract('surface.observation_age_seconds', 'integer', minimum=0, maximum=31536000, corroborating_owners=_SURFACE_OWNERS))
 PUBLIC_FACT_CONTRACTS = MappingProxyType({contract.predicate: contract for contract in _FACT_CONTRACT_ROWS})
 _PUBLIC_FACTS_BY_PREDICATE = PUBLIC_FACT_CONTRACTS
 _PREDICATE_ORDER = {predicate: index for index, predicate in enumerate(PUBLIC_FACT_CONTRACTS)}
 TOOL_REQUIRED_PREDICATES = MappingProxyType({'list_responsibilities': frozenset({'responsibility.identity', 'responsibility.title', 'responsibility.state', 'responsibility.next_action'}), 'get_responsibility': frozenset({'responsibility.identity', 'responsibility.title', 'responsibility.objective', 'responsibility.next_action', 'responsibility.state'}), 'get_attention': frozenset({'attention.ref', 'attention.reason', 'attention.requested_action', 'attention.state'}), 'get_current_runtime': frozenset({'runtime.job_ref', 'runtime.attempt_ref', 'runtime.worker_ref', 'runtime.binding_ref', 'runtime.state', 'runtime.effect_state'}), 'explain_blocker': frozenset({'blocker.present', 'blocker.kind', 'blocker.explanation'}), 'resolve_surface': frozenset({'surface.ref', 'surface.locator_kind', 'surface.review_state', 'surface.health'})})
 _RESPONSIBILITY_REF_SCHEMA = _string(max_length=MAX_RESPONSIBILITY_REF_CHARS, pattern=_RESPONSIBILITY_REF_PATTERN)
 _OBSERVED_AT_SCHEMA = {'oneOf': [{'type': 'null'}, _string(max_length=20, pattern=_TIMESTAMP_PATTERN)]}
-_SOURCE_SCHEMA = _object({'owner': {'type': 'string', 'enum': sorted(SOURCE_OWNERS)}, 'source_ref': _string(max_length=256, pattern=f'^[^\x00-\x20\x7f]{{1,256}}{_ABSOLUTE_END}'), 'observed_at': _OBSERVED_AT_SCHEMA}, required=('owner', 'source_ref', 'observed_at'))
+_SOURCE_SCHEMA = _object({'owner': {'type': 'string', 'enum': sorted(SOURCE_OWNERS)}, 'source_ref': _string(max_length=256, pattern=rf'^[^\x00-\x20\x7f]{{1,256}}{_ABSOLUTE_END}'), 'observed_at': _OBSERVED_AT_SCHEMA}, required=('owner', 'source_ref', 'observed_at'))
 _SOURCE_SCHEMA['allOf'] = [{'oneOf': [{'properties': {'owner': {'const': owner}, 'source_ref': _string(max_length=256, pattern=pattern)}} for owner, pattern in _SOURCE_REF_PATTERN_BY_OWNER.items()]}]
 _FACT_SCHEMA = _object({'subject_ref': _RESPONSIBILITY_REF_SCHEMA, 'predicate': {'type': 'string', 'enum': list(PUBLIC_FACT_CONTRACTS)}, 'value': {'anyOf': [{'type': 'boolean'}, {'type': 'integer', 'minimum': 0, 'maximum': 31536000}, {'type': 'string'}]}, 'freshness': {'type': 'string', 'enum': sorted(FRESHNESS_STATES)}, 'sources': {'type': 'array', 'minItems': 1, 'maxItems': MAX_SOURCES_PER_FACT, 'items': _SOURCE_SCHEMA}}, required=('subject_ref', 'predicate', 'value', 'freshness', 'sources'))
 _FACT_SCHEMA['allOf'] = [{'oneOf': [{'properties': {'predicate': {'const': contract.predicate}, 'value': contract.value_schema, 'sources': {'contains': {'properties': {'owner': {'enum': list(contract.corroborating_owners)}}}, 'minContains': 1}}} for contract in _FACT_CONTRACT_ROWS]}]
@@ -181,8 +201,18 @@ _RESULT_DATA_SCHEMA = _object({'state': {'type': 'string', 'enum': sorted(GROUND
 _RESULT_DATA_SCHEMA['allOf'] = [{'oneOf': [{'properties': {'state': {'const': 'FACTS'}, 'facts': {'type': 'array', 'minItems': 1, 'maxItems': MAX_FACTS, 'items': {'type': 'object', 'properties': {'freshness': {'const': 'FRESH'}}, 'required': ['freshness']}}, 'reason_codes': {'type': 'array', 'maxItems': 0}}}, {'properties': {'state': {'const': 'UNKNOWN'}, 'facts': {'type': 'array', 'maxItems': 0}, 'reason_codes': {'type': 'array', 'minItems': 1, 'maxItems': MAX_REASON_CODES}}}, {'properties': {'state': {'const': 'DEGRADED'}, 'reason_codes': {'type': 'array', 'minItems': 1, 'maxItems': MAX_REASON_CODES}}}, {'properties': {'state': {'const': 'REFUSED'}, 'facts': {'type': 'array', 'maxItems': 0}, 'reason_codes': {'type': 'array', 'minItems': 1, 'maxItems': MAX_REASON_CODES}}}]}]
 _ERROR_DETAIL_SCHEMA = {'oneOf': [_object({'code': {'const': code}, 'message': {'const': code}}, required=('code', 'message')) for code in sorted(ERROR_CODES)]}
 
+def _facts_contains(predicate: str) -> dict[str, Any]:
+    return {'contains': {'properties': {'predicate': {'const': predicate}}, 'required': ['predicate']}, 'minContains': 1}
+
+def _result_data_schema_for(tool_name: str) -> dict[str, Any]:
+    schema = copy.deepcopy(_RESULT_DATA_SCHEMA)
+    required = sorted(TOOL_REQUIRED_PREDICATES.get(tool_name, ()))
+    if required:
+        schema['allOf'][0]['oneOf'][0]['properties']['facts']['allOf'] = [_facts_contains(predicate) for predicate in required]
+    return schema
+
 def _output_schema(tool_name: str) -> dict[str, Any]:
-    value = _object({'schema': {'const': RESULT_SCHEMA}, 'tool': {'const': tool_name}, 'ok': {'type': 'boolean'}, 'server_version': {'const': SERVER_VERSION}, 'data': {'oneOf': [{'type': 'null'}, copy.deepcopy(_RESULT_DATA_SCHEMA)]}, 'error': {'oneOf': [{'type': 'null'}, copy.deepcopy(_ERROR_DETAIL_SCHEMA)]}}, required=('schema', 'tool', 'ok', 'server_version', 'data', 'error'))
+    value = _object({'schema': {'const': RESULT_SCHEMA}, 'tool': {'const': tool_name}, 'ok': {'type': 'boolean'}, 'server_version': {'const': SERVER_VERSION}, 'data': {'oneOf': [{'type': 'null'}, _result_data_schema_for(tool_name)]}, 'error': {'oneOf': [{'type': 'null'}, copy.deepcopy(_ERROR_DETAIL_SCHEMA)]}}, required=('schema', 'tool', 'ok', 'server_version', 'data', 'error'))
     value['allOf'] = [{'oneOf': [{'properties': {'ok': {'const': True}, 'data': {'type': 'object'}, 'error': {'type': 'null'}}}, {'properties': {'ok': {'const': False}, 'data': {'type': 'null'}, 'error': {'type': 'object'}}}]}]
     return value
 
@@ -304,6 +334,42 @@ def _validated_fact(value: Any) -> dict[str, Any]:
         raise GatewayError('RESPONSE_REFUSED')
     return {'subject_ref': subject_ref, 'predicate': predicate, 'value': normalized_value, 'freshness': freshness, 'sources': normalized_sources}
 
+_EXECUTIVE_RUNTIME_PREDICATES = ('runtime.job_ref', 'runtime.attempt_ref', 'runtime.worker_ref', 'runtime.state', 'runtime.effect_state')
+_BINDING_RUNTIME_PREDICATES = ('runtime.binding_ref', 'runtime.continuation')
+
+def _common_receipt(rows: dict[str, dict[str, Any]], predicates: tuple[str, ...], owners: tuple[str, ...]) -> str | None:
+    """Return the single receipt shared by every present fact, else refuse."""
+    receipt_sets: list[set[str]] = []
+    for predicate in predicates:
+        row = rows.get(predicate)
+        if row is None:
+            continue
+        refs = {source['source_ref'] for source in row['sources'] if source['owner'] in owners}
+        if not refs:
+            raise GatewayError('RESPONSE_REFUSED')
+        receipt_sets.append(refs)
+    if not receipt_sets:
+        return None
+    common = set.intersection(*receipt_sets)
+    if len(common) != 1:
+        raise GatewayError('RESPONSE_REFUSED')
+    return next(iter(common))
+
+def _receipt_attempt_identity(receipt: str) -> str | None:
+    _, _, tail = receipt.partition(':')
+    return tail if tail.startswith('ATT-') else None
+
+def _validate_runtime_receipt_join(rows: dict[str, dict[str, Any]]) -> None:
+    """Selected runtime facts may not borrow authority across unrelated receipts."""
+    executive = _common_receipt(rows, _EXECUTIVE_RUNTIME_PREDICATES, _EXECUTIVE_OS)
+    _common_receipt(rows, _BINDING_RUNTIME_PREDICATES, _RUNTIME_BINDING)
+    attempt = rows.get('runtime.attempt_ref')
+    if executive is None or attempt is None:
+        return
+    carried = _receipt_attempt_identity(executive)
+    if carried is not None and carried != str(attempt['value']):
+        raise GatewayError('RESPONSE_REFUSED')
+
 def _surface_receipt_matches(surface_ref: str, receipt: str) -> bool:
     return receipt == surface_ref or receipt == f'surface-binding:{surface_ref}'
 
@@ -333,6 +399,8 @@ def _validate_cross_fact_law(state: str, facts: list[dict[str, Any]], reason_cod
         effect = rows.get('runtime.effect_state')
         if selected_runtime and effect is not None and (str(effect['value']).lower() == 'effect_unknown'):
             raise GatewayError('RESPONSE_REFUSED')
+        if selected_runtime:
+            _validate_runtime_receipt_join(rows)
         surface = rows.get('surface.ref')
         if surface is None:
             continue
@@ -354,7 +422,31 @@ def _validate_cross_fact_law(state: str, facts: list[dict[str, Any]], reason_cod
         if not _surface_receipt_matches(str(surface['value']), receipt):
             raise GatewayError('RESPONSE_REFUSED')
 
-def validate_result_data(value: Any) -> dict[str, Any]:
+_SUBJECT_SCOPED_TOOLS = ('get_responsibility', 'get_current_runtime', 'explain_blocker', 'resolve_surface')
+
+def _validate_tool_contract(tool_name: str | None, responsibility_ref: str | None, state: str, facts: list[dict[str, Any]]) -> None:
+    """Enforce the frozen per-tool field set and the exact requested subject."""
+    if tool_name is None:
+        return
+    required = TOOL_REQUIRED_PREDICATES.get(tool_name)
+    if required is None:
+        raise GatewayError('RESPONSE_REFUSED')
+    scoped = tool_name in _SUBJECT_SCOPED_TOOLS
+    subjects = {fact['subject_ref'] for fact in facts}
+    if scoped and responsibility_ref is not None and any((subject != responsibility_ref for subject in subjects)):
+        raise GatewayError('RESPONSE_REFUSED')
+    if state != 'FACTS':
+        return
+    if scoped and len(subjects) != 1:
+        raise GatewayError('RESPONSE_REFUSED')
+    present: dict[str, set[str]] = {}
+    for fact in facts:
+        present.setdefault(fact['subject_ref'], set()).add(fact['predicate'])
+    for predicates in present.values():
+        if not required <= predicates:
+            raise GatewayError('RESPONSE_REFUSED')
+
+def validate_result_data(value: Any, *, tool_name: str | None=None, responsibility_ref: str | None=None) -> dict[str, Any]:
     """Validate the complete typed Steward return without inference or repair."""
     if not isinstance(value, Mapping) or set(value) != {'state', 'facts', 'reason_codes'}:
         raise GatewayError('RESPONSE_REFUSED')
@@ -376,13 +468,14 @@ def validate_result_data(value: Any) -> dict[str, Any]:
     if state == 'DEGRADED' and (not normalized_reasons):
         raise GatewayError('RESPONSE_REFUSED')
     _validate_cross_fact_law(state, normalized_facts, normalized_reasons)
+    _validate_tool_contract(tool_name, responsibility_ref, state, normalized_facts)
     normalized_facts.sort(key=lambda fact: (fact['subject_ref'], _PREDICATE_ORDER[fact['predicate']], canonical_json(fact['value'])))
     return {'state': state, 'facts': normalized_facts, 'reason_codes': normalized_reasons}
 
-def result_envelope(tool_name: str, *, data: Any) -> dict[str, Any]:
+def result_envelope(tool_name: str, *, data: Any, responsibility_ref: str | None=None) -> dict[str, Any]:
     if tool_name not in _TOOLS_BY_NAME:
         raise GatewayError('RESPONSE_REFUSED')
-    normalized = validate_result_data(data)
+    normalized = validate_result_data(data, tool_name=tool_name, responsibility_ref=responsibility_ref)
     envelope = {'schema': RESULT_SCHEMA, 'tool': tool_name, 'ok': True, 'server_version': SERVER_VERSION, 'data': normalized, 'error': None}
     try:
         if len(canonical_json(envelope)) > MAX_RESPONSE_BYTES:
@@ -397,7 +490,7 @@ def error_envelope(tool_name: str, code: str) -> dict[str, Any]:
     return {'schema': RESULT_SCHEMA, 'tool': tool_name if isinstance(tool_name, str) and tool_name in _TOOLS_BY_NAME else 'unknown', 'ok': False, 'server_version': SERVER_VERSION, 'data': None, 'error': {'code': code, 'message': code}}
 
 def schema_snapshot() -> dict[str, Any]:
-    return {'server_name': SERVER_NAME, 'server_identity': SERVER_IDENTITY, 'server_version': SERVER_VERSION, 'result_schema': RESULT_SCHEMA, 'errors': sorted(ERROR_CODES), 'grounding_reason_codes': sorted(GROUNDING_REASON_CODES), 'source_namespaces': {owner: list(namespaces) for owner, namespaces in SOURCE_NAMESPACE_BY_OWNER.items()}, 'public_fact_contracts': [{'predicate': contract.predicate, 'value_kind': contract.value_kind, 'enum_values': list(contract.enum_values), 'minimum': contract.minimum, 'maximum': contract.maximum, 'max_length': contract.max_length, 'reference_namespaces': list(contract.reference_namespaces), 'corroborating_owners': list(contract.corroborating_owners), 'pattern': contract.pattern} for contract in _FACT_CONTRACT_ROWS], 'tool_required_predicates': {tool: sorted(predicates) for tool, predicates in TOOL_REQUIRED_PREDICATES.items()}, 'limits': {'request_bytes': MAX_REQUEST_BYTES, 'response_bytes': MAX_RESPONSE_BYTES, 'facts': MAX_FACTS, 'sources_per_fact': MAX_SOURCES_PER_FACT, 'reason_codes': MAX_REASON_CODES}, 'tools': [{'name': spec.name, 'description': spec.description, 'input_schema': copy.deepcopy(spec.input_schema), 'output_schema': copy.deepcopy(spec.output_schema), 'annotations': copy.deepcopy(spec.annotations), 'read_only': spec.read_only} for spec in TOOL_SPECS]}
+    return {'server_name': SERVER_NAME, 'server_identity': SERVER_IDENTITY, 'server_version': SERVER_VERSION, 'result_schema': RESULT_SCHEMA, 'errors': sorted(ERROR_CODES), 'grounding_reason_codes': sorted(GROUNDING_REASON_CODES), 'source_namespaces': {owner: list(namespaces) for owner, namespaces in SOURCE_NAMESPACE_BY_OWNER.items()}, 'public_fact_contracts': [{'predicate': contract.predicate, 'value_kind': contract.value_kind, 'enum_values': list(contract.enum_values), 'minimum': contract.minimum, 'maximum': contract.maximum, 'max_length': contract.max_length, 'reference_namespaces': list(contract.reference_namespaces), 'corroborating_owners': list(contract.corroborating_owners), 'pattern': contract.pattern, 'enum_aliases': [list(pair) for pair in contract.enum_aliases]} for contract in _FACT_CONTRACT_ROWS], 'tool_required_predicates': {tool: sorted(predicates) for tool, predicates in TOOL_REQUIRED_PREDICATES.items()}, 'limits': {'request_bytes': MAX_REQUEST_BYTES, 'response_bytes': MAX_RESPONSE_BYTES, 'facts': MAX_FACTS, 'sources_per_fact': MAX_SOURCES_PER_FACT, 'reason_codes': MAX_REASON_CODES}, 'tools': [{'name': spec.name, 'description': spec.description, 'input_schema': copy.deepcopy(spec.input_schema), 'output_schema': copy.deepcopy(spec.output_schema), 'annotations': copy.deepcopy(spec.annotations), 'read_only': spec.read_only} for spec in TOOL_SPECS]}
 
 def schema_snapshot_sha256() -> str:
     return hashlib.sha256(canonical_json(schema_snapshot())).hexdigest()
@@ -407,8 +500,8 @@ def tool_schema_snapshot() -> list[dict[str, Any]]:
 
 def tool_schema_digest() -> str:
     return hashlib.sha256(canonical_json(tool_schema_snapshot())).hexdigest()
-SCHEMA_SNAPSHOT_SHA256 = '02f0c15dd88983188d3356bde3937a9d90a9bf0e089903d72dea469122972b28'
-TOOL_SCHEMA_DIGEST = 'a35f600cc5435e74e422a0203c28e026b90ca5f3ab7931092a37383dcfd9b07b'
+SCHEMA_SNAPSHOT_SHA256 = 'e73601400350540e5949f76a8d5f68012e3e3cf09bd980f775ebe7ce2f9afe5c'
+TOOL_SCHEMA_DIGEST = 'beed9214a33ad6a5cbe61c08c392ad134d80e70ff39c13dc6351dc652a5d86ee'
 
 def assert_contract_integrity() -> None:
     if schema_snapshot_sha256() != SCHEMA_SNAPSHOT_SHA256 or tool_schema_digest() != TOOL_SCHEMA_DIGEST:

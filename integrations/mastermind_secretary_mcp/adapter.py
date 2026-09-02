@@ -137,7 +137,11 @@ class SecretaryGroundingGateway:
         except Exception:
             return error_envelope(tool_name, "INTERNAL_ERROR")
         try:
-            return result_envelope(tool_name, data=_grounding_data(grounding))
+            return result_envelope(
+                tool_name,
+                data=_grounding_data(grounding),
+                responsibility_ref=normalized.get("responsibility_ref"),
+            )
         except Exception:
             return error_envelope(tool_name, "RESPONSE_REFUSED")
 

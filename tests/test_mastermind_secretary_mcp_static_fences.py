@@ -78,6 +78,26 @@ def test_sdk_free_static_tool_rows_are_exact_and_read_only():
     assert observed_mcp_tool_schema_digest(observed) == TOOL_SCHEMA_DIGEST
 
 
+def _attention_facts(source: dict, subject: str = "responsibility:alpha") -> list[dict]:
+    """A complete get_attention bundle under the frozen required field set."""
+
+    def row(predicate, value):
+        return {
+            "subject_ref": subject,
+            "predicate": predicate,
+            "value": value,
+            "freshness": "FRESH",
+            "sources": [dict(source)],
+        }
+
+    return [
+        row("attention.ref", "EVENT:alpha"),
+        row("attention.reason", "The exact head awaits review."),
+        row("attention.requested_action", "Review the exact head."),
+        row("attention.state", "SOL_REQUIRED"),
+    ]
+
+
 def test_advertised_output_schema_matches_runtime_state_and_error_law():
     jsonschema = pytest.importorskip("jsonschema")
     validator = jsonschema.Draft202012Validator(TOOL_SPECS[2].output_schema)
@@ -91,7 +111,7 @@ def test_advertised_output_schema_matches_runtime_state_and_error_law():
     }
     stale_fact = {**fresh_fact, "freshness": "STALE"}
     valid_data = (
-        {"state": "FACTS", "facts": [fresh_fact], "reason_codes": []},
+        {"state": "FACTS", "facts": _attention_facts(source), "reason_codes": []},
         {"state": "UNKNOWN", "facts": [], "reason_codes": ["NO_SOURCE"]},
         {
             "state": "DEGRADED",
@@ -229,17 +249,9 @@ def test_advertised_and_runtime_output_contract_accept_same_canonical_sources(so
     jsonschema = pytest.importorskip("jsonschema")
     data = {
         "state": "FACTS",
-        "facts": [
-            {
-                "subject_ref": "responsibility:alpha",
-                "predicate": "attention.state",
-                "value": "SOL_REQUIRED",
-                "freshness": "FRESH",
-                "sources": [
-                    {"owner": "agent_os", "source_ref": source_ref, "observed_at": None}
-                ],
-            }
-        ],
+        "facts": _attention_facts(
+            {"owner": "agent_os", "source_ref": source_ref, "observed_at": None}
+        ),
         "reason_codes": [],
     }
     normalized = validate_result_data(data)
@@ -483,6 +495,12 @@ def test_producer_native_attention_owner_and_vocabulary_are_preserved():
             owner="executive_inbox",
             source_ref=receipt,
         ),
+        _producer_fact(
+            "attention.state",
+            "SOL_REQUIRED",
+            owner="executive_inbox",
+            source_ref=receipt,
+        ),
     ]
 
     assert contract_schemas.result_envelope(
@@ -588,7 +606,7 @@ def test_schema_footprint_and_serialization_are_deterministically_bounded():
 
     assert len(
         contract_schemas.canonical_json(contract_schemas.tool_schema_snapshot())
-    ) < 160_000
+    ) < 176_000
     with pytest.raises(GatewayError, match="INVALID_REQUEST"):
         contract_schemas.canonical_json({"unordered": {"a", "b"}})
 
