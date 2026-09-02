@@ -8,11 +8,14 @@ request surface over one group-reachable, peer-credentialled Unix socket.
 W3C adds only an optional, production-disarmed in-process turn loop. The loop
 recomputes exact-current-worker and target bindings on every pass and delegates
 all history, Wake persistence, retry, and provider effects to existing owners.
+A completed terminal RESULT remains explicitly held until an accepted owner
+supplies a durable post-time dialogue binding; W3C never weakens WP-3 to infer it.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import os
 import stat
 import sys
@@ -22,6 +25,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
+from control_plane.executive_runtime import AttemptStatus
 from control_plane.session_targets import (
     RuntimeBinding,
     SessionTargetRegistry,
@@ -67,6 +71,8 @@ from integrations.slack_agent_dialogue.wake_projection import (
 _TOKEN_MAX_BYTES = 2048
 AGENT_RELAY_SOCKET_PATH = Path("/var/run/mastermind-agent-relay/agent-relay.sock")
 EXECUTIVE_CLIENT_UID = 450
+DEFAULT_MAX_TURN_CANDIDATES_PER_PASS = 32
+MAX_TURN_CANDIDATES_PER_PASS = 256
 _RUNTIME_ERROR_CODES = frozenset(
     {
         "RUNTIME_INVALID",
@@ -85,6 +91,14 @@ class RelayRuntimeError(RuntimeError):
             raise ValueError("unknown Agent Relay runtime error code")
         super().__init__(code)
         self.code = code
+
+
+class ActiveWaiterStateUnavailable(RuntimeError):
+    """Trusted active-waiter evidence is missing, malformed, or unavailable."""
+
+    def __init__(self) -> None:
+        super().__init__("ACTIVE_WAITER_STATE_UNAVAILABLE")
+        self.code = "ACTIVE_WAITER_STATE_UNAVAILABLE"
 
 
 class PrivateRelayAuthorityPolicy:
@@ -168,6 +182,10 @@ class RelayTurnCandidate:
     derived from the accepted WP-3 result and canonical target owners inside
     :class:`AgentRelayTurnRuntime`; callers cannot author parallel identity
     or routing facts.
+
+    A completed Attempt is not silently treated as a current worker. Terminal
+    read-time observation requires a separate accepted post-time binding owner,
+    which is not present in this production-disarmed source slice.
     """
 
     delegation_identity: ExecutiveDelegationIdentity
@@ -188,6 +206,7 @@ class AgentRelayTurnRuntime:
         current_binding_for: Callable[[str], RuntimeBinding | None],
         candidate_source: Callable[[], Iterable[RelayTurnCandidate]],
         poll_interval_seconds: float = 1.0,
+        max_candidates_per_pass: int = DEFAULT_MAX_TURN_CANDIDATES_PER_PASS,
     ) -> None:
         if not hasattr(observer, "reconcile_once"):
             raise TypeError("observer must expose reconcile_once")
@@ -203,12 +222,24 @@ class AgentRelayTurnRuntime:
             or poll_interval_seconds <= 0
         ):
             raise ValueError("poll_interval_seconds must be positive")
+        if (
+            isinstance(max_candidates_per_pass, bool)
+            or not isinstance(max_candidates_per_pass, int)
+            or not 1
+            <= max_candidates_per_pass
+            <= MAX_TURN_CANDIDATES_PER_PASS
+        ):
+            raise ValueError(
+                "max_candidates_per_pass must be an integer between 1 and "
+                f"{MAX_TURN_CANDIDATES_PER_PASS}"
+            )
 
         self.observer = observer
         self.registry = registry
         self._current_binding_for = current_binding_for
         self._candidate_source = candidate_source
         self._poll_interval_seconds = float(poll_interval_seconds)
+        self._max_candidates_per_pass = max_candidates_per_pass
 
     @staticmethod
     def _receipt(
@@ -240,9 +271,39 @@ class AgentRelayTurnRuntime:
         except (AttributeError, TypeError, ValueError):
             raise TurnRoutingFactsError("DIALOGUE_BINDING_MISMATCH") from None
 
-    async def _reconcile_candidate(
+    def _collect_candidates(self) -> tuple[object, ...] | ObservationReceipt:
+        """Consume at most max+1 synchronous items before any candidate effect."""
+
+        try:
+            iterator = iter(self._candidate_source())
+        except Exception:
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TURN_CANDIDATE_SOURCE_UNAVAILABLE",
+            )
+
+        candidates: list[object] = []
+        for _index in range(self._max_candidates_per_pass + 1):
+            try:
+                candidates.append(next(iterator))
+            except StopIteration:
+                break
+            except Exception:
+                return self._receipt(
+                    ObservationOutcome.REFUSED,
+                    "TURN_CANDIDATE_SOURCE_UNAVAILABLE",
+                )
+
+        if len(candidates) > self._max_candidates_per_pass:
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TURN_CANDIDATE_LIMIT_EXCEEDED",
+            )
+        return tuple(candidates)
+
+    async def _reconcile_candidate_inner(
         self,
-        candidate: RelayTurnCandidate,
+        candidate: object,
     ) -> ObservationReceipt:
         if not isinstance(candidate, RelayTurnCandidate):
             return self._receipt(
@@ -250,11 +311,21 @@ class AgentRelayTurnRuntime:
                 "TURN_CANDIDATE_INVALID",
             )
 
+        current_worker = candidate.current_worker
+        if (
+            isinstance(current_worker, CurrentWorkerDialogueSnapshot)
+            and current_worker.attempt_status is AttemptStatus.COMPLETED
+        ):
+            return self._receipt(
+                ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
+            )
+
         resolution = resolve_company_dialogue_binding(
             delegation_identity=candidate.delegation_identity,
             dialogue_parent=candidate.dialogue_parent,
             thread_ts=candidate.thread_ts,
-            current=candidate.current_worker,
+            current=current_worker,
             actor=candidate.actor,
         )
         if resolution.state is not BindingState.RESOLVED or resolution.binding is None:
@@ -264,12 +335,12 @@ class AgentRelayTurnRuntime:
                 f"{resolution.state.value}/{resolution.reason.value}",
             )
 
-        assert candidate.current_worker is not None
+        assert current_worker is not None
         try:
             context = self._context_from_binding(resolution.binding)
             routing = resolve_turn_routing_facts(
                 dialogue_parent=candidate.dialogue_parent,
-                current_worker=candidate.current_worker,
+                current_worker=current_worker,
                 binding_resolution=resolution,
                 registry=self.registry,
                 current_binding_for=self._current_binding_for,
@@ -287,31 +358,56 @@ class AgentRelayTurnRuntime:
                 context=context,
                 routing=routing,
             )
+        except ActiveWaiterStateUnavailable:
+            return self._receipt(
+                ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                "ACTIVE_WAITER_STATE_UNAVAILABLE",
+            )
         except Exception:
             return self._receipt(
                 ObservationOutcome.REFUSED,
                 "TURN_OBSERVER_UNAVAILABLE",
             )
 
-    async def reconcile_once(self) -> tuple[ObservationReceipt, ...]:
+    async def _reconcile_candidate(
+        self,
+        candidate: object,
+    ) -> ObservationReceipt:
         try:
-            candidates = tuple(self._candidate_source())
+            return await self._reconcile_candidate_inner(candidate)
+        except asyncio.CancelledError:
+            raise
+        except ActiveWaiterStateUnavailable:
+            return self._receipt(
+                ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                "ACTIVE_WAITER_STATE_UNAVAILABLE",
+            )
         except Exception:
-            return (
-                self._receipt(
-                    ObservationOutcome.REFUSED,
-                    "TURN_CANDIDATE_SOURCE_UNAVAILABLE",
-                ),
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TURN_CANDIDATE_PROCESSING_FAILED",
             )
 
+    async def reconcile_once(self) -> tuple[ObservationReceipt, ...]:
+        collected = self._collect_candidates()
+        if isinstance(collected, ObservationReceipt):
+            return (collected,)
+
         receipts: list[ObservationReceipt] = []
-        for candidate in candidates:
+        for candidate in collected:
             receipts.append(await self._reconcile_candidate(candidate))
         return tuple(receipts)
 
     async def serve_forever(self) -> None:
         while True:
-            await self.reconcile_once()
+            try:
+                await self.reconcile_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # The optional data-plane overlay cannot terminate the accepted
+                # AF_UNIX dialogue service. The next bounded pass recomputes.
+                pass
             await asyncio.sleep(self._poll_interval_seconds)
 
 
@@ -413,6 +509,7 @@ def build_turn_runtime(
     has_active_waiter: Callable[[str, str], bool] | None = None,
     emitted_at: Callable[[], str] = utc_now_iso,
     poll_interval_seconds: float = 1.0,
+    max_candidates_per_pass: int = DEFAULT_MAX_TURN_CANDIDATES_PER_PASS,
 ) -> AgentRelayTurnRuntime:
     """Compose the disarmed W3C loop around the already-built relay service."""
 
@@ -420,9 +517,22 @@ def build_turn_runtime(
         raise TypeError("service must be AgentDialogueService")
     if service.engine_v2 is None or service.engine.client is not service.engine_v2.client:
         raise RelayRuntimeError("RUNTIME_INVALID")
+    if has_active_waiter is not None and not callable(has_active_waiter):
+        raise RelayRuntimeError("RUNTIME_INVALID")
 
     def current_for_route(route: WakeRoute) -> RuntimeBinding | None:
         return current_binding_for(route.target_seat)
+
+    def exact_active_waiter(source_ref: str, target_seat: str) -> bool:
+        if has_active_waiter is None:
+            raise ActiveWaiterStateUnavailable()
+        try:
+            observed = has_active_waiter(source_ref, target_seat)
+        except Exception:
+            raise ActiveWaiterStateUnavailable() from None
+        if type(observed) is not bool:
+            raise ActiveWaiterStateUnavailable()
+        return observed
 
     observer = compose_persisted_turn_observer(
         policy=service.engine.policy,
@@ -433,7 +543,7 @@ def build_turn_runtime(
         current_binding_for=current_for_route,
         retry_policy=retry_policy,
         binding_for=current_binding_for,
-        has_active_waiter=has_active_waiter,
+        has_active_waiter=exact_active_waiter,
         emitted_at=emitted_at,
     )
     return AgentRelayTurnRuntime(
@@ -442,7 +552,19 @@ def build_turn_runtime(
         current_binding_for=current_binding_for,
         candidate_source=candidate_source,
         poll_interval_seconds=poll_interval_seconds,
+        max_candidates_per_pass=max_candidates_per_pass,
     )
+
+
+async def _contain_turn_overlay(awaitable: object) -> None:
+    """Contain an optional W3C overlay failure without stopping Agent Relay."""
+
+    try:
+        await awaitable  # type: ignore[misc]
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return
 
 
 async def run_relay(
@@ -450,7 +572,7 @@ async def run_relay(
     *,
     turn_runtime_factory: Callable[[AgentDialogueService], Any] | None = None,
 ) -> None:
-    """Run the relay, plus an explicitly injected W3C loop, until cancelled."""
+    """Run Agent Relay; an injected W3C overlay can never terminate it."""
 
     service = build_service(config)
     if turn_runtime_factory is None:
@@ -460,21 +582,19 @@ async def run_relay(
     try:
         turn_runtime = turn_runtime_factory(service)
         turn_serve = turn_runtime.serve_forever
+        if not callable(turn_serve):
+            raise TypeError("turn runtime serve_forever is not callable")
+        turn_awaitable = turn_serve()
+        if not inspect.isawaitable(turn_awaitable):
+            raise TypeError("turn runtime serve_forever did not return an awaitable")
     except Exception:
         raise RelayRuntimeError("RUNTIME_INVALID") from None
-    if not callable(turn_serve):
-        raise RelayRuntimeError("RUNTIME_INVALID")
 
     service_task = asyncio.create_task(service.serve_forever())
-    turn_task = asyncio.create_task(turn_serve())
+    turn_task = asyncio.create_task(_contain_turn_overlay(turn_awaitable))
     tasks = (service_task, turn_task)
     try:
-        done, _pending = await asyncio.wait(
-            tasks,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for task in done:
-            await task
+        await service_task
     finally:
         for task in tasks:
             if not task.done():
@@ -520,7 +640,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 __all__ = [
     "AGENT_RELAY_SOCKET_PATH",
+    "DEFAULT_MAX_TURN_CANDIDATES_PER_PASS",
     "EXECUTIVE_CLIENT_UID",
+    "MAX_TURN_CANDIDATES_PER_PASS",
+    "ActiveWaiterStateUnavailable",
     "AgentRelayTurnRuntime",
     "ObservationOutcome",
     "ObservationReceipt",
