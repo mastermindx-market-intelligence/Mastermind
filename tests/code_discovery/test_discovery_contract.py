@@ -8,12 +8,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
+from dataclasses import FrozenInstanceError
 
 import pytest
 
 from experiments.code_discovery.discovery_contract import (
+    CodeMatch,
     DISCOVERY_TOOL_SCHEMAS,
     DiscoveryRequestError,
+    RepositoryIndexStatus,
+    SearchResult,
     discovery_tool_schema_digest,
     validate_discovery_request,
 )
@@ -75,6 +80,48 @@ def test_schema_digest_is_the_hand_checked_canonical_json_sha256() -> None:
     ).hexdigest()
 
     assert discovery_tool_schema_digest() == expected
+
+
+def test_result_types_are_immutable_and_keep_provenance_attached() -> None:
+    """A result cannot shed exact source identity through mutable containers."""
+
+    observed_at = datetime(2026, 8, 30, 12, tzinfo=UTC)
+    status = RepositoryIndexStatus(
+        repository_id="mastermind",
+        ref_label="master",
+        indexed_commit_sha="a" * 40,
+        source_tree_digest="b" * 64,
+        shard_namespace="z0-identity",
+        health="healthy",
+        coverage="covered",
+        generated_at=observed_at,
+        observed_at=observed_at,
+        freshness_seconds=0.0,
+    )
+    match = CodeMatch(
+        repository_id="mastermind",
+        ref_label="master",
+        indexed_commit_sha="a" * 40,
+        path="control_plane/routes.py",
+        line_start=12,
+        line_end=12,
+        preview="def route():",
+        context_before=("from .types import Route",),
+        context_after=(),
+        engine_score=0.75,
+    )
+    result = SearchResult(
+        matches=(match,),
+        repository_statuses=(status,),
+        query_completed=True,
+        truncated=False,
+        negative_result_authority="unavailable",
+        negative_result_reasons=("matches_present",),
+    )
+
+    assert result.matches[0].indexed_commit_sha == status.indexed_commit_sha
+    with pytest.raises(FrozenInstanceError):
+        status.health = "stale"  # type: ignore[misc]
 
 
 def test_search_request_preserves_only_the_closed_safe_contract() -> None:

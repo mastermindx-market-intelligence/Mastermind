@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from types import MappingProxyType
 from typing import Final
 
@@ -115,6 +116,50 @@ class DiscoveryRequest:
 
     tool: str
     arguments: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class RepositoryIndexStatus:
+    """Observed health and exact source identity for one indexed repository/ref."""
+
+    repository_id: str
+    ref_label: str
+    indexed_commit_sha: str | None
+    source_tree_digest: str | None
+    shard_namespace: str | None
+    health: str
+    coverage: str
+    generated_at: datetime
+    observed_at: datetime
+    freshness_seconds: float | None
+
+
+@dataclass(frozen=True)
+class CodeMatch:
+    """A bounded source match with its indexed repository/ref provenance."""
+
+    repository_id: str
+    ref_label: str
+    indexed_commit_sha: str
+    path: str
+    line_start: int
+    line_end: int
+    preview: str
+    context_before: tuple[str, ...]
+    context_after: tuple[str, ...]
+    engine_score: float | None
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    """A complete discovery response whose absence semantics stay explicit."""
+
+    matches: tuple[CodeMatch, ...]
+    repository_statuses: tuple[RepositoryIndexStatus, ...]
+    query_completed: bool
+    truncated: bool
+    negative_result_authority: str
+    negative_result_reasons: tuple[str, ...]
 
 
 def discovery_tool_schema_digest() -> str:
