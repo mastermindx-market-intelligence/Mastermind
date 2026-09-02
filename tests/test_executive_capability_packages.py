@@ -2092,3 +2092,448 @@ def test_finding2_required_directory_mutation_refusal_balances_descriptors(tmp_p
         verify_capability_package_source(tmp_path, generation)
     assert counts["open"] > 0
     assert counts["open"] == counts["close"]
+
+
+# ===========================================================================
+# ROUND-2 HOSTILE RED COVERAGE for Sol implementation-grade clarification
+# 5505160491 (five items, extending accepted review 5085454178).
+# ===========================================================================
+#
+# Additive-only against the pre-existing (round-1) test file. Each block is
+# labeled with the clarification item it exercises. As with the round-1
+# hostile block, the RED-head pytest tail is the authority on which cases are
+# newly failing before the item-2 repair; some cases fail via an unexpected
+# exception type (e.g. a missing keyword argument, a naked UnicodeEncodeError)
+# rather than a plain assertion failure -- that is still valid RED evidence.
+
+
+# ---------------------------------------------------------------------------
+# ITEM 1: exact-type revalidation boundary. Python's dataclass-generated
+# __eq__ returns NotImplemented when `other.__class__ is not self.__class__`,
+# which makes the interpreter fall back to `other.__eq__(self)` -- so a
+# subclass overriding __eq__ to always return True can make an otherwise
+# tampered object compare equal to a genuinely rebuilt one. Closing this
+# requires refusing any non-exact type before ever reaching an equality
+# check, not merely rebuilding-and-comparing.
+# ---------------------------------------------------------------------------
+
+
+class _SpoofedGeneration(CapabilityPackageGeneration):
+    def __eq__(self, other):
+        return True
+
+    def __hash__(self):
+        return 0
+
+
+class _SpoofedFile(CapabilityPackageFile):
+    def __eq__(self, other):
+        return True
+
+    def __hash__(self):
+        return 0
+
+
+def _generation_kwargs(generation: CapabilityPackageGeneration) -> dict:
+    return {f.name: getattr(generation, f.name) for f in dataclasses.fields(generation)}
+
+
+def _two_skill_generation_and_files(tmp_path: Path, *, package_root: str = "plugins/example3"):
+    """A genuinely-built, self-consistent generation with TWO skills.
+
+    Used specifically to prove the __eq__-fallback bypass: reordering
+    `.skills` (a pure tuple-order change) changes nothing about any
+    individual digest -- `_generation_to_raw` folds the tuple into a
+    capability_id-keyed *mapping*, and the builder always re-derives the
+    canonical (sorted-by-capability_id) order on rebuild -- so a naive
+    zeroed-digest tamper is masked by the pre-existing digest-mismatch
+    exception path (kept below as regression coverage), while a pure
+    reorder survives rebuild untouched and isolates the real __eq__ gap.
+    """
+    contents = {
+        ".codex-plugin/plugin.json": b'{"name": "example3"}',
+        "references/boundary.md": b"shared reference bytes v3",
+        "skills/receive/SKILL.md": b"skill entrypoint bytes receive",
+        "skills/finish/SKILL.md": b"skill entrypoint bytes finish",
+    }
+    _write_tree(tmp_path, package_root, contents)
+    manifest = _row_from_disk(tmp_path, package_root, ".codex-plugin/plugin.json")
+    boundary = _row_from_disk(tmp_path, package_root, "references/boundary.md")
+    receive_md = _row_from_disk(tmp_path, package_root, "skills/receive/SKILL.md")
+    finish_md = _row_from_disk(tmp_path, package_root, "skills/finish/SKILL.md")
+    files = tuple(sorted((manifest, boundary, receive_md, finish_md), key=lambda f: f.relative_path))
+
+    capability_id = "example.pkg3"
+    generation = _canonical_generation(
+        capability_id=capability_id,
+        package_root=package_root,
+        manifest_path=".codex-plugin/plugin.json",
+        files=files,
+        skills_spec=[
+            {
+                "skill_capability_id": "example.receive.v1",
+                "runtime_name": "receive",
+                "entrypoint_path": "skills/receive/SKILL.md",
+                "closure_paths": ["skills/receive/SKILL.md"],
+            },
+            {
+                "skill_capability_id": "example.finish.v1",
+                "runtime_name": "finish",
+                "entrypoint_path": "skills/finish/SKILL.md",
+                "closure_paths": ["skills/finish/SKILL.md"],
+            },
+        ],
+        generation_label="example.pkg3.g1",
+        repository="mastermindx-market-intelligence/Mastermind",
+        source_commit="5" * 40,
+        source_tree_sha="6" * 40,
+    )
+    assert len(generation.skills) == 2
+    return generation
+
+
+def test_item1_subclassed_generation_with_spoofed_eq_refuses(tmp_path):
+    generation = _two_skill_generation_and_files(tmp_path)
+
+    # A pure tuple-order change to `.skills`: every individual digest
+    # (skill-content, grant, generation) stays byte-for-byte identical,
+    # since `_generation_to_raw` folds the tuple into a capability_id-keyed
+    # mapping and the builder always re-derives sorted order on rebuild.
+    # This survives rebuild untouched -- unlike a digest-value tamper,
+    # which is already caught by the pre-existing rebuild-exception path
+    # regardless of any __eq__ trick (see the zeroed-digest sanity check
+    # in test_item1_zeroed_digest_tamper_is_already_caught_by_rebuild).
+    reordered = dataclasses.replace(generation, skills=tuple(reversed(generation.skills)))
+    assert reordered != generation  # a plain (non-spoofed) comparison correctly differs
+
+    kwargs = _generation_kwargs(reordered)
+    spoofed = _SpoofedGeneration(**kwargs)
+    # Sanity: the spoof really does lie about equality to the genuine rebuild.
+    assert spoofed == generation
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, spoofed)
+
+
+def test_item1_zeroed_digest_tamper_is_already_caught_by_rebuild(tmp_path):
+    """Regression coverage, not discriminating on its own (see round-1's own
+    header note for the same pattern): a subclass wrapping a zeroed digest
+    is refused because the REBUILD's own digest recomputation fails first,
+    before the (spoofable) equality check is ever reached -- this predates
+    and is unaffected by the item-1 repair. The reordering test above is
+    what isolates the actual __eq__-fallback gap."""
+    generation = _real_generation_and_files(tmp_path)
+    kwargs = _generation_kwargs(generation)
+    kwargs["package_generation_digest"] = "0" * 64  # tampered
+    spoofed = _SpoofedGeneration(**kwargs)
+    assert spoofed == generation
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, spoofed)
+
+
+def test_item1_subclassed_file_row_in_files_refuses(tmp_path):
+    """Regression coverage, not discriminating on its own: every field of a
+    CapabilityPackageFile row is covered by the content-digest projection,
+    so any value-level tamper is already caught by the rebuild's own digest
+    recomputation before the (spoofable) equality check is reached. This
+    still closes the exact-type gap defensively (a subclass with identical
+    values is refused too, per the exact-type check added in the repair)."""
+    generation = _real_generation_and_files(tmp_path)
+    original = generation.files[0]
+    spoofed_row = _SpoofedFile(
+        relative_path=original.relative_path,
+        sha256="9" * 64,  # tampered but "believed" via the spoofed __eq__
+        byte_length=original.byte_length,
+        executable=original.executable,
+    )
+    files = list(generation.files)
+    files[0] = spoofed_row
+    tampered = dataclasses.replace(generation, files=tuple(files))
+    assert tampered.files[0] == generation.files[0]  # sanity: spoof lies here too
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, tampered)
+
+
+def test_item1_content_digest_refuses_subclassed_row():
+    class _OtherSpoofedFile(CapabilityPackageFile):
+        pass
+
+    row = _OtherSpoofedFile("references/boundary.md", "a" * 64, 7, False)
+    other = CapabilityPackageFile("skills/receive/SKILL.md", "b" * 64, 11, False)
+    with pytest.raises(CapabilityPackageError):
+        capability_package_content_digest((row, other))
+
+
+def test_item1_content_digest_refuses_bad_hex_row():
+    bad_row = CapabilityPackageFile("references/boundary.md", "not-a-valid-sha-value!!" + "0" * 41, 7, False)
+    good_row = CapabilityPackageFile("skills/receive/SKILL.md", "b" * 64, 11, False)
+    with pytest.raises(CapabilityPackageError):
+        capability_package_content_digest((bad_row, good_row))
+
+
+def test_item1_content_digest_refuses_bad_path_row():
+    bad_row = CapabilityPackageFile("/etc/passwd", "a" * 64, 7, False)
+    good_row = CapabilityPackageFile("skills/receive/SKILL.md", "b" * 64, 11, False)
+    with pytest.raises(CapabilityPackageError):
+        capability_package_content_digest((bad_row, good_row))
+
+
+def test_item1_effective_skill_digest_refuses_subclassed_closure_row():
+    class _OtherSpoofedFile(CapabilityPackageFile):
+        pass
+
+    entrypoint = _OtherSpoofedFile("skills/receive-commission/SKILL.md", "d" * 64, 100, False)
+    with pytest.raises(CapabilityPackageError):
+        effective_skill_content_digest(
+            runtime_name="receive-commission",
+            entrypoint_path="skills/receive-commission/SKILL.md",
+            closure_files=(entrypoint,),
+        )
+
+
+# ---------------------------------------------------------------------------
+# ITEM 2: streaming bounded census. `os.listdir(dir_fd)` materializes the
+# entire directory into a Python list before any per-entry budget check can
+# run; a streaming `os.scandir(dir_fd)` walk must stop consuming entries the
+# moment the budget is exceeded, never after. A directory's *name* being
+# swapped for a fresh same-named directory of a different inode is also
+# invisible to any purely name-based census (the name set is unchanged);
+# only a parent-entry-vs-retained-descriptor identity check can see it.
+# ---------------------------------------------------------------------------
+
+
+def test_item2_census_never_calls_listdir(tmp_path, monkeypatch):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    def _forbidden_listdir(*args, **kwargs):
+        raise AssertionError("package census must stream via os.scandir, not os.listdir")
+
+    monkeypatch.setattr(scf_pkg.os, "listdir", _forbidden_listdir)
+
+    generation, _ = _standard_generation(tmp_path)
+    receipt = verify_capability_package_source(tmp_path, generation)
+    assert receipt.file_count == 3
+
+
+def test_item2_overfull_directory_census_is_bounded(tmp_path, monkeypatch):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    generation, _ = _standard_generation(tmp_path)
+    receive_dir = tmp_path / "plugins" / "example" / "skills" / "receive"
+    for i in range(200):
+        (receive_dir / f"extra{i:04d}.txt").write_bytes(b"x")
+
+    observed = {"n": 0}
+    real_listdir = scf_pkg.os.listdir
+    real_scandir = scf_pkg.os.scandir
+
+    def counting_listdir(*args, **kwargs):
+        names = real_listdir(*args, **kwargs)
+        observed["n"] += len(names)
+        return names
+
+    def counting_scandir(*args, **kwargs):
+        it = real_scandir(*args, **kwargs)
+
+        def gen():
+            try:
+                for entry in it:
+                    observed["n"] += 1
+                    yield entry
+            finally:
+                it.close()
+
+        return gen()
+
+    monkeypatch.setattr(scf_pkg.os, "listdir", counting_listdir)
+    monkeypatch.setattr(scf_pkg.os, "scandir", counting_scandir)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+    # A directory holding far more than the traversal budget must never be
+    # observed (via either listdir's all-at-once materialization or
+    # scandir's per-entry yield) beyond a small slack past the budget --
+    # whichever enumeration primitive is in use, the scan must stop early.
+    assert observed["n"] <= scf_pkg.MAX_PACKAGE_TRAVERSAL_ENTRIES + 5
+
+
+def test_item2_directory_swap_refuses_even_when_timestamp_drift_signal_unavailable(tmp_path, monkeypatch, tmp_path_factory):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    # Neutralize the pre-existing (round-1) "did any retained descriptor's
+    # own fstat drift over time" signal by excluding mtime/ctime from the
+    # identity tuple, simulating a coarse-timestamp filesystem where that
+    # signal is unavailable. This isolates the NEW, independent check: a
+    # fresh lookup of a declared directory's name through its *parent* must
+    # still see the same inode the verifier is holding open, regardless of
+    # whether any timestamp happened to drift.
+    def _identity_without_timestamps(st):
+        return (st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_uid, st.st_gid, st.st_size)
+
+    monkeypatch.setattr(scf_pkg, "_stat_identity", _identity_without_timestamps)
+
+    generation, _ = _standard_generation(tmp_path)
+
+    # The "detached" original directory must land OUTSIDE `tmp_path`
+    # (source_root) entirely: source_root's own retained descriptor is
+    # ALSO in the all_retained set, and adding a new top-level sibling
+    # entry under it would bump ITS OWN nlink/size, incidentally catching
+    # the swap for an unrelated reason even with timestamps neutralized.
+    elsewhere = tmp_path_factory.mktemp("item2-detached")
+
+    def _swap():
+        receive_dir = tmp_path / "plugins" / "example" / "skills" / "receive"
+        detached = elsewhere / "detached-original"
+        receive_dir.rename(detached)  # move the OLD dir (with content) fully outside the scanned tree
+        receive_dir.mkdir()  # brand-new inode, identical name/path
+        (receive_dir / "SKILL.md").write_bytes(b"skill entrypoint bytes")  # identical declared bytes
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_swap)
+
+
+# ---------------------------------------------------------------------------
+# ITEM 3: census-to-open identity binding. A regular file removed and
+# replaced by a *different* regular file with byte-for-byte identical
+# declared content (same size, same bytes, same executable bit) hashes
+# identically and passes every content-based check; only comparing the
+# census-time lstat identity to the open-time fstat identity can see it.
+# ---------------------------------------------------------------------------
+
+
+def test_item3_regular_file_swapped_for_different_regular_file_same_bytes_refuses(tmp_path, monkeypatch):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    # As in the item-2 directory-swap test: neutralize the pre-existing
+    # "did any retained descriptor's own fstat drift" signal (excluding
+    # mtime/ctime) so this test isolates the NEW, independent check --
+    # census-time lstat identity vs. open-time fstat identity for the FILE
+    # itself -- rather than incidentally relying on the PARENT directory's
+    # mtime bumping when the file underneath it is unlinked and recreated.
+    def _identity_without_timestamps(st):
+        return (st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_uid, st.st_gid, st.st_size)
+
+    monkeypatch.setattr(scf_pkg, "_stat_identity", _identity_without_timestamps)
+
+    generation, _ = _standard_generation(tmp_path)
+    target = "references/boundary.md"
+    victim = tmp_path / "plugins" / "example" / target
+    original_bytes = victim.read_bytes()
+
+    def _swap(path):
+        if path == target:
+            victim.unlink()
+            # A brand-new inode with byte-for-byte identical declared
+            # content: content/size/executable-bit hashing alone is blind
+            # to this swap.
+            victim.write_bytes(original_bytes)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_file_open=_swap)
+
+
+# ---------------------------------------------------------------------------
+# ITEM 4: bounded read. The hash loop must track cumulative bytes read and
+# refuse immediately once they exceed the declared length, rather than
+# reading to EOF and only catching a size change via the final fstat.
+# ---------------------------------------------------------------------------
+
+
+def _single_file_generation(tmp_path: Path, *, package_root: str, contents: bytes) -> CapabilityPackageGeneration:
+    _write_tree(tmp_path, package_root, {"skills/receive/SKILL.md": contents})
+    skill_md = _row_from_disk(tmp_path, package_root, "skills/receive/SKILL.md")
+    return _canonical_generation(
+        capability_id="example.pkg1",
+        package_root=package_root,
+        manifest_path="skills/receive/SKILL.md",
+        files=(skill_md,),
+        skills_spec=[
+            {
+                "skill_capability_id": "example.receive.v1",
+                "runtime_name": "receive",
+                "entrypoint_path": "skills/receive/SKILL.md",
+                "closure_paths": ["skills/receive/SKILL.md"],
+            }
+        ],
+    )
+
+
+def test_item4_mid_read_growth_refuses_with_bounded_reads(tmp_path, monkeypatch):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    monkeypatch.setattr(scf_pkg, "_READ_CHUNK_BYTES", 4)
+    package_root = "plugins/example"
+    generation = _single_file_generation(tmp_path, package_root=package_root, contents=b"abcd")
+
+    grown = {"done": False}
+
+    def _grow(path):
+        if not grown["done"]:
+            grown["done"] = True
+            p = tmp_path / package_root / "skills/receive/SKILL.md"
+            with open(p, "ab") as f:
+                f.write(b"0" * 400)  # far beyond the declared 4-byte length
+
+    real_read = os.read
+    read_calls = {"n": 0}
+
+    def counting_read(fd, n, *a, **kw):
+        read_calls["n"] += 1
+        return real_read(fd, n, *a, **kw)
+
+    monkeypatch.setattr(scf_pkg.os, "read", counting_read)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _between_read_chunks=_grow)
+
+    # A growing file must be refused as soon as the cumulative read count
+    # exceeds the declared length -- not after draining the whole (now much
+    # larger) file to EOF.
+    assert read_calls["n"] <= 3
+
+
+def test_item4_truncated_mid_read_refuses(tmp_path, monkeypatch):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    monkeypatch.setattr(scf_pkg, "_READ_CHUNK_BYTES", 4)
+    package_root = "plugins/example"
+    generation = _single_file_generation(tmp_path, package_root=package_root, contents=b"abcdEXTRA")
+
+    truncated = {"done": False}
+
+    def _truncate(path):
+        if not truncated["done"]:
+            truncated["done"] = True
+            p = tmp_path / package_root / "skills/receive/SKILL.md"
+            with open(p, "r+b") as f:
+                f.truncate(4)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _between_read_chunks=_truncate)
+
+
+# ---------------------------------------------------------------------------
+# ITEM 5: grammar/edge hygiene residue. A lone surrogate cannot be encoded
+# to UTF-8 at all; an unwrapped `.encode("utf-8")` raises a naked
+# UnicodeEncodeError instead of the bounded CapabilityPackageError
+# vocabulary. A hostile `source_root` (embedded NUL, or a non-str type)
+# must be refused the same bounded way rather than leaking a raw
+# TypeError/ValueError from Path()/os.lstat()/os.open().
+# ---------------------------------------------------------------------------
+
+
+def test_item5_surrogate_path_component_refuses():
+    with pytest.raises(CapabilityPackageError):
+        _validate_relative_path("skills/\ud800/SKILL.md", "field")
+
+
+def test_item5_hostile_source_root_nul_byte_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source("bad\x00root", generation)
+
+
+def test_item5_hostile_source_root_non_str_type_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(12345, generation)
