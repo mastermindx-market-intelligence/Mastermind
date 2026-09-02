@@ -602,10 +602,16 @@ class _ScriptedCanaryClient:
     Records every RPC call and can substitute scripted sequential
     ``skills/list`` responses (mirroring
     ``tests/test_codex_operator_adapter.py::_RecordingSkillsClient``), a
-    scripted per-turn model reply keyed by call order, and a synthetic
+    scripted per-turn model reply keyed by call order, a synthetic
     transport failure on a chosen ``turn/start`` call -- used only to prove
-    the runner's ``EFFECT_UNKNOWN`` no-retry law. Every other RPC always
-    reaches the real fake App Server subprocess.
+    the runner's ``EFFECT_UNKNOWN`` no-retry law -- and a synthetic
+    ``skills/changed`` notification injected right after a chosen
+    ``turn/start`` call accepts, appended directly onto the wrapped real
+    client's own ``notifications`` queue (the same list
+    ``drain_notifications``/``wait_notification`` read) so it is ingested
+    exactly like a real out-of-band notification during that turn's own
+    event collection -- used to prove ``SKILLS_CHANGED_DURING_CANARY``.
+    Every other RPC always reaches the real fake App Server subprocess.
     """
 
     def __init__(
@@ -616,6 +622,7 @@ class _ScriptedCanaryClient:
         replies=None,
         fail_turn_start_at=None,
         config_read_mutator=None,
+        inject_skills_changed_after_turn_starts=None,
     ) -> None:
         self._inner = inner
         self._skills_list_script = list(skills_list_script or [])
@@ -624,6 +631,7 @@ class _ScriptedCanaryClient:
         self._fail_turn_start_at = fail_turn_start_at
         self._turn_start_calls = 0
         self._config_read_mutator = config_read_mutator
+        self._inject_skills_changed_after_turn_starts = inject_skills_changed_after_turn_starts
         self.calls: list[tuple[str, dict]] = []
 
     def __getattr__(self, name):
@@ -638,6 +646,11 @@ class _ScriptedCanaryClient:
             if self._fail_turn_start_at == self._turn_start_calls:
                 raise ConnectionError("synthetic transport failure")
         result = self._inner.request(method, params, timeout=timeout)
+        if (
+            method == "turn/start"
+            and self._inject_skills_changed_after_turn_starts == self._turn_start_calls
+        ):
+            self._inner.notifications.append({"method": "skills/changed", "params": {}})
         if method == "config/read" and self._config_read_mutator is not None:
             result = self._config_read_mutator(result)
         if method == "turn/start" and self._replies:
@@ -673,6 +686,7 @@ def _canary_client_factory(
     fail_turn_start_at=None,
     on_create=None,
     config_read_mutator=None,
+    inject_skills_changed_after_turn_starts=None,
 ):
     def factory(argv, env, cwd):
         _asserts_never_the_real_codex_binary(argv)
@@ -685,6 +699,7 @@ def _canary_client_factory(
             replies=replies,
             fail_turn_start_at=fail_turn_start_at,
             config_read_mutator=config_read_mutator,
+            inject_skills_changed_after_turn_starts=inject_skills_changed_after_turn_starts,
         )
         _CREATED_CANARY_CLIENTS.append(client)
         return client
@@ -1013,6 +1028,202 @@ def test_run_canary_ambient_skill_surface_stops(tmp_path) -> None:
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
     assert excinfo.value.code == "AMBIENT_SKILL_SURFACE_NOT_EMPTY"
+
+
+# ---------------------------------------------------------------------------
+# CAP-S1 gap fill: dedicated stop-code coverage for the three
+# ``_mapped_stop_for_adapter_error`` mappings that (before this commission)
+# had no test of their own -- only AMBIENT_SKILL_SURFACE_NOT_EMPTY did.
+# ---------------------------------------------------------------------------
+
+
+def _expected_skills_root(scratch: Path, operation_id: str) -> str:
+    """The exact ``skills_root`` ``stage_skill_projection`` will compute.
+
+    Deterministic from ``scratch_root``, ``operation_id``, and the real
+    reviewed package's own ``package_root`` -- reproduced here independently
+    (not imported from the staging module) so a scripted ``skills/list``
+    response can name syntactically-correct per-skill paths before the
+    projection is ever staged.
+    """
+
+    generation = _load_real_generation()
+    process_generation_id = f"{operation_id}-gen1"
+    return str(
+        scratch
+        / "cap-s1-attempt-root"
+        / f"skill-projection-{process_generation_id}"
+        / generation.package_root
+        / "skills"
+    )
+
+
+def _required_runtime_names() -> tuple[str, ...]:
+    return tuple(sorted(grant.runtime_name for grant in _load_real_generation().skills))
+
+
+def test_run_canary_extra_enabled_skill_after_root_add_is_causality_failed(tmp_path) -> None:
+    """An extra, correctly-pathed skill row after the root add refuses.
+
+    ``_skill_rows_to_observed`` compares the enabled name *set* (and count)
+    against the profile's required runtime names -- a fifth, unrequested but
+    otherwise well-formed row makes the sets unequal and must map to
+    ``SKILL_SET_CAUSALITY_FAILED``, never silently accepted as "close
+    enough".
+    """
+
+    scratch = tmp_path / "scratch-causality-extra"
+    scratch.mkdir()
+    workspace_cwd = str((scratch / "synthetic-workspace").resolve())
+    operation_id = "cap-s1-canary-causality-extra"
+    skills_root = _expected_skills_root(scratch, operation_id)
+    required_names = _required_runtime_names()
+    assert len(required_names) == 4
+
+    after_add_rows = [
+        _skill_row(name, path=f"{skills_root}/{name}/SKILL.md") for name in required_names
+    ] + [_skill_row("rogue-extra-skill", path=f"{skills_root}/rogue-extra-skill/SKILL.md")]
+    # Three scripted `skills/list` responses, in real call order:
+    #   1. the generic ambient probe `_initialize_and_attest` issues before
+    #      the CAP-S1 skill-canary sequence even begins (lenient parser,
+    #      unrelated to the canary binding -- must stay empty or it trips
+    #      AMBIENT_SKILL_SURFACE_NOT_EMPTY instead of the causality check
+    #      this test targets);
+    #   2. the causal sequence's own baseline (post `extraRoots/set []`),
+    #      which must also be empty for the same reason;
+    #   3. the causal sequence's post-root-add read -- this is the one
+    #      carrying the extra unrequested row.
+    script = [
+        _strict_skills_list_result(workspace_cwd, []),
+        _strict_skills_list_result(workspace_cwd, []),
+        _strict_skills_list_result(workspace_cwd, after_add_rows),
+    ]
+    factory = _canary_client_factory(skills_list_script=script)
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id=operation_id,
+            client_factory=factory,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert excinfo.value.code == "SKILL_SET_CAUSALITY_FAILED"
+
+    # No retry: skills/list is read exactly three times (generic ambient
+    # probe + causal-sequence baseline + post-root-add) and the runner never
+    # starts a turn once the causal sequence refuses.
+    assert len(_CREATED_CANARY_CLIENTS) == 1
+    client = _CREATED_CANARY_CLIENTS[0]
+    skills_list_calls = [call for call in client.calls if call[0] == "skills/list"]
+    assert len(skills_list_calls) == 3
+    turn_start_calls = [call for call in client.calls if call[0] == "turn/start"]
+    assert len(turn_start_calls) == 0
+
+
+def test_run_canary_pathless_rows_without_schema_support_is_attestation_unavailable(
+    tmp_path,
+) -> None:
+    """Pathless post-add rows with an unsupportive schema refuse.
+
+    When the App Server's ``skills/list`` rows carry no ``path`` field at
+    all (mode B), the runner can only trust runtime-name identity if the
+    attested protocol schema itself declares a ``path`` on the Skill turn
+    input -- ``_SCHEMA_WITHOUT_SKILL_PATH`` (already used elsewhere in this
+    module for the schema-attestation unit tests) does not, so
+    ``binding.schema_supports_skill_input_path`` is False and this must map
+    to ``SKILL_PATH_ATTESTATION_UNAVAILABLE`` rather than silently trusting
+    the name-only rows.
+    """
+
+    scratch = tmp_path / "scratch-attestation-unavailable"
+    scratch.mkdir()
+    workspace_cwd = str((scratch / "synthetic-workspace").resolve())
+    operation_id = "cap-s1-canary-attestation-unavailable"
+    required_names = _required_runtime_names()
+
+    after_add_rows = [_skill_row(name) for name in required_names]  # no `path` key at all
+    # Same three-slot ordering as the causality test above: generic ambient
+    # probe, causal-sequence baseline (both empty), then the pathless
+    # post-root-add rows this test targets.
+    script = [
+        _strict_skills_list_result(workspace_cwd, []),
+        _strict_skills_list_result(workspace_cwd, []),
+        _strict_skills_list_result(workspace_cwd, after_add_rows),
+    ]
+    factory = _canary_client_factory(skills_list_script=script)
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id=operation_id,
+            client_factory=factory,
+            # The schema fixture WITHOUT the skill input path -- the fake
+            # binary is never invoked; this is just the JSON doc the
+            # injected run_command writes out for attest_protocol_schema.
+            run_command=_fake_schema_run_command(_SCHEMA_WITHOUT_SKILL_PATH),
+        )
+    assert excinfo.value.code == "SKILL_PATH_ATTESTATION_UNAVAILABLE"
+
+    assert len(_CREATED_CANARY_CLIENTS) == 1
+    client = _CREATED_CANARY_CLIENTS[0]
+    skills_list_calls = [call for call in client.calls if call[0] == "skills/list"]
+    assert len(skills_list_calls) == 3
+    turn_start_calls = [call for call in client.calls if call[0] == "turn/start"]
+    assert len(turn_start_calls) == 0
+
+
+def test_run_canary_skills_changed_notification_stops_before_the_next_turn(tmp_path) -> None:
+    """A ``skills/changed`` notification during turn 1 stops turn 2.
+
+    The launch causal sequence, real skill projection, and turn 1 itself
+    all proceed exactly as the happy path -- no ``skills_list_script``
+    override is used, so the real fake App Server discovers the real
+    staged skills on disk, matching the happy-path test's approach. A
+    synthetic ``skills/changed`` notification is appended directly to the
+    real client's own notification queue right after turn 1's ``turn/start``
+    accepts (mirroring the fake App Server's own
+    ``OHF_FAKE_SKILLS_CHANGED`` behavior, which notifies right after
+    ``skills/extraRoots/set`` -- here scripted at the RPC layer instead,
+    since ``run_canary`` does not expose that env switch to callers). Turn
+    1's own event collection ingests the notification and sets
+    ``state.skills_changed``; the pre-turn revalidation before turn 2 must
+    see it and refuse before ever calling ``turn/start`` a second time.
+    """
+
+    scratch = tmp_path / "scratch-skills-changed"
+    scratch.mkdir()
+    factory = _canary_client_factory(
+        replies=list(_HAPPY_REPLIES),
+        inject_skills_changed_after_turn_starts=1,
+    )
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-skills-changed",
+            client_factory=factory,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert excinfo.value.code == "SKILLS_CHANGED_DURING_CANARY"
+
+    # No retry: turn 1 was allowed to start exactly once, and the refusal
+    # before turn 2 must never re-attempt a second turn/start call.
+    assert len(_CREATED_CANARY_CLIENTS) == 1
+    client = _CREATED_CANARY_CLIENTS[0]
+    turn_start_calls = [call for call in client.calls if call[0] == "turn/start"]
+    assert len(turn_start_calls) == 1
 
 
 # ---------------------------------------------------------------------------

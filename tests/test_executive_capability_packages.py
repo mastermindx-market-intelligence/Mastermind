@@ -1428,6 +1428,99 @@ def test_verify_package_path_escaping_source_root_refuses(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Numeric ceilings (CAP-S1 gap fill): MAX_PACKAGE_DIRECTORIES and
+# MAX_PACKAGE_TREE_DEPTH are enforced at the "bound the declared shape
+# BEFORE any descriptor is opened" gate inside verify_capability_package_source
+# -- neither ceiling was previously tripped by any test in this module. Each
+# test below carries an inverse-control assertion (monkeypatching the exact
+# module constant the refusal reads) so the test's own bite is demonstrated
+# in-line rather than only by a throwaway manual mutation.
+# ---------------------------------------------------------------------------
+
+
+def test_verify_refuses_when_declared_directories_exceed_ceiling(tmp_path, monkeypatch):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    package_root = "plugins/example-dirs"
+    # 33 single-file directories -- one more than MAX_PACKAGE_DIRECTORIES=32
+    # -- via distinct top-level dirs, so allowed_dirs derives to exactly 33
+    # entries and no other bound (file count, traversal entries, depth) is
+    # anywhere near tripping first.
+    contents = {f"d{i:02d}/f.txt": f"contents-{i}".encode() for i in range(33)}
+    _write_tree(tmp_path, package_root, contents)
+    files = tuple(_row_from_disk(tmp_path, package_root, rel) for rel in sorted(contents))
+    manifest_path = "d00/f.txt"
+    generation = _canonical_generation(
+        capability_id="example.dirs1",
+        package_root=package_root,
+        manifest_path=manifest_path,
+        files=files,
+        skills_spec=[
+            {
+                "skill_capability_id": "example.probe.v1",
+                "runtime_name": "probe",
+                "entrypoint_path": manifest_path,
+                "closure_paths": [manifest_path],
+            }
+        ],
+    )
+
+    with pytest.raises(CapabilityPackageError, match="too_many_directories"):
+        verify_capability_package_source(tmp_path, generation)
+
+    # Inverse control: raise the exact ceiling the refusal above reads (the
+    # check is a plain module-global lookup at call time, so patching the
+    # module attribute changes behavior without touching the frozen
+    # generation or the files on disk) and confirm the SAME call now
+    # succeeds end to end -- proving the refusal above was driven by this
+    # constant, not some other bound.
+    monkeypatch.setattr(scf_pkg, "MAX_PACKAGE_DIRECTORIES", 64)
+    receipt = verify_capability_package_source(tmp_path, generation)
+    assert isinstance(receipt, VerifiedCapabilityPackage)
+    assert receipt.file_count == 33
+
+
+def test_verify_refuses_when_declared_tree_depth_exceeds_ceiling(tmp_path, monkeypatch):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    package_root = "plugins/example-depth"
+    # 8 nested directories with the file at the 9th path component --
+    # component count 9 exceeds MAX_PACKAGE_TREE_DEPTH=8 -- while the
+    # directory forest itself (8 single-chain directories) stays far below
+    # MAX_PACKAGE_DIRECTORIES=32, isolating the depth ceiling specifically.
+    deep_path = "d1/d2/d3/d4/d5/d6/d7/d8/f.txt"
+    assert deep_path.count("/") + 1 == 9
+    contents = {deep_path: b"deep file bytes"}
+    _write_tree(tmp_path, package_root, contents)
+    files = (_row_from_disk(tmp_path, package_root, deep_path),)
+    generation = _canonical_generation(
+        capability_id="example.depth1",
+        package_root=package_root,
+        manifest_path=deep_path,
+        files=files,
+        skills_spec=[
+            {
+                "skill_capability_id": "example.probe.v1",
+                "runtime_name": "probe",
+                "entrypoint_path": deep_path,
+                "closure_paths": [deep_path],
+            }
+        ],
+    )
+
+    with pytest.raises(CapabilityPackageError, match="package_tree_too_deep"):
+        verify_capability_package_source(tmp_path, generation)
+
+    # Inverse control, same discipline as the directories test above: raise
+    # MAX_PACKAGE_TREE_DEPTH past 9 and confirm the identical call now
+    # verifies cleanly.
+    monkeypatch.setattr(scf_pkg, "MAX_PACKAGE_TREE_DEPTH", 20)
+    receipt = verify_capability_package_source(tmp_path, generation)
+    assert isinstance(receipt, VerifiedCapabilityPackage)
+    assert receipt.file_count == 1
+
+
+# ---------------------------------------------------------------------------
 # Race seams: deterministic terminal-fence and final-fstat mutation
 # ---------------------------------------------------------------------------
 
