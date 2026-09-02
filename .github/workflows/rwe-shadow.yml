@@ -16,6 +16,7 @@ on:
       - "requirements/gate-*.lock"
       - "scripts/rwe_env.py"
       - ".github/workflows/rwe-shadow.yml"
+      - "pyproject.toml"
   workflow_dispatch:
 
 permissions:
@@ -28,25 +29,39 @@ concurrency:
 jobs:
   shadow-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # Same pinned checkout ci.yml uses for the repository test gate's
-      # vendored macro engine/lib surface -- kept in sync by hand with the
-      # "Checkout pinned Macro engine" step in .github/workflows/ci.yml.
+      # Reads the pinned vendored-macro ref straight out of ci.yml's own
+      # "Checkout pinned Macro engine" step at runtime (via rwe_env.py's own
+      # parser), so this checkout below can never drift from ci.yml's --
+      # there is no second copy of the ref to keep in sync by hand.
+      - name: Read pinned macro ref from ci.yml
+        id: pinned_ref
+        run: |
+          ref=$(python3 -c "
+          import sys
+          sys.path.insert(0, 'scripts')
+          from pathlib import Path
+          from rwe_env import parse_pinned_ref
+          print(parse_pinned_ref(Path('.github/workflows/ci.yml').read_text(encoding='utf-8')))
+          ")
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       - name: Checkout pinned Macro engine
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          ref: ${{ steps.pinned_ref.outputs.ref }}
           path: vendor/macro_src
           sparse-checkout: |
             engine

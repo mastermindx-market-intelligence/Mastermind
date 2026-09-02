@@ -18,6 +18,29 @@ either installs byte-identical wheels or refuses outright -- there is no
 silent drift between two installs of the same lock. Each lock's header
 records the platform, the interpreter it was compiled for, the source
 `pyproject.toml` sha256 at mint time, and the exact regeneration command.
+`rwe_env.py` checks that header sha256 against the live `pyproject.toml` on
+every `realize`/`receipt`, and refuses ("stale lock -- regenerate") if they
+no longer match -- a hand-built lock with no such header is warn-only, not
+refused.
+
+**Scope of the no-silent-drift guarantee:** it covers exactly the packages
+named *in the lock file* -- everything `--require-hashes` verifies. The
+project's own editable install (`pip install -e . --no-deps
+--no-build-isolation`) is not itself a hash-locked entry (there is no
+sdist/wheel of an in-tree project to hash); it runs against a build backend
+(`setuptools`/`wheel`) pinned to an exact version in
+`scripts/rwe_env.py::PINNED_BUILD_BACKEND` and recorded in the receipt's
+`build_backend` field, but installed without `--require-hashes` for those
+two packages only. If you need a hash-verified build backend too, hash-lock
+`setuptools`/`wheel` into the platform lock file instead -- that is a
+deliberate follow-up, not something this pilot claims today.
+
+As of today the two platform locks below resolve to identical pin/hash sets
+-- expected, since `pip-compile --generate-hashes` hashes every supported
+platform tag for a resolved version, not just the one it ran on. The
+macOS/Linux split exists for *future* divergence (a platform-specific wheel
+constraint, a differing transitive resolution), not because the two
+platforms currently differ.
 
 Current locks:
 
