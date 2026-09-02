@@ -1,0 +1,89 @@
+name: RWE-P0 shadow gate
+
+# Shadow lane only -- proves the hash-locked rwe_env.py environment reaches
+# gate parity with the existing `ci.yml` job. It is never required and never
+# replaces `ci.yml`'s own "Install project" / "Run repository test gate"
+# steps; that job is completely untouched by this file.
+#
+# Bootstrap path: the first time this runs with no committed
+# requirements/gate-linux-x86_64-py312.lock, it mints one with pip-compile
+# and uploads it as an artifact so a maintainer can commit it. Once the lock
+# is committed, later runs realize from it instead of minting fresh.
+
+on:
+  pull_request:
+    paths:
+      - "requirements/gate-*.lock"
+      - "scripts/rwe_env.py"
+      - ".github/workflows/rwe-shadow.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rwe-shadow-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shadow-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Same pinned checkout ci.yml uses for the repository test gate's
+      # vendored macro engine/lib surface -- kept in sync by hand with the
+      # "Checkout pinned Macro engine" step in .github/workflows/ci.yml.
+      - name: Checkout pinned Macro engine
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          path: vendor/macro_src
+          sparse-checkout: |
+            engine
+            lib
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+
+      - name: Mint linux lock (bootstrap only)
+        if: hashFiles('requirements/gate-linux-x86_64-py312.lock') == ''
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-tools
+          pip-compile --quiet --generate-hashes --extra dev \
+            --output-file requirements/gate-linux-x86_64-py312.lock pyproject.toml
+          echo "minted=true" >> "$GITHUB_ENV"
+
+      - name: Upload bootstrap lock artifact
+        if: hashFiles('requirements/gate-linux-x86_64-py312.lock') != '' && env.minted == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-lock
+          path: requirements/gate-linux-x86_64-py312.lock
+          if-no-files-found: error
+
+      - name: Realize hash-locked environment
+        # Runs whether the lock was freshly minted above or already
+        # committed -- either way requirements/gate-linux-x86_64-py312.lock
+        # exists in the workspace by this point.
+        run: python scripts/rwe_env.py realize --dest /tmp/rwe-env
+
+      - name: Run repository test gate inside the realized environment
+        run: python scripts/rwe_env.py gate --env /tmp/rwe-env
+
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rwe-receipt-linux
+          path: /tmp/rwe-env/rwe_receipt.json
+          if-no-files-found: warn
