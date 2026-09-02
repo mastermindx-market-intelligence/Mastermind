@@ -83,9 +83,15 @@ def validate(c: dict[str, Any]) -> None:
     assert "owner_seat equals ceo" in root["required"] and "status in QUEUED|RUNNING|CHECKPOINTED" in root["required"]
     assert "Wake acknowledgement" in root["not_required"] and "provider identity" in root["not_required"]
     carrier = c["destination_carrier"]
-    for item in ("orchestration_role is null", "active worker provider openai-codex", "exactly one CURRENT epoch", "exactly one matching OHF_LAUNCH_DECISION=ALLOW"):
+    for item in ("orchestration_role is null", "carrier status in QUEUED|RUNNING|CHECKPOINTED", "active worker provider openai-codex", "exactly one CURRENT epoch", "exactly one matching OHF_LAUNCH_DECISION=ALLOW"):
         assert item in carrier["required"]
     assert "ORCHESTRATION_WORK_ADMITTED" in carrier["does_not_require"]
+    actor = c["command_authority"]
+    assert actor["source"] == "non-serialized live RuntimeBinding from invoking session boundary"
+    assert "actor RuntimeBinding is outside command JSON" in actor["required"]
+    assert "actor native_handle, binding_id, binding_generation, and reasoning_surface exactly equal destination current RuntimeBinding" in actor["required"]
+    assert actor["caller_may_supply_actor_label"] is False and actor["caller_may_supply_actor_binding_in_command"] is False
+    assert actor["event_actor_derivation"] == "ceo from validated destination carrier provenance" and actor["persist_native_handle"] is False
     owner = c["assignment_owner"]
     assert owner["event_type"] == "SOL_ACTION_TARGET_ASSIGNED" and owner["event_schema"] == "mastermind.sol_action_target_assignment/v1"
     assert owner["event_actor"] == "ceo" and owner["first_revision"] == 1
@@ -96,8 +102,8 @@ def validate(c: dict[str, Any]) -> None:
     assert command["expected_assignment_revision"] == 0 and command["expected_session_alias"] == TARGET
     assert command["foreign_occupancy"] == "COMMAND_REPLAY_CONFLICT" and "EXPECTED_REVISION_MISMATCH" in command["same_root_race"]
     assert "never retry/failover" in command["effect_unknown"]
-    assert "binding_generation" in c["event_required"] and "responsibility_authority_fingerprint" in c["event_required"]
-    for item in ("native_handle", "provider_session_id", "account_label", "pid", "Slack principal", "model output"):
+    assert "binding_generation" in c["event_required"] and "responsibility_authority_fingerprint" in c["event_required"] and "actor_authority_fingerprint" in c["event_required"]
+    for item in ("native_handle", "provider_session_id", "account_label", "pid", "Slack principal", "model output", "caller_actor_label"):
         assert item in c["event_forbidden"]
     assert c["target_fingerprint"]["fields"] == ["session_alias", "target_seat", "reasoning_surface", "wake_transport", "allowed_transports", "workstream"]
     assert "target_enabled" in c["target_fingerprint"]["excludes"] and "root_job_bindings" in c["target_fingerprint"]["excludes"]
@@ -108,8 +114,8 @@ def validate(c: dict[str, Any]) -> None:
     assert "verify global alias assignments bind one RuntimeBinding" in c["action_time"]
     assert "require Event binding_id and binding_generation exact match" in c["action_time"]
     assert "copy complete root_job_bindings and replace selected root ceo only" in c["action_time"]
-    assert c["transaction"][2] == "BEGIN IMMEDIATE" and c["transaction"][-1].endswith("same id")
-    for failure in ("ROOT_JOB_NOT_CEO_OWNED", "TARGET_CARRIER_ROLE_CONFLICT", "TARGET_ALIAS_ALREADY_BINDS_DIFFERENT_RUNTIME", "EXPECTED_REVISION_MISMATCH", "COMMAND_REPLAY_CONFLICT", "STALE_ASSIGNED_BINDING", "UNSUPPORTED_ASSIGNMENT_MODE"):
+    assert c["transaction"][2] == "BEGIN IMMEDIATE" and "validate live actor binding equals destination current binding" in c["transaction"] and c["transaction"][-1].endswith("same id")
+    for failure in ("ROOT_JOB_NOT_CEO_OWNED", "TARGET_CARRIER_ROLE_CONFLICT", "ACTOR_AUTHORITY_INVALID", "ACTOR_BINDING_MISMATCH", "TARGET_ALIAS_ALREADY_BINDS_DIFFERENT_RUNTIME", "EXPECTED_REVISION_MISMATCH", "COMMAND_REPLAY_CONFLICT", "STALE_ASSIGNED_BINDING", "UNSUPPORTED_ASSIGNMENT_MODE"):
         assert failure in c["failures"]
     assert "never elect by recency" in c["time_null_correction"]["timestamps"]
     assert "no reassignment or succession" in c["time_null_correction"]["correction"]
@@ -130,12 +136,16 @@ def test_v4_contract_and_mutations() -> None:
     def set_path(path: tuple[str, ...], value: Any) -> Mutation:
         def mutate(item: dict[str, Any]) -> None:
             cursor: Any = item
-            for key in path[:-1]: cursor = cursor[key]
+            for key in path[:-1]:
+                cursor = cursor[key]
             cursor[path[-1]] = value
         return mutate
     mutations: dict[str, Mutation] = {
         "predecessor_owner": set_path(("assignment_owner", "rule"), "separate receipt owns assignment"),
         "pre_ack": lambda item: item["responsibility_root"]["not_required"].remove("Wake acknowledgement"),
+        "caller_actor_label": set_path(("command_authority", "caller_may_supply_actor_label"), True),
+        "caller_actor_binding": set_path(("command_authority", "caller_may_supply_actor_binding_in_command"), True),
+        "drop_actor_match": lambda item: item["command_authority"]["required"].remove("actor native_handle, binding_id, binding_generation, and reasoning_surface exactly equal destination current RuntimeBinding"),
         "caller_id": set_path(("command", "caller_may_supply_command_id"), True),
         "caller_alias": set_path(("canonical_target", "caller_selectable"), True),
         "succession": lambda item: item["supported_after_source_wave"]["modes"].append("SAME_ALIAS_GENERATION_SUCCESSION"),
@@ -150,9 +160,12 @@ def test_v4_contract_and_mutations() -> None:
     }
     survivors = []
     for name, mutate in mutations.items():
-        changed = copy.deepcopy(c); mutate(changed)
-        try: validate(changed)
-        except (AssertionError, ValueError): continue
+        changed = copy.deepcopy(c)
+        mutate(changed)
+        try:
+            validate(changed)
+        except (AssertionError, ValueError):
+            continue
         survivors.append(name)
     assert survivors == [], survivors
 
@@ -202,8 +215,10 @@ def test_plan_gate_paths_and_order() -> None:
     assert g["records_only"] is True and g["runtime_effect"] is False and g["provider_effect"] is False and g["production_armed"] is False
     assert g["authorized_next_wave"] == "STAGE-B1_CEO_CODEX_INITIAL_ASSIGNMENT_VERTICAL" and g["authorized_mode"] == "INITIAL_ASSIGNMENT" and g["authorized_surface"] == "codex"
     assert g["canonical_target_alias"] == TARGET and g["separate_root_binding_owner_required"] is False and g["pre_assignment_wake_ack_required"] is False
+    assert g["requires_exact_current_actor_binding"] is True and g["caller_actor_label_authoritative"] is False
     assert g["requires_exact_binding_generation_fence"] is True and g["requires_full_map_preservation"] is True and g["requires_unchanged_stage_a"] is True and g["requires_separate_production_canary"] is True
     assert "chatgpt-web" not in raw and text_block(P, OB, OE) == ORDER
     plan = read(P)
-    for path in RECORDS + SOURCE: assert path in plan
+    for path in RECORDS + SOURCE:
+        assert path in plan
     assert "No seventh path is authorized" in plan and "Do not modify `control_plane/sol_action_target.py`" in plan
