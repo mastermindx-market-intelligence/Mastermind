@@ -1140,33 +1140,109 @@ def _row_from_disk(root: Path, package_root: str, rel: str, executable: bool = F
     )
 
 
-def _make_generation(
+def _canonical_generation(
     *,
     capability_id: str,
     package_root: str,
     manifest_path: str,
     files: tuple[CapabilityPackageFile, ...],
-    skills: tuple[EffectiveSkillGrant, ...],
+    skills_spec: list[dict],
+    generation_label: str = "example.g1",
+    repository: str = "example/repo",
+    source_commit: str = "1" * 40,
+    source_tree_sha: str = "2" * 40,
     revoked: bool = False,
 ) -> CapabilityPackageGeneration:
-    return CapabilityPackageGeneration(
+    """Build a genuinely self-consistent generation via the real builder.
+
+    `verify_capability_package_source` no longer trusts a hand-constructed
+    CapabilityPackageGeneration (review 5085454178, finding 3): it
+    reconstructs the canonical raw mapping and requires it to rebuild,
+    via `build_capability_package_generation`, into something
+    dataclass-equal to what was handed in. Fixtures that feed `verify()`
+    therefore have to be built the same way production would build them --
+    through the real builder -- rather than by hand-assembling the
+    dataclass with placeholder digests.
+    """
+    sorted_files = tuple(sorted(files, key=lambda f: f.relative_path))
+    files_by_path = {f.relative_path: f for f in sorted_files}
+    content_digest = _expected_content_digest(sorted_files)
+    source_digest = _expected_source_digest(
         capability_id=capability_id,
         kind=PACKAGE_KIND_SKILLS_ONLY_SOURCE,
-        repository="example/repo",
-        source_commit="1" * 40,
-        source_tree_sha="2" * 40,
+        repository=repository,
+        source_commit=source_commit,
+        source_tree_sha=source_tree_sha,
         package_root=package_root,
         manifest_path=manifest_path,
-        generation="example.g1",
+        package_content_digest=content_digest,
+        required_app_references=[],
+    )
+
+    skills_raw: dict = {}
+    skills_ordered: list[tuple[str, str]] = []
+    for spec in skills_spec:
+        closure_paths = list(spec["closure_paths"])
+        closure_files = tuple(files_by_path[p] for p in closure_paths)
+        skill_content_digest = _expected_closure_digest(
+            runtime_name=spec["runtime_name"],
+            entrypoint_path=spec["entrypoint_path"],
+            closure_files=closure_files,
+        )
+        grant_digest = _expected_grant_digest(
+            capability_id=spec["skill_capability_id"],
+            runtime_name=spec["runtime_name"],
+            entrypoint_path=spec["entrypoint_path"],
+            closure_paths=closure_paths,
+            skill_content_digest=skill_content_digest,
+            package_capability_id=capability_id,
+            package_generation=generation_label,
+            package_source_digest=source_digest,
+        )
+        skills_raw[spec["skill_capability_id"]] = {
+            "runtime_name": spec["runtime_name"],
+            "entrypoint_path": spec["entrypoint_path"],
+            "closure_paths": closure_paths,
+            "skill_content_digest": skill_content_digest,
+            "grant_digest": grant_digest,
+        }
+        skills_ordered.append((spec["skill_capability_id"], grant_digest))
+
+    generation_digest = _expected_generation_digest(
+        capability_id=capability_id,
+        generation=generation_label,
         source_state=PACKAGE_SOURCE_STATE_PROTECTED,
         revoked=revoked,
-        package_content_digest=capability_package_content_digest(files),
-        package_source_digest="0" * 64,
-        files=tuple(sorted(files, key=lambda f: f.relative_path)),
-        skills=skills,
-        required_app_references=(),
-        package_generation_digest="0" * 64,
+        package_source_digest=source_digest,
+        skills_ordered=tuple(sorted(skills_ordered)),
     )
+
+    raw = {
+        "kind": PACKAGE_KIND_SKILLS_ONLY_SOURCE,
+        "repository": repository,
+        "source_commit": source_commit,
+        "source_tree_sha": source_tree_sha,
+        "package_root": package_root,
+        "manifest_path": manifest_path,
+        "generation": generation_label,
+        "source_state": PACKAGE_SOURCE_STATE_PROTECTED,
+        "revoked": revoked,
+        "package_content_digest": content_digest,
+        "package_source_digest": source_digest,
+        "files": [
+            {
+                "relative_path": f.relative_path,
+                "sha256": f.sha256,
+                "byte_length": f.byte_length,
+                "executable": f.executable,
+            }
+            for f in sorted_files
+        ],
+        "skills": skills_raw,
+        "required_app_references": [],
+        "package_generation_digest": generation_digest,
+    }
+    return build_capability_package_generation(capability_id=capability_id, raw=raw)
 
 
 def _standard_generation(tmp_path: Path, package_root: str = "plugins/example"):
@@ -1183,23 +1259,19 @@ def _standard_generation(tmp_path: Path, package_root: str = "plugins/example"):
     skill_digest = effective_skill_content_digest(
         runtime_name="receive", entrypoint_path="skills/receive/SKILL.md", closure_files=(boundary, skill_md)
     )
-    skill = EffectiveSkillGrant(
-        capability_id="example.receive.v1",
-        runtime_name="receive",
-        entrypoint_path="skills/receive/SKILL.md",
-        closure_paths=("references/boundary.md", "skills/receive/SKILL.md"),
-        skill_content_digest=skill_digest,
-        package_capability_id="example.pkg1",
-        package_generation="example.g1",
-        package_source_digest="0" * 64,
-        grant_digest="0" * 64,
-    )
-    generation = _make_generation(
+    generation = _canonical_generation(
         capability_id="example.pkg1",
         package_root=package_root,
         manifest_path=".codex-plugin/plugin.json",
         files=files,
-        skills=(skill,),
+        skills_spec=[
+            {
+                "skill_capability_id": "example.receive.v1",
+                "runtime_name": "receive",
+                "entrypoint_path": "skills/receive/SKILL.md",
+                "closure_paths": ["references/boundary.md", "skills/receive/SKILL.md"],
+            }
+        ],
     )
     return generation, skill_digest
 
@@ -1215,6 +1287,12 @@ def test_verify_happy_path(tmp_path):
     assert receipt.file_count == 3
     assert receipt.total_bytes == sum(f.byte_length for f in generation.files)
     assert receipt.skill_content_digests == (("example.receive.v1", skill_digest),)
+    # Finding 3: the happy-path receipt carries the (now-trusted) provenance
+    # fields through from the verified generation.
+    assert receipt.package_source_digest == generation.package_source_digest
+    assert receipt.package_generation_digest == generation.package_generation_digest
+    assert receipt.source_state == generation.source_state
+    assert receipt.revoked == generation.revoked
 
 
 def test_verify_source_root_symlink_refuses(tmp_path):
@@ -1401,26 +1479,19 @@ def test_verify_mutate_via_before_final_stat_refuses(tmp_path):
     contents = {"skills/receive/SKILL.md": b"original skill bytes"}
     _write_tree(tmp_path, package_root, contents)
     skill_md = _row_from_disk(tmp_path, package_root, "skills/receive/SKILL.md")
-    skill_digest = effective_skill_content_digest(
-        runtime_name="receive", entrypoint_path="skills/receive/SKILL.md", closure_files=(skill_md,)
-    )
-    skill = EffectiveSkillGrant(
-        capability_id="example.receive.v1",
-        runtime_name="receive",
-        entrypoint_path="skills/receive/SKILL.md",
-        closure_paths=("skills/receive/SKILL.md",),
-        skill_content_digest=skill_digest,
-        package_capability_id="example.pkg1",
-        package_generation="example.g1",
-        package_source_digest="0" * 64,
-        grant_digest="0" * 64,
-    )
-    generation = _make_generation(
+    generation = _canonical_generation(
         capability_id="example.pkg1",
         package_root=package_root,
         manifest_path="skills/receive/SKILL.md",
         files=(skill_md,),
-        skills=(skill,),
+        skills_spec=[
+            {
+                "skill_capability_id": "example.receive.v1",
+                "runtime_name": "receive",
+                "entrypoint_path": "skills/receive/SKILL.md",
+                "closure_paths": ["skills/receive/SKILL.md"],
+            }
+        ],
     )
 
     mutated = {"done": False}
