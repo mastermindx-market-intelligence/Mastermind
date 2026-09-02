@@ -229,12 +229,19 @@ one genuinely cross-repo question below, Macro's own
      (measured on the real artifact, 2026-09-01: 7 of 47 rows) — is
      deliberately NOT mapped, and NO ``ResponsibilityFact`` is built for
      that row: :func:`_responsibility_facts_from_agent_os_state` instead
-     records one bounded, per-row ``SourceFailure``
-     (``code="workstream_owner_not_recognized"``) naming the workstream
-     key, never the raw owner text — treating an unrecognized-owner
-     sentence as seat-shaped prose would be exactly the "derive ... seat
-     ... from ... prose" the frozen spec forbids, even where the words
-     "COO" or "Fable" happen to appear inside it.
+     records one bounded, per-row PLAIN-DATA ``unmapped`` entry
+     (``reason="owner_not_a_recognized_seat"``, not a ``SourceFailure`` —
+     corrected by Fix 4 of the final adversarial review, 2026-09-01; the
+     blast-radius repair packet deleted the ``SourceFailure``-per-row
+     shape this docstring used to describe, since the Steward folds every
+     ``SourceFailure`` into the issues of EVERY query it answers — see
+     :func:`_responsibility_facts_from_agent_os_state`'s own docstring,
+     "Fix 5"/"blast-radius repair packet" paragraphs, for the full
+     account and the measured blast radius) naming the workstream key,
+     never the raw owner text — treating an unrecognized-owner sentence
+     as seat-shaped prose would be exactly the "derive ... seat ... from
+     ... prose" the frozen spec forbids, even where the words "COO" or
+     "Fable" happen to appear inside it.
    * A ``BlockerFact`` is NEVER built from ``agent_os_state`` data (bug-fix
      packet, 2026-09-01).  ``BlockerFact.__post_init__``
      (``executive_steward.py``) refuses any ``source.owner`` other than
@@ -329,8 +336,15 @@ one genuinely cross-repo question below, Macro's own
     genuinely exists but is merely unparseable or uncomparable — ``SourceRef``
     permits ``UNKNOWN`` with ``observed_at`` present) when ``observed_at``
     is absent, blank, unparseable, or ``reference_at`` itself cannot be
-    parsed.  Comparing two already-supplied timestamps is pure; this module
-    still never reads a clock.
+    parsed.  A further correction, Fix 1 of the FINAL adversarial review
+    (2026-09-01): an ``observed_at`` sitting AHEAD of ``reference_at`` by
+    more than :data:`FUTURE_SKEW_TOLERANCE` (one hour) also reads
+    ``UNKNOWN``, never ``CURRENT`` — the prior revision of this fix bounded
+    only the backward (staleness) side, leaving the forward side
+    unbounded, so an artifact stamped in the far future (e.g. 2999-01-01)
+    read ``CURRENT`` with ``counts["stale"]`` at zero.  Comparing two
+    already-supplied timestamps is pure; this module still never reads a
+    clock.
 """
 from __future__ import annotations
 
@@ -1319,11 +1333,31 @@ def project_autonomy(
     # mapped, nothing was suppressed by a Steward-level issue, AND nothing
     # was suppressed as unmapped.
     membership_suppressed = bool(list_result.issues)
+    # Fix 2 (final adversarial review, 2026-09-01): `blocked` stays
+    # Steward-owned ONLY (`card["blocker"]`, i.e. a real `BlockerFact`) —
+    # that attribution is correct and unchanged.  But rendering it alone
+    # under the bare label "gated" let the Chairman read "0 gated" on a
+    # real artifact while a visible card (and, on an unrecognized-owner
+    # row, an `unmapped_responsibilities` entry) carried an Agent-OS-
+    # declared block (`declared_blocker`/`unmapped_rows[i]["declared_
+    # blocker"]`) — the summary contradicting the detail directly beneath
+    # it.  `declared_blocked` is a separate, deterministic count of every
+    # row carrying a declared block, over BOTH surfaces such a declaration
+    # can appear on: a mapped card's own `declared_blocker` field, and an
+    # unmapped row's `declared_blocker` sub-object (see
+    # `_declared_blocker_receipt`) — never merged into `blocked`, so
+    # Steward-owned and Agent-OS-declared blocks stay two separately
+    # countable numbers, exactly as they stay two separately countable
+    # fields on the cards/rows themselves.
+    declared_blocked = sum(
+        1 for c in responsibilities if c["declared_blocker"] is not None
+    ) + sum(1 for row in unmapped_rows if row.get("declared_blocker") is not None)
     counts = {
         "total": len(responsibilities),
         "actionable": sum(1 for c in responsibilities if c["is_actionable"]),
         "stale": sum(1 for c in responsibilities if c["freshness"] == Freshness.STALE.value),
         "blocked": sum(1 for c in responsibilities if c["blocker"] is not None),
+        "declared_blocked": declared_blocked,
         "empty": (
             len(responsibilities) == 0
             and not membership_suppressed
@@ -1376,6 +1410,29 @@ def _seat_or_none(value: Any) -> Seat | None:
 FRESHNESS_BUDGET_HOURS = 48
 FRESHNESS_BUDGET = timedelta(hours=FRESHNESS_BUDGET_HOURS)
 
+#: Fix 1 (adversarial-review final-adjudication repair, 2026-09-01): the
+#: maximum amount an ``observed_at`` may sit AHEAD of the reference
+#: timestamp before this module stops trusting the gap as ordinary clock
+#: skew.  Without a bound, a negative ``age`` (``reference_dt -
+#: observed_dt``) was unconditionally within :data:`FRESHNESS_BUDGET`
+#: (``age <= FRESHNESS_BUDGET`` is trivially true for any negative ``age``,
+#: no matter how large in magnitude) — an artifact stamped 2999-01-01 and
+#: composed against a 2026 reference read ``CURRENT`` with
+#: ``counts["stale"]`` at zero, and could even become actionable, on
+#: evidence that has not happened yet.  One hour is a small window
+#: genuinely attributable to unsynchronized clocks between the host that
+#: stamped the artifact and the host that composed it — not a license to
+#: treat an arbitrarily-future timestamp as current.  Beyond this
+#: tolerance the timestamp reads ``UNKNOWN`` — never ``CURRENT`` (nothing
+#: observed that far ahead has actually happened yet) and never ``STALE``
+#: (this module has no basis to claim the artifact is old either) — so a
+#: card built from it can never read falsely current and, per
+#: :func:`_classify_actionability`, can never become actionable on it.
+#: The BACKWARD (ordinary staleness) side of :data:`FRESHNESS_BUDGET` is
+#: entirely unchanged by this constant.
+FUTURE_SKEW_TOLERANCE_HOURS = 1
+FUTURE_SKEW_TOLERANCE = timedelta(hours=FUTURE_SKEW_TOLERANCE_HOURS)
+
 
 def _parse_iso8601(value: Any) -> datetime | None:
     """Best-effort, defensive ISO-8601 parse — never raises; unparseable -> ``None``.
@@ -1418,9 +1475,17 @@ def _freshness_for(observed_at: Any, reference_at: Any) -> tuple[str | None, Fre
       current.
     - ``reference_at`` absent/unparseable -> ``(observed_at, UNKNOWN)`` —
       nothing to compare against.
+    - ``observed_at`` parses and sits AHEAD of ``reference_at`` by more
+      than :data:`FUTURE_SKEW_TOLERANCE` -> ``(observed_at, UNKNOWN)`` —
+      Fix 1: an artifact stamped far in the future (e.g. 2999-01-01
+      against a 2026 reference) is neither current (it has not happened
+      yet) nor stale (this module cannot claim to know it is old either).
+      Checked BEFORE the budget comparison below, so an unbounded-forward
+      ``age`` can never fall through to ``CURRENT``.
     - ``observed_at`` parses and is within :data:`FRESHNESS_BUDGET` of
-      ``reference_at`` (including ``observed_at`` at/after ``reference_at``
-      — clock skew, not staleness) -> ``(observed_at, CURRENT)``.
+      ``reference_at`` (including ``observed_at`` at/after
+      ``reference_at`` by up to :data:`FUTURE_SKEW_TOLERANCE` — ordinary
+      clock skew, not staleness) -> ``(observed_at, CURRENT)``.
     - ``observed_at`` parses and is older than the budget ->
       ``(observed_at, STALE)``.
     """
@@ -1433,6 +1498,11 @@ def _freshness_for(observed_at: Any, reference_at: Any) -> tuple[str | None, Fre
     if reference_dt is None:
         return observed_at, Freshness.UNKNOWN
     age = reference_dt - observed_dt
+    # Fix 1: bound the forward (observed_at-in-the-future) side first — an
+    # unbounded negative age is otherwise trivially <= FRESHNESS_BUDGET no
+    # matter how far in the future observed_at sits.
+    if age < -FUTURE_SKEW_TOLERANCE:
+        return observed_at, Freshness.UNKNOWN
     if age <= FRESHNESS_BUDGET:
         return observed_at, Freshness.CURRENT
     return observed_at, Freshness.STALE

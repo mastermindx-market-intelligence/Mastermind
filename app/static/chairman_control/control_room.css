@@ -843,6 +843,12 @@ kbd {
 }
 .ccr-au-reading-item { display: inline-flex; align-items: baseline; gap: 5px; color: var(--faint); font-size: 10px; }
 .ccr-au-reading-item strong { color: var(--muted); font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; }
+/* Fix 2 (final adversarial review, 2026-09-01): a non-zero Agent-OS-
+   declared block count is flagged the same danger tone the row-level
+   "BLOCKED" chip already uses (line ~788's ".is-danger"), so the ledger
+   summary reads as urgent as the card detail it must never contradict. */
+.ccr-au-reading-item.is-declared strong { color: var(--danger-ink); }
+.ccr-au-reading-item.is-declared span:last-child { color: var(--danger); }
 
 /* responsibility rows */
 .ccr-au-list { border-top: 1px solid var(--line); }

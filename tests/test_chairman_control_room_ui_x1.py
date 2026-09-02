@@ -20,6 +20,170 @@ JS = STATIC / "control_room.js"
 CSS = STATIC / "control_room.css"
 REMOTE = STATIC / "remote.html"
 
+#: Fix 5 (final adversarial review, 2026-09-01): every other test in this
+#: module is a string-literal assertion against ``control_room.js``'s
+#: source text — none of them would notice a stray/missing/mismatched
+#: bracket, and ``test_x1_javascript_parses_with_node_when_available``
+#: below skips outright on a node-less runner.  On such a runner a
+#: grossly malformed ``control_room.js`` would ship green.  This is a
+#: deliberately conservative, pure-Python (no ``node`` dependency)
+#: structural check — NOT a JS parser — that skips over string/template
+#: literals, ``//``/``/* */`` comments, and regex literals, and reports
+#: whether every ``(){}[]`` nests correctly outside of them.  Regex-vs-
+#: division disambiguation uses the standard heuristic: a ``/`` opens a
+#: regex literal when the last significant token before it is punctuation/
+#: operator-shaped (an opening bracket, comma, colon, assignment, etc.)
+#: or one of a small set of keywords that can only be followed by a value
+#: expression (``return``, ``typeof``, ``case``, ...); it reads as
+#: ordinary division after a value-shaped token (an identifier, number,
+#: ``)``, or ``]``).  Good enough to catch a grossly malformed file; not a
+#: substitute for ``node --check`` when node is available, which stays the
+#: stronger gate below.
+_JS_REGEX_PRECURSOR_PUNCT = set("([{,;:=!&|?+-*%^~<>")
+_JS_REGEX_PRECURSOR_KEYWORDS = {
+    "return", "typeof", "instanceof", "in", "of", "new", "delete",
+    "void", "throw", "case", "yield", "do", "else",
+}
+
+
+def _js_structural_balance_ok(text: str) -> bool:
+    """``True`` iff ``text``'s ``(){}[]`` nest correctly outside of
+    strings/templates/comments/regex literals; ``False`` on any
+    imbalance or any unterminated string/template/comment/regex."""
+    stack: list[str] = []
+    pairs = {")": "(", "]": "[", "}": "{"}
+    opens = set(pairs.values())
+    n = len(text)
+    i = 0
+    last_word = ""
+    last_char = ""
+    while i < n:
+        c = text[i]
+        if c in "\"'":
+            quote = c
+            i += 1
+            closed = False
+            while i < n:
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == quote:
+                    i += 1
+                    closed = True
+                    break
+                if text[i] == "\n":
+                    break
+                i += 1
+            if not closed:
+                return False
+            last_word = ""
+            last_char = quote
+            continue
+        if c == "`":
+            i += 1
+            closed = False
+            while i < n:
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == "`":
+                    i += 1
+                    closed = True
+                    break
+                if text[i] == "$" and i + 1 < n and text[i + 1] == "{":
+                    depth = 1
+                    i += 2
+                    while i < n and depth > 0:
+                        if text[i] == "{":
+                            depth += 1
+                        elif text[i] == "}":
+                            depth -= 1
+                        i += 1
+                    continue
+                i += 1
+            if not closed:
+                return False
+            last_word = ""
+            last_char = "`"
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            j = text.find("\n", i)
+            i = n if j == -1 else j
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            j = text.find("*/", i + 2)
+            if j == -1:
+                return False
+            i = j + 2
+            continue
+        if c == "/":
+            is_regex = (
+                last_char == ""
+                or last_char in _JS_REGEX_PRECURSOR_PUNCT
+                or last_word in _JS_REGEX_PRECURSOR_KEYWORDS
+            )
+            if is_regex:
+                j = i + 1
+                in_class = False
+                closed = False
+                while j < n:
+                    ch = text[j]
+                    if ch == "\\":
+                        j += 2
+                        continue
+                    if ch == "\n":
+                        break
+                    if ch == "[":
+                        in_class = True
+                    elif ch == "]":
+                        in_class = False
+                    elif ch == "/" and not in_class:
+                        j += 1
+                        closed = True
+                        break
+                    j += 1
+                if not closed:
+                    return False
+                while j < n and text[j].isalpha():
+                    j += 1
+                i = j
+                last_word = ""
+                last_char = "/"
+                continue
+            i += 1
+            last_word = ""
+            last_char = "/"
+            continue
+        if c in opens:
+            stack.append(c)
+            i += 1
+            last_word = ""
+            last_char = c
+            continue
+        if c in pairs:
+            if not stack or stack[-1] != pairs[c]:
+                return False
+            stack.pop()
+            i += 1
+            last_word = ""
+            last_char = c
+            continue
+        if c.isspace():
+            i += 1
+            continue
+        if c.isalnum() or c in "_$":
+            j = i
+            while j < n and (text[j].isalnum() or text[j] in "_$"):
+                j += 1
+            last_word = text[i:j]
+            last_char = text[j - 1]
+            i = j
+            continue
+        last_word = ""
+        last_char = c
+        i += 1
+    return not stack
+
 
 class _MarkupProbe(HTMLParser):
     def __init__(self) -> None:
@@ -292,6 +456,58 @@ def test_x1_javascript_parses_with_node_when_available() -> None:
     if node is None:
         pytest.skip("node is not installed on this test host")
     subprocess.run([node, "--check", str(JS)], check=True, capture_output=True, text=True)
+
+
+def test_x1_structural_balance_check_catches_a_missing_closing_bracket() -> None:
+    """Fix 5: the pure-Python check must actually fail on malformed input
+    — a missing ``]`` before the statement-ending ``;``."""
+    malformed = "function foo() {\n  var x = [1, 2, 3;\n}\n"
+    assert _js_structural_balance_ok(malformed) is False
+
+
+def test_x1_structural_balance_check_catches_an_extra_closing_brace() -> None:
+    malformed = "function foo() { return 1; } }\n"
+    assert _js_structural_balance_ok(malformed) is False
+
+
+def test_x1_structural_balance_check_catches_an_unterminated_string() -> None:
+    malformed = "var x = \"unterminated string;\nvar y = 1;\n"
+    assert _js_structural_balance_ok(malformed) is False
+
+
+def test_x1_structural_balance_check_passes_well_formed_code_with_regex_and_template() -> None:
+    """Exercises every kind of span the check must skip over rather than
+    balance-count: a regex literal containing an escaped ``/`` (would look
+    unbalanced if mistaken for division/strings), a single-quoted string
+    containing bare brace/bracket characters, a template literal with a
+    nested ``${...}`` expression, and ordinary division (``/``) right
+    after a value-shaped token, which must NOT be read as a regex."""
+    well_formed = (
+        "function foo(a, b) {\n"
+        "  var re = /[a-z]+\\/g/;\n"
+        "  var s = 'a string with { and } and [ chars';\n"
+        "  var t = `template ${a + b} literal`;\n"
+        "  return (a + b) / 2;\n"
+        "}\n"
+    )
+    assert _js_structural_balance_ok(well_formed) is True
+
+
+def test_x1_structural_balance_check_passes_on_the_real_control_room_js() -> None:
+    """The check that actually runs regardless of whether node is
+    installed — proving it agrees with node on the real, current file."""
+    source = JS.read_text(encoding="utf-8")
+    assert _js_structural_balance_ok(source) is True
+
+
+def test_x1_structural_balance_check_does_not_depend_on_node(monkeypatch) -> None:
+    """Fix 5's whole point: this must still run — and still pass on the
+    real file — even where node is unavailable and the sibling node-based
+    test above self-skips."""
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    assert shutil.which("node") is None  # sanity: the node test would skip here
+    source = JS.read_text(encoding="utf-8")
+    assert _js_structural_balance_ok(source) is True
 
 
 def test_remote_shell_is_one_shared_renderer_without_local_authority() -> None:
@@ -571,6 +787,22 @@ def test_x1_autonomy_composition_leads_with_owed_action_not_event_volume() -> No
     # No synthesized health, score or ranking of the organization.
     for forbidden in ("score", "health", "rank", "priority"):
         assert forbidden not in block
+
+
+def test_x1_autonomy_ledger_gated_and_declared_are_separately_rendered() -> None:
+    """Fix 2 (final adversarial review, 2026-09-01): the ledger must not
+    let the Chairman read "0 gated" while a declared block is visible on
+    a card/unmapped row beneath it — "gated" (Steward-owned,
+    ``counts.blocked``) and "declared" (Agent-OS-declared,
+    ``counts.declared_blocked``) are wired as two SEPARATE reading items,
+    never merged into one number."""
+    block = _autonomy_js()
+    ledger_fn = block[block.index("function auLedger(projection)") : block.index("function auDecisions")]
+    assert '["gated", counts.blocked]' in ledger_fn
+    assert '["declared", counts.declared_blocked]' in ledger_fn
+    # Never merged/summed into a single combined figure.
+    for forbidden in ("counts.blocked + counts.declared_blocked", "counts.declared_blocked + counts.blocked"):
+        assert forbidden not in ledger_fn
 
 
 def test_x1_autonomy_chairman_decision_band_names_the_reason() -> None:

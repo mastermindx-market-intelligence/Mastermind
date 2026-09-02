@@ -1489,12 +1489,20 @@
 
     var reading = el("div", { className: "ccr-au-reading" });
     [
+      // "gated" stays the Steward-owned block count (card.blocker !=
+      // null) exactly as before.  "declared" is a SEPARATE count of
+      // Agent-OS-declared blocks (card.declared_blocker plus a declared
+      // block on an unmapped row) — never merged into "gated" — so the
+      // Chairman can never read "0 gated" while a declared block is
+      // visible on a card or unmapped row directly beneath the ledger.
       ["live", counts.actionable],
       ["history", counts.stale],
       ["gated", counts.blocked],
+      ["declared", counts.declared_blocked],
       ["carried", counts.total],
     ].forEach(function (pair) {
-      var item = el("span", { className: "ccr-au-reading-item" });
+      var isDeclared = pair[0] === "declared" && typeof pair[1] === "number" && pair[1] > 0;
+      var item = el("span", { className: "ccr-au-reading-item" + (isDeclared ? " is-declared" : "") });
       item.appendChild(el("strong", { text: typeof pair[1] === "number" ? String(pair[1]) : "—" }));
       item.appendChild(el("span", { text: pair[0] }));
       reading.appendChild(item);

@@ -487,7 +487,8 @@ def test_state_empty():
 
     assert doc["responsibilities"] == []
     assert doc["counts"] == {
-        "total": 0, "actionable": 0, "stale": 0, "blocked": 0, "empty": True,
+        "total": 0, "actionable": 0, "stale": 0, "blocked": 0,
+        "declared_blocked": 0, "empty": True,
     }
     assert doc["chairman_decisions"] == []
     assert doc["owed_by_seat"] == {
@@ -2523,3 +2524,233 @@ def test_fix5_unreadable_rows_never_suppress_a_sibling_rows_mapping():
     assert unmapped == (
         {"responsibility_ref": None, "reason": "row_unreadable"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Final adversarial review repair packet, 2026-09-01 — three more fixes
+# found by the FINAL adversarial review (distinct from the "Fix 1"..."Fix 5"
+# adversarial-review repair packet tested above): (1) an unbounded forward
+# clock-skew tolerance let a far-future observed_at read CURRENT; (2) the
+# ledger's "gated" count was Steward-blocker-only with no separate visible
+# count of Agent-OS-declared blocks, so the summary could contradict a
+# card/unmapped row's own detail; (3) FRESHNESS_BUDGET_HOURS was an unpinned
+# free parameter — the whole 48h suite stayed green under several mutated
+# values because no test pinned the constant itself or its exact boundary.
+# ---------------------------------------------------------------------------
+
+# --- Final Fix 1: bounded forward clock-skew tolerance ---------------------
+
+def test_final_fix1_far_future_observed_at_reads_unknown_never_current():
+    """The production defect: an artifact stamped in the far future
+    (2999-01-01) composed against a 2026 reference used to read freshness
+    "current" with counts["stale"] == 0 unconditionally, since a negative
+    age is trivially <= FRESHNESS_BUDGET no matter how large in magnitude.
+    Now it reads "unknown" — never "current" and never "stale"."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FINALFIX1-FAR-FUTURE", owner="chairman", status="active")],
+        generated_at="2999-01-01T00:00:00Z",
+    )
+    reference_at = "2026-08-31T00:00:00Z"
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at=reference_at,
+    )
+    doc = proj.project_autonomy(snap, generated_at=reference_at)
+    card = _card(doc, "WS:FINALFIX1-FAR-FUTURE")
+
+    assert card["freshness"] == "unknown"
+    assert card["freshness"] != "current"
+    assert card["freshness"] != "stale"
+    assert doc["counts"]["stale"] == 0
+
+
+def test_final_fix1_modest_future_overshoot_beyond_tolerance_reads_unknown():
+    """A more modest overshoot — well past the one-hour skew tolerance but
+    nowhere near as extreme as the 2999 case — must read the same way:
+    unknown, never current."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FINALFIX1-MODEST-FUTURE", owner="chairman", status="active")],
+        generated_at="2026-09-02T00:00:00Z",  # one full day ahead of reference
+    )
+    reference_at = "2026-09-01T00:00:00Z"
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at=reference_at,
+    )
+    doc = proj.project_autonomy(snap, generated_at=reference_at)
+    card = _card(doc, "WS:FINALFIX1-MODEST-FUTURE")
+
+    assert card["freshness"] == "unknown"
+
+
+def test_final_fix1_timestamp_inside_skew_tolerance_still_reads_current():
+    """Genuine host clock skew — observed_at a few minutes ahead of the
+    reference, well inside FUTURE_SKEW_TOLERANCE — must still read
+    current, exactly as the pre-existing "at/after reference_at is skew,
+    not staleness" rule always promised."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FINALFIX1-SKEW-OK", owner="chairman", status="active")],
+        generated_at="2026-09-01T00:05:00Z",  # five minutes ahead of reference
+    )
+    reference_at = "2026-09-01T00:00:00Z"
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at=reference_at,
+    )
+    doc = proj.project_autonomy(snap, generated_at=reference_at)
+    card = _card(doc, "WS:FINALFIX1-SKEW-OK")
+
+    assert card["freshness"] == "current"
+
+
+def test_final_fix1_far_future_card_is_never_actionable():
+    """A composed-card proof: a far-future-stamped artifact must never
+    become actionable — the exact "actionable on evidence that has not
+    happened yet" failure mode this fix exists to close."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FINALFIX1-NOT-ACTIONABLE", owner="chairman", status="active")],
+        generated_at="2999-01-01T00:00:00Z",
+    )
+    reference_at = "2026-08-31T00:00:00Z"
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at=reference_at,
+    )
+    doc = proj.project_autonomy(snap, generated_at=reference_at)
+    card = _card(doc, "WS:FINALFIX1-NOT-ACTIONABLE")
+
+    assert card["is_actionable"] is False
+    assert card["actionability_reason"] == "freshness_unknown"
+    assert doc["counts"]["actionable"] == 0
+
+
+# --- Final Fix 2: the ledger's declared-block count must not read zero -----
+
+def test_final_fix2_declared_block_count_is_never_zero_when_a_block_is_declared():
+    """The production contradiction: counts["blocked"] (Steward-owned
+    only) could read 0 while a real card's own declared_blocker field, or
+    an unmapped row's declared_blocker sub-object, showed a genuine
+    Agent-OS-declared block.  counts["declared_blocked"] must count both
+    surfaces and must never read 0 when either one carries a block."""
+    agent_os_state = _agent_os_state([
+        _ws_row(
+            "FINALFIX2-MAPPED-BLOCKED", owner="chairman",
+            blocked_by=["Agent OS: blocked by upstream outage"],
+        ),
+        _ws_row(
+            "FINALFIX2-UNMAPPED-BLOCKED", owner="grok-cn-c",
+            blocked_by=["Agent OS: blocked by missing credential"],
+        ),
+    ])
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    declared_blockers = proj.declared_blockers_from_agent_os_state(agent_os_state)
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+    doc = proj.project_autonomy(
+        snap, generated_at="G",
+        declared_blockers=declared_blockers,
+        unmapped_responsibilities=unmapped,
+    )
+
+    # Steward-owned "blocked" stays 0 — no BlockerFact exists anywhere in
+    # this snapshot (Agent OS data can never build one; see module
+    # docstring point 8).  The point of this fix: that must not be the
+    # only number the Chairman sees.
+    assert doc["counts"]["blocked"] == 0
+    assert doc["counts"]["declared_blocked"] == 2
+    assert doc["counts"]["declared_blocked"] != 0
+
+    mapped_card = _card(doc, "WS:FINALFIX2-MAPPED-BLOCKED")
+    assert mapped_card["declared_blocker"] is not None
+    unmapped_row = doc["unmapped_responsibilities"][0]
+    assert unmapped_row["responsibility_ref"] == "WS:FINALFIX2-UNMAPPED-BLOCKED"
+    assert unmapped_row["declared_blocker"] is not None
+
+
+def test_final_fix2_steward_and_declared_blocks_stay_separately_countable():
+    """A Steward-owned blocker and an Agent-OS-declared block must remain
+    two distinct counters — never merged into one number — even when both
+    are present at once in the same snapshot."""
+    ref = "WS:FINALFIX2-BOTH-KINDS"
+    resp = _responsibility(ref=ref)
+    blocker = _blocker(
+        ref=ref,
+        code="BLOCKED",
+        explanation="A real Steward-owned blocker.",
+        target="WORKER",
+        effect_state="NONE",
+    )
+    snap = _snapshot(responsibilities=(resp,), blockers=(blocker,))
+
+    agent_os_state = _agent_os_state([
+        _ws_row(
+            "SIDECAR-DECLARED", owner="grok-cn-c",
+            blocked_by=["Agent OS: a wholly separate declared block"],
+        ),
+    ])
+    unmapped = proj.unmapped_responsibilities_from_agent_os_state(agent_os_state)
+
+    doc = proj.project_autonomy(
+        snap, generated_at="G", unmapped_responsibilities=unmapped,
+    )
+    card = _card(doc, ref)
+
+    assert card["blocker"] is not None
+    # Both kinds present at once: each has its own count, each == 1, and
+    # they are two distinct dict entries — not one merged figure.
+    assert doc["counts"]["blocked"] == 1
+    assert doc["counts"]["declared_blocked"] == 1
+    assert "blocked" in doc["counts"] and "declared_blocked" in doc["counts"]
+
+
+# --- Final Fix 3: pin the freshness budget as a value, not just a shape ----
+
+def test_final_fix3_freshness_budget_hours_is_pinned_at_48():
+    """The review mutated FRESHNESS_BUDGET_HOURS to 13, 150, and 215 and
+    the whole suite stayed green — an unpinned free parameter.  Pin the
+    exact value so a silent mutation is caught here directly."""
+    assert proj.FRESHNESS_BUDGET_HOURS == 48
+
+
+def test_final_fix3_exactly_at_budget_boundary_is_current():
+    """observed_at exactly FRESHNESS_BUDGET_HOURS (48h) before the
+    reference — the closed edge of the CURRENT interval."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FINALFIX3-EXACT-BOUNDARY", owner="chairman", status="active")],
+        generated_at="2026-08-30T00:00:00Z",
+    )
+    reference_at = "2026-09-01T00:00:00Z"  # exactly 48h later
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at=reference_at,
+    )
+    doc = proj.project_autonomy(snap, generated_at=reference_at)
+    card = _card(doc, "WS:FINALFIX3-EXACT-BOUNDARY")
+
+    assert card["freshness"] == "current"
+
+
+def test_final_fix3_one_microsecond_past_budget_boundary_is_stale():
+    """observed_at one microsecond OLDER than the 48h budget — the open
+    edge, immediately across the boundary from the case above."""
+    agent_os_state = _agent_os_state(
+        [_ws_row("FINALFIX3-PAST-BOUNDARY", owner="chairman", status="active")],
+        generated_at="2026-08-29T23:59:59.999999Z",
+    )
+    reference_at = "2026-09-01T00:00:00Z"  # 48h + 1 microsecond later
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at=reference_at,
+    )
+    doc = proj.project_autonomy(snap, generated_at=reference_at)
+    card = _card(doc, "WS:FINALFIX3-PAST-BOUNDARY")
+
+    assert card["freshness"] == "stale"
