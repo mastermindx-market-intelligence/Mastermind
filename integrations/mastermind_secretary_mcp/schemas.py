@@ -37,12 +37,16 @@ _ABSOLUTE_END = r'(?![\s\S])'
 _RESPONSIBILITY_REF_PATTERN = f'^responsibility:{_CANONICAL_CREDENTIAL_FENCE}[a-z0-9][a-z0-9._-]{{0,144}}{_ABSOLUTE_END}'
 _RESPONSIBILITY_REF_RE = re.compile(rf'\Aresponsibility:{_CANONICAL_CREDENTIAL_FENCE}[a-z0-9][a-z0-9._-]{{0,144}}\Z')
 _CONTROL_RE = re.compile(r'[\x00-\x1f\x7f]')
+_TEXT_SEPARATOR_RE = re.compile(r'[\u0085\u2028\u2029]')
+_PUBLIC_TEXT_CHAR = r'[^\x00-\x1f\x7f\u0085\u2028\u2029]'
 _EMAIL_PATTERN = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
 _URL_PATTERN = '://'
 _PRIVATE_PATH_PATTERN = r'(?:/Users/|/home/|/private/|/tmp/|/var/|/etc/|~/|[A-Za-z]:\\)'
-_SECRET_LABEL_PATTERN = r'\b(?:[Bb]earer|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Tt]oken|[Ss]ecret|[Pp]assword)\s*[:=]'
+_LABEL_BOUNDARY = r'(?:^|[^A-Za-z0-9])'
+_SECRET_LABEL_KEY_PATTERN = r'(?:[Bb]earer|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Tt]oken|[Ss]ecret|[Pp]assword|[Cc]ookie|[Ss]ession[_-]?[Ii][Dd]|[Rr]efresh|[Aa]uth)'
+_SECRET_LABEL_PATTERN = rf'{_LABEL_BOUNDARY}{_SECRET_LABEL_KEY_PATTERN}\s*[:=]'
 _PRIVATE_LOCATOR_KEY_PATTERN = '(?:[Pp]rovider(?:_session)?|[Nn]ative_(?:session|handle)|[Aa]ccount(?:_id)?|[Bb]rowser_profile|[Pp]rofile_id|[Hh]ost|[Cc]hannel|[Tt]hread|[Cc]oordinates|[Pp]id|[Pp]gid|[Aa]ction|[Tt]arget)'
-_PRIVATE_LOCATOR_PATTERN = rf'\b{_PRIVATE_LOCATOR_KEY_PATTERN}\s*[:=]\s*\S+'
+_PRIVATE_LOCATOR_PATTERN = rf'{_LABEL_BOUNDARY}{_PRIVATE_LOCATOR_KEY_PATTERN}\s*[:=]\s*\S+'
 _EMAIL_RE = re.compile(_EMAIL_PATTERN)
 _URL_RE = re.compile(_URL_PATTERN)
 _PRIVATE_PATH_RE = re.compile(_PRIVATE_PATH_PATTERN)
@@ -50,7 +54,7 @@ _SECRET_RE = re.compile(f'(?:^|[^A-Za-z0-9]){_CANONICAL_CREDENTIAL_PREFIX}|-----
 _PRIVATE_LOCATOR_RE = re.compile(_PRIVATE_LOCATOR_PATTERN)
 _HEX_SECRET_RE = re.compile(r'\b[A-Fa-f0-9]{32,}\b')
 _HIGH_ENTROPY_RE = re.compile(r'\b(?=[A-Za-z0-9]{32,}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\b')
-_PUBLIC_TEXT_PATTERN = rf'^(?=\S(?:.*\S)?$)(?!.*[\x00-\x1f\x7f])(?!.*{_URL_PATTERN})(?!.*{_EMAIL_PATTERN})(?!.*{_PRIVATE_PATH_PATTERN}){_CREDENTIAL_ANY_GUARD}(?!.*{_SECRET_LABEL_PATTERN})(?!.*-----BEGIN [A-Z ]*PRIVATE KEY-----)(?!.*{_PRIVATE_LOCATOR_PATTERN})(?!.*\b[A-Fa-f0-9]{{32,}}\b)(?!.*\b(?=[A-Za-z0-9]{{32,}}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\b).+{_ABSOLUTE_END}'
+_PUBLIC_TEXT_PATTERN = rf'^(?=\S(?:.*\S)?$)(?!.*[\x00-\x1f\x7f])(?!.*{_URL_PATTERN})(?!.*{_EMAIL_PATTERN})(?!.*{_PRIVATE_PATH_PATTERN}){_CREDENTIAL_ANY_GUARD}(?!.*{_SECRET_LABEL_PATTERN})(?!.*-----BEGIN [A-Z ]*PRIVATE KEY-----)(?!.*{_PRIVATE_LOCATOR_PATTERN})(?!.*\b[A-Fa-f0-9]{{32,}}\b)(?!.*\b(?=[A-Za-z0-9]{{32,}}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\b){_PUBLIC_TEXT_CHAR}+{_ABSOLUTE_END}'
 _PUBLIC_TOKEN_PATTERN = f'^{_CREDENTIAL_ANY_GUARD}[A-Za-z0-9][A-Za-z0-9._-]{{0,95}}{_ABSOLUTE_END}'
 _PUBLIC_TOKEN_RE = re.compile(_PUBLIC_TOKEN_PATTERN)
 _SAFE_REF_TOKEN = '[A-Za-z0-9][A-Za-z0-9._-]{0,223}'
@@ -123,7 +127,7 @@ def _object(properties: Mapping[str, Any], *, required: tuple[str, ...]=()) -> d
     return value
 
 def _normalize_public_text(value: Any, maximum: int) -> str:
-    if not isinstance(value, str) or not 1 <= len(value) <= maximum or value != value.strip() or _CONTROL_RE.search(value) or _EMAIL_RE.search(value) or _URL_RE.search(value) or _PRIVATE_PATH_RE.search(value) or _SECRET_RE.search(value) or _PRIVATE_LOCATOR_RE.search(value) or _HEX_SECRET_RE.search(value) or _HIGH_ENTROPY_RE.search(value):
+    if not isinstance(value, str) or not 1 <= len(value) <= maximum or value != value.strip() or _CONTROL_RE.search(value) or _TEXT_SEPARATOR_RE.search(value) or _EMAIL_RE.search(value) or _URL_RE.search(value) or _PRIVATE_PATH_RE.search(value) or _SECRET_RE.search(value) or _PRIVATE_LOCATOR_RE.search(value) or _HEX_SECRET_RE.search(value) or _HIGH_ENTROPY_RE.search(value):
         raise GatewayError('RESPONSE_REFUSED')
     return value
 
@@ -359,16 +363,29 @@ def _receipt_attempt_identity(receipt: str) -> str | None:
     _, _, tail = receipt.partition(':')
     return tail if tail.startswith('ATT-') else None
 
+def _assert_attempt_identity(rows: dict[str, dict[str, Any]], predicates: tuple[str, ...], owners: tuple[str, ...], expected: str) -> None:
+    """Every owner receipt that names an Attempt must name the selected one."""
+    for predicate in predicates:
+        row = rows.get(predicate)
+        if row is None:
+            continue
+        for source in row['sources']:
+            if source['owner'] not in owners:
+                continue
+            carried = _receipt_attempt_identity(source['source_ref'])
+            if carried is not None and carried != expected:
+                raise GatewayError('RESPONSE_REFUSED')
+
 def _validate_runtime_receipt_join(rows: dict[str, dict[str, Any]]) -> None:
     """Selected runtime facts may not borrow authority across unrelated receipts."""
-    executive = _common_receipt(rows, _EXECUTIVE_RUNTIME_PREDICATES, _EXECUTIVE_OS)
+    _common_receipt(rows, _EXECUTIVE_RUNTIME_PREDICATES, _EXECUTIVE_OS)
     _common_receipt(rows, _BINDING_RUNTIME_PREDICATES, _RUNTIME_BINDING)
     attempt = rows.get('runtime.attempt_ref')
-    if executive is None or attempt is None:
+    if attempt is None:
         return
-    carried = _receipt_attempt_identity(executive)
-    if carried is not None and carried != str(attempt['value']):
-        raise GatewayError('RESPONSE_REFUSED')
+    expected = str(attempt['value'])
+    _assert_attempt_identity(rows, _EXECUTIVE_RUNTIME_PREDICATES, _EXECUTIVE_OS, expected)
+    _assert_attempt_identity(rows, _BINDING_RUNTIME_PREDICATES, _RUNTIME_BINDING, expected)
 
 def _surface_receipt_matches(surface_ref: str, receipt: str) -> bool:
     return receipt == surface_ref or receipt == f'surface-binding:{surface_ref}'
@@ -433,6 +450,8 @@ def _validate_tool_contract(tool_name: str | None, responsibility_ref: str | Non
         raise GatewayError('RESPONSE_REFUSED')
     scoped = tool_name in _SUBJECT_SCOPED_TOOLS
     subjects = {fact['subject_ref'] for fact in facts}
+    if scoped and responsibility_ref is None and subjects:
+        raise GatewayError('RESPONSE_REFUSED')
     if scoped and responsibility_ref is not None and any((subject != responsibility_ref for subject in subjects)):
         raise GatewayError('RESPONSE_REFUSED')
     if state != 'FACTS':
@@ -500,8 +519,8 @@ def tool_schema_snapshot() -> list[dict[str, Any]]:
 
 def tool_schema_digest() -> str:
     return hashlib.sha256(canonical_json(tool_schema_snapshot())).hexdigest()
-SCHEMA_SNAPSHOT_SHA256 = 'e73601400350540e5949f76a8d5f68012e3e3cf09bd980f775ebe7ce2f9afe5c'
-TOOL_SCHEMA_DIGEST = 'beed9214a33ad6a5cbe61c08c392ad134d80e70ff39c13dc6351dc652a5d86ee'
+SCHEMA_SNAPSHOT_SHA256 = '16f41084829714fcbb25cd72ebcdb78ba6f5e5804f2a17bcfb26b5df527452cd'
+TOOL_SCHEMA_DIGEST = 'b67fc7db63965c74515ab3ad6ff2eacc5722b59587a8ea9105cc10d3683d0ce2'
 
 def assert_contract_integrity() -> None:
     if schema_snapshot_sha256() != SCHEMA_SNAPSHOT_SHA256 or tool_schema_digest() != TOOL_SCHEMA_DIGEST:

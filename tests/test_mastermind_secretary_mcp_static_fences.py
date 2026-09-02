@@ -274,34 +274,30 @@ def test_advertised_output_contract_rejects_wrapped_source_credentials(
     wrapped_credential,
 ):
     jsonschema = pytest.importorskip("jsonschema")
-    envelope = {
-        "schema": "mastermind.secretary_grounding_mcp_result.v1",
-        "tool": "get_attention",
-        "ok": True,
-        "server_version": "1.0.0",
-        "data": {
-            "state": "FACTS",
-            "facts": [
-                {
-                    "subject_ref": "responsibility:alpha",
-                    "predicate": "attention.state",
-                    "value": "SOL_REQUIRED",
-                    "freshness": "FRESH",
-                    "sources": [
-                        {
-                            "owner": "agent_os",
-                            "source_ref": "DEC:" + wrapped_credential,
-                            "observed_at": None,
-                        }
-                    ],
-                }
-            ],
-            "reason_codes": [],
-        },
-        "error": None,
-    }
+    validator = jsonschema.Draft202012Validator(TOOL_SPECS[2].output_schema)
+
+    def envelope_for(source_ref):
+        return {
+            "schema": "mastermind.secretary_grounding_mcp_result.v1",
+            "tool": "get_attention",
+            "ok": True,
+            "server_version": "1.0.0",
+            "data": {
+                "state": "FACTS",
+                "facts": _attention_facts(
+                    {"owner": "agent_os", "source_ref": source_ref, "observed_at": None}
+                ),
+                "reason_codes": [],
+            },
+            "error": None,
+        }
+
+    # Control: the same complete bundle with a safe source_ref must validate, so
+    # the refusal below is attributable to the credential fence and not to the
+    # per-tool required-predicate constraints.
+    validator.validate(envelope_for("DEC:TOTALLY-SAFE-REF"))
     with pytest.raises(jsonschema.ValidationError):
-        jsonschema.Draft202012Validator(TOOL_SPECS[2].output_schema).validate(envelope)
+        validator.validate(envelope_for("DEC:" + wrapped_credential))
 
 
 def test_static_contract_server_exposes_only_list_and_call():
@@ -447,7 +443,7 @@ def test_producer_native_runtime_identity_and_provenance_are_distinct():
     ]
 
     envelope = contract_schemas.result_envelope(
-        "get_current_runtime", data=_producer_data(facts)
+        "get_current_runtime", responsibility_ref="responsibility:alpha", data=_producer_data(facts)
     )
 
     assert [row["value"] for row in envelope["data"]["facts"][:4]] == [
@@ -538,7 +534,7 @@ def test_producer_native_surface_identity_is_not_its_provenance_receipt():
     ]
 
     envelope = contract_schemas.result_envelope(
-        "resolve_surface", data=_producer_data(facts)
+        "resolve_surface", responsibility_ref="responsibility:alpha", data=_producer_data(facts)
     )
     assert envelope["data"]["facts"][0]["value"] == surface_ref
     assert envelope["data"]["facts"][0]["sources"][0]["source_ref"] == receipt
@@ -575,7 +571,7 @@ def test_selected_surface_cannot_borrow_review_from_another_receipt():
 
     with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
         contract_schemas.result_envelope(
-            "resolve_surface", data=_producer_data(facts)
+            "resolve_surface", responsibility_ref="responsibility:alpha", data=_producer_data(facts)
         )
 
 
@@ -597,7 +593,7 @@ def test_selected_runtime_refuses_its_own_effect_unknown_fact():
 
     with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
         contract_schemas.result_envelope(
-            "get_current_runtime", data=_producer_data(facts)
+            "get_current_runtime", responsibility_ref="responsibility:alpha", data=_producer_data(facts)
         )
 
 

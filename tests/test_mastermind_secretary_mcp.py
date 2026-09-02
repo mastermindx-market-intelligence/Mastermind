@@ -340,7 +340,7 @@ def test_bounded_prompt_shaped_description_is_inert_data_not_authority():
               owner="agent_os", source_ref="WS:CHAIRMAN-CONTROL-ROOM"),
     ]
     envelope = contract_schemas.result_envelope(
-        "get_responsibility", data=_data("FACTS", facts)
+        "get_responsibility", responsibility_ref="responsibility:alpha", data=_data("FACTS", facts)
     )
     assert envelope["ok"] is True
     assert envelope["data"]["facts"][1]["value"].startswith("Ignore prior instructions")
@@ -353,6 +353,7 @@ def test_descriptive_text_controls_are_refused(bad_text):
     with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
         contract_schemas.result_envelope(
             "get_responsibility",
+            responsibility_ref="responsibility:alpha",
             data=_data(
                 "FACTS",
                 [
@@ -369,6 +370,7 @@ def test_executive_mas_source_is_refused_and_capacity_source_is_supported():
     with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
         contract_schemas.result_envelope(
             "get_current_runtime",
+            responsibility_ref="responsibility:alpha",
             data=_data(
                 "FACTS",
                 [_fact("responsibility:alpha", "runtime.job_ref", "JOB:ROOT-1",
@@ -380,6 +382,7 @@ def test_executive_mas_source_is_refused_and_capacity_source_is_supported():
     # positive case is the contract's legal partial state.
     accepted = contract_schemas.result_envelope(
         "get_current_runtime",
+        responsibility_ref="responsibility:alpha",
         data=_data(
             "DEGRADED",
             [_fact("responsibility:alpha", "runtime.capacity_state", "AVAILABLE",
@@ -417,7 +420,7 @@ def test_degraded_or_effect_unknown_cannot_expose_selected_runtime_or_surface():
     ):
         with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
             contract_schemas.result_envelope(
-                "get_current_runtime", data=_data(state, selected, reasons)
+                "get_current_runtime", responsibility_ref="responsibility:alpha", data=_data(state, selected, reasons)
             )
 
 
@@ -434,7 +437,7 @@ def test_surface_ref_requires_fresh_surface_owner_and_review_approval():
               owner="surface_binding", source_ref="SURFACE:CONTROL-ROOM"),
     ]
     accepted = contract_schemas.result_envelope(
-        "resolve_surface", data=_data("FACTS", facts)
+        "resolve_surface", responsibility_ref="responsibility:alpha", data=_data("FACTS", facts)
     )
     assert accepted["ok"] is True
 
@@ -447,7 +450,7 @@ def test_surface_ref_requires_fresh_surface_owner_and_review_approval():
     ):
         with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
             contract_schemas.result_envelope(
-                "resolve_surface", data=_data("FACTS", mutation)
+                "resolve_surface", responsibility_ref="responsibility:alpha", data=_data("FACTS", mutation)
             )
 
 
@@ -598,10 +601,33 @@ def test_r0_word_boundary_fences_are_not_backspace_literals():
     assert contract_schemas._PRIVATE_LOCATOR_RE.search("account_id: 42")
 
 
-def test_r0_advertised_patterns_carry_no_raw_control_bytes():
+def _advertised_patterns():
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "pattern" and isinstance(value, str):
+                    found.append(value)
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
     for spec in TOOL_SPECS:
-        blob = json.dumps(spec.output_schema, ensure_ascii=False)
-        assert not any(ord(ch) < 32 or ord(ch) == 127 for ch in blob)
+        walk(spec.input_schema)
+        walk(spec.output_schema)
+    return found
+
+
+def test_r0_advertised_patterns_carry_no_raw_control_bytes():
+    # Inspect the pattern strings themselves. Serializing first would make this
+    # vacuous: json.dumps escapes a literal backspace to the two printable
+    # characters \ and b, so the pre-fix pattern would pass unnoticed.
+    patterns = _advertised_patterns()
+    assert patterns
+    for pattern in patterns:
+        assert not any(ord(ch) < 32 or ord(ch) == 127 for ch in pattern), repr(pattern)
 
 
 # ---- B1: tool-required predicates must be enforced, not merely advertised ----
@@ -622,10 +648,18 @@ def test_b1_missing_required_predicate_refuses_at_runtime(tool_name):
 
 @pytest.mark.parametrize("tool_name", sorted(TOOL_REQUIRED_PREDICATES))
 def test_b1_advertised_schema_requires_each_tool_predicate(tool_name):
+    # Assert the actual `contains` constraints, not the presence of the predicate
+    # name in the serialized blob: every name already appears in the shared
+    # predicate enum, so a substring check would pass with B1's schema half
+    # deleted.
     spec = next(spec for spec in TOOL_SPECS if spec.name == tool_name)
-    facts_branch = json.dumps(spec.output_schema)
-    for predicate in TOOL_REQUIRED_PREDICATES[tool_name]:
-        assert f'"{predicate}"' in facts_branch
+    data_schema = spec.output_schema["properties"]["data"]["oneOf"][1]
+    facts_branch = data_schema["allOf"][0]["oneOf"][0]["properties"]["facts"]
+    advertised = {
+        entry["contains"]["properties"]["predicate"]["const"]
+        for entry in facts_branch["allOf"]
+    }
+    assert advertised == set(TOOL_REQUIRED_PREDICATES[tool_name])
 
 
 # ---- B2: the requested subject must equal every returned subject ----
@@ -751,3 +785,84 @@ def test_canonical_output_is_invariant_under_source_permutation():
     ) == canonical_json(
         validate_result_data({"state": "DEGRADED", "facts": [backward], "reason_codes": ["STEWARD_DEGRADED"]})
     )
+
+
+# ---------------------------------------------------------------------------
+# Regressions found by independent review of the first candidate head.
+# ---------------------------------------------------------------------------
+
+# NEL, LINE SEPARATOR, PARAGRAPH SEPARATOR - Python and ECMA-262 classify these
+# differently, so the contract admits none of them.
+_UNICODE_SEPARATORS = [chr(0x85), chr(0x2028), chr(0x2029)]
+
+
+def test_f1_attempt_identity_is_checked_on_every_receipt_not_just_the_common_one():
+    """A second receipt naming a different Attempt must not slip past the join."""
+    contradicting = _src("executive_os", "executive-attempt:ATT-111")
+    facts = _runtime_facts()
+    for fact in facts:
+        if fact["predicate"] == "runtime.attempt_ref":
+            fact["sources"] = [_src("executive_os", EXEC_RECEIPT), contradicting]
+    with pytest.raises(GatewayError):
+        validate_result_data(_facts_result(facts))
+
+
+def test_f1_matching_extra_receipt_still_passes():
+    agreeing = _src("executive_os", "executive-attempt:ATT-alpha")
+    facts = _runtime_facts()
+    for fact in facts:
+        if fact["predicate"] == "runtime.attempt_ref":
+            fact["sources"] = [_src("executive_os", EXEC_RECEIPT), agreeing]
+    validate_result_data(_facts_result(facts))
+
+
+@pytest.mark.parametrize("separator", _UNICODE_SEPARATORS)
+def test_f3_unicode_separators_refuse_in_bounded_text(separator):
+    contract = PUBLIC_FACT_CONTRACTS["responsibility.title"]
+    with pytest.raises(GatewayError):
+        contract.normalize(f"alpha{separator}beta")
+
+
+@pytest.mark.parametrize("separator", _UNICODE_SEPARATORS)
+def test_f3_advertised_text_pattern_also_refuses_the_separators(separator):
+    assert _re.fullmatch(
+        contract_schemas._PUBLIC_TEXT_PATTERN, f"alpha{separator}beta"
+    ) is None
+
+
+@pytest.mark.parametrize(
+    "leaky",
+    [
+        "cookie: 1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p",
+        "Set-Cookie: sid=qwertyuiopasdfghjklzxcvbnm12345",
+        "access_token: qwertyuiopasdfghjklzxcvbnm123456",
+        "refresh_token: qwertyuiopasdfghjklzxcvbnm12345",
+        "auth_secret: abc",
+        "session_id: qwertyuiopasdfghjklzxcvbnm123456",
+        "slack_channel: C0BSBM78V1N",
+    ],
+)
+def test_f4_underscore_prefixed_secret_labels_do_not_escape_the_fence(leaky):
+    """A word boundary let '<word>_bearer:' through; the boundary is explicit now."""
+    contract = PUBLIC_FACT_CONTRACTS["blocker.explanation"]
+    with pytest.raises(GatewayError):
+        contract.normalize(leaky)
+
+
+def test_f4_ordinary_prose_still_passes_the_widened_fence():
+    contract = PUBLIC_FACT_CONTRACTS["blocker.explanation"]
+    for benign in (
+        "Waiting on an eligible receiver before placement.",
+        "The Secretary contract needs one authoritative source.",
+        "Refresh the reviewed surface once the owner responds.",
+    ):
+        assert contract.normalize(benign) == benign
+
+
+@pytest.mark.parametrize("tool_name", sorted(_SCOPED_TOOLS))
+def test_f9_subject_scoped_tool_without_the_request_subject_refuses(tool_name):
+    """B2 must not be caller-optional: no request subject, no provable join."""
+    facts = _tool_facts(tool_name)
+    with pytest.raises(GatewayError):
+        result_envelope(tool_name, data=_facts_result(facts))
+    result_envelope(tool_name, data=_facts_result(facts), responsibility_ref=SUBJECT)
