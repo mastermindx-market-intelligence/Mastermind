@@ -53,6 +53,17 @@ def _validate(document: dict[str, object]) -> None:
     assert request["operation"] == "resolve_dialogue_observation"
     assert request["parent_is_untrusted_lookup_input"] is True
     assert set(request["exact_keys"]) == {"schema", "request_id", "parent"}
+    assert set(request["parent_required_identity"]) == {
+        "schema",
+        "work_ref",
+        "commission_ref",
+        "session_ref",
+        "operation_key",
+        "watch_mode",
+        "allowed_sol_user_ids",
+        "created_at",
+        "fingerprint",
+    }
     for forbidden in (
         "job_id",
         "attempt_id",
