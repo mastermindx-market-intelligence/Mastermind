@@ -23,6 +23,7 @@ import json
 import os
 import shutil
 import socket
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -2537,3 +2538,70 @@ def test_item5_hostile_source_root_non_str_type_refuses(tmp_path):
     generation, _ = _standard_generation(tmp_path)
     with pytest.raises(CapabilityPackageError):
         verify_capability_package_source(12345, generation)
+
+
+# ---------------------------------------------------------------------------
+# Descriptor-leak proof, extended: the two new refusal paths that open real
+# descriptors (the item-2 parent/child directory-identity mismatch and the
+# item-3 census-to-open file-identity mismatch) must balance opens and
+# closes exactly like every round-1 refusal path.
+# ---------------------------------------------------------------------------
+
+
+def test_item2_directory_swap_refusal_balances_descriptors(tmp_path, monkeypatch):
+    counts = _count_opens_closes(monkeypatch)
+    generation, _ = _standard_generation(tmp_path)
+    elsewhere = Path(tempfile.mkdtemp())
+
+    def _swap():
+        receive_dir = tmp_path / "plugins" / "example" / "skills" / "receive"
+        detached = elsewhere / "detached-original"
+        receive_dir.rename(detached)
+        receive_dir.mkdir()
+        (receive_dir / "SKILL.md").write_bytes(b"skill entrypoint bytes")
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_swap)
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]
+
+
+def test_item3_regular_file_swap_refusal_balances_descriptors(tmp_path, monkeypatch):
+    counts = _count_opens_closes(monkeypatch)
+    generation, _ = _standard_generation(tmp_path)
+    target = "references/boundary.md"
+    victim = tmp_path / "plugins" / "example" / target
+    original_bytes = victim.read_bytes()
+
+    def _swap(path):
+        if path == target:
+            victim.unlink()
+            victim.write_bytes(original_bytes)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_file_open=_swap)
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]
+
+
+def test_item4_mid_read_growth_refusal_balances_descriptors(tmp_path, monkeypatch):
+    counts = _count_opens_closes(monkeypatch)
+    import control_plane.executive_capability_packages as scf_pkg
+
+    monkeypatch.setattr(scf_pkg, "_READ_CHUNK_BYTES", 4)
+    package_root = "plugins/example"
+    generation = _single_file_generation(tmp_path, package_root=package_root, contents=b"abcd")
+
+    grown = {"done": False}
+
+    def _grow(path):
+        if not grown["done"]:
+            grown["done"] = True
+            p = tmp_path / package_root / "skills/receive/SKILL.md"
+            with open(p, "ab") as f:
+                f.write(b"0" * 40)
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _between_read_chunks=_grow)
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]

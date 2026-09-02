@@ -103,6 +103,16 @@ def _refuse(field: str, reason: str) -> NoReturn:
     raise CapabilityPackageError(f"{field}: {reason}")
 
 
+def _utf8_byte_length(value: str, field: str) -> int:
+    """`len(value.encode("utf-8"))`, refusing bounded instead of leaking a
+    naked UnicodeEncodeError for a str containing a lone surrogate (which
+    cannot be encoded to UTF-8 at all)."""
+    try:
+        return len(value.encode("utf-8"))
+    except UnicodeEncodeError:
+        _refuse(field, "invalid_utf8")
+
+
 # ---------------------------------------------------------------------------
 # Immutable contract types
 # ---------------------------------------------------------------------------
@@ -192,7 +202,31 @@ def _file_row_projection(row: CapabilityPackageFile) -> dict:
     }
 
 
+def _require_valid_file_row(row: object, field: str) -> None:
+    """Exact row type plus the same per-field validation the builder applies.
+
+    The two public digest helpers below accept a bare tuple of file rows
+    from ANY caller, not only the trusted builder -- a directly constructed
+    invalid or subclassed row must never be allowed to yield a
+    canonical-looking digest.
+    """
+    if type(row) is not CapabilityPackageFile:
+        _refuse(field, "invalid_row")
+    _validate_relative_path(row.relative_path, f"{field}.relative_path")
+    _validate_sha256_value(row.sha256, f"{field}.sha256")
+    _validate_byte_length(row.byte_length, f"{field}.byte_length")
+    _validate_executable_flag(row.executable, f"{field}.executable")
+
+
+def _require_valid_file_rows(files: object, field: str) -> None:
+    if type(files) is not tuple:
+        _refuse(field, "invalid_shape")
+    for row in files:
+        _require_valid_file_row(row, f"{field}[]")
+
+
 def capability_package_content_digest(files: tuple[CapabilityPackageFile, ...]) -> str:
+    _require_valid_file_rows(files, "files")
     ordered = sorted(files, key=lambda f: f.relative_path)
     projection = {
         "schema_version": CAPABILITY_PACKAGE_CONTENT_SCHEMA,
@@ -207,6 +241,7 @@ def effective_skill_content_digest(
     entrypoint_path: str,
     closure_files: tuple[CapabilityPackageFile, ...],
 ) -> str:
+    _require_valid_file_rows(closure_files, "closure_files")
     ordered = sorted(closure_files, key=lambda f: f.relative_path)
     projection = {
         "schema_version": EFFECTIVE_SKILL_CLOSURE_SCHEMA,
@@ -305,7 +340,7 @@ def _validate_relative_path(value: object, field: str) -> str:
     if not isinstance(value, str) or value == "":
         _refuse(field, "empty_path")
     assert isinstance(value, str)
-    if len(value.encode("utf-8")) > MAX_RELATIVE_PATH_BYTES:
+    if _utf8_byte_length(value, field) > MAX_RELATIVE_PATH_BYTES:
         _refuse(field, "path_too_long")
     if value.startswith("/"):
         _refuse(field, "absolute_path")
@@ -318,7 +353,7 @@ def _validate_relative_path(value: object, field: str) -> str:
             _refuse(field, "empty_path_component")
         if part in (".", ".."):
             _refuse(field, "dot_component")
-        if len(part.encode("utf-8")) > MAX_PATH_SEGMENT_BYTES:
+        if _utf8_byte_length(part, field) > MAX_PATH_SEGMENT_BYTES:
             _refuse(field, "path_segment_too_long")
     return value
 
@@ -339,7 +374,7 @@ def _validate_repository(value: object, field: str) -> str:
     if not isinstance(value, str):
         _refuse(field, "invalid_repository")
     assert isinstance(value, str)
-    if len(value.encode("utf-8")) > MAX_REPOSITORY_BYTES:
+    if _utf8_byte_length(value, field) > MAX_REPOSITORY_BYTES:
         _refuse(field, "invalid_repository")
     if _REPOSITORY_RE.fullmatch(value) is None:
         _refuse(field, "invalid_repository")
@@ -673,7 +708,31 @@ def _generation_to_raw(generation: CapabilityPackageGeneration) -> dict:
     }
 
 
+def _require_exact_type(value: object, expected: type, field: str) -> None:
+    if type(value) is not expected:
+        _refuse(field, "untrusted_generation_refused")
+
+
 def _require_trusted_generation(generation: CapabilityPackageGeneration) -> None:
+    # Exact-type boundary (identity amendment clarification 5505160491,
+    # item 1): a dataclass's generated __eq__ returns NotImplemented when
+    # `other.__class__ is not self.__class__`, so Python falls back to the
+    # OTHER object's __eq__ -- a subclass overriding __eq__ to always
+    # return True can make an otherwise-differing object compare equal to a
+    # genuine rebuild. Refuse any non-exact type, recursively, BEFORE ever
+    # reaching an equality check, rather than trusting the comparison to
+    # catch it.
+    _require_exact_type(generation, CapabilityPackageGeneration, "generation")
+    _require_exact_type(generation.files, tuple, "generation.files")
+    for row in generation.files:
+        _require_exact_type(row, CapabilityPackageFile, "generation.files[]")
+    _require_exact_type(generation.skills, tuple, "generation.skills")
+    for grant in generation.skills:
+        _require_exact_type(grant, EffectiveSkillGrant, "generation.skills[]")
+    _require_exact_type(generation.required_app_references, tuple, "generation.required_app_references")
+    for value in generation.required_app_references:
+        _require_exact_type(value, str, "generation.required_app_references[]")
+
     try:
         rebuilt = build_capability_package_generation(
             capability_id=generation.capability_id,
@@ -681,7 +740,14 @@ def _require_trusted_generation(generation: CapabilityPackageGeneration) -> None
         )
     except CapabilityPackageError:
         _refuse("generation", "untrusted_generation_refused")
-    if rebuilt != generation:
+
+    # Compare via dataclasses.astuple (recursively converting every nested
+    # dataclass -- files, skills -- into plain tuples of primitive scalar
+    # values) rather than `rebuilt != generation`: even with the exact-type
+    # checks above in place, this ensures the identity decision is never
+    # made by invoking any object's own __eq__, only by comparing raw,
+    # unspoofable scalars.
+    if dataclasses.astuple(rebuilt) != dataclasses.astuple(generation):
         _refuse("generation", "untrusted_generation_refused")
 
 
@@ -721,6 +787,7 @@ def verify_capability_package_source(
     _before_terminal_fence: "Callable[[], None] | None" = None,
     _before_final_stat: "Callable[[], None] | None" = None,
     _before_file_open: "Callable[[str], None] | None" = None,
+    _between_read_chunks: "Callable[[str], None] | None" = None,
 ) -> VerifiedCapabilityPackage:
     if _O_NOFOLLOW == 0 or _O_DIRECTORY == 0 or _O_NONBLOCK == 0 or _O_CLOEXEC == 0:
         _refuse("platform", "nofollow_directory_unavailable")
@@ -759,13 +826,22 @@ def verify_capability_package_source(
         if candidate.count("/") + 1 > MAX_PACKAGE_TREE_DEPTH:
             _refuse("package_root", "package_tree_too_deep")
 
-    source_root_path = Path(source_root)
+    # Hostile source_root inputs (an embedded NUL byte, or a non-str/
+    # non-PathLike type) must refuse the same bounded CapabilityPackageError
+    # way as everything else, never leak a naked TypeError (from Path()
+    # construction) or ValueError (os.lstat()/os.open() reject an embedded
+    # NUL byte with "embedded null character/byte in path", which is NOT an
+    # OSError subclass and was previously uncaught).
+    try:
+        source_root_path = Path(source_root)
+    except TypeError:
+        _refuse("source_root", "source_root_invalid")
     package_root_parts = package_root.split("/")
 
     # Step 1: lexical, non-resolving symlink checks (never call resolve()).
     try:
         source_root_lstat = os.lstat(str(source_root_path))
-    except OSError:
+    except (OSError, ValueError):
         _refuse("source_root", "source_root_unavailable")
     if stat.S_ISLNK(source_root_lstat.st_mode) or not stat.S_ISDIR(source_root_lstat.st_mode):
         _refuse("source_root", "source_root_symlink_refused")
@@ -775,7 +851,7 @@ def verify_capability_package_source(
         lexical_path = lexical_path / part
         try:
             component_lstat = os.lstat(str(lexical_path))
-        except OSError:
+        except (OSError, ValueError):
             _refuse("package_root", "package_root_unavailable")
         if stat.S_ISLNK(component_lstat.st_mode):
             _refuse("package_root", "package_symlink_refused")
@@ -789,7 +865,7 @@ def verify_capability_package_source(
     try:
         try:
             root_fd = os.open(str(source_root_path), os.O_RDONLY | _O_NOFOLLOW | _O_DIRECTORY)
-        except OSError:
+        except (OSError, ValueError):
             _refuse("source_root", "source_root_unavailable")
         _track(root_fd)
 
@@ -813,62 +889,86 @@ def verify_capability_package_source(
         package_dirs[""] = package_root_fd
 
         traversal_counts = {"entries": 0, "dirs": 0}
+        # Parent-descriptor + name for every declared directory opened
+        # during the first census, used by the terminal-fence identity
+        # check below: a directory removed and replaced by a fresh
+        # same-named directory (a different inode) presents an IDENTICAL
+        # name set to any purely name-based census.
+        dir_parent_link: dict[str, tuple[int, str]] = {}
+        # Census-time lstat identity of every declared regular file,
+        # compared against the fstat identity of the fd actually opened
+        # for hashing (census-to-open identity binding).
+        file_initial_identity: dict[str, tuple[int, int]] = {}
 
-        def _check_traversal_entry(name: str, child_rel: str) -> None:
-            if len(name.encode("utf-8")) > MAX_PATH_SEGMENT_BYTES:
+        def _check_traversal_entry(name: str, child_rel: str, counts: dict) -> None:
+            if _utf8_byte_length(name, "package_root") > MAX_PATH_SEGMENT_BYTES:
                 _refuse("package_root", "path_segment_too_long")
-            if len(child_rel.encode("utf-8")) > MAX_RELATIVE_PATH_BYTES:
+            if _utf8_byte_length(child_rel, "package_root") > MAX_RELATIVE_PATH_BYTES:
                 _refuse("package_root", "path_too_long")
-            traversal_counts["entries"] += 1
-            if traversal_counts["entries"] > MAX_PACKAGE_TRAVERSAL_ENTRIES:
+            counts["entries"] += 1
+            if counts["entries"] > MAX_PACKAGE_TRAVERSAL_ENTRIES:
                 _refuse("package_root", "too_many_entries")
 
         def _walk(dir_fd: int, rel_prefix: str, depth: int, file_entries: set[str], dir_entries: set[str]) -> None:
+            # Stream the directory via os.scandir rather than materializing
+            # the full listing with os.listdir: an attacker-controlled (or
+            # merely pathological) directory must never be read into memory
+            # before the per-entry budget below has a chance to stop the
+            # scan -- the budget check runs on every entry as it is yielded,
+            # and the iterator is abandoned (never drained) the moment it
+            # trips.
             try:
-                names = os.listdir(dir_fd)
+                scan_iter = os.scandir(dir_fd)
             except OSError:
                 _refuse("package_root", "package_root_unavailable")
-            for name in names:
-                child_rel = name if rel_prefix == "" else f"{rel_prefix}/{name}"
-                # Bound the scan (bytes + total entry count) BEFORE lstat-ing
-                # or opening anything: an unbounded (or hostile) directory
-                # entry set must never be able to exhaust descriptors or
-                # recursion before any per-file bound applies.
-                _check_traversal_entry(name, child_rel)
-                try:
-                    entry_stat = os.lstat(name, dir_fd=dir_fd)
-                except OSError:
-                    _refuse("package_root", "package_file_set_mismatch")
-                if stat.S_ISLNK(entry_stat.st_mode):
-                    _refuse("package_root", "package_symlink_refused")
-                elif stat.S_ISDIR(entry_stat.st_mode):
-                    # Refuse any directory not implied by the declaration
-                    # BEFORE opening or recursing into it -- an undeclared
-                    # directory (empty, or the root of an arbitrarily deep
-                    # forest) must never consume a descriptor or a stack
-                    # frame.
-                    if child_rel not in allowed_dirs:
-                        _refuse("package_root", "package_file_set_mismatch")
-                    traversal_counts["dirs"] += 1
-                    if traversal_counts["dirs"] > MAX_PACKAGE_DIRECTORIES:
-                        _refuse("package_root", "too_many_directories")
-                    new_depth = depth + 1
-                    if new_depth > MAX_PACKAGE_TREE_DEPTH:
-                        _refuse("package_root", "package_tree_too_deep")
+            try:
+                for entry in scan_iter:
+                    name = entry.name
+                    child_rel = name if rel_prefix == "" else f"{rel_prefix}/{name}"
+                    # Bound the scan (bytes + total entry count) BEFORE
+                    # lstat-ing or opening anything: an unbounded (or
+                    # hostile) directory entry set must never be able to
+                    # exhaust descriptors or recursion before any per-file
+                    # bound applies.
+                    _check_traversal_entry(name, child_rel, traversal_counts)
                     try:
-                        child_fd = os.open(
-                            name, os.O_RDONLY | _O_NOFOLLOW | _O_DIRECTORY, dir_fd=dir_fd
-                        )
+                        entry_stat = os.lstat(name, dir_fd=dir_fd)
                     except OSError:
+                        _refuse("package_root", "package_file_set_mismatch")
+                    if stat.S_ISLNK(entry_stat.st_mode):
                         _refuse("package_root", "package_symlink_refused")
-                    _track(child_fd)
-                    package_dirs[child_rel] = child_fd
-                    dir_entries.add(child_rel)
-                    _walk(child_fd, child_rel, new_depth, file_entries, dir_entries)
-                elif stat.S_ISREG(entry_stat.st_mode):
-                    file_entries.add(child_rel)
-                else:
-                    _refuse("package_root", "package_non_regular_file_refused")
+                    elif stat.S_ISDIR(entry_stat.st_mode):
+                        # Refuse any directory not implied by the declaration
+                        # BEFORE opening or recursing into it -- an undeclared
+                        # directory (empty, or the root of an arbitrarily deep
+                        # forest) must never consume a descriptor or a stack
+                        # frame.
+                        if child_rel not in allowed_dirs:
+                            _refuse("package_root", "package_file_set_mismatch")
+                        traversal_counts["dirs"] += 1
+                        if traversal_counts["dirs"] > MAX_PACKAGE_DIRECTORIES:
+                            _refuse("package_root", "too_many_directories")
+                        new_depth = depth + 1
+                        if new_depth > MAX_PACKAGE_TREE_DEPTH:
+                            _refuse("package_root", "package_tree_too_deep")
+                        try:
+                            child_fd = os.open(
+                                name, os.O_RDONLY | _O_NOFOLLOW | _O_DIRECTORY, dir_fd=dir_fd
+                            )
+                        except OSError:
+                            _refuse("package_root", "package_symlink_refused")
+                        _track(child_fd)
+                        package_dirs[child_rel] = child_fd
+                        dir_parent_link[child_rel] = (dir_fd, name)
+                        dir_entries.add(child_rel)
+                        _walk(child_fd, child_rel, new_depth, file_entries, dir_entries)
+                    elif stat.S_ISREG(entry_stat.st_mode):
+                        file_entries.add(child_rel)
+                        file_initial_identity[child_rel] = (entry_stat.st_dev, entry_stat.st_ino)
+                    else:
+                        _refuse("package_root", "package_non_regular_file_refused")
+            finally:
+                scan_iter.close()
 
         first_file_entries: set[str] = set()
         first_dir_entries: set[str] = set()
@@ -913,6 +1013,19 @@ def verify_capability_package_source(
                     _refuse("package_root", "package_non_regular_file_refused")
                 if first_stat.st_nlink != 1:
                     _refuse("package_root", "package_hardlink_refused")
+
+                # Census-to-open identity binding: the file actually opened
+                # must be the SAME inode the first census observed at this
+                # relative path, not merely a different regular file with
+                # byte-for-byte identical declared content (which would
+                # otherwise hash identically and pass every content-based
+                # check below).
+                census_identity = file_initial_identity.get(row.relative_path)
+                if census_identity is None:
+                    _refuse("package_root", "package_file_set_mismatch")
+                if (first_stat.st_dev, first_stat.st_ino) != census_identity:
+                    _refuse("package_root", "package_file_identity_mismatch")
+
                 if first_stat.st_size != row.byte_length:
                     _refuse("package_root", "package_file_size_mismatch")
                 if first_stat.st_size > MAX_PACKAGE_FILE_BYTES:
@@ -928,6 +1041,7 @@ def verify_capability_package_source(
                     _refuse("package_root", "package_executable_mismatch")
 
                 hasher = hashlib.sha256()
+                bytes_read = 0
                 while True:
                     try:
                         chunk = os.read(file_fd, _READ_CHUNK_BYTES)
@@ -935,7 +1049,21 @@ def verify_capability_package_source(
                         _refuse("package_root", "package_file_unreadable")
                     if not chunk:
                         break
+                    bytes_read += len(chunk)
+                    # Refuse the moment cumulative bytes exceed either the
+                    # declared length or the absolute per-file ceiling --
+                    # never read to EOF first: a file that grows mid-read
+                    # (past the initial fstat above) must not be able to
+                    # make this loop do unbounded work before the drift is
+                    # detected.
+                    if bytes_read > row.byte_length or bytes_read > MAX_PACKAGE_FILE_BYTES:
+                        _refuse("package_root", "package_file_size_mismatch")
                     hasher.update(chunk)
+                    if _between_read_chunks is not None:
+                        _between_read_chunks(row.relative_path)
+
+                if bytes_read != row.byte_length:
+                    _refuse("package_root", "package_file_size_mismatch")
 
                 if _before_final_stat is not None:
                     _before_final_stat()
@@ -979,30 +1107,61 @@ def verify_capability_package_source(
 
         second_file_entries: set[str] = set()
         second_dir_entries: set[str] = set()
+        # A fresh, independent budget for the terminal-fence re-scan: a
+        # hostile actor could grow a retained directory's entry count
+        # AFTER the first census (but before the fence) just as easily as
+        # before it, so this walk must never materialize an unbounded
+        # listing either.
+        second_traversal_counts = {"entries": 0}
         for rel_path, dir_fd in package_dirs.items():
             try:
-                names = os.listdir(dir_fd)
+                scan_iter = os.scandir(dir_fd)
             except OSError:
                 _refuse("package_root", "package_file_set_mismatch")
-            for name in names:
-                child_rel = name if rel_path == "" else f"{rel_path}/{name}"
-                try:
-                    entry_stat = os.lstat(name, dir_fd=dir_fd)
-                except OSError:
-                    _refuse("package_root", "package_file_set_mismatch")
-                if stat.S_ISDIR(entry_stat.st_mode):
-                    # Unlike the first census, a directory is NEVER skipped
-                    # here: a directory inserted after the first census
-                    # (even one holding its own file) must be visible to the
-                    # terminal fence, not silently ignored.
-                    second_dir_entries.add(child_rel)
-                elif stat.S_ISREG(entry_stat.st_mode):
-                    second_file_entries.add(child_rel)
-                else:
-                    _refuse("package_root", "package_file_set_mismatch")
+            try:
+                for entry in scan_iter:
+                    name = entry.name
+                    child_rel = name if rel_path == "" else f"{rel_path}/{name}"
+                    _check_traversal_entry(name, child_rel, second_traversal_counts)
+                    try:
+                        entry_stat = os.lstat(name, dir_fd=dir_fd)
+                    except OSError:
+                        _refuse("package_root", "package_file_set_mismatch")
+                    if stat.S_ISDIR(entry_stat.st_mode):
+                        # Unlike the first census, a directory is NEVER
+                        # skipped here: a directory inserted after the first
+                        # census (even one holding its own file) must be
+                        # visible to the terminal fence, not silently
+                        # ignored.
+                        second_dir_entries.add(child_rel)
+                    elif stat.S_ISREG(entry_stat.st_mode):
+                        second_file_entries.add(child_rel)
+                    else:
+                        _refuse("package_root", "package_file_set_mismatch")
+            finally:
+                scan_iter.close()
 
         if second_file_entries != declared_entries or second_dir_entries != allowed_dirs:
             _refuse("package_root", "package_file_set_mismatch")
+
+        # Parent-entry-vs-retained-descriptor identity check: a declared
+        # directory removed and replaced by a FRESH same-named directory
+        # (a different inode) presents an identical name set to the
+        # purely name-based census above, and does not necessarily disturb
+        # any retained descriptor's own fstat identity either (only its
+        # PARENT's directory entries changed). A fresh lookup of the name
+        # through the parent is the only thing that can see it.
+        for child_rel, (parent_fd, name) in dir_parent_link.items():
+            try:
+                fresh_lstat = os.lstat(name, dir_fd=parent_fd)
+            except OSError:
+                _refuse("package_root", "package_directory_identity_mismatch")
+            if not stat.S_ISDIR(fresh_lstat.st_mode):
+                _refuse("package_root", "package_directory_identity_mismatch")
+            retained_fd = package_dirs[child_rel]
+            retained_fstat = os.fstat(retained_fd)
+            if (fresh_lstat.st_dev, fresh_lstat.st_ino) != (retained_fstat.st_dev, retained_fstat.st_ino):
+                _refuse("package_root", "package_directory_identity_mismatch")
 
         for fd, initial_identity in all_retained:
             if _stat_identity(os.fstat(fd)) != initial_identity:
