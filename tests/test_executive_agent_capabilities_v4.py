@@ -49,7 +49,10 @@ from control_plane.executive_agent_capabilities import (
     ExecutionCapabilityRegistry,
 )
 from control_plane.executive_capability_packages import (
+    CapabilityPackageFile,
     build_capability_package_generation,
+    capability_package_content_digest,
+    effective_skill_content_digest,
 )
 from control_plane.operator_harness_contract import NativeHelperPolicy
 
@@ -472,3 +475,553 @@ def test_v4_runtime_name_collision_across_packages_refuses(tmp_path):
     raw["capability_packages"]["mastermind-operator.p2"] = second_package
     with pytest.raises(CapabilityPolicyError, match="collide"):
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+def test_v4_changed_payload_under_same_capability_id_changes_generation_and_policy_digest(
+    tmp_path,
+):
+    """A byte-identical re-declaration of the same package/policy loads with
+
+    the same digests; changing the payload under the same capability ID
+    (here: revoking it, which is a declared-field change, not a source-file
+    change) must move the generation and policy digest.
+    """
+
+    baseline = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    raw = _load_v4_fixture_raw()
+    package_raw = raw["capability_packages"][PACKAGE_CAPABILITY_ID]
+    _flip_revoked(package_raw, revoked=True)
+    # The fixture profile references this package's skills, so it must be
+    # dropped for this raw to still resolve to a loadable (if diagnostic)
+    # registry -- revocation-vs-profile-reference refusal is covered by the
+    # dedicated revocation tests below.
+    raw["profiles"].pop(FIXTURE_PROFILE_ID)
+    mutated = ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+    assert (
+        mutated.capability_packages[PACKAGE_CAPABILITY_ID].package_generation_digest
+        != baseline.capability_packages[PACKAGE_CAPABILITY_ID].package_generation_digest
+    )
+    assert mutated.policy_digest != baseline.policy_digest
+
+
+def _flip_revoked(package_raw: dict, *, revoked: bool) -> dict:
+    """Mutate ``package_raw`` in place to the given revocation state,
+
+    recomputing ``package_generation_digest`` (the only digest revocation
+    affects per the acyclic identity graph -- source/closure/grant digests
+    are untouched by revocation).
+    """
+
+    from control_plane.executive_capability_packages import (
+        _package_generation_digest,  # type: ignore[attr-defined]
+    )
+
+    package_raw["revoked"] = revoked
+    skills_ordered = tuple(
+        (cid, row["grant_digest"]) for cid, row in sorted(package_raw["skills"].items())
+    )
+    package_raw["package_generation_digest"] = _package_generation_digest(
+        capability_id=PACKAGE_CAPABILITY_ID,
+        generation=package_raw["generation"],
+        source_state=package_raw["source_state"],
+        revoked=revoked,
+        package_source_digest=package_raw["package_source_digest"],
+        skills_ordered=skills_ordered,
+    )
+    return package_raw
+
+
+# ---------------------------------------------------------------------------
+# (c) Exact Skill-capability profile resolution
+# ---------------------------------------------------------------------------
+
+
+def test_v4_profile_resolves_exact_skill_grants_and_compatibility_names():
+    registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    profile = registry.resolve(FIXTURE_PROFILE_ID)
+    assert profile.skills == (
+        "escalate-decision",
+        "finish-operation",
+        "receive-commission",
+        "return-progress",
+    )
+    assert tuple(grant.capability_id for grant in profile.skill_grants) == (
+        REQUIRED_SKILL_CAPABILITY_IDS
+    )
+    assert profile.plugins == ()
+    assert profile.write_capable is False
+    assert profile.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert profile.execution_surface == "codex-app-server"
+    assert profile.sandbox_policy == "read-only"
+
+
+def test_v4_default_config_profiles_have_no_skill_grants_when_capabilities_empty():
+    """A V4 profile with ``skill_capabilities: []`` behaves exactly like the
+
+    V3 runtime-name path: ``skill_grants`` stays empty and ``skills`` is
+    whatever the raw ``skills`` field says (empty for every default profile
+    copied unchanged into the fixture).
+    """
+
+    registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    for profile_id, profile in registry.profiles.items():
+        if profile_id == FIXTURE_PROFILE_ID:
+            continue
+        assert profile.skill_grants == ()
+
+
+# ---------------------------------------------------------------------------
+# (d) Hostile V4 profile refusals
+# ---------------------------------------------------------------------------
+
+
+def _raw_with_mutated_fixture_profile(**overrides) -> dict:
+    raw = _load_v4_fixture_raw()
+    raw["profiles"][FIXTURE_PROFILE_ID] = {
+        **raw["profiles"][FIXTURE_PROFILE_ID],
+        **overrides,
+    }
+    return raw
+
+
+def test_v4_profile_refuses_unknown_skill_capability_id(tmp_path):
+    raw = _raw_with_mutated_fixture_profile(
+        skill_capabilities=["mastermind-operator.does-not-exist.v1"]
+    )
+    with pytest.raises(CapabilityPolicyError, match="unknown"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+def test_v4_profile_refuses_duplicate_skill_capability_id_in_list(tmp_path):
+    raw = _raw_with_mutated_fixture_profile(
+        skill_capabilities=[
+            "mastermind-operator.escalate-decision.v1",
+            "mastermind-operator.escalate-decision.v1",
+        ]
+    )
+    with pytest.raises(CapabilityPolicyError, match="duplicate"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+def test_v4_profile_refuses_revoked_package_generation_reference(tmp_path):
+    raw = _load_v4_fixture_raw()
+    _flip_revoked(raw["capability_packages"][PACKAGE_CAPABILITY_ID], revoked=True)
+    with pytest.raises(CapabilityPolicyError, match="revoked"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+def test_v4_profile_refuses_non_empty_skills_combined_with_skill_capabilities(tmp_path):
+    raw = _raw_with_mutated_fixture_profile(
+        skills=["escalate-decision"],
+        skill_capabilities=list(REQUIRED_SKILL_CAPABILITY_IDS),
+    )
+    with pytest.raises(CapabilityPolicyError, match="combine"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+def test_v4_profile_refuses_codex_exec_with_skill_capabilities(tmp_path):
+    raw = _raw_with_mutated_fixture_profile(execution_surface="codex-exec")
+    with pytest.raises(CapabilityPolicyError, match="codex-exec"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+def test_v4_profile_refuses_write_capable_with_skill_capabilities(tmp_path):
+    raw = _raw_with_mutated_fixture_profile(
+        write_capable=True, sandbox_policy="workspace-write"
+    )
+    with pytest.raises(CapabilityPolicyError, match="write-capable"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+def test_v4_browser_profile_refuses_skill_capabilities(tmp_path):
+    raw = _load_v4_fixture_raw()
+    raw["profiles"]["operator.browser.local-review.v1"]["skill_capabilities"] = [
+        "mastermind-operator.escalate-decision.v1"
+    ]
+    with pytest.raises(CapabilityPolicyError, match="browser"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+def test_v4_profile_refuses_non_empty_plugins_regardless_of_skill_capabilities(tmp_path):
+    raw = _raw_with_mutated_fixture_profile(plugins=["something"])
+    with pytest.raises(CapabilityPolicyError, match="plugins"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+# ---------------------------------------------------------------------------
+# (e) Compiled OHF capability manifest
+# ---------------------------------------------------------------------------
+
+
+def test_v4_capability_manifest_compiles_exact_skill_closure_identities():
+    registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    profile = registry.resolve(FIXTURE_PROFILE_ID)
+    manifest = profile.capability_manifest(harness_binary_digest="a" * 64)
+    assert [
+        (item.kind, item.name, item.skill_content_digest) for item in manifest.required
+    ] == [
+        ("skill", "escalate-decision", FROZEN_SKILL_CONTENT_DIGESTS["escalate-decision"]),
+        ("skill", "finish-operation", FROZEN_SKILL_CONTENT_DIGESTS["finish-operation"]),
+        ("skill", "receive-commission", FROZEN_SKILL_CONTENT_DIGESTS["receive-commission"]),
+        ("skill", "return-progress", FROZEN_SKILL_CONTENT_DIGESTS["return-progress"]),
+    ]
+    assert all(item.harness_binary_digest == "a" * 64 for item in manifest.required)
+    assert manifest.allowed_ambient == ()
+    assert manifest.forbidden == ()
+    assert manifest.unclassified_policy == "fail_closed_on_write"
+
+
+# ---------------------------------------------------------------------------
+# (f) skills.bundled.enabled=false projection/override law
+# ---------------------------------------------------------------------------
+
+
+def test_v4_grant_bearing_profile_disables_bundled_skills():
+    registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    profile = registry.resolve(FIXTURE_PROFILE_ID)
+    assert profile.app_server_config_projection()["skills"] == {
+        "bundled": {"enabled": False},
+        "config": None,
+    }
+    assert "skills.bundled.enabled=false" in profile.app_server_config_overrides()
+
+
+@pytest.mark.parametrize(
+    "profile_id",
+    [
+        "operator.appserver.readonly.v1",
+        "operator.appserver.readonly.docs-mcp.v1",
+        "operator.browser.local-review.v1",
+    ],
+)
+def test_v4_copied_v3_shaped_profiles_keep_current_skills_projection(profile_id):
+    registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    profile = registry.resolve(profile_id)
+    assert profile.app_server_config_projection()["skills"] == {"config": None}
+    assert "skills.bundled.enabled=false" not in profile.app_server_config_overrides()
+
+
+# ---------------------------------------------------------------------------
+# (g) Corrected acyclic digest cascade under source mutation
+# ---------------------------------------------------------------------------
+
+
+def _copy_package_source(tmp_path: Path) -> Path:
+    source_root = tmp_path / "source_root"
+    dest = source_root / "plugins" / "mastermind-operator"
+    dest.parent.mkdir(parents=True)
+    shutil.copytree(PACKAGE_ROOT, dest)
+    return source_root
+
+
+def _rebuild_package_raw_from_disk(source_root: Path) -> dict:
+    """Recompute a fully self-consistent V4 package raw dict from whatever
+
+    bytes currently sit under ``source_root/plugins/mastermind-operator``,
+    using the package module's own (public and private) digest builders.
+    This is a registry-consumption test helper, not a re-proof of the
+    package module's own digest law (that lives in
+    ``tests/test_executive_capability_packages.py``); it exists so this
+    module can prove the REGISTRY's exact acyclic propagation of a source
+    mutation into profile/policy identity.
+    """
+
+    from control_plane.executive_capability_packages import (
+        _package_source_digest,  # type: ignore[attr-defined]
+        _skill_grant_digest,  # type: ignore[attr-defined]
+        _package_generation_digest,  # type: ignore[attr-defined]
+    )
+
+    package_dir = source_root / "plugins" / "mastermind-operator"
+    original = _load_v4_fixture_raw()["capability_packages"][PACKAGE_CAPABILITY_ID]
+
+    file_objs = []
+    for rel in _REAL_RELATIVE_PATHS:
+        data = (package_dir / rel).read_bytes()
+        st = os.stat(package_dir / rel)
+        executable = bool(st.st_mode & (stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH))
+        file_objs.append(
+            CapabilityPackageFile(
+                relative_path=rel,
+                sha256=_local_sha256_hex(data),
+                byte_length=len(data),
+                executable=executable,
+            )
+        )
+    files_by_path = {f.relative_path: f for f in file_objs}
+    content_digest = capability_package_content_digest(tuple(file_objs))
+
+    source_digest = _package_source_digest(
+        capability_id=PACKAGE_CAPABILITY_ID,
+        kind=original["kind"],
+        repository=original["repository"],
+        source_commit=original["source_commit"],
+        source_tree_sha=original["source_tree_sha"],
+        package_root=original["package_root"],
+        manifest_path=original["manifest_path"],
+        package_content_digest=content_digest,
+        required_app_references=tuple(original["required_app_references"]),
+    )
+
+    skills_raw: dict[str, dict] = {}
+    skill_content_digests: dict[str, str] = {}
+    for capability_id, old_skill in sorted(original["skills"].items()):
+        runtime_name = old_skill["runtime_name"]
+        entrypoint_path = old_skill["entrypoint_path"]
+        closure_paths = tuple(old_skill["closure_paths"])
+        closure_files = tuple(files_by_path[p] for p in closure_paths)
+        skill_digest = effective_skill_content_digest(
+            runtime_name=runtime_name,
+            entrypoint_path=entrypoint_path,
+            closure_files=closure_files,
+        )
+        skill_content_digests[runtime_name] = skill_digest
+        grant_digest = _skill_grant_digest(
+            capability_id=capability_id,
+            runtime_name=runtime_name,
+            entrypoint_path=entrypoint_path,
+            closure_paths=closure_paths,
+            skill_content_digest=skill_digest,
+            package_capability_id=PACKAGE_CAPABILITY_ID,
+            package_generation=original["generation"],
+            package_source_digest=source_digest,
+        )
+        skills_raw[capability_id] = {
+            "runtime_name": runtime_name,
+            "entrypoint_path": entrypoint_path,
+            "closure_paths": list(closure_paths),
+            "skill_content_digest": skill_digest,
+            "grant_digest": grant_digest,
+        }
+
+    generation_digest = _package_generation_digest(
+        capability_id=PACKAGE_CAPABILITY_ID,
+        generation=original["generation"],
+        source_state=original["source_state"],
+        revoked=False,
+        package_source_digest=source_digest,
+        skills_ordered=tuple(
+            (cid, row["grant_digest"]) for cid, row in sorted(skills_raw.items())
+        ),
+    )
+
+    return {
+        "kind": original["kind"],
+        "repository": original["repository"],
+        "source_commit": original["source_commit"],
+        "source_tree_sha": original["source_tree_sha"],
+        "package_root": original["package_root"],
+        "manifest_path": original["manifest_path"],
+        "generation": original["generation"],
+        "source_state": original["source_state"],
+        "revoked": False,
+        "package_content_digest": content_digest,
+        "package_source_digest": source_digest,
+        "files": [
+            {
+                "relative_path": f.relative_path,
+                "sha256": f.sha256,
+                "byte_length": f.byte_length,
+                "executable": f.executable,
+            }
+            for f in file_objs
+        ],
+        "skills": skills_raw,
+        "required_app_references": list(original["required_app_references"]),
+        "package_generation_digest": generation_digest,
+    }, skill_content_digests
+
+
+def _load_registry_from_source_root(tmp_path: Path, source_root: Path, name: str):
+    package_raw, skill_digests = _rebuild_package_raw_from_disk(source_root)
+    raw = _load_v4_fixture_raw()
+    raw["capability_packages"][PACKAGE_CAPABILITY_ID] = package_raw
+    policy_path = _write(tmp_path, raw, name=name)
+    registry = ExecutionCapabilityRegistry.load(policy_path, source_root=source_root)
+    return registry, skill_digests
+
+
+def test_v4_baseline_mutation_helper_reproduces_the_frozen_fixture(tmp_path):
+    """Sanity: rebuilding from an UNMUTATED copy reproduces the exact frozen
+
+    digests, so every mutation assertion below is measured against a proven
+    baseline rather than an already-drifted one.
+    """
+
+    source_root = _copy_package_source(tmp_path)
+    registry, skill_digests = _load_registry_from_source_root(tmp_path, source_root, "baseline.json")
+    generation = registry.capability_packages[PACKAGE_CAPABILITY_ID]
+    assert generation.package_content_digest == FROZEN_PACKAGE_CONTENT_DIGEST
+    assert generation.package_generation_digest == (
+        "37836a5986c916a58217b95d1976220eae8827e4e588a50677011c2543e43b97"
+    )
+    assert skill_digests == FROZEN_SKILL_CONTENT_DIGESTS
+    baseline_registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    assert registry.policy_digest == baseline_registry.policy_digest
+    assert registry.resolve(FIXTURE_PROFILE_ID).profile_digest == (
+        baseline_registry.resolve(FIXTURE_PROFILE_ID).profile_digest
+    )
+
+
+def test_v4_entrypoint_byte_change_moves_only_its_own_closure_and_the_cascade(tmp_path):
+    source_root = _copy_package_source(tmp_path)
+    baseline_registry, baseline_skill_digests = _load_registry_from_source_root(
+        tmp_path, source_root, "baseline.json"
+    )
+    baseline_generation = baseline_registry.capability_packages[PACKAGE_CAPABILITY_ID]
+    baseline_profile_digest = baseline_registry.resolve(FIXTURE_PROFILE_ID).profile_digest
+
+    entrypoint = source_root / "plugins" / "mastermind-operator" / "skills" / "escalate-decision" / "SKILL.md"
+    entrypoint.write_bytes(entrypoint.read_bytes() + b"\n<!-- mutated -->\n")
+
+    mutated_registry, mutated_skill_digests = _load_registry_from_source_root(
+        tmp_path, source_root, "mutated.json"
+    )
+    mutated_generation = mutated_registry.capability_packages[PACKAGE_CAPABILITY_ID]
+
+    assert mutated_skill_digests["escalate-decision"] != baseline_skill_digests["escalate-decision"]
+    for runtime_name in ("finish-operation", "receive-commission", "return-progress"):
+        assert mutated_skill_digests[runtime_name] == baseline_skill_digests[runtime_name]
+
+    assert mutated_generation.package_content_digest != baseline_generation.package_content_digest
+    assert mutated_generation.package_generation_digest != baseline_generation.package_generation_digest
+    assert (
+        mutated_registry.resolve(FIXTURE_PROFILE_ID).profile_digest != baseline_profile_digest
+    )
+    assert mutated_registry.policy_digest != baseline_registry.policy_digest
+
+
+def test_v4_shared_dialogue_reference_change_moves_all_four_closures(tmp_path):
+    source_root = _copy_package_source(tmp_path)
+    _baseline_registry, baseline_skill_digests = _load_registry_from_source_root(
+        tmp_path, source_root, "baseline.json"
+    )
+
+    shared = source_root / "plugins" / "mastermind-operator" / "references" / "dialogue-boundary.md"
+    shared.write_bytes(shared.read_bytes() + b"\n<!-- mutated -->\n")
+
+    _mutated_registry, mutated_skill_digests = _load_registry_from_source_root(
+        tmp_path, source_root, "mutated.json"
+    )
+    for runtime_name in FROZEN_SKILL_CONTENT_DIGESTS:
+        assert mutated_skill_digests[runtime_name] != baseline_skill_digests[runtime_name]
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "references/app-bindings.template.json",
+        ".codex-plugin/plugin.json",
+    ],
+    ids=["unrelated_app_binding", "manifest"],
+)
+def test_v4_unrelated_or_manifest_file_change_leaves_all_closures_stable(tmp_path, relative_path):
+    source_root = _copy_package_source(tmp_path)
+    baseline_registry, baseline_skill_digests = _load_registry_from_source_root(
+        tmp_path, source_root, "baseline.json"
+    )
+    baseline_generation = baseline_registry.capability_packages[PACKAGE_CAPABILITY_ID]
+    baseline_profile_digest = baseline_registry.resolve(FIXTURE_PROFILE_ID).profile_digest
+
+    target = source_root / "plugins" / "mastermind-operator" / relative_path
+    target.write_bytes(target.read_bytes() + b"\n")
+
+    mutated_registry, mutated_skill_digests = _load_registry_from_source_root(
+        tmp_path, source_root, "mutated.json"
+    )
+    mutated_generation = mutated_registry.capability_packages[PACKAGE_CAPABILITY_ID]
+
+    assert mutated_skill_digests == baseline_skill_digests
+    assert mutated_generation.package_content_digest != baseline_generation.package_content_digest
+    assert mutated_generation.package_generation_digest != baseline_generation.package_generation_digest
+    assert (
+        mutated_registry.resolve(FIXTURE_PROFILE_ID).profile_digest != baseline_profile_digest
+    )
+    assert mutated_registry.policy_digest != baseline_registry.policy_digest
+
+
+def test_v4_loader_refuses_mutated_source_bytes_against_stale_declared_digests(tmp_path):
+    """The loader must never accept changed source against the OLD declared
+
+    digests: mutate a real file on disk but keep the frozen fixture's
+    (now-stale) declared digests, and require refusal via source
+    verification rather than silent acceptance.
+    """
+
+    source_root = _copy_package_source(tmp_path)
+    entrypoint = source_root / "plugins" / "mastermind-operator" / "skills" / "return-progress" / "SKILL.md"
+    entrypoint.write_bytes(entrypoint.read_bytes() + b"\n<!-- drift -->\n")
+
+    raw = _load_v4_fixture_raw()  # still declares the OLD (now-stale) digests
+    policy_path = _write(tmp_path, raw, name="stale.json")
+    with pytest.raises(CapabilityPolicyError):
+        ExecutionCapabilityRegistry.load(policy_path, source_root=source_root)
+
+
+# ---------------------------------------------------------------------------
+# (h) Revocation semantics (load-time refusal chosen per FROZEN SPEC)
+# ---------------------------------------------------------------------------
+
+
+def test_v4_revoked_generation_still_parses_for_diagnostics_when_unreferenced(tmp_path):
+    raw = _load_v4_fixture_raw()
+    _flip_revoked(raw["capability_packages"][PACKAGE_CAPABILITY_ID], revoked=True)
+    del raw["profiles"][FIXTURE_PROFILE_ID]
+    registry = ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+    generation = registry.capability_packages[PACKAGE_CAPABILITY_ID]
+    assert generation.revoked is True
+    # No source row is rewritten by revocation: files/skills/digests besides
+    # package_generation_digest are exactly the frozen values.
+    assert generation.package_content_digest == FROZEN_PACKAGE_CONTENT_DIGEST
+    assert {g.runtime_name: g.skill_content_digest for g in generation.skills} == (
+        FROZEN_SKILL_CONTENT_DIGESTS
+    )
+
+
+def test_v4_revocation_changes_policy_digest_but_not_source_identity(tmp_path):
+    raw_live = _load_v4_fixture_raw()
+    del raw_live["profiles"][FIXTURE_PROFILE_ID]
+    live_registry = ExecutionCapabilityRegistry.load(
+        _write(tmp_path, raw_live, name="live.json"), source_root=REPO_ROOT
+    )
+
+    raw_revoked = _load_v4_fixture_raw()
+    _flip_revoked(raw_revoked["capability_packages"][PACKAGE_CAPABILITY_ID], revoked=True)
+    del raw_revoked["profiles"][FIXTURE_PROFILE_ID]
+    revoked_registry = ExecutionCapabilityRegistry.load(
+        _write(tmp_path, raw_revoked, name="revoked.json"), source_root=REPO_ROOT
+    )
+
+    assert revoked_registry.policy_digest != live_registry.policy_digest
+    assert (
+        revoked_registry.capability_packages[PACKAGE_CAPABILITY_ID].package_content_digest
+        == live_registry.capability_packages[PACKAGE_CAPABILITY_ID].package_content_digest
+    )
+
+
+# ---------------------------------------------------------------------------
+# (j) Static no-migration proof
+# ---------------------------------------------------------------------------
+
+
+def test_default_config_has_not_migrated_to_v4():
+    raw = json.loads(Path("config/executive_agent_capabilities.json").read_text(encoding="utf-8"))
+    assert raw["schema_version"] == CAPABILITY_POLICY_SCHEMA_V3
+    assert raw["plugins"] == {}
+    assert "capability_packages" not in raw
+    assert FIXTURE_PROFILE_ID not in raw["profiles"]
+    for profile in raw["profiles"].values():
+        assert "skill_capabilities" not in profile
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        Path("config/executive_worker_routes.json"),
+        Path("control_plane/executive_autonomy.py"),
+    ],
+)
+def test_routing_and_autonomy_surfaces_carry_no_v4_package_identifiers(path):
+    text = path.read_text(encoding="utf-8")
+    assert PACKAGE_CAPABILITY_ID not in text
+    assert "2026-09-01.mastermind-operator-p1-fixture" not in text
