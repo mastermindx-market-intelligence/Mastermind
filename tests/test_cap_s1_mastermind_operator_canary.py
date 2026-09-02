@@ -17,6 +17,7 @@ import dataclasses
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -909,10 +910,13 @@ from control_plane.executive_agent_capabilities import ExecutionCapabilityRegist
 from control_plane.operator_harness_contract import LaunchDecision
 from scripts.ohf.cap_s1_mastermind_operator_canary import (
     PROFILE_ID as _CANARY_PROFILE_ID,
+    CanaryCleanupRecord,
     CanaryEvidence,
     CanaryStop,
+    FAKE_HARNESS_VERSION,
     FROZEN_STOP_CODES,
     SchemaAttestation,
+    _SCHEMA_FIXTURE_BINARY_SOURCE,
     attest_protocol_schema,
     build_synthetic_workspace,
     main as canary_main,
@@ -983,8 +987,18 @@ def _fake_schema_run_command(schema_doc):
     runs of the same schema_doc.
     """
 
-    def run_command(argv, **_kwargs):
+    def run_command(argv, **kwargs):
         _asserts_never_the_real_codex_binary(argv)
+        # ``run_command`` is now the single injectable seam for BOTH schema
+        # generation AND the synthetic workspace's real git init/commit
+        # (Sol wave-3 review finding B2) -- a real ``git`` invocation is
+        # passed straight through to the real ``subprocess.run`` (the
+        # workspace itself is a real temp directory; there is nothing to
+        # fake here), while a schema-generation call (identified by its own
+        # ``--out`` flag) is answered with this fixture's deterministic
+        # payload, never actually invoking the fixture "binary".
+        if argv and argv[0] == "git":
+            return _subprocess.run(argv, **kwargs)
         out_dir = Path(argv[argv.index("--out") + 1])
         out_dir.mkdir(parents=True, exist_ok=True)
         payload = {"schema": schema_doc, "variant": out_dir.name}
@@ -1028,6 +1042,7 @@ class _ScriptedCanaryClient:
         fail_turn_start_at=None,
         config_read_mutator=None,
         inject_skills_changed_after_turn_starts=None,
+        force_post_clear_nonempty=False,
     ) -> None:
         self._inner = inner
         self._skills_list_script = list(skills_list_script or [])
@@ -1037,6 +1052,17 @@ class _ScriptedCanaryClient:
         self._turn_start_calls = 0
         self._config_read_mutator = config_read_mutator
         self._inject_skills_changed_after_turn_starts = inject_skills_changed_after_turn_starts
+        # CAP-S1 item 9 "post-turn drift refusal" falsifier: the ONE
+        # skills/list read immediately after the runner's own final
+        # ``extraRoots/set []`` clear is forced non-empty, simulating a
+        # provider whose skill surface silently failed to actually clear.
+        # The adapter's OWN internal causal sequence already issues one
+        # earlier ``extraRoots/set []`` as its baseline probe (before ever
+        # adding the canary's roots) -- only the SECOND empty-clear call is
+        # the runner's own final teardown step, so only that one is armed.
+        self._force_post_clear_nonempty = force_post_clear_nonempty
+        self._empty_extra_roots_set_calls = 0
+        self._extra_roots_just_cleared = False
         self.calls: list[tuple[str, dict]] = []
 
     def __getattr__(self, name):
@@ -1044,6 +1070,21 @@ class _ScriptedCanaryClient:
 
     def request(self, method, params=None, *, timeout: float = 15.0):
         self.calls.append((method, dict(params or {})))
+        if method == "skills/extraRoots/set" and self._force_post_clear_nonempty:
+            if isinstance(params, dict) and params.get("extraRoots") == []:
+                self._empty_extra_roots_set_calls += 1
+                if self._empty_extra_roots_set_calls == 2:
+                    self._extra_roots_just_cleared = True
+        if method == "skills/list" and self._extra_roots_just_cleared:
+            self._extra_roots_just_cleared = False
+            cwd = ""
+            if isinstance(params, dict):
+                cwds = params.get("cwds")
+                if isinstance(cwds, list) and cwds:
+                    cwd = str(cwds[0])
+            return _strict_skills_list_result(
+                cwd, [_skill_row("rogue-post-clear-skill", path=f"{cwd}/rogue-post-clear-skill/SKILL.md")]
+            )
         if method == "skills/list" and self._skills_list_script:
             return self._skills_list_script.pop(0)
         if method == "turn/start":
@@ -1092,6 +1133,7 @@ def _canary_client_factory(
     on_create=None,
     config_read_mutator=None,
     inject_skills_changed_after_turn_starts=None,
+    force_post_clear_nonempty=False,
 ):
     def factory(argv, env, cwd):
         _asserts_never_the_real_codex_binary(argv)
@@ -1105,6 +1147,7 @@ def _canary_client_factory(
             fail_turn_start_at=fail_turn_start_at,
             config_read_mutator=config_read_mutator,
             inject_skills_changed_after_turn_starts=inject_skills_changed_after_turn_starts,
+            force_post_clear_nonempty=force_post_clear_nonempty,
         )
         _CREATED_CANARY_CLIENTS.append(client)
         return client
@@ -1140,6 +1183,15 @@ def _close_created_canary_clients():
         except Exception:
             pass
     _CREATED_CANARY_CLIENTS.clear()
+
+
+def _cleanup_map(record) -> dict:
+    """``CanaryCleanupRecord.artifacts`` (Sol wave-3 review finding B4) as a
+    ``{kind: (removed, verified_absent)}`` mapping -- the same shape the
+    tests below used to read off the old mutable dict, minus the renamed
+    keys."""
+
+    return {kind: (removed, verified_absent) for kind, removed, verified_absent in record.artifacts}
 
 
 def _strict_skills_list_result(cwd: str, rows: list) -> dict:
@@ -1229,22 +1281,29 @@ def test_attest_protocol_schema_failing_command_stops_unattested(tmp_path) -> No
 
 def test_build_synthetic_workspace_is_fresh_and_contains_only_readme(tmp_path) -> None:
     scratch = tmp_path / "scratch-ws"
-    workspace = build_synthetic_workspace(scratch)
+    workspace, base_sha, read_only_applied = build_synthetic_workspace(
+        scratch, operation_id="test-op-ws"
+    )
     assert workspace.is_dir()
-    entries = list(workspace.iterdir())
-    assert [entry.name for entry in entries] == ["README.md"]
+    entries = {entry.name for entry in workspace.iterdir()}
+    # A real, sealed git repo now lives alongside the README (Sol wave-3
+    # review finding B2) -- ``.git`` is not one of the forbidden ambient
+    # surface names below.
+    assert entries == {"README.md", ".git"}
     assert "CAP-S1 synthetic canary workspace" in (workspace / "README.md").read_text(
         encoding="utf-8"
     )
     for name in (".agents", ".codex", "plugins", "marketplace", "skills"):
         assert not (workspace / name).exists()
+    assert re.fullmatch(r"[0-9a-f]{40}", base_sha)
+    assert isinstance(read_only_applied, bool)
 
 
 def test_build_synthetic_workspace_refuses_a_preexisting_directory(tmp_path) -> None:
     scratch = tmp_path / "scratch-ws-2"
-    build_synthetic_workspace(scratch)
+    build_synthetic_workspace(scratch, operation_id="test-op-ws-2")
     with pytest.raises(FileExistsError):
-        build_synthetic_workspace(scratch)
+        build_synthetic_workspace(scratch, operation_id="test-op-ws-2")
 
 
 # ---------------------------------------------------------------------------
@@ -1288,12 +1347,20 @@ def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
         "receive-commission",
         "return-progress",
     )
-    assert evidence.cleanup == {
-        "projection_removed": True,
-        "projection_verified_absent": True,
-        "schema_dir_removed": True,
-        "workspace_removed": True,
-    }
+    assert evidence.baseline_enabled_names == evidence.observed_enabled_names
+    assert evidence.after_add_enabled_names == evidence.observed_enabled_names
+    assert evidence.after_clear_enabled_names == ()
+    assert evidence.schema_version == "mastermind.cap_s1_canary_evidence/v1"
+    assert evidence.origin_mode == ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE
+    assert evidence.origin_authentication == ORIGIN_AUTHENTICATION_EPHEMERAL_GIT_ARCHIVE
+    assert evidence.skills_root
+    assert evidence.binary_digest
+    assert evidence.binary_version == FAKE_HARNESS_VERSION
+    assert evidence.protocol_receipt_digest
+    cleanup_map = _cleanup_map(evidence.cleanup)
+    assert set(cleanup_map) == {"schema", "workspace", "archive_origin", "projection", "process"}
+    for kind in ("schema", "workspace", "archive_origin", "projection"):
+        assert cleanup_map[kind] == (True, True), (kind, cleanup_map[kind])
     assert evidence.served_model
     assert evidence.terminal_process_state
     assert evidence.package_source_digest
@@ -1358,7 +1425,7 @@ def test_run_canary_fake_backend_bundled_omission_refuses_config_drift(tmp_path)
     # Consistent with the runner's existing decision handling (``main``'s
     # ``launch_ok`` gate): a non-ALLOW decision maps to a nonzero exit.
     markers_ok = all(ok for _name, ok in evidence.turn_marker_results)
-    cleanup_ok = all(bool(value) for value in evidence.cleanup.values())
+    cleanup_ok = evidence.cleanup.all_removed
     launch_ok = evidence.launch_decision == LaunchDecision.ALLOW.value
     exit_code = 0 if (markers_ok and cleanup_ok and launch_ok) else 1
     assert exit_code == 1
@@ -1718,6 +1785,171 @@ def test_run_canary_transport_failure_mid_turn_is_effect_unknown_with_no_retry(
 
 
 # ---------------------------------------------------------------------------
+# Failure-bounded cleanup (Sol wave-3 review finding B4): EVERYTHING created
+# after scratch setup -- schema dir, synthetic workspace, archive origin,
+# projection -- is torn down on EVERY exit path, never just the happy one.
+# ---------------------------------------------------------------------------
+
+
+def _assert_scratch_has_no_leaked_resources(scratch: Path) -> None:
+    assert not (scratch / "synthetic-workspace").exists()
+    for entry in scratch.iterdir():
+        assert not entry.name.startswith("schema-attestation-"), entry
+        assert not entry.name.startswith("ephemeral-archive-"), entry
+    attempt_root = scratch / "cap-s1-attempt-root"
+    if attempt_root.exists():
+        assert list(attempt_root.iterdir()) == [], list(attempt_root.iterdir())
+
+
+def test_run_canary_schema_attestation_failure_leaves_scratch_clean(tmp_path) -> None:
+    scratch = tmp_path / "scratch-cleanup-boundary-schema"
+    scratch.mkdir()
+    factory = _canary_client_factory()
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-cleanup-boundary-schema",
+            client_factory=factory,
+            run_command=_failing_schema_run_command,
+        )
+    assert excinfo.value.code == "SKILL_PROTOCOL_SCHEMA_UNATTESTED"
+    _assert_scratch_has_no_leaked_resources(scratch)
+
+
+def test_run_canary_ambient_refusal_at_launch_leaves_scratch_clean(tmp_path) -> None:
+    scratch = tmp_path / "scratch-cleanup-boundary-ambient"
+    scratch.mkdir()
+    workspace_cwd = str((scratch / "synthetic-workspace").resolve())
+    script = [
+        _strict_skills_list_result(workspace_cwd, []),
+        _strict_skills_list_result(
+            workspace_cwd,
+            [_skill_row("rogue-skill", path="/fake-ambient-skills/rogue-skill/SKILL.md")],
+        ),
+    ]
+    factory = _canary_client_factory(skills_list_script=script)
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-cleanup-boundary-ambient",
+            client_factory=factory,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert excinfo.value.code == "AMBIENT_SKILL_SURFACE_NOT_EMPTY"
+    # The adapter's own ``_start_process`` already closed the client
+    # internally on this exact failure boundary (before our own "process"
+    # cleanup action would ever be registered) -- the process is still dead.
+    assert _CREATED_CANARY_CLIENTS[0].alive() is False
+    _assert_scratch_has_no_leaked_resources(scratch)
+
+
+def test_run_canary_mid_turn_effect_unknown_tears_down_process_exactly_once_and_cleans_scratch(
+    tmp_path, monkeypatch
+) -> None:
+    scratch = tmp_path / "scratch-cleanup-boundary-effect-unknown"
+    scratch.mkdir()
+    call_count = {"n": 0}
+    real_graceful_close = AppServerClient.graceful_close
+
+    def _counting_graceful_close(self, *, wait: float = 5.0):
+        call_count["n"] += 1
+        return real_graceful_close(self, wait=wait)
+
+    monkeypatch.setattr(AppServerClient, "graceful_close", _counting_graceful_close)
+
+    factory = _canary_client_factory(fail_turn_start_at=1)
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-cleanup-boundary-effect-unknown",
+            client_factory=factory,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert excinfo.value.code == "EFFECT_UNKNOWN"
+    # Attempted exactly once, never retried -- the process stop surface is
+    # invoked by the finally-block cleanup ledger regardless of the
+    # mid-turn transport failure's own uncertainty.
+    assert call_count["n"] == 1
+    assert _CREATED_CANARY_CLIENTS[0].alive() is False
+    _assert_scratch_has_no_leaked_resources(scratch)
+
+
+def test_run_canary_marker_noncompliant_journey_still_cleans_up_everything(tmp_path) -> None:
+    """A non-raising, marker-noncompliant journey (a false marker recorded,
+    never an exception) is not exempt from the SAME cleanup discipline as
+    every raising failure boundary above."""
+
+    scratch = tmp_path / "scratch-cleanup-boundary-marker"
+    scratch.mkdir()
+    non_compliant_replies = [
+        _HAPPY_REPLIES[0],
+        "PROGRESS COMPLETE synthetic operation is already done.",  # forbidden COMPLETE
+        _HAPPY_REPLIES[2],
+        _HAPPY_REPLIES[3],
+    ]
+    factory = _canary_client_factory(replies=non_compliant_replies)
+
+    evidence = run_canary(
+        backend="fake",
+        binary_path=None,
+        codex_home=None,
+        repo_root=REPO_ROOT,
+        scratch_root=scratch,
+        operation_id="cap-s1-canary-cleanup-boundary-marker",
+        client_factory=factory,
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+    )
+    assert evidence.turn_marker_results[1] == ("return-progress", False)
+    assert evidence.cleanup.all_removed is True
+    _assert_scratch_has_no_leaked_resources(scratch)
+
+
+def test_run_canary_post_clear_drift_refusal_still_cleans_up_everything(tmp_path) -> None:
+    """"Post-turn drift refusal": the provider's skill surface fails to
+    actually clear after the runner's own ``extraRoots/set []`` -- the
+    causal-sequence law this maps to (``SKILL_SET_CAUSALITY_FAILED``) must
+    still leave scratch fully torn down, exactly like every earlier
+    boundary."""
+
+    scratch = tmp_path / "scratch-cleanup-boundary-post-clear"
+    scratch.mkdir()
+    factory = _canary_client_factory(
+        replies=list(_HAPPY_REPLIES), force_post_clear_nonempty=True
+    )
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-cleanup-boundary-post-clear",
+            client_factory=factory,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert excinfo.value.code == "SKILL_SET_CAUSALITY_FAILED"
+    assert "post-clear" in str(excinfo.value)
+    assert _CREATED_CANARY_CLIENTS[0].alive() is False
+    _assert_scratch_has_no_leaked_resources(scratch)
+
+
+# ---------------------------------------------------------------------------
 # cleanup honesty
 # ---------------------------------------------------------------------------
 
@@ -1754,10 +1986,12 @@ def test_run_canary_reports_cleanup_failure_honestly(tmp_path, monkeypatch) -> N
         if attempt_root.exists():
             os.chmod(attempt_root, 0o700)
 
-    assert evidence.cleanup["projection_removed"] is False
-    assert evidence.cleanup["projection_verified_absent"] is False
-    assert evidence.cleanup["schema_dir_removed"] is True
-    assert evidence.cleanup["workspace_removed"] is True
+    cleanup_map = _cleanup_map(evidence.cleanup)
+    assert cleanup_map["projection"] == (False, False)
+    assert cleanup_map["schema"] == (True, True)
+    assert cleanup_map["workspace"] == (True, True)
+    assert cleanup_map["archive_origin"] == (True, True)
+    assert evidence.cleanup.all_removed is False
 
     import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
 
@@ -1799,10 +2033,19 @@ def test_cli_main_prints_evidence_json_and_exits_zero_on_a_clean_journey(
         skill_grant_digests=(("cap.a", "f" * 64),),
         skill_closure_digests=(("cap.a", "0" * 64),),
         projection_receipt_digest="1" * 64,
+        binary_digest="4" * 64,
+        binary_version=FAKE_HARNESS_VERSION,
+        origin_mode=ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE,
+        origin_authentication=ORIGIN_AUTHENTICATION_EPHEMERAL_GIT_ARCHIVE,
+        skills_root="/fixture/skills",
         app_server_config_digest="2" * 64,
         extra_roots_set_outcomes=("cleared",),
         skills_list_raw_shape_digest="3" * 64,
+        baseline_enabled_names=("receive-commission",),
+        after_add_enabled_names=("receive-commission",),
         observed_enabled_names=("receive-commission",),
+        after_clear_enabled_names=(),
+        protocol_receipt_digest="5" * 64,
         launch_decision="ALLOW",
         turn_marker_results=(
             ("receive-commission", True),
@@ -1813,12 +2056,15 @@ def test_cli_main_prints_evidence_json_and_exits_zero_on_a_clean_journey(
         served_model="gpt-5.6-sol",
         terminal_process_state="PROVEN_DEAD",
         artifact_inventory=("workspace:README.md",),
-        cleanup={
-            "projection_removed": True,
-            "projection_verified_absent": True,
-            "schema_dir_removed": True,
-            "workspace_removed": True,
-        },
+        cleanup=CanaryCleanupRecord(
+            artifacts=(
+                ("schema", True, True),
+                ("workspace", True, True),
+                ("archive_origin", True, True),
+                ("projection", True, True),
+                ("process", True, True),
+            )
+        ),
     )
     monkeypatch.setattr(canary_module, "run_canary", lambda **_kwargs: clean_evidence)
 
@@ -1849,10 +2095,19 @@ def test_cli_main_exits_nonzero_when_a_marker_is_false_or_cleanup_failed(
         skill_grant_digests=(("cap.a", "f" * 64),),
         skill_closure_digests=(("cap.a", "0" * 64),),
         projection_receipt_digest="1" * 64,
+        binary_digest="4" * 64,
+        binary_version=FAKE_HARNESS_VERSION,
+        origin_mode=ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE,
+        origin_authentication=ORIGIN_AUTHENTICATION_EPHEMERAL_GIT_ARCHIVE,
+        skills_root="/fixture/skills",
         app_server_config_digest="2" * 64,
         extra_roots_set_outcomes=("cleared",),
         skills_list_raw_shape_digest="3" * 64,
+        baseline_enabled_names=("receive-commission",),
+        after_add_enabled_names=("receive-commission",),
         observed_enabled_names=("receive-commission",),
+        after_clear_enabled_names=(),
+        protocol_receipt_digest="5" * 64,
         launch_decision="ALLOW",
         turn_marker_results=(
             ("receive-commission", True),
@@ -1863,12 +2118,15 @@ def test_cli_main_exits_nonzero_when_a_marker_is_false_or_cleanup_failed(
         served_model="gpt-5.6-sol",
         terminal_process_state="PROVEN_DEAD",
         artifact_inventory=(),
-        cleanup={
-            "projection_removed": True,
-            "projection_verified_absent": True,
-            "schema_dir_removed": True,
-            "workspace_removed": True,
-        },
+        cleanup=CanaryCleanupRecord(
+            artifacts=(
+                ("schema", True, True),
+                ("workspace", True, True),
+                ("archive_origin", True, True),
+                ("projection", True, True),
+                ("process", True, True),
+            )
+        ),
     )
     monkeypatch.setattr(canary_module, "run_canary", lambda **_kwargs: dirty_evidence)
 
@@ -1894,6 +2152,202 @@ def test_cli_main_prints_stop_code_and_exits_nonzero_on_canary_stop(
     captured = capsys.readouterr()
     assert exit_code != 0
     assert "AMBIENT_SKILL_SURFACE_NOT_EMPTY" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Closed evidence contract (Sol wave-3 review finding B5)
+# ---------------------------------------------------------------------------
+
+
+def test_canary_evidence_schema_pins_version_and_full_field_set() -> None:
+    fields = dataclasses.fields(CanaryEvidence)
+    assert fields[0].name == "schema_version"
+    assert fields[0].default == "mastermind.cap_s1_canary_evidence/v1"
+    field_names = {f.name for f in fields}
+    assert field_names == {
+        "schema_version",
+        "candidate_commit",
+        "candidate_tree",
+        "canary_operation_id",
+        "workspace_root",
+        "process_generation",
+        "v4_policy_digest",
+        "package_source_digest",
+        "package_generation_digest",
+        "skill_grant_digests",
+        "skill_closure_digests",
+        "projection_receipt_digest",
+        "binary_digest",
+        "binary_version",
+        "origin_mode",
+        "origin_authentication",
+        "skills_root",
+        "app_server_config_digest",
+        "extra_roots_set_outcomes",
+        "skills_list_raw_shape_digest",
+        "baseline_enabled_names",
+        "after_add_enabled_names",
+        "observed_enabled_names",
+        "after_clear_enabled_names",
+        "protocol_receipt_digest",
+        "launch_decision",
+        "turn_marker_results",
+        "served_model",
+        "terminal_process_state",
+        "artifact_inventory",
+        "cleanup",
+    }
+
+
+def test_canary_cleanup_record_schema_and_fields() -> None:
+    fields = dataclasses.fields(CanaryCleanupRecord)
+    field_names = {f.name for f in fields}
+    assert field_names == {"schema_version", "artifacts"}
+    assert CanaryCleanupRecord().schema_version == "mastermind.cap_s1_canary_cleanup/v1"
+    assert CanaryCleanupRecord().artifacts == ()
+    assert CanaryCleanupRecord().all_removed is True
+    assert CanaryCleanupRecord(artifacts=(("schema", True, False),)).all_removed is False
+
+
+def test_turn_markers_use_a_closed_standalone_word_grammar() -> None:
+    from scripts.ohf.cap_s1_mastermind_operator_canary import _turn_markers_satisfied
+
+    # A bare substring occurrence inside a longer word must never satisfy a
+    # required token.
+    assert (
+        _turn_markers_satisfied("finish-operation", "Still RESULTING, nothing else final.")
+        is False
+    )
+    # ... but the standalone token itself still satisfies it.
+    assert _turn_markers_satisfied("finish-operation", "RESULT: final output recorded.") is True
+    # A bare substring occurrence inside a longer word must never trip a
+    # forbidden token either.
+    assert (
+        _turn_markers_satisfied("return-progress", "PROGRESS: task is COMPLETED already.")
+        is True
+    )
+    # ... but the standalone forbidden token still refuses it.
+    assert (
+        _turn_markers_satisfied("return-progress", "PROGRESS: task is COMPLETE now.") is False
+    )
+
+
+# ---------------------------------------------------------------------------
+# CAP-S1 addendum: executable CLI backends (5087373998)
+# ---------------------------------------------------------------------------
+
+
+def test_cli_main_fake_backend_completes_the_real_four_turn_journey_as_a_subprocess(
+    tmp_path,
+) -> None:
+    """Neither committed CLI backend ran end to end before this commission
+    (addendum finding 2): the fake fixture schema "binary" was print-only
+    and wrote no files, so ``--backend fake`` always stopped at
+    ``SKILL_PROTOCOL_SCHEMA_UNATTESTED`` the moment ``main`` was actually
+    invoked as a real subprocess (never overriding ``run_command``). This
+    drives the REAL ``python -m scripts.ohf.cap_s1_mastermind_operator_canary``
+    entry point end to end -- real schema-fixture generation, a real
+    ephemeral git archive origin, a real synthetic-workspace git commit, and
+    a real ``python -m scripts.ohf.fake_app_server`` subprocess -- and
+    parses its printed JSON evidence.
+    """
+
+    scratch = tmp_path / "cli-e2e-scratch"
+    result = _subprocess.run(
+        [
+            _sys.executable,
+            "-m",
+            "scripts.ohf.cap_s1_mastermind_operator_canary",
+            "--backend",
+            "fake",
+            "--scratch",
+            str(scratch),
+            "--operation-id",
+            "cap-s1-cli-e2e-fake",
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == "mastermind.cap_s1_canary_evidence/v1"
+    assert payload["launch_decision"] == "ALLOW"
+    assert [ok for _name, ok in payload["turn_marker_results"]] == [True, True, True, True]
+    artifacts = payload["cleanup"]["artifacts"]
+    assert {row[0] for row in artifacts} == {
+        "schema",
+        "workspace",
+        "archive_origin",
+        "projection",
+        "process",
+    }
+    assert all(row[1] and row[2] for row in artifacts)
+
+
+def test_cli_main_live_backend_seam_probe_reaches_client_construction_and_refuses(
+    tmp_path,
+) -> None:
+    """Addendum finding 3: the live CLI backend's client-factory wiring is
+    proven end to end -- reaching real ``CodexOperatorAdapter`` client
+    construction with the exact real schema/workspace/origin/projection
+    machinery -- via an explicit ``CAP_S1_LIVE_CLIENT_FACTORY`` override
+    pointed at ``_seam_probe_client_factory``, a non-network double that
+    records construction was reached then raises a deterministic refusal.
+    No provider or network effect occurs anywhere in this test.
+    """
+
+    fixture_binary = tmp_path / "fixture-live-binary"
+    fixture_binary.write_text(_SCHEMA_FIXTURE_BINARY_SOURCE, encoding="utf-8")
+    fixture_binary.chmod(0o755)
+
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    codex_home.chmod(0o700)
+    auth_path = codex_home / "auth.json"
+    auth_path.write_text("fixture credential bytes", encoding="utf-8")
+    auth_path.chmod(0o600)
+
+    scratch = tmp_path / "scratch-live-seam"
+    record_path = tmp_path / "seam-probe-record.json"
+
+    env = dict(os.environ)
+    env["CAP_S1_LIVE_CLIENT_FACTORY"] = (
+        "scripts.ohf.cap_s1_mastermind_operator_canary:_seam_probe_client_factory"
+    )
+    env["OHF_SEAM_PROBE_RECORD_PATH"] = str(record_path)
+
+    result = _subprocess.run(
+        [
+            _sys.executable,
+            "-m",
+            "scripts.ohf.cap_s1_mastermind_operator_canary",
+            "--backend",
+            "live",
+            "--binary-path",
+            str(fixture_binary),
+            "--codex-home",
+            str(codex_home),
+            "--scratch",
+            str(scratch),
+            "--operation-id",
+            "cap-s1-cli-e2e-live-seam",
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "CANARY_STOP:" in result.stdout
+    assert record_path.is_file(), result.stdout + result.stderr
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["argv"], record
+    assert Path(record["argv"][0]) == fixture_binary.resolve()
+    assert record["cwd"]
 
 
 # ---------------------------------------------------------------------------

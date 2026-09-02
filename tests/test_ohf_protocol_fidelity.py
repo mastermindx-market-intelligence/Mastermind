@@ -420,6 +420,61 @@ def test_turn_start_rejects_malformed_skill_item(tmp_path, monkeypatch):
     assert read["thread"]["turns"] == []
 
 
+# ---------------------------------------------------------------------------
+# CAP-S1 addendum: OHF_FAKE_CAP_S1_TURN_REPLIES turn-specific replies
+# ---------------------------------------------------------------------------
+
+
+def _start_turn_with_skill(server, thread_id, skill_name, request_id):
+    input_items = [
+        {"type": "text", "text": f"$._probe {skill_name}"},
+        {
+            "type": "skill",
+            "name": skill_name,
+            "path": f"/fake-skills/{skill_name}/SKILL.md",
+        },
+    ]
+    resp = _rpc(
+        server, "turn/start", {"threadId": thread_id, "input": input_items}, request_id
+    )
+    assert "result" in resp, resp
+    read = _rpc(server, "thread/read", {"threadId": thread_id}, request_id + 1)["result"]
+    return read["thread"]["turns"][-1]["text"]
+
+
+@pytest.mark.parametrize(
+    "skill_name,required_token,forbidden_token",
+    [
+        ("receive-commission", "PICKUP-ACK", "STARTED"),
+        ("return-progress", "PROGRESS", "COMPLETE"),
+        ("escalate-decision", "DECISION-REQUEST", "DECIDED"),
+        ("finish-operation", "RESULT", "ACCEPTED"),
+    ],
+)
+def test_fake_cap_s1_turn_replies_are_marker_compliant_per_skill(
+    tmp_path, monkeypatch, skill_name, required_token, forbidden_token
+):
+    monkeypatch.setenv("OHF_FAKE_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("OHF_FAKE_CAP_S1_TURN_REPLIES", "1")
+    server = FakeAppServer()
+    _rpc(server, "initialize", {}, 1)
+    thread = _rpc(server, "thread/start", {"cwd": str(tmp_path)}, 2)["result"]["thread"]
+    text = _start_turn_with_skill(server, thread["id"], skill_name, 3)
+    assert required_token in text
+    assert forbidden_token not in text
+
+
+def test_fake_cap_s1_turn_replies_off_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHF_FAKE_WORKSPACE", str(tmp_path))
+    server = FakeAppServer()
+    _rpc(server, "initialize", {}, 1)
+    thread = _rpc(server, "thread/start", {"cwd": str(tmp_path)}, 2)["result"]["thread"]
+    text = _start_turn_with_skill(server, thread["id"], "receive-commission", 3)
+    # Without the switch, the ordinary OHF-probe / default-ack behavior
+    # applies -- never the CAP-S1 turn-specific marker text.
+    assert "PICKUP-ACK" not in text
+
+
 def test_turn_start_text_only_unchanged(tmp_path, monkeypatch):
     monkeypatch.setenv("OHF_FAKE_WORKSPACE", str(tmp_path))
     server = FakeAppServer()
