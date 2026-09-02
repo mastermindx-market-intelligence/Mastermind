@@ -5,6 +5,9 @@ Covers:
   - the real protected `plugins/mastermind-operator` package generation
   - the complete raw-input validation matrix for `build_capability_package_generation`
   - the acyclic five-layer digest cascade and its mismatch-refusal behavior
+  - `verify_capability_package_source`'s descriptor-relative, no-follow,
+    race-fenced local source verification, including a hostile-filesystem
+    matrix and a descriptor-leak proof.
 
 This module intentionally recomputes the canonical-JSON digest projections
 locally (from the frozen spec) rather than importing production's private
@@ -17,6 +20,7 @@ import copy
 import dataclasses
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -38,9 +42,11 @@ from control_plane.executive_capability_packages import (
     CapabilityPackageFile,
     CapabilityPackageGeneration,
     EffectiveSkillGrant,
+    VerifiedCapabilityPackage,
     build_capability_package_generation,
     capability_package_content_digest,
     effective_skill_content_digest,
+    verify_capability_package_source,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -1105,3 +1111,395 @@ def test_unknown_skill_row_key_refuses():
         build_capability_package_generation(capability_id=capability_id, raw=raw)
 
 
+# ---------------------------------------------------------------------------
+# verify_capability_package_source
+# ---------------------------------------------------------------------------
+
+
+def _write_tree(root: Path, package_root: str, contents: dict[str, bytes]) -> None:
+    base = root / package_root
+    for rel, data in contents.items():
+        p = base / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+
+
+def _row_from_disk(root: Path, package_root: str, rel: str, executable: bool = False) -> CapabilityPackageFile:
+    data = (root / package_root / rel).read_bytes()
+    return CapabilityPackageFile(
+        relative_path=rel,
+        sha256=hashlib.sha256(data).hexdigest(),
+        byte_length=len(data),
+        executable=executable,
+    )
+
+
+def _make_generation(
+    *,
+    capability_id: str,
+    package_root: str,
+    manifest_path: str,
+    files: tuple[CapabilityPackageFile, ...],
+    skills: tuple[EffectiveSkillGrant, ...],
+    revoked: bool = False,
+) -> CapabilityPackageGeneration:
+    return CapabilityPackageGeneration(
+        capability_id=capability_id,
+        kind=PACKAGE_KIND_SKILLS_ONLY_SOURCE,
+        repository="example/repo",
+        source_commit="1" * 40,
+        source_tree_sha="2" * 40,
+        package_root=package_root,
+        manifest_path=manifest_path,
+        generation="example.g1",
+        source_state=PACKAGE_SOURCE_STATE_PROTECTED,
+        revoked=revoked,
+        package_content_digest=capability_package_content_digest(files),
+        package_source_digest="0" * 64,
+        files=tuple(sorted(files, key=lambda f: f.relative_path)),
+        skills=skills,
+        required_app_references=(),
+        package_generation_digest="0" * 64,
+    )
+
+
+def _standard_generation(tmp_path: Path, package_root: str = "plugins/example"):
+    contents = {
+        ".codex-plugin/plugin.json": b'{"name": "example"}',
+        "references/boundary.md": b"shared reference bytes",
+        "skills/receive/SKILL.md": b"skill entrypoint bytes",
+    }
+    _write_tree(tmp_path, package_root, contents)
+    manifest = _row_from_disk(tmp_path, package_root, ".codex-plugin/plugin.json")
+    boundary = _row_from_disk(tmp_path, package_root, "references/boundary.md")
+    skill_md = _row_from_disk(tmp_path, package_root, "skills/receive/SKILL.md")
+    files = (manifest, boundary, skill_md)
+    skill_digest = effective_skill_content_digest(
+        runtime_name="receive", entrypoint_path="skills/receive/SKILL.md", closure_files=(boundary, skill_md)
+    )
+    skill = EffectiveSkillGrant(
+        capability_id="example.receive.v1",
+        runtime_name="receive",
+        entrypoint_path="skills/receive/SKILL.md",
+        closure_paths=("references/boundary.md", "skills/receive/SKILL.md"),
+        skill_content_digest=skill_digest,
+        package_capability_id="example.pkg1",
+        package_generation="example.g1",
+        package_source_digest="0" * 64,
+        grant_digest="0" * 64,
+    )
+    generation = _make_generation(
+        capability_id="example.pkg1",
+        package_root=package_root,
+        manifest_path=".codex-plugin/plugin.json",
+        files=files,
+        skills=(skill,),
+    )
+    return generation, skill_digest
+
+
+def test_verify_happy_path(tmp_path):
+    generation, skill_digest = _standard_generation(tmp_path)
+    receipt = verify_capability_package_source(tmp_path, generation)
+    assert isinstance(receipt, VerifiedCapabilityPackage)
+    assert receipt.capability_id == "example.pkg1"
+    assert receipt.generation == "example.g1"
+    assert receipt.package_root == "plugins/example"
+    assert receipt.package_content_digest == generation.package_content_digest
+    assert receipt.file_count == 3
+    assert receipt.total_bytes == sum(f.byte_length for f in generation.files)
+    assert receipt.skill_content_digests == (("example.receive.v1", skill_digest),)
+
+
+def test_verify_source_root_symlink_refuses(tmp_path):
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    generation, _ = _standard_generation(real_root)
+    link_root = tmp_path / "link"
+    os.symlink(real_root, link_root)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(link_root, generation)
+
+
+def test_verify_package_root_symlink_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    real_package_dir = tmp_path / "plugins" / "example"
+    aside = tmp_path / "aside"
+    real_package_dir.rename(aside)
+    os.symlink(aside, real_package_dir)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_verify_symlink_in_package_path_component_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path, package_root="plugins/example")
+    plugins_dir = tmp_path / "plugins"
+    aside = tmp_path / "plugins-real"
+    plugins_dir.rename(aside)
+    os.symlink(aside, plugins_dir)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_verify_symlinked_file_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    target = tmp_path / "outside.md"
+    target.write_bytes(b"shared reference bytes")
+    victim = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+    victim.unlink()
+    os.symlink(target, victim)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_verify_hardlinked_file_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    victim = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+    external = tmp_path / "external-hardlink.md"
+    os.link(victim, external)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_verify_fifo_in_tree_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    fifo_path = tmp_path / "plugins" / "example" / "a-fifo"
+    os.mkfifo(fifo_path)
+    try:
+        with pytest.raises(CapabilityPackageError):
+            verify_capability_package_source(tmp_path, generation)
+    finally:
+        fifo_path.unlink()
+
+
+def test_verify_extra_file_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    extra = tmp_path / "plugins" / "example" / "extra.txt"
+    extra.write_text("undeclared")
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_verify_missing_file_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    victim = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+    victim.unlink()
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_verify_changed_bytes_same_size_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    victim = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+    original = victim.read_bytes()
+    replacement = bytes((b + 1) % 256 for b in original)
+    assert len(replacement) == len(original)
+    victim.write_bytes(replacement)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_verify_changed_size_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    victim = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+    victim.write_bytes(b"a totally different and longer set of bytes")
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_verify_executable_bit_drift_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    victim = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+    victim.chmod(0o755)
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+
+def test_verify_unreadable_file_refuses(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses permission bits")
+    generation, _ = _standard_generation(tmp_path)
+    victim = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+    victim.chmod(0o000)
+    try:
+        with pytest.raises(CapabilityPackageError):
+            verify_capability_package_source(tmp_path, generation)
+    finally:
+        victim.chmod(0o644)
+
+
+def test_verify_nonexistent_source_root_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    missing_root = tmp_path / "does-not-exist"
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(missing_root, generation)
+
+
+def test_verify_package_path_escaping_source_root_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    escaping = dataclasses.replace(generation, package_root="../outside")
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, escaping)
+
+
+# ---------------------------------------------------------------------------
+# Race seams: deterministic terminal-fence and final-fstat mutation
+# ---------------------------------------------------------------------------
+
+
+def test_verify_insert_via_terminal_fence_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+
+    def _insert():
+        (tmp_path / "plugins" / "example" / "sneaked-in.txt").write_text("surprise")
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_insert)
+
+
+def test_verify_remove_via_terminal_fence_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+
+    def _remove():
+        (tmp_path / "plugins" / "example" / "references" / "boundary.md").unlink()
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_remove)
+
+
+def test_verify_rename_via_terminal_fence_refuses(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+
+    def _rename():
+        victim = tmp_path / "plugins" / "example" / "references" / "boundary.md"
+        victim.rename(victim.with_name("renamed.md"))
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_rename)
+
+
+def test_verify_terminal_fence_is_not_reached_without_mutation(tmp_path):
+    generation, _ = _standard_generation(tmp_path)
+    calls = {"n": 0}
+
+    def _noop():
+        calls["n"] += 1
+
+    verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_noop)
+    assert calls["n"] == 1
+
+
+def test_verify_mutate_via_before_final_stat_refuses(tmp_path):
+    # A single-file package makes the mutation target unambiguous.
+    package_root = "plugins/example"
+    contents = {"skills/receive/SKILL.md": b"original skill bytes"}
+    _write_tree(tmp_path, package_root, contents)
+    skill_md = _row_from_disk(tmp_path, package_root, "skills/receive/SKILL.md")
+    skill_digest = effective_skill_content_digest(
+        runtime_name="receive", entrypoint_path="skills/receive/SKILL.md", closure_files=(skill_md,)
+    )
+    skill = EffectiveSkillGrant(
+        capability_id="example.receive.v1",
+        runtime_name="receive",
+        entrypoint_path="skills/receive/SKILL.md",
+        closure_paths=("skills/receive/SKILL.md",),
+        skill_content_digest=skill_digest,
+        package_capability_id="example.pkg1",
+        package_generation="example.g1",
+        package_source_digest="0" * 64,
+        grant_digest="0" * 64,
+    )
+    generation = _make_generation(
+        capability_id="example.pkg1",
+        package_root=package_root,
+        manifest_path="skills/receive/SKILL.md",
+        files=(skill_md,),
+        skills=(skill,),
+    )
+
+    mutated = {"done": False}
+
+    def _mutate():
+        if not mutated["done"]:
+            mutated["done"] = True
+            path = tmp_path / package_root / "skills/receive/SKILL.md"
+            path.write_bytes(b"mutated skill bytes#")  # same length as original (20 bytes)
+
+    assert len(b"mutated skill bytes#") == len(b"original skill bytes")
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_final_stat=_mutate)
+
+    assert mutated["done"] is True
+
+
+# ---------------------------------------------------------------------------
+# Descriptor-leak proof
+# ---------------------------------------------------------------------------
+
+
+def test_verify_closes_all_descriptors_on_success_and_refusal(tmp_path, monkeypatch):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    counts = {"open": 0, "close": 0}
+    real_open = os.open
+    real_close = os.close
+
+    def counting_open(*args, **kwargs):
+        counts["open"] += 1
+        return real_open(*args, **kwargs)
+
+    def counting_close(fd, *args, **kwargs):
+        counts["close"] += 1
+        return real_close(fd, *args, **kwargs)
+
+    monkeypatch.setattr(scf_pkg.os, "open", counting_open)
+    monkeypatch.setattr(scf_pkg.os, "close", counting_close)
+
+    generation, _ = _standard_generation(tmp_path)
+
+    verify_capability_package_source(tmp_path, generation)
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]
+
+    counts["open"] = 0
+    counts["close"] = 0
+
+    extra = tmp_path / "plugins" / "example" / "extra.txt"
+    extra.write_text("undeclared")
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation)
+
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]
+
+
+def test_verify_closes_all_descriptors_on_race_seam_refusal(tmp_path, monkeypatch):
+    import control_plane.executive_capability_packages as scf_pkg
+
+    counts = {"open": 0, "close": 0}
+    real_open = os.open
+    real_close = os.close
+
+    def counting_open(*args, **kwargs):
+        counts["open"] += 1
+        return real_open(*args, **kwargs)
+
+    def counting_close(fd, *args, **kwargs):
+        counts["close"] += 1
+        return real_close(fd, *args, **kwargs)
+
+    monkeypatch.setattr(scf_pkg.os, "open", counting_open)
+    monkeypatch.setattr(scf_pkg.os, "close", counting_close)
+
+    generation, _ = _standard_generation(tmp_path)
+
+    def _insert():
+        (tmp_path / "plugins" / "example" / "sneaked-in.txt").write_text("surprise")
+
+    with pytest.raises(CapabilityPackageError):
+        verify_capability_package_source(tmp_path, generation, _before_terminal_fence=_insert)
+
+    assert counts["open"] > 0
+    assert counts["open"] == counts["close"]

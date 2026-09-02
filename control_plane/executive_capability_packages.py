@@ -22,8 +22,11 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
 import re
-from typing import Mapping, NoReturn
+import stat
+from pathlib import Path
+from typing import Callable, Mapping, NoReturn
 
 # ---------------------------------------------------------------------------
 # Schema tokens and bounds
@@ -44,10 +47,15 @@ MAX_PACKAGE_TOTAL_BYTES = 8 * 1024 * 1024
 MAX_SKILLS_PER_PACKAGE = 32
 MAX_CLOSURE_FILES = 32
 
+_READ_CHUNK_BYTES = 65536
+
 _IDENTIFIER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 _CONTROL_CHARS = frozenset(chr(c) for c in range(0x20)) | {chr(0x7F)}
+
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 
 _RAW_KEYS = frozenset(
     {
@@ -586,3 +594,262 @@ def build_capability_package_generation(
         package_generation_digest=recomputed_generation_digest,
     )
 
+
+# ---------------------------------------------------------------------------
+# Bounded, no-follow, descriptor-relative, race-fenced source verification
+# ---------------------------------------------------------------------------
+
+
+def _stat_identity(st: os.stat_result) -> tuple:
+    return (
+        st.st_dev,
+        st.st_ino,
+        st.st_mode,
+        st.st_nlink,
+        st.st_uid,
+        st.st_gid,
+        st.st_size,
+        st.st_mtime_ns,
+        st.st_ctime_ns,
+    )
+
+
+def verify_capability_package_source(
+    source_root: str | Path,
+    generation: CapabilityPackageGeneration,
+    *,
+    _before_terminal_fence: "Callable[[], None] | None" = None,
+    _before_final_stat: "Callable[[], None] | None" = None,
+) -> VerifiedCapabilityPackage:
+    if _O_NOFOLLOW == 0 or _O_DIRECTORY == 0:
+        _refuse("platform", "nofollow_directory_unavailable")
+
+    # Defense-in-depth: never trust a hand-constructed generation's path
+    # fields either, even though build_capability_package_generation already
+    # validates them.
+    package_root = _validate_relative_path(generation.package_root, "package_root")
+    _validate_relative_path(generation.manifest_path, "manifest_path")
+    for row in generation.files:
+        _validate_relative_path(row.relative_path, "files[].relative_path")
+    for skill in generation.skills:
+        _validate_relative_path(skill.entrypoint_path, "skills[].entrypoint_path")
+        for path in skill.closure_paths:
+            _validate_relative_path(path, "skills[].closure_paths[]")
+
+    source_root_path = Path(source_root)
+    package_root_parts = package_root.split("/")
+
+    # Step 1: lexical, non-resolving symlink checks (never call resolve()).
+    try:
+        source_root_lstat = os.lstat(str(source_root_path))
+    except OSError:
+        _refuse("source_root", "source_root_unavailable")
+    if stat.S_ISLNK(source_root_lstat.st_mode) or not stat.S_ISDIR(source_root_lstat.st_mode):
+        _refuse("source_root", "source_root_symlink_refused")
+
+    lexical_path = source_root_path
+    for part in package_root_parts:
+        lexical_path = lexical_path / part
+        try:
+            component_lstat = os.lstat(str(lexical_path))
+        except OSError:
+            _refuse("package_root", "package_root_unavailable")
+        if stat.S_ISLNK(component_lstat.st_mode):
+            _refuse("package_root", "package_symlink_refused")
+
+    all_retained: list[tuple[int, tuple]] = []
+    package_dirs: dict[str, int] = {}
+
+    def _track(fd: int) -> None:
+        all_retained.append((fd, _stat_identity(os.fstat(fd))))
+
+    try:
+        try:
+            root_fd = os.open(str(source_root_path), os.O_RDONLY | _O_NOFOLLOW | _O_DIRECTORY)
+        except OSError:
+            _refuse("source_root", "source_root_unavailable")
+        _track(root_fd)
+
+        current_fd = root_fd
+        for part in package_root_parts:
+            try:
+                component_stat = os.lstat(part, dir_fd=current_fd)
+            except OSError:
+                _refuse("package_root", "package_root_unavailable")
+            if stat.S_ISLNK(component_stat.st_mode):
+                _refuse("package_root", "package_symlink_refused")
+            if not stat.S_ISDIR(component_stat.st_mode):
+                _refuse("package_root", "package_root_unavailable")
+            try:
+                child_fd = os.open(part, os.O_RDONLY | _O_NOFOLLOW | _O_DIRECTORY, dir_fd=current_fd)
+            except OSError:
+                _refuse("package_root", "package_symlink_refused")
+            _track(child_fd)
+            current_fd = child_fd
+        package_root_fd = current_fd
+        package_dirs[""] = package_root_fd
+
+        def _walk(dir_fd: int, rel_prefix: str, file_entries: set[str]) -> None:
+            try:
+                names = os.listdir(dir_fd)
+            except OSError:
+                _refuse("package_root", "package_root_unavailable")
+            for name in names:
+                child_rel = name if rel_prefix == "" else f"{rel_prefix}/{name}"
+                try:
+                    entry_stat = os.lstat(name, dir_fd=dir_fd)
+                except OSError:
+                    _refuse("package_root", "package_file_set_mismatch")
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    _refuse("package_root", "package_symlink_refused")
+                elif stat.S_ISDIR(entry_stat.st_mode):
+                    try:
+                        child_fd = os.open(
+                            name, os.O_RDONLY | _O_NOFOLLOW | _O_DIRECTORY, dir_fd=dir_fd
+                        )
+                    except OSError:
+                        _refuse("package_root", "package_symlink_refused")
+                    _track(child_fd)
+                    package_dirs[child_rel] = child_fd
+                    _walk(child_fd, child_rel, file_entries)
+                elif stat.S_ISREG(entry_stat.st_mode):
+                    file_entries.add(child_rel)
+                else:
+                    _refuse("package_root", "package_non_regular_file_refused")
+
+        first_entries: set[str] = set()
+        _walk(package_root_fd, "", first_entries)
+
+        declared_entries = {row.relative_path for row in generation.files}
+        if first_entries != declared_entries:
+            _refuse("package_root", "package_file_set_mismatch")
+
+        actual_files_by_path: dict[str, CapabilityPackageFile] = {}
+        running_total = 0
+
+        for row in generation.files:
+            parent_rel, _, name = row.relative_path.rpartition("/")
+            parent_fd = package_dirs.get(parent_rel)
+            if parent_fd is None:
+                _refuse("package_root", "package_file_set_mismatch")
+
+            try:
+                file_fd = os.open(name, os.O_RDONLY | _O_NOFOLLOW, dir_fd=parent_fd)
+            except FileNotFoundError:
+                _refuse("package_root", "package_file_set_mismatch")
+            except PermissionError:
+                _refuse("package_root", "package_file_unreadable")
+            except OSError:
+                _refuse("package_root", "package_symlink_refused")
+
+            try:
+                first_stat = os.fstat(file_fd)
+                if not stat.S_ISREG(first_stat.st_mode):
+                    _refuse("package_root", "package_non_regular_file_refused")
+                if first_stat.st_nlink != 1:
+                    _refuse("package_root", "package_hardlink_refused")
+                if first_stat.st_size != row.byte_length:
+                    _refuse("package_root", "package_file_size_mismatch")
+                if first_stat.st_size > MAX_PACKAGE_FILE_BYTES:
+                    _refuse("package_root", "package_too_large")
+                running_total += first_stat.st_size
+                if running_total > MAX_PACKAGE_TOTAL_BYTES:
+                    _refuse("package_root", "package_too_large")
+
+                actual_executable = bool(
+                    first_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                )
+                if actual_executable != row.executable:
+                    _refuse("package_root", "package_executable_mismatch")
+
+                hasher = hashlib.sha256()
+                while True:
+                    try:
+                        chunk = os.read(file_fd, _READ_CHUNK_BYTES)
+                    except OSError:
+                        _refuse("package_root", "package_file_unreadable")
+                    if not chunk:
+                        break
+                    hasher.update(chunk)
+
+                if _before_final_stat is not None:
+                    _before_final_stat()
+
+                final_stat = os.fstat(file_fd)
+                if _stat_identity(final_stat) != _stat_identity(first_stat):
+                    _refuse("package_root", "package_file_identity_mismatch")
+            finally:
+                os.close(file_fd)
+
+            actual_files_by_path[row.relative_path] = CapabilityPackageFile(
+                relative_path=row.relative_path,
+                sha256=hasher.hexdigest(),
+                byte_length=first_stat.st_size,
+                executable=actual_executable,
+            )
+
+        actual_files_ordered = tuple(actual_files_by_path[row.relative_path] for row in generation.files)
+        recomputed_content_digest = capability_package_content_digest(actual_files_ordered)
+        if recomputed_content_digest != generation.package_content_digest:
+            _refuse("package_root", "package_content_digest_mismatch")
+
+        skill_digest_pairs: list[tuple[str, str]] = []
+        for skill in generation.skills:
+            closure_files = tuple(actual_files_by_path[path] for path in skill.closure_paths)
+            recomputed_skill_digest = effective_skill_content_digest(
+                runtime_name=skill.runtime_name,
+                entrypoint_path=skill.entrypoint_path,
+                closure_files=closure_files,
+            )
+            if recomputed_skill_digest != skill.skill_content_digest:
+                _refuse("package_root", "skill_content_digest_mismatch")
+            skill_digest_pairs.append((skill.capability_id, recomputed_skill_digest))
+
+        # Terminal fence (identity amendment §6): repeat the complete-tree
+        # census through the retained descriptors and require every retained
+        # directory's identity to be unchanged, closing the post-first-census
+        # insertion/removal/rename race.
+        if _before_terminal_fence is not None:
+            _before_terminal_fence()
+
+        second_entries: set[str] = set()
+        for rel_path, dir_fd in package_dirs.items():
+            try:
+                names = os.listdir(dir_fd)
+            except OSError:
+                _refuse("package_root", "package_file_set_mismatch")
+            for name in names:
+                child_rel = name if rel_path == "" else f"{rel_path}/{name}"
+                try:
+                    entry_stat = os.lstat(name, dir_fd=dir_fd)
+                except OSError:
+                    _refuse("package_root", "package_file_set_mismatch")
+                if stat.S_ISDIR(entry_stat.st_mode):
+                    continue
+                elif stat.S_ISREG(entry_stat.st_mode):
+                    second_entries.add(child_rel)
+                else:
+                    _refuse("package_root", "package_file_set_mismatch")
+
+        if second_entries != declared_entries:
+            _refuse("package_root", "package_file_set_mismatch")
+
+        for fd, initial_identity in all_retained:
+            if _stat_identity(os.fstat(fd)) != initial_identity:
+                _refuse("package_root", "package_directory_identity_mismatch")
+
+        return VerifiedCapabilityPackage(
+            capability_id=generation.capability_id,
+            generation=generation.generation,
+            package_root=generation.package_root,
+            package_content_digest=recomputed_content_digest,
+            file_count=len(generation.files),
+            total_bytes=sum(row.byte_length for row in generation.files),
+            skill_content_digests=tuple(skill_digest_pairs),
+        )
+    finally:
+        for fd, _identity in all_retained:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
