@@ -23,7 +23,7 @@ from integrations.slack_agent_dialogue.contract_v2 import (
     build_parent_v2,
 )
 
-from control_plane.company_dialogue_runtime_binding import (
+from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
     BINDING_SCHEMA,
     BindingReason,
     BindingState,
@@ -411,7 +411,7 @@ def test_caller_identity_has_no_thread_target_or_authority_fields() -> None:
 
 
 def test_module_is_pure_storeless_and_has_no_transport_or_lifecycle_mutation() -> None:
-    path = ROOT / "control_plane" / "company_dialogue_runtime_binding.py"
+    path = ROOT / "integrations" / "slack_agent_dialogue" / "company_dialogue_runtime_binding.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
     imports = {
         alias.name.split(".")[0]
@@ -442,3 +442,22 @@ def test_module_is_pure_storeless_and_has_no_transport_or_lifecycle_mutation() -
         "write_bytes(",
     ):
         assert forbidden not in source
+
+
+def test_resolver_is_owned_by_agent_dialogue_and_control_plane_never_imports_integrations() -> None:
+    assert not (ROOT / "control_plane" / "company_dialogue_runtime_binding.py").exists()
+
+    for path in sorted((ROOT / "control_plane").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imported_roots = {
+            alias.name.split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        imported_roots |= {
+            (node.module or "").split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+        }
+        assert "integrations" not in imported_roots, path
