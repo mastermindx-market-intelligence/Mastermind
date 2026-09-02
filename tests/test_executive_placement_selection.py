@@ -2377,27 +2377,134 @@ def test_candidate_refuses_a_source_observed_at_the_wire_could_not_carry(source_
         eps.PlacementCandidateFact(**fields)
 
 
-def test_every_constructible_candidate_produces_a_revalidatable_decision():
-    """The closure property itself, stated once: if a candidate can be
-    built, the decision it produces MUST pass this module's own validator.
-    Any future field that can be constructed but not revalidated fails
-    here, not silently in the Chairman's degraded list."""
-    edge_timestamps = [
-        "2026-09-01T00:00:00Z",
-        "2026-09-01T00:00:00.123456Z",
-        "20260901T000000Z",
-    ]
-    for observed_at in edge_timestamps:
+#: Values chosen to straddle every boundary the token law draws, so the
+#: sweep below exercises BOTH outcomes: refused-at-construction and
+#: constructs-and-must-revalidate.
+_CLOSURE_SWEEP_VALUES = [
+    "plain-token", "colon:token", "plus+token", "dot.token",      # legal
+    "2026-09-01T00:00:00Z", "2026-09-01T00:00:00+05:45",          # legal timestamps
+    "has space", "has@at", "has/slash", "has\\backslash",           # illegal separators
+    "nul\x00byte", "esc\x1b[31m", "bell\x07", "del\x7f", "",        # illegal controls/empty
+]
+
+#: Every string-valued field that reaches the wire, with a setter that puts
+#: a value into a candidate's field dict. `responsibility_ref` is swept
+#: separately since it belongs to the responsibility, not the candidate.
+_CLOSURE_SWEEP_FIELDS = {
+    "worker_id": lambda f, v: f.__setitem__("worker_id", v),
+    "provider": lambda f, v: f.__setitem__("provider", v),
+    "account_label": lambda f, v: f.__setitem__("account_label", v),
+    "quota_class": lambda f, v: f.__setitem__("quota_class", v),
+    "capabilities_item": lambda f, v: f.__setitem__("capabilities", frozenset({v})),
+    "occupancy_source.ref": lambda f, v: f.__setitem__(
+        "occupancy_source", SourceRef(owner=SourceOwner.RUNTIME_BINDING, ref=v,
+                                      observed_at="2026-09-01T00:00:00Z",
+                                      freshness=Freshness.CURRENT)),
+    "capacity_source.ref": lambda f, v: f.__setitem__(
+        "capacity_source", SourceRef(owner=SourceOwner.CAPACITY, ref=v,
+                                     observed_at="2026-09-01T00:00:00Z",
+                                     freshness=Freshness.CURRENT)),
+    "closure_source.ref": lambda f, v: f.__setitem__(
+        "closure_source", SourceRef(owner=SourceOwner.CAPACITY, ref=v,
+                                    observed_at="2026-09-01T00:00:00Z",
+                                    freshness=Freshness.CURRENT)),
+    "occupancy_source.observed_at": lambda f, v: f.__setitem__(
+        "occupancy_source", SourceRef(owner=SourceOwner.RUNTIME_BINDING, ref="ref-a",
+                                      observed_at=v, freshness=Freshness.CURRENT)),
+    "capacity_source.observed_at": lambda f, v: f.__setitem__(
+        "capacity_source", SourceRef(owner=SourceOwner.CAPACITY, ref="ref-b",
+                                     observed_at=v, freshness=Freshness.CURRENT)),
+    "closure_source.observed_at": lambda f, v: f.__setitem__(
+        "closure_source", SourceRef(owner=SourceOwner.CAPACITY, ref="ref-c",
+                                    observed_at=v, freshness=Freshness.CURRENT)),
+}
+
+
+@pytest.mark.parametrize("field", sorted(_CLOSURE_SWEEP_FIELDS))
+def test_every_constructible_candidate_produces_a_revalidatable_decision(field):
+    """The CLOSURE property, actually swept.
+
+    If a candidate can be BUILT, the decision it produces MUST pass this
+    module's own validator. The two validators are separate code paths, so
+    any field where construction is more permissive than revalidation
+    yields a genuine decision the Chairman silently loses — that is exactly
+    how the `*_source.observed_at` gap shipped.
+
+    Exact-head review N-3: the previous version of this test claimed this
+    property while exercising three benign timestamps, and did NOT fail
+    when the observed_at hunk was reverted. It now sweeps every
+    string-valued field that reaches the wire against values straddling
+    every boundary the token law draws, and asserts BOTH outcomes occur so
+    the sweep cannot silently degenerate into all-refused.
+    """
+    setter = _CLOSURE_SWEEP_FIELDS[field]
+    constructed = refused = 0
+    for value in _CLOSURE_SWEEP_VALUES:
         fields = _candidate_fields()
-        fields["occupancy_source"] = SourceRef(
-            owner=SourceOwner.RUNTIME_BINDING, ref="ref-a",
-            observed_at=observed_at, freshness=Freshness.CURRENT,
-        )
-        candidate = eps.PlacementCandidateFact(**fields)
+        try:
+            setter(fields, value)
+            candidate = eps.PlacementCandidateFact(**fields)
+        except (ValueError, TypeError):
+            refused += 1
+            continue
+        constructed += 1
+        # The demand is deliberately NOT matched to the mutated field: an
+        # evidence row is emitted for every candidate whether it is eligible
+        # or excluded, so the mutated value reaches the wire either way and
+        # the closure property applies regardless of the outcome state.
         payload = eps.select_placement(
             responsibility=_responsibility(), demand=_demand(), candidates=(candidate,),
         ).to_dict()
-        assert eps.validate_placement_selection(payload) == payload, observed_at
+        # THE closure assertion: constructed => its own wire form revalidates
+        assert eps.validate_placement_selection(payload) == payload, (field, value)
+    # the sweep really exercised both sides of the boundary
+    assert constructed, f"{field}: nothing constructed — sweep is vacuous"
+    assert refused, f"{field}: nothing refused — sweep is vacuous"
+
+
+@pytest.mark.parametrize("value", _CLOSURE_SWEEP_VALUES)
+def test_responsibility_ref_closure_is_symmetric(value):
+    """Same closure property for `responsibility_ref`: if
+    `select_placement` accepts it, the decision it produces must
+    revalidate; if this module's token law refuses it, that refusal must
+    happen in step-1 input refusal, never mid-algorithm (review N-1)."""
+    ref = f"WS:{value}"
+    try:
+        responsibility = _responsibility(ref=ref)
+    except (ValueError, TypeError):
+        return  # the steward refused it first; nothing for this module to do
+    # Instrument the first algorithm step that touches candidates. A step-1
+    # input refusal must happen BEFORE this runs; a late raise from
+    # PlacementSelectionDecision.__post_init__ happens after it. Asserting
+    # only "some ValueError" cannot tell those apart — that is exactly how
+    # the previous version of this test passed while N-1 was live.
+    ran = []
+    real_evidence = eps._evidence_from_candidates
+
+    def _tracking(candidates):
+        ran.append(True)
+        return real_evidence(candidates)
+
+    monkeypatch_target = eps
+    original = monkeypatch_target._evidence_from_candidates
+    monkeypatch_target._evidence_from_candidates = _tracking
+    try:
+        try:
+            decision = eps.select_placement(
+                responsibility=responsibility, demand=_demand(),
+                candidates=(_candidate(worker_id="worker-a"),),
+            )
+        except ValueError:
+            assert not ran, (
+                f"{ref!r} was refused only AFTER the algorithm ran — a "
+                "non-representable responsibility_ref must be refused in "
+                "step-1 input refusal, never mid-algorithm"
+            )
+            return
+    finally:
+        monkeypatch_target._evidence_from_candidates = original
+    payload = decision.to_dict()
+    assert eps.validate_placement_selection(payload) == payload, ref
 
 
 @pytest.mark.parametrize(
@@ -2442,8 +2549,19 @@ def test_token_law_rejects_control_characters_and_backslash_paths(token):
         eps._require_token("t", token)
 
 
-def test_a_decision_cannot_carry_a_terminal_escape_in_its_demand():
+@pytest.mark.parametrize(
+    "escape", ["\x1b[2J\x1b[31mref\x00-1", "ref\x07bell", "C:\\Users\\x\\id_rsa"],
+)
+def test_a_decision_cannot_carry_a_terminal_escape_in_a_source_ref(escape):
+    """Exact-head review N-2: this previously mutated `demand.quota_class`
+    and passed for the WRONG reason — rewriting the demand flips the
+    recomputed state, so the PROVENANCE gate raised and the token law was
+    never exercised at all (proved by reverting the token hunk: the old
+    test still passed). `evidence[*].occupancy_source.ref` does not perturb
+    the recomputation, so only the token law can refuse it."""
     payload = _selected_payload(worker_id="worker-a")
-    payload["demand"]["quota_class"] = "\x1b[2J\x1b[31mqc\x00-1"
-    with pytest.raises(ValueError):
+    payload["evidence"][0]["occupancy_source"]["ref"] = escape
+    with pytest.raises(ValueError) as excinfo:
         eps.validate_placement_selection(payload)
+    # the token law, not the provenance gate
+    assert "must be a non-empty token" in str(excinfo.value)

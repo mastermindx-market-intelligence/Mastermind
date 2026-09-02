@@ -224,9 +224,13 @@ _AGGREGATE_PRECEDENCE: tuple[tuple[SelectionState, frozenset[ExclusionReason]], 
 def _require_token(name: str, value: object) -> str:
     """Every text token in this module's wire — worker_id, provider,
     quota_class, capabilities, tie-breaker strings, exclusion/tied worker
-    ids — is secret-safe: non-empty, no whitespace, and (reviewer M-1/M-2)
-    no ``"@"`` or ``"/"`` either, so an email address or a filesystem path
-    can never flow through ANY token field, not just ``account_label``.
+    ids, ``responsibility_ref``, and every ``*_source`` ``ref``/
+    ``observed_at`` — is secret-safe: non-empty, no whitespace, no ``"@"``
+    or ``"/"`` (reviewer M-1/M-2), and no backslash or control character
+    (exact-head review), so neither an email address, a POSIX path, a
+    Windows path, nor an ANSI terminal escape can flow through ANY token
+    field. ``scripts/chairman_control_room.py`` prints these fields to a
+    terminal, where an escape sequence is not inert.
     """
     if (
         not isinstance(value, str)
@@ -398,10 +402,11 @@ class PlacementDemand:
 class PlacementCandidateFact:
     """One point-in-time, source-attributed candidate worker observation.
 
-    Every text field — INCLUDING each ``*_source.ref`` — is a secret-safe
-    token (no whitespace, no empty strings, no ``"@"``, no ``"/"``) so an
-    email address or a filesystem path can never flow into a decision or
-    its wire form. Construction ALSO eagerly builds (and discards) the
+    Every text field — INCLUDING each ``*_source.ref`` AND each present
+    ``*_source.observed_at`` — is a secret-safe token (see
+    :func:`_require_token`: no whitespace, empty strings, ``"@"``, ``"/"``,
+    backslash or control characters) so an email address, a filesystem path
+    or a terminal escape can never flow into a decision or its wire form. Construction ALSO eagerly builds (and discards) the
     Phase-B placement-snapshot shape from this candidate's own
     ``worker_id``/``quota_class``/``provider``/``account_label``/
     ``observed_at_ms`` — enforcing the snapshot's own canonical regexes at
@@ -1522,7 +1527,10 @@ def select_placement(
     Documented algorithm
     ---------------------
     1. Input refusal (typed ``ValueError``, no decision produced):
-       ``responsibility.state != "waiting_capacity"``; ``accepted_tie_breaker``
+       ``responsibility.state != "waiting_capacity"``; a
+       ``responsibility_ref`` that is legal per
+       :mod:`control_plane.executive_steward` but violates THIS module's
+       stricter token law (it flows onto the Chairman wire); ``accepted_tie_breaker``
        not ``None`` (addendum A: C1 has NO tie-breaker authority — a later
        wave may add a typed, source-owned ruling receipt binding the exact
        candidate-set digest, but until then this parameter accepts only
@@ -1601,6 +1609,17 @@ def select_placement(
             "responsibility.state must be 'waiting_capacity' before placement "
             "selection may run"
         )
+    # Exact-head review N-1: this module's `_require_responsibility_ref` is
+    # deliberately STRICTER than executive_steward's `_valid_responsibility_ref`
+    # (which admits '@', '/', backslash and control characters), because the
+    # ref flows onto the Chairman wire. A ResponsibilityFact that is legal per
+    # the steward is therefore a legal INPUT here that this module cannot
+    # represent — so it must be refused in step 1 alongside the other input
+    # refusals, not late from PlacementSelectionDecision.__post_init__ after
+    # the whole algorithm has run. That late raise is exactly the defect class
+    # the M-1/M-2 ratchet above forbids ("so select_placement can never raise
+    # past this point").
+    _require_responsibility_ref(responsibility.responsibility_ref)
     if accepted_tie_breaker is not None:
         # Addendum A: no tie-breaker authority exists in C1. See the
         # docstring above for the forward-compatible plan; the error text
