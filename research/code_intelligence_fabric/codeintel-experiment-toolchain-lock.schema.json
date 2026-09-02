@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mastermind.codeintel_experiment_toolchain_lock.schema.v1",
+  "title": "Mastermind Code Intelligence Experiment Toolchain Lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "lock_version", "operation_key", "supported_platforms", "components", "lock_digest"],
+  "properties": {
+    "schema": {"const": "mastermind.codeintel_experiment_toolchain_lock.v1"},
+    "lock_version": {"const": 1},
+    "operation_key": {"const": "mastermind-codeintel-b0-hosted-tool-bundle-forge-20260902-sol-001"},
+    "supported_platforms": {"type": "array", "const": ["linux-x64"]},
+    "lock_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serena", "pyright", "typescript_language_server", "typescript", "zoekt", "node_runtime", "go_runtime"],
+      "properties": {
+        "serena": {"$ref": "#/$defs/component"},
+        "pyright": {"$ref": "#/$defs/component"},
+        "typescript_language_server": {"$ref": "#/$defs/component"},
+        "typescript": {"$ref": "#/$defs/component"},
+        "zoekt": {"$ref": "#/$defs/component"},
+        "node_runtime": {"$ref": "#/$defs/component"},
+        "go_runtime": {"$ref": "#/$defs/component"}
+      }
+    }
+  },
+  "$defs": {
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "dependency_lock", "license", "artifacts", "platforms", "build_recipe"],
+      "properties": {
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "commit", "tree_sha1"],
+          "properties": {
+            "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+            "commit": {"$ref": "#/$defs/sha1"},
+            "tree_sha1": {"$ref": "#/$defs/sha1"}
+          }
+        },
+        "dependency_lock": {
+          "type": ["object", "null"],
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "blob_sha1": {"$ref": "#/$defs/sha1"}
+          },
+          "required": ["path", "blob_sha1"],
+          "additionalProperties": false
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["spdx", "blobs"],
+          "properties": {
+            "spdx": {"type": "string", "minLength": 1},
+            "blobs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "sha1"],
+                "properties": {"path": {"type": "string", "minLength": 1}, "sha1": {"$ref": "#/$defs/sha1"}}
+              }
+            }
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["filename", "publisher", "locator", "checksum", "platform"],
+            "properties": {
+              "filename": {"type": "string", "minLength": 1},
+              "publisher": {"type": "string", "minLength": 1},
+              "locator": {"type": "string", "minLength": 1},
+              "platform": {"enum": ["any", "linux-x64"]},
+              "checksum": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["algorithm", "value"],
+                "properties": {
+                  "algorithm": {"enum": ["sha256", "sha512-base64"]},
+                  "value": {"type": "string", "minLength": 1}
+                }
+              }
+            }
+          }
+        },
+        "platforms": {"type": "array", "const": ["linux-x64"]},
+        "build_recipe": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "steps", "sha256"],
+          "properties": {
+            "kind": {"enum": ["exact_source_build", "published_artifact"]},
+            "steps": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[a-z0-9-]+$"}},
+            "sha256": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    }
+  }
+}

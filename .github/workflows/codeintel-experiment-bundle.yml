@@ -1,0 +1,117 @@
+name: Code Intelligence experiment bundle (held)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Fixed consumer mode.
+        required: true
+        type: choice
+        options: [C0, Z0]
+      consumer_sha:
+        description: Exact 40-character consumer commit in this repository.
+        required: true
+        type: string
+      consumer_tree_sha:
+        description: Exact 40-character consumer tree associated with consumer_sha.
+        required: true
+        type: string
+      operation_key:
+        description: Fixed B0 operation identity.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeintel-experiment-bundle-${{ inputs.mode }}-${{ inputs.consumer_sha }}
+  cancel-in-progress: false
+
+jobs:
+  phase-p-prepare:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact B0 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Use pinned Python bootstrap
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+      - name: Validate closed inputs, consumer identity, and B0 lock
+        env:
+          MODE: ${{ inputs.mode }}
+          CONSUMER_SHA: ${{ inputs.consumer_sha }}
+          CONSUMER_TREE_SHA: ${{ inputs.consumer_tree_sha }}
+          OPERATION_KEY: ${{ inputs.operation_key }}
+        run: |
+          python3 -c 'from experiments.codeintel_supply.hosted_runner import validate_dispatch_inputs; import os; validate_dispatch_inputs({"mode": os.environ["MODE"], "consumer_sha": os.environ["CONSUMER_SHA"], "consumer_tree_sha": os.environ["CONSUMER_TREE_SHA"], "operation_key": os.environ["OPERATION_KEY"]})'
+          python3 -c 'from pathlib import Path; from experiments.codeintel_supply.toolchain_lock import load_toolchain_lock; load_toolchain_lock(Path("research/code_intelligence_fabric/codeintel-experiment-toolchain-lock.v1.json"))'
+      - name: Checkout exact consumer source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ inputs.consumer_sha }}
+          path: _consumer
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove checkout matches supplied consumer tree
+        env:
+          CONSUMER_SHA: ${{ inputs.consumer_sha }}
+          CONSUMER_TREE_SHA: ${{ inputs.consumer_tree_sha }}
+        run: |
+          test "$(git -C _consumer rev-parse "${CONSUMER_SHA}^{commit}")" = "$CONSUMER_SHA"
+          test "$(git -C _consumer rev-parse "${CONSUMER_SHA}^{tree}")" = "$CONSUMER_TREE_SHA"
+      - name: Emit immutable phase-P handoff marker
+        run: |
+          mkdir -p _phase_p
+          printf '%s\n' '${{ inputs.mode }}' '${{ inputs.consumer_sha }}' '${{ inputs.consumer_tree_sha }}' '${{ inputs.operation_key }}' > _phase_p/identity.txt
+      - name: Transfer verified phase-P handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: codeintel-phase-p-identity
+          path: _phase_p/identity.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  phase-e-sealed-contract:
+    needs: phase-p-prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact B0 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Receive immutable phase-P handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: codeintel-phase-p-identity
+          path: _phase_p
+      - name: Prove network namespace isolation before a fixed mode command
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          test "$(wc -l < _phase_p/identity.txt | tr -d ' ')" = 4
+          unshare -n -- /usr/bin/env -i PATH=/usr/bin:/bin true
+          unshare -n -- /usr/bin/env -i PATH=/usr/bin:/bin python3 - <<'PY'
+          import socket
+
+          try:
+              socket.create_connection(("1.1.1.1", 443), timeout=2)
+          except OSError:
+              raise SystemExit(0)
+          raise SystemExit(70)
+          PY
+          if [ "$MODE" = C0 ]; then
+            unshare -n -- /usr/bin/env -i PATH=/usr/bin:/bin python3 -m experiments.codeintel_supply.hosted_runner execute --sealed --mode C0
+          elif [ "$MODE" = Z0 ]; then
+            unshare -n -- /usr/bin/env -i PATH=/usr/bin:/bin python3 -m experiments.codeintel_supply.hosted_runner execute --sealed --mode Z0
+          else
+            exit 64
+          fi

@@ -1,0 +1,65 @@
+{
+  "schema": "mastermind.codeintel_experiment_toolchain_lock.v1",
+  "lock_version": 1,
+  "operation_key": "mastermind-codeintel-b0-hosted-tool-bundle-forge-20260902-sol-001",
+  "supported_platforms": ["linux-x64"],
+  "components": {
+    "serena": {
+      "source": {"repository": "oraios/serena", "commit": "949a27ef1e5fda1a6e7b561e777bcece345c6ffd", "tree_sha1": "6daa0fe28c2be66ed2462e02871426098ddecb69"},
+      "dependency_lock": {"path": "uv.lock", "blob_sha1": "c5d1ab52d59ff37687f824017be234e878abe1f0"},
+      "license": {"spdx": "MIT", "blobs": [{"path": "LICENSE", "sha1": "d27bba648a59b23cadf39b9e74fd0684ea2e15dd"}]},
+      "artifacts": [{"filename": "serena_agent-1.7.0-py3-none-any.whl", "publisher": "pypi.org", "locator": "https://files.pythonhosted.org/packages/95/c1/edd38220ce54fe37999d5b4a0790e6cfcc3557f71a8f47cf850fc079769b/serena_agent-1.7.0-py3-none-any.whl", "checksum": {"algorithm": "sha256", "value": "6dbf1459670d96fb0595f84932adef34260a6fe14ba5135b901fdb3c8c76e891"}, "platform": "any"}],
+      "platforms": ["linux-x64"],
+      "build_recipe": {"kind": "published_artifact", "steps": ["verify-artifact", "stage-serena-wheel", "write-bundle-manifest"], "sha256": "807695546120b7ea2c14665ddd47f9b9da8f4963db48aeb80c67ca8ad6676133"}
+    },
+    "pyright": {
+      "source": {"repository": "microsoft/pyright", "commit": "789d8275fef25f347ffef7b847305fefd8a3e363", "tree_sha1": "f545ff49957e755524ea9c6a36ef80e053c1365b"},
+      "dependency_lock": {"path": "package-lock.json", "blob_sha1": "4f4e9083d421857ca9da0fbea865b500e8d6944b"},
+      "license": {"spdx": "MIT", "blobs": [{"path": "LICENSE.txt", "sha1": "0c537977906fbe6f3fb260109f579bc4d9cad402"}]},
+      "artifacts": [],
+      "platforms": ["linux-x64"],
+      "build_recipe": {"kind": "exact_source_build", "steps": ["verify-source-tree", "verify-package-lock", "build-with-locked-node", "write-bundle-manifest"], "sha256": "98a299e913ce62b08929dc2638450b18a417236abe3790d3558f001ce5b6e9c6"}
+    },
+    "typescript_language_server": {
+      "source": {"repository": "typescript-language-server/typescript-language-server", "commit": "1c0f224eb44c626d96dae07aaf5d78654de0e1f2", "tree_sha1": "8ce3a30644f0cda99091b2cbc753a15656cce89d"},
+      "dependency_lock": {"path": "pnpm-lock.yaml", "blob_sha1": "ef497e570623015c5a410ae3af49b1bae75b43e8"},
+      "license": {"spdx": "MIT", "blobs": [{"path": "LICENSE", "sha1": "671b6d79c3b71ba4a8cb5f00f1b8b1c4274b9508"}]},
+      "artifacts": [],
+      "platforms": ["linux-x64"],
+      "build_recipe": {"kind": "exact_source_build", "steps": ["verify-source-tree", "verify-pnpm-lock", "build-with-locked-node", "write-bundle-manifest"], "sha256": "2cafb47c3c213e96c3f09007aff19864e4b2414e4ba885977d68152d8cd4bcb3"}
+    },
+    "typescript": {
+      "source": {"repository": "microsoft/TypeScript", "commit": "050880ce59e30b356b686bd3144efe24f875ebc8", "tree_sha1": "2f2864c2abd114731af731ec0b9866cae565329c"},
+      "dependency_lock": {"path": "package-lock.json", "blob_sha1": "700e2e7c83f24dbd2d9838b6626308c7f07ae8d1"},
+      "license": {"spdx": "Apache-2.0", "blobs": [{"path": "LICENSE.txt", "sha1": "8746124b277914d0f0fd9cf4aef2ed3b587143d9"}]},
+      "artifacts": [{"filename": "typescript-6.0.3.tgz", "publisher": "github.com/microsoft/TypeScript", "locator": "github-release:microsoft/TypeScript@v6.0.3", "checksum": {"algorithm": "sha256", "value": "33cd0ee1beaa8c9e9d15a9da836c62ddea4c34a42d7c2d349dbc80d94165d22a"}, "platform": "any"}],
+      "platforms": ["linux-x64"],
+      "build_recipe": {"kind": "published_artifact", "steps": ["verify-release-asset", "stage-typescript", "write-bundle-manifest"], "sha256": "48973e823a5c887b7b7dbc7beeb4d4f12b3b089340fc0400b033cc018a844757"}
+    },
+    "zoekt": {
+      "source": {"repository": "sourcegraph/zoekt", "commit": "5f833dde1bc4b1a8f99007617b4b721e44506c4f", "tree_sha1": "8135ec1d7329e7f8de43714ac5c7a2bad14bd7b5"},
+      "dependency_lock": {"path": "go.sum", "blob_sha1": "6f54532eef8a9628275d1aa870c1b26f89987dd0"},
+      "license": {"spdx": "Apache-2.0", "blobs": [{"path": "LICENSE", "sha1": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"}]},
+      "artifacts": [],
+      "platforms": ["linux-x64"],
+      "build_recipe": {"kind": "exact_source_build", "steps": ["verify-source-tree", "verify-go-sum", "build-with-locked-go", "write-bundle-manifest"], "sha256": "5b46f2ead18faa4a182f11515b27721e49ace2179c1ce7e51098c872a9b3da4f"}
+    },
+    "node_runtime": {
+      "source": {"repository": "nodejs/node", "commit": "2645dc73720b1b4f27c49f395d3c66025ce126cc", "tree_sha1": "6fa806ed5bbc3c0427f5f3376ecd2669ad98eca4"},
+      "dependency_lock": null,
+      "license": {"spdx": "MIT", "blobs": [{"path": "LICENSE", "sha1": "a640a1f4708257449c53645022c8762488d7261f"}]},
+      "artifacts": [{"filename": "node-v22.22.2-linux-x64.tar.xz", "publisher": "nodejs.org", "locator": "https://nodejs.org/dist/v22.22.2/node-v22.22.2-linux-x64.tar.xz", "checksum": {"algorithm": "sha256", "value": "88fd1ce767091fd8d4a99fdb2356e98c819f93f3b1f8663853a2dee9b438068a"}, "platform": "linux-x64"}],
+      "platforms": ["linux-x64"],
+      "build_recipe": {"kind": "published_artifact", "steps": ["verify-runtime-archive", "extract-node", "write-bundle-manifest"], "sha256": "fcbceaf724aceeda1dfb7dd56ff9bfed302a38dabba90742644a40b28aa29c58"}
+    },
+    "go_runtime": {
+      "source": {"repository": "golang/go", "commit": "c19862e5f8415b4f24b189d065ed739517c548ba", "tree_sha1": "0bb2fb1cc06c334c36a2a92d2f0b07fea7236d74"},
+      "dependency_lock": null,
+      "license": {"spdx": "BSD-3-Clause", "blobs": [{"path": "LICENSE", "sha1": "2a7cf70da6e498df9c11ab6a5eaa2ddd7af34da4"}]},
+      "artifacts": [{"filename": "go1.26.5.linux-amd64.tar.gz", "publisher": "go.dev", "locator": "https://go.dev/dl/go1.26.5.linux-amd64.tar.gz", "checksum": {"algorithm": "sha256", "value": "5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053"}, "platform": "linux-x64"}],
+      "platforms": ["linux-x64"],
+      "build_recipe": {"kind": "published_artifact", "steps": ["verify-runtime-archive", "extract-go", "write-bundle-manifest"], "sha256": "63b1b7db0eb1862bea5b978bd1a0f2832266c5a5143a10e1cae80027d6770088"}
+    }
+  },
+  "lock_digest": "e8805f4da5bd505ca9389ad21a6f41ae6a432597c63c9ca881dde8194a4d9a2e"
+}
