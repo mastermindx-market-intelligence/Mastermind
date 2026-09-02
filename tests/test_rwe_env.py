@@ -332,15 +332,20 @@ def test_build_receipt_scrubs_and_truncates_pip_check_detail(tmp_path):
 # receipt contains no forbidden keys/substrings
 # ---------------------------------------------------------------------------
 
-# Case-insensitive matching (MAJOR-3): "/home/" and "/root/" added alongside
-# the existing macOS-home and generic secret-shaped tokens.
-FORBIDDEN_SUBSTRINGS = ("TOKEN", "SECRET", "KEY=", "/Users/", "HOME", "/home/", "/root/")
+# Path tokens are matched case-insensitively (MAJOR-3: "/home/" and "/root/"
+# alongside the macOS "/Users/"); secret-shaped bare tokens stay case-SENSITIVE
+# so the legitimate receipt value "homebrew" (python_executable_class) can
+# never false-positive against "HOME".
+FORBIDDEN_PATH_SUBSTRINGS = ("/users/", "/home/", "/root/")
+FORBIDDEN_TOKEN_SUBSTRINGS = ("TOKEN", "SECRET", "KEY=", "HOME")
 
 
 def _assert_no_forbidden_substrings(serialized: str) -> None:
     lowered = serialized.lower()
-    for forbidden in FORBIDDEN_SUBSTRINGS:
-        assert forbidden.lower() not in lowered, f"receipt leaked forbidden substring: {forbidden!r}"
+    for forbidden in FORBIDDEN_PATH_SUBSTRINGS:
+        assert forbidden not in lowered, f"receipt leaked forbidden path: {forbidden!r}"
+    for forbidden in FORBIDDEN_TOKEN_SUBSTRINGS:
+        assert forbidden not in serialized, f"receipt leaked forbidden token: {forbidden!r}"
 
 
 def test_gate_receipt_has_no_forbidden_substrings_for_out_of_repo_subset(
@@ -875,3 +880,39 @@ def test_repo_root_resolves_the_real_repository():
     root = rwe.repo_root()
     assert (root / "pyproject.toml").is_file()
     assert (root / "scripts" / "rwe_env.py").is_file()
+
+
+def test_forbidden_guard_accepts_homebrew_executable_class():
+    _assert_no_forbidden_substrings('{"python_executable_class": "homebrew"}')
+
+
+def test_forbidden_guard_rejects_real_paths_any_case():
+    import pytest as _pytest
+
+    for leak in ('"/Users/x/y"', '"/HOME/runner"', '"/root/.cache"'):
+        with _pytest.raises(AssertionError):
+            _assert_no_forbidden_substrings(leak)
+
+
+def test_parse_discovered_ignores_summary_shaped_traceback_lines():
+    out = (
+        "E  AssertionError: found 2 errors in the payload\n"
+        "1 failed, 36 passed in 2.03s\n"
+    )
+    assert rwe._parse_discovered(out) == 37
+
+
+def test_parse_discovered_ignores_summary_shaped_log_lines():
+    out = (
+        "some log line: 5 skipped locales\n"
+        "40 passed in 1s\n"
+    )
+    assert rwe._parse_discovered(out) == 40
+
+
+def test_parse_discovered_takes_last_summary_line():
+    out = (
+        "2 errors in 5s\n"
+        "1 failed, 30 passed, 6 skipped in 9.00s\n"
+    )
+    assert rwe._parse_discovered(out) == 37

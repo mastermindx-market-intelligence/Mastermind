@@ -100,8 +100,20 @@ def _count_result_chars(output: str) -> int | None:
     return total if found else None
 
 
+_SUMMARY_ANCHOR_RE = re.compile(
+    r"^=*\s*\d+\s+(?:passed|failed|errors?|skipped|xfailed|xpassed)\b"
+    r".*\bin\s+\d+(?:\.\d+)?s\b"
+)
+
+
 def _sum_summary_line_counts(line: str) -> int | None:
-    matches = _SUMMARY_COUNTS_RE.findall(line)
+    # Anchored to a genuine pytest summary line (starts with a count-category
+    # pair, carries an "in <N>s" duration) so a traceback or captured log line
+    # containing "<N> errors"/"<N> skipped" can never masquerade as the summary.
+    stripped = line.strip()
+    if not _SUMMARY_ANCHOR_RE.match(stripped):
+        return None
+    matches = _SUMMARY_COUNTS_RE.findall(stripped)
     if not matches:
         return None
     return sum(int(value) for value in matches)
@@ -853,6 +865,7 @@ def cmd_receipt(args: argparse.Namespace) -> int:
 
 
 def _parse_discovered(output: str) -> int | None:
+    last_summary: int | None = None
     for line in output.splitlines():
         match = _DISCOVERED_RE.match(line.strip())
         if match:
@@ -864,9 +877,13 @@ def _parse_discovered(output: str) -> int | None:
                 return int(group)
         # Sums every category on the pytest summary line (e.g. "1 failed,
         # 36 passed in 1.23s" -> 37), not just the first category matched.
+        # The LAST anchored summary line wins: pytest prints its summary at
+        # the end, after any output that could contain summary-shaped text.
         summed = _sum_summary_line_counts(line)
         if summed is not None:
-            return summed
+            last_summary = summed
+    if last_summary is not None:
+        return last_summary
     return _count_result_chars(output)
 
 
@@ -880,8 +897,13 @@ def _display_subset_path(root: Path, subset: str) -> str:
     receipt (MAJOR-3)."""
 
     try:
-        resolved = Path(subset).resolve()
+        subset_path = Path(subset)
         root_resolved = root.resolve()
+        # A relative subset is executed with cwd=root, so resolve it against
+        # root (not the driver's cwd) so the displayed path is the one run.
+        if not subset_path.is_absolute():
+            subset_path = root_resolved / subset_path
+        resolved = subset_path.resolve()
         relative = resolved.relative_to(root_resolved)
     except (OSError, ValueError):
         return "<subset>"
