@@ -1,0 +1,130 @@
+{
+  "schema_version": "mastermind.executive_agent_capabilities/v4",
+  "policy_version": "2026-09-01.mastermind-operator-p1-fixture",
+  "lifecycle_authority": "executive_os",
+  "production_armed": false,
+  "mcp_servers": {},
+  "resources": {},
+  "capability_packages": {
+    "mastermind-operator.p1": {
+      "kind": "skills-only-source",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "source_commit": "12c2cb8993f78e81c6cb9e9a75a9829f9b194dab",
+      "source_tree_sha": "783ae81b44e9606baf13e2402a75a2130df9758a",
+      "package_root": "plugins/mastermind-operator",
+      "manifest_path": ".codex-plugin/plugin.json",
+      "generation": "mastermind-operator.p1.2026-09-01",
+      "source_state": "SOURCE_PROTECTED",
+      "revoked": false,
+      "package_content_digest": "a9781411d2642569f8b56e33bd0e0d9808a69176ccaced86642cd23948a71306",
+      "files": [
+        {
+          "relative_path": ".codex-plugin/plugin.json",
+          "sha256": "0373afdf8950226466383dff091359b81e78ea2732b5ce0ca51afad9c5d8a396",
+          "byte_length": 796,
+          "executable": false
+        },
+        {
+          "relative_path": "references/app-bindings.template.json",
+          "sha256": "a4e3e7219fa162063913aadf8cfb6c8b8d1e8ba27bfd7fead1fe007c617dea35",
+          "byte_length": 388,
+          "executable": false
+        },
+        {
+          "relative_path": "references/dialogue-boundary.md",
+          "sha256": "e2270c7a324f817b3d0307a2dc9f103615c807102ff35e1a15b8b07f63d7b1c9",
+          "byte_length": 881,
+          "executable": false
+        },
+        {
+          "relative_path": "skills/escalate-decision/SKILL.md",
+          "sha256": "1dbe6a296a96eb60c60b587816dec492d258797e42736ffd8901ecd2a81b5286",
+          "byte_length": 1636,
+          "executable": false
+        },
+        {
+          "relative_path": "skills/finish-operation/SKILL.md",
+          "sha256": "f6a91874cf4c41a7655ae31755744646fb3220185f290f118b5d3e8e92a27685",
+          "byte_length": 1816,
+          "executable": false
+        },
+        {
+          "relative_path": "skills/receive-commission/SKILL.md",
+          "sha256": "212f5253c812ca47174ca9aac92977d5f649891da28c12b6948c4e0284422c4d",
+          "byte_length": 1695,
+          "executable": false
+        },
+        {
+          "relative_path": "skills/return-progress/SKILL.md",
+          "sha256": "6e569a972075f18a5595891a3b7178520a04d0ff732cc7dcffce910c2d097d30",
+          "byte_length": 1435,
+          "executable": false
+        }
+      ],
+      "skills": {
+        "mastermind-operator.escalate-decision.v1": {
+          "runtime_name": "escalate-decision",
+          "entrypoint_path": "skills/escalate-decision/SKILL.md",
+          "closure_paths": [
+            "references/dialogue-boundary.md",
+            "skills/escalate-decision/SKILL.md"
+          ],
+          "skill_content_digest": "ca621a8cc034bf607460d81085c8d466000e38d0f4b6afa8245001374d6cc2ad"
+        },
+        "mastermind-operator.finish-operation.v1": {
+          "runtime_name": "finish-operation",
+          "entrypoint_path": "skills/finish-operation/SKILL.md",
+          "closure_paths": [
+            "references/dialogue-boundary.md",
+            "skills/finish-operation/SKILL.md"
+          ],
+          "skill_content_digest": "3e689aeaa2b1579781832a854d7256c6ad8ee2ef55521b45f3af8dbe9660675e"
+        },
+        "mastermind-operator.receive-commission.v1": {
+          "runtime_name": "receive-commission",
+          "entrypoint_path": "skills/receive-commission/SKILL.md",
+          "closure_paths": [
+            "references/dialogue-boundary.md",
+            "skills/receive-commission/SKILL.md"
+          ],
+          "skill_content_digest": "d7953504035c797b30f434f1fdc72e864a7074179abffe7c247f1afc9c0a162c"
+        },
+        "mastermind-operator.return-progress.v1": {
+          "runtime_name": "return-progress",
+          "entrypoint_path": "skills/return-progress/SKILL.md",
+          "closure_paths": [
+            "references/dialogue-boundary.md",
+            "skills/return-progress/SKILL.md"
+          ],
+          "skill_content_digest": "510be1ed3036f0bc1ed5f709875792ca042c350198a48e1128b4ce8ae46a6552"
+        }
+      },
+      "required_app_references": []
+    }
+  },
+  "plugins": {},
+  "profiles": {
+    "operator.appserver.readonly.mastermind-operator.v1": {
+      "enabled": true,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "skill_capabilities": [
+        "mastermind-operator.escalate-decision.v1",
+        "mastermind-operator.finish-operation.v1",
+        "mastermind-operator.receive-commission.v1",
+        "mastermind-operator.return-progress.v1"
+      ],
+      "mcp_servers": [],
+      "resources": [],
+      "plugins": [],
+      "forbidden": []
+    }
+  }
+}
