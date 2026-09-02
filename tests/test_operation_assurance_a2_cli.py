@@ -157,7 +157,11 @@ def test_from_facts_malformed_json_exits_two(capsys, tmp_path):
     facts_path.write_text("{not valid json")
     code, out, err = _run(["--from-facts", str(facts_path)], capsys)
     assert code == 2
-    assert "MALFORMED_JSON" in err
+    # REPAIR B1: --from-facts now goes through the one closed-wire ingest
+    # entry point (SourceFacts.from_json_bytes), whose refusal code family
+    # is INVALID_SOURCE_BUNDLE rather than an ad hoc CLI-local code.
+    assert "INVALID_SOURCE_BUNDLE" in err
+    assert "malformed JSON" in err
 
 
 def test_from_facts_missing_file_exits_two(capsys, tmp_path):

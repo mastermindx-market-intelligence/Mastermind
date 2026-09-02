@@ -77,6 +77,20 @@ _NONTERMINAL_MARKINGS = frozenset({"PENDING", "ACTIVE"})
 _TERMINAL_MARKINGS = frozenset({"DONE", "DROPPED"})
 _WAVE_DOMAIN = ("ACTIVE", "DONE", "DROPPED", "PENDING")
 
+# REPAIR B3 (Sol pre-review): workstream `status` -> operation's declared
+# terminal/ongoing classification (design Section 5 bullet 5), mechanized
+# as an agreement axis against the compiled wave markings rather than a
+# note-only disclosure. `killed` is grouped with `done` (both are a closed
+# organizational classification); every other status is "ongoing" —
+# `parked` included, since "on hold" is not an assertion of completion.
+# These groupings are a compiler-authored, disclosed judgment call (design
+# Section 5's own "compiler-template, never owner-attested" principle), not
+# a claim the real agentos schema itself makes this exact split.
+_STATUS_CLASS_TERMINAL = frozenset({"done", "killed"})
+_STATUS_CLASS_ONGOING = frozenset({"proposed", "active", "blocked", "awaiting_ci", "awaiting_review", "parked"})
+STATUS_WAVE_CONFLICT_PROPERTY_ID = "WORKSTREAM_STATUS_WAVE_MARKING_CONFLICT"
+STATUS_WAVE_CONFLICT_GAP_ID = "workstream_status_wave_marking_conflict"
+
 
 class CompilerError(ValueError):
     """The whole compile call is refused. Carries a stable reason code."""
@@ -94,22 +108,37 @@ def _wave_var(wave_id: str) -> str:
     return f"wave_{wave_id.lower()}"
 
 
-def _compact_source_ref(repo: str, path: str, digest: str) -> str:
-    """Compact, schema-legal per-element source ref.
+_ALIAS_PREFIX = "oasrc_"
 
-    See DEVIATIONS in the OLS-A2 packet: the FROZEN SPEC's illustrative
-    ``<repo>@<revision>:<path>#sha256:<digest>`` template cannot satisfy the
-    PROTECTED (unmodifiable) A1 model's ``_SOURCE_REF_RE``
-    (``^[A-Za-z0-9][A-Za-z0-9.:/_@-]{0,127}$`` — no ``#``) and 128-char
-    ceiling for any repo+revision+path+digest of realistic length; the exact
-    full-fidelity string (including the un-abbreviated revision) is instead
-    recorded verbatim in ``abstraction_contract.notes`` for every source.
+
+def _content_addressed_alias(repo: str, revision: str, path: str, digest: str) -> str:
+    """REPAIR B4 (Sol pre-review): a schema-legal, deterministic,
+    content-addressed alias over the FULL four-dimensional source identity
+    (repo, revision, path, digest) — never a truncated ref that silently
+    drops the revision or shortens the digest.
+
+    The FROZEN SPEC's illustrative ``<repo>@<revision>:<path>#sha256:<digest>``
+    template cannot satisfy the PROTECTED (unmodifiable) A1 model's
+    ``_SOURCE_REF_RE`` (``^[A-Za-z0-9][A-Za-z0-9.:/_@-]{0,127}$`` — no
+    ``#``) and 128-char ceiling for any repo+revision+path+digest of
+    realistic length (see DEVIATIONS in the OLS-A2 packet). Rather than
+    truncating any one of the four dimensions into the token itself (the
+    B4 defect: the prior compact ref dropped the revision entirely and
+    truncated the digest to 16 hex chars, both individually collision-prone
+    across a re-gather at a new revision or a corrected record), this alias
+    is the full sha256 of the canonical JSON of the exact four-tuple —
+    collision-resistant over ALL four dimensions, changing whenever ANY one
+    of them changes. The full tuple is recorded verbatim in
+    ``abstraction_contract.notes``, keyed by this exact alias, so the
+    mapping back to repo/revision/path/digest is always disclosed alongside
+    the compact token used on every model element's ``source_refs``.
     """
-    return f"{repo}:{path}:{digest[:16]}"
+    body = canonical_json([repo, revision, path, digest])
+    return _ALIAS_PREFIX + sha256_hex(body)
 
 
-def _full_source_note(fact: SourceFact) -> str:
-    return f"source: {fact.repo}@{fact.revision}:{fact.path}#sha256:{fact.content_digest}"
+def _full_source_note(alias: str, fact: SourceFact) -> str:
+    return f"{alias} = {fact.repo}@{fact.revision}:{fact.path}#sha256:{fact.content_digest}"
 
 
 def _build_steward_snapshot(facts: SourceFacts) -> tuple[ExecutiveStewardSnapshot, dict[str, SourceFact]]:
@@ -141,7 +170,7 @@ def _build_steward_snapshot(facts: SourceFacts) -> tuple[ExecutiveStewardSnapsho
                     owner=SourceOwner.AGENT_OS,
                     code=fact.status,
                     explanation=fact.reason or f"{fact.status} at {fact.path}",
-                    source_ref=_compact_source_ref(fact.repo, fact.path, fact.content_digest),
+                    source_ref=_content_addressed_alias(fact.repo, fact.revision, fact.path, fact.content_digest),
                     observed_at=fact.observed_at,
                 )
             )
@@ -155,7 +184,7 @@ def _build_steward_snapshot(facts: SourceFacts) -> tuple[ExecutiveStewardSnapsho
             # via the adapter's own output.
             continue
         ref = f"WS:{key}"
-        source_ref_token = _compact_source_ref(fact.repo, fact.path, fact.content_digest)
+        source_ref_token = _content_addressed_alias(fact.repo, fact.revision, fact.path, fact.content_digest)
         by_ref[source_ref_token] = fact
         responsibilities.append(
             ResponsibilityFact(
@@ -418,6 +447,54 @@ def _unsupported_scope_gaps(transition_ids: list[str]) -> list[dict]:
     return gaps
 
 
+def _status_wave_agreement_conflict(
+    status: str, initial_state: dict[str, str], ws_source_ref: str
+) -> tuple[dict | None, dict | None]:
+    """REPAIR B3 (Sol pre-review): mechanize the workstream-status/wave-
+    marking agreement axis instead of leaving it a note-only disclosure.
+
+    Returns (safety_property, model_gap) — both None when status and wave
+    markings AGREE. On DISAGREEMENT, returns a declared STATE_FORBIDDEN
+    safety property whose violation_when is pinned to the EXACT initial
+    state (the conflict is a compile-time fact, known before any
+    exploration — the checker reports it as an immediate FAIL with a
+    real, source-attributed witness) plus a load-bearing known_model_gap
+    naming it, so neither false closure (status=done while work is still
+    open) nor false ongoing state (status=active while every wave has
+    already resolved) can compile silently into a clean-looking model.
+    """
+    all_waves_terminal = all(marking in _TERMINAL_MARKINGS for marking in initial_state.values())
+    if status in _STATUS_CLASS_TERMINAL:
+        agree = all_waves_terminal
+        disagreement = "status is terminal-class (done/killed) but at least one wave is still non-terminal"
+    elif status in _STATUS_CLASS_ONGOING:
+        agree = not all_waves_terminal
+        disagreement = "status is ongoing-class but every wave already carries a terminal marking"
+    else:  # pragma: no cover - defense in depth; the adapter's closed status enum forecloses this
+        agree = True
+        disagreement = ""
+    if agree:
+        return None, None
+
+    conflict_guards = [_guard(var, "EQ", value) for var, value in sorted(initial_state.items())]
+    safety_property = {
+        "property_id": STATUS_WAVE_CONFLICT_PROPERTY_ID,
+        "kind": "STATE_FORBIDDEN",
+        "violation_when": conflict_guards,
+        "source_refs": [ws_source_ref],
+    }
+    model_gap = {
+        "gap_id": STATUS_WAVE_CONFLICT_GAP_ID,
+        "reason": f"workstream status {status!r} disagrees with the compiled wave markings: {disagreement}",
+        "load_bearing": True,
+        "affects_property_ids": [STATUS_WAVE_CONFLICT_PROPERTY_ID],
+        "affects_transition_ids": [],
+        "affects_variable_ids": sorted(initial_state.keys()),
+        "source_refs": [ws_source_ref],
+    }
+    return safety_property, model_gap
+
+
 def _relevant_facts(facts: SourceFacts, target_fact: SourceFact, ref: str) -> list[SourceFact]:
     """REPAIR FIX 7 (coordinator REQUEST_REPAIR, real-gather proof):
     ``source_snapshot.sources`` and ``abstraction_contract.notes`` must carry
@@ -540,7 +617,7 @@ def compile_operation_assurance_model(
     payload = fact.payload or {}
     waves = payload.get("waves") or []
     seat_token = responsibility.accountable_seat.value.upper()
-    ws_source_ref = _compact_source_ref(fact.repo, fact.path, fact.content_digest)
+    ws_source_ref = _content_addressed_alias(fact.repo, fact.revision, fact.path, fact.content_digest)
 
     (
         state_domains,
@@ -565,15 +642,33 @@ def compile_operation_assurance_model(
     transition_ids = [t["transition_id"] for t in transitions]
     known_model_gaps = _unsupported_scope_gaps(transition_ids)
 
+    # REPAIR B3: mechanize the workstream-status/wave-marking agreement
+    # axis. A disagreement adds a declared FAILing safety property plus a
+    # load-bearing gap naming it — never a silent, apparently-healthy
+    # compile.
+    status_conflict_property, status_conflict_gap = _status_wave_agreement_conflict(
+        payload.get("status"), initial_state, ws_source_ref
+    )
+    safety_properties = [status_conflict_property] if status_conflict_property else []
+    if status_conflict_gap:
+        known_model_gaps.append(status_conflict_gap)
+
     relevant_facts = _relevant_facts(facts, fact, ref)
 
-    notes = [_full_source_note(f) for f in relevant_facts]
+    notes = [
+        _full_source_note(_content_addressed_alias(f.repo, f.revision, f.path, f.content_digest), f)
+        for f in relevant_facts
+    ]
     notes.append(f"workstream status (source-declared organizational classification): {payload.get('status')}")
     notes.append(
         "compiler-template state machine grounded in exact wave/dependency/next_action/wait "
         "fields of the accepted Agent OS record; never presented as owner-attested runtime fact "
         "or current operational proof (design Section 5)"
     )
+    # REPAIR B2: the revision binding is disclosed on every compile, not
+    # just when it is the honest, unverified default — applicability stays
+    # capped at UNKNOWN either way; this is disclosure, never a promotion.
+    notes.append(f"revision_binding: {facts.revision_binding}")
     notes.extend(_family_census_notes(facts))
 
     doc = {
@@ -614,7 +709,7 @@ def compile_operation_assurance_model(
         "external_gates": gates,
         "fairness_assumptions": [],
         "environment_assumptions": [],
-        "safety_properties": [],
+        "safety_properties": safety_properties,
         "property_set": PROPERTY_SET,
         "exploration_limits": {"max_states": 50_000, "max_depth": 5_000},
         "known_model_gaps": known_model_gaps,

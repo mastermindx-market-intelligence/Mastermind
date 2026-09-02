@@ -271,3 +271,386 @@ def test_source_facts_from_dict_refuses_malformed_document() -> None:
         SourceFacts.from_dict({"not": "a valid document"})
     with pytest.raises(SourceGatherError):
         SourceFacts.from_dict("not even a dict")  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# REPAIR B1 (Sol pre-review): --from-facts must be a genuinely CLOSED wire,
+# not a field-copying passthrough. Every mutation class below must refuse
+# with SourceGatherError (CLI exit 2), never silently accepted.
+# ---------------------------------------------------------------------------
+
+
+def _baseline_doc() -> dict:
+    import copy
+    import json
+
+    facts = _gather("hostile")
+    return copy.deepcopy(json.loads(json.dumps(facts.to_dict())))
+
+
+def _ws_fact(doc: dict) -> dict:
+    return next(f for f in doc["facts"] if f["record_schema"] == "agentos.workstream.v1")
+
+
+def _ho_fact(doc: dict) -> dict:
+    return next(f for f in doc["facts"] if f["record_schema"] == "agentos.handoff.v1")
+
+
+def _assert_refused(doc: dict) -> None:
+    with pytest.raises(SourceGatherError):
+        SourceFacts.from_dict(doc)
+
+
+def test_b1_baseline_document_is_accepted() -> None:
+    # sanity: the mutation tests below all start from something that DOES
+    # parse, so a refusal in them is meaningful.
+    SourceFacts.from_dict(_baseline_doc())
+
+
+def test_b1_unknown_top_level_key_refused() -> None:
+    doc = _baseline_doc()
+    doc["evil_field"] = "pwned"
+    _assert_refused(doc)
+
+
+def test_b1_missing_top_level_key_refused() -> None:
+    doc = _baseline_doc()
+    del doc["revision_binding"]
+    _assert_refused(doc)
+
+
+def test_b1_wrong_schema_refused() -> None:
+    doc = _baseline_doc()
+    doc["schema"] = "not.the.right.schema"
+    _assert_refused(doc)
+
+
+def test_b1_wrong_source_owner_at_top_level_refused() -> None:
+    doc = _baseline_doc()
+    doc["source_owner"] = "SOMEONE_ELSE"
+    _assert_refused(doc)
+
+
+def test_b1_bad_revision_binding_refused() -> None:
+    doc = _baseline_doc()
+    doc["revision_binding"] = "TOTALLY_VERIFIED"
+    _assert_refused(doc)
+
+
+def test_b1_unknown_fact_field_refused() -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["evil_field"] = "pwned"
+    _assert_refused(doc)
+
+
+def test_b1_missing_fact_field_refused() -> None:
+    doc = _baseline_doc()
+    del _ws_fact(doc)["conflict"]
+    _assert_refused(doc)
+
+
+def test_b1_unknown_fact_status_refused() -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["status"] = "TOTALLY_FINE"
+    _assert_refused(doc)
+
+
+def test_b1_unknown_fact_conflict_enum_refused() -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["conflict"] = "MAYBE"
+    _assert_refused(doc)
+
+
+def test_b1_unknown_fact_record_schema_refused() -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["record_schema"] = "not.a.schema"
+    _assert_refused(doc)
+
+
+@pytest.mark.parametrize(
+    "bad_digest",
+    [
+        "not-hex-at-all",
+        "deadbeef",  # too short
+        "g" * 64,  # not hex
+        "prefix-sha256:" + "a" * 64,  # marker present on a non-truncated fact
+    ],
+)
+def test_b1_malformed_digest_shapes_refused(bad_digest: str) -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["content_digest"] = bad_digest
+    _assert_refused(doc)
+
+
+def test_b1_truncated_fact_without_prefix_marker_refused() -> None:
+    doc = _baseline_doc()
+    fact = _ws_fact(doc)
+    fact["status"] = "SOURCE_TRUNCATED"
+    fact["reason"] = "record exceeds MAX_FILE_BYTES"
+    fact["payload"] = None
+    fact["content_digest"] = "a" * 64  # missing the required prefix-sha256: marker
+    _assert_refused(doc)
+
+
+def test_b1_ok_fact_with_non_null_reason_refused() -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["reason"] = "should be null on an OK fact"
+    _assert_refused(doc)
+
+
+def test_b1_non_ok_fact_with_non_null_payload_refused() -> None:
+    doc = _baseline_doc()
+    fact = _ws_fact(doc)
+    fact["status"] = "SOURCE_MISSING"
+    fact["reason"] = "synthetic"
+    # payload stays non-null despite the status change -> refused
+    _assert_refused(doc)
+
+
+def test_b1_mixed_repo_across_facts_refused() -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["repo"] = "a-different/repo"
+    _assert_refused(doc)
+
+
+def test_b1_mixed_revision_across_facts_refused_single_revision_rule() -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["revision"] = "b" * 40
+    _assert_refused(doc)
+
+
+def test_b1_mixed_observed_at_across_facts_refused_single_cutoff_rule() -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["observed_at"] = "2099-01-01T00:00:00Z"
+    _assert_refused(doc)
+
+
+def test_b1_duplicate_fact_path_refused() -> None:
+    doc = _baseline_doc()
+    dup = dict(_ws_fact(doc))
+    doc["facts"].append(dup)
+    _assert_refused(doc)
+
+
+def test_b1_inconsistent_coverage_ok_count_refused() -> None:
+    doc = _baseline_doc()
+    ws_cov = next(c for c in doc["coverage"] if c["record_schema"] == "agentos.workstream.v1")
+    ws_cov["ok"] = 999
+    _assert_refused(doc)
+
+
+def test_b1_inconsistent_coverage_attempted_count_refused() -> None:
+    doc = _baseline_doc()
+    ws_cov = next(c for c in doc["coverage"] if c["record_schema"] == "agentos.workstream.v1")
+    ws_cov["attempted"] = 0  # a fact is present, so 0 is inconsistent
+    _assert_refused(doc)
+
+
+def test_b1_inconsistent_coverage_truncated_flag_refused() -> None:
+    doc = _baseline_doc()
+    ws_cov = next(c for c in doc["coverage"] if c["record_schema"] == "agentos.workstream.v1")
+    ws_cov["truncated"] = True  # no truncated fact is present
+    _assert_refused(doc)
+
+
+def test_b1_missing_coverage_family_refused() -> None:
+    doc = _baseline_doc()
+    doc["coverage"] = [c for c in doc["coverage"] if c["record_schema"] != "agentos.handoff.v1"]
+    _assert_refused(doc)
+
+
+def test_b1_duplicate_coverage_family_refused() -> None:
+    doc = _baseline_doc()
+    doc["coverage"].append(dict(doc["coverage"][0]))
+    _assert_refused(doc)
+
+
+def test_b1_ok_payload_unknown_field_refused_on_ingest() -> None:
+    # a payload that would have never survived the ORIGINAL frontmatter
+    # parse (an injected unknown field) must also be refused when it
+    # arrives pre-parsed via --from-facts, not merely trusted.
+    doc = _baseline_doc()
+    _ws_fact(doc)["payload"]["evil_field"] = "pwned"
+    _assert_refused(doc)
+
+
+def test_b1_ok_payload_bad_status_enum_refused_on_ingest() -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["payload"]["status"] = "not_a_real_status"
+    _assert_refused(doc)
+
+
+def test_b1_ok_payload_missing_required_field_refused_on_ingest() -> None:
+    doc = _baseline_doc()
+    del _ws_fact(doc)["payload"]["waves"]
+    _assert_refused(doc)
+
+
+def test_b1_ok_payload_bad_seat_grammar_refused_on_ingest() -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["payload"]["owner"] = "no seat token here"
+    _assert_refused(doc)
+
+
+def test_b1_ok_handoff_payload_bad_model_enum_refused_on_ingest() -> None:
+    doc = _baseline_doc()
+    _ho_fact(doc)["payload"]["model"] = "not_a_real_model"
+    _assert_refused(doc)
+
+
+# --- duplicate JSON keys: must be caught at the RAW TEXT level (a parsed
+# dict can never itself carry a duplicate key), so these go through
+# from_json_bytes directly rather than from_dict.
+
+
+def test_b1_duplicate_json_key_at_top_level_refused() -> None:
+    raw = b'{"schema": "a", "schema": "b"}'
+    with pytest.raises(SourceGatherError):
+        SourceFacts.from_json_bytes(raw)
+
+
+def test_b1_duplicate_json_key_inside_a_fact_payload_refused() -> None:
+    import json
+
+    doc = _baseline_doc()
+    text = json.dumps(doc)
+    # inject a duplicate "key" entry inside the workstream payload object,
+    # which object_pairs_hook must catch even though it is deeply nested.
+    needle = '"key": "OPERATION-ASSURANCE"'
+    assert needle in text
+    text = text.replace(needle, needle + ', "key": "OPERATION-ASSURANCE"', 1)
+    with pytest.raises(SourceGatherError):
+        SourceFacts.from_json_bytes(text.encode("utf-8"))
+
+
+def test_b1_from_json_bytes_rejects_invalid_utf8() -> None:
+    with pytest.raises(SourceGatherError):
+        SourceFacts.from_json_bytes(b"\xff\xfe\x00\x01")
+
+
+def test_b1_from_json_bytes_oversized_input_refused() -> None:
+    from control_plane.operation_assurance_sources import MAX_SOURCE_FACTS_JSON_BYTES
+
+    with pytest.raises(SourceGatherError):
+        SourceFacts.from_json_bytes(b" " * (MAX_SOURCE_FACTS_JSON_BYTES + 1))
+
+
+# ---------------------------------------------------------------------------
+# REPAIR B2 (Sol pre-review): the pinned revision is bound to the checkout
+# actually read — pure file reads only, no subprocess. A git checkout
+# (loose ref, detached HEAD, packed ref, or a worktree `.git` FILE) whose
+# real HEAD disagrees with the caller's asserted revision must be refused;
+# a bare directory (no .git) must carry the honest
+# CALLER_ASSERTED_UNVERIFIED marker, never a silently promoted one.
+# ---------------------------------------------------------------------------
+
+import shutil as _shutil
+
+
+def _copy_hostile(tmp_path) -> "Path":
+    from pathlib import Path
+
+    dest = tmp_path / "checkout"
+    _shutil.copytree(FIXTURES / "hostile", dest)
+    return dest
+
+
+def test_b2_bare_directory_no_git_is_caller_asserted_unverified() -> None:
+    facts = _gather("hostile")
+    assert facts.revision_binding == "CALLER_ASSERTED_UNVERIFIED"
+
+
+def test_b2_loose_branch_ref_matching_revision_is_git_head_verified(tmp_path) -> None:
+    dest = _copy_hostile(tmp_path)
+    sha = "b" * 40
+    (dest / ".git" / "refs" / "heads").mkdir(parents=True)
+    (dest / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (dest / ".git" / "refs" / "heads" / "main").write_text(sha + "\n", encoding="utf-8")
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision=sha, observed_at="2026-09-02T00:00:00Z")
+    assert facts.revision_binding == "GIT_HEAD_VERIFIED"
+
+
+def test_b2_falsifier_mismatched_checkout_revision_is_refused(tmp_path) -> None:
+    """The B2 falsifier: a real git checkout whose HEAD genuinely disagrees
+    with the caller's asserted revision must be refused, not silently
+    recorded as if the caller's assertion were true."""
+    dest = _copy_hostile(tmp_path)
+    real_head = "b" * 40
+    asserted = "c" * 40
+    assert real_head != asserted
+    (dest / ".git" / "refs" / "heads").mkdir(parents=True)
+    (dest / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (dest / ".git" / "refs" / "heads" / "main").write_text(real_head + "\n", encoding="utf-8")
+
+    with pytest.raises(SourceGatherError) as exc:
+        gather_agent_os_source_facts(dest, repo="r", revision=asserted, observed_at="2026-09-02T00:00:00Z")
+    assert exc.value.reason_code == "REVISION_MISMATCH"
+    assert real_head in str(exc.value)
+    assert asserted in str(exc.value)
+
+
+def test_b2_detached_head_matching_revision_is_git_head_verified(tmp_path) -> None:
+    dest = _copy_hostile(tmp_path)
+    sha = "d" * 40
+    (dest / ".git").mkdir()
+    (dest / ".git" / "HEAD").write_text(sha + "\n", encoding="utf-8")
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision=sha, observed_at="2026-09-02T00:00:00Z")
+    assert facts.revision_binding == "GIT_HEAD_VERIFIED"
+
+
+def test_b2_detached_head_mismatch_refused(tmp_path) -> None:
+    dest = _copy_hostile(tmp_path)
+    (dest / ".git").mkdir()
+    (dest / ".git" / "HEAD").write_text(("e" * 40) + "\n", encoding="utf-8")
+
+    with pytest.raises(SourceGatherError) as exc:
+        gather_agent_os_source_facts(dest, repo="r", revision="f" * 40, observed_at="2026-09-02T00:00:00Z")
+    assert exc.value.reason_code == "REVISION_MISMATCH"
+
+
+def test_b2_packed_refs_matching_revision_is_git_head_verified(tmp_path) -> None:
+    dest = _copy_hostile(tmp_path)
+    sha = "1" * 40
+    (dest / ".git").mkdir()
+    (dest / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (dest / ".git" / "packed-refs").write_text(
+        f"# pack-refs with: peeled fully-peeled sorted\n{sha} refs/heads/main\n", encoding="utf-8"
+    )
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision=sha, observed_at="2026-09-02T00:00:00Z")
+    assert facts.revision_binding == "GIT_HEAD_VERIFIED"
+
+
+def test_b2_worktree_gitfile_pointer_resolves(tmp_path) -> None:
+    """A linked worktree's `.git` is a FILE containing `gitdir: <path>`,
+    not a directory — real git worktrees (including this very repo's own
+    session worktrees) use exactly this shape."""
+    dest = _copy_hostile(tmp_path)
+    real_gitdir = tmp_path / "real_gitdir"
+    (real_gitdir / "refs" / "heads").mkdir(parents=True)
+    sha = "2" * 40
+    (real_gitdir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (real_gitdir / "refs" / "heads" / "main").write_text(sha + "\n", encoding="utf-8")
+    (dest / ".git").write_text(f"gitdir: {real_gitdir}\n", encoding="utf-8")
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision=sha, observed_at="2026-09-02T00:00:00Z")
+    assert facts.revision_binding == "GIT_HEAD_VERIFIED"
+
+
+def test_b2_unresolvable_git_head_falls_back_to_caller_asserted_unverified(tmp_path) -> None:
+    dest = _copy_hostile(tmp_path)
+    (dest / ".git").mkdir()
+    (dest / ".git" / "HEAD").write_text("ref: refs/heads/nonexistent\n", encoding="utf-8")
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision="3" * 40, observed_at="2026-09-02T00:00:00Z")
+    assert facts.revision_binding == "CALLER_ASSERTED_UNVERIFIED"
+
+
+def test_b2_revision_binding_round_trips_through_the_closed_wire() -> None:
+    import json
+
+    facts = _gather("hostile")
+    restored = SourceFacts.from_dict(json.loads(json.dumps(facts.to_dict())))
+    assert restored.revision_binding == facts.revision_binding == "CALLER_ASSERTED_UNVERIFIED"

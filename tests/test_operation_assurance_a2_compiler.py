@@ -28,6 +28,24 @@ def _compile(name: str, **overrides):
     return compile_operation_assurance_model(_facts(name, **overrides))
 
 
+def _edit_target_payload(facts, mutate, *, target_key: str = "OPERATION-ASSURANCE"):
+    """Apply an in-memory, one-lawful-edit mutation to the accepted target
+    workstream fact's already-parsed payload, leaving every other fact
+    untouched — the same pattern the FIX-1-repro test above uses."""
+    import dataclasses
+
+    from control_plane.operation_assurance_sources import STATUS_OK
+
+    new_facts = []
+    for fact in facts.facts:
+        if fact.status == STATUS_OK and fact.payload and fact.payload.get("key") == target_key:
+            payload = dict(fact.payload)
+            mutate(payload)
+            fact = dataclasses.replace(fact, payload=payload)
+        new_facts.append(fact)
+    return dataclasses.replace(facts, facts=tuple(new_facts))
+
+
 # ---------------------------------------------------------------------------
 # Refusals mirror the adapter's SOURCE_* states 1:1 (design Section 9: fail
 # closed, never an apparently healthy compilation)
@@ -181,11 +199,18 @@ def test_every_compiled_element_carries_nonempty_source_refs() -> None:
 
 
 def test_full_fidelity_source_string_is_recorded_verbatim_in_notes() -> None:
+    # REPAIR B4: notes now read "<alias> = repo@revision:path#sha256:digest"
+    # — the alias is the exact token used on every model element's own
+    # source_refs, so the mapping is directly correlatable.
     facts = _facts("hostile")
     model = compile_operation_assurance_model(facts)
     ws_fact = next(f for f in facts.facts if f.path.endswith("WS-OPERATION-ASSURANCE.md"))
-    expected = f"source: {ws_fact.repo}@{ws_fact.revision}:{ws_fact.path}#sha256:{ws_fact.content_digest}"
-    assert expected in model.abstraction_contract.notes
+    expected_tail = f"{ws_fact.repo}@{ws_fact.revision}:{ws_fact.path}#sha256:{ws_fact.content_digest}"
+    matching = [n for n in model.abstraction_contract.notes if n.endswith(expected_tail)]
+    assert len(matching) == 1
+    alias = matching[0].split(" = ", 1)[0]
+    assert alias.startswith("oasrc_")
+    assert any(alias in t.source_refs for t in model.transitions)
 
 
 # ---------------------------------------------------------------------------
@@ -498,3 +523,156 @@ def test_target_entirely_missing_refuses_typed_even_with_source_failures_populat
     with pytest.raises(CompilerError) as exc:
         _compile("missing")
     assert exc.value.reason_code == "SOURCE_MISSING"
+
+
+# ---------------------------------------------------------------------------
+# REPAIR B3 (Sol pre-review): workstream `status` is mechanized against the
+# compiled wave markings, not merely a note. Both adversarial disagreement
+# shapes must produce a real, checked FAIL through the PROTECTED checker —
+# never a silently healthy compile.
+# ---------------------------------------------------------------------------
+
+
+def _all_status_wave_conflict_ids():
+    from control_plane.operation_assurance_compiler import (
+        STATUS_WAVE_CONFLICT_GAP_ID,
+        STATUS_WAVE_CONFLICT_PROPERTY_ID,
+    )
+
+    return STATUS_WAVE_CONFLICT_PROPERTY_ID, STATUS_WAVE_CONFLICT_GAP_ID
+
+
+def test_status_and_wave_markings_agreeing_never_adds_the_conflict_property() -> None:
+    # sanity: the real "hostile"/"corrected" fixtures (status=active with a
+    # genuinely non-terminal wave) must NEVER trip this — agreement is the
+    # normal, silent case.
+    property_id, gap_id = _all_status_wave_conflict_ids()
+    for name in ("hostile", "corrected", "black_hole"):
+        model = _compile(name)
+        assert property_id not in {p.property_id for p in model.safety_properties}
+        assert gap_id not in {g.gap_id for g in model.known_model_gaps}
+
+
+def test_b3_false_closure_status_done_but_wave_active_fails_through_the_checker() -> None:
+    """Adversarial case 1: status=done while a wave is still active/todo —
+    FALSE CLOSURE. Must compile to a declared safety property that FAILs,
+    never a silently "complete" model."""
+    from control_plane.operation_assurance_checker import run_checker
+
+    property_id, gap_id = _all_status_wave_conflict_ids()
+
+    def mutate(payload: dict) -> None:
+        payload["status"] = "done"
+        # leave the waves exactly as the corrected fixture declares them —
+        # A2/A3 are genuinely non-terminal, so this is a real disagreement.
+
+    facts = _edit_target_payload(_facts("corrected"), mutate)
+    model = compile_operation_assurance_model(facts)
+    assert property_id in {p.property_id for p in model.safety_properties}
+    assert gap_id in {g.gap_id for g in model.known_model_gaps}
+    gap = next(g for g in model.known_model_gaps if g.gap_id == gap_id)
+    assert gap.load_bearing is True
+
+    report = run_checker(model, generated_at="2026-09-02T00:00:00Z")
+    result = next(r for r in report.property_results if r.property_id == property_id)
+    assert result.status == "FAIL"
+    assert result.source_refs, "the conflict witness must be source-attributed"
+
+
+def test_b3_false_ongoing_status_active_but_all_waves_done_fails_through_the_checker() -> None:
+    """Adversarial case 2: status=active while every wave already carries a
+    terminal marking — FALSE ONGOING STATE. Must also compile to a declared
+    FAILing safety property, never a silently "still working" model."""
+    from control_plane.operation_assurance_checker import run_checker
+
+    property_id, gap_id = _all_status_wave_conflict_ids()
+
+    def mutate(payload: dict) -> None:
+        payload["status"] = "active"
+        waves = [dict(w) for w in payload["waves"]]
+        for wave in waves:
+            wave["status"] = "done"
+            wave.pop("next_action", None)
+            wave.pop("depends_on", None)
+        payload["waves"] = waves
+
+    facts = _edit_target_payload(_facts("corrected"), mutate)
+    model = compile_operation_assurance_model(facts)
+    assert property_id in {p.property_id for p in model.safety_properties}
+    assert gap_id in {g.gap_id for g in model.known_model_gaps}
+
+    report = run_checker(model, generated_at="2026-09-02T00:00:00Z")
+    result = next(r for r in report.property_results if r.property_id == property_id)
+    assert result.status == "FAIL"
+    assert result.source_refs
+
+
+def test_b3_status_killed_groups_with_done_terminal_class() -> None:
+    def mutate(payload: dict) -> None:
+        payload["status"] = "killed"
+
+    property_id, _ = _all_status_wave_conflict_ids()
+    facts = _edit_target_payload(_facts("corrected"), mutate)
+    model = compile_operation_assurance_model(facts)
+    # corrected fixture has genuinely non-terminal waves -> killed+non-terminal disagrees
+    assert property_id in {p.property_id for p in model.safety_properties}
+
+
+# ---------------------------------------------------------------------------
+# REPAIR B4 (Sol pre-review): per-element source refs are a content-addressed
+# alias over the FULL (repo, revision, path, digest) tuple — changing ANY
+# one dimension changes every affected element's alias.
+# ---------------------------------------------------------------------------
+
+
+def test_b4_alias_changes_when_only_revision_changes() -> None:
+    facts_a = _facts("hostile")
+    facts_b = _facts("hostile", revision="b" * 40)
+    model_a = compile_operation_assurance_model(facts_a)
+    model_b = compile_operation_assurance_model(facts_b)
+    refs_a = {t.transition_id: t.source_refs for t in model_a.transitions}
+    refs_b = {t.transition_id: t.source_refs for t in model_b.transitions}
+    assert refs_a.keys() == refs_b.keys()
+    for tid in refs_a:
+        assert refs_a[tid] != refs_b[tid], f"{tid} alias did not change when only revision changed"
+
+
+def test_b4_alias_changes_when_only_digest_changes() -> None:
+    import dataclasses
+
+    from control_plane.operation_assurance_sources import STATUS_OK
+
+    facts = _facts("hostile")
+    mutated_facts = tuple(
+        dataclasses.replace(f, content_digest="b" * 64) if f.status == STATUS_OK and f.path.endswith("WS-OPERATION-ASSURANCE.md") else f
+        for f in facts.facts
+    )
+    mutated = dataclasses.replace(facts, facts=mutated_facts)
+
+    model_a = compile_operation_assurance_model(facts)
+    model_b = compile_operation_assurance_model(mutated)
+    refs_a = {t.transition_id: t.source_refs for t in model_a.transitions}
+    refs_b = {t.transition_id: t.source_refs for t in model_b.transitions}
+    for tid in refs_a:
+        assert refs_a[tid] != refs_b[tid], f"{tid} alias did not change when only the digest changed"
+
+
+def test_b4_alias_is_schema_legal_and_full_sha256() -> None:
+    import re
+
+    model = _compile("hostile")
+    ref_re = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.:/_@-]{0,127}$")
+    for t in model.transitions:
+        for ref in t.source_refs:
+            assert ref.startswith("oasrc_")
+            assert len(ref) == len("oasrc_") + 64  # full sha256 hex, never truncated
+            assert ref_re.match(ref)
+
+
+def test_b4_alias_is_deterministic_and_never_drops_the_revision() -> None:
+    # same fixture compiled twice -> identical aliases (determinism); and
+    # the full tuple recorded in notes must show a non-abbreviated revision.
+    model_a = _compile("hostile")
+    model_b = _compile("hostile")
+    assert model_a.transitions[0].source_refs == model_b.transitions[0].source_refs
+    assert any(REV in note for note in model_a.abstraction_contract.notes)

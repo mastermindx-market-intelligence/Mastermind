@@ -94,11 +94,9 @@ def main(argv: list[str] | None = None) -> int:
             print("INPUT_READ_ERROR: could not read the supplied source-facts input", file=sys.stderr)
             return 2
         try:
-            doc = json.loads(raw.decode("utf-8"))
-            facts = SourceFacts.from_dict(doc)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            print(f"MALFORMED_JSON: {exc}", file=sys.stderr)
-            return 2
+            # REPAIR B1: the ONE canonical, closed-wire ingest entry point —
+            # never a bare json.loads()+from_dict() passthrough.
+            facts = SourceFacts.from_json_bytes(raw)
         except SourceGatherError as exc:
             print(f"{exc.reason_code}: {exc}", file=sys.stderr)
             return 2

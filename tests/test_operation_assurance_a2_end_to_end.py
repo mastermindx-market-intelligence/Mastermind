@@ -85,7 +85,13 @@ def test_2_black_hole_fixture_yields_a_real_source_attributed_witness() -> None:
     cx = next(c for c in report.counterexamples if c.counterexample_id == dead_transition.counterexample_id)
     assert cx.source_refs, "the witness must name the offending wave's record"
     ws_fact = next(f for f in facts.facts if f.path.endswith("WS-OPERATION-ASSURANCE.md"))
-    assert any(ws_fact.path in ref for ref in cx.source_refs)
+    # REPAIR B4: source_refs are now opaque content-addressed aliases (never
+    # a raw path substring) — resolve the alias back to the record it names
+    # via the model's own notes, where the full repo/revision/path/digest
+    # tuple is recorded verbatim.
+    notes_by_alias = {n.split(" = ", 1)[0]: n for n in model.abstraction_contract.notes if " = " in n}
+    resolved = [notes_by_alias.get(ref, "") for ref in cx.source_refs]
+    assert any(ws_fact.path in note for note in resolved)
 
     # MECHANIZED, not a design-doc opinion: UNSAFE_COUNTEREXAMPLE is
     # unreachable whenever abstraction_contract.kind != DECLARED_EXACT (see
