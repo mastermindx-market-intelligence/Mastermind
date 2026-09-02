@@ -7,7 +7,10 @@ no network. It is also the falsifier for the hand-written answer key.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -98,3 +101,55 @@ class TestCorpusDiscriminates:
 
     def test_answer_key_is_valid_json_on_disk(self) -> None:
         json.loads((CORPUS / "answer_key.json").read_text())
+
+
+class TestCorpusIsDataNotTests:
+    """B1 — the corpus must contribute zero `tests/**/test_*.py` paths.
+
+    The repository gate (`scripts/ci_pytest.py`) discovers with
+    `rglob("test_*.py")` and then passes each path to pytest **explicitly**.
+    pytest's ignore contract — `pytest_ignore_collect` and `collect_ignore`
+    alike — does not apply to paths given explicitly on the command line, so no
+    conftest hook can protect the corpus. The only durable guard is that the
+    corpus contains no file matching `test_*.py` at all.
+    """
+
+    def _gate(self):
+        spec = importlib.util.spec_from_file_location(
+            "_c0_ci_pytest", Path("scripts/ci_pytest.py").resolve()
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_repository_gate_discovers_no_corpus_test_module(self) -> None:
+        discovered = self._gate().discover_test_modules(Path(".").resolve())
+        corpus = [p for p in discovered if "fixtures/code_intelligence" in p]
+        assert corpus == [], (
+            "the C0 corpus must contribute no repository test paths; the gate "
+            f"passes these explicitly and pytest cannot ignore them: {corpus}"
+        )
+
+    def test_no_corpus_file_matches_the_gate_glob(self) -> None:
+        offenders = sorted(
+            path.as_posix()
+            for path in Path("tests/fixtures/code_intelligence").rglob("test_*.py")
+        )
+        assert offenders == [], offenders
+
+    def test_bounded_subprocess_collection_of_the_corpus_is_clean(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests/fixtures/code_intelligence",
+             "--collect-only", "-q"],
+            capture_output=True, text=True, timeout=180, shell=False,
+        )
+        # Exit code 5 is pytest's EXIT_NOTESTSCOLLECTED — the desired proof that
+        # the corpus contributes no tests at all. A collection *error* would be 2/3.
+        assert result.returncode == 5, (
+            f"expected no tests collected, got rc={result.returncode}\n"
+            + result.stdout[-1500:] + result.stderr[-800:]
+        )
+        assert "error" not in result.stdout.lower(), result.stdout[-1500:]
+
+    def test_corpus_consumer_case_is_still_present_under_its_data_name(self) -> None:
+        assert (CORPUS / "tests" / "consumer_case.py").is_file()

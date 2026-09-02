@@ -139,8 +139,8 @@ class TestSemanticMapping:
         found = sorted({(r["relative_file"], r["line"]) for r in rows})
         assert found == [
             ("src/sample/consumer.py", 8),
-            ("tests/test_consumer.py", 5),
-            ("tests/test_consumer.py", 9),
+            ("tests/consumer_case.py", 11),
+            ("tests/consumer_case.py", 15),
         ]
 
     def test_find_implementations_separates_live_from_dead(self, harness: _Harness) -> None:

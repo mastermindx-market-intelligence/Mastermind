@@ -63,8 +63,8 @@
     },
     {
       "symbol": "test_consume_returns_live",
-      "relative_file": "tests/test_consumer.py",
-      "line": 8,
+      "relative_file": "tests/consumer_case.py",
+      "line": 14,
       "kind": "function"
     }
   ],
@@ -95,12 +95,12 @@
         "line": 8
       },
       {
-        "relative_file": "tests/test_consumer.py",
-        "line": 5
+        "relative_file": "tests/consumer_case.py",
+        "line": 11
       },
       {
-        "relative_file": "tests/test_consumer.py",
-        "line": 9
+        "relative_file": "tests/consumer_case.py",
+        "line": 15
       }
     ],
     "LiveProducer": [
