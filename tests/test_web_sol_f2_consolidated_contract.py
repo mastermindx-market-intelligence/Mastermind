@@ -253,13 +253,16 @@ if (saturate) {
     pbkdf2("a", "b", 200000, 32, "sha256", () => {});
   }
 }
-let sent = null;
+let resolveProbe;
+const probeReceived = new Promise((resolve) => {
+  resolveProbe = resolve;
+});
 const context = {
   chrome: {
     runtime: {
       onMessage: { addListener() {} },
       sendMessage(value) {
-        sent = value;
+        resolveProbe(value);
         return Promise.resolve();
       },
     },
@@ -286,13 +289,19 @@ vm.createContext(context);
 vm.runInContext(source, context, {filename: "content.js"});
 
 (async () => {
-  for (let index = 0; index < 20 && sent === null; index += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
-  if (!sent || typeof sent.conversation_fingerprint !== "string") {
+  const observed = await Promise.race([
+    probeReceived,
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("probe fingerprint not emitted")),
+        5000,
+      ),
+    ),
+  ]);
+  if (!observed || typeof observed.conversation_fingerprint !== "string") {
     throw new Error("probe fingerprint not emitted");
   }
-  process.stdout.write(sent.conversation_fingerprint);
+  process.stdout.write(observed.conversation_fingerprint);
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
