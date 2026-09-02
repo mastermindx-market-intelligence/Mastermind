@@ -70,7 +70,7 @@ def test_observed_provider_and_estimated_usage_remain_distinct():
         assert phrase in law
 
     assert "own activity, provider quota and forecast are separate objects" in design
-    assert "scope": "mastermind_observed_only"  # source-law vocabulary sentinel
+    assert '"scope": "mastermind_observed_only"' in design
 
 
 def test_no_universal_reset_or_fixed_turn_assumption():
