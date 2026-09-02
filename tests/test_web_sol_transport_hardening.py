@@ -4,8 +4,10 @@ from dataclasses import is_dataclass
 import io
 import os
 from pathlib import Path
+import shutil
 import socket
 import struct
+import tempfile
 import threading
 import time
 
@@ -301,19 +303,24 @@ def test_private_server_refuses_overlong_unix_socket_path_before_bind(tmp_path):
     assert not destination.exists()
 
 
-def _private_socket_root(tmp_path: Path) -> Path:
-    private = tmp_path / "private-host"
-    private.mkdir(mode=0o700)
-    os.chmod(private, 0o700)
-    return private
+@pytest.fixture
+def short_socket_root():
+    # Keep the test-owned AF_UNIX root below Darwin's fixed 104-byte limit;
+    # pytest's nested tmp_path can exceed the production path budget.
+    value = Path(tempfile.mkdtemp(prefix="mmx-wsx-t1-", dir="/tmp"))
+    os.chmod(value, 0o700)
+    try:
+        yield value
+    finally:
+        shutil.rmtree(value, ignore_errors=True)
 
 
 def _run_host_with_partial_unsolicited_frame(
     monkeypatch,
-    tmp_path: Path,
+    short_socket_root: Path,
     material: bytes,
 ) -> tuple[bool, list[BaseException], float]:
-    private = _private_socket_root(tmp_path)
+    private = short_socket_root
     destination = native.wsi.socket_path(INSTANCE_ID, root=private)
     read_fd, write_fd = os.pipe()
     chrome_in = os.fdopen(read_fd, "rb", buffering=0)
@@ -363,9 +370,9 @@ def _run_host_with_partial_unsolicited_frame(
 
 def test_run_native_host_reports_exact_owned_socket_cleanup_failure(
     monkeypatch,
-    tmp_path,
+    short_socket_root,
 ):
-    private = _private_socket_root(tmp_path)
+    private = short_socket_root
     destination = native.wsi.socket_path(INSTANCE_ID, root=private)
     read_fd, write_fd = os.pipe()
     os.close(write_fd)
@@ -405,11 +412,12 @@ def test_run_native_host_reports_exact_owned_socket_cleanup_failure(
 
 def test_failed_open_reports_exact_owned_socket_cleanup_failure(
     monkeypatch,
-    tmp_path,
+    short_socket_root,
 ):
-    private = _private_socket_root(tmp_path)
+    private = short_socket_root
     destination = private / "open-cleanup.sock"
     original_unlink = Path.unlink
+    original_chmod = os.chmod
 
     def refuse_exact_owned_socket(path: Path, *args, **kwargs):
         if path == destination:
@@ -419,7 +427,7 @@ def test_failed_open_reports_exact_owned_socket_cleanup_failure(
     def fail_post_bind_chmod(path, _mode):
         if Path(path) == destination:
             raise PermissionError("post-bind failure")
-        return os.chmod(path, _mode)
+        return original_chmod(path, _mode)
 
     monkeypatch.setattr(Path, "unlink", refuse_exact_owned_socket)
     monkeypatch.setattr(native.os, "chmod", fail_post_bind_chmod)
@@ -435,11 +443,11 @@ def test_failed_open_reports_exact_owned_socket_cleanup_failure(
 
 def test_unsolicited_partial_header_is_bounded_by_action_timeout(
     monkeypatch,
-    tmp_path,
+    short_socket_root,
 ):
     exceeded, errors, elapsed = _run_host_with_partial_unsolicited_frame(
         monkeypatch,
-        tmp_path,
+        short_socket_root,
         b"\x08\x00",
     )
     assert not exceeded, f"host exceeded frame deadline ({elapsed:.3f}s)"
@@ -450,11 +458,11 @@ def test_unsolicited_partial_header_is_bounded_by_action_timeout(
 
 def test_unsolicited_partial_payload_is_bounded_by_action_timeout(
     monkeypatch,
-    tmp_path,
+    short_socket_root,
 ):
     exceeded, errors, elapsed = _run_host_with_partial_unsolicited_frame(
         monkeypatch,
-        tmp_path,
+        short_socket_root,
         struct.pack("@I", 8) + b'{"x"',
     )
     assert not exceeded, f"host exceeded frame deadline ({elapsed:.3f}s)"
@@ -465,9 +473,9 @@ def test_unsolicited_partial_payload_is_bounded_by_action_timeout(
 
 def test_clean_chrome_eof_remains_normal_and_removes_exact_socket(
     monkeypatch,
-    tmp_path,
+    short_socket_root,
 ):
-    private = _private_socket_root(tmp_path)
+    private = short_socket_root
     destination = native.wsi.socket_path(INSTANCE_ID, root=private)
     read_fd, write_fd = os.pipe()
     os.close(write_fd)
