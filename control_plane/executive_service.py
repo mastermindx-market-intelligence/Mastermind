@@ -18,6 +18,7 @@ import dataclasses
 import errno
 import fcntl
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -47,6 +48,11 @@ from control_plane.executive_runtime import (
     SCHEMA_VERSION,
     StateConflict,
     V2_HOST_EXECUTION_BINDING_KEYS,
+)
+from control_plane.executive_terminal_return import (
+    TerminalReturnCandidate,
+    TerminalReturnError,
+    reduce_terminal_return,
 )
 from control_plane.model_router import ModelRouter, RoutingPolicyError
 from control_plane.executive_workspace import (
@@ -139,6 +145,9 @@ class BackupBackendProtocol(Protocol):
     def verify_backup(
         self, database_path: Path, manifest_path: Path | None = None
     ) -> Any: ...
+
+
+TerminalReturnProjector = Callable[[TerminalReturnCandidate], Awaitable[None] | None]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -416,6 +425,7 @@ class ExecutiveControlService:
         ceo_ingress_grounding_provider: "ceo_ingress.GroundingProvider | None" = None,
         ceo_ingress_armed: bool = False,
         ceo_ingress_activated_socket: socket.socket | None = None,
+        terminal_return_projector: TerminalReturnProjector | None = None,
     ) -> None:
         self.config = config
         self._runtime_factory = runtime_factory
@@ -455,6 +465,14 @@ class ExecutiveControlService:
         self._coo_cycle_lock = asyncio.Lock()
         self._dispatch_tasks: dict[str, asyncio.Task[Any]] = {}
         self._dispatch_errors: dict[str, str] = {}
+        # Default-off: without an explicitly injected trusted projector this
+        # service merely records a typed no-I/O diagnostic after terminal pickup.
+        self._terminal_return_projector = terminal_return_projector
+        self._terminal_return_lock = asyncio.Lock()
+        # This is a process-local one-call guard, not a durable result owner.
+        # A restart deliberately makes no exactly-once claim.
+        self._terminal_return_candidates: dict[str, TerminalReturnCandidate] = {}
+        self._terminal_return_last_diagnostic: str | None = None
         self._coo_execution_binding = self._load_coo_execution_binding()
         self._coo_tick_task: asyncio.Task[Any] | None = None
         self._coo_shutdown_event: asyncio.Event | None = None
@@ -2439,6 +2457,11 @@ class ExecutiveControlService:
                         self._service_state = "QUARANTINED"
                     raise
                 if isinstance(started, OrchestrationDispatchOutcome):
+                    if started.outcome == "TERMINAL":
+                        await self._project_terminal_return(
+                            started.job_id,
+                            expected_attempt_id=started.attempt.attempt_id,
+                        )
                     return started
                 lease = getattr(started, "lease", None)
                 attempt = getattr(lease, "attempt", None)
@@ -2634,10 +2657,67 @@ class ExecutiveControlService:
             # dispatch.  Quarantine all mutating requests until an operator
             # restarts and identity-safely reconciles the still-active attempt.
             self._service_state = "QUARANTINED"
+        else:
+            lease = getattr(active, "lease", None)
+            attempt = getattr(lease, "attempt", None)
+            attempt_id = getattr(attempt, "attempt_id", None)
+            if isinstance(attempt_id, str):
+                await self._project_terminal_return(
+                    job_id, expected_attempt_id=attempt_id
+                )
         finally:
             current = asyncio.current_task()
             if self._dispatch_tasks.get(job_id) is current:
                 self._dispatch_tasks.pop(job_id, None)
+
+    async def _project_terminal_return(
+        self, job_id: str, *, expected_attempt_id: str
+    ) -> None:
+        """Offer one freshly-reduced terminal candidate without changing Runtime truth."""
+
+        projector = self._terminal_return_projector
+        if projector is None:
+            self._terminal_return_last_diagnostic = "terminal-return:PROJECTOR_UNBOUND"
+            return
+        runtime = self._require_runtime()
+        job = runtime.jobs.get_job(job_id)
+        if job is None or job.current_attempt_id != expected_attempt_id:
+            self._terminal_return_last_diagnostic = "terminal-return:BINDING_REFUSED"
+            return
+        attempt = runtime.attempts.get_attempt(expected_attempt_id)
+        if attempt is None:
+            self._terminal_return_last_diagnostic = "terminal-return:BINDING_REFUSED"
+            return
+        worker = runtime.workers.get_worker(attempt.worker_id)
+        if worker is None:
+            self._terminal_return_last_diagnostic = "terminal-return:BINDING_REFUSED"
+            return
+        try:
+            candidate = reduce_terminal_return(job=job, attempt=attempt, worker=worker)
+        except TerminalReturnError as exc:
+            self._terminal_return_last_diagnostic = f"terminal-return:{exc.code}"
+            return
+        async with self._terminal_return_lock:
+            previous = self._terminal_return_candidates.get(candidate.attempt_id)
+            if previous == candidate:
+                return
+            if previous is not None:
+                self._terminal_return_last_diagnostic = "terminal-return:CANDIDATE_CONFLICT"
+                return
+            # Record the attempted call before entering an effect-unknown
+            # callback.  This process-local guard intentionally has no
+            # restart/exactly-once semantics and never owns Runtime state.
+            self._terminal_return_candidates[candidate.attempt_id] = candidate
+        try:
+            result = projector(candidate)
+            if inspect.isawaitable(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._terminal_return_last_diagnostic = (
+                f"terminal-return:EFFECT_UNKNOWN:{type(exc).__name__}"
+            )
 
     async def _dispatch_job(self, job_id: str) -> dict[str, Any]:
         runtime = self._require_runtime()
