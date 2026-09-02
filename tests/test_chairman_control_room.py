@@ -1579,39 +1579,55 @@ def _warm_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, a
     )
 
 
-def _cold_doc(facts_path, boot_packet, inbox, bindings, active_builds):
-    """The cold path's placement contract, expressed exactly as
-    build_control_room() applies it."""
-    placement, failure = ccr._read_placement_selection(facts_path)
-    doc = ccr.compose_control_room(
-        inbox=inbox, boot_packet=boot_packet, active_builds=active_builds,
-        agent_os_state=None, runtime_jobs=None, bindings=bindings,
-        binding_problems=(), generated_at="2026-09-02T00:00:00Z",
-        placement_selection=placement,
+def _cold_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds):
+    """The REAL cold path — `ccr.build_control_room()` itself.
+
+    Review of head dcc5661c (minor): this used to be a hand-written MODEL of
+    the cold path's placement handling, so the parity assertion compared the
+    warm seam against a reimplementation. A future change to
+    build_control_room's own placement wiring would then break real parity
+    without reddening this test. Calling the real function is the whole
+    point of a parity test.
+    """
+    _stub_gather(monkeypatch, boot_packet, inbox, bindings)
+    monkeypatch.setattr(ccr, "_read_active_builds", lambda root: (active_builds, None))
+    return ccr.build_control_room(
+        repo_root=tmp_path, macro_root_flag=None, environ={},
+        now="2026-09-02T00:00:00Z", bindings_path=tmp_path / "bindings.json",
+        placement_selection_path=facts_path,
     )
-    if failure:
-        doc = dict(doc)
-        doc["degraded"] = sorted(list(doc["degraded"]) + [f"placement_selection: {failure}"])
-    return doc
+
+
+def _facts_variant(kind: str) -> dict:
+    """Facts documents that drive the selector to genuinely DIFFERENT states,
+    so cold-vs-warm parity is proven across outcomes rather than once."""
+    facts = _facts_document()
+    if kind == "selected":
+        return facts
+    if kind == "reconciliation_required":  # duplicate worker_id
+        facts["candidates"] = [facts["candidates"][0], dict(facts["candidates"][0])]
+        return facts
+    if kind == "waiting_capacity":  # the sole candidate is occupied
+        facts["candidates"][0]["occupancy"] = "occupied"
+        return facts
+    if kind == "no_eligible_candidate":  # capability mismatch
+        facts["candidates"][0]["capabilities"] = ["cap_other"]
+        return facts
+    raise AssertionError(kind)
 
 
 @pytest.mark.parametrize(
-    "responsibility_state, expected_state",
-    [
-        ("waiting_capacity", "selected"),
-    ],
+    "kind",
+    ["selected", "waiting_capacity", "reconciliation_required", "no_eligible_candidate"],
 )
 def test_warm_cache_path_renders_the_same_placement_selection_as_cold(
-    monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings,
-    responsibility_state, expected_state,
+    monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings, kind,
 ):
+    expected_state = kind
     facts_path = tmp_path / "facts.json"
-    facts_path.write_text(
-        json.dumps(_facts_document(responsibility_state=responsibility_state)),
-        encoding="utf-8",
-    )
+    facts_path.write_text(json.dumps(_facts_variant(kind)), encoding="utf-8")
     warm = _warm_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds)
-    cold = _cold_doc(facts_path, boot_packet, inbox, bindings, active_builds)
+    cold = _cold_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds)
 
     assert cold["placement_selection"] is not None
     assert cold["placement_selection"]["state"] == expected_state
@@ -1627,7 +1643,7 @@ def test_warm_cache_path_degrades_a_malformed_facts_document_like_cold(
     facts_path = tmp_path / "facts.json"
     facts_path.write_text("{not json", encoding="utf-8")
     warm = _warm_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds)
-    cold = _cold_doc(facts_path, boot_packet, inbox, bindings, active_builds)
+    cold = _cold_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds)
 
     assert warm["placement_selection"] is None
     warm_rows = [d for d in warm["degraded"] if d.startswith("placement_selection:")]
@@ -1710,6 +1726,90 @@ def test_module_boots_with_selector_present_but_steward_absent(tmp_path):
     finally:
         sys.meta_path.remove(finder)
         for name in names:
+            sys.modules.pop(name, None)
+        for name, module in saved.items():
+            if module is not None:
+                sys.modules[name] = module
+        importlib.import_module("control_plane.chairman_control_room")
+
+
+def test_declared_selector_dependencies_match_its_actual_static_imports():
+    """The declared `requires=` list must equal what the selector ACTUALLY
+    imports — derived from its own AST, never hand-maintained.
+
+    Review of head dcc5661c: the first fix declared only
+    `executive_steward` while the selector also statically imports
+    `executive_orchestration_principal`, so deleting THAT module reproduced
+    the identical hard import crash BLOCKER 4 was filed for. Hand-listing
+    the dependency was itself the bug a second time. This guard closes the
+    CLASS: adding a third static control-plane import to the selector fails
+    here until it is declared.
+    """
+    import ast as _ast
+
+    source = Path(ccr.executive_placement_selection.__file__).read_text(encoding="utf-8")
+    actual: set[str] = set()
+    for node in _ast.walk(_ast.parse(source)):
+        if isinstance(node, _ast.ImportFrom) and (node.module or "").startswith("control_plane."):
+            actual.add((node.module or "").split(".", 1)[1])
+        elif isinstance(node, _ast.Import):
+            for alias in node.names:
+                if alias.name.startswith("control_plane."):
+                    actual.add(alias.name.split(".", 1)[1])
+    assert actual, "AST walk found no control_plane imports — the derivation is broken"
+    assert set(ccr._SELECTOR_CONTROL_PLANE_REQUIRES) == actual, (
+        "declared requires= does not match the selector's real static imports",
+        sorted(set(ccr._SELECTOR_CONTROL_PLANE_REQUIRES) ^ actual),
+    )
+
+
+@pytest.mark.parametrize("absent", ["executive_steward", "executive_orchestration_principal"])
+def test_module_fails_closed_when_any_selector_dependency_is_absent(tmp_path, absent):
+    """Real 'not shipped' shape: `find_spec` returns a None spec (the branch
+    that actually fires in production), not a raised ModuleNotFoundError.
+    Parametrized over EVERY declared dependency so this cannot pass for one
+    and crash on another.
+    """
+    import importlib
+    import importlib.util
+    import sys
+
+    blocked = {f"control_plane.{absent}"}
+    touched = blocked | {
+        "control_plane.executive_placement_selection",
+        "control_plane.executive_steward",
+        "control_plane.executive_orchestration_principal",
+        "control_plane.chairman_control_room",
+    }
+
+    # A meta-path finder returning None means "I cannot handle this, try the
+    # next finder" — the real one then loads it. `importlib.util.find_spec`
+    # yields None only when NO finder locates the module, so patch that
+    # directly: this is precisely the `spec is None` branch
+    # `_optional_control_plane_module` takes for a genuinely unshipped file.
+    real_find_spec = importlib.util.find_spec
+
+    def _absent_find_spec(name, package=None):
+        if name in blocked:
+            return None
+        return real_find_spec(name, package)
+
+    saved = {name: sys.modules.get(name) for name in touched}
+    monkey = importlib.util.find_spec
+    importlib.util.find_spec = _absent_find_spec
+    for name in touched:
+        sys.modules.pop(name, None)
+    try:
+        fresh = importlib.import_module("control_plane.chairman_control_room")
+        assert fresh.executive_placement_selection is None
+        facts_path = tmp_path / "facts.json"
+        facts_path.write_text("{}", encoding="utf-8")
+        result, failure = fresh._read_placement_selection(facts_path)
+        assert result is None
+        assert failure == "unavailable (module not shipped)"
+    finally:
+        importlib.util.find_spec = monkey
+        for name in touched:
             sys.modules.pop(name, None)
         for name, module in saved.items():
             if module is not None:

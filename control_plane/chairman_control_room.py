@@ -119,11 +119,22 @@ def _optional_control_plane_module(name: str, *, requires: tuple[str, ...] = ())
     return importlib.import_module(qualified)
 
 
-# The selector statically imports the steward, so the steward's absence must
-# make the SELECTOR absent too — declared here rather than assumed, because
-# assuming it is what let the asymmetric case crash the import (BLOCKER 4).
+#: Every control-plane module :mod:`control_plane.executive_placement_selection`
+#: STATICALLY imports. The selector's absence-handling is only as complete as
+#: this list: any dependency missing from it reproduces the exact hard import
+#: crash BLOCKER 4 was filed for. Declaring only the steward was itself that
+#: bug a second time — `executive_orchestration_principal` was equally static
+#: and equally fatal. `tests/test_chairman_control_room.py::
+#: test_declared_selector_dependencies_match_its_actual_static_imports`
+#: derives this set from the selector's own AST, so the list cannot drift
+#: again if a third import is ever added.
+_SELECTOR_CONTROL_PLANE_REQUIRES: tuple[str, ...] = (
+    "executive_orchestration_principal",
+    "executive_steward",
+)
+
 executive_placement_selection = _optional_control_plane_module(
-    "executive_placement_selection", requires=("executive_steward",)
+    "executive_placement_selection", requires=_SELECTOR_CONTROL_PLANE_REQUIRES
 )
 executive_steward = _optional_control_plane_module("executive_steward")
 
