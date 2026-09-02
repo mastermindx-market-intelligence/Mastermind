@@ -32,6 +32,10 @@ class FakeAppServer:
         self.include_mcp = os.environ.get("OHF_FAKE_MCP_GONE") != "1"
         self.leak = os.environ.get("OHF_FAKE_LEAK") == "1"
         self.flat_skills = os.environ.get("OHF_FAKE_FLAT_SKILLS") == "1"
+        self.skills_omit_path = os.environ.get("OHF_FAKE_SKILLS_OMIT_PATH") == "1"
+        self.skills_malformed_enabled = os.environ.get("OHF_FAKE_SKILLS_MALFORMED_ENABLED") or ""
+        self.ambient_skill = os.environ.get("OHF_FAKE_AMBIENT_SKILL") or ""
+        self.skills_changed_notify = os.environ.get("OHF_FAKE_SKILLS_CHANGED") == "1"
         self.native_helper = os.environ.get("OHF_FAKE_NATIVE_HELPER") == "1"
         self.native_helper_depth = int(
             os.environ.get("OHF_FAKE_NATIVE_HELPER_DEPTH") or "1"
@@ -102,22 +106,42 @@ class FakeAppServer:
         return self.threads.get(thread_id)
 
     def _discover_skills(self, extra_dirs: list[Path]) -> list[dict[str, Any]]:
-        names: dict[str, Path] = {}
+        """Row-preserving, deterministically ordered skill discovery.
+
+        Unlike a name-keyed map, a same-name skill served by two roots
+        yields TWO rows here — CAP-S1's fidelity requirement — ordered by
+        per-root scan order (alphabetical by skill name within a root),
+        then by root order (bundled root, then extra roots in the order
+        they were set, then any per-call extra dirs).
+        """
+        rows: list[dict[str, Any]] = []
         roots = [self.skill_root, *self.extra_roots, *extra_dirs]
         for root in roots:
             if not root.exists():
                 continue
-            for skill_md in root.glob("*/SKILL.md"):
-                names[skill_md.parent.name] = skill_md.parent
-        return [
-            {
-                "name": name,
-                "enabled": True,
-                "path": str(path),
-                "scope": "repo",
-            }
-            for name, path in sorted(names.items())
-        ]
+            for skill_md in sorted(root.glob("*/SKILL.md"), key=lambda p: p.parent.name):
+                rows.append(self._skill_row(skill_md.parent.name, str(skill_md.parent)))
+        if self.ambient_skill:
+            rows.append(
+                self._skill_row(
+                    self.ambient_skill,
+                    str(Path("/fake-ambient-skills") / self.ambient_skill / "SKILL.md"),
+                )
+            )
+        return rows
+
+    def _skill_row(self, name: str, path: str) -> dict[str, Any]:
+        row: dict[str, Any] = {"name": name}
+        if self.skills_malformed_enabled == "missing":
+            pass
+        elif self.skills_malformed_enabled == "string":
+            row["enabled"] = "true"
+        else:
+            row["enabled"] = True
+        if not self.skills_omit_path:
+            row["path"] = path
+        row["scope"] = "repo"
+        return row
 
     def handle(self, message: dict[str, Any]) -> None:
         method = message.get("method")
@@ -239,13 +263,28 @@ class FakeAppServer:
             if not Path(thread.get("cwd") or self.workspace).exists():
                 self._error(request_id, "workspace missing", code=-32005)
                 return
-            turn_id = f"turn_{uuid.uuid4().hex[:8]}"
             text_in = ""
+            input_skills: list[dict[str, Any]] = []
             for item in params.get("input") or []:
-                if isinstance(item, dict) and item.get("type") == "text":
+                if not isinstance(item, dict):
+                    continue
+                input_kind = item.get("type")
+                if input_kind == "text":
                     text_in += str(item.get("text") or "")
-                if isinstance(item, dict) and item.get("type") == "skill":
-                    text_in += str(item.get("name") or "")
+                elif input_kind == "skill":
+                    skill_name = item.get("name")
+                    skill_path = item.get("path")
+                    if (
+                        not isinstance(skill_name, str)
+                        or not skill_name.strip()
+                        or not isinstance(skill_path, str)
+                        or not skill_path.startswith("/")
+                    ):
+                        self._error(request_id, "malformed skill input item", code=-32008)
+                        return
+                    text_in += skill_name
+                    input_skills.append(dict(item))
+            turn_id = f"turn_{uuid.uuid4().hex[:8]}"
             fixture_reply = os.environ.get("OHF_FAKE_TURN_REPLY")
             if fixture_reply is not None:
                 reply = fixture_reply
@@ -269,6 +308,7 @@ class FakeAppServer:
                     "items": [
                         {"type": "agentMessage", "text": reply, "content": [{"type": "text", "text": reply}]}
                     ],
+                    "inputSkills": input_skills,
                 }
             )
             self._save()
@@ -403,7 +443,7 @@ class FakeAppServer:
             if self.flat_skills:
                 self._ok(
                     request_id,
-                    {"data": [{"name": item["name"], "path": item["path"]} for item in skills]},
+                    {"data": [{"name": item["name"], "path": item.get("path")} for item in skills]},
                 )
                 return
             self._ok(
@@ -425,6 +465,8 @@ class FakeAppServer:
             if isinstance(roots, list):
                 self.extra_roots = [Path(str(item)) for item in roots]
             self._ok(request_id, {})
+            if self.skills_changed_notify:
+                self._notify("skills/changed", {})
             return
         if method == "config/read":
             mcp = [OHF_PROBE_MCP_SERVER] if self.include_mcp else []
