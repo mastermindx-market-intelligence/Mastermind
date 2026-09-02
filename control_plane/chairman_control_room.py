@@ -123,16 +123,28 @@ def _optional_control_plane_module(name: str, *, requires: tuple[str, ...] = ())
 #: STATICALLY imports, derived from its own AST by
 #: ``tests/test_chairman_control_room.py::
 #: test_declared_selector_dependencies_match_its_actual_static_imports`` so
-#: the list cannot silently drift if an import is added later.
+#: the list cannot silently drift if a STATIC import is added later.
+#:
+#: Scope of that guarantee, stated exactly, because the unqualified version
+#: of this sentence was falsifiable: the derivation sees STATIC import forms
+#: only. A DYNAMIC import (``importlib.import_module``, ``__import__``, or an
+#: attribute reached off a bare ``import control_plane``) is invisible to any
+#: AST walk and would leave this list stale while the guard stayed green.
+#: Rather than claim a completeness the derivation cannot deliver, the guard
+#: additionally REFUSES a dynamic import in the selector — turning that
+#: silent gap into a loud one.
 #:
 #: What this buys, stated exactly — because an earlier pass over-claimed it:
 #: declaring a dependency here converts its absence into the documented
 #: "not shipped" degrade ONLY IF the dependency is not ALREADY reachable
 #: from this module's own mandatory imports. ``executive_steward`` is such a
 #: case and genuinely degrades. ``executive_orchestration_principal`` is NOT:
-#: ``from control_plane import (... executive_runtime ...)`` above runs
-#: unconditionally and pulls it transitively, so its absence raises long
-#: before this optional block is reached. It is listed here because it IS a
+#: the unconditional ``from control_plane import (...)`` above pulls it
+#: transitively. The observed traceback runs ``chairman_control_room ->
+#: executive_inbox -> executive_runtime -> executive_orchestration_principal``;
+#: ``executive_runtime`` is also imported directly here, so BOTH routes are
+#: mandatory. Its absence therefore raises long before this optional block
+#: is reached. It is listed here because it IS a
 #: static import of the selector and the AST guard is the source of truth —
 #: but a mandatory transitive dependency cannot be softened from here, and
 #: ``test_a_mandatory_transitive_dependency_is_a_hard_failure_not_a_degrade``

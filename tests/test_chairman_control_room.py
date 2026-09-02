@@ -1748,19 +1748,41 @@ def _static_control_plane_imports(path) -> set[str]:
     Handles: `from control_plane import X` (+ `as`), `from control_plane.X
     import y`, `import control_plane.X` (+ `as`), both relative forms, and
     nested subpackages (the TOP segment is what a requires= entry names).
-    `if TYPE_CHECKING:` bodies are skipped deliberately — they never execute,
+    `if TYPE_CHECKING:` bodies are skipped deliberately (including a local
+    alias, `from typing import TYPE_CHECKING as TC`) — they never execute,
     so forcing them into requires= would make the selector report "not
-    shipped" for a module it never actually needs.
+    shipped" for a module it never actually needs. A star import names no
+    submodule and is skipped for the same reason.
+
+    KNOWN OVER-DERIVATION, recorded rather than implied away: an import
+    inside `try/except ImportError`, a function-local lazy import, and a
+    class-body import are all treated as unconditional. If the selector
+    ever adopts one, this guard demands it in requires= and the selector
+    then reports "not shipped" for a module it can actually live without.
+    That direction is LOUD — the guard reds and says so — unlike a dynamic
+    import, which would be silent and is therefore refused outright by
+    `_dynamic_import_calls`. Only the silent gap is closed by refusal; this
+    one is left visible on purpose.
     """
     import ast as _ast
 
     found: set[str] = set()
     top = lambda name: name.split(".", 1)[0]  # noqa: E731
+    tree = _ast.parse(Path(path).read_text(encoding="utf-8"))
+    # Local aliases of typing.TYPE_CHECKING, so `as TC` is still recognised.
+    type_checking_names = {"TYPE_CHECKING"}
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.ImportFrom) and node.module == "typing":
+            for alias in node.names:
+                if alias.name == "TYPE_CHECKING" and alias.asname:
+                    type_checking_names.add(alias.asname)
 
     class _Visitor(_ast.NodeVisitor):
         def visit_If(self, node):
             test = node.test
-            if (isinstance(test, _ast.Name) and test.id == "TYPE_CHECKING") or (
+            # `from typing import TYPE_CHECKING as TC` would otherwise defeat
+            # a bare name check and force a type-only import into requires=.
+            if (isinstance(test, _ast.Name) and test.id in type_checking_names) or (
                 isinstance(test, _ast.Attribute) and test.attr == "TYPE_CHECKING"
             ):
                 for child in node.orelse:
@@ -1778,7 +1800,8 @@ def _static_control_plane_imports(path) -> set[str]:
                         found.add(top(alias.name))
             elif module == "control_plane":
                 for alias in node.names:
-                    found.add(top(alias.name))
+                    if alias.name != "*":  # a star import names no submodule
+                        found.add(top(alias.name))
             elif module.startswith("control_plane."):
                 found.add(top(module.split(".", 1)[1]))
 
@@ -1787,7 +1810,28 @@ def _static_control_plane_imports(path) -> set[str]:
                 if alias.name.startswith("control_plane."):
                     found.add(top(alias.name.split(".", 1)[1]))
 
-    _Visitor().visit(_ast.parse(Path(path).read_text(encoding="utf-8")))
+    _Visitor().visit(tree)
+    return found
+
+
+def _dynamic_import_calls(path) -> list[str]:
+    """Dynamic imports in a source file — invisible to any AST derivation.
+
+    The declared-dependency guard can only see STATIC forms, so a dynamic
+    import would leave `requires=` stale while the guard stayed green. This
+    turns that silent gap into a loud one.
+    """
+    import ast as _ast
+
+    found: list[str] = []
+    for node in _ast.walk(_ast.parse(Path(path).read_text(encoding="utf-8"))):
+        if not isinstance(node, _ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, _ast.Name) and func.id == "__import__":
+            found.append("__import__")
+        elif isinstance(func, _ast.Attribute) and func.attr == "import_module":
+            found.append("importlib.import_module")
     return found
 
 
@@ -1825,7 +1869,15 @@ def test_declared_selector_dependencies_match_its_actual_static_imports():
     CLASS: adding a third static control-plane import to the selector fails
     here until it is declared.
     """
-    actual = _static_control_plane_imports(ccr.executive_placement_selection.__file__)
+    selector_path = ccr.executive_placement_selection.__file__
+    # The derivation covers STATIC forms only; refuse a dynamic import
+    # rather than let it silently stale the declared list.
+    assert not _dynamic_import_calls(selector_path), (
+        "the selector uses a dynamic import, which this AST guard cannot see — "
+        "declare the dependency explicitly or extend the derivation",
+        _dynamic_import_calls(selector_path),
+    )
+    actual = _static_control_plane_imports(selector_path)
     assert actual, "AST walk found no control_plane imports — the derivation is broken"
     assert set(ccr._SELECTOR_CONTROL_PLANE_REQUIRES) == actual, (
         "declared requires= does not match the selector's real static imports",
@@ -1946,4 +1998,8 @@ def test_a_mandatory_transitive_dependency_is_a_hard_failure_not_a_degrade():
         cwd=Path(__file__).resolve().parent.parent,
         capture_output=True, text=True,
     )
+    # Name-blind `startswith("RAISED")` would be satisfied by ANY
+    # ModuleNotFoundError during that import — including an unrelated one.
+    # Assert the blocked module is the one that raised.
     assert result.stdout.startswith("RAISED"), (result.stdout, result.stderr[-400:])
+    assert "executive_orchestration_principal" in result.stdout, result.stdout
