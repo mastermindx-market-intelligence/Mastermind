@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pwd
+import signal
 import stat
 import subprocess
 import sys
@@ -1484,7 +1485,12 @@ def test_cancel_signals_verified_process_group_and_kills_descendant(tmp_path: Pa
         pytest.fail("cancelled Codex descendant survived its process group")
 
 
-def test_cancel_sigkills_descendant_that_ignores_sigterm(tmp_path: Path):
+def test_cancel_sigkills_descendant_that_ignores_sigterm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    control = _install_cancel_race_control(monkeypatch)
+    control.mode = "off"
+
     async def exercise():
         adapter, spec, _workspace_path, run_dir = _fixture(
             tmp_path, prompt="sleep-stubborn", timeout=30, grace=0.1
@@ -1501,6 +1507,7 @@ def test_cancel_sigkills_descendant_that_ignores_sigterm(tmp_path: Path):
             break
         assert child_pid is not None
         assert os.getpgid(child_pid) == ref.pgid
+        control.bind(ref.pid, ref.pgid, asyncio.Event())
         cancel = await adapter.cancel(ref, "operator requested")
         receipt = await adapter.collect_result(ref)
         return cancel, receipt, child_pid
@@ -1508,6 +1515,11 @@ def test_cancel_sigkills_descendant_that_ignores_sigterm(tmp_path: Path):
     cancel, receipt, child_pid = asyncio.run(exercise())
     assert cancel.signal_sent is True
     assert cancel.escalated_to_sigkill is True
+    # A surviving residual group is escalated against exactly once -- never
+    # twice, and never zero times now that a vanished group is reconciled.
+    assert len(control.group_signals(signal.SIGKILL)) == 1, (
+        f"expected exactly one residual-group SIGKILL, got {control.signals}"
+    )
     assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
     for _ in range(100):
         try:
@@ -1566,3 +1578,218 @@ def test_cancel_refuses_pid_reuse_identity_mismatch(tmp_path: Path):
 def test_local_schema_validator_fails_closed_on_unknown_keyword():
     with pytest.raises(cw.ResultValidationError, match="unsupported JSON Schema"):
         cw.validate_json_schema({"x": 1}, {"type": "object", "unevaluatedProperties": False})
+
+
+class _CancelRaceControl:
+    """Pins the interleaving of the observed cancellation race.
+
+    Every real signal is still delivered to the real process group and recorded,
+    so "no SIGKILL was issued" is asserted on evidence.  Once a real ``SIGTERM``
+    has reached the exact verified PGID, the control forces the escalation
+    observation into one specific state using the *same* errors the kernel and
+    the real inspector raise -- ``ProcessLookupError`` for an empty process
+    group, ``ProcessIdentityError`` for a reaped leader.  Only the interleaving
+    is pinned; no behaviour is invented.
+    """
+
+    def __init__(self) -> None:
+        self.pid: int | None = None
+        self.pgid: int | None = None
+        self.release: asyncio.Event | None = None
+        self.armed = False
+        self.mode = "vanished"
+        self.signals: list[tuple[int, int]] = []
+
+    def bind(self, pid: int, pgid: int, release: asyncio.Event) -> None:
+        self.pid = pid
+        self.pgid = pgid
+        self.release = release
+
+    def disarm(self) -> None:
+        self.armed = False
+        self.mode = "off"
+
+    def group_signals(self, sig: int) -> list[tuple[int, int]]:
+        return [entry for entry in self.signals if entry == (self.pgid, int(sig))]
+
+
+def _install_cancel_race_control(monkeypatch: pytest.MonkeyPatch) -> _CancelRaceControl:
+    control = _CancelRaceControl()
+    real_killpg = os.killpg
+
+    def killpg(pgid, sig):
+        if int(sig) == 0:
+            # Existence probe.  Real signals below are never intercepted, so a
+            # wrongly issued SIGKILL can still be observed and asserted against.
+            if control.armed and int(pgid) == control.pgid:
+                if control.mode == "group_unavailable":
+                    raise PermissionError(f"cannot inspect process group {pgid}")
+                if control.mode != "off":
+                    raise ProcessLookupError(f"no process group {pgid}")
+            return real_killpg(pgid, sig)
+        control.signals.append((int(pgid), int(sig)))
+        result = real_killpg(pgid, sig)
+        if int(sig) == int(signal.SIGTERM) and int(pgid) == control.pgid:
+            control.armed = True
+        return result
+
+    monkeypatch.setattr(os, "killpg", killpg)
+    return control
+
+
+class _RaceInspector(cw.ProcessInspector):
+    """Reports the escalation observation demanded by the control."""
+
+    def __init__(self, real: cw.ProcessInspector, control: _CancelRaceControl) -> None:
+        self.real = real
+        self.control = control
+        self.absent_reports = 0
+
+    def boot_session_id(self):
+        if self.control.armed and self.control.mode == "boot_changed":
+            return "boot-identity-rotated"
+        return self.real.boot_session_id()
+
+    def inspect(self, pid):
+        return self.real.inspect(pid)
+
+    def identity(self, pid):
+        if self.control.armed and pid == self.control.pid:
+            if self.control.release is not None:
+                self.control.release.set()
+            if self.control.mode == "identity_changed":
+                return ("reused-pid-start-identity", self.control.pgid)
+            self.absent_reports += 1
+            raise cw.ProcessIdentityError(f"process {pid} is absent")
+        return self.real.identity(pid)
+
+
+async def _start_with_gated_wait(adapter, spec, run_dir: Path, control: _CancelRaceControl):
+    """Start a real worker, then make the grace boundary reproducible.
+
+    The wait task is gated on an explicit event rather than on timing, so the
+    ``cancel_grace_seconds`` boundary is always reached and escalation is always
+    entered -- the reproducibility the race needs, with no inflated sleeps.
+    """
+
+    ref = await adapter.start(spec)
+    child_path = run_dir / "output" / "child.pid"
+    child_pid = None
+    for _ in range(500):
+        try:
+            child_pid = int(child_path.read_text())
+        except (FileNotFoundError, ValueError):
+            await asyncio.sleep(0.01)
+            continue
+        break
+    assert child_pid is not None
+    assert os.getpgid(child_pid) == ref.pgid
+    state = adapter._state_for(ref)
+    release = asyncio.Event()
+    real_wait_task = state.process_wait_task
+
+    async def gated() -> int:
+        await release.wait()
+        return await real_wait_task
+
+    state.process_wait_task = asyncio.create_task(gated())
+    control.bind(ref.pid, ref.pgid, release)
+    return ref, state, release, child_pid
+
+
+def _assert_process_gone(pid: int, message: str) -> None:
+    for _ in range(200):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.02)
+    pytest.fail(message)
+
+
+def test_cancel_reconciles_proven_absent_leader_and_group_without_sigkill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Both leader and group proven gone after a verified SIGTERM is terminated.
+
+    That closed state is the desired postcondition of cancellation, not an
+    identity violation: it must succeed, must not issue SIGKILL, and must not
+    claim escalation in the receipt.
+    """
+
+    control = _install_cancel_race_control(monkeypatch)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        adapter.inspector = _RaceInspector(adapter.inspector, control)
+        ref, _state, _release, child_pid = await _start_with_gated_wait(
+            adapter, spec, run_dir, control
+        )
+        cancel = await adapter.cancel(ref, "operator requested")
+        receipt = await adapter.collect_result(ref)
+        return cancel, receipt, child_pid
+
+    cancel, receipt, child_pid = asyncio.run(exercise())
+
+    assert control.armed is True, "the verified process group never received SIGTERM"
+    assert control.group_signals(signal.SIGTERM), "SIGTERM was not delivered to the group"
+    assert control.group_signals(signal.SIGKILL) == [], (
+        "an already-vanished process group must never be escalated against"
+    )
+    assert cancel.signal_sent is True
+    assert cancel.escalated_to_sigkill is False
+    assert cancel.already_exited is False
+    assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
+    assert "operator requested" in (receipt.result.error or "")
+    _assert_process_gone(child_pid, "cancelled Codex descendant survived its process group")
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("group_unavailable", "cannot inspect process group"),
+        ("identity_changed", "process identity changed before SIGKILL escalation"),
+        ("boot_changed", "process boot identity changed before SIGKILL escalation"),
+    ],
+)
+def test_cancel_escalation_falsifiers_remain_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, expected: str
+):
+    """Reuse, rotated boot identity and unavailable observations never reconcile.
+
+    Each case must raise instead of reporting termination, and none of them may
+    signal the process group -- an absent or unreadable leader must never
+    authorise a signal that could land on a reused PGID.
+    """
+
+    control = _install_cancel_race_control(monkeypatch)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        adapter.inspector = _RaceInspector(adapter.inspector, control)
+        ref, state, release, child_pid = await _start_with_gated_wait(
+            adapter, spec, run_dir, control
+        )
+        control.mode = mode
+        with pytest.raises(cw.ProcessIdentityError, match=expected):
+            await adapter.cancel(ref, "operator requested")
+        # Release the gated wait and let it settle before the cleanup cancel, so
+        # cleanup observes an already-exited leader instead of re-entering the
+        # escalation path this case has just proven closed.
+        control.disarm()
+        release.set()
+        await state.process_wait_task
+        await adapter.cancel(ref, "cleanup after fail-closed escalation")
+        return child_pid
+
+    child_pid = asyncio.run(exercise())
+
+    assert control.armed is False
+    assert control.group_signals(signal.SIGKILL) == [], (
+        f"{mode} must not authorise a SIGKILL: {control.signals}"
+    )
+    _assert_process_gone(child_pid, "Codex descendant survived the fail-closed path")

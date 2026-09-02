@@ -3009,13 +3009,21 @@ class CodexWorkerAdapter:
                         raise ProcessIdentityError(
                             "process boot identity changed before SIGKILL escalation"
                         )
+                    group_vanished = False
                     try:
                         identity, observed_pgid = self.inspector.identity(state.ref.pid)
                     except ProcessIdentityError:
+                        # The leader can no longer be resolved.  A *proven* absent
+                        # group means the verified original group leader and every
+                        # remaining member have already exited, so the SIGTERM above
+                        # reached the terminated postcondition and there is nothing
+                        # left to escalate against; signalling that PGID now could
+                        # only ever reach a reused group.  This is proof rather than
+                        # inference: _process_group_exists reports absence only for
+                        # ProcessLookupError and raises when the observation itself
+                        # is unavailable, so an unreadable group still fails closed.
                         if not _process_group_exists(state.ref.pgid):
-                            raise ProcessIdentityError(
-                                "process leader disappeared with no residual group"
-                            )
+                            group_vanished = True
                     else:
                         if (
                             identity != state.ref.process_start_identity
@@ -3024,13 +3032,14 @@ class CodexWorkerAdapter:
                             raise ProcessIdentityError(
                                 "process identity changed before SIGKILL escalation"
                             )
-                    try:
-                        os.killpg(state.ref.pgid, signal.SIGKILL)
-                        sent = True
-                    except ProcessLookupError:
-                        pass
-                    escalated = True
-                    state.escalated = True
+                    if not group_vanished:
+                        try:
+                            os.killpg(state.ref.pgid, signal.SIGKILL)
+                            sent = True
+                        except ProcessLookupError:
+                            pass
+                        escalated = True
+                        state.escalated = True
                     await state.process_wait_task
 
             await state.process_wait_task
