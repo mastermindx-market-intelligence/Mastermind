@@ -123,7 +123,7 @@ def test_terminal_stop_consumes_receiver_assignment_for_that_child() -> None:
     routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
     for text in (index, routing):
         for phrase in (
-            "receiver assignment is child-specific",
+            "Receiver assignment is child-specific",
             "terminal STOP consumes that child assignment",
             "standing program instruction does not self-assign a successor child",
             "fresh Sol/Chairman delivery or canonical placement edge",
