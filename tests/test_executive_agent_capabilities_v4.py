@@ -47,6 +47,7 @@ from control_plane.executive_agent_capabilities import (
     DEFAULT_CAPABILITY_SOURCE_ROOT,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    app_server_security_config_digest,
 )
 from control_plane.executive_capability_packages import (
     CapabilityPackageFile,
@@ -699,6 +700,58 @@ def test_v4_copied_v3_shaped_profiles_keep_current_skills_projection(profile_id)
     profile = registry.resolve(profile_id)
     assert profile.app_server_config_projection()["skills"] == {"config": None}
     assert "skills.bundled.enabled=false" not in profile.app_server_config_overrides()
+
+
+def test_v4_observed_config_projection_matches_expected_digest_with_bundled_disabled():
+    """CAP-S1 config-digest attestation gap closure (protocol amendment §5).
+
+    The observed-side projection (``app_server_security_config_projection``)
+    must now agree with the policy-side projection
+    (``ExecutionCapabilityProfile.app_server_config_projection``) on the
+    ``skills`` shape for a V4 skill-grant profile: both must carry
+    ``bundled.enabled=False``. A config whose reported ``skills.bundled`` is
+    malformed (not a mapping, or a non-boolean ``enabled``) must stay
+    distinguishable from the well-formed shape and therefore digest
+    differently -- this is the fail-closed drift signal the amendment
+    requires.
+    """
+
+    registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    profile = registry.resolve(FIXTURE_PROFILE_ID)
+    expected_projection = profile.app_server_config_projection()
+    assert expected_projection["skills"] == {
+        "bundled": {"enabled": False},
+        "config": None,
+    }
+
+    # A raw ``config/read`` response shaped exactly like the policy
+    # projection (this is what the fixed observed-side projection now
+    # produces from a real App Server that echoes ``skills.bundled``).
+    assert app_server_security_config_digest(expected_projection) == (
+        profile.expected_config_digest
+    )
+
+    # Malformed: "bundled" present but not a mapping.
+    non_mapping_bundled = copy.deepcopy(expected_projection)
+    non_mapping_bundled["skills"]["bundled"] = "not-a-mapping"
+    assert app_server_security_config_digest(non_mapping_bundled) != (
+        profile.expected_config_digest
+    )
+
+    # Malformed: "bundled" is a mapping but "enabled" is not a boolean.
+    non_bool_enabled = copy.deepcopy(expected_projection)
+    non_bool_enabled["skills"]["bundled"] = {"enabled": "false"}
+    assert app_server_security_config_digest(non_bool_enabled) != (
+        profile.expected_config_digest
+    )
+
+    # Malformed: "bundled" key present but empty -- absence of "enabled"
+    # must not be silently treated as False.
+    missing_enabled = copy.deepcopy(expected_projection)
+    missing_enabled["skills"]["bundled"] = {}
+    assert app_server_security_config_digest(missing_enabled) != (
+        profile.expected_config_digest
+    )
 
 
 # ---------------------------------------------------------------------------

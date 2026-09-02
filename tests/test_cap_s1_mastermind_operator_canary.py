@@ -514,7 +514,10 @@ import shutil
 import subprocess as _subprocess
 import sys as _sys
 
+from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+from control_plane.operator_harness_contract import LaunchDecision
 from scripts.ohf.cap_s1_mastermind_operator_canary import (
+    PROFILE_ID as _CANARY_PROFILE_ID,
     CanaryEvidence,
     CanaryStop,
     FROZEN_STOP_CODES,
@@ -525,6 +528,11 @@ from scripts.ohf.cap_s1_mastermind_operator_canary import (
     run_canary,
 )
 from scripts.ohf.laboratory import AppServerClient, default_user_codex_home
+
+
+def _load_canary_profile():
+    registry = ExecutionCapabilityRegistry.load(FIXTURE_PATH, source_root=REPO_ROOT)
+    return registry.resolve(_CANARY_PROFILE_ID)
 
 _SCHEMA_WITH_SKILL_PATH = {
     "$defs": {
@@ -607,6 +615,7 @@ class _ScriptedCanaryClient:
         skills_list_script=None,
         replies=None,
         fail_turn_start_at=None,
+        config_read_mutator=None,
     ) -> None:
         self._inner = inner
         self._skills_list_script = list(skills_list_script or [])
@@ -614,6 +623,7 @@ class _ScriptedCanaryClient:
         self._native_turn_replies: dict[str, str] = {}
         self._fail_turn_start_at = fail_turn_start_at
         self._turn_start_calls = 0
+        self._config_read_mutator = config_read_mutator
         self.calls: list[tuple[str, dict]] = []
 
     def __getattr__(self, name):
@@ -628,6 +638,8 @@ class _ScriptedCanaryClient:
             if self._fail_turn_start_at == self._turn_start_calls:
                 raise ConnectionError("synthetic transport failure")
         result = self._inner.request(method, params, timeout=timeout)
+        if method == "config/read" and self._config_read_mutator is not None:
+            result = self._config_read_mutator(result)
         if method == "turn/start" and self._replies:
             turn_obj = result.get("turn") if isinstance(result.get("turn"), dict) else {}
             native_turn_id = str(turn_obj.get("id") or "")
@@ -655,7 +667,12 @@ class _ScriptedCanaryClient:
 
 
 def _canary_client_factory(
-    *, skills_list_script=None, replies=None, fail_turn_start_at=None, on_create=None
+    *,
+    skills_list_script=None,
+    replies=None,
+    fail_turn_start_at=None,
+    on_create=None,
+    config_read_mutator=None,
 ):
     def factory(argv, env, cwd):
         _asserts_never_the_real_codex_binary(argv)
@@ -667,11 +684,30 @@ def _canary_client_factory(
             skills_list_script=skills_list_script,
             replies=replies,
             fail_turn_start_at=fail_turn_start_at,
+            config_read_mutator=config_read_mutator,
         )
         _CREATED_CANARY_CLIENTS.append(client)
         return client
 
     return factory
+
+
+def _strip_bundled_from_config_read(result):
+    """Simulate an App Server that never echoes ``skills.bundled`` back.
+
+    Deep-copies the scripted fake server's real ``config/read`` reply and
+    removes the ``skills`` key the runner's ``OHF_FAKE_BUNDLED_DISABLED=1``
+    wiring added -- this is the config-digest attestation gate's falsifier:
+    the profile's ``expected_config_digest`` requires
+    ``skills.bundled.enabled=false``, so a real config/read that omits it
+    must produce ``REFUSE_CONFIG_DRIFT``, never a silent ALLOW.
+    """
+
+    copied = json.loads(json.dumps(result))
+    config = copied.get("config")
+    if isinstance(config, dict):
+        config.pop("skills", None)
+    return copied
 
 
 @pytest.fixture(autouse=True)
@@ -814,6 +850,12 @@ def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
 
     assert isinstance(evidence, CanaryEvidence)
     assert evidence.launch_decision == "ALLOW"
+    # Config-digest attestation gate (protocol amendment §5): the happy
+    # path now runs with ``expected_config_digest`` armed end to end --
+    # the observed attestation's digest must equal the profile's own
+    # expectation, not merely be non-None.
+    profile = _load_canary_profile()
+    assert evidence.app_server_config_digest == profile.expected_config_digest
     assert evidence.turn_marker_results == (
         ("receive-commission", True),
         ("return-progress", True),
@@ -846,6 +888,60 @@ def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
 
     # Cleanup actually happened on disk.
     assert not Path(evidence.workspace_root).exists()
+
+
+# ---------------------------------------------------------------------------
+# config-digest attestation gate (protocol amendment §5)
+# ---------------------------------------------------------------------------
+
+
+def test_run_canary_fake_backend_bundled_omission_refuses_config_drift(tmp_path) -> None:
+    """The re-armed gate's runner-level falsifier.
+
+    Everything else about the journey is identical to the happy path: the
+    fake App Server still echoes ``skills.bundled.enabled=false`` from its
+    own state (``OHF_FAKE_BUNDLED_DISABLED=1``, wired unconditionally by
+    ``run_canary`` for this V4 skill-grant profile), but the scripted
+    client strips the ``skills`` key back out of the raw ``config/read``
+    reply before the adapter ever sees it -- simulating a real App Server
+    that never echoes the override. ``expected_config_digest`` is now
+    always sealed onto this profile's requested profile, so the observed
+    digest mismatch must REFUSE_CONFIG_DRIFT rather than silently ALLOW,
+    and the four-turn journey must never run.
+    """
+
+    scratch = tmp_path / "scratch-bundled-omit"
+    scratch.mkdir()
+    factory = _canary_client_factory(
+        replies=list(_HAPPY_REPLIES),
+        config_read_mutator=_strip_bundled_from_config_read,
+    )
+
+    evidence = run_canary(
+        backend="fake",
+        binary_path=None,
+        codex_home=None,
+        repo_root=REPO_ROOT,
+        scratch_root=scratch,
+        operation_id="cap-s1-canary-bundled-omit",
+        client_factory=factory,
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+    )
+
+    assert evidence.launch_decision == LaunchDecision.REFUSE_CONFIG_DRIFT.value
+    assert evidence.launch_decision != LaunchDecision.ALLOW.value
+    profile = _load_canary_profile()
+    assert evidence.app_server_config_digest != profile.expected_config_digest
+    # The turn loop is gated on ALLOW; a refused launch must never run it.
+    assert evidence.turn_marker_results == ()
+
+    # Consistent with the runner's existing decision handling (``main``'s
+    # ``launch_ok`` gate): a non-ALLOW decision maps to a nonzero exit.
+    markers_ok = all(ok for _name, ok in evidence.turn_marker_results)
+    cleanup_ok = all(bool(value) for value in evidence.cleanup.values())
+    launch_ok = evidence.launch_decision == LaunchDecision.ALLOW.value
+    exit_code = 0 if (markers_ok and cleanup_ok and launch_ok) else 1
+    assert exit_code == 1
 
 
 # ---------------------------------------------------------------------------

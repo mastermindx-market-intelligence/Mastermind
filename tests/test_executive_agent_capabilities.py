@@ -12,6 +12,7 @@ from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
     app_server_security_config_digest,
+    app_server_security_config_projection,
     observed_mcp_tool_schema_digest,
 )
 from control_plane.operator_harness_contract import NativeHelperPolicy
@@ -274,6 +275,61 @@ def test_docs_mcp_schema_and_security_projection_are_exact_and_drift_sensitive()
     }
     assert app_server_security_config_digest(widened_projection) != (
         profile.expected_config_digest
+    )
+
+
+def test_security_config_projection_without_skills_bundled_key_is_byte_identical_to_pre_change_shape():
+    """CAP-S1 digest-stability pin (protocol amendment §5).
+
+    A raw config whose ``skills`` mapping never carries a ``bundled`` key
+    (every V3 profile, and any V4 config/plugin/agent host that predates the
+    Skill-package surface) must project and digest EXACTLY as it did before
+    ``app_server_security_config_projection`` learned to observe
+    ``skills.bundled`` -- this is the "V3 config/profile/policy digests
+    remain byte-identical" half of the amendment.
+    """
+
+    config = {
+        "agents": {"enabled": False},
+        "features": {
+            "apps": False,
+            "auth_elicitation": False,
+            "enable_mcp_apps": False,
+            "mcp_2026_07_28": False,
+            "multi_agent": False,
+            "multi_agent_v2": False,
+            "plugins": False,
+            "remote_plugin": False,
+            "tool_call_mcp_elicitation": False,
+        },
+        "mcp_servers": {},
+        "plugins": {},
+        "skills": {"config": None},
+    }
+    projection = app_server_security_config_projection(config)
+    assert projection == {
+        "agents": {"enabled": False},
+        "features": {
+            "apps": False,
+            "auth_elicitation": False,
+            "enable_mcp_apps": False,
+            "mcp_2026_07_28": False,
+            "multi_agent": False,
+            "multi_agent_v2": False,
+            "plugins": False,
+            "remote_plugin": False,
+            "tool_call_mcp_elicitation": False,
+        },
+        "mcp_servers": {},
+        "plugins": {},
+        "skills": {"config": None},
+    }
+    # Pre-change literal: computed against this exact config with
+    # ``python3 -c`` immediately BEFORE the CAP-S1 observed-``bundled``
+    # production edit landed. Absence of "bundled" in the raw config's
+    # "skills" mapping must keep producing this exact digest forever.
+    assert app_server_security_config_digest(config) == (
+        "16f3a01790a8fad7b098a037018b55dd49c9c4fcf99ec0d5872cec992fdcfd61"
     )
 
 

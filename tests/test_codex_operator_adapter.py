@@ -183,8 +183,35 @@ def _make_skill_harness(
     extra_env: dict[str, str] | None = None,
     client_factory=None,
     turn_input: str = "Reply with the probe acknowledgement.",
+    bundled_disabled: bool = True,
 ) -> "Harness":
-    merged_env = {"OHF_FAKE_SKILL_ROOT": str(tmp_path / "cap-s1-no-ambient-skills")}
+    """Build a skill-canary harness with the config-digest gate re-armed.
+
+    ``bundled_disabled`` (default True) tells the fake App Server to echo
+    ``skills.bundled.enabled=false`` from ``config/read``, matching the
+    profile's own policy-side projection (protocol amendment §5). Pass
+    ``bundled_disabled=False`` to build a harness whose scripted
+    ``config/read`` OMITS the ``bundled`` key -- this is the re-armed gate's
+    falsifier: ``compare_launch`` must then REFUSE_CONFIG_DRIFT rather than
+    silently ALLOW, because ``expected_config_digest`` is always sealed onto
+    a skill-canary harness now (never left unset the way the retired
+    workaround left it).
+
+    The CAP-S1 mastermind-operator profile grants zero MCP servers (its own
+    ``app_server_config_projection()["mcp_servers"]`` is ``{}``), so the
+    fake App Server's unrelated OHF-probe MCP fixture must not appear in
+    the observed config surface either -- ``OHF_FAKE_MCP_GONE=1`` mirrors
+    the same precedent already used by
+    ``scripts/ohf/cap_s1_mastermind_operator_canary.py`` for this exact
+    profile.
+    """
+
+    merged_env = {
+        "OHF_FAKE_SKILL_ROOT": str(tmp_path / "cap-s1-no-ambient-skills"),
+        "OHF_FAKE_MCP_GONE": "1",
+    }
+    if bundled_disabled:
+        merged_env["OHF_FAKE_BUNDLED_DISABLED"] = "1"
     merged_env.update(extra_env or {})
     harness = _make_harness(
         tmp_path,
@@ -192,6 +219,7 @@ def _make_skill_harness(
         skill_canary_binding=binding,
         client_factory=client_factory or _recording_client_factory(),
         turn_input=turn_input,
+        expected_config_digest_override=binding.profile.expected_config_digest,
     )
     harness.requested = _skill_capability_requested(harness, binding)
     return harness
@@ -242,6 +270,7 @@ def _make_harness(
     network_policy: str = "disabled",
     native_helper: bool = False,
     skill_canary_binding: "CodexSkillCanaryBinding | None" = None,
+    expected_config_digest_override: str | None = None,
 ) -> Harness:
     codex_home = tmp_path / "codex-home"
     workspace = tmp_path / "workspace"
@@ -319,6 +348,8 @@ def _make_harness(
                 "plugins": {},
             }
         )
+    if expected_config_digest_override is not None:
+        expected_config_digest = expected_config_digest_override
     kwargs = {}
     if client_factory is not None:
         kwargs["client_factory"] = client_factory
@@ -1769,6 +1800,30 @@ def test_skill_canary_causal_launch_happy_path_mode_a_real_server(
         {"extraRoots": []},
         {"extraRoots": [binding.projection.skills_root]},
     ]
+
+
+def test_skill_canary_launch_refuses_config_drift_when_bundled_key_is_omitted(
+    tmp_path: Path,
+) -> None:
+    """CAP-S1 config-digest attestation gate re-arm falsifier.
+
+    A skill-canary harness whose scripted ``config/read`` OMITS the
+    ``skills.bundled`` key (as a real App Server would if it never echoed
+    the override) must REFUSE_CONFIG_DRIFT via ``compare_launch`` -- the
+    profile's ``expected_config_digest`` requires ``bundled.enabled=false``
+    per the protocol amendment §5, and a skill-canary's
+    ``expected_config_digest`` is now always sealed onto the harness
+    (never left unset the way the retired workaround left it).
+    """
+
+    binding = _stage_cap_s1_binding(tmp_path, owning_process_generation="bundled-omitted")
+    harness = _make_skill_harness(tmp_path, binding, bundled_disabled=False)
+
+    _observation, observed, launch = _start(harness)
+
+    assert launch.decision is LaunchDecision.REFUSE_CONFIG_DRIFT
+    assert "config_drift" in launch.mismatch_reasons
+    assert observed.effective_config_digest != harness.requested.expected_config_digest
 
 
 def test_skill_canary_causal_launch_happy_path_mode_b_pathless(

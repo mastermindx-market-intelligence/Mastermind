@@ -370,6 +370,25 @@ def test_fake_skills_changed_notification_off_by_default(tmp_path, monkeypatch):
     assert "skills/changed" not in methods
 
 
+def test_fake_config_read_omits_bundled_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHF_FAKE_WORKSPACE", str(tmp_path))
+    server = FakeAppServer()
+    _rpc(server, "initialize", {}, 1)
+    config = _rpc(server, "config/read", {"includeLayers": False}, 2)["result"]["config"]
+    assert "skills" not in config
+
+
+def test_fake_config_read_bundled_disabled_switch_adds_the_bundled_block(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("OHF_FAKE_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("OHF_FAKE_BUNDLED_DISABLED", "1")
+    server = FakeAppServer()
+    _rpc(server, "initialize", {}, 1)
+    config = _rpc(server, "config/read", {"includeLayers": False}, 2)["result"]["config"]
+    assert config["skills"] == {"bundled": {"enabled": False}}
+
+
 def test_turn_start_captures_valid_skill_item(tmp_path, monkeypatch):
     monkeypatch.setenv("OHF_FAKE_WORKSPACE", str(tmp_path))
     server = FakeAppServer()
