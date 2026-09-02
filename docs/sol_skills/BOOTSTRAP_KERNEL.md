@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.1
+skillpack_version: 1.1.0
 minimum_bootstrap_major: 1
 skill: bootstrap_kernel
 ---
@@ -39,6 +39,7 @@ For substantial Mastermind work:
 18. Worker placement is not routine Chairman labor. For Chairman-visible/manual routing, Sol states exactly one PREFERRED_AVENUE from Fable, Opus, Grok, CTO Sol or Terra. Ordinary CAPACITY_SELECTABLE work with no exact receiver is WAITING_CAPACITY / needs_placement; do not emit a worker-facing PRECOMMISSION, OPEN_PICKUP or ACCOUNT_BINDING: CHAIRMAN_SELECTS merely because automated placement is incomplete, and do not arm a receiver-specific watcher. CHAIRMAN_SELECTS is an explicit manual exception only when the current live Chairman opts into manually allocating the concrete account/session for that exact operation. Prefer Terra or CTO Sol when sufficient; reserve Fable for the hardest principal-level work.
 19. Manual receiver binding still distinguishes capacity-selectable new work from exact-session-required continuation. When a concrete eligible session is deliberately given CAPACITY_SELECTABLE work through current live Chairman delivery, an already-authorized Sol direct handoff, or the canonical placement owner, that delivery is the receiver-assignment edge: the receiver ACKs, reads, arms continuation and separately STARTs when gates clear without demanding a second Chairman/Slack claim. Before START, a lawful PRESTART_REBIND may change the concrete receiver under the same operation/carrier when no prior execution/effect or effect uncertainty exists. EXACT_SESSION_REQUIRED stays strict when the provider conversation/session itself is part of the target. After START, runtime binding is sticky until canonically reconciled; EFFECT_UNKNOWN blocks receiver change.
 20. These placement/pickup laws apply equally to every Sol/project seat and provider surface. No ChatGPT, Codex, Claude, Fable, Grok or another surface is exempt because it historically used PRECOMMISSION, OPEN_PICKUP or CHAIRMAN_SELECTS wording.
+21. Before any continuation handoff, reconcile current GitHub + Agent OS state, subtract completed/superseded/rejected/do-not-redo work, and dispatch only the unresolved delta. A verification rerun requires a named receipt-invalidating change.
 ```
 
 ## Project configuration law

@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.1
+skillpack_version: 1.1.0
 minimum_bootstrap_major: 1
 skill: review_return
 ---
@@ -142,7 +142,29 @@ A records-only architecture PR may be accepted without production proof when its
 implementation is a later wave. An implementation PR may be `BUILT_NOT_PROVEN` when production
 proof is explicitly deferred. Preserve those distinctions.
 
-## Step 9 — Close or continue the reciprocal dialogue explicitly
+## Step 9 — Obligation reconciliation (Continuation Delta Law)
+
+Before any continuation is derived from this return, every prior commissioned
+obligation receives exactly one disposition:
+
+```text
+DONE | OPEN | BLOCKED | SUPERSEDED | REJECTED | REVALIDATE_REQUIRED
+```
+
+For each: obligation ID / statement; evidence; disposition; and, for
+revalidation, the prior receipt plus the named invalidating event.
+
+Then derive:
+
+```text
+NEXT_WORKSET = OPEN + NEW + REVALIDATE_REQUIRED
+```
+
+after subtracting completed/superseded/rejected/binding-do-not-redo work.
+A completed effect described in the packet is context; only the derived
+workset may be re-commissioned (`CONTINUATION_DELTA_CONTRACT.md`).
+
+## Step 10 — Close or continue the reciprocal dialogue explicitly
 
 A worker return does not become terminal merely because Sol has enough information to continue
 CEO-only adjudication.
@@ -182,6 +204,11 @@ Blocking findings
 Nonblocking residue / separate follow-ups
 Proof reviewed
 What the merge would and would not make true
+Completed — do not repeat
+Open workset
+Revalidation required and why
+Blocked / held
+Superseded / rejected
 Exact continuation action
 Dialogue edge: CONTINUE | STOP | NOT_WATCHER_ENABLED
 Watcher state: ARMED | DISARMED | WATCH_STOP_FAILED | NOT_APPLICABLE

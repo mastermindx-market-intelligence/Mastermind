@@ -1,0 +1,8 @@
+{
+  "schema": "mastermind.sol_commission_context.v1",
+  "note": "Bundle carrying a binding do_not_redo statement the base manifest never reconciles — lint must raise DNR_COVERAGE_MISSING.",
+  "do_not_redo": [
+    "Do not re-derive the six-lane archaeology; extend, don't re-census.",
+    "Never rerun the four final critics absent a named receipt-invalidating event."
+  ]
+}

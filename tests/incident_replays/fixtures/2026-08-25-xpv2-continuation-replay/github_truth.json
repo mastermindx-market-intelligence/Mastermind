@@ -1,0 +1,37 @@
+{
+  "incident": "2026-08-25-xpv2-continuation-replay",
+  "frozen_from": "macro origin/main 15ce6525dd6447e7c0625bb24a1190b43cb9f86f, 2026-08-25",
+  "repository": "mastermindx-market-intelligence/macro",
+  "carrier": {
+    "pr": 6337,
+    "state": "MERGED",
+    "merged_at": "2026-08-24T22:56:54-04:00",
+    "merge_sha": "8b303a58e8c0b807ef34d1913c4cacf5bb346e2d",
+    "final_head_short": "f400e8b4df4d",
+    "stale_recorded_head": "90ce21ac977209370b57b2ef1af7331cebb25861",
+    "verdict": "APPROVE_WITH_CONDITIONS",
+    "scope": "reference law only — no production migration, no R3C authorization",
+    "carried_conditions_owner": "R3C",
+    "carried_conditions": [
+      "R3C-HEATMAP-LEGIBILITY",
+      "R3C-AUTH-PREMIUM",
+      "R3C-TIME-MACHINE",
+      "R3C-VALIDATED-21D",
+      "R3C-NO-UNSUPPORTED-INVENTION"
+    ],
+    "refuted_not_carried": ["MA2-001"],
+    "candidate_sha256": "4adb4b6245e8e4aa5b68c850a615461327c0a5d2e672e4c203d6ba32a3b8d53c"
+  },
+  "predecessors": {
+    "r3b_merge_sha": "f5b0094614b688e8b66552e35ac65d23656fbc64",
+    "r3b1_merge_sha": "780cbcf6d2d2c7b32b87a4674929e1732e5ad036",
+    "workstream_repair_6388_merge_sha": "4faf00a44510a41f968a272a6fae5d8acb7890be"
+  },
+  "stale_at_freeze": {
+    "workstream_r3b2_status": "in_progress",
+    "workstream_recorded_head": "90ce21ac977209370b57b2ef1af7331cebb25861",
+    "workstream_next_action": "resolve F1/F2, re-run gates, return to Sol for the final design-authority verdict",
+    "latest_handoff": "agentos/handoffs/WS-INSTITUTIONAL-PRODUCT-EXPERIENCE-V2-2026-08-21.md",
+    "latest_handoff_next_action": "Review and dispatch R3B_HANDOFF_DRAFT.md (marked DRAFT - DO NOT START) to a fresh design session"
+  }
+}

@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.1
+skillpack_version: 1.1.0
 minimum_bootstrap_major: 1
 skill: closeout
 ---
@@ -138,6 +138,30 @@ return point / highest-authority sources
 
 Use exact PR/SHA/MAS/WS identities. Do not paste private reasoning or secrets.
 
+### Closeout-completeness law (Continuation Delta)
+
+A material wave is not safely handed forward while its owning Agent OS
+workstream/latest handoff still presents a superseded next action. If the
+durable owner cannot be updated now, classify `CLOSEOUT_INCOMPLETE`; the next
+continuation may repair that durable state but may not commission downstream
+work that depends on the stale sequence. Supersede stale records with a newer
+record/handoff — never rewrite the historical one to pretend it was not
+emitted.
+
+Every material closeout must additionally produce structured:
+
+```text
+COMPLETED_DO_NOT_REPEAT
+OPEN_WORKSET
+REVALIDATE_REQUIRED
+BLOCKED_OR_HELD
+SUPERSEDED_OR_REJECTED
+EXACT_NEXT_ACTION
+```
+
+For every completed item, include immutable evidence (merge SHA, workflow run,
+receipt path) when available.
+
 ## Step 8 — Reconcile projections and transport
 
 Before declaring closeout complete:
@@ -222,4 +246,5 @@ Independent parallel actions
 A fresh session can recover the accepted result, its evidence, its limits and the exact continuation
 without chat archaeology, no canonical/projection layer was advanced beyond what the evidence
 supports, and no watcher-enabled counterpart was left waiting on silence after a terminal or
-nonterminal return.
+nonterminal return. A fresh session cannot lawfully infer a completed/superseded task as next
+work from the current durable record.

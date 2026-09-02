@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.1
+skillpack_version: 1.1.0
 minimum_bootstrap_major: 1
 skill: index
 ---
@@ -108,6 +108,14 @@ leave the exact next action recoverable by a new session.
 The compact text intended for Shared Project instructions. It is constitutional boot logic,
 not a substitute for loading this Skillpack.
 
+### `CONTINUATION_DELTA_CONTRACT.md`
+Heavy reference for `CONTINUATION_DELTA` commissions: the
+`mastermind.sol_commission.v1` manifest schema, disposition vocabulary, the
+deterministic `scripts/sol_commission_lint.py` findings, `DURABLE_STATE_STALE`,
+`NOTHING_TO_COMMISSION`, and the revalidation law. Required by
+`COMMISSION_WAVE.md` for continuation mode only — a genuinely new independent
+wave does not need this token load.
+
 ## Mandatory universal source-law companions
 
 These are repository source laws, not additional lifecycle/control planes:
@@ -180,6 +188,14 @@ specific law.
     Codex, Claude, Fable, Grok or another surface is exempt from current protected placement procedure
     because of historical account behavior or prior `PRECOMMISSION` / `OPEN_PICKUP` /
     `CHAIRMAN_SELECTS` practice.
+21. Continuation Delta Law. A continuation commission is derived from current canonical state,
+    never copied from a prior commission. Reconcile prior obligations and binding `do_not_redo`;
+    subtract `DONE`, `SUPERSEDED`, and `REJECTED` work. Only `OPEN`, `NEW`, and justified
+    `REVALIDATE_REQUIRED` work may enter executable scope. If no executable work remains, emit
+    `NOTHING_TO_COMMISSION`.
+
+Revalidation is not redo. A completed verification may rerun only when a named subsequent state
+change invalidates the earlier receipt for the required release point.
 
 ## Modification handshake
 
