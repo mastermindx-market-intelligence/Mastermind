@@ -1546,3 +1546,309 @@ def test_new_exclusion_reasons_fall_through_to_no_eligible_candidate():
         eps.ExclusionReason.CREATION_SURFACE_INACCESSIBLE,
         eps.ExclusionReason.SESSION_CREATION_DISALLOWED,
     }
+
+
+# ---------------------------------------------------------------------------
+# wire-integrity repair — source-authority binding
+#
+# Review 5084378111 BLOCKER 1: `validate_placement_selection` validated
+# `selected`, `selected_mode`, `exclusions`, `tied_worker_ids` and
+# `evidence` INDEPENDENTLY and never bound them together, so a caller could
+# staple a separately valid snapshot for worker B onto evidence for worker
+# A — a document `select_placement()` could never have produced — and
+# `compose_control_room()` would render it as the canonical decision.
+#
+# Every forgery below is built by MUTATING a real `select_placement()`
+# output, so each test proves the validator (not the selector) is what
+# refuses it.
+# ---------------------------------------------------------------------------
+
+def _selected_payload(**kwargs) -> dict:
+    """A real SELECTED decision's wire dict — the base every forgery mutates."""
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=_demand(),
+        candidates=(_candidate(**kwargs),),
+    )
+    assert decision.state is eps.SelectionState.SELECTED
+    return decision.to_dict()
+
+
+def test_wire_rejects_selected_snapshot_for_a_worker_with_no_evidence_row():
+    """The headline forgery: a SEPARATELY VALID Phase-B snapshot for worker
+    B, spliced onto a decision whose evidence is entirely about worker A."""
+    payload = _selected_payload(worker_id="worker-a")
+    foreign = principal.build_placement_snapshot(
+        worker_id="worker-b", quota_class="standard", provider="acme",
+        account_label="account1", observed_at_ms=1000,
+    )
+    # The spliced snapshot is itself valid — the forgery is that nothing
+    # in this decision ever OBSERVED worker-b.
+    assert principal.validate_placement_snapshot(foreign) == foreign
+    payload["selected"] = foreign
+    assert [row["worker_id"] for row in payload["evidence"]] == ["worker-a"]
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_wire_rejects_selected_mode_that_contradicts_the_selected_workers_evidence():
+    payload = _selected_payload(mode=eps.PlacementMode.NEW_SESSION_MATERIALIZATION)
+    assert payload["selected_mode"] == "new_session_materialization"
+    assert payload["evidence"][0]["mode"] == "new_session_materialization"
+    payload["selected_mode"] = "existing_session_reuse"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_wire_rejects_a_selected_worker_that_is_also_excluded():
+    """`select_placement` can never do this — the winner is by construction
+    eligible, and only non-eligible candidates are excluded."""
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=_demand(),
+        candidates=(
+            _candidate(worker_id="worker-a"),
+            _candidate(worker_id="worker-b", capabilities=frozenset({"cap_other"})),
+        ),
+    )
+    assert decision.state is eps.SelectionState.SELECTED
+    payload = decision.to_dict()
+    assert payload["selected"]["worker_id"] == "worker-a"
+    assert [e["worker_id"] for e in payload["exclusions"]] == ["worker-b"]
+    payload["exclusions"] = [
+        {"worker_id": "worker-a", "reason": payload["exclusions"][0]["reason"]}
+    ]
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_wire_rejects_a_selected_worker_that_is_also_tied():
+    """Foreclosed twice over: `tied_worker_ids` must be empty unless the
+    state is 'tie_abstained', AND a selected worker may never be tied. The
+    property under test is that the document is refused, not which rule
+    fires first."""
+    payload = _selected_payload(worker_id="worker-a")
+    payload["tied_worker_ids"] = ["worker-a"]
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_wire_rejects_an_exclusion_id_absent_from_evidence():
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=_demand(),
+        candidates=(_candidate(worker_id="worker-a", capabilities=frozenset({"cap_other"})),),
+    )
+    payload = decision.to_dict()
+    assert len(payload["exclusions"]) == 1
+    payload["exclusions"] = [
+        {"worker_id": "worker-ghost", "reason": payload["exclusions"][0]["reason"]}
+    ]
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_wire_rejects_a_tied_id_absent_from_evidence():
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=_demand(),
+        candidates=(_candidate(worker_id="worker-a"), _candidate(worker_id="worker-b")),
+    )
+    assert decision.state is eps.SelectionState.TIE_ABSTAINED
+    payload = decision.to_dict()
+    assert payload["tied_worker_ids"] == ["worker-a", "worker-b"]
+    # still sorted, so the sortedness rule cannot be what refuses this
+    payload["tied_worker_ids"] = ["worker-a", "worker-ghost"]
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_wire_stays_fail_closed_when_the_selected_worker_has_duplicate_evidence():
+    """Duplicate identity is exactly the case `select_placement` refuses to
+    select on at all (it returns RECONCILIATION_REQUIRED). The validator
+    must NOT resolve the ambiguity by picking a row — two rows for the
+    selected worker is a refusal, not a lookup."""
+    payload = _selected_payload(worker_id="worker-a")
+    payload["evidence"] = [payload["evidence"][0], dict(payload["evidence"][0])]
+    payload["evaluated_candidates"] = 2
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+# ---------------------------------------------------------------------------
+# wire-integrity repair — evidence source AUTHORITY (owner), not just shape
+#
+# Review 5084378111 BLOCKER 2: `PlacementCandidateFact` pins occupancy to
+# RUNTIME_BINDING, capacity to CAPACITY and closure to CAPACITY|EXECUTIVE_OS,
+# but `CandidateEvidence.__post_init__` and `_validate_evidence_row`
+# weakened that to "is a SourceRef" / "is a recognized SourceOwner" — so a
+# fabricated row could attribute occupancy to Agent OS/Wake, capacity to
+# Executive Inbox, or closure to Surface Bindings and still pass.
+# ---------------------------------------------------------------------------
+
+def _evidence(**kwargs) -> eps.CandidateEvidence:
+    base = dict(
+        worker_id="worker-a",
+        occupancy=eps.OccupancyState.FREE,
+        occupancy_source=_source(SourceOwner.RUNTIME_BINDING, "binding-a"),
+        capacity_state=CapacityState.AVAILABLE,
+        capacity_source=_source(SourceOwner.CAPACITY, "capacity-a"),
+        host_source_closure_proven=True,
+        closure_source=_source(SourceOwner.CAPACITY, "closure-a"),
+        effect_state=EffectState.NONE,
+        mode=eps.PlacementMode.NEW_SESSION_MATERIALIZATION,
+        creation_surface_accessible=True,
+        session_creation_allowed=True,
+    )
+    base.update(kwargs)
+    return eps.CandidateEvidence(**base)
+
+
+def test_candidate_evidence_accepts_the_authoritative_owners():
+    assert _evidence() is not None
+    # closure may come from EITHER owner in the pinned pair
+    assert _evidence(closure_source=_source(SourceOwner.EXECUTIVE_OS, "closure-a")) is not None
+
+
+@pytest.mark.parametrize(
+    "field, owner",
+    [
+        ("occupancy_source", SourceOwner.AGENT_OS),
+        ("occupancy_source", SourceOwner.WAKE),
+        ("occupancy_source", SourceOwner.CAPACITY),
+        ("capacity_source", SourceOwner.EXECUTIVE_INBOX),
+        ("capacity_source", SourceOwner.RUNTIME_BINDING),
+        ("closure_source", SourceOwner.SURFACE_BINDINGS),
+        ("closure_source", SourceOwner.AGENT_OS),
+    ],
+)
+def test_candidate_evidence_rejects_a_non_authoritative_source_owner(field, owner):
+    """Direct-object regression: the dataclass must pin the SAME owner sets
+    PlacementCandidateFact already pins."""
+    with pytest.raises(ValueError):
+        _evidence(**{field: _source(owner, "forged-ref")})
+
+
+@pytest.mark.parametrize(
+    "field, owner",
+    [
+        ("occupancy_source", "agent_os"),
+        ("occupancy_source", "wake"),
+        ("occupancy_source", "capacity"),
+        ("capacity_source", "executive_inbox"),
+        ("capacity_source", "runtime_binding"),
+        ("closure_source", "surface_bindings"),
+        ("closure_source", "agent_os"),
+    ],
+)
+def test_wire_rejects_a_non_authoritative_evidence_source_owner(field, owner):
+    """Wire regression mirroring the direct-object one: a fabricated
+    document must not be able to re-attribute a fact to an owner that has
+    no authority over it."""
+    payload = _selected_payload(worker_id="worker-a")
+    assert len(payload["evidence"]) == 1  # single row: sortedness cannot be the refusal
+    payload["evidence"][0][field]["owner"] = owner
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_wire_accepts_executive_os_as_a_closure_owner():
+    """The pinned closure pair is CAPACITY|EXECUTIVE_OS — the repair must
+    pin the exact set, not collapse it to a single owner."""
+    payload = _selected_payload(worker_id="worker-a")
+    payload["evidence"][0]["closure_source"]["owner"] = "executive_os"
+    assert eps.validate_placement_selection(payload)["evidence"][0]["closure_source"]["owner"] == "executive_os"
+
+
+# ---------------------------------------------------------------------------
+# wire-integrity repair — MAJOR 3: no caller-controlled key echo
+# ---------------------------------------------------------------------------
+
+def test_top_level_key_error_never_echoes_caller_supplied_key_names():
+    """`compose_control_room()` appends `str(exc)` from this validator into
+    Chairman-visible `degraded`, so the top-level exact-key error must name
+    FIELDS only — never the caller's own keys."""
+    secret = "AWS_SECRET_ACCESS_KEY_AKIAIOSFODNN7EXAMPLE"
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection({secret: "x", "another_caller_key": "y"})
+    message = str(excinfo.value)
+    assert secret not in message
+    assert "another_caller_key" not in message
+    # every key it DOES name is one of this module's own constants
+    for key in _SELECTION_KEYS_FOR_TEST:
+        assert key in message
+
+
+_SELECTION_KEYS_FOR_TEST = sorted(eps._SELECTION_KEYS)
+
+
+def test_top_level_error_on_a_non_mapping_never_echoes_the_value_or_its_type():
+    class AKIAIOSFODNN7EXAMPLE:  # a type name is caller-controlled too
+        pass
+
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(AKIAIOSFODNN7EXAMPLE())
+    assert "AKIAIOSFODNN7EXAMPLE" not in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# wire-integrity repair — the repair must not narrow any GENUINE decision
+# ---------------------------------------------------------------------------
+
+def test_every_genuine_decision_state_still_round_trips_byte_identically():
+    """The binding rules are derived from properties `select_placement`
+    already guarantees, so EVERY real decision — including the duplicate
+    (reconciliation_required) and tie paths the new rules talk about — must
+    still round-trip unchanged."""
+    reuse_demand = _demand(allowed_modes=frozenset({eps.PlacementMode.EXISTING_SESSION_REUSE}))
+    cases = {
+        "selected": (_demand(), (_candidate(worker_id="worker-a"),)),
+        "selected_reuse_mode": (reuse_demand, (_reuse_candidate(worker_id="worker-a"),)),
+        "tie_abstained": (_demand(), (_candidate(worker_id="worker-a"), _candidate(worker_id="worker-b"))),
+        "reconciliation_required_duplicate": (
+            _demand(), (_candidate(worker_id="worker-a"), _candidate(worker_id="worker-a")),
+        ),
+        "no_eligible_candidate": (
+            _demand(), (_candidate(worker_id="worker-a", capabilities=frozenset({"cap_other"})),),
+        ),
+        "no_candidates": (_demand(), ()),
+    }
+    seen_states = set()
+    for name, (demand, candidates) in cases.items():
+        decision = eps.select_placement(
+            responsibility=_responsibility(), demand=demand, candidates=candidates,
+        )
+        seen_states.add(decision.state)
+        payload = decision.to_dict()
+        revalidated = eps.validate_placement_selection(payload)
+        assert revalidated == payload, name
+        assert json.dumps(revalidated, sort_keys=True) == json.dumps(payload, sort_keys=True), name
+        assert payload["selection_is_commitment"] is False, name
+    # the duplicate and tie paths really were exercised
+    assert eps.SelectionState.RECONCILIATION_REQUIRED in seen_states
+    assert eps.SelectionState.TIE_ABSTAINED in seen_states
+    assert eps.SelectionState.SELECTED in seen_states
+
+
+def test_stale_evidence_decision_still_round_trips():
+    decision = eps.select_placement(
+        responsibility=_responsibility(freshness=Freshness.STALE), demand=_demand(),
+        candidates=(_candidate(worker_id="worker-a"),),
+    )
+    assert decision.state is eps.SelectionState.STALE_EVIDENCE
+    payload = decision.to_dict()
+    assert eps.validate_placement_selection(payload) == payload
+
+
+def test_permutation_invariance_survives_the_repair():
+    candidates = (
+        _candidate(worker_id="worker-a"),
+        _candidate(worker_id="worker-b", capacity_state=CapacityState.DEGRADED),
+        _candidate(worker_id="worker-c", capabilities=frozenset({"cap_other"})),
+    )
+    baseline = None
+    for permutation in itertools.permutations(candidates):
+        decision = eps.select_placement(
+            responsibility=_responsibility(), demand=_demand(), candidates=permutation,
+        )
+        payload = json.dumps(decision.to_dict(), sort_keys=True)
+        assert eps.validate_placement_selection(decision.to_dict()) == decision.to_dict()
+        if baseline is None:
+            baseline = payload
+        assert payload == baseline

@@ -47,6 +47,7 @@ from pathlib import Path
 import pytest
 
 from control_plane import chairman_control_room as ccr
+from control_plane import executive_orchestration_principal as principal
 from control_plane import executive_placement_selection as eps
 from control_plane import executive_steward as es
 from control_plane import surface_bindings as sb
@@ -1244,3 +1245,129 @@ def test_module_boots_with_both_selector_modules_absent_at_import_time(tmp_path)
                 sys.modules[name] = module
             else:
                 sys.modules.pop(name, None)
+
+
+# ---------------------------------------------------------------------------
+# CAP-C1 wire-integrity repair — the Control Room is the real consumer
+#
+# Review 5084378111 MAJOR 3: `validate_placement_selection`'s top-level
+# exact-key error rendered `sorted(value)` — the CALLER's own key names —
+# and `compose_control_room()` appends `str(exc)` verbatim to its
+# Chairman-visible `degraded` list. These tests drive the REAL, unmodified
+# `compose_control_room()`; nothing here stubs or monkeypatches the
+# validator, so they prove the end-to-end product behaviour, not a unit
+# contract.
+# ---------------------------------------------------------------------------
+
+#: Shaped like a credential so a leak is unmistakable in any output.
+_SECRET_SHAPED_KEY = "AWS_SECRET_ACCESS_KEY_AKIAIOSFODNN7EXAMPLE"
+
+
+def _placement_degraded(doc) -> list[str]:
+    return [entry for entry in doc["degraded"] if entry.startswith("placement_selection:")]
+
+
+def test_compose_never_echoes_a_secret_shaped_unknown_top_level_key(
+    boot_packet, inbox, active_builds, bindings
+):
+    forged = dict(_valid_placement_selection_wire_dict())
+    forged[_SECRET_SHAPED_KEY] = "s3cr3t-value"
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=forged)
+
+    assert doc["placement_selection"] is None
+    assert _placement_degraded(doc)  # it DID degrade, by name
+    # Zero echo anywhere in the Chairman-visible document — not just in the
+    # degraded list: the key name, and the value it carried.
+    rendered = json.dumps(doc, sort_keys=True)
+    assert _SECRET_SHAPED_KEY not in rendered
+    assert "s3cr3t-value" not in rendered
+    assert "AKIAIOSFODNN7EXAMPLE" not in rendered
+    # compose stays total.
+    assert doc["schema"] == ccr.SCHEMA
+
+
+def test_compose_degraded_reason_for_an_unknown_key_is_constant(
+    boot_packet, inbox, active_builds, bindings
+):
+    """Two different caller-controlled key names must produce the IDENTICAL
+    degraded reason — that is what "constant, field-only" means, and it is
+    the property that makes an echo impossible rather than merely absent in
+    one sample."""
+    reasons = []
+    for key in (_SECRET_SHAPED_KEY, "another_totally_different_caller_key"):
+        forged = dict(_valid_placement_selection_wire_dict())
+        forged[key] = "x"
+        doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=forged)
+        reasons.append(_placement_degraded(doc))
+    assert reasons[0] == reasons[1]
+    assert reasons[0]
+
+
+def test_compose_never_echoes_a_secret_shaped_type_name(
+    boot_packet, inbox, active_builds, bindings
+):
+    class AKIAIOSFODNN7EXAMPLE:  # a caller-controlled type name
+        pass
+
+    doc = _compose(
+        boot_packet, inbox, active_builds, bindings,
+        placement_selection=AKIAIOSFODNN7EXAMPLE(),
+    )
+    assert doc["placement_selection"] is None
+    assert _placement_degraded(doc)
+    assert "AKIAIOSFODNN7EXAMPLE" not in json.dumps(doc, sort_keys=True)
+
+
+def test_compose_refuses_a_forged_selection_naming_a_worker_it_never_observed(
+    boot_packet, inbox, active_builds, bindings
+):
+    """The product-level statement of BLOCKER 1: a separately valid
+    snapshot for worker B, stapled onto evidence about worker-1, must NOT
+    reach the Chairman as a rendered selection."""
+    forged = dict(_valid_placement_selection_wire_dict())
+    assert [row["worker_id"] for row in forged["evidence"]] == ["worker-1"]
+    forged["selected"] = principal.build_placement_snapshot(
+        worker_id="worker-b", quota_class="standard", provider="acme",
+        account_label="account1", observed_at_ms=1000,
+    )
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=forged)
+    assert doc["placement_selection"] is None
+    assert _placement_degraded(doc)
+    # and the forged worker id never renders anywhere
+    assert "worker-b" not in json.dumps(doc, sort_keys=True)
+
+
+def test_compose_refuses_a_forged_selection_with_a_mismatched_mode(
+    boot_packet, inbox, active_builds, bindings
+):
+    forged = dict(_valid_placement_selection_wire_dict())
+    assert forged["selected_mode"] == "new_session_materialization"
+    forged["selected_mode"] = "existing_session_reuse"
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=forged)
+    assert doc["placement_selection"] is None
+    assert _placement_degraded(doc)
+
+
+def test_compose_refuses_evidence_attributed_to_a_non_authoritative_owner(
+    boot_packet, inbox, active_builds, bindings
+):
+    """The product-level statement of BLOCKER 2: occupancy re-attributed to
+    Agent OS must not render as a Chairman-visible decision."""
+    forged = _valid_placement_selection_wire_dict()
+    forged["evidence"][0]["occupancy_source"]["owner"] = "agent_os"
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=forged)
+    assert doc["placement_selection"] is None
+    assert _placement_degraded(doc)
+
+
+def test_compose_still_renders_a_genuine_selection_verbatim_after_the_repair(
+    boot_packet, inbox, active_builds, bindings
+):
+    """The repair must tighten forgeries WITHOUT narrowing a real decision:
+    a genuine select_placement() output still renders byte-identically."""
+    wire = _valid_placement_selection_wire_dict()
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=wire)
+    assert doc["placement_selection"] == wire
+    assert json.dumps(doc["placement_selection"], sort_keys=True) == json.dumps(wire, sort_keys=True)
+    assert not _placement_degraded(doc)
+    assert doc["placement_selection"]["selection_is_commitment"] is False

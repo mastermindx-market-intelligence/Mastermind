@@ -23,8 +23,10 @@ provider action of any kind — it returns an inert
 :class:`PlacementSelectionDecision` describing what a fully evaluated,
 point-in-time selection over already-gathered facts *would* choose. Phase-B
 runtime commitment (actually creating/binding a Job/Attempt/Worker) is
-explicitly held on PR #255 (:mod:`control_plane.executive_runtime`, which
-this module never imports, calls, or simulates).
+NEVER performed here: it belongs to the separate Executive claim owner
+(:mod:`control_plane.executive_runtime`, which this module never imports,
+calls, or simulates). That boundary is a durable property of this module —
+selection is inert — not a status held on any particular carrier.
 
 Per-candidate exclusion is a REFINEMENT of the aggregate precedence
 (:func:`_first_exclusion_reason` checks its gates in the same top-to-bottom
@@ -303,6 +305,17 @@ def _require_bool(name: str, value: object) -> bool:
     return value
 
 
+#: The ONE definition of which owner may attest each candidate fact. Used
+#: by PlacementCandidateFact, CandidateEvidence AND the wire validator, so
+#: the typed and serialized forms can never drift apart (review 5084378111
+#: BLOCKER 2: they had).
+_OCCUPANCY_SOURCE_OWNERS: tuple[SourceOwner, ...] = (SourceOwner.RUNTIME_BINDING,)
+_CAPACITY_SOURCE_OWNERS: tuple[SourceOwner, ...] = (SourceOwner.CAPACITY,)
+_CLOSURE_SOURCE_OWNERS: tuple[SourceOwner, ...] = (
+    SourceOwner.CAPACITY, SourceOwner.EXECUTIVE_OS,
+)
+
+
 def _require_source_owner(
     source: object, allowed: tuple[SourceOwner, ...], fact_name: str
 ) -> SourceRef:
@@ -415,17 +428,15 @@ class PlacementCandidateFact:
         _require_int_at_least("observed_at_ms", self.observed_at_ms, 1)
         _require_enum("occupancy", self.occupancy, OccupancyState)
         _require_source_owner(
-            self.occupancy_source, (SourceOwner.RUNTIME_BINDING,), "occupancy_source"
+            self.occupancy_source, _OCCUPANCY_SOURCE_OWNERS, "occupancy_source"
         )
         _require_enum("capacity_state", self.capacity_state, CapacityState)
         _require_source_owner(
-            self.capacity_source, (SourceOwner.CAPACITY,), "capacity_source"
+            self.capacity_source, _CAPACITY_SOURCE_OWNERS, "capacity_source"
         )
         _require_bool("host_source_closure_proven", self.host_source_closure_proven)
         _require_source_owner(
-            self.closure_source,
-            (SourceOwner.CAPACITY, SourceOwner.EXECUTIVE_OS),
-            "closure_source",
+            self.closure_source, _CLOSURE_SOURCE_OWNERS, "closure_source"
         )
         _require_enum("effect_state", self.effect_state, EffectState)
         _require_enum("mode", self.mode, PlacementMode)
@@ -517,14 +528,24 @@ class CandidateEvidence:
     def __post_init__(self) -> None:
         _require_token("worker_id", self.worker_id)
         _require_enum("occupancy", self.occupancy, OccupancyState)
-        if not isinstance(self.occupancy_source, SourceRef):
-            raise TypeError("occupancy_source must be SourceRef")
+        # Source AUTHORITY, not merely source shape: an evidence row is a
+        # claim about WHO observed a fact, so it must pin the SAME owner
+        # sets PlacementCandidateFact does (occupancy=RUNTIME_BINDING,
+        # capacity=CAPACITY, closure=CAPACITY|EXECUTIVE_OS). Accepting any
+        # SourceRef here would let a row attribute occupancy to Agent OS or
+        # Wake, capacity to the Executive Inbox, or closure to Surface
+        # Bindings — owners with no authority over those facts.
+        _require_source_owner(
+            self.occupancy_source, _OCCUPANCY_SOURCE_OWNERS, "occupancy_source"
+        )
         _require_enum("capacity_state", self.capacity_state, CapacityState)
-        if not isinstance(self.capacity_source, SourceRef):
-            raise TypeError("capacity_source must be SourceRef")
+        _require_source_owner(
+            self.capacity_source, _CAPACITY_SOURCE_OWNERS, "capacity_source"
+        )
         _require_bool("host_source_closure_proven", self.host_source_closure_proven)
-        if not isinstance(self.closure_source, SourceRef):
-            raise TypeError("closure_source must be SourceRef")
+        _require_source_owner(
+            self.closure_source, _CLOSURE_SOURCE_OWNERS, "closure_source"
+        )
         _require_enum("effect_state", self.effect_state, EffectState)
         _require_enum("mode", self.mode, PlacementMode)
         _require_mode_shape(self.mode, self.creation_surface_accessible, self.session_creation_allowed)
@@ -602,9 +623,9 @@ class PlacementSelectionDecision:
     executive_placement_snapshot/v1`` shape
     (:func:`control_plane.executive_orchestration_principal.
     build_placement_snapshot`), i.e. the Phase-B seam: this module hands off
-    to the same snapshot contract PR #255's runtime already speaks, without
-    itself creating any Job/Attempt/Worker/RuntimeBinding or provider
-    action.
+    to the same snapshot contract the Executive runtime already speaks,
+    without itself creating any Job/Attempt/Worker/RuntimeBinding or
+    provider action.
 
     ``tie_breaker_used`` is RESERVED (addendum A): C1 has no tie-breaker
     authority, so this field is always ``None`` on every decision this
@@ -727,10 +748,18 @@ _EVIDENCE_ROW_KEYS = frozenset({
 _SOURCE_REF_KEYS = frozenset({"owner", "ref", "observed_at", "freshness"})
 
 
-def _validate_source_ref_dict(value: Any, *, name: str) -> dict[str, Any]:
+def _validate_source_ref_dict(
+    value: Any, *, name: str, allowed: tuple[SourceOwner, ...]
+) -> dict[str, Any]:
     """Closed-key revalidation of one ``evidence[*].*_source`` row — the
     plain four-field serialization :func:`_source_ref_dict` produces.
     Field-only error messages throughout — never the caller-supplied value.
+
+    ``allowed`` is REQUIRED (review 5084378111 BLOCKER 2): being a
+    *recognized* :class:`SourceOwner` is only a shape check. The wire must
+    enforce the SAME authority the typed dataclasses do, or a fabricated
+    document can re-attribute a fact to an owner that never had standing to
+    observe it.
     """
     if not isinstance(value, Mapping) or set(value) != _SOURCE_REF_KEYS:
         raise ValueError(f"{name} must have exactly {sorted(_SOURCE_REF_KEYS)}")
@@ -738,6 +767,13 @@ def _validate_source_ref_dict(value: Any, *, name: str) -> dict[str, Any]:
         owner = SourceOwner(value["owner"])
     except ValueError as exc:
         raise ValueError(f"{name}.owner is not a recognized SourceOwner value") from exc
+    if owner not in allowed:
+        # Field-only, and the named owners are this module's OWN constants —
+        # never the caller's value.
+        raise ValueError(
+            f"{name}.owner must be one of: "
+            + ", ".join(item.value for item in allowed)
+        )
     ref = _require_token(f"{name}.ref", value["ref"])
     observed_at = value["observed_at"]
     if observed_at is not None:
@@ -772,20 +808,20 @@ def _validate_evidence_row(value: Any) -> dict[str, Any]:
     except ValueError as exc:
         raise ValueError("evidence.occupancy is not a recognized OccupancyState value") from exc
     occupancy_source = _validate_source_ref_dict(
-        value["occupancy_source"], name="evidence.occupancy_source"
+        value["occupancy_source"], name="evidence.occupancy_source", allowed=_OCCUPANCY_SOURCE_OWNERS
     )
     try:
         capacity_state = CapacityState(value["capacity_state"])
     except ValueError as exc:
         raise ValueError("evidence.capacity_state is not a recognized CapacityState value") from exc
     capacity_source = _validate_source_ref_dict(
-        value["capacity_source"], name="evidence.capacity_source"
+        value["capacity_source"], name="evidence.capacity_source", allowed=_CAPACITY_SOURCE_OWNERS
     )
     host_source_closure_proven = value["host_source_closure_proven"]
     if type(host_source_closure_proven) is not bool:
         raise TypeError("evidence.host_source_closure_proven must be bool")
     closure_source = _validate_source_ref_dict(
-        value["closure_source"], name="evidence.closure_source"
+        value["closure_source"], name="evidence.closure_source", allowed=_CLOSURE_SOURCE_OWNERS
     )
     try:
         effect_state = EffectState(value["effect_state"])
@@ -833,11 +869,29 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
     ``selection_is_commitment`` must be exactly ``false``; and
     ``evaluated_candidates`` equals ``len(evidence)`` exactly and is never
     smaller than ``len(exclusions)``.
+
+    Beyond those, it enforces SOURCE-AUTHORITY BINDING — the parts of a
+    decision must refer to one another, so that only a document
+    :func:`select_placement` could coherently have produced is accepted: a
+    ``selected`` snapshot must correspond to exactly ONE ``evidence`` row
+    for the same ``worker_id`` (zero rows means the decision never observed
+    that worker; more than one is duplicate identity, which fails closed
+    rather than being resolved by picking a row), ``selected_mode`` must
+    equal that row's ``mode``, the selected worker may not simultaneously
+    appear in ``exclusions``/``tied_worker_ids``, and every exclusion/tied
+    id must be represented in ``evidence``.
     """
     if not isinstance(value, Mapping) or set(value) != _SELECTION_KEYS:
-        actual = sorted(value) if isinstance(value, Mapping) else type(value).__name__
+        # Review 5084378111 MAJOR 3: this previously rendered
+        # `sorted(value)` (the CALLER's own key names) / `type(value).
+        # __name__` into the message, and `compose_control_room()` appends
+        # `str(exc)` verbatim to its Chairman-visible `degraded` list — so a
+        # malformed document could echo a secret-shaped key straight onto
+        # the Control Room. The message now names this module's OWN closed
+        # key set and nothing else, matching every other closed-key error
+        # here.
         raise ValueError(
-            f"placement selection must have exactly {sorted(_SELECTION_KEYS)}; got {actual}"
+            f"placement selection must have exactly {sorted(_SELECTION_KEYS)}"
         )
 
     if value["schema_version"] != SELECTION_SCHEMA:
@@ -923,6 +977,57 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
         raise ValueError("evaluated_candidates must be >= the number of tied_worker_ids")
     if evaluated_candidates != len(evidence):
         raise ValueError("evaluated_candidates must equal the number of evidence rows")
+
+    # --- source-authority binding (review 5084378111 BLOCKER 1) -----------
+    # Every rule above validates ONE field in isolation. Without the rules
+    # below, `selected`, `selected_mode`, `exclusions`, `tied_worker_ids`
+    # and `evidence` are five independently-valid islands, and a caller can
+    # staple a separately valid snapshot for worker B onto evidence
+    # gathered about worker A. `compose_control_room()` treats this
+    # function as THE decision gate, so such a document would be displayed
+    # as a real selection that `select_placement()` never produced.
+    #
+    # Each rule below is a property `select_placement()` already
+    # guarantees by construction, so no genuine decision is narrowed:
+    # duplicates always short-circuit to `reconciliation_required` (never
+    # `selected`), the winner is drawn from the eligible set (so it is
+    # never excluded), a tie leaves `selected` unset, and every exclusion/
+    # tie id names a candidate that necessarily has an evidence row.
+    known_worker_ids = frozenset(row["worker_id"] for row in evidence)
+
+    if selected is not None:
+        selected_worker_id = selected["worker_id"]
+        matching = [
+            row for row in evidence if row["worker_id"] == selected_worker_id
+        ]
+        if len(matching) != 1:
+            # Zero rows: the decision never observed this worker at all.
+            # More than one: duplicate identity — the exact case
+            # select_placement() refuses to select on. Fail CLOSED; never
+            # resolve the ambiguity by picking a row.
+            raise ValueError(
+                "selected must correspond to exactly one evidence row for the "
+                "same worker_id"
+            )
+        if selected_mode is not None and matching[0]["mode"] != selected_mode.value:
+            raise ValueError(
+                "selected_mode must equal the selected worker's evidence mode"
+            )
+        if any(item["worker_id"] == selected_worker_id for item in exclusions):
+            raise ValueError("selected worker_id must not also appear in exclusions")
+        if selected_worker_id in tied_raw:
+            raise ValueError("selected worker_id must not also appear in tied_worker_ids")
+
+    for item in exclusions:
+        if item["worker_id"] not in known_worker_ids:
+            raise ValueError(
+                "every exclusion worker_id must be represented in evidence"
+            )
+    for worker_id in tied_raw:
+        if worker_id not in known_worker_ids:
+            raise ValueError(
+                "every tied worker_id must be represented in evidence"
+            )
 
     return {
         "schema_version": SELECTION_SCHEMA,
