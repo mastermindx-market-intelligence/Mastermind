@@ -14,6 +14,7 @@ from control_plane.sol_watcher_contract import (
     render_watcher_prompt,
     validate_watcher_prompt,
 )
+from scripts import audit_sol_watchers as watcher_audit_cli
 
 
 ACTION_CARRIER = "slack:C0BSBM78V1N/1788308881.756489"
@@ -437,3 +438,197 @@ def test_cli_returns_two_for_malformed_input(tmp_path, capsys) -> None:
     error = json.loads(capsys.readouterr().err)
     assert error["schema"] == "mastermind.sol_watcher_audit_error.v1"
     assert error["error"] == "INVALID_INPUT"
+
+
+@pytest.mark.parametrize(
+    "source_text",
+    (
+        '{"tasks": [], "tasks": []}',
+        (
+            '{"tasks": [{"id": "first", "id": "secret-duplicate-id", '
+            '"title": "Duplicate key", "is_enabled": false, '
+            '"audit_kind": "NON_WATCHER", "prompt": "ordinary"}]}'
+        ),
+    ),
+)
+def test_cli_refuses_duplicate_json_keys_at_every_depth_without_echoing_input(
+    source_text: str, tmp_path, capsys
+) -> None:
+    """Replacing the strict decoder with json.loads must fail this test."""
+
+    source = tmp_path / "tasks.json"
+    source.write_text(source_text, encoding="utf-8")
+
+    assert watcher_audit_cli.main([str(source)]) == 2
+    error = json.loads(capsys.readouterr().err)
+    assert error == {
+        "schema": "mastermind.sol_watcher_audit_error.v1",
+        "error": "INVALID_INPUT",
+        "message": "duplicate JSON object keys are not allowed",
+    }
+    assert "secret-duplicate-id" not in json.dumps(error)
+
+
+def test_declared_non_watcher_cannot_exempt_an_exact_watcher_discriminator() -> None:
+    """Changing the NON_WATCHER branch to early-return must fail this test."""
+
+    report = audit_tasks(
+        [
+            {
+                "id": "mislabeled-watcher",
+                "title": "Mislabeled managed watcher",
+                "is_enabled": True,
+                "audit_kind": "NON_WATCHER",
+                "prompt": _prompt(),
+            }
+        ]
+    )
+
+    assert report.valid is False
+    assert report.invalid_classification_tasks == 1
+    task = report.tasks[0]
+    assert task.evaluated is True
+    assert task.audit is not None
+    assert any(
+        finding.code is FindingCode.CLASSIFICATION_MISMATCH
+        and finding.field == "audit_kind"
+        for finding in task.audit.findings
+    )
+
+
+def test_cli_preserves_every_row_for_a_valid_list_with_a_non_object_task(tmp_path, capsys) -> None:
+    """Reinstating CLI-wide non-object rejection must fail this test."""
+
+    source = tmp_path / "tasks.json"
+    source.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "clean-one",
+                    "title": "Clean one",
+                    "is_enabled": True,
+                    "prompt": _prompt(),
+                },
+                ["malformed native task"],
+                {
+                    "id": "clean-two",
+                    "title": "Clean two",
+                    "is_enabled": True,
+                    "prompt": _prompt(),
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert watcher_audit_cli.main([str(source)]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["summary"] == {
+        "total_tasks": 3,
+        "enabled_tasks": 2,
+        "valid_enabled_tasks": 2,
+        "invalid_enabled_tasks": 0,
+        "invalid_classification_tasks": 0,
+        "invalid_export_tasks": 1,
+        "duplicate_task_ids": [],
+    }
+    assert [task["task_id"] for task in report["tasks"]] == [
+        "clean-one",
+        "invalid-task-1",
+        "clean-two",
+    ]
+
+
+def test_explicit_export_byte_and_task_count_limits_have_exact_boundaries(tmp_path, capsys) -> None:
+    """Removing a raw-byte/count guard or changing >= to > must fail this test."""
+
+    clean_export = json.dumps(
+        [
+            {
+                "id": "ordinary",
+                "title": "Ordinary reminder",
+                "is_enabled": True,
+                "audit_kind": "NON_WATCHER",
+                "prompt": "ordinary reminder",
+            }
+        ]
+    )
+    exact_bytes = clean_export + " " * (
+        watcher_audit_cli.MAX_INPUT_BYTES - len(clean_export.encode("utf-8"))
+    )
+    over_bytes = exact_bytes + " "
+    exact_source = tmp_path / "exact-bytes.json"
+    over_source = tmp_path / "over-bytes.json"
+    exact_source.write_text(exact_bytes, encoding="utf-8")
+    over_source.write_text(over_bytes, encoding="utf-8")
+
+    assert watcher_audit_cli.main([str(exact_source)]) == 0
+    assert watcher_audit_cli.main([str(over_source)]) == 2
+    assert json.loads(capsys.readouterr().err) == {
+        "schema": "mastermind.sol_watcher_audit_error.v1",
+        "error": "INVALID_INPUT",
+        "message": "input exceeds maximum allowed size",
+    }
+
+    exact_tasks = [
+        {
+            "id": f"ordinary-{index}",
+            "title": "Ordinary reminder",
+            "is_enabled": False,
+            "audit_kind": "NON_WATCHER",
+            "prompt": "ordinary reminder",
+        }
+        for index in range(watcher_audit_cli.MAX_EXPORT_TASKS)
+    ]
+    exact_count_source = tmp_path / "exact-count.json"
+    over_count_source = tmp_path / "over-count.json"
+    exact_count_source.write_text(json.dumps(exact_tasks), encoding="utf-8")
+    over_count_source.write_text(
+        json.dumps(exact_tasks + [exact_tasks[-1] | {"id": "ordinary-over"}]),
+        encoding="utf-8",
+    )
+
+    assert watcher_audit_cli.main([str(exact_count_source)]) == 0
+    assert watcher_audit_cli.main([str(over_count_source)]) == 2
+    assert json.loads(capsys.readouterr().err) == {
+        "schema": "mastermind.sol_watcher_audit_error.v1",
+        "error": "INVALID_INPUT",
+        "message": "task count exceeds maximum allowed size",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "limit_name"),
+    (
+        ("id", "MAX_TASK_ID_BYTES"),
+        ("title", "MAX_TASK_TITLE_BYTES"),
+        ("prompt", "MAX_TASK_PROMPT_BYTES"),
+    ),
+)
+def test_task_text_byte_limits_accept_the_boundary_and_report_one_over(
+    field: str, limit_name: str
+) -> None:
+    """Dropping per-field byte limits must fail this test."""
+
+    limit = getattr(watcher_audit_cli, limit_name)
+    exact = {
+        "id": "id" if field != "id" else "i" * limit,
+        "title": "title" if field != "title" else "t" * limit,
+        "is_enabled": False,
+        "audit_kind": "NON_WATCHER",
+        "prompt": "ordinary reminder" if field != "prompt" else "p" * limit,
+    }
+
+    assert audit_tasks([exact]).valid is True
+
+    one_over = exact | {field: "x" * (limit + 1)}
+    report = audit_tasks([one_over])
+    assert report.valid is False
+    assert report.invalid_export_tasks == 1
+    assert report.tasks[0].audit is not None
+    assert any(
+        finding.code is FindingCode.TASK_FIELD_TOO_LARGE
+        and finding.field == field
+        and finding.message == "task field exceeds maximum allowed size"
+        for finding in report.tasks[0].audit.findings
+    )

@@ -31,6 +31,14 @@ _AGGREGATE_CARRIER_RE = re.compile(r"^aggregate:[a-z0-9][a-z0-9._/-]{2,127}$")
 _OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
 _EDGE_RE = re.compile(r"^(?:NONE|\d{10}\.\d{6}|[A-Za-z0-9][A-Za-z0-9._:/-]{1,255})$")
 _AUDIT_KINDS = frozenset({"SOL_WATCHER", "NON_WATCHER"})
+MAX_EXPORT_TASKS = 1_000
+MAX_TASK_ID_BYTES = 512
+MAX_TASK_TITLE_BYTES = 4_096
+MAX_TASK_PROMPT_BYTES = 65_536
+
+
+class TaskExportLimitError(ValueError):
+    """Raised when an audit iterable exceeds its fixed safe task ceiling."""
 
 
 class WatcherRole(str, Enum):
@@ -72,6 +80,8 @@ class FindingCode(str, Enum):
     INVALID_TASK_ID = "INVALID_TASK_ID"
     INVALID_ENABLED_FLAG = "INVALID_ENABLED_FLAG"
     DUPLICATE_TASK_ID = "DUPLICATE_TASK_ID"
+    CLASSIFICATION_MISMATCH = "CLASSIFICATION_MISMATCH"
+    TASK_FIELD_TOO_LARGE = "TASK_FIELD_TOO_LARGE"
 
 
 @dataclass(frozen=True)
@@ -231,6 +241,7 @@ _EXPORT_FINDING_CODES = frozenset(
         FindingCode.INVALID_TASK_ID,
         FindingCode.INVALID_ENABLED_FLAG,
         FindingCode.DUPLICATE_TASK_ID,
+        FindingCode.TASK_FIELD_TOO_LARGE,
     }
 )
 
@@ -511,7 +522,26 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
     )
 
 
+def _text_exceeds_byte_limit(value: Any, limit: int) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        return len(value.encode("utf-8")) > limit
+    except UnicodeEncodeError:
+        return True
+
+
+def _field_too_large(field: str) -> ContractFinding:
+    return _finding(
+        FindingCode.TASK_FIELD_TOO_LARGE,
+        "task field exceeds maximum allowed size",
+        field=field,
+    )
+
+
 def _normalize_task_id(value: Any, *, field: str) -> tuple[str | None, ContractFinding | None]:
+    if _text_exceeds_byte_limit(value, MAX_TASK_ID_BYTES):
+        return None, _field_too_large(field)
     if not isinstance(value, str) or not value.strip():
         return None, _finding(
             FindingCode.INVALID_TASK_ID,
@@ -599,10 +629,34 @@ def _extract_enabled(raw: Mapping[str, Any]) -> tuple[bool, list[ContractFinding
     return normalized.get("is_enabled", normalized.get("enabled", False)), findings
 
 
-def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
+def _materialize_tasks(tasks: Iterable[Any]) -> list[Any]:
+    materialized: list[Any] = []
+    for index, raw in enumerate(tasks):
+        if index >= MAX_EXPORT_TASKS:
+            raise TaskExportLimitError("task count exceeds maximum allowed size")
+        materialized.append(raw)
+    return materialized
+
+
+def _extract_title(raw: Mapping[str, Any]) -> tuple[str, list[ContractFinding]]:
+    value = raw.get("title")
+    if value is None:
+        return "", []
+    if _text_exceeds_byte_limit(value, MAX_TASK_TITLE_BYTES):
+        return "", [_field_too_large("title")]
+    return str(value), []
+
+
+def _prompt_uses_exact_discriminator(prompt: Any) -> bool:
+    if not isinstance(prompt, str):
+        return False
+    return _normalize_document(prompt).split("\n", 1)[0] == DISCRIMINATOR
+
+
+def audit_tasks(tasks: Iterable[Any]) -> AuditReport:
     """Audit an account-local task export without contacting or mutating a task store."""
 
-    materialized = list(tasks)
+    materialized = _materialize_tasks(tasks)
     candidate_ids: list[str] = []
     for index, raw in enumerate(materialized):
         if not isinstance(raw, Mapping):
@@ -642,7 +696,11 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
         task_id, wrapper_findings = _extract_task_id(raw, index)
         enabled, enabled_findings = _extract_enabled(raw)
         wrapper_findings.extend(enabled_findings)
-        title = str(raw.get("title") or "")
+        title, title_findings = _extract_title(raw)
+        wrapper_findings.extend(title_findings)
+        prompt = raw.get("prompt", "")
+        if _text_exceeds_byte_limit(prompt, MAX_TASK_PROMPT_BYTES):
+            wrapper_findings.append(_field_too_large("prompt"))
         raw_audit_kind = raw.get("audit_kind", "SOL_WATCHER")
         if not isinstance(raw_audit_kind, str):
             audit_kind = "INVALID"
@@ -660,6 +718,14 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
                 _finding(
                     FindingCode.INVALID_TASK,
                     f"unknown audit_kind {audit_kind!r}",
+                    field="audit_kind",
+                )
+            )
+        elif audit_kind == "NON_WATCHER" and _prompt_uses_exact_discriminator(prompt):
+            wrapper_findings.append(
+                _finding(
+                    FindingCode.CLASSIFICATION_MISMATCH,
+                    "managed watcher discriminator cannot be declared NON_WATCHER",
                     field="audit_kind",
                 )
             )
@@ -705,7 +771,7 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
                 enabled=True,
                 evaluated=True,
                 audit_kind=audit_kind,
-                audit=validate_watcher_prompt(raw.get("prompt", "")),
+                audit=validate_watcher_prompt(prompt),
             )
         )
 
@@ -720,8 +786,11 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
         bool(
             result.audit
             and any(
-                finding.code is FindingCode.INVALID_TASK
-                and finding.field == "audit_kind"
+                finding.code is FindingCode.CLASSIFICATION_MISMATCH
+                or (
+                    finding.code is FindingCode.INVALID_TASK
+                    and finding.field == "audit_kind"
+                )
                 for finding in result.audit.findings
             )
         )
