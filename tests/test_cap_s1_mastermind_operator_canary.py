@@ -17,6 +17,7 @@ import dataclasses
 import io
 import json
 import os
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -24,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+import scripts.ohf.capability_skill_projection as capability_skill_projection
 from control_plane.executive_capability_packages import (
     CapabilityPackageError,
     CapabilityPackageGeneration,
@@ -32,8 +34,11 @@ from control_plane.executive_capability_packages import (
     verify_capability_package_source,
 )
 from scripts.ohf.capability_skill_projection import (
+    ORIGIN_AUTHENTICATION_EPHEMERAL_GIT_ARCHIVE,
+    ORIGIN_AUTHENTICATION_INSTALLED_RELEASE,
     ORIGIN_INSTALLED_RELEASE,
     ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE,
+    EphemeralGitOriginReceipt,
     SkillProjectionCleanupReceipt,
     SkillProjectionError,
     SkillProjectionReceipt,
@@ -41,6 +46,7 @@ from scripts.ohf.capability_skill_projection import (
     cleanup_skill_projection,
     create_ephemeral_archive_origin,
     stage_skill_projection,
+    validate_skill_projection_receipt,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -70,6 +76,32 @@ def _resolve_repo_git_dir() -> Path:
     return git_dir_path
 
 
+def _real_package_tree_sha() -> str:
+    git_dir = _resolve_repo_git_dir()
+    return subprocess.check_output(
+        ["git", f"--git-dir={git_dir}", "rev-parse", f"{REAL_SOURCE_COMMIT}:plugins/mastermind-operator"],
+        text=True,
+    ).strip()
+
+
+def _build_installed_release_origin(
+    root_dir: Path, generation: CapabilityPackageGeneration, *, basename: "str | None" = None
+) -> Path:
+    """Build a small, real (non-symlink) INSTALLED_RELEASE-shaped origin by
+    copying the real, already-reviewed package tree under a directory named
+    after the generation's ``source_commit`` -- the Executive installer's
+    ``releases/<sha>`` layout ``stage_skill_projection`` now authenticates
+    against (Sol wave-3 review finding M6). ``basename`` overrides the
+    directory name for the negative authentication tests.
+    """
+    name = generation.source_commit if basename is None else basename
+    release_root = root_dir / name
+    package_dest = release_root / generation.package_root
+    package_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(PACKAGE_ROOT, package_dest)
+    return release_root
+
+
 # ---------------------------------------------------------------------------
 # Fixture sanity: the frozen digests this whole module pins against
 # ---------------------------------------------------------------------------
@@ -90,13 +122,14 @@ def test_fixture_generation_matches_frozen_digests():
 
 def test_stage_skill_projection_happy_path_installed_release(tmp_path):
     generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
     attempt_root = tmp_path / "attempt"
     attempt_root.mkdir()
 
     receipt = stage_skill_projection(
         generation=generation,
         origin_mode=ORIGIN_INSTALLED_RELEASE,
-        origin_root=REPO_ROOT,
+        origin_root=origin_root,
         attempt_root=attempt_root,
         owning_operation_id=OPERATION_ID,
         owning_process_generation="happy-path-0001",
@@ -121,6 +154,19 @@ def test_stage_skill_projection_happy_path_installed_release(tmp_path):
     assert receipt.cleanup_state == "LIVE"
     assert receipt.read_only_applied is True
 
+    # --- Sol wave-3 M6 hardening: the extended receipt shape -------------
+    assert receipt.schema_version == "mastermind.skill_projection_receipt/v1"
+    assert receipt.origin_authentication == ORIGIN_AUTHENTICATION_INSTALLED_RELEASE
+    assert tuple(sorted(receipt.origin_rows)) == tuple(sorted(receipt.projection_rows))
+    assert len(receipt.origin_rows) == 7
+    assert receipt.origin_resolved_root == os.path.realpath(str(origin_root))
+    assert receipt.projection_resolved_root == os.path.realpath(receipt.projection_root)
+    assert receipt.attempt_root == str(attempt_root)
+    assert receipt.attempt_root_identity == (os.lstat(str(attempt_root)).st_dev, os.lstat(str(attempt_root)).st_ino)
+    assert receipt.created_at_monotonic_ns > 0
+    # A happy-path receipt is, by construction, its own valid witness.
+    validate_skill_projection_receipt(receipt)
+
     # Byte-identical re-verification through the real package verifier,
     # independent of stage_skill_projection's own internal call.
     reverified = verify_capability_package_source(receipt.projection_root, generation)
@@ -140,7 +186,38 @@ def test_stage_skill_projection_happy_path_installed_release(tmp_path):
     assert isinstance(cleanup, SkillProjectionCleanupReceipt)
     assert cleanup.removed is True
     assert cleanup.verified_absent is True
+    assert cleanup.schema_version == "mastermind.skill_projection_cleanup/v1"
     assert not Path(receipt.projection_root).exists()
+
+
+# ---------------------------------------------------------------------------
+# INSTALLED_RELEASE authentication (Sol wave-3 review finding M6)
+# ---------------------------------------------------------------------------
+
+
+def test_stage_installed_release_rejects_unauthenticated_basename(tmp_path):
+    """A byte-identical origin under a basename that is NOT the exact
+    generation ``source_commit`` no longer authenticates as
+    ``INSTALLED_RELEASE`` -- a plain checkout root must refuse, not just a
+    hostile one."""
+    generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(
+        tmp_path / "origin", generation, basename="not-the-source-commit"
+    )
+    attempt_root = tmp_path / "attempt"
+    attempt_root.mkdir()
+
+    with pytest.raises(SkillProjectionError, match="installed_release_root_unauthenticated"):
+        stage_skill_projection(
+            generation=generation,
+            origin_mode=ORIGIN_INSTALLED_RELEASE,
+            origin_root=origin_root,
+            attempt_root=attempt_root,
+            owning_operation_id=OPERATION_ID,
+            owning_process_generation="unauthenticated-basename-0001",
+        )
+    # Nothing should have been staged.
+    assert list(attempt_root.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------
@@ -167,13 +244,19 @@ def test_ephemeral_archive_origin_and_projection_end_to_end(tmp_path):
     scratch_root = tmp_path / "scratch"
     scratch_root.mkdir()
 
-    origin_root = create_ephemeral_archive_origin(
+    origin_receipt = create_ephemeral_archive_origin(
         repository_git_dir=git_dir,
         source_commit=REAL_SOURCE_COMMIT,
         package_root=generation.package_root,
         scratch_root=scratch_root,
+        expected_package_tree_sha=generation.source_tree_sha,
     )
-    assert isinstance(origin_root, Path)
+    assert isinstance(origin_receipt, EphemeralGitOriginReceipt)
+    assert origin_receipt.schema_version == "mastermind.ephemeral_git_origin/v1"
+    assert origin_receipt.source_commit == REAL_SOURCE_COMMIT
+    assert origin_receipt.source_tree_sha == generation.source_tree_sha
+    assert origin_receipt.member_count == 7
+    origin_root = Path(origin_receipt.origin_root)
 
     verified = verify_capability_package_source(origin_root, generation)
     assert verified.package_generation_digest == EXPECTED_PACKAGE_GENERATION_DIGEST
@@ -187,14 +270,94 @@ def test_ephemeral_archive_origin_and_projection_end_to_end(tmp_path):
         attempt_root=attempt_root,
         owning_operation_id=OPERATION_ID,
         owning_process_generation="ephemeral-0001",
+        origin_receipt=origin_receipt,
     )
     assert receipt.origin_mode == ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE
+    assert receipt.origin_authentication == ORIGIN_AUTHENTICATION_EPHEMERAL_GIT_ARCHIVE
     assert receipt.package_generation_digest == EXPECTED_PACKAGE_GENERATION_DIGEST
     assert len(receipt.file_rows) == 7
+    validate_skill_projection_receipt(receipt)
 
     cleanup = cleanup_skill_projection(receipt)
     assert cleanup.removed is True
     assert cleanup.verified_absent is True
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral origin receipt (Sol wave-3 review finding M6)
+# ---------------------------------------------------------------------------
+
+
+def test_create_ephemeral_archive_origin_expected_package_tree_sha_mismatch_refuses(tmp_path):
+    git_dir = _resolve_repo_git_dir()
+    generation = _load_real_generation()
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+
+    with pytest.raises(SkillProjectionError, match="package_tree_sha_mismatch"):
+        create_ephemeral_archive_origin(
+            repository_git_dir=git_dir,
+            source_commit=REAL_SOURCE_COMMIT,
+            package_root=generation.package_root,
+            scratch_root=scratch_root,
+            expected_package_tree_sha="f" * 40,
+        )
+
+
+def test_stage_ephemeral_without_origin_receipt_refuses(tmp_path):
+    git_dir = _resolve_repo_git_dir()
+    generation = _load_real_generation()
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+
+    origin_receipt = create_ephemeral_archive_origin(
+        repository_git_dir=git_dir,
+        source_commit=REAL_SOURCE_COMMIT,
+        package_root=generation.package_root,
+        scratch_root=scratch_root,
+    )
+    attempt_root = tmp_path / "attempt"
+    attempt_root.mkdir()
+
+    with pytest.raises(SkillProjectionError, match="ephemeral_origin_receipt_required"):
+        stage_skill_projection(
+            generation=generation,
+            origin_mode=ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE,
+            origin_root=Path(origin_receipt.origin_root),
+            attempt_root=attempt_root,
+            owning_operation_id=OPERATION_ID,
+            owning_process_generation="no-receipt-0001",
+        )
+    assert list(attempt_root.iterdir()) == []
+
+
+def test_stage_ephemeral_with_doctored_origin_receipt_refuses(tmp_path):
+    git_dir = _resolve_repo_git_dir()
+    generation = _load_real_generation()
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+
+    origin_receipt = create_ephemeral_archive_origin(
+        repository_git_dir=git_dir,
+        source_commit=REAL_SOURCE_COMMIT,
+        package_root=generation.package_root,
+        scratch_root=scratch_root,
+    )
+    doctored = dataclasses.replace(origin_receipt, source_commit="f" * 40)
+    attempt_root = tmp_path / "attempt"
+    attempt_root.mkdir()
+
+    with pytest.raises(SkillProjectionError, match="ephemeral_origin_receipt_commit_mismatch"):
+        stage_skill_projection(
+            generation=generation,
+            origin_mode=ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE,
+            origin_root=Path(origin_receipt.origin_root),
+            attempt_root=attempt_root,
+            owning_operation_id=OPERATION_ID,
+            owning_process_generation="doctored-receipt-0001",
+            origin_receipt=doctored,
+        )
+    assert list(attempt_root.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------
@@ -219,12 +382,13 @@ def test_stage_rejects_unsupported_origin_mode(tmp_path):
 
 def test_stage_rejects_missing_attempt_root(tmp_path):
     generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
     missing = tmp_path / "does-not-exist"
-    with pytest.raises(SkillProjectionError):
+    with pytest.raises(SkillProjectionError, match="attempt_root_unavailable"):
         stage_skill_projection(
             generation=generation,
             origin_mode=ORIGIN_INSTALLED_RELEASE,
-            origin_root=REPO_ROOT,
+            origin_root=origin_root,
             attempt_root=missing,
             owning_operation_id=OPERATION_ID,
             owning_process_generation="missing-root-0001",
@@ -238,11 +402,12 @@ def test_stage_rejects_symlinked_attempt_root(tmp_path):
     os.symlink(real_dir, link_dir)
 
     generation = _load_real_generation()
-    with pytest.raises(SkillProjectionError):
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
+    with pytest.raises(SkillProjectionError, match="attempt_root_symlink_refused"):
         stage_skill_projection(
             generation=generation,
             origin_mode=ORIGIN_INSTALLED_RELEASE,
-            origin_root=REPO_ROOT,
+            origin_root=origin_root,
             attempt_root=link_dir,
             owning_operation_id=OPERATION_ID,
             owning_process_generation="symlink-root-0001",
@@ -251,16 +416,17 @@ def test_stage_rejects_symlinked_attempt_root(tmp_path):
 
 def test_stage_rejects_preexisting_projection_directory(tmp_path):
     generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
     attempt_root = tmp_path / "attempt"
     attempt_root.mkdir()
     gen_token = "exclusivity-0001"
     (attempt_root / f"skill-projection-{gen_token}").mkdir()
 
-    with pytest.raises(SkillProjectionError):
+    with pytest.raises(SkillProjectionError, match="projection_root_exists"):
         stage_skill_projection(
             generation=generation,
             origin_mode=ORIGIN_INSTALLED_RELEASE,
-            origin_root=REPO_ROOT,
+            origin_root=origin_root,
             attempt_root=attempt_root,
             owning_operation_id=OPERATION_ID,
             owning_process_generation=gen_token,
@@ -381,12 +547,13 @@ def test_create_ephemeral_archive_origin_rejects_unknown_commit(tmp_path):
 
 def test_cleanup_refuses_doctored_projection_root_and_leaves_it_untouched(tmp_path):
     generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
     attempt_root = tmp_path / "attempt"
     attempt_root.mkdir()
     receipt = stage_skill_projection(
         generation=generation,
         origin_mode=ORIGIN_INSTALLED_RELEASE,
-        origin_root=REPO_ROOT,
+        origin_root=origin_root,
         attempt_root=attempt_root,
         owning_operation_id=OPERATION_ID,
         owning_process_generation="containment-0001",
@@ -426,6 +593,46 @@ def test_cleanup_refuses_doctored_projection_root_and_leaves_it_untouched(tmp_pa
     assert real_cleanup.verified_absent is True
 
 
+def test_cleanup_refuses_doctored_attempt_root_identity_and_deletes_nothing(tmp_path):
+    """Sol wave-3 review finding M6: cleanup authorization must bind the
+    EXACT attempt-root parent identity, not merely the projection root's own
+    basename and inode. A receipt whose ``attempt_root_identity`` no longer
+    matches the real parent directory's identity refuses -- even though the
+    projection root's own name and identity are perfectly correct -- and the
+    real tree must survive untouched."""
+    generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
+    attempt_root = tmp_path / "attempt"
+    attempt_root.mkdir()
+    receipt = stage_skill_projection(
+        generation=generation,
+        origin_mode=ORIGIN_INSTALLED_RELEASE,
+        origin_root=origin_root,
+        attempt_root=attempt_root,
+        owning_operation_id=OPERATION_ID,
+        owning_process_generation="parent-binding-0001",
+    )
+
+    other_dir = tmp_path / "some-other-directory"
+    other_dir.mkdir()
+    other_identity = (os.lstat(str(other_dir)).st_dev, os.lstat(str(other_dir)).st_ino)
+    assert other_identity != receipt.attempt_root_identity
+
+    doctored = dataclasses.replace(receipt, attempt_root_identity=other_identity)
+    with pytest.raises(SkillProjectionError, match="projection_root_parent_identity_mismatch"):
+        cleanup_skill_projection(doctored)
+
+    # Nothing was deleted: the real projection tree survives.
+    assert Path(receipt.projection_root).exists()
+    reverified = verify_capability_package_source(receipt.projection_root, generation)
+    assert reverified.package_generation_digest == EXPECTED_PACKAGE_GENERATION_DIGEST
+
+    # Clean up for real so the test leaves nothing behind.
+    real_cleanup = cleanup_skill_projection(receipt)
+    assert real_cleanup.removed is True
+    assert real_cleanup.verified_absent is True
+
+
 def test_error_messages_never_echo_hostile_origin_mode(tmp_path):
     generation = _load_real_generation()
     attempt_root = tmp_path / "attempt"
@@ -445,12 +652,13 @@ def test_error_messages_never_echo_hostile_origin_mode(tmp_path):
 
 def test_error_messages_never_echo_hostile_paths(tmp_path):
     generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
     hostile_path = tmp_path / "\U0001F525do-not-echo-this-secret\U0001F525"
     with pytest.raises(SkillProjectionError) as exc_info:
         stage_skill_projection(
             generation=generation,
             origin_mode=ORIGIN_INSTALLED_RELEASE,
-            origin_root=REPO_ROOT,
+            origin_root=origin_root,
             attempt_root=hostile_path,
             owning_operation_id=OPERATION_ID,
             owning_process_generation="no-echo-path-0001",
@@ -465,12 +673,13 @@ def test_cleanup_reports_failure_honestly_when_parent_undeletable(tmp_path):
         pytest.skip("root bypasses permission checks; cannot force an undeletable directory")
 
     generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
     attempt_root = tmp_path / "attempt"
     attempt_root.mkdir()
     receipt = stage_skill_projection(
         generation=generation,
         origin_mode=ORIGIN_INSTALLED_RELEASE,
-        origin_root=REPO_ROOT,
+        origin_root=origin_root,
         attempt_root=attempt_root,
         owning_operation_id=OPERATION_ID,
         owning_process_generation="undeletable-0001",
@@ -486,6 +695,188 @@ def test_cleanup_reports_failure_honestly_when_parent_undeletable(tmp_path):
         final_cleanup = cleanup_skill_projection(receipt)
         assert final_cleanup.removed is True
         assert final_cleanup.verified_absent is True
+
+
+# ---------------------------------------------------------------------------
+# validate_skill_projection_receipt: self-validation boundary
+# (Sol wave-3 review finding M6)
+# ---------------------------------------------------------------------------
+
+
+def _staged_happy_receipt(tmp_path) -> SkillProjectionReceipt:
+    generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
+    attempt_root = tmp_path / "attempt"
+    attempt_root.mkdir()
+    return stage_skill_projection(
+        generation=generation,
+        origin_mode=ORIGIN_INSTALLED_RELEASE,
+        origin_root=origin_root,
+        attempt_root=attempt_root,
+        owning_operation_id=OPERATION_ID,
+        owning_process_generation="validate-witness-0001",
+    )
+
+
+def test_validate_skill_projection_receipt_accepts_the_happy_receipt(tmp_path):
+    receipt = _staged_happy_receipt(tmp_path)
+    validate_skill_projection_receipt(receipt)  # must not raise
+    cleanup_skill_projection(receipt)
+
+
+def test_validate_skill_projection_receipt_rejects_wrong_type():
+    with pytest.raises(SkillProjectionError, match="invalid_receipt_type"):
+        validate_skill_projection_receipt(object())
+
+
+def test_validate_skill_projection_receipt_rejects_bad_schema_version(tmp_path):
+    receipt = _staged_happy_receipt(tmp_path)
+    try:
+        doctored = dataclasses.replace(receipt, schema_version="not-a-real-schema-version")
+        with pytest.raises(SkillProjectionError, match="invalid_schema_version"):
+            validate_skill_projection_receipt(doctored)
+    finally:
+        cleanup_skill_projection(receipt)
+
+
+def test_validate_skill_projection_receipt_rejects_origin_projection_rows_mismatch(tmp_path):
+    receipt = _staged_happy_receipt(tmp_path)
+    try:
+        tampered_rows = tuple(receipt.projection_rows[:-1])  # drop one row
+        doctored = dataclasses.replace(receipt, projection_rows=tampered_rows)
+        with pytest.raises(SkillProjectionError, match="origin_projection_rows_mismatch"):
+            validate_skill_projection_receipt(doctored)
+    finally:
+        cleanup_skill_projection(receipt)
+
+
+def test_validate_skill_projection_receipt_rejects_non_hex64_digest(tmp_path):
+    receipt = _staged_happy_receipt(tmp_path)
+    try:
+        doctored = dataclasses.replace(receipt, package_content_digest="not-hex-at-all")
+        with pytest.raises(SkillProjectionError, match="invalid_digest"):
+            validate_skill_projection_receipt(doctored)
+    finally:
+        cleanup_skill_projection(receipt)
+
+
+def test_validate_skill_projection_receipt_rejects_non_hex64_row_digest(tmp_path):
+    receipt = _staged_happy_receipt(tmp_path)
+    try:
+        bad_row = (receipt.origin_rows[0][0], "not-a-real-sha256", receipt.origin_rows[0][2], receipt.origin_rows[0][3])
+        doctored = dataclasses.replace(receipt, origin_rows=(bad_row, *receipt.origin_rows[1:]))
+        with pytest.raises(SkillProjectionError, match="invalid_row_digest"):
+            validate_skill_projection_receipt(doctored)
+    finally:
+        cleanup_skill_projection(receipt)
+
+
+def test_validate_skill_projection_receipt_rejects_bad_authentication_token(tmp_path):
+    receipt = _staged_happy_receipt(tmp_path)
+    try:
+        doctored = dataclasses.replace(receipt, origin_authentication="not-a-real-authentication-token")
+        with pytest.raises(SkillProjectionError, match="unsupported_value"):
+            validate_skill_projection_receipt(doctored)
+    finally:
+        cleanup_skill_projection(receipt)
+
+
+def test_validate_skill_projection_receipt_rejects_doctored_attempt_root_identity_shape(tmp_path):
+    receipt = _staged_happy_receipt(tmp_path)
+    try:
+        doctored = dataclasses.replace(receipt, attempt_root_identity=("not", "a", "tuple-of-two-ints"))
+        with pytest.raises(SkillProjectionError, match="invalid_identity_shape"):
+            validate_skill_projection_receipt(doctored)
+    finally:
+        cleanup_skill_projection(receipt)
+
+
+def test_validate_skill_projection_receipt_rejects_non_positive_monotonic_ns(tmp_path):
+    receipt = _staged_happy_receipt(tmp_path)
+    try:
+        doctored = dataclasses.replace(receipt, created_at_monotonic_ns=0)
+        with pytest.raises(SkillProjectionError, match="invalid_value"):
+            validate_skill_projection_receipt(doctored)
+    finally:
+        cleanup_skill_projection(receipt)
+
+
+# ---------------------------------------------------------------------------
+# Rollback on partial staging (Sol wave-3 review finding M6)
+# ---------------------------------------------------------------------------
+
+
+def test_stage_skill_projection_rolls_back_orphan_tree_on_mid_staging_failure(tmp_path, monkeypatch):
+    """A failure injected AFTER the exclusive projection-root mkdir (here: a
+    seam failure partway through copying the declared files) must leave NO
+    projection root behind, and the re-raised error must carry the bounded
+    ``rollback_complete`` outcome token -- never a leaked path."""
+    generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
+    attempt_root = tmp_path / "attempt"
+    attempt_root.mkdir()
+
+    real_write_exclusive_file = capability_skill_projection._write_exclusive_file
+    call_count = {"n": 0}
+
+    def _flaky_write_exclusive_file(parent_fd, name, data, executable):
+        call_count["n"] += 1
+        if call_count["n"] == 3:
+            raise OSError("synthetic mid-staging failure (no path here)")
+        return real_write_exclusive_file(parent_fd, name, data, executable)
+
+    monkeypatch.setattr(capability_skill_projection, "_write_exclusive_file", _flaky_write_exclusive_file)
+
+    with pytest.raises(SkillProjectionError) as exc_info:
+        stage_skill_projection(
+            generation=generation,
+            origin_mode=ORIGIN_INSTALLED_RELEASE,
+            origin_root=origin_root,
+            attempt_root=attempt_root,
+            owning_operation_id=OPERATION_ID,
+            owning_process_generation="rollback-0001",
+        )
+
+    assert call_count["n"] == 3  # the seam actually fired mid-copy, not before or never
+    assert "rollback_complete" in str(exc_info.value)
+    assert list(attempt_root.iterdir()) == []  # no orphan projection root
+
+
+# ---------------------------------------------------------------------------
+# Bounded write loop (Sol wave-3 review finding M6)
+# ---------------------------------------------------------------------------
+
+
+def test_stage_skill_projection_bounded_write_loop_survives_short_writes(tmp_path, monkeypatch):
+    """``os.write`` returning far fewer bytes than requested must not
+    truncate a staged file -- the bounded write loop must keep writing
+    until every declared byte has landed."""
+    generation = _load_real_generation()
+    origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
+    attempt_root = tmp_path / "attempt"
+    attempt_root.mkdir()
+
+    real_os_write = os.write
+
+    def _short_os_write(fd, data):
+        return real_os_write(fd, bytes(data)[:7])
+
+    monkeypatch.setattr(capability_skill_projection.os, "write", _short_os_write)
+
+    receipt = stage_skill_projection(
+        generation=generation,
+        origin_mode=ORIGIN_INSTALLED_RELEASE,
+        origin_root=origin_root,
+        attempt_root=attempt_root,
+        owning_operation_id=OPERATION_ID,
+        owning_process_generation="short-write-0001",
+    )
+
+    reverified = verify_capability_package_source(receipt.projection_root, generation)
+    assert reverified.package_generation_digest == EXPECTED_PACKAGE_GENERATION_DIGEST
+    assert len(receipt.projection_rows) == 7
+
+    cleanup_skill_projection(receipt)
 
 
 # ===========================================================================
