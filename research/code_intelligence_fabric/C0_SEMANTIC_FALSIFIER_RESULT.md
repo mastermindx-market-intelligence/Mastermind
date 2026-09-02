@@ -4,10 +4,10 @@
 `canonical_packet: mastermindx-market-intelligence/Mastermind issue #365`
 `artifact_version: mastermind.codeintel_c0_result.v1`
 `wave_status: DISPOSABLE FALSIFIER / PRODUCTION_INERT`
+`return: DECISION_REQUEST / PINNED_BACKEND_ACQUISITION_REQUIRED`
 
-> **This experiment grants nothing.** It is a disposable falsifier. It installs no
-> capability, registers no MCP server, starts no service and selects no production
-> backend.
+> **This experiment grants nothing.** It is a disposable falsifier: no capability,
+> no MCP server, no registry entry, no service, no host install, no backend selection.
 
 ---
 
@@ -15,58 +15,69 @@
 
 **`decision_state: BLOCKED_MISSING_PINNED_DEPENDENCY`** — **no decision enum is published.**
 
-`SERENA`, `DIRECT_LSP` and `NO_SAFE_BACKEND` are all empirical claims. None of them
-was earned, because neither candidate could be run at all:
+`SERENA`, `DIRECT_LSP` and `NO_SAFE_BACKEND` are all empirical claims. None was earned,
+because neither candidate could be run at all:
 
-- **Candidate L (direct LSP):** `LSP_BINARY_UNAVAILABLE`. This host carries no Python
-  language server and no TypeScript/TSX language server — no `pyright`, `pylsp`,
-  `jedi-language-server`, `typescript-language-server` or `tsserver`, and no `uv`,
-  `uvx` or `pipx` with which a pinned one could be resolved from an existing bundle.
+- **Candidate L (direct LSP):** `LSP_BINARY_UNAVAILABLE`. No Python and no TypeScript/TSX
+  language server exists on this host — no `pyright`, `pylsp`, `jedi-language-server`,
+  `typescript-language-server`, `tsserver` — and no `uv`, `uvx` or `pipx`.
 - **Candidate S (pinned Serena):** `SERENA_BUNDLE_UNAVAILABLE`. No immutable bundle at
   `949a27ef1e5fda1a6e7b561e777bcece345c6ffd` / v1.7.0 exists anywhere on this host.
 
-`NO_SAFE_BACKEND` was deliberately **not** emitted. The protected plan admits it as a
-successful result only "when honestly proven"; proving it requires exercising both
-candidates and finding both unsafe. Reporting it from an empty bench would assert a
-measurement that never happened. The packet's own failure law resolves the tension:
-*"missing pinned dependency ... fails closed."* So this fails closed.
+`NO_SAFE_BACKEND` was deliberately **not** emitted. The protected plan admits it only
+"when honestly proven", which requires exercising both candidates and finding both
+unsafe. Emitting it from an empty bench would assert a measurement that never happened.
+The packet's failure law settles it — *"missing pinned dependency ... fails closed"* —
+and Sol's `CONTINUE` ruling of 2026-09-02T08:16:13Z directs exactly this return:
+`DECISION_REQUEST / PINNED_BACKEND_ACQUISITION_REQUIRED` with complete built-harness
+evidence and effect state.
 
-The result schema enforces this structurally rather than trusting the author — see §6.
+The schema enforces this structurally rather than trusting the author — see §6.
 
-### Why this is a provisioning question, not a connectivity one
+### A provisioning question, not a connectivity one
 
 The host **can** reach `github.com`, `pypi.org` and `registry.npmjs.org` (HTTP 200,
-measured). The blocker is therefore permission-shaped, and every authority level
-forbids the experiment from resolving it itself:
+measured). The blocker is permission-shaped, and every authority level forbids this wave
+from resolving it itself:
 
 | Authority | Binding text |
 |---|---|
 | F0 architecture (blob `987156c2…`) | `network_policy = disabled`; resolve the binary "from an immutable installed bundle" |
 | Language/deployment amendment (blob `32e0b610…`) | forbids "automatic package download or type acquisition" and "network lookup" |
-| C0 plan (blob `54a92715…`) | Global constraint "No network access"; Task 4 Step 5: absence of a pin-able server is a truthful `LSP_BINARY_UNAVAILABLE`, "**not permission to download latest or use PATH ambiently**" |
+| C0 plan (blob `54a92715…`) | "No network access"; absence of a pin-able server is a truthful `LSP_BINARY_UNAVAILABLE`, "**not permission to download latest or use PATH ambiently**" |
+| Sol `CONTINUE` 08:16:13Z | missing binaries are "not permission to download latest, use ambient PATH, lower the floor, or emit an unearned `NO_SAFE_BACKEND`" |
 
-I did not self-authorise an exception. The bundles are a host-side input this wave
-does not own.
+No exception was self-authorised.
 
 ---
 
-## 2. Source identity
+## 2. Source identity and the protected join
+
+Sol repinned protected source twice during execution
+(`ae483cc5…` → `162af533…` → `24fa9bc4…`) and required a history-preserving join of the
+then-current protected head before first remote push. That join was performed as a
+**merge** — never a reset, rebase, force or regeneration.
 
 | Field | Value |
 |---|---|
 | Repository | `mastermindx-market-intelligence/Mastermind` |
 | Branch | `sol/codeintel-c0-semantic-falsifier-20260830` |
-| Base (`merge-base` with `origin/master`) | `162af533a4bcf380125895d225b6962987c3c582` |
-| Head at artifact generation | `9af49061b8558af4cb60672c6690b5eb0ab606ef` |
-| Protected pickup SHA | `ae483cc5f101d369f368f217bb767c91fc9e0150` |
-| Changed paths | 29 |
+| Base (current protected head) | `24fa9bc4acfbffb77f09193dd50d1ee8f90bcbf8` |
+| Composed head at artifact generation | `394613b6c6e45bae44f7c0402c2e2df4ae92f787` |
+| Composed head parents | `977c9cf1433979bd41e1f75672ee03b70f1275f5` (C0 work), `24fa9bc4acfbffb77f09193dd50d1ee8f90bcbf8` (protected) |
+| Composed tree | `dc52041c316e2531f18a5fb9ae7521806a0bec8f` |
+| Original pickup SHA | `ae483cc5f101d369f368f217bb767c91fc9e0150` |
+| Changed paths vs base | 30 |
 
-The head above is the code head. This report is the only later commit, and it is
-documentation-only; re-running `c0_runner` at the report head reproduces the same
-artifact apart from `generated_unix_ms`.
+**Disjointness proof.** Movement `162af533…` → `24fa9bc4…` is a single commit (#363,
+authenticated Executive admission app) touching only `config/business_mcp/`,
+`control_plane/ceo_request.py`, `docs/runbooks/`, `integrations/mastermind_executive_app/`,
+`scripts/` and three `tests/test_mastermind_executive_app_*.py` files. Its intersection
+with the C0 ceiling is empty. The three controlling CodeIntel blobs are byte-identical at
+`ae483cc5…`, `162af533…` and `24fa9bc4…`.
 
-Authority blobs were verified identical at the protected pickup SHA **and** at current
-`origin/master` before any edit — no source movement.
+Every focused, hostile, full, static and mutation check was rerun on the composed head
+(§4). This report is the only commit after the artifact head, and it is documentation-only.
 
 ### Changed paths and blob digests
 
@@ -102,29 +113,29 @@ Authority blobs were verified identical at the protected pickup SHA **and** at c
 | `tests/fixtures/code_intelligence/python_sample/src/sample/producer.py` | `698bab9996ca4a02fe9a2ed70dce4420737f5f84` |
 | `tests/fixtures/code_intelligence/python_sample/tests/test_consumer.py` | `22772e58c9667c6598efb9f496bd098fa95b4aef` |
 
-Every path is inside the declared ceiling; nothing outside it was touched. No
-`control_plane/**`, `config/**`, capability registry, Operator Harness, MCP profile,
-service, host, credential, Slack, Linear, Agent OS, deployment, market, ranking,
-sizing or trading path was read for write or modified. `integrations/code_intelligence/**`
-remains absent.
+Nothing outside the ceiling was modified. No `control_plane/**`, `config/**`, capability
+registry, Operator Harness, MCP profile, service, host, credential, Slack, Linear, Agent
+OS, deployment, market, ranking, sizing or trading path was touched.
+`integrations/code_intelligence/**` remains absent.
 
 ---
 
 ## 3. What was built
 
-A complete, backend-neutral falsifier harness, RED→GREEN task by task:
+A complete backend-neutral falsifier harness, RED→GREEN task by task:
 
 | Task | Module | What it establishes |
 |---|---|---|
 | 1 | `semantic_contract.py` | The six-tool census, frozen and closed. No schema field may contain `root`, `path`, `project`, `attempt`, `worker`, `session`, `endpoint`, `command`, `executable`, `cwd`, `env`, `memory`, `edit` or `shell`. Bounded arguments (4 KiB) and limits (100). |
-| 2 | `workspace_seal.py` | Exact worktree identity: resolved root, device, inode, uid, gid, git common dir, git dir, HEAD, porcelain-v2 digest, candidate-tree digest. Typed refusals for symlink root/ancestor, moved root, replaced inode, changed HEAD, tree writes and index drift. |
-| 3 | `backend.py`, `ground_truth.py`, corpus | The backend protocol, a response guard that refuses (never trims) host leaks, and an **LSP-independent** `ast` ground truth so no candidate is graded against itself. |
-| 4 | `jsonrpc_stdio.py`, `lsp_backend.py` | Bounded stdio JSON-RPC (4 MiB frames, 32 KiB stderr, closed env, digest checked before *and* after launch) and the direct-LSP adapter with a closed admitted-method set. |
+| 2 | `workspace_seal.py` | Exact worktree identity: resolved root, device, inode, uid, gid, git common dir, git dir, HEAD, porcelain-v2 digest, candidate-tree digest — with typed refusals for symlink root/ancestor, moved root, replaced inode, changed HEAD, tree writes and index drift. |
+| 3 | `backend.py`, `ground_truth.py`, corpus | Backend protocol, a response guard that **refuses rather than trims** host leaks, and an **LSP-independent** `ast` ground truth so no candidate is graded against itself. |
+| 4 | `jsonrpc_stdio.py`, `lsp_backend.py` | Bounded stdio JSON-RPC (4 MiB frames, 32 KiB stderr, closed env, digest verified before *and* after launch) and the direct-LSP adapter with a closed admitted-method set. |
 | 5 | `serena_backend.py` | The pinned-Serena adapter, which refuses rather than patches on tool-surface widening, repository-config influence or candidate-tree writes. |
 | 6 | `semantic_facade.py` | The sealed dispatcher: verify seal → one backend call → bound the response → **verify the seal again before publishing**. |
-| 7 | `c0_runner.py`, `c0-result.schema.json` | The runner, the immutable result and the guard that makes a fabricated decision structurally impossible. |
+| 7 | `c0_runner.py`, `c0-result.schema.json` | Runner, immutable result, and the guard that makes a fabricated decision structurally impossible. |
 
-**158 tests pass.** Each module's tests were observed RED before its implementation existed.
+**158 tests pass on the composed head.** Every module's tests were observed RED before
+its implementation existed.
 
 ---
 
@@ -148,7 +159,7 @@ A complete, backend-neutral falsifier harness, RED→GREEN task by task:
 | `two_worktrees_carry_distinct_seals` | REFUSED_AS_REQUIRED | `—` |
 | `scratch_refuses_candidate_tree` | REFUSED_AS_REQUIRED | `SCRATCH_INSIDE_CANDIDATE_TREE` |
 
-### Mutation kills — each applied to real source, observed RED, reverted
+### Mutation kills — applied to real source, observed RED, reverted, re-run on the composed head
 
 | Mutation | Killed by |
 |---|---|
@@ -162,7 +173,7 @@ A complete, backend-neutral falsifier harness, RED→GREEN task by task:
 Two simultaneous linked worktrees with identical package and symbol names but distinct
 sentinels (`WORKTREE_ALPHA_ONLY` / `WORKTREE_BETA_ONLY`) never cross-read, at seal level
 and through the facade. They share a `git_common_dir` and differ in `git_dir` and inode —
-which is exactly why both fields are in the seal.
+which is precisely why both fields are in the seal.
 
 ### Zero candidate-tree writes
 
@@ -175,15 +186,14 @@ misbehaving backend writing `.semantic-cache` into the worktree being caught as
 ## 5. What was NOT proven — stated plainly
 
 - **No real backend semantics were measured.** Adapter proofs used stand-in servers
-  written for this experiment. They demonstrate what Mastermind's wrapper does; they
-  say nothing about what Serena or any real language server does.
+  written for this experiment. They show what Mastermind's wrapper does; they say nothing
+  about what Serena or any real language server does.
 - **No TypeScript/TSX evidence exists.** The required TS/TSX corpus and the protected
-  Terminal `migrateLegacy` case were not exercised — there is no TS language server
-  bundle on this host. This is a declared gap in the required language matrix, not an
-  omission.
+  Terminal `migrateLegacy` case were not exercised — there is no TS language server bundle
+  on this host. A declared gap in the required language matrix, not an omission.
 - **No latency, resource or cold/warm comparison between candidates exists**, because
   there is nothing to compare.
-- **No independent review has been obtained** — see §8.
+- **No independent review has been obtained** — §8.
 
 ---
 
@@ -194,13 +204,12 @@ misbehaving backend writing `.semantic-cache` into the worktree being caught as
 - every trial carries a `synthetic` flag;
 - `decision_state: DECIDED` **requires** `decision`, and requires every candidate's
   `trials` to `contain` at least one entry with `synthetic: false`;
-- `decision_state: BLOCKED_MISSING_PINNED_DEPENDENCY` **forbids** `decision` and
-  requires `blocking_reason`.
+- `decision_state: BLOCKED_MISSING_PINNED_DEPENDENCY` **forbids** `decision` and requires
+  `blocking_reason`.
 
-A stand-in server therefore cannot produce a backend selection, no matter what a
-future runner or author claims. This is covered by
-`test_synthetic_trials_can_never_produce_a_decision`, and the complementary test
-`test_a_decided_result_with_real_trials_is_accepted` proves the guard blocks
+A stand-in server therefore cannot produce a backend selection, whatever a future runner
+or author asserts. Covered by `test_synthetic_trials_can_never_produce_a_decision`; the
+complementary `test_a_decided_result_with_real_trials_is_accepted` proves the guard blocks
 fabrication rather than decisions as such.
 
 ---
@@ -209,17 +218,18 @@ fabrication rather than decisions as such.
 
 | Item | Disposition |
 |---|---|
-| Third-party runtime dependencies added | **none** — standard library only (`jsonschema`, already present, is used for validation in tests/runner) |
-| Network use by the experiment | none; `network_policy: disabled` is asserted in the artifact and the JSON-RPC child gets a closed environment |
+| Third-party runtime dependencies added | **none** — standard library only (`jsonschema`, already present, validates the artifact) |
+| Network use by the experiment | none; `network_policy: disabled`, and the JSON-RPC child gets a closed environment |
 | New executables, services, installs | none |
 | Licences | no vendored third-party code |
 | Exposed model-facing tools | exactly `workspace_status, symbol_overview, find_symbol, find_references, find_implementations, diagnostics` |
 | Semantic schema digest | `ee253db52b52d2cfc551c3c2091789251000ca3009c2afbe5df44937232dd8ce` |
 | Facade source digest | `b00d4b2b776199fdc89ba468181f257f658fdf1f87e98e6bdfa255c7531446a6` |
+| Workspace binding digest | `49ba3adbf8f2ca0a2cdcf4bb1a84b636ea58f916ecc0520efb92fd37ef4b6a6e` |
 
 The child environment is closed to `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`,
 `PYTHONHASHSEED` and `PYTHONDONTWRITEBYTECODE`, with `HOME`/`TMPDIR` pointed at external
-scratch so a server that writes "next to the project" writes into the sandbox.
+scratch so a server that writes "next to the project" writes into the sandbox instead.
 
 ---
 
@@ -227,16 +237,16 @@ scratch so a server that writes "next to the project" writes into the sandbox.
 
 | Effect | State |
 |---|---|
-| Local | one isolated worktree, one branch, commits only |
-| Remote | one Draft PR, held |
+| Local | one isolated worktree, one branch, commits and one merge |
+| Remote | one Draft PR, held — no `merge-on-green`, no auto-merge |
 | Production | **none** — nothing installed, armed, deployed or registered |
 | Ready / merge | not requested; gated on Macro #6756 |
 
-**Independent review is an open gap, disclosed rather than papered over.** The only
-GitHub identity available to this surface is `chriswong6031-creator`, which is also the
-author identity of this branch. An "independent exact-head non-author review" cannot be
-satisfied from here without it being a self-review, so I have not claimed one. Sol should
-place this review with a distinct reviewer.
+**Independent review is an open gap, disclosed rather than papered over.** The only GitHub
+identity available to this surface is `chriswong6031-creator`, which is also this branch's
+author identity. An "independent exact-head non-author review" cannot be satisfied from
+here without being a self-review, so none is claimed. Sol should place that review with a
+distinct reviewer.
 
 ---
 
@@ -273,7 +283,7 @@ No code change is required to reach a decision — only the bundles.
 
 ## 11. Immutable artifact
 
-`sha256(canonical) = 22d118f08a9bde51a1815b5a579f625f66fc1a6fae8b5cf317597c3b6c444131`
+`sha256(canonical) = 5f9ad5b9aa03f6ab312dc257ae13412f8f0685865920225f05a8cf936575973e`
 
 ```json
 {
@@ -331,7 +341,7 @@ No code change is required to reach a decision — only the bundles.
     "find_implementations",
     "diagnostics"
   ],
-  "generated_unix_ms": 1788338668440,
+  "generated_unix_ms": 1788338973527,
   "hostile_results": [
     {
       "check": "contract_refuses_root_selection",
@@ -439,7 +449,7 @@ No code change is required to reach a decision — only the bundles.
     "Ground truth is a conservative AST census, not a full type-checker."
   ],
   "source": {
-    "base_sha": "162af533a4bcf380125895d225b6962987c3c582",
+    "base_sha": "24fa9bc4acfbffb77f09193dd50d1ee8f90bcbf8",
     "branch": "sol/codeintel-c0-semantic-falsifier-20260830",
     "changed_paths": [
       "experiments/code_intelligence/__init__.py",
@@ -452,6 +462,7 @@ No code change is required to reach a decision — only the bundles.
       "experiments/code_intelligence/semantic_facade.py",
       "experiments/code_intelligence/serena_backend.py",
       "experiments/code_intelligence/workspace_seal.py",
+      "research/code_intelligence_fabric/C0_SEMANTIC_FALSIFIER_RESULT.md",
       "research/code_intelligence_fabric/c0-result.schema.json",
       "tests/code_intelligence/servers/fake_jsonrpc_server.py",
       "tests/code_intelligence/servers/fake_lsp_server.py",
@@ -472,7 +483,7 @@ No code change is required to reach a decision — only the bundles.
       "tests/fixtures/code_intelligence/python_sample/src/sample/producer.py",
       "tests/fixtures/code_intelligence/python_sample/tests/test_consumer.py"
     ],
-    "head_sha": "9af49061b8558af4cb60672c6690b5eb0ab606ef",
+    "head_sha": "394613b6c6e45bae44f7c0402c2e2df4ae92f787",
     "protected_pickup_sha": "ae483cc5f101d369f368f217bb767c91fc9e0150",
     "repository": "mastermindx-market-intelligence/Mastermind"
   },
