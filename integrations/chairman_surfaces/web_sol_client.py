@@ -285,12 +285,17 @@ class _FrameWriteProgress:
         self._stream = stream
         self._expected_bytes = expected_bytes
         self.accepted_bytes = 0
+        self._write_raised = False
 
     def __getattr__(self, name: str):
         return getattr(self._stream, name)
 
     def write(self, payload: bytes):
-        written = self._stream.write(payload)
+        try:
+            written = self._stream.write(payload)
+        except BaseException:
+            self._write_raised = True
+            raise
         if type(written) is int and 0 < written <= len(payload):
             self.accepted_bytes += written
         return written
@@ -298,6 +303,10 @@ class _FrameWriteProgress:
     @property
     def frame_complete(self) -> bool:
         return self.accepted_bytes >= self._expected_bytes
+
+    @property
+    def effect_possible(self) -> bool:
+        return self._write_raised or self.frame_complete
 
 
 def _transport_failure_code(
@@ -357,7 +366,7 @@ def _exchange_web_sol_socket(
                     monotonic=monotonic,
                 )
             except native.NativeHostError:
-                sent = action_writer.frame_complete
+                sent = action_writer.effect_possible
                 raise
             sent = True
             response = native.read_frame(
