@@ -128,6 +128,7 @@ class JsonRpcStdioClient:
         self._write_lock = threading.Lock()
         self._fatal: JsonRpcError | None = None
         self._next_id = 1
+        self._pgid: int | None = None
         self._reader: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
         self._closed = False
@@ -217,6 +218,13 @@ class JsonRpcStdioClient:
 
         # Re-verify after launch: a swap between check and exec is still a swap.
         self._verify_executable()
+
+        # Capture the group id while the child is certainly alive: after it exits
+        # and is reaped, getpgid() no longer resolves.
+        try:
+            self._pgid = os.getpgid(self._process.pid)
+        except (ProcessLookupError, PermissionError):  # pragma: no cover
+            self._pgid = None
 
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
@@ -451,7 +459,11 @@ class JsonRpcStdioClient:
                     stream.close()
             except OSError:  # pragma: no cover - defensive
                 pass
-        self._shutdown_receipt = kill_process_group(process.pid)
+        # Reap the direct child while signalling, or its zombie keeps the group
+        # alive and the receipt would falsely report a surviving descendant.
+        self._shutdown_receipt = kill_process_group(
+            process.pid, pgid=self._pgid, reap=process.poll
+        )
         if process.poll() is None:
             process.terminate()
             try:

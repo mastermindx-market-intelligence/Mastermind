@@ -80,9 +80,12 @@ def _facade(root: Path, scratch_parent: Path, mode: str = "ok") -> SemanticFacad
     return facade
 
 
-@pytest.fixture
-def facade(tmp_path: Path):
-    item = _facade(_make_repo(tmp_path / "repo"), tmp_path / "scratch")
+@pytest.fixture(scope="module")
+def facade(tmp_path_factory):
+    # Module-scoped: these tests only read. The one test that writes into the
+    # sealed tree would poison a shared facade, so it builds its own below.
+    base = tmp_path_factory.mktemp("facade-shared")
+    item = _facade(_make_repo(base / "repo"), base / "scratch")
     yield item
     item.close()
 
@@ -167,16 +170,22 @@ class TestDispatch:
             assert facade.call(validate_semantic_request(tool, args)).tool == tool
 
     def test_seal_is_reverified_after_every_call(self, facade: SemanticFacade) -> None:
+        before = facade.seal_verifications
         facade.call(validate_semantic_request("workspace_status", {}))
-        assert facade.seal_verifications >= 2
+        assert facade.seal_verifications >= before + 2
 
-    def test_backend_write_is_caught_before_publication(
-        self, facade: SemanticFacade
-    ) -> None:
-        (Path(facade.seal.resolved_root) / ".semantic-cache").write_text("x", encoding="utf-8")
-        with pytest.raises(FacadeError) as excinfo:
-            facade.call(validate_semantic_request("workspace_status", {}))
-        assert excinfo.value.code == "CANDIDATE_TREE_WRITE_DETECTED"
+    def test_backend_write_is_caught_before_publication(self, tmp_path: Path) -> None:
+        # Own facade: this test deliberately breaks the seal it runs against.
+        own = _facade(_make_repo(tmp_path / "repo"), tmp_path / "scratch")
+        try:
+            (Path(own.seal.resolved_root) / ".semantic-cache").write_text(
+                "x", encoding="utf-8"
+            )
+            with pytest.raises(FacadeError) as excinfo:
+                own.call(validate_semantic_request("workspace_status", {}))
+            assert excinfo.value.code == "CANDIDATE_TREE_WRITE_DETECTED"
+        finally:
+            own.close()
 
     def test_failures_are_not_auto_resent(self, tmp_path: Path) -> None:
         item = _facade(_make_repo(tmp_path / "repo"), tmp_path / "scratch", mode="slow")

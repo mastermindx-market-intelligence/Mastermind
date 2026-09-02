@@ -91,10 +91,14 @@ class _Harness:
         self.backend.close()
 
 
-@pytest.fixture
-def harness(tmp_path: Path):
-    root = _make_corpus_repo(tmp_path / "repo")
-    item = _Harness(root, tmp_path / "scratch")
+@pytest.fixture(scope="module")
+def harness(tmp_path_factory):
+    # Module-scoped on purpose: every test using this fixture is read-only, and
+    # a fresh git repo + language-server launch per test cost ~11 minutes of the
+    # 25-minute repository gate. Tests that mutate the tree build their own.
+    base = tmp_path_factory.mktemp("lsp-shared")
+    root = _make_corpus_repo(base / "repo")
+    item = _Harness(root, base / "scratch")
     yield item
     item.close()
 

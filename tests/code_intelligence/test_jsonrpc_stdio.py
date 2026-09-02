@@ -346,6 +346,17 @@ class TestB6Enforcement:
         assert receipt["group_signalled"] in (True, False)
         assert receipt["descendants_alive"] == 0, receipt
 
+    def test_direct_child_is_reaped_not_left_a_zombie(self, tmp_path: Path) -> None:
+        # A terminated-but-unreaped child is a zombie, and a zombie keeps its
+        # process group alive - which made the shutdown receipt claim a
+        # surviving descendant on Linux while passing on macOS.
+        client = _client("echo", tmp_path)
+        client.start()
+        client.request("ping", {})
+        client.close()
+        assert client._process.returncode is not None, "child was not reaped"
+        assert client.shutdown_receipt()["descendants_alive"] == 0
+
     def test_descendants_are_killed_with_the_group(self, tmp_path: Path) -> None:
         client = _client("spawn", tmp_path)
         client.start()

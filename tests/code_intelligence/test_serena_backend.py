@@ -257,6 +257,17 @@ class TestIdentityAndConfiguration:
             backend.close()
 
 
+@pytest.fixture(scope="module")
+def clean_serena(tmp_path_factory):
+    """Module-scoped: these mapping tests are read-only and each start is costly."""
+    base = tmp_path_factory.mktemp("serena-shared")
+    root = _make_repo(base / "repo")
+    bundle = _make_bundle(base)
+    backend, seal = _start(root, base / "scratch", "clean", bundle)
+    yield backend, seal
+    backend.close()
+
+
 class TestB3RealMapping:
     """B3 — Candidate S must map real protocol results, not return empty stubs."""
 
@@ -265,62 +276,47 @@ class TestB3RealMapping:
         bundle = _make_bundle(tmp_path)
         return _start(root, tmp_path / "scratch", "clean", bundle)
 
-    def test_find_symbol_returns_mapped_rows(self, tmp_path: Path) -> None:
-        backend, _ = self._start_clean(tmp_path)
-        try:
-            rows = backend.find_symbol(
-                name="LiveProducer", relative_file=None, limit=10
-            )["rows"]
-            assert rows, "Candidate S must actually answer, not return an empty stub"
-            assert rows[0]["relative_file"] == "src/sample/producer.py"
-            assert rows[0]["line"] == 20
-            assert rows[0]["symbol"] == "LiveProducer"
-        finally:
-            backend.close()
+    def test_find_symbol_returns_mapped_rows(self, clean_serena) -> None:
+        backend, _ = clean_serena
+        rows = backend.find_symbol(
+            name="LiveProducer", relative_file=None, limit=10
+        )["rows"]
+        assert rows, "Candidate S must actually answer, not return an empty stub"
+        assert rows[0]["relative_file"] == "src/sample/producer.py"
+        assert rows[0]["line"] == 20
+        assert rows[0]["symbol"] == "LiveProducer"
 
-    def test_symbol_overview_returns_mapped_rows(self, tmp_path: Path) -> None:
-        backend, _ = self._start_clean(tmp_path)
-        try:
-            rows = backend.symbol_overview(
-                relative_file="src/sample/producer.py", query=None, limit=50
-            )["rows"]
-            assert sorted(r["symbol"] for r in rows) == [
-                "DeadProducer", "LiveProducer", "Producer",
-                "make_dead_producer", "make_producer",
-            ]
-        finally:
-            backend.close()
+    def test_symbol_overview_returns_mapped_rows(self, clean_serena) -> None:
+        backend, _ = clean_serena
+        rows = backend.symbol_overview(
+            relative_file="src/sample/producer.py", query=None, limit=50
+        )["rows"]
+        assert sorted(r["symbol"] for r in rows) == [
+            "DeadProducer", "LiveProducer", "Producer",
+            "make_dead_producer", "make_producer",
+        ]
 
-    def test_find_references_returns_mapped_rows(self, tmp_path: Path) -> None:
-        backend, _ = self._start_clean(tmp_path)
-        try:
-            rows = backend.find_references(
-                name="make_producer", relative_file=None, limit=50
-            )["rows"]
-            found = sorted({(r["relative_file"], r["line"]) for r in rows})
-            assert ("src/sample/producer.py", 34) in found
-            assert ("src/sample/consumer.py", 9) in found
-        finally:
-            backend.close()
+    def test_find_references_returns_mapped_rows(self, clean_serena) -> None:
+        backend, _ = clean_serena
+        rows = backend.find_references(
+            name="make_producer", relative_file=None, limit=50
+        )["rows"]
+        found = sorted({(r["relative_file"], r["line"]) for r in rows})
+        assert ("src/sample/producer.py", 34) in found
+        assert ("src/sample/consumer.py", 9) in found
 
-    def test_arguments_are_forwarded_not_dropped(self, tmp_path: Path) -> None:
-        backend, _ = self._start_clean(tmp_path)
-        try:
-            # A name that exists must differ from one that does not; a stub that
-            # discards arguments would return the same thing for both.
-            hit = backend.find_symbol(name="LiveProducer", relative_file=None, limit=10)["rows"]
-            miss = backend.find_symbol(name="NoSuchSymbol", relative_file=None, limit=10)["rows"]
-            assert hit and not miss
-        finally:
-            backend.close()
+    def test_arguments_are_forwarded_not_dropped(self, clean_serena) -> None:
+        backend, _ = clean_serena
+        # A name that exists must differ from one that does not; a stub that
+        # discards arguments would return the same thing for both.
+        hit = backend.find_symbol(name="LiveProducer", relative_file=None, limit=10)["rows"]
+        miss = backend.find_symbol(name="NoSuchSymbol", relative_file=None, limit=10)["rows"]
+        assert hit and not miss
 
-    def test_rows_are_bounded_by_limit(self, tmp_path: Path) -> None:
-        backend, _ = self._start_clean(tmp_path)
-        try:
-            rows = backend.symbol_overview(relative_file=None, query=None, limit=2)["rows"]
-            assert len(rows) <= 2
-        finally:
-            backend.close()
+    def test_rows_are_bounded_by_limit(self, clean_serena) -> None:
+        backend, _ = clean_serena
+        rows = backend.symbol_overview(relative_file=None, query=None, limit=2)["rows"]
+        assert len(rows) <= 2
 
     def test_unsupported_capabilities_are_typed_not_silently_empty(
         self, tmp_path: Path

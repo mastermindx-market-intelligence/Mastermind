@@ -349,28 +349,58 @@ def build_sandbox(
     )
 
 
-def kill_process_group(pid: int, *, grace: float = 3.0) -> dict[str, Any]:
-    """Terminate a child's whole group and receipt whether it actually died."""
+def kill_process_group(
+    pid: int | None = None,
+    *,
+    pgid: int | None = None,
+    reap: Any = None,
+    grace: float = 3.0,
+) -> dict[str, Any]:
+    """Terminate a child's whole group and receipt whether it actually died.
+
+    ``reap`` must be a callable that reaps the direct child (``Popen.poll`` does).
+    It is called between signal and liveness check because a terminated but
+    UNREAPED child is a zombie, and a zombie keeps its process group alive — so
+    without reaping, ``killpg(pgid, 0)`` reports a survivor that is really just
+    an unclaimed exit status. That is a real Linux behaviour, not a race.
+    """
     import time
 
-    try:
-        pgid = os.getpgid(pid)
-    except (ProcessLookupError, PermissionError):
-        return {"group_signalled": False, "descendants_alive": 0, "detail": "already gone"}
+    if pgid is None:
+        if pid is None:
+            return {"group_signalled": False, "descendants_alive": 0,
+                    "detail": "no process to signal"}
+        try:
+            pgid = os.getpgid(pid)
+        except (ProcessLookupError, PermissionError):
+            return {"group_signalled": False, "descendants_alive": 0,
+                    "detail": "already gone"}
+
+    def _reap() -> None:
+        if reap is not None:
+            try:
+                reap()
+            except Exception:  # pragma: no cover - defensive
+                pass
 
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(pgid, sig)
         except (ProcessLookupError, PermissionError):
-            break
+            _reap()
+            return {"group_signalled": True, "descendants_alive": 0,
+                    "detail": "group already gone"}
         deadline = time.monotonic() + grace
         while time.monotonic() < deadline:
+            _reap()
             try:
                 os.killpg(pgid, 0)
             except (ProcessLookupError, PermissionError):
-                return {"group_signalled": True, "descendants_alive": 0, "detail": f"died on {sig.name}"}
+                return {"group_signalled": True, "descendants_alive": 0,
+                        "detail": f"died on {sig.name}"}
             time.sleep(0.05)
 
+    _reap()
     try:
         os.killpg(pgid, 0)
     except (ProcessLookupError, PermissionError):
