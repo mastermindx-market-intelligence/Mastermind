@@ -41,9 +41,17 @@ from pathlib import Path
 
 import pytest
 
+from control_plane.executive_agent_capabilities import (
+    CAPABILITY_POLICY_SCHEMA_V3,
+    CAPABILITY_POLICY_SCHEMA_V4,
+    DEFAULT_CAPABILITY_SOURCE_ROOT,
+    CapabilityPolicyError,
+    ExecutionCapabilityRegistry,
+)
 from control_plane.executive_capability_packages import (
     build_capability_package_generation,
 )
+from control_plane.operator_harness_contract import NativeHelperPolicy
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKAGE_ROOT = REPO_ROOT / "plugins" / "mastermind-operator"
@@ -208,3 +216,259 @@ def test_fixture_package_generation_builds_and_verifies_through_production_modul
     assert {grant.runtime_name: grant.skill_content_digest for grant in generation.skills} == (
         FROZEN_SKILL_CONTENT_DIGESTS
     )
+
+
+# ---------------------------------------------------------------------------
+# (b) V4 happy-path load through the real registry loader
+# ---------------------------------------------------------------------------
+
+
+def test_v4_registry_loads_and_verifies_the_real_package_source():
+    registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V4
+    assert tuple(registry.capability_packages) == (PACKAGE_CAPABILITY_ID,)
+    generation = registry.capability_packages[PACKAGE_CAPABILITY_ID]
+    assert generation.package_content_digest == FROZEN_PACKAGE_CONTENT_DIGEST
+    assert generation.revoked is False
+    assert len(registry.policy_digest) == 64
+
+
+def test_v4_registry_load_default_source_root_is_repo_root(monkeypatch):
+    """``source_root=None`` falls back to ``DEFAULT_CAPABILITY_SOURCE_ROOT``,
+
+    which is the repository root -- the same root the real package lives
+    under -- so a caller that never supplies ``source_root`` still verifies
+    correctly against the checked-in package.
+    """
+
+    assert DEFAULT_CAPABILITY_SOURCE_ROOT == REPO_ROOT
+    registry = ExecutionCapabilityRegistry.load(V4_FIXTURE)
+    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V4
+
+
+def test_v3_load_ignores_source_root():
+    registry = ExecutionCapabilityRegistry.load(source_root="/nonexistent/does-not-matter")
+    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert registry.capability_packages == {}
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda raw: raw["capability_packages"].__setitem__("mastermind-operator.p1", "not-a-dict"),
+        lambda raw: raw.update(capability_packages={}),
+        lambda raw: raw.update(
+            capability_packages={
+                f"extra-package-{i}": raw["capability_packages"]["mastermind-operator.p1"]
+                for i in range(17)
+            }
+        ),
+    ],
+)
+def test_v4_capability_packages_shape_bounds_refuse(tmp_path, mutate):
+    raw = _load_v4_fixture_raw()
+    mutate(raw)
+    with pytest.raises(CapabilityPolicyError):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+def test_v4_package_build_failure_chains_as_capability_policy_error(tmp_path):
+    raw = _load_v4_fixture_raw()
+    raw["capability_packages"][PACKAGE_CAPABILITY_ID]["package_content_digest"] = "1" * 64
+    with pytest.raises(CapabilityPolicyError) as excinfo:
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+    assert excinfo.value.__cause__ is not None
+
+
+def test_v4_source_verification_failure_refuses(tmp_path):
+    """A declared package that does not match real bytes on disk fails closed."""
+
+    raw = _load_v4_fixture_raw()
+    package_raw = raw["capability_packages"][PACKAGE_CAPABILITY_ID]
+    # Point the package root somewhere that does not contain the declared
+    # files at all -- this must refuse via source verification rather than
+    # silently accepting the (unverified) declared digests.
+    package_raw["package_root"] = "plugins/mastermind-operator-does-not-exist"
+    with pytest.raises(CapabilityPolicyError):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)
+
+
+# ---------------------------------------------------------------------------
+# (i, partial) Duplicate-JSON-key refusal at root/package/file-row/skill/profile depth
+# ---------------------------------------------------------------------------
+
+
+def _canon(value: object) -> str:
+    if isinstance(value, dict):
+        return "{" + ",".join(f"{json.dumps(k)}:{_canon(v)}" for k, v in value.items()) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(_canon(v) for v in value) + "]"
+    return json.dumps(value)
+
+
+def _canon_with_duplicate(value: object, path: tuple, dup_key: str, dup_value: object) -> str:
+    """Serialize ``value`` as JSON text, injecting one extra ``dup_key`` pair
+
+    (in addition to any pre-existing occurrence) into the object reached by
+    walking ``path`` through nested dict/list containers.
+    """
+
+    if not path:
+        assert isinstance(value, dict)
+        inner = ",".join(f"{json.dumps(k)}:{_canon(v)}" for k, v in value.items())
+        inner += f",{json.dumps(dup_key)}:{_canon(dup_value)}"
+        return "{" + inner + "}"
+    head, *rest = path
+    if isinstance(value, dict):
+        parts = []
+        for k, v in value.items():
+            if k == head:
+                parts.append(f"{json.dumps(k)}:{_canon_with_duplicate(v, rest, dup_key, dup_value)}")
+            else:
+                parts.append(f"{json.dumps(k)}:{_canon(v)}")
+        return "{" + ",".join(parts) + "}"
+    if isinstance(value, list):
+        parts = []
+        for i, v in enumerate(value):
+            if i == head:
+                parts.append(_canon_with_duplicate(v, rest, dup_key, dup_value))
+            else:
+                parts.append(_canon(v))
+        return "[" + ",".join(parts) + "]"
+    raise TypeError("path descends into a non-container")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        (),  # root depth
+        ("capability_packages", PACKAGE_CAPABILITY_ID),  # package depth
+        ("capability_packages", PACKAGE_CAPABILITY_ID, "files", 0),  # file-row depth
+        (
+            "capability_packages",
+            PACKAGE_CAPABILITY_ID,
+            "skills",
+            "mastermind-operator.escalate-decision.v1",
+        ),  # skill depth
+        ("profiles", FIXTURE_PROFILE_ID),  # profile depth
+    ],
+    ids=["root", "package", "file_row", "skill", "profile"],
+)
+def test_v4_duplicate_json_keys_refuse_at_every_depth(tmp_path, path):
+    raw = _load_v4_fixture_raw()
+    target: object = raw
+    for key in path:
+        target = target[key]
+    assert isinstance(target, dict)
+    dup_key = next(iter(target))
+    dup_value = target[dup_key]
+
+    duplicated_text = _canon_with_duplicate(raw, path, dup_key, dup_value)
+    dest = tmp_path / "dup_v4.json"
+    dest.write_text(duplicated_text, encoding="utf-8")
+    with pytest.raises(CapabilityPolicyError, match="duplicate JSON key"):
+        ExecutionCapabilityRegistry.load(dest, source_root=REPO_ROOT)
+
+
+def _build_self_consistent_second_package(
+    *, new_capability_id: str, new_generation: str, skill_capability_prefix: str
+) -> dict:
+    """Build a second, digest-consistent package raw dict reusing the same
+
+    real on-disk files (and therefore the same skill runtime names) as the
+    protected `mastermind-operator.p1` package, but under a fresh package and
+    skill capability-ID namespace. Used only to prove the registry's global
+    runtime-name collision check; it reaches into the package module's own
+    (private) digest builders purely to construct a valid second fixture, not
+    to re-prove that module's own digest law.
+    """
+
+    from control_plane.executive_capability_packages import (
+        _package_source_digest,  # type: ignore[attr-defined]
+        _skill_grant_digest,  # type: ignore[attr-defined]
+        _package_generation_digest,  # type: ignore[attr-defined]
+    )
+
+    original = _load_v4_fixture_raw()["capability_packages"][PACKAGE_CAPABILITY_ID]
+    files = copy.deepcopy(original["files"])
+    content_digest = original["package_content_digest"]  # same files -> same digest
+
+    source_digest = _package_source_digest(
+        capability_id=new_capability_id,
+        kind=original["kind"],
+        repository=original["repository"],
+        source_commit=original["source_commit"],
+        source_tree_sha=original["source_tree_sha"],
+        package_root=original["package_root"],
+        manifest_path=original["manifest_path"],
+        package_content_digest=content_digest,
+        required_app_references=tuple(original["required_app_references"]),
+    )
+
+    new_skills: dict[str, dict] = {}
+    for old_capability_id, old_skill in original["skills"].items():
+        runtime_name = old_skill["runtime_name"]
+        new_skill_capability_id = f"{skill_capability_prefix}.{runtime_name}.v1"
+        grant_digest = _skill_grant_digest(
+            capability_id=new_skill_capability_id,
+            runtime_name=runtime_name,
+            entrypoint_path=old_skill["entrypoint_path"],
+            closure_paths=tuple(old_skill["closure_paths"]),
+            skill_content_digest=old_skill["skill_content_digest"],
+            package_capability_id=new_capability_id,
+            package_generation=new_generation,
+            package_source_digest=source_digest,
+        )
+        new_skills[new_skill_capability_id] = {
+            "runtime_name": runtime_name,
+            "entrypoint_path": old_skill["entrypoint_path"],
+            "closure_paths": list(old_skill["closure_paths"]),
+            "skill_content_digest": old_skill["skill_content_digest"],
+            "grant_digest": grant_digest,
+        }
+
+    generation_digest = _package_generation_digest(
+        capability_id=new_capability_id,
+        generation=new_generation,
+        source_state=original["source_state"],
+        revoked=False,
+        package_source_digest=source_digest,
+        skills_ordered=tuple(
+            (cid, row["grant_digest"]) for cid, row in sorted(new_skills.items())
+        ),
+    )
+
+    return {
+        "kind": original["kind"],
+        "repository": original["repository"],
+        "source_commit": original["source_commit"],
+        "source_tree_sha": original["source_tree_sha"],
+        "package_root": original["package_root"],
+        "manifest_path": original["manifest_path"],
+        "generation": new_generation,
+        "source_state": original["source_state"],
+        "revoked": False,
+        "package_content_digest": content_digest,
+        "package_source_digest": source_digest,
+        "files": files,
+        "skills": new_skills,
+        "required_app_references": list(original["required_app_references"]),
+        "package_generation_digest": generation_digest,
+    }
+
+
+def test_v4_runtime_name_collision_across_packages_refuses(tmp_path):
+    raw = _load_v4_fixture_raw()
+    second_package = _build_self_consistent_second_package(
+        new_capability_id="mastermind-operator.p2",
+        new_generation="mastermind-operator.p2.2026-09-01",
+        skill_capability_prefix="mastermind-operator-p2",
+    )
+    # Sanity: this synthetic second package is itself well-formed before we
+    # assert the registry-level collision refusal.
+    build_capability_package_generation(
+        capability_id="mastermind-operator.p2", raw=second_package
+    )
+    raw["capability_packages"]["mastermind-operator.p2"] = second_package
+    with pytest.raises(CapabilityPolicyError, match="collide"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw), source_root=REPO_ROOT)

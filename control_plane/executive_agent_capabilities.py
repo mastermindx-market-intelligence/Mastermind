@@ -21,6 +21,13 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
+from control_plane.executive_capability_packages import (
+    CapabilityPackageError,
+    CapabilityPackageGeneration,
+    EffectiveSkillGrant,
+    build_capability_package_generation,
+    verify_capability_package_source,
+)
 from control_plane.operator_harness_contract import (
     CapabilityIdentity,
     CapabilityManifest,
@@ -28,12 +35,26 @@ from control_plane.operator_harness_contract import (
 )
 
 
-CAPABILITY_POLICY_SCHEMA = "mastermind.executive_agent_capabilities/v3"
+# Sol Capability Fabric package-identity amendment §5.1 permits one shared
+# duplicate-rejecting `object_pairs_hook` for both schema generations under
+# this exact compatibility statement: all valid V3 documents retain identical
+# normalized objects, profile digests and policy digests; ambiguous
+# duplicate-key JSON was never a valid reviewed capability policy and now
+# refuses.
+CAPABILITY_POLICY_SCHEMA_V3 = "mastermind.executive_agent_capabilities/v3"
+CAPABILITY_POLICY_SCHEMA_V4 = "mastermind.executive_agent_capabilities/v4"
+CAPABILITY_POLICY_SCHEMA = CAPABILITY_POLICY_SCHEMA_V3
 DEFAULT_CAPABILITY_POLICY_PATH = (
     Path(__file__).resolve().parent.parent
     / "config"
     / "executive_agent_capabilities.json"
 )
+DEFAULT_CAPABILITY_SOURCE_ROOT = Path(__file__).resolve().parent.parent
+
+_MIN_CAPABILITY_PACKAGES = 1
+_MAX_CAPABILITY_PACKAGES = 16
+_MAX_SKILL_CAPABILITIES_PER_PROFILE = 32
+_MAX_DUPLICATE_KEY_ECHO_LEN = 200
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 _CONFIG_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
@@ -155,6 +176,20 @@ _PROFILE_KEYS = frozenset(
         "forbidden",
     }
 )
+_PROFILE_KEYS_V4 = _PROFILE_KEYS | frozenset({"skill_capabilities"})
+_ROOT_KEYS_V3 = frozenset(
+    {
+        "schema_version",
+        "policy_version",
+        "lifecycle_authority",
+        "production_armed",
+        "mcp_servers",
+        "resources",
+        "plugins",
+        "profiles",
+    }
+)
+_ROOT_KEYS_V4 = _ROOT_KEYS_V3 | frozenset({"capability_packages"})
 _NATIVE_HELPER_KEYS = frozenset(
     {
         "mechanism",
@@ -171,6 +206,27 @@ _NATIVE_HELPER_KEYS = frozenset(
 
 class CapabilityPolicyError(RuntimeError):
     """The reviewed execution-capability policy is malformed or unsafe."""
+
+
+def _no_duplicate_keys_object_pairs_hook(pairs: list[tuple[str, object]]) -> dict:
+    """Refuse ambiguous duplicate JSON object keys at every parsed depth.
+
+    Applies uniformly to V3 and V4 documents (identity amendment §5.1): all
+    valid V3 documents retain identical normalized objects, profile digests
+    and policy digests; ambiguous duplicate-key JSON was never a valid
+    reviewed capability policy and now refuses. The error names only the
+    bounded duplicated key itself, never any value.
+    """
+
+    seen: set[str] = set()
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in seen:
+            token = key if len(key) <= _MAX_DUPLICATE_KEY_ECHO_LEN else key[:_MAX_DUPLICATE_KEY_ECHO_LEN]
+            raise CapabilityPolicyError(f"capability policy has a duplicate JSON key: {token!r}")
+        seen.add(key)
+        result[key] = value
+    return result
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -513,6 +569,7 @@ class ExecutionCapabilityProfile:
     native_helper_policy: NativeHelperPolicy
     native_helper: "NativeHelperGrant | None"
     skills: tuple[str, ...]
+    skill_grants: tuple[EffectiveSkillGrant, ...]
     mcp_server_grants: tuple[McpServerGrant, ...]
     resource_grants: tuple[ResourceGrant, ...]
     plugins: tuple[str, ...]
@@ -592,7 +649,15 @@ class ExecutionCapabilityProfile:
             # App Server currently omits an explicitly empty ``skills.config``
             # from config/read. The override still clears configured skills;
             # effective discovery is independently attested by skills/list.
-            "skills": {"config": None},
+            # A profile holding exact V4 Skill-package grants additionally
+            # disables the bundled Skill surface (protocol attestation
+            # amendment §5): V3 profiles always carry empty ``skill_grants``
+            # and are structurally unaffected.
+            "skills": (
+                {"bundled": {"enabled": False}, "config": None}
+                if self.skill_grants
+                else {"config": None}
+            ),
         }
 
     @property
@@ -649,6 +714,8 @@ class ExecutionCapabilityProfile:
             )
         for grant in self.mcp_server_grants:
             values.extend(grant.config_overrides())
+        if self.skill_grants:
+            values.append("skills.bundled.enabled=false")
         return tuple(values)
 
     def capability_manifest(self, *, harness_binary_digest: str) -> CapabilityManifest:
@@ -666,14 +733,30 @@ class ExecutionCapabilityProfile:
                 "harness_binary_digest must be a lowercase SHA-256 digest"
             )
         required: list[CapabilityIdentity] = []
-        for name in self.skills:
-            required.append(
-                CapabilityIdentity(
-                    name=name,
-                    kind="skill",
-                    harness_binary_digest=binary_digest,
+        if self.skill_grants:
+            # Exact V4 company-Skill grants compile their closure digest
+            # into the existing OHF identity; package path, source commit
+            # and generation stay registry/profile provenance only (they
+            # already bind the source generation via the profile/policy
+            # digest) and are never added to CapabilityIdentity.
+            for grant in self.skill_grants:
+                required.append(
+                    CapabilityIdentity(
+                        name=grant.runtime_name,
+                        kind="skill",
+                        harness_binary_digest=binary_digest,
+                        skill_content_digest=grant.skill_content_digest,
+                    )
                 )
-            )
+        else:
+            for name in self.skills:
+                required.append(
+                    CapabilityIdentity(
+                        name=name,
+                        kind="skill",
+                        harness_binary_digest=binary_digest,
+                    )
+                )
         for grant in self.mcp_server_grants:
             required.append(
                 CapabilityIdentity(
@@ -728,39 +811,47 @@ class NativeHelperGrant:
 
 @dataclasses.dataclass(frozen=True)
 class ExecutionCapabilityRegistry:
+    schema_version: str
     policy_version: str
     lifecycle_authority: str
     production_armed: bool
     mcp_servers: Mapping[str, McpServerGrant]
     resources: Mapping[str, ResourceGrant]
+    capability_packages: Mapping[str, CapabilityPackageGeneration]
     profiles: Mapping[str, ExecutionCapabilityProfile]
     policy_digest: str
     source_path: Path
 
     @classmethod
-    def load(cls, path: str | Path | None = None) -> "ExecutionCapabilityRegistry":
+    def load(
+        cls,
+        path: str | Path | None = None,
+        *,
+        source_root: str | Path | None = None,
+    ) -> "ExecutionCapabilityRegistry":
         source = Path(path or DEFAULT_CAPABILITY_POLICY_PATH).expanduser().resolve(
             strict=True
         )
         try:
-            raw = json.loads(source.read_text(encoding="utf-8"))
+            raw = json.loads(
+                source.read_text(encoding="utf-8"),
+                object_pairs_hook=_no_duplicate_keys_object_pairs_hook,
+            )
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise CapabilityPolicyError(
                 f"capability policy is unreadable: {type(exc).__name__}"
             ) from exc
-        if not isinstance(raw, dict) or set(raw) != {
-            "schema_version",
-            "policy_version",
-            "lifecycle_authority",
-            "production_armed",
-            "mcp_servers",
-            "resources",
-            "plugins",
-            "profiles",
-        }:
+        if not isinstance(raw, dict):
             raise CapabilityPolicyError("capability policy root fields drifted")
-        if raw.get("schema_version") != CAPABILITY_POLICY_SCHEMA:
+        schema_version = raw.get("schema_version")
+        if schema_version == CAPABILITY_POLICY_SCHEMA_V3:
+            expected_root_keys = _ROOT_KEYS_V3
+        elif schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+            expected_root_keys = _ROOT_KEYS_V4
+        else:
             raise CapabilityPolicyError("capability policy schema_version is unsupported")
+        if set(raw) != expected_root_keys:
+            raise CapabilityPolicyError("capability policy root fields drifted")
         if raw.get("lifecycle_authority") != "executive_os":
             raise CapabilityPolicyError(
                 "capability policy must preserve Executive OS lifecycle authority"
@@ -981,13 +1072,60 @@ class ExecutionCapabilityRegistry:
                 browser_revision="1237",
                 grant_digest=_digest(normalized_resource),
             )
+        capability_packages: dict[str, CapabilityPackageGeneration] = {}
+        skill_capability_index: dict[str, EffectiveSkillGrant] = {}
+        if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+            capability_packages_raw = raw.get("capability_packages")
+            if not isinstance(capability_packages_raw, dict) or not (
+                _MIN_CAPABILITY_PACKAGES
+                <= len(capability_packages_raw)
+                <= _MAX_CAPABILITY_PACKAGES
+            ):
+                raise CapabilityPolicyError(
+                    f"capability policy requires {_MIN_CAPABILITY_PACKAGES}-"
+                    f"{_MAX_CAPABILITY_PACKAGES} capability packages"
+                )
+            seen_runtime_names: dict[str, str] = {}
+            resolved_source_root = Path(source_root or DEFAULT_CAPABILITY_SOURCE_ROOT)
+            for raw_package_id, package_raw in capability_packages_raw.items():
+                package_capability_id = _identifier(
+                    raw_package_id, field="capability_packages capability_id"
+                )
+                if not isinstance(package_raw, Mapping):
+                    raise CapabilityPolicyError(
+                        f"capability package {package_capability_id!r} fields drifted"
+                    )
+                try:
+                    generation = build_capability_package_generation(
+                        capability_id=package_capability_id, raw=package_raw
+                    )
+                except CapabilityPackageError as exc:
+                    raise CapabilityPolicyError(str(exc)) from exc
+                try:
+                    verify_capability_package_source(resolved_source_root, generation)
+                except CapabilityPackageError as exc:
+                    raise CapabilityPolicyError(str(exc)) from exc
+                for grant in generation.skills:
+                    if grant.runtime_name in seen_runtime_names:
+                        raise CapabilityPolicyError(
+                            "capability package skill runtime names collide "
+                            "across packages"
+                        )
+                    seen_runtime_names[grant.runtime_name] = package_capability_id
+                    skill_capability_index[grant.capability_id] = grant
+                capability_packages[package_capability_id] = generation
         profiles_raw = raw.get("profiles")
         if not isinstance(profiles_raw, dict) or not profiles_raw or len(profiles_raw) > 32:
             raise CapabilityPolicyError("capability policy requires 1-32 profiles")
         profiles: dict[str, ExecutionCapabilityProfile] = {}
         for raw_id, value in profiles_raw.items():
             profile_id = _identifier(raw_id, field="profile_id")
-            if not isinstance(value, dict) or set(value) != _PROFILE_KEYS:
+            expected_profile_keys = (
+                _PROFILE_KEYS_V4
+                if schema_version == CAPABILITY_POLICY_SCHEMA_V4
+                else _PROFILE_KEYS
+            )
+            if not isinstance(value, dict) or set(value) != expected_profile_keys:
                 raise CapabilityPolicyError(
                     f"capability profile {profile_id!r} fields drifted"
                 )
@@ -1189,6 +1327,64 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot inherit browser resource authority"
                 )
+            if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+                skill_capability_ids = _identities(
+                    value.get("skill_capabilities"),
+                    field=f"profiles.{profile_id}.skill_capabilities",
+                    maximum=_MAX_SKILL_CAPABILITIES_PER_PROFILE,
+                )
+            else:
+                skill_capability_ids = ()
+            if skill_capability_ids:
+                if skills:
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} cannot combine skills with "
+                        "skill_capabilities; exact V4 company-Skill profiles "
+                        "require skills=[]"
+                    )
+                if execution_surface == "codex-exec":
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} cannot grant skill_capabilities "
+                        "to sealed codex-exec"
+                    )
+                if write_capable:
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} write-capable profiles cannot "
+                        "grant skill_capabilities"
+                    )
+                if is_browser_profile:
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} browser profile cannot grant "
+                        "skill_capabilities"
+                    )
+                resolved_grants: list[EffectiveSkillGrant] = []
+                seen_grant_runtime_names: set[str] = set()
+                for skill_capability_id in skill_capability_ids:
+                    grant = skill_capability_index.get(skill_capability_id)
+                    if grant is None:
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} references an unknown "
+                            "skill capability"
+                        )
+                    owning_generation = capability_packages.get(
+                        grant.package_capability_id
+                    )
+                    if owning_generation is None or owning_generation.revoked:
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} references a skill "
+                            "capability from a revoked package generation"
+                        )
+                    if grant.runtime_name in seen_grant_runtime_names:
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} skill_capabilities resolve "
+                            "to a duplicate runtime name"
+                        )
+                    seen_grant_runtime_names.add(grant.runtime_name)
+                    resolved_grants.append(grant)
+                skill_grants = tuple(resolved_grants)
+                skills = tuple(sorted(seen_grant_runtime_names))
+            else:
+                skill_grants = ()
             if write_capable and sandbox_policy != "workspace-write":
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} write capability requires workspace-write"
@@ -1251,6 +1447,24 @@ class ExecutionCapabilityRegistry:
                 "plugins": list(plugins),
                 "forbidden": list(forbidden),
             }
+            if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+                # Identity amendment §4.6: closure movement, an unrelated
+                # package-file change, or revocation must all be able to
+                # change this profile's digest, so the normalized projection
+                # binds each selected exact Skill's grant digest AND its
+                # owning package generation digest, in capability-ID order.
+                # This key is present in every V4 profile normalization
+                # (empty list for grant-less profiles) and never in V3.
+                normalized["skill_capabilities"] = [
+                    {
+                        "capability_id": grant.capability_id,
+                        "grant_digest": grant.grant_digest,
+                        "package_generation_digest": capability_packages[
+                            grant.package_capability_id
+                        ].package_generation_digest,
+                    }
+                    for grant in skill_grants
+                ]
             profiles[profile_id] = ExecutionCapabilityProfile(
                 profile_id=profile_id,
                 enabled=enabled,
@@ -1263,6 +1477,7 @@ class ExecutionCapabilityRegistry:
                 native_helper_policy=native_helper_policy,
                 native_helper=native_helper,
                 skills=skills,
+                skill_grants=skill_grants,
                 mcp_server_grants=resolved_mcp,
                 resource_grants=resolved_resources,
                 plugins=plugins,
@@ -1270,7 +1485,7 @@ class ExecutionCapabilityRegistry:
                 profile_digest=_digest(normalized),
             )
         normalized_policy = {
-            "schema_version": CAPABILITY_POLICY_SCHEMA,
+            "schema_version": schema_version,
             "policy_version": policy_version,
             "lifecycle_authority": "executive_os",
             "production_armed": False,
@@ -1291,12 +1506,19 @@ class ExecutionCapabilityRegistry:
                 for profile_id, profile in sorted(profiles.items())
             },
         }
+        if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+            normalized_policy["capability_packages"] = {
+                capability_id: generation.package_generation_digest
+                for capability_id, generation in sorted(capability_packages.items())
+            }
         return cls(
+            schema_version=schema_version,
             policy_version=policy_version,
             lifecycle_authority="executive_os",
             production_armed=False,
             mcp_servers=mcp_registry,
             resources=resource_registry,
+            capability_packages=capability_packages,
             profiles=profiles,
             policy_digest=_digest(normalized_policy),
             source_path=source,
@@ -1315,7 +1537,10 @@ class ExecutionCapabilityRegistry:
 
 __all__ = [
     "CAPABILITY_POLICY_SCHEMA",
+    "CAPABILITY_POLICY_SCHEMA_V3",
+    "CAPABILITY_POLICY_SCHEMA_V4",
     "DEFAULT_CAPABILITY_POLICY_PATH",
+    "DEFAULT_CAPABILITY_SOURCE_ROOT",
     "CapabilityPolicyError",
     "ExecutionCapabilityProfile",
     "ExecutionCapabilityRegistry",

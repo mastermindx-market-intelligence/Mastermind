@@ -6,6 +6,9 @@ from pathlib import Path
 import pytest
 
 from control_plane.executive_agent_capabilities import (
+    CAPABILITY_POLICY_SCHEMA,
+    CAPABILITY_POLICY_SCHEMA_V3,
+    CAPABILITY_POLICY_SCHEMA_V4,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
     app_server_security_config_digest,
@@ -520,3 +523,83 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
     mutation(raw)
     with pytest.raises(CapabilityPolicyError):
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+def test_v3_compatibility_digests_and_schema_constants_remain_exact():
+    """CAP-S1 package-identity amendment: opt-in V4 must never move V3 identity.
+
+    These are the exact protected-master values verified live before the V4
+    dispatch/duplicate-key production edit landed.
+    """
+
+    assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
+    assert CAPABILITY_POLICY_SCHEMA_V3 == "mastermind.executive_agent_capabilities/v3"
+    assert CAPABILITY_POLICY_SCHEMA_V4 == "mastermind.executive_agent_capabilities/v4"
+
+    registry = ExecutionCapabilityRegistry.load()
+    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert registry.capability_packages == {}
+    assert registry.policy_digest == (
+        "0d025d2728c7dbf73977ac5997e1bd6832be5660ab996ad7e837e50887f7c856"
+    )
+    assert registry.resolve(
+        "operator.appserver.readonly.docs-mcp.native-helper.v1"
+    ).profile_digest == (
+        "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39"
+    )
+
+    for profile in registry.profiles.values():
+        assert profile.skill_grants == ()
+        assert profile.app_server_config_projection()["skills"] == {"config": None}
+
+
+@pytest.mark.parametrize(
+    "raw_key_path",
+    [
+        (),
+        ("profiles", "operator.appserver.readonly.v1"),
+    ],
+)
+def test_duplicate_json_keys_refuse_for_v3_documents(tmp_path, raw_key_path):
+    """Identity amendment §5.1: duplicate JSON keys refuse at every depth,
+
+    including for V3 documents, under the shared object_pairs_hook.
+    """
+
+    raw_text = json.dumps(_raw_policy())
+    # Build a hand-crafted duplicate: re-serialize the target object with one
+    # of its own keys repeated, verbatim, as a second occurrence.
+    raw = _raw_policy()
+    target = raw
+    for key in raw_key_path:
+        target = target[key]
+    dup_key = next(iter(target))
+    dup_value = target[dup_key]
+
+    def _canon(value):
+        if isinstance(value, dict):
+            return "{" + ",".join(f"{json.dumps(k)}:{_canon(v)}" for k, v in value.items()) + "}"
+        if isinstance(value, list):
+            return "[" + ",".join(_canon(v) for v in value) + "]"
+        return json.dumps(value)
+
+    def _canon_with_dup(value, path):
+        if not path:
+            assert isinstance(value, dict)
+            inner = ",".join(f"{json.dumps(k)}:{_canon(v)}" for k, v in value.items())
+            inner += f",{json.dumps(dup_key)}:{_canon(dup_value)}"
+            return "{" + inner + "}"
+        head, *rest = path
+        parts = []
+        for k, v in value.items():
+            if k == head:
+                parts.append(f"{json.dumps(k)}:{_canon_with_dup(v, rest)}")
+            else:
+                parts.append(f"{json.dumps(k)}:{_canon(v)}")
+        return "{" + ",".join(parts) + "}"
+
+    duplicated_text = _canon_with_dup(raw, list(raw_key_path))
+    path = tmp_path / "dup.json"
+    path.write_text(duplicated_text, encoding="utf-8")
+    with pytest.raises(CapabilityPolicyError, match="duplicate JSON key"):
+        ExecutionCapabilityRegistry.load(path)
