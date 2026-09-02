@@ -32,26 +32,33 @@ SOURCE_NAMESPACE_BY_OWNER = MappingProxyType({'agent_os': ('WS', 'DEC', 'DSC'), 
 SOURCE_OWNERS = frozenset(SOURCE_NAMESPACE_BY_OWNER)
 _CANONICAL_CREDENTIAL_PREFIX = '(?:sb_secret_|sb_publishable_|sbp_|sk-ant-|sk-|github_pat_|ghp_|gho_|ghs_|xox[abeprs]-|xapp-|eyJ|AKIA|ASIA|ABIA|ACCA)'
 _CANONICAL_CREDENTIAL_FENCE = f'(?!{_CANONICAL_CREDENTIAL_PREFIX})(?![A-Za-z0-9._-]*[._-]{_CANONICAL_CREDENTIAL_PREFIX})'
-_CREDENTIAL_ANY_GUARD = f'(?!.*(?:^|[._:/-])(?i:{_CANONICAL_CREDENTIAL_PREFIX}))'
-_RESPONSIBILITY_REF_PATTERN = f'^responsibility:{_CANONICAL_CREDENTIAL_FENCE}[a-z0-9][a-z0-9._-]{{0,144}}$'
-_RESPONSIBILITY_REF_RE = re.compile(f'\\Aresponsibility:{_CANONICAL_CREDENTIAL_FENCE}[a-z0-9][a-z0-9._-]{{0,144}}\\Z')
-_CONTROL_RE = re.compile('[\\x00-\\x1f\\x7f]')
-_EMAIL_RE = re.compile('(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}')
-_URL_RE = re.compile('(?i)\\b(?:https?|file|ssh|postgres(?:ql)?|mysql|redis)://')
-_PRIVATE_PATH_RE = re.compile('(?i)(?:/Users/|/home/|/private/|/tmp/|/var/|/etc/|~/|[A-Z]:\\\\)')
-_SECRET_RE = re.compile(f'(?i:(?:^|[^A-Z0-9]){_CANONICAL_CREDENTIAL_PREFIX}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\\b(?:bearer|api[_-]?key|token|secret|password)\\s*[:=])')
-_PRIVATE_LOCATOR_RE = re.compile('(?i)\\b(?:provider(?:_session)?|native_(?:session|handle)|account(?:_id)?|browser_profile|profile_id|host|channel|thread|coordinates|pid|pgid|action|target)\\s*[:=]\\s*\\S+')
-_HEX_SECRET_RE = re.compile('\\b[A-Fa-f0-9]{32,}\\b')
-_HIGH_ENTROPY_RE = re.compile('\\b(?=[A-Za-z0-9]{32,}\\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\\b')
-_PUBLIC_TEXT_PATTERN = f'^(?=\\S(?:.*\\S)?$)(?!.*[\\x00-\\x1f\\x7f])(?!.*(?i:(?:https?://|file://|ssh://|postgres(?:ql)?://|mysql://|redis://)))(?!.*(?i:[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{{2,}}))(?!.*(?i:(?:/Users/|/home/|/private/|/tmp/|/var/|/etc/|~/|[A-Z]:\\\\))){_CREDENTIAL_ANY_GUARD}(?!.*(?i:\\b(?:bearer|api[_-]?key|token|secret|password)\\s*[:=]))(?!.*(?i:\\b(?:provider(?:_session)?|native_(?:session|handle)|account(?:_id)?|browser_profile|profile_id|host|channel|thread|coordinates|pid|pgid|action|target)\\s*[:=]))(?!.*\\b[A-Fa-f0-9]{{32,}}\\b)(?!.*\\b(?=[A-Za-z0-9]{{32,}}\\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\\b).+$'
-_PUBLIC_TOKEN_PATTERN = f'^{_CREDENTIAL_ANY_GUARD}[A-Za-z0-9][A-Za-z0-9._-]{{0,95}}$'
+_CREDENTIAL_ANY_GUARD = f'(?!.*(?:^|[^A-Za-z0-9]){_CANONICAL_CREDENTIAL_PREFIX})'
+_ABSOLUTE_END = '(?![\s\S])'
+_RESPONSIBILITY_REF_PATTERN = f'^responsibility:{_CANONICAL_CREDENTIAL_FENCE}[a-z0-9][a-z0-9._-]{{0,144}}{_ABSOLUTE_END}'
+_RESPONSIBILITY_REF_RE = re.compile(f'\Aresponsibility:{_CANONICAL_CREDENTIAL_FENCE}[a-z0-9][a-z0-9._-]{{0,144}}\Z')
+_CONTROL_RE = re.compile('[\x00-\x1f\x7f]')
+_EMAIL_PATTERN = '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+_URL_PATTERN = '://'
+_PRIVATE_PATH_PATTERN = '(?:/Users/|/home/|/private/|/tmp/|/var/|/etc/|~/|[A-Za-z]:\\)'
+_SECRET_LABEL_PATTERN = '\b(?:[Bb]earer|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Tt]oken|[Ss]ecret|[Pp]assword)\s*[:=]'
+_PRIVATE_LOCATOR_KEY_PATTERN = '(?:[Pp]rovider(?:_session)?|[Nn]ative_(?:session|handle)|[Aa]ccount(?:_id)?|[Bb]rowser_profile|[Pp]rofile_id|[Hh]ost|[Cc]hannel|[Tt]hread|[Cc]oordinates|[Pp]id|[Pp]gid|[Aa]ction|[Tt]arget)'
+_PRIVATE_LOCATOR_PATTERN = f'\b{_PRIVATE_LOCATOR_KEY_PATTERN}\s*[:=]\s*\S+'
+_EMAIL_RE = re.compile(_EMAIL_PATTERN)
+_URL_RE = re.compile(_URL_PATTERN)
+_PRIVATE_PATH_RE = re.compile(_PRIVATE_PATH_PATTERN)
+_SECRET_RE = re.compile(f'(?:^|[^A-Za-z0-9]){_CANONICAL_CREDENTIAL_PREFIX}|-----BEGIN [A-Z ]*PRIVATE KEY-----|{_SECRET_LABEL_PATTERN}')
+_PRIVATE_LOCATOR_RE = re.compile(_PRIVATE_LOCATOR_PATTERN)
+_HEX_SECRET_RE = re.compile('\b[A-Fa-f0-9]{32,}\b')
+_HIGH_ENTROPY_RE = re.compile('\b(?=[A-Za-z0-9]{32,}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\b')
+_PUBLIC_TEXT_PATTERN = f'^(?=\S(?:.*\S)?$)(?!.*[\x00-\x1f\x7f])(?!.*{_URL_PATTERN})(?!.*{_EMAIL_PATTERN})(?!.*{_PRIVATE_PATH_PATTERN}){_CREDENTIAL_ANY_GUARD}(?!.*{_SECRET_LABEL_PATTERN})(?!.*-----BEGIN [A-Z ]*PRIVATE KEY-----)(?!.*{_PRIVATE_LOCATOR_PATTERN})(?!.*\b[A-Fa-f0-9]{{32,}}\b)(?!.*\b(?=[A-Za-z0-9]{{32,}}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]+\b).+{_ABSOLUTE_END}'
+_PUBLIC_TOKEN_PATTERN = f'^{_CREDENTIAL_ANY_GUARD}[A-Za-z0-9][A-Za-z0-9._-]{{0,95}}{_ABSOLUTE_END}'
 _PUBLIC_TOKEN_RE = re.compile(_PUBLIC_TOKEN_PATTERN)
 _SAFE_REF_TOKEN = '[A-Za-z0-9][A-Za-z0-9._-]{0,223}'
-_SAFE_RECEIPT_TOKEN = '[A-Za-z0-9][A-Za-z0-9._:-]{0,223}'
+_SAFE_RECEIPT_TOKEN = '[A-Za-z0-9][A-Za-z0-9._-]{0,223}'
 _UUID_PATTERN = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}'
 
 def _guarded_pattern(body: str) -> str:
-    return f'^{_CREDENTIAL_ANY_GUARD}{body}$'
+    return f'^{_CREDENTIAL_ANY_GUARD}{body}{_ABSOLUTE_END}'
 _WORK_ID_PATTERN = _guarded_pattern(f'WS:{_SAFE_REF_TOKEN}')
 _ATTENTION_ID_PATTERN = _guarded_pattern(f'(?:(?:EVENT|EXEC|WAKE|DIALOGUE):{_SAFE_REF_TOKEN}|[A-Za-z][A-Za-z0-9._-]{{0,223}})')
 _JOB_ID_PATTERN = _guarded_pattern(f'JOB-{_SAFE_REF_TOKEN}')
@@ -60,7 +67,7 @@ _WORKER_ID_PATTERN = _guarded_pattern('[A-Za-z][A-Za-z0-9._-]{0,223}')
 _BINDING_ID_PATTERN = _guarded_pattern('[A-Za-z][A-Za-z0-9._-]{0,223}')
 _SURFACE_ID_PATTERN = _guarded_pattern(f'(?:SURFACE:{_SAFE_REF_TOKEN}|{_UUID_PATTERN})')
 _PUBLIC_REFERENCE_PATTERN = _guarded_pattern(f'(?:(?:WS|DEC|DSC|JOB|ATTEMPT|WORKER|EVENT|EXEC|RUNTIME|CAPACITY|WAKE|DIALOGUE|SURFACE|POLICY):{_SAFE_REF_TOKEN}|JOB-{_SAFE_REF_TOKEN}|ATT-{_SAFE_REF_TOKEN}|{_UUID_PATTERN}|[A-Za-z][A-Za-z0-9._-]{{0,223}})')
-_AGENT_OS_SOURCE_PATTERN = _guarded_pattern(f'(?:(?:WS|DEC|DSC):{_SAFE_REF_TOKEN}|agentos/workstreams/(?!.*(?:/\\.\\.?/|/\\.\\.?$))[A-Za-z0-9][A-Za-z0-9._/-]{{0,220}})')
+_AGENT_OS_SOURCE_PATTERN = _guarded_pattern(f'(?:(?:WS|DEC|DSC):{_SAFE_REF_TOKEN}|agentos/workstreams/(?!.*(?:/\.\.?/|/\.\.?$))[A-Za-z0-9][A-Za-z0-9._/-]{{0,220}})')
 _EXECUTIVE_OS_SOURCE_PATTERN = _guarded_pattern(f'executive-(?:runtime|event|job|attempt|worker):{_SAFE_RECEIPT_TOKEN}')
 _RUNTIME_BINDING_SOURCE_PATTERN = _guarded_pattern(f'runtime-binding:{_SAFE_RECEIPT_TOKEN}')
 _EXECUTIVE_INBOX_SOURCE_PATTERN = _guarded_pattern(f'executive-inbox:{_SAFE_RECEIPT_TOKEN}')
@@ -74,7 +81,7 @@ _UNKNOWN_SOURCE_PATTERN = _guarded_pattern(f'UNKNOWN:{_SAFE_REF_TOKEN}')
 _SOURCE_REF_PATTERN_BY_OWNER = MappingProxyType({'agent_os': _AGENT_OS_SOURCE_PATTERN, 'executive_os': _EXECUTIVE_OS_SOURCE_PATTERN, 'runtime_binding': _RUNTIME_BINDING_SOURCE_PATTERN, 'executive_inbox': _EXECUTIVE_INBOX_SOURCE_PATTERN, 'capacity': _CAPACITY_SOURCE_PATTERN, 'wake': _WAKE_SOURCE_PATTERN, 'agent_dialogue': _DIALOGUE_SOURCE_PATTERN, 'surface_binding': _SURFACE_BINDING_SOURCE_PATTERN, 'surface_bindings': _SURFACE_BINDINGS_SOURCE_PATTERN, 'provider_control': _PROVIDER_SOURCE_PATTERN, 'unknown': _UNKNOWN_SOURCE_PATTERN})
 _SOURCE_REF_RE_BY_OWNER = MappingProxyType({owner: re.compile(pattern) for owner, pattern in _SOURCE_REF_PATTERN_BY_OWNER.items()})
 _LEAP_YEAR = '(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)'
-_TIMESTAMP_PATTERN = f'^(?!0000-)(?:[0-9]{{4}}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|{_LEAP_YEAR}-02-29)T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$'
+_TIMESTAMP_PATTERN = f'^(?!0000-)(?:[0-9]{{4}}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|{_LEAP_YEAR}-02-29)T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z{_ABSOLUTE_END}'
 _TIMESTAMP_RE = re.compile(_TIMESTAMP_PATTERN)
 
 class GatewayError(RuntimeError):
@@ -87,8 +94,10 @@ class GatewayError(RuntimeError):
         self.code = code
 
 def _string(*, max_length: int, pattern: str | None=None) -> dict[str, Any]:
-    value: dict[str, Any] = {'type': 'string', 'minLength': 1, 'maxLength': max_length}
-    if pattern is not None:
+    value: dict[str, Any] = {'type': 'string', 'maxLength': max_length}
+    if pattern is None:
+        value['minLength'] = 1
+    else:
         value['pattern'] = pattern
     return value
 
@@ -104,7 +113,7 @@ def _normalize_public_text(value: Any, maximum: int) -> str:
     return value
 
 def _normalize_pattern(value: Any, maximum: int, pattern: str) -> str:
-    if not isinstance(value, str) or not 1 <= len(value) <= maximum or value != value.strip() or _CONTROL_RE.search(value) or _SECRET_RE.search(value) or (re.fullmatch(pattern, value) is None):
+    if not isinstance(value, str) or not 1 <= len(value) <= maximum or value != value.strip() or _CONTROL_RE.search(value) or (re.fullmatch(pattern, value) is None):
         raise GatewayError('RESPONSE_REFUSED')
     return value
 
@@ -164,7 +173,7 @@ _PREDICATE_ORDER = {predicate: index for index, predicate in enumerate(PUBLIC_FA
 TOOL_REQUIRED_PREDICATES = MappingProxyType({'list_responsibilities': frozenset({'responsibility.identity', 'responsibility.title', 'responsibility.state', 'responsibility.next_action'}), 'get_responsibility': frozenset({'responsibility.identity', 'responsibility.title', 'responsibility.objective', 'responsibility.next_action', 'responsibility.state'}), 'get_attention': frozenset({'attention.ref', 'attention.reason', 'attention.requested_action', 'attention.state'}), 'get_current_runtime': frozenset({'runtime.job_ref', 'runtime.attempt_ref', 'runtime.worker_ref', 'runtime.binding_ref', 'runtime.state', 'runtime.effect_state'}), 'explain_blocker': frozenset({'blocker.present', 'blocker.kind', 'blocker.explanation'}), 'resolve_surface': frozenset({'surface.ref', 'surface.locator_kind', 'surface.review_state', 'surface.health'})})
 _RESPONSIBILITY_REF_SCHEMA = _string(max_length=MAX_RESPONSIBILITY_REF_CHARS, pattern=_RESPONSIBILITY_REF_PATTERN)
 _OBSERVED_AT_SCHEMA = {'oneOf': [{'type': 'null'}, _string(max_length=20, pattern=_TIMESTAMP_PATTERN)]}
-_SOURCE_SCHEMA = _object({'owner': {'type': 'string', 'enum': sorted(SOURCE_OWNERS)}, 'source_ref': _string(max_length=256, pattern='^[^\\x00-\\x20\\x7f]{1,256}$'), 'observed_at': _OBSERVED_AT_SCHEMA}, required=('owner', 'source_ref', 'observed_at'))
+_SOURCE_SCHEMA = _object({'owner': {'type': 'string', 'enum': sorted(SOURCE_OWNERS)}, 'source_ref': _string(max_length=256, pattern=f'^[^\x00-\x20\x7f]{{1,256}}{_ABSOLUTE_END}'), 'observed_at': _OBSERVED_AT_SCHEMA}, required=('owner', 'source_ref', 'observed_at'))
 _SOURCE_SCHEMA['allOf'] = [{'oneOf': [{'properties': {'owner': {'const': owner}, 'source_ref': _string(max_length=256, pattern=pattern)}} for owner, pattern in _SOURCE_REF_PATTERN_BY_OWNER.items()]}]
 _FACT_SCHEMA = _object({'subject_ref': _RESPONSIBILITY_REF_SCHEMA, 'predicate': {'type': 'string', 'enum': list(PUBLIC_FACT_CONTRACTS)}, 'value': {'anyOf': [{'type': 'boolean'}, {'type': 'integer', 'minimum': 0, 'maximum': 31536000}, {'type': 'string'}]}, 'freshness': {'type': 'string', 'enum': sorted(FRESHNESS_STATES)}, 'sources': {'type': 'array', 'minItems': 1, 'maxItems': MAX_SOURCES_PER_FACT, 'items': _SOURCE_SCHEMA}}, required=('subject_ref', 'predicate', 'value', 'freshness', 'sources'))
 _FACT_SCHEMA['allOf'] = [{'oneOf': [{'properties': {'predicate': {'const': contract.predicate}, 'value': contract.value_schema, 'sources': {'contains': {'properties': {'owner': {'enum': list(contract.corroborating_owners)}}}, 'minContains': 1}}} for contract in _FACT_CONTRACT_ROWS]}]
@@ -274,7 +283,7 @@ def _validated_source(value: Any) -> dict[str, Any]:
     source_ref = value['source_ref']
     if not isinstance(owner, str) or owner not in SOURCE_OWNERS:
         raise GatewayError('RESPONSE_REFUSED')
-    if not isinstance(source_ref, str) or not 1 <= len(source_ref) <= 256 or source_ref != source_ref.strip() or _CONTROL_RE.search(source_ref) or _SECRET_RE.search(source_ref) or (_SOURCE_REF_RE_BY_OWNER[owner].fullmatch(source_ref) is None):
+    if not isinstance(source_ref, str) or not 1 <= len(source_ref) <= 256 or source_ref != source_ref.strip() or _CONTROL_RE.search(source_ref) or (_SOURCE_REF_RE_BY_OWNER[owner].fullmatch(source_ref) is None):
         raise GatewayError('RESPONSE_REFUSED')
     observed_at = _validated_timestamp(value['observed_at'])
     return {'owner': owner, 'source_ref': source_ref, 'observed_at': observed_at}
@@ -398,8 +407,8 @@ def tool_schema_snapshot() -> list[dict[str, Any]]:
 
 def tool_schema_digest() -> str:
     return hashlib.sha256(canonical_json(tool_schema_snapshot())).hexdigest()
-SCHEMA_SNAPSHOT_SHA256 = '130b934958c9e60ea70e464bfa59d854df5b6ce3697c81944e9c8a5649468017'
-TOOL_SCHEMA_DIGEST = '76c21784f074df172840b848d3263306ca5f9563ea6cfa891ba205046d720dfe'
+SCHEMA_SNAPSHOT_SHA256 = '02f0c15dd88983188d3356bde3937a9d90a9bf0e089903d72dea469122972b28'
+TOOL_SCHEMA_DIGEST = 'a35f600cc5435e74e422a0203c28e026b90ca5f3ab7931092a37383dcfd9b07b'
 
 def assert_contract_integrity() -> None:
     if schema_snapshot_sha256() != SCHEMA_SNAPSHOT_SHA256 or tool_schema_digest() != TOOL_SCHEMA_DIGEST:
