@@ -268,6 +268,12 @@ P0 implements, installs, enables and exercises none of the later runtime path.
       "session_ref",
       "target_seat"
     ],
+    "maximum_active_registration_per_key": 1,
+    "duplicate_registration": "CONFLICT_ZERO_EFFECT",
+    "registration_identity": "OPAQUE_PROCESS_LOCAL_TOKEN",
+    "remove_requires": "KEY_PLUS_EXACT_REGISTRATION_TOKEN",
+    "stale_cleanup": "INERT",
+    "lookup_rule": "ACTIVE_ONLY_FOR_CURRENT_EXACT_REGISTRATION",
     "source_ref_is_key": false,
     "provider_attention_inflight_is_equivalent": false,
     "missing_or_failed_lookup": "FAIL_CLOSED_BEFORE_WAKE_PERSISTENCE",
@@ -286,7 +292,8 @@ P0 implements, installs, enables and exercises none of the later runtime path.
     "PEER_UID_REFUSED": "REFUSE_ZERO_EFFECT",
     "COLLECTION_TIMEOUT": "UNKNOWN_ZERO_EFFECT",
     "COLLECTION_OVERFLOW": "REFUSE_PASS_ZERO_EFFECT",
-    "WAITER_LOOKUP_UNAVAILABLE": "HELD_ZERO_EFFECT"
+    "WAITER_LOOKUP_UNAVAILABLE": "HELD_ZERO_EFFECT",
+    "WAITER_REGISTRATION_CONFLICT": "CONFLICT_ZERO_EFFECT"
   },
   "no_rebuild": [
     "NO_NEW_JOB_ATTEMPT_WORKER_EVENT_LIFECYCLE",
@@ -333,12 +340,14 @@ Startup validates absolute paths, parent/final-component non-symlink identity, o
 
 Relay discovers only bounded, unique, fully validated V2 parents through its existing shared Slack client. Candidate collection is async, time/cardinality bounded, returns an immutable tuple, permits one in-flight collection, uses no synchronous iterable or worker thread, and cannot stop the accepted AF_UNIX service.
 
-The hot waiter key is exact parent fingerprint + operation key + session ref + target seat. Registration occurs before the first `wait_for_reply` poll and removal occurs in `finally`. `source_ref` cannot be the key because the future reply does not exist when waiting begins. Missing waiter evidence fails closed before Wake persistence. Restart clears the ephemeral waiter; Wake ledger identity remains the durable duplicate authority.
+The hot waiter key is exact parent fingerprint + operation key + session ref + target seat. Registration occurs before the first `wait_for_reply` poll. At most one current registration may exist for that key; a concurrent duplicate registration returns typed `CONFLICT` with zero effect and never overwrites the current waiter. Every accepted registration mints one opaque process-local registration token. `finally` performs compare-and-delete using the exact key plus registration token. Stale cleanup is inert and cannot clear a newer waiter registered under the same logical key. Lookup reports active only for the current exact registration.
+
+`source_ref` cannot be the key because the future reply does not exist when waiting begins. Missing waiter evidence fails closed before Wake persistence. Restart clears the ephemeral waiter and its process-local tokens; Wake ledger identity remains the durable duplicate authority.
 
 ## Implementation sequence
 
 1. P1: after existing ORION R2 protects its active binding/current resolver, add the pure active-observation reducer and dedicated Executive listener, default disabled.
-2. P2: add the Relay observation client, bounded parent discovery, async collection, exact waiter registry and real default-disarmed composition inside the existing Relay process.
+2. P2: add the Relay observation client, bounded parent discovery, async collection, tokenized exact waiter registry and real default-disarmed composition inside the existing Relay process.
 3. R2 terminal projection: continue the already-started ORION R2 operation until it protects one immutable RESULT and effect-known receipt; do not mint a parallel RET2 operation.
 4. P3: extend the same Executive resolver for the protected R2 terminal receipt; no second endpoint.
 5. P4: run one disposable target canary proving one Wake/provider turn/ACK/source resolution and zero duplicate write after restart.
