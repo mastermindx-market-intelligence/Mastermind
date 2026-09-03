@@ -1,375 +1,1273 @@
-# C0 Semantic Falsifier — Result (B1–B8 repair)
+# C0 Semantic Falsifier — Real Paired Result
 
-`operation_key: mastermind-codeintel-c0-semantic-falsifier-20260830-sol-001`
-`canonical_packet: Mastermind #365` · `PR: #375 (DRAFT / HOLD-FOR-SOL)`
+`publication_operation: mastermind-codeintel-c0-real-result-publication-20260903-sol-001`
+`experiment_operation: mastermind-codeintel-c0-semantic-falsifier-20260830-sol-001`
+`canonical_carrier: C0BSBM78V1N/1788475769.871519`
+`PR: #375 (DRAFT / HOLD-FOR-SOL)`
 `artifact_version: mastermind.codeintel_c0_result.v1`
 `wave_status: DISPOSABLE FALSIFIER / PRODUCTION_INERT`
-`return: DECISION_REQUEST / PINNED_BACKEND_ACQUISITION_REQUIRED`
+`return: RESULT / HOLD-FOR-SOL`
 
-> **This experiment grants nothing.** No capability, MCP server, registry entry,
-> workspace registry, lifecycle, retry, service, credential, deployment, market or
-> trading authority is created. Nothing is installed, armed or deployed.
+> **This experiment grants nothing.** No capability, backend acceptance, MCP
+> server, registry entry, profile, service, credential, deployment, market or
+> trading authority is created. The result is source evidence on a Draft PR.
 
 ---
 
 ## 1. Decision
 
-**`decision_state: BLOCKED_MISSING_PINNED_DEPENDENCY`** — **no decision enum is published.**
+**`decision_state: DECIDED` — `decision: NO_SAFE_BACKEND`.**
 
-Neither candidate could be exercised with real pinned bytes: this host has no
-Python LSP, no TypeScript/TSX LSP, and no Serena bundle at
-`949a27ef1e5fda1a6e7b561e777bcece345c6ffd`. The network *is* reachable, so the
-blocker is **provisioning, not connectivity**, and F0 (`network_policy = disabled`,
-"immutable installed bundle"), the language/deployment amendment, the C0 plan and
-Sol's own rulings all forbid this wave from resolving it. No exception was
-self-authorised.
+The exact frozen ruler reached a real decision because both candidates completed
+the full non-synthetic Python + TypeScript/TSX, five-case, cold/warm matrix with
+no candidate-level hard failure. Neither candidate cleared the protected
+primary-case usefulness floor:
 
-`NO_SAFE_BACKEND` was deliberately **not** emitted. It is a real result only when
-both candidates were genuinely exercised and neither qualified.
+| Candidate | Correct | Primary | Complete | Useful |
+|---|---:|---:|---|---|
+| `direct_lsp` | 16/20 | 10/12 | yes | **no** |
+| `serena` | 8/20 | 4/12 | yes | **no** |
+
+The decisive direct-LSP failure is Python
+`A3_implementations_of_protocol` in both phases. Pyright 1.1.403 does not
+serve `textDocument/implementation` for the fixture's structural
+`typing.Protocol`, and `LiveProducer` / `DeadProducer` intentionally do
+not inherit from `Producer`. A launcher-side structural-typing algorithm would
+change candidate behavior to force the expected answer, so none was added.
+TypeScript pull diagnostics were also empty in both phases, but diagnostics are
+secondary and did not cause the usefulness failure.
+
+Serena's four admitted retrieval tools correctly served definition and overview.
+It missed the declaration row in Python references, returned no TypeScript
+references, and its frozen adapter explicitly records implementations and
+diagnostics as unavailable. Those preserved failures are evidence, not omitted
+trials.
+
+This result **does not reproduce** the earlier pre-canonical `DIRECT_LSP`
+claim. It falsifies that claim on the exact published harness/tool versions.
+That disagreement is the central result, not a reason to rewrite the harness.
 
 ---
 
-## 2. B1–B8 closure
+## 2. Replay proof
 
-| Blocker | Status | Evidence |
-|---|---|---|
-| **B1** repository gate red | **CLOSED** | `scripts/ci_pytest.py` discovers with `rglob("test_*.py")` and passes each hit **explicitly**; pytest's ignore contract does not apply to explicit paths — measured for both `pytest_ignore_collect` **and** `collect_ignore`, so the 09:01 prescription would have left CI red. The corpus module is renamed to `consumer_case.py` and the fragile hook removed. The gate now discovers **470** modules with **zero** corpus paths (was 471 with one). |
-| **B2** no path to any decision | **CLOSED** | `decision.py` is the sole ruler; the runner exercises both candidates × both languages × 5 cases × cold/warm. Per-execution binding receipts replace the single overwritten one; `--serena-sha256` is enforced; an unpinned LSP digest is a hard failure rather than an ambient recompute. |
-| **B3** Candidate S was a stub | **CLOSED** | Arguments are forwarded and bounded, MCP content decoded, every returned location strict-checked against the seal, results mapped into the closed facade. A hit and a miss now differ — a stub that discards arguments cannot pass. Bundle digest enforced at start; the config-influence differential is actually executed. |
-| **B4** guard insufficient | **CLOSED** | Schema requires exactly one of each candidate kind and non-synthetic coverage of every required language/case/phase before `DECIDED` is expressible; nested objects are closed; `cross_check_result()` re-derives the winner and refuses an inconsistent artifact. 15 discriminating mutants. |
-| **B5** containment lexical | **CLOSED** | URIs are strict-resolved and proven regular files inside the seal, so percent-encoded traversal and escaping symlinks are refused before any read. Real `DocumentSymbol{range}` shape supported. Wire payloads bounded for size and width; one universal publication guard in the facade. |
-| **B6** isolation was a claim | **CLOSED** | Network denial is **enforced** by `sandbox-exec` and **attested by a discriminating canary** (reachable without the sandbox, `PermissionError` with it). Limits are measured, not assumed. Process group isolation, descendant shutdown receipt, bounded headers, argv-artifact digests, and server-initiated mutation as a hard failure. |
-| **B7** matrix incomplete | **PARTIAL** | A `.ts`/`.tsx` corpus with LSP-independent ground truth now exists and both languages execute. The protected Terminal `migrateLegacy` case is **not** materialized — see §5. A deterministic semantic-evidence digest excludes volatile observation fields. |
-| **B8** cleanup unproven | **CLOSED** | Deterministic teardown with a scratch census, retained-path count and typed failure; process-group descendant receipt from the transport. |
+Both accepted publication trials used the same finalized host launcher bytes,
+fresh absent output/scratch paths, and the unchanged exact PR head.
 
----
-
-## 3. The harness runs the complete contract
-
-Sol required a demonstration that the repaired harness can execute the whole
-matrix using digest-bound stand-ins that **cannot win**. It does:
-
-| Candidate | Status | Languages | Cases | Correct |
+| Run | Canonical result digest | Artifact-file SHA-256 | Semantic evidence digest | Decision |
 |---|---|---|---|---|
-| `direct_lsp` | EXERCISED | python, typescript | 5 | 20/20 |
-| `serena` | EXERCISED | python, typescript | 5 | 12/20 |
+| 1 | `e828f6c88a68fc04d957f1c2d772d59ee90114bf5333c1f9392fb983aed7f27f` | `cc4521b9c110256164969df0479b26d86d8af12d61185e4807a5947b045ebaad` | `fd84936688c1318d7832be281549a128b9e0a9cc04be8fdfb9a823bf18005330` | `NO_SAFE_BACKEND` |
+| 2 | `ed458c3d760ceaf09e556b4ffb9457ef1605a041bd35ea9df54d699ba145d896` | `bae5775b7e5b15f73f2efb8d8131f12fdc21c08018ed99a4d68443f5e1c0607e` | `fd84936688c1318d7832be281549a128b9e0a9cc04be8fdfb9a823bf18005330` | `NO_SAFE_BACKEND` |
 
-`decision_state` for that run is still **`BLOCKED_MISSING_PINNED_DEPENDENCY`** with gate
-`real_evidence_required`: every trial is marked `synthetic`, and the ruler and
-schema both discard synthetic trials as evidence. Serena's 8 failures are its two
-unavailable capabilities (implementations, diagnostics) recorded as **preserved
-failed trials**, not omitted.
+The canonical result digest and file digest differ across runs only because the
+artifact retains wall-clock, latency, workspace-binding and scratch census
+observations. The semantic evidence digest strips exactly those declared
+volatile fields and is byte-identical across replay.
+
+The earlier exploratory runs are not publication evidence: they established the
+minimum launcher compatibility required by the frozen harness, then were
+discarded from the accepted pair before the final launcher bytes were frozen.
 
 ---
 
-## 4. Source identity
+## 3. Source binding
 
 | Field | Value |
 |---|---|
 | Repository | `mastermindx-market-intelligence/Mastermind` |
-| Branch | `sol/codeintel-c0-semantic-falsifier-20260830` |
-| Base (current protected) | `cba0424f10ad6a9a917234c6740d92b19b018642` |
-| Head at artifact generation | `220f5e1dd171664a494cba3b833aa5802d4d206c` |
-| Changed paths vs base | 38 |
-| Result digest | `f68bdacce449370786a6057bd89cc7d0db414d9aead7a248a04d18a8a00f0058` |
-| Semantic evidence digest | `fcb94a787fc9cecbf965269497804b61a95cc2b0412e4c7e499c5fba5089182c` |
+| Existing remote branch | `sol/codeintel-c0-semantic-falsifier-20260830` |
+| Harness head exercised | `ea9e591d9dfb2cdad384e6614644e6eb5bf8df65` |
+| Harness tree | `741baf8fadd3aceb77706da1ffe0e3e97ff812d0` |
+| Merge base recorded by the frozen artifact | `0d5c80bba8c69b5d1ed86aa3d32c9003a4252c73` |
+| Protected ruling pin checked before START | `6aa94e3377086d8f862c4811a2ae87b94d4bd5a1` |
+| PR paths at exercised head | 38, all frozen C0 paths |
+| Publication edit | this result document only |
 
-Protected source moved three times during execution
-(`ae483cc5…` → `162af533…` → `24fa9bc4…` → `cba0424f…`). Each was joined
-**history-preservingly** as a merge — never a reset, rebase, force or
-regeneration — after proving the movement path- and authority-disjoint from the
-C0 ceiling. The three controlling CodeIntel blobs are byte-identical at every one
-of those heads.
+The quarantined predecessor worktree was not opened, read, cleaned, reset,
+reused, cherry-picked, salvaged or used to infer any commit content.
 
-### Changed paths and blob digests
+---
 
-| Path | Blob |
+## 4. Exact toolchain and launch identity
+
+Acquisition occurred in a unique external temporary staging root before the
+semantic calls. The semantic calls themselves ran with network denial enforced
+and attested.
+
+### Serena
+
+| Item | Identity |
 |---|---|
-| `experiments/code_intelligence/__init__.py` | `d36f9078232118355908c5485a5ada0e0a9efa98` |
-| `experiments/code_intelligence/backend.py` | `7c1fa052eea8c18bc5362a4a661f2317a8182c15` |
-| `experiments/code_intelligence/c0_runner.py` | `61a355eeb4fb402ed55aef1d294d5f78273a0570` |
-| `experiments/code_intelligence/decision.py` | `2e5aa9dd4e36a1659d22c8f8f511ca8f9feb982c` |
-| `experiments/code_intelligence/ground_truth.py` | `6286a725e3fbae25e649a2937166265ebf98da59` |
-| `experiments/code_intelligence/jsonrpc_stdio.py` | `fd2793e77bccffa41897effec24412b1a6251302` |
-| `experiments/code_intelligence/lsp_backend.py` | `bcc5bb55c9bcd8445efc62d60e849b5b3f83abed` |
-| `experiments/code_intelligence/sandbox.py` | `593c66c4d577f426f60e089e00c66c3caa6e94fd` |
-| `experiments/code_intelligence/semantic_contract.py` | `f9cd10fbb787e20476ac9be087faf41fdeaed02f` |
-| `experiments/code_intelligence/semantic_facade.py` | `c28874daee6e84c3dbdd3e51d3dd0c6fd35d66ba` |
-| `experiments/code_intelligence/serena_backend.py` | `09dae38d99d9bb936d55f2775c5fb2582eb1ad68` |
-| `experiments/code_intelligence/workspace_seal.py` | `5b826a70a84378c633455eac4c2ca18c224d9df6` |
-| `research/code_intelligence_fabric/c0-result.schema.json` | `345ab972969fd7b8405940b6acfbb9f350609723` |
-| `tests/code_intelligence/servers/fake_jsonrpc_server.py` | `9ed76e6126a3e6e26a3f32a085ad246af9af6417` |
-| `tests/code_intelligence/servers/fake_lsp_server.py` | `cfa3ba55fb0730fc9fc4ed9bd66a793907ee1f73` |
-| `tests/code_intelligence/servers/fake_serena_server.py` | `5cc33d9e174e12d75d771d81d45be76131626968` |
-| `tests/code_intelligence/test_backend_contract.py` | `bc7b7219438ad3e5f4a7a3dd99b7f8313af5dbf6` |
-| `tests/code_intelligence/test_c0_runner.py` | `47cb65490e4ab9ca90c1e05877ce3600f570769d` |
-| `tests/code_intelligence/test_decision.py` | `9de989c3b622e4e6da82e6c2d61c454c578d7a6f` |
-| `tests/code_intelligence/test_ground_truth.py` | `7f5ba7a5bf7731de6d8c82cde2a441c1266970c3` |
-| `tests/code_intelligence/test_jsonrpc_stdio.py` | `a20d6c4f51cb9f0e3c20faf6c8e5e16612036957` |
-| `tests/code_intelligence/test_lsp_backend.py` | `a8182562e98c246d3bfb2e203604b2391d04ba7c` |
-| `tests/code_intelligence/test_sandbox.py` | `638265eff82e80eb0f7b2d208b22a9eda86766a8` |
-| `tests/code_intelligence/test_semantic_contract.py` | `174b8606dc64269c11f6c8adf94e5d73d87ff14b` |
-| `tests/code_intelligence/test_semantic_facade.py` | `acea1d10f0de51dd1f6ee0bad268c1f1733d7f28` |
-| `tests/code_intelligence/test_serena_backend.py` | `7fb5ed3f79af0d38808da4ff9cc654d1e2b3e071` |
-| `tests/code_intelligence/test_workspace_seal.py` | `521086628455f3f9acc4bdf1c489bdfce13bf795` |
-| `tests/fixtures/code_intelligence/python_sample/answer_key.json` | `f60646ee7d18d02287cb293904fb526bf7e1c8fb` |
-| `tests/fixtures/code_intelligence/python_sample/src/sample/__init__.py` | `01d94305f6d87d0d55ba594303f7c4d73a1d0e22` |
-| `tests/fixtures/code_intelligence/python_sample/src/sample/consumer.py` | `028558dc5f6959c5df6d07b4df209356190d1b4b` |
-| `tests/fixtures/code_intelligence/python_sample/src/sample/producer.py` | `698bab9996ca4a02fe9a2ed70dce4420737f5f84` |
-| `tests/fixtures/code_intelligence/python_sample/tests/consumer_case.py` | `257bbafb10a5896a0aebbefb8dbff5b949af3dfd` |
-| `tests/fixtures/code_intelligence/typescript_sample/answer_key.json` | `e59c183b54136b54b0be13656b10c3e72d70c3d7` |
-| `tests/fixtures/code_intelligence/typescript_sample/src/consumer.ts` | `07592c849c17dd6b37592a76d342a4ac4acb14b5` |
-| `tests/fixtures/code_intelligence/typescript_sample/src/producer.ts` | `5d641e398f50970b19ceaedc1e8c13cf19085ab1` |
-| `tests/fixtures/code_intelligence/typescript_sample/src/widget.tsx` | `c660fbb0ce75d4ccf2ce7fd9d9a1c37e2e997021` |
-| `tests/fixtures/code_intelligence/typescript_sample/tests/consumer_case.ts` | `142e3c01b23d9cdc181a52ec66843ed2073d483a` |
+| Source | `oraios/serena@949a27ef1e5fda1a6e7b561e777bcece345c6ffd` / tag `v1.7.0` |
+| Source tree | `6daa0fe28c2be66ed2462e02871426098ddecb69` |
+| Frozen `uv.lock` SHA-256 | `48f88af6b9a7c942820b65d0321176b33b49f0012a8a0cd036ee1f5140cfe167` |
+| Installed environment | Python 3.12.13; 77 locked packages; no dev/agno/google extras |
+| Bundle digest | `397add65e1263194505ebb90cc6108ceea4d37d32ce9176b74cc7680f3dd9cd9` |
+| Python executable SHA-256 | `94be2db6796807c796419e7adbc45cbff3e71966c107c2adcbf931cf70393941` |
+| Serena launcher SHA-256 | `2743ccc40025ae84b3d4c36036da7415a5b67c039d34f0305194253e898ea525` |
+| Fixed context SHA-256 | `c6ab04add6fddf1ac814b5d7eb358bc2f98c829493d08a4e945e0fe8f33bde35` |
 
-Every path is inside the declared ceiling. No `control_plane/**`, `config/**`,
-capability registry, workspace registry, Operator Harness, MCP profile, service,
-host, credential, Slack, Linear, Agent OS, deployment, market, ranking, sizing or
-trading path was modified. `integrations/code_intelligence/**` remains absent.
+The temporary Serena launcher translates the frozen harness's Content-Length
+framing to upstream newline-framed MCP, supplies the initialize-bound disposable
+root to Serena at process start, keeps project configuration in memory, moves
+Serena data/cache/logs under external scratch, fixes `tools/list` to
+`get_symbols_overview`, `find_symbol`,
+`find_referencing_symbols`, and `list_dir`, and normalizes Serena's own JSON
+string records into the adapter's frozen `symbols` envelope. It does not add an
+implementation or diagnostics capability.
 
----
+### Shared direct language engines
 
-## 5. What is still NOT proven
-
-- **No real backend semantics were measured.** Adapter proofs used stand-ins.
-  They show what Mastermind's wrapper does; they say nothing about Serena or any
-  real language server. Raw Serena `read_only` is treated as a negative control,
-  never as a boundary.
-- **The protected Terminal `migrateLegacy` case is not materialized.** It is not
-  present on any pinned Terminal checkout reachable from this host — the only copy
-  found is inside a *different session's* worktree, which is not a sound source
-  pin. It is wired as a host-supplied input rather than vendored.
-- **`RLIMIT_AS` is unenforceable on Darwin**, so address space is not bounded;
-  this is reported in `unenforced_limits`, not silently swallowed.
-- **No independent review.** See §7.
-
----
-
-## 6. Proof summary
-
-### Hostile checks
-
-| Check | Outcome | Code |
-|---|---|---|
-| `contract_refuses_root_selection` | REFUSED_AS_REQUIRED | `SemanticContractError` |
-| `contract_refuses_absolute_location` | REFUSED_AS_REQUIRED | `SemanticContractError` |
-| `contract_refuses_path_traversal` | REFUSED_AS_REQUIRED | `SemanticContractError` |
-| `contract_refuses_unknown_tool` | REFUSED_AS_REQUIRED | `SemanticContractError` |
-| `contract_refuses_oversized_limit` | REFUSED_AS_REQUIRED | `SemanticContractError` |
-| `payload_guard_refuses_absolute_path` | REFUSED_AS_REQUIRED | `PAYLOAD_ABSOLUTE_PATH` |
-| `payload_guard_refuses_host_key` | REFUSED_AS_REQUIRED | `PAYLOAD_HOST_LEAK` |
-| `payload_guard_refuses_secret` | REFUSED_AS_REQUIRED | `PAYLOAD_SECRET_SUSPECTED` |
-| `payload_guard_refuses_unbounded_rows` | REFUSED_AS_REQUIRED | `PAYLOAD_TOO_MANY_ROWS` |
-| `payload_guard_refuses_wide_collection` | REFUSED_AS_REQUIRED | `PAYLOAD_TOO_MANY_ROWS` |
-| `seal_detects_candidate_tree_write` | REFUSED_AS_REQUIRED | `CANDIDATE_TREE_WRITE_DETECTED` |
-| `seal_refuses_symlink_root` | REFUSED_AS_REQUIRED | `SYMLINK_ROOT_REFUSED` |
-| `two_worktrees_carry_distinct_seals` | REFUSED_AS_REQUIRED | `—` |
-| `scratch_refuses_candidate_tree` | REFUSED_AS_REQUIRED | `SCRATCH_INSIDE_CANDIDATE_TREE` |
-| `serena_repository_config_differential` | NOT_RUN | `—` |
-
-### Mutation kills — applied to real source, observed RED, reverted
-
-| Mutation | Killed by |
+| Item | Version / identity |
 |---|---|
-| add a root-selecting field (project_path) to the find_symbol schema | `test_semantic_contract.py::test_no_schema_field_exposes_a_steering_token` |
-| disable candidate-tree write detection in verify_workspace_seal | `test_workspace_seal.py::test_backend_writing_the_worktree_is_refused` |
-| make the facade binding accept a foreign worktree seal | `test_semantic_facade.py::test_receipt_validation_against_a_foreign_seal_is_refused` |
-| bypass the executable SHA-256 check before launch | `test_jsonrpc_stdio.py::test_wrong_digest_refuses_to_launch` |
-| invert the lower-surface tie-break preference | `test_decision.py::test_tie_goes_to_the_lower_surface_candidate` |
-| let latency rather than correctness select the winner | `test_decision.py::test_material_secondary_advantage_beats_the_surface_preference` |
+| Pyright | `1.1.403`; registry SRI `sha512-OyslngwxftKgNfbiyR8WDadUoLHDoinwUfbd50P1VBfLWkR5cro9R52qMQMpVI/LiSVpWbzunToR2NX7SanwmA==` |
+| `pyright/langserver.index.js` SHA-256 | `f200762078eb9880faf421a5b30f9ef3055b1d85c6f10780d75db4da8d8499f1` |
+| TypeScript Language Server | `5.1.3`; registry SRI `sha512-r+pAcYtWdN8tKlYZPwiiHNA2QPjXnI02NrW5Sf2cVM3TRtuQ3V9EKKwOxqwaQ0krsaEXk/CbN90I5erBuf84Vg==` |
+| `typescript-language-server/lib/cli.mjs` SHA-256 | `3c2a7818315bd8399e56f461fe7da01c0f8f67a9c66108af0b655605b088dd77` |
+| TypeScript | `5.9.3`; registry SRI `sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==` |
+| `typescript/lib/typescript.js` SHA-256 | `3ae902c92cc44dace175c0e69e13a4b0899f6983c6121d76b9ab8dd5795e7675` |
+| npm `package-lock.json` SHA-256 | `38c445783e722200e93cf16aeff32604caf0a9d4d47a7e903a04dca0ab55ec39` |
+| Complete installed npm tree digest | `1cd549b4f1763c7fe150d2540831986fd25c41bb218e2e7bdf64f472b1149e4a` |
+| Node | `v26.5.0`; executable SHA-256 `70851490e028b3d699a8d6d4e1de909af2a989359ae807974c92af9c6580a8e8` |
+| Direct-LSP launcher SHA-256 | `fb13c040a2cfded60f1e477659827ef1d80e8fd3a6ae687ad57eaf6c833a85c2` |
+| Exact run driver SHA-256 | `5b5840a64585055d4bd9e6b00f6fd6bdc34596a34535ddb88005ccbd4b30efab` |
 
-The latency mutation is worth naming: it **survived** the first time, revealing
-that the materiality band was unreachable dead code behind a `perfect` filter.
-Adding the usefulness floor made the rule reachable, and the mutation now dies.
+The temporary direct launcher performs only the compatibility that the frozen
+adapter requires to exercise these real server bytes: it binds `rootUri` as a
+workspace folder, opens the sealed corpus documents to create inferred projects,
+bridges published diagnostics to the facade's pull request, removes nested
+members from a top-level overview, and maps an unavailable implementation
+request to the server's real references restricted to class-declaration
+locations. That conservative mapping succeeds for explicit TypeScript
+`implements` declarations but correctly produces no Python structural
+implementations. This host launcher is a remaining local-bundle confound and is
+not installed or published as a product capability.
 
-### Environment
+---
 
-| Item | Value |
+## 5. Isolation, integrity, and cleanup
+
+| Proof | Result |
 |---|---|
-| Network policy | `enforced_and_attested` |
-| Sandbox available | True · profile `5c358b8d84721133…` |
-| Network denied (attested) | True |
-| Enforced limits | RLIMIT_CPU, RLIMIT_NOFILE, RLIMIT_NPROC |
-| Unenforced limits | RLIMIT_AS |
-| Third-party runtime deps added | **none** (standard library only) |
-| Exposed model-facing tools | `workspace_status, symbol_overview, find_symbol, find_references, find_implementations, diagnostics` |
+| Semantic-call network boundary | `sandbox-exec` profile `5c358b8d84721133e7ba22df82d84f796b5f30a41a2682209a949d783adbd08`; DNS failed and TCP returned `PermissionError: Operation not permitted` in both accepted runs |
+| Resource boundary | `RLIMIT_CPU`, `RLIMIT_NOFILE`, `RLIMIT_NPROC` enforced; Darwin `RLIMIT_AS` explicitly reported unenforceable |
+| Credential environment | frozen transport child allowlist only: `HOME`, `LANG`, `LC_ALL`, `PATH`, `PYTHONDONTWRITEBYTECODE`, `PYTHONHASHSEED`, `TMPDIR`; no host credential variable or credential path supplied |
+| Candidate source writes | 4/4 execution receipts per run have identical candidate-tree before/after fingerprints |
+| Mastermind source during experiment | exact `ea9e591d…` / tree `741baf8…`, clean before and after accepted pair |
+| Serena source during experiment | exact `949a27ef…` / tree `6daa0fe…`, clean before and after accepted pair |
+| Toolchain drift | npm lock, Serena `uv.lock`, launchers and context retained identical SHA-256 before/after replay |
+| Hostile boundary probes | 15/15 `REFUSED_AS_REQUIRED`, including root selection, absolute/traversal paths, secret/host-key payloads, candidate writes, symlink root, cross-worktree seal, internal scratch, and repository-config influence |
+| Run 1 scratch | removed; zero retained paths; 305 files / 2,825,344 bytes censused before removal |
+| Run 2 scratch | removed; zero retained paths; 305 files / 2,825,353 bytes censused before removal |
+| Descendants | post-run process census empty for both launchers, Serena, Pyright and TypeScript Language Server |
+
+The acquisition/staging root is not a production installation. It is retained
+only through source publication verification so the reported digests can be
+rechecked, then removed as the final local cleanup action.
 
 ---
 
-## 7. Effect state and the review gap
+## 6. Effect and hold state
 
-| Effect | State |
+| Plane | State |
 |---|---|
-| Local | one isolated worktree, one branch |
-| Remote | PR #375 DRAFT / HOLD — no `merge-on-green`, auto-merge null, not Ready |
-| Production | **none** |
+| Source | one bounded evidence-only update on existing PR #375 |
+| Review | no current independent exact-head approval |
+| Remote | Draft / HOLD-FOR-SOL; no Ready; auto-merge remains absent |
+| Merge/deploy | none |
+| Installation/profile/service | none |
+| Market/trading/production | none |
 
-**Independent review remains open.** The only GitHub identity on this surface is
-`chriswong6031-creator`, which also authored this branch. A review submitted from
-here would be a self-review. A `DIRECT_TARGETED` independent-review operation was
-delivered to this session on 2026-09-02 and was **refused**
-(`PICKUP_REFUSED … LOCAL_EFFECT_CONFLICT`) on exactly that ground — it also named a
-head branch, `…-20260902`, that does not exist. Sol should place the review with a
-genuinely distinct reviewer identity.
-
----
-
-## 8. Residual risks
-
-- Adapter proofs used stand-in servers; real backend semantics remain unmeasured.
-- The protected Terminal migrateLegacy case was not materialized: it is not present on any pinned Terminal checkout reachable from this host.
-- Ground truth is a conservative census, not a type-checker.
-- RLIMIT_AS is unenforceable on Darwin, so address space is not bounded.
+The earlier `DIRECT_LSP` observation must not be treated as accepted or
+replay-stable evidence for this exact frozen matrix. Sol should review this
+contradiction and either accept `NO_SAFE_BACKEND` or identify the exact
+previous launcher/result artifact that produced Python structural
+implementations without changing candidate behavior.
 
 ---
 
-## 9. Smallest next action
+## 7. Complete machine artifact (accepted replay run 2)
 
-Provide, via B0 (`#371`) or an explicit authorisation, three immutable
-digest-pinned bundles: Serena `949a27ef…`/v1.7.0, one pinned Python language
-server, one pinned TypeScript/TSX language server. The harness then runs unchanged:
-
-```
-python3 -m experiments.code_intelligence.c0_runner \
-  --scratch-parent <external-scratch> \
-  --python-lsp-binary <pinned> --python-lsp-sha256 <digest> \
-  --typescript-lsp-binary <pinned> --typescript-lsp-sha256 <digest> \
-  --serena-bundle <bundle> --serena-sha256 <digest> \
-  --serena-launcher-binary <pinned> --serena-launcher-sha256 <digest>
-```
-
-**No code change is required to reach a decision — only the bundles.**
-
----
-
-## 10. Immutable artifact
-
-`sha256(canonical) = f68bdacce449370786a6057bd89cc7d0db414d9aead7a248a04d18a8a00f0058`
+`sha256(file) = bae5775b7e5b15f73f2efb8d8131f12fdc21c08018ed99a4d68443f5e1c0607e`
+`sha256(canonical result) = ed458c3d760ceaf09e556b4ffb9457ef1605a041bd35ea9df54d699ba145d896`
+`semantic_evidence_digest = fd84936688c1318d7832be281549a128b9e0a9cc04be8fdfb9a823bf18005330`
 
 ```json
 {
   "artifact_version": "mastermind.codeintel_c0_result.v1",
   "binding_receipt": {
-    "facade_source_digest": "87feadaadc91aed27aefb684d24d75d8f5e18dbb07b422919870f710a2fd7bb7",
-    "per_execution": [],
+    "facade_source_digest": "495030c00167248fada016024f7275edf48a2a8ef64e2131db30b98ffd689afe",
+    "per_execution": [
+      {
+        "backend_identity_digest": "22b60a12069bc9192ab4c2abea749a325bfa8a18bb4c6eb262c637490e9c211b",
+        "backend_kind": "direct_lsp",
+        "candidate": "direct_lsp",
+        "candidate_tree_after": "f0fd9b3929e6d66d093e3c07709a5467ada09cef77c7258c5c926dc74da66598",
+        "candidate_tree_before": "f0fd9b3929e6d66d093e3c07709a5467ada09cef77c7258c5c926dc74da66598",
+        "facade_source_digest": "495030c00167248fada016024f7275edf48a2a8ef64e2131db30b98ffd689afe",
+        "language": "python",
+        "language_server_digests": [
+          [
+            "python:pyright",
+            "94be2db6796807c796419e7adbc45cbff3e71966c107c2adcbf931cf70393941"
+          ]
+        ],
+        "semantic_schema_digest": "ee253db52b52d2cfc551c3c2091789251000ca3009c2afbe5df44937232dd8ce",
+        "startup_unix_ms": 1788478866215,
+        "workspace_binding_digest": "7a262ba6cd22a8f18fe7dd571aeaf66c5177dc1273cbf53cdd93121df6bd0843"
+      },
+      {
+        "backend_identity_digest": "998501d8f3d7b8f09b3703dc4373bd6610ec34d236778805294ffb5e9ab7ac69",
+        "backend_kind": "direct_lsp",
+        "candidate": "direct_lsp",
+        "candidate_tree_after": "57214efe14c7586e0542a07f493bd2af7e43af1a7434ea57209cbe56aaa53049",
+        "candidate_tree_before": "57214efe14c7586e0542a07f493bd2af7e43af1a7434ea57209cbe56aaa53049",
+        "facade_source_digest": "495030c00167248fada016024f7275edf48a2a8ef64e2131db30b98ffd689afe",
+        "language": "typescript",
+        "language_server_digests": [
+          [
+            "typescript:typescript-language-server",
+            "94be2db6796807c796419e7adbc45cbff3e71966c107c2adcbf931cf70393941"
+          ]
+        ],
+        "semantic_schema_digest": "ee253db52b52d2cfc551c3c2091789251000ca3009c2afbe5df44937232dd8ce",
+        "startup_unix_ms": 1788478868573,
+        "workspace_binding_digest": "73be960b47775aa7b849154fd51d24da2378f2d5011756eeab1c5285602d8f90"
+      },
+      {
+        "backend_identity_digest": "190817e3553be7879c5fc562b925d0702ca7eb7065c50e3c803d6c7d374004de",
+        "backend_kind": "serena",
+        "candidate": "serena",
+        "candidate_tree_after": "f0fd9b3929e6d66d093e3c07709a5467ada09cef77c7258c5c926dc74da66598",
+        "candidate_tree_before": "f0fd9b3929e6d66d093e3c07709a5467ada09cef77c7258c5c926dc74da66598",
+        "facade_source_digest": "495030c00167248fada016024f7275edf48a2a8ef64e2131db30b98ffd689afe",
+        "language": "python",
+        "language_server_digests": [
+          [
+            "serena:bundle",
+            "397add65e1263194505ebb90cc6108ceea4d37d32ce9176b74cc7680f3dd9cd9"
+          ]
+        ],
+        "semantic_schema_digest": "ee253db52b52d2cfc551c3c2091789251000ca3009c2afbe5df44937232dd8ce",
+        "startup_unix_ms": 1788478883215,
+        "workspace_binding_digest": "f7098139e27e84c810860b5328fade2bac397cc085e1f98e1f64861a2d26e982"
+      },
+      {
+        "backend_identity_digest": "190817e3553be7879c5fc562b925d0702ca7eb7065c50e3c803d6c7d374004de",
+        "backend_kind": "serena",
+        "candidate": "serena",
+        "candidate_tree_after": "57214efe14c7586e0542a07f493bd2af7e43af1a7434ea57209cbe56aaa53049",
+        "candidate_tree_before": "57214efe14c7586e0542a07f493bd2af7e43af1a7434ea57209cbe56aaa53049",
+        "facade_source_digest": "495030c00167248fada016024f7275edf48a2a8ef64e2131db30b98ffd689afe",
+        "language": "typescript",
+        "language_server_digests": [
+          [
+            "serena:bundle",
+            "397add65e1263194505ebb90cc6108ceea4d37d32ce9176b74cc7680f3dd9cd9"
+          ]
+        ],
+        "semantic_schema_digest": "ee253db52b52d2cfc551c3c2091789251000ca3009c2afbe5df44937232dd8ce",
+        "startup_unix_ms": 1788478888298,
+        "workspace_binding_digest": "dadb4b5a81af89d127e4be1088e10e07fa5eab4e930fa56af5129401825b8428"
+      }
+    ],
     "semantic_schema_digest": "ee253db52b52d2cfc551c3c2091789251000ca3009c2afbe5df44937232dd8ce",
-    "workspace_binding_digest": "0e2a58cbed86012305595b865bcee8336c718c4f6658a667354dbb26f5f5662f"
+    "workspace_binding_digest": "7a262ba6cd22a8f18fe7dd571aeaf66c5177dc1273cbf53cdd93121df6bd0843"
   },
-  "blocking_reason": "No decision may be published: the required candidate x language x case x phase matrix was not genuinely exercised. direct_lsp missing 20 required trial(s); serena missing 20 required trial(s). Synthetic stand-in trials prove adapter behaviour and are categorically ineligible as empirical evidence.",
   "candidate_summaries": [
     {
-      "complete": false,
-      "correct": 0,
-      "correctness": 0.0,
-      "hard_failures": [
-        "LSP_BINARY_UNAVAILABLE:python",
-        "LSP_BINARY_UNAVAILABLE:typescript"
-      ],
+      "complete": true,
+      "correct": 16,
+      "correctness": 0.8,
+      "hard_failures": [],
       "kind": "direct_lsp",
-      "median_latency_ms": null,
-      "missing": [
-        "python/O1_definition_live_implementation/cold",
-        "python/O1_definition_live_implementation/warm",
-        "python/W1_references_across_files/cold",
-        "python/W1_references_across_files/warm",
-        "python/A3_implementations_of_protocol/cold",
-        "python/A3_implementations_of_protocol/warm",
-        "python/overview_single_file/cold",
-        "python/overview_single_file/warm",
-        "python/diagnostics_planted_undefined_name/cold",
-        "python/diagnostics_planted_undefined_name/warm",
-        "typescript/O1_definition_live_implementation/cold",
-        "typescript/O1_definition_live_implementation/warm",
-        "typescript/W1_references_across_files/cold",
-        "typescript/W1_references_across_files/warm",
-        "typescript/A3_implementations_of_protocol/cold",
-        "typescript/A3_implementations_of_protocol/warm",
-        "typescript/overview_single_file/cold",
-        "typescript/overview_single_file/warm",
-        "typescript/diagnostics_planted_undefined_name/cold",
-        "typescript/diagnostics_planted_undefined_name/warm"
-      ],
-      "non_synthetic_trials": 0,
-      "primary_correct": 0,
-      "primary_trials": 0,
-      "status": "UNEXERCISED_MISSING_BUNDLE",
+      "median_latency_ms": 76,
+      "missing": [],
+      "non_synthetic_trials": 20,
+      "primary_correct": 10,
+      "primary_trials": 12,
+      "status": "EXERCISED",
       "useful": false
     },
     {
-      "complete": false,
-      "correct": 0,
-      "correctness": 0.0,
-      "hard_failures": [
-        "SERENA_BUNDLE_UNAVAILABLE"
-      ],
+      "complete": true,
+      "correct": 8,
+      "correctness": 0.4,
+      "hard_failures": [],
       "kind": "serena",
-      "median_latency_ms": null,
-      "missing": [
-        "python/O1_definition_live_implementation/cold",
-        "python/O1_definition_live_implementation/warm",
-        "python/W1_references_across_files/cold",
-        "python/W1_references_across_files/warm",
-        "python/A3_implementations_of_protocol/cold",
-        "python/A3_implementations_of_protocol/warm",
-        "python/overview_single_file/cold",
-        "python/overview_single_file/warm",
-        "python/diagnostics_planted_undefined_name/cold",
-        "python/diagnostics_planted_undefined_name/warm",
-        "typescript/O1_definition_live_implementation/cold",
-        "typescript/O1_definition_live_implementation/warm",
-        "typescript/W1_references_across_files/cold",
-        "typescript/W1_references_across_files/warm",
-        "typescript/A3_implementations_of_protocol/cold",
-        "typescript/A3_implementations_of_protocol/warm",
-        "typescript/overview_single_file/cold",
-        "typescript/overview_single_file/warm",
-        "typescript/diagnostics_planted_undefined_name/cold",
-        "typescript/diagnostics_planted_undefined_name/warm"
-      ],
-      "non_synthetic_trials": 0,
-      "primary_correct": 0,
-      "primary_trials": 0,
-      "status": "UNEXERCISED_MISSING_BUNDLE",
+      "median_latency_ms": 110,
+      "missing": [],
+      "non_synthetic_trials": 20,
+      "primary_correct": 4,
+      "primary_trials": 12,
+      "status": "EXERCISED",
       "useful": false
     }
   ],
   "candidates": [
     {
-      "hard_failures": [
-        "LSP_BINARY_UNAVAILABLE:python",
-        "LSP_BINARY_UNAVAILABLE:typescript"
-      ],
-      "identity": null,
+      "hard_failures": [],
+      "identity": {
+        "configuration_digest": "7b9ae12872bba1e6864f94d93b41e5fc103554199eadac2bca0347e48ee64a01",
+        "executable_sha256": "94be2db6796807c796419e7adbc45cbff3e71966c107c2adcbf931cf70393941",
+        "kind": "direct_lsp",
+        "source_commit": "unpinned",
+        "source_version": "1.1.403"
+      },
       "kind": "direct_lsp",
       "notes": "",
-      "status": "UNEXERCISED_MISSING_BUNDLE",
-      "trials": []
+      "status": "EXERCISED",
+      "trials": [
+        {
+          "actual": [
+            [
+              "src/sample/producer.py",
+              20
+            ]
+          ],
+          "case": "O1_definition_live_implementation",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/sample/producer.py",
+              20
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 1251,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/sample/consumer.py",
+              8
+            ],
+            [
+              "tests/consumer_case.py",
+              11
+            ],
+            [
+              "tests/consumer_case.py",
+              15
+            ]
+          ],
+          "case": "W1_references_across_files",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/sample/consumer.py",
+              8
+            ],
+            [
+              "tests/consumer_case.py",
+              11
+            ],
+            [
+              "tests/consumer_case.py",
+              15
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 72,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [],
+          "case": "A3_implementations_of_protocol",
+          "correct": false,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer"
+          ],
+          "language": "python",
+          "latency_ms": 68,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "make_dead_producer",
+            "make_producer"
+          ],
+          "case": "overview_single_file",
+          "correct": true,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "make_dead_producer",
+            "make_producer"
+          ],
+          "language": "python",
+          "latency_ms": 67,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/sample/consumer.py",
+              15
+            ]
+          ],
+          "case": "diagnostics_planted_undefined_name",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/sample/consumer.py",
+              15
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 72,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/sample/producer.py",
+              20
+            ]
+          ],
+          "case": "O1_definition_live_implementation",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/sample/producer.py",
+              20
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 75,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/sample/consumer.py",
+              8
+            ],
+            [
+              "tests/consumer_case.py",
+              11
+            ],
+            [
+              "tests/consumer_case.py",
+              15
+            ]
+          ],
+          "case": "W1_references_across_files",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/sample/consumer.py",
+              8
+            ],
+            [
+              "tests/consumer_case.py",
+              11
+            ],
+            [
+              "tests/consumer_case.py",
+              15
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 78,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [],
+          "case": "A3_implementations_of_protocol",
+          "correct": false,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer"
+          ],
+          "language": "python",
+          "latency_ms": 72,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "make_dead_producer",
+            "make_producer"
+          ],
+          "case": "overview_single_file",
+          "correct": true,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "make_dead_producer",
+            "make_producer"
+          ],
+          "language": "python",
+          "latency_ms": 70,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/sample/consumer.py",
+              15
+            ]
+          ],
+          "case": "diagnostics_planted_undefined_name",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/sample/consumer.py",
+              15
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 70,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/producer.ts",
+              13
+            ]
+          ],
+          "case": "O1_definition_live_implementation",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/producer.ts",
+              13
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 3300,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/consumer.ts",
+              5
+            ],
+            [
+              "src/widget.tsx",
+              3
+            ],
+            [
+              "src/widget.tsx",
+              6
+            ],
+            [
+              "tests/consumer_case.ts",
+              8
+            ],
+            [
+              "tests/consumer_case.ts",
+              11
+            ]
+          ],
+          "case": "W1_references_across_files",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/consumer.ts",
+              5
+            ],
+            [
+              "src/widget.tsx",
+              3
+            ],
+            [
+              "src/widget.tsx",
+              6
+            ],
+            [
+              "tests/consumer_case.ts",
+              8
+            ],
+            [
+              "tests/consumer_case.ts",
+              11
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 86,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            "DeadProducer",
+            "LiveProducer"
+          ],
+          "case": "A3_implementations_of_protocol",
+          "correct": true,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer"
+          ],
+          "language": "typescript",
+          "latency_ms": 103,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "makeDeadProducer",
+            "makeProducer"
+          ],
+          "case": "overview_single_file",
+          "correct": true,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "makeDeadProducer",
+            "makeProducer"
+          ],
+          "language": "typescript",
+          "latency_ms": 81,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [],
+          "case": "diagnostics_planted_undefined_name",
+          "correct": false,
+          "error": null,
+          "expected": [
+            [
+              "src/consumer.ts",
+              11
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 3074,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/producer.ts",
+              13
+            ]
+          ],
+          "case": "O1_definition_live_implementation",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/producer.ts",
+              13
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 73,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/consumer.ts",
+              5
+            ],
+            [
+              "src/widget.tsx",
+              3
+            ],
+            [
+              "src/widget.tsx",
+              6
+            ],
+            [
+              "tests/consumer_case.ts",
+              8
+            ],
+            [
+              "tests/consumer_case.ts",
+              11
+            ]
+          ],
+          "case": "W1_references_across_files",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/consumer.ts",
+              5
+            ],
+            [
+              "src/widget.tsx",
+              3
+            ],
+            [
+              "src/widget.tsx",
+              6
+            ],
+            [
+              "tests/consumer_case.ts",
+              8
+            ],
+            [
+              "tests/consumer_case.ts",
+              11
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 86,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            "DeadProducer",
+            "LiveProducer"
+          ],
+          "case": "A3_implementations_of_protocol",
+          "correct": true,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer"
+          ],
+          "language": "typescript",
+          "latency_ms": 76,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "makeDeadProducer",
+            "makeProducer"
+          ],
+          "case": "overview_single_file",
+          "correct": true,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "makeDeadProducer",
+            "makeProducer"
+          ],
+          "language": "typescript",
+          "latency_ms": 71,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [],
+          "case": "diagnostics_planted_undefined_name",
+          "correct": false,
+          "error": null,
+          "expected": [
+            [
+              "src/consumer.ts",
+              11
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 3074,
+          "phase": "warm",
+          "synthetic": false
+        }
+      ]
     },
     {
-      "hard_failures": [
-        "SERENA_BUNDLE_UNAVAILABLE"
-      ],
-      "identity": null,
+      "advertised_tool_census": [],
+      "hard_failures": [],
+      "identity": {
+        "configuration_digest": "66af61310ed0aafb66f8ed4128994bcbee6addaeb130e8adc34f78754669da82",
+        "executable_sha256": "94be2db6796807c796419e7adbc45cbff3e71966c107c2adcbf931cf70393941",
+        "kind": "serena",
+        "source_commit": "949a27ef1e5fda1a6e7b561e777bcece345c6ffd",
+        "source_version": "1.7.0"
+      },
       "kind": "serena",
-      "notes": "No host-supplied immutable Serena bundle at the pinned commit was provided; the protected plan forbids acquiring one inside this wave.",
-      "status": "UNEXERCISED_MISSING_BUNDLE",
-      "trials": []
+      "notes": "",
+      "status": "EXERCISED",
+      "trials": [
+        {
+          "actual": [
+            [
+              "src/sample/producer.py",
+              20
+            ]
+          ],
+          "case": "O1_definition_live_implementation",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/sample/producer.py",
+              20
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 730,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "tests/consumer_case.py",
+              11
+            ],
+            [
+              "tests/consumer_case.py",
+              15
+            ]
+          ],
+          "case": "W1_references_across_files",
+          "correct": false,
+          "error": null,
+          "expected": [
+            [
+              "src/sample/consumer.py",
+              8
+            ],
+            [
+              "tests/consumer_case.py",
+              11
+            ],
+            [
+              "tests/consumer_case.py",
+              15
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 2119,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": null,
+          "case": "A3_implementations_of_protocol",
+          "correct": false,
+          "error": "SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: no admitted upstream implementations tool",
+          "expected": [
+            "DeadProducer",
+            "LiveProducer"
+          ],
+          "language": "python",
+          "latency_ms": 35,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "make_dead_producer",
+            "make_producer"
+          ],
+          "case": "overview_single_file",
+          "correct": true,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "make_dead_producer",
+            "make_producer"
+          ],
+          "language": "python",
+          "latency_ms": 167,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": null,
+          "case": "diagnostics_planted_undefined_name",
+          "correct": false,
+          "error": "SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: no admitted upstream diagnostics tool",
+          "expected": [
+            [
+              "src/sample/consumer.py",
+              15
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 32,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/sample/producer.py",
+              20
+            ]
+          ],
+          "case": "O1_definition_live_implementation",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/sample/producer.py",
+              20
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 75,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "tests/consumer_case.py",
+              11
+            ],
+            [
+              "tests/consumer_case.py",
+              15
+            ]
+          ],
+          "case": "W1_references_across_files",
+          "correct": false,
+          "error": null,
+          "expected": [
+            [
+              "src/sample/consumer.py",
+              8
+            ],
+            [
+              "tests/consumer_case.py",
+              11
+            ],
+            [
+              "tests/consumer_case.py",
+              15
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 110,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": null,
+          "case": "A3_implementations_of_protocol",
+          "correct": false,
+          "error": "SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: no admitted upstream implementations tool",
+          "expected": [
+            "DeadProducer",
+            "LiveProducer"
+          ],
+          "language": "python",
+          "latency_ms": 34,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "make_dead_producer",
+            "make_producer"
+          ],
+          "case": "overview_single_file",
+          "correct": true,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "make_dead_producer",
+            "make_producer"
+          ],
+          "language": "python",
+          "latency_ms": 175,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": null,
+          "case": "diagnostics_planted_undefined_name",
+          "correct": false,
+          "error": "SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: no admitted upstream diagnostics tool",
+          "expected": [
+            [
+              "src/sample/consumer.py",
+              15
+            ]
+          ],
+          "language": "python",
+          "latency_ms": 37,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/producer.ts",
+              13
+            ]
+          ],
+          "case": "O1_definition_live_implementation",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/producer.ts",
+              13
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 830,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [],
+          "case": "W1_references_across_files",
+          "correct": false,
+          "error": null,
+          "expected": [
+            [
+              "src/consumer.ts",
+              5
+            ],
+            [
+              "src/widget.tsx",
+              3
+            ],
+            [
+              "src/widget.tsx",
+              6
+            ],
+            [
+              "tests/consumer_case.ts",
+              8
+            ],
+            [
+              "tests/consumer_case.ts",
+              11
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 5132,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": null,
+          "case": "A3_implementations_of_protocol",
+          "correct": false,
+          "error": "SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: no admitted upstream implementations tool",
+          "expected": [
+            "DeadProducer",
+            "LiveProducer"
+          ],
+          "language": "typescript",
+          "latency_ms": 36,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "makeDeadProducer",
+            "makeProducer"
+          ],
+          "case": "overview_single_file",
+          "correct": true,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "makeDeadProducer",
+            "makeProducer"
+          ],
+          "language": "typescript",
+          "latency_ms": 170,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": null,
+          "case": "diagnostics_planted_undefined_name",
+          "correct": false,
+          "error": "SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: no admitted upstream diagnostics tool",
+          "expected": [
+            [
+              "src/consumer.ts",
+              11
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 37,
+          "phase": "cold",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            [
+              "src/producer.ts",
+              13
+            ]
+          ],
+          "case": "O1_definition_live_implementation",
+          "correct": true,
+          "error": null,
+          "expected": [
+            [
+              "src/producer.ts",
+              13
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 171,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [],
+          "case": "W1_references_across_files",
+          "correct": false,
+          "error": null,
+          "expected": [
+            [
+              "src/consumer.ts",
+              5
+            ],
+            [
+              "src/widget.tsx",
+              3
+            ],
+            [
+              "src/widget.tsx",
+              6
+            ],
+            [
+              "tests/consumer_case.ts",
+              8
+            ],
+            [
+              "tests/consumer_case.ts",
+              11
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 106,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": null,
+          "case": "A3_implementations_of_protocol",
+          "correct": false,
+          "error": "SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: no admitted upstream implementations tool",
+          "expected": [
+            "DeadProducer",
+            "LiveProducer"
+          ],
+          "language": "typescript",
+          "latency_ms": 36,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "makeDeadProducer",
+            "makeProducer"
+          ],
+          "case": "overview_single_file",
+          "correct": true,
+          "error": null,
+          "expected": [
+            "DeadProducer",
+            "LiveProducer",
+            "Producer",
+            "makeDeadProducer",
+            "makeProducer"
+          ],
+          "language": "typescript",
+          "latency_ms": 186,
+          "phase": "warm",
+          "synthetic": false
+        },
+        {
+          "actual": null,
+          "case": "diagnostics_planted_undefined_name",
+          "correct": false,
+          "error": "SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: SERENA_CAPABILITY_UNAVAILABLE: no admitted upstream diagnostics tool",
+          "expected": [
+            [
+              "src/consumer.ts",
+              11
+            ]
+          ],
+          "language": "typescript",
+          "latency_ms": 37,
+          "phase": "warm",
+          "synthetic": false
+        }
+      ]
     }
   ],
   "cleanup": {
     "failure": null,
     "removed": true,
     "retained_paths": 0,
-    "scratch_bytes_before": 101524,
-    "scratch_files_before": 123
+    "scratch_bytes_before": 2825353,
+    "scratch_files_before": 305
   },
   "corpora": [
     {
       "answer_key_digest": "a8fc681801339e5451b13cccc5716d423b4af02d32d792ef75bc23261755b6d5",
       "corpus_id": "python_sample",
       "language": "python",
-      "manifest_digest": "6b42a5bfdd99aaeed8834fc61ebdac870af69cf6ca0c0b347d68d2d9de9d783f"
+      "manifest_digest": "cc095175552d8a2c0d9307da29ef2b1f0339041319ce966355a88cb7f75b51c4"
     },
     {
       "answer_key_digest": "7ae09d9b7ed75405adc0d1bcd5082f9ad9f64138a93cf1e23b1f77a89149c2bf",
@@ -378,10 +1276,12 @@ python3 -m experiments.code_intelligence.c0_runner \
       "manifest_digest": "8ab20183b3a88aad31c1468112ce55a8819d717ead7f5b7d43aa2a40d2020037"
     }
   ],
+  "decision": "NO_SAFE_BACKEND",
   "decision_gates": [
-    "real_evidence_required"
+    "direct_lsp failed the usefulness floor on primary cases (10/12)",
+    "serena failed the usefulness floor on primary cases (4/12)"
   ],
-  "decision_state": "BLOCKED_MISSING_PINNED_DEPENDENCY",
+  "decision_state": "DECIDED",
   "environment": {
     "network_policy": "enforced_and_attested",
     "observations": [
@@ -414,7 +1314,7 @@ python3 -m experiments.code_intelligence.c0_runner \
     "find_implementations",
     "diagnostics"
   ],
-  "generated_unix_ms": 1788346186128,
+  "generated_unix_ms": 1788478897864,
   "hostile_results": [
     {
       "check": "contract_refuses_root_selection",
@@ -503,8 +1403,8 @@ python3 -m experiments.code_intelligence.c0_runner \
     {
       "check": "serena_repository_config_differential",
       "code": null,
-      "detail": "no Serena bundle supplied",
-      "outcome": "NOT_RUN"
+      "detail": "tool census unchanged under a hostile repository configuration",
+      "outcome": "REFUSED_AS_REQUIRED"
     }
   ],
   "materiality_band": 0.1,
@@ -534,7 +1434,7 @@ python3 -m experiments.code_intelligence.c0_runner \
       "mutation": "let latency rather than correctness select the winner"
     }
   ],
-  "next_action": "Sol/B0 to provide the pinned Serena bundle (949a27ef1e5fda1a6e7b561e777bcece345c6ffd / v1.7.0) and pinned Python and TypeScript/TSX language-server bundles as immutable host inputs; the harness then runs unchanged via c0_runner.",
+  "next_action": "Return the decision to Sol for C0 release adjudication.",
   "operation_key": "mastermind-codeintel-c0-semantic-falsifier-20260830-sol-001",
   "primary_cases": [
     "O1_definition_live_implementation",
@@ -547,9 +1447,9 @@ python3 -m experiments.code_intelligence.c0_runner \
     "Ground truth is a conservative census, not a type-checker.",
     "RLIMIT_AS is unenforceable on Darwin, so address space is not bounded."
   ],
-  "semantic_evidence_digest": "fcb94a787fc9cecbf965269497804b61a95cc2b0412e4c7e499c5fba5089182c",
+  "semantic_evidence_digest": "fd84936688c1318d7832be281549a128b9e0a9cc04be8fdfb9a823bf18005330",
   "source": {
-    "base_sha": "cba0424f10ad6a9a917234c6740d92b19b018642",
+    "base_sha": "0d5c80bba8c69b5d1ed86aa3d32c9003a4252c73",
     "branch": "sol/codeintel-c0-semantic-falsifier-20260830",
     "changed_paths": [
       "experiments/code_intelligence/__init__.py",
@@ -591,11 +1491,11 @@ python3 -m experiments.code_intelligence.c0_runner \
       "tests/fixtures/code_intelligence/typescript_sample/src/widget.tsx",
       "tests/fixtures/code_intelligence/typescript_sample/tests/consumer_case.ts"
     ],
-    "head_sha": "220f5e1dd171664a494cba3b833aa5802d4d206c",
-    "protected_pickup_sha": "ae483cc5f101d369f368f217bb767c91fc9e0150",
+    "head_sha": "ea9e591d9dfb2cdad384e6614644e6eb5bf8df65",
+    "protected_pickup_sha": "6aa94e3377086d8f862c4811a2ae87b94d4bd5a1",
     "repository": "mastermindx-market-intelligence/Mastermind"
   },
-  "tie_break": "",
+  "tie_break": "Both candidates were genuinely exercised and neither cleared the safety and correctness floor.",
   "wave_status": "DISPOSABLE FALSIFIER / PRODUCTION_INERT"
 }
 ```
