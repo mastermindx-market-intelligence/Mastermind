@@ -1458,6 +1458,34 @@ def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_probe_env_is_immune_to_inherited_terminal_identity(tmp_path, monkeypatch):
+    """Second live EFFECT_UNKNOWN (PR #350): the probe env was a SUPERSET of
+    the adapter launch env, and the real binary embeds env-derived terminal
+    identity into its userAgent -- so the probe sealed a version the
+    sanitized launch could never observe. The probe env is now built from
+    empty, byte-equal to CodexOperatorAdapter._env. This regression taints
+    the inherited environment with a userAgent-affecting variable (echoed
+    by the fake under OHF_FAKE_UA_SUFFIX) and proves the journey still
+    completes: pre-fix, the tainted var reached ONLY the probe and the
+    launch refused on version inequality."""
+    monkeypatch.setenv("OHF_FAKE_UA_SUFFIX", "tainted-terminal-identity")
+    scratch = tmp_path / "scratch-env-immunity"
+    scratch.mkdir()
+    factory = _canary_client_factory(replies=list(_HAPPY_REPLIES))
+    evidence = run_canary(
+        backend="fake",
+        binary_path=None,
+        codex_home=None,
+        repo_root=REPO_ROOT,
+        scratch_root=scratch,
+        operation_id="cap-s1-canary-env-immunity",
+        client_factory=factory,
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+    )
+    assert evidence.launch_decision == "ALLOW"
+    assert "tainted-terminal-identity" not in evidence.binary_version
+
+
 def test_probe_client_identity_mismatch_reproduces_the_live_version_refusal(tmp_path, monkeypatch):
     """The live canary refused EFFECT_UNKNOWN because the attestation probe
     identified as a different client than the launch, and the real App

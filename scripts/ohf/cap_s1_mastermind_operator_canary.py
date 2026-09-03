@@ -932,15 +932,15 @@ def run_canary(
         # the synthetic workspace (which does not exist at this point in the
         # sequence) -- the probe only ever issues ``initialize``, which never
         # touches the workspace.
-        # Base on the caller's own environment -- exactly what schema
-        # generation above already implicitly inherits by not passing an
-        # explicit ``env=`` to ``run_command``'s default ``subprocess.run``
-        # -- then layer the same adapter-consistent overrides
-        # ``CodexOperatorAdapter._env`` would apply. A real Codex binary
-        # ignores the extra inherited keys; the fake realm's single-binary
-        # fixture genuinely needs ``PYTHONPATH`` (carried in ``extra_env``)
-        # to exec into ``scripts.ohf.fake_app_server``.
-        probe_env = dict(os.environ)
+        # EXACTLY the adapter's own launch environment -- nothing more.
+        # The consumed live attempt proved a superset env is fatal: the
+        # inherited terminal-identity variables (TERM_PROGRAM and friends)
+        # are embedded into the real binary's reported userAgent, so a
+        # probe carrying them seals a version string the sanitized launch
+        # can never observe (second EFFECT_UNKNOWN, PR #350). The probe
+        # context must be byte-equal to CodexOperatorAdapter._env: four
+        # keys plus extra_env, built from empty.
+        probe_env = {}
         probe_env.update(
             {
                 "PATH": os.environ.get("PATH", "/usr/bin:/bin"),

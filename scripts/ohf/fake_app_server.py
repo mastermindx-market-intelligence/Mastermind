@@ -182,6 +182,13 @@ class FakeAppServer:
                 name = str((client or {}).get("name") or "unknown")
                 version = str((client or {}).get("version") or "0")
                 user_agent = f"ohf-fake-app-server/p0b ({name}/{version})"
+            suffix = os.environ.get("OHF_FAKE_UA_SUFFIX")
+            if suffix:
+                # Faithful to the real binary, whose userAgent embeds
+                # env-derived terminal identity: a process that inherits
+                # extra environment reports a DIFFERENT version string than
+                # a sanitized one (second live EFFECT_UNKNOWN, PR #350).
+                user_agent = f"{user_agent} [{suffix}]"
             self._ok(
                 request_id,
                 {
