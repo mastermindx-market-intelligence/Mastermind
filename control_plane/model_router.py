@@ -115,7 +115,12 @@ def _bounded_id(value: Any, *, field: str) -> str:
 
 
 def _bounded_text(value: Any, *, field: str) -> str:
-    resolved = str(value or "").strip()
+    if not isinstance(value, str):
+        raise RoutingPolicyError(
+            f"{field} must be a non-empty string no longer than "
+            f"{_METERED_TEXT_MAX} characters"
+        )
+    resolved = value.strip()
     if not resolved or len(resolved) > _METERED_TEXT_MAX:
         raise RoutingPolicyError(
             f"{field} must be a non-empty string no longer than {_METERED_TEXT_MAX} characters"

@@ -137,6 +137,22 @@ def test_pro_receipt_is_bounded_and_duration_has_a_hard_ceiling() -> None:
 
 
 @pytest.mark.parametrize(
+    "field",
+    ("why_pro_mode", "why_non_pro_insufficient", "stop_condition"),
+)
+@pytest.mark.parametrize("bad_value", (True, 123, {"done": False}, ["done"]))
+def test_pro_receipt_rejects_non_string_text_fields(
+    field: str,
+    bad_value: object,
+) -> None:
+    with pytest.raises(
+        RoutingPolicyError,
+        match="PRO_MODE_REFUSED / USE_NON_PRO_MODE",
+    ):
+        _pro_receipt(**{field: bad_value})
+
+
+@pytest.mark.parametrize(
     "forbidden_class",
     ["handoff", "status", "routing", "monitoring", "mechanical", "simple_review"],
 )
@@ -299,6 +315,24 @@ def test_metered_receipt_is_bounded_and_expected_cost_cannot_exceed_cap() -> Non
         _metered_receipt(expected_max_cost=math.inf)
     with pytest.raises(RoutingPolicyError):
         _metered_receipt(hard_budget_cap=math.nan)
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "why_metered",
+        "why_pro_chat_insufficient",
+        "stop_condition",
+        "budget_authority",
+    ),
+)
+@pytest.mark.parametrize("bad_value", (True, 123, {"done": False}, ["done"]))
+def test_metered_receipt_rejects_non_string_text_fields(
+    field: str,
+    bad_value: object,
+) -> None:
+    with pytest.raises(RoutingPolicyError, match="must be a non-empty string"):
+        _metered_receipt(**{field: bad_value})
 
 
 def test_chat_default_rejects_an_attached_metered_receipt_instead_of_ignoring_it() -> None:
