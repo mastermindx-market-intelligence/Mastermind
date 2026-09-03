@@ -304,7 +304,7 @@ def test_current_control_chain_orders_provider_after_runtime_for_start_and_resum
     resume_order = [
         "begin_operator_resume(",
         "commit_operator_provider_dispatch(",
-        "resume(",
+        "observation = resume(",
         "bind_operator_resume(",
     ]
     assert [start.index(token) for token in start_order] == sorted(
