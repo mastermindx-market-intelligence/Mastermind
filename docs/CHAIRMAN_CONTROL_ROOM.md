@@ -105,6 +105,9 @@ python3 scripts/mas115_setup.py prepare-disposable
 python3 scripts/mas115_setup.py credential --vendor multilogin
 python3 scripts/mas115_setup.py configure-canary-port --vendor multilogin
 python3 scripts/mas115_setup.py run-canary --vendor multilogin
+python3 scripts/mas115_setup.py bootstrap-peer-lifecycle
+python3 scripts/mas115_setup.py create-peer-profile --vendor multilogin
+python3 scripts/mas115_setup.py rollback-peer-profile --vendor multilogin
 ```
 
 The ordered journey is:
@@ -160,6 +163,34 @@ The ordered journey is:
    The v2 receipt includes a separate cleanup proof: stop acknowledged (or no
    start needed), exact-profile process count returned to zero, and all other
    managed-profile process counts unchanged.
+
+   **Existing-estate first-rollout bootstrap.** Installations that already have
+   the exact private v3 Multilogin Mimic anchor from before the peer lifecycle
+   was introduced run `bootstrap-peer-lifecycle` once before item 6. The setup
+   coordinator requires healthy three-seat bindings, freshly re-identifies the
+   exact anchor as a non-Chairman local profile, proves it stopped, and requires
+   the distinct phrase `BOOTSTRAP THE EXISTING DISPOSABLE PEER LIFECYCLE`.
+   It then passes an opaque bootstrap-only capability to one fixed-coordinate,
+   local-file seam. The seam reads no credential, constructs no HTTP client,
+   invokes no vendor command, creates no profile or account, and never starts a
+   browser; ordinary peer creation remains the separate item-6 ceremony.
+
+   The seam O_EXCL-creates one private, self-bound bootstrap fence at
+   `PEER_BOOTSTRAP_FENCE_PATH` in `PENDING` before it may create the existing v5
+   lifecycle genesis. That closed fence binds the exact bootstrap and peer
+   operations, source/lifecycle generation, fixed anchor/state/witness/peer-
+   provision coordinate digests, and the anchor document plus device/inode
+   identity; it contains no raw profile/folder identity or filesystem path.
+   `PENDING` may recover only the exact witness/state crash prefix under the
+   same already-held parent lock. After genesis is mutually bound, the same
+   fence inode is durably CAS-rewritten to `COMPLETE` with the exact state and
+   witness document digests and device/inode identities. An exact `COMPLETE`
+   replay is read-only. With that fence present, any missing, replaced,
+   malformed, hardlinked, symlinked, stale-generation, or otherwise mismatched
+   anchor/state/witness is terminally refused and is never re-armed. The direct
+   secret-owning vendor helper exposes no bootstrap command or redirectable
+   bootstrap coordinate.
+
 6. `create-peer-profile` (REALM1-C1, Mastermind #385) creates the one missing
    stopped disposable Multilogin **peer** profile alongside the existing
    anchor (`profile_A`) disposable profile, so a second automation-owned

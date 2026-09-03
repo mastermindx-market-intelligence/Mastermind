@@ -6134,6 +6134,486 @@ def test_peer_r2_completed_rollback_refuses_stale_state_after_census(tmp_path):
     assert vendors._peer_intent_snapshot(state_path) is None
 
 
+# --- REALM1-C1 first-rollout existing-v3-anchor bootstrap -----------------
+
+
+def _peer_bootstrap_preimage(tmp_path):
+    """Seed the real first-rollout shape: exact v3 anchor, no peer records."""
+    anchor_path = tmp_path / "anchor.json"
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    fence_path = tmp_path / "peer-bootstrap.json"
+    provision = _stored_provision(_valid_provision("multilogin"))
+    outcome, anchor = vendors._exclusive_private_json(  # noqa: SLF001
+        anchor_path, provision,
+    )
+    assert outcome == vendors.CREATED_THIS_CALL
+    assert anchor is not None
+    return provision, anchor_path, state_path, provision_path, fence_path, anchor
+
+
+_DEFAULT_BOOTSTRAP_AUTHORIZATION = object()
+
+
+def _bootstrap_existing_peer(
+    anchor_path, state_path, provision_path, fence_path,
+    *, authorization=_DEFAULT_BOOTSTRAP_AUTHORIZATION,
+):
+    bootstrap = getattr(
+        vendors, "_bootstrap_peer_lifecycle_for_existing_anchor", None,
+    )
+    assert callable(bootstrap), "the explicit existing-v3 bootstrap is missing"
+    if authorization is _DEFAULT_BOOTSTRAP_AUTHORIZATION:
+        authorization = getattr(vendors, "BOOTSTRAP_PEER_AUTHORIZATION", None)
+    return bootstrap(
+        authorization=authorization,
+        anchor_path=anchor_path,
+        state_path=state_path,
+        peer_provision_path=provision_path,
+        bootstrap_fence_path=fence_path,
+    )
+
+
+def _assert_completed_bootstrap(
+    provision, anchor_path, state_path, provision_path, fence_path,
+):
+    fence_reader = getattr(vendors, "_peer_bootstrap_fence_snapshot", None)
+    assert callable(fence_reader), "the bootstrap fence reader is missing"
+    fence = fence_reader(fence_path)
+    state = vendors._peer_intent_snapshot(state_path)
+    witness = vendors._peer_genesis_witness_snapshot(
+        vendors._peer_genesis_witness_path(state_path),
+    )
+    anchor = vendors._optional_private_json_snapshot(anchor_path)
+    assert fence is not None and state is not None and witness is not None
+    assert anchor is not None
+    assert fence.document["phase"] == vendors.PEER_BOOTSTRAP_PHASE_COMPLETE
+    assert fence.document["anchor_document_digest"] == anchor.sha256
+    assert (fence.document["anchor_dev"], fence.document["anchor_ino"]) == (
+        anchor.st_dev, anchor.st_ino,
+    )
+    assert fence.document["state_document_digest"] == state.sha256
+    assert (fence.document["state_dev"], fence.document["state_ino"]) == (
+        state.st_dev, state.st_ino,
+    )
+    assert fence.document["witness_document_digest"] == witness.sha256
+    assert (fence.document["witness_dev"], fence.document["witness_ino"]) == (
+        witness.st_dev, witness.st_ino,
+    )
+    assert state.document["phase"] == vendors.PEER_PHASE_INITIALIZED
+    checked_state, checked_provision = vendors._preflight_peer_paths(
+        operation="create-peer-profile",
+        state_path=state_path,
+        provision_path=provision_path,
+    )
+    assert vendors._same_snapshot(checked_state, state)
+    assert checked_provision is None
+    return fence, state, witness, anchor
+
+
+def test_peer_bootstrap_red_actual_existing_v3_preimage_reaches_genesis_without_secret_or_vendor(
+    tmp_path, monkeypatch,
+):
+    """The exact old-estate v3 anchor is upgraded only by the new local seam."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    with pytest.raises(vendors._PeerStateRefusal):
+        vendors._preflight_peer_paths(
+            operation="create-peer-profile",
+            state_path=state_path,
+            provision_path=peer_path,
+        )
+
+    monkeypatch.setattr(
+        vendors,
+        "_open_keychain_credential_pipe",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("bootstrap must not open Keychain"),
+        ),
+    )
+    monkeypatch.setattr(
+        vendors,
+        "BoundedHttpClient",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("bootstrap must not construct vendor HTTP"),
+        ),
+    )
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+
+
+def test_peer_bootstrap_complete_replay_is_read_only_and_inode_exact(tmp_path):
+    """A COMPLETE fence reconciles without rewriting any durable record."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    first = _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+    before = tuple((item.st_dev, item.st_ino, item.sha256) for item in first)
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.EXISTING_EXACT
+    second = _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+    assert tuple((item.st_dev, item.st_ino, item.sha256) for item in second) == before
+
+
+@pytest.mark.parametrize(
+    "crash_point",
+    (
+        "after_fence",
+        "after_witness",
+        "after_state",
+        "before_fence_complete",
+        "after_fence_complete",
+    ),
+)
+def test_peer_bootstrap_pending_recovers_each_declared_crash_window(
+    tmp_path, monkeypatch, crash_point,
+):
+    """Every exact PENDING prefix finishes once; no alternate genesis appears."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    witness_path = vendors._peer_genesis_witness_path(state_path)
+    real_create = vendors._create_self_bound_private_record
+    real_rewrite = vendors._rewrite_private_record_in_parent
+
+    def _create(target, *args, **kwargs):
+        target = Path(target)
+        blocked = (
+            crash_point == "after_fence" and target == witness_path
+        ) or (
+            crash_point == "after_witness" and target == state_path
+        )
+        return None if blocked else real_create(target, *args, **kwargs)
+
+    def _rewrite(target, *args, **kwargs):
+        target = Path(target)
+        phase = kwargs.get("next_document", {}).get("phase")
+        if (
+            crash_point == "after_state"
+            and target == witness_path
+            and phase == vendors._PEER_GENESIS_WITNESS_BOUND
+        ):
+            return None
+        if (
+            crash_point in ("before_fence_complete", "after_fence_complete")
+            and target == fence_path
+            and phase == vendors.PEER_BOOTSTRAP_PHASE_COMPLETE
+        ):
+            if crash_point == "before_fence_complete":
+                return None
+            real_rewrite(target, *args, **kwargs)
+            return None
+        return real_rewrite(target, *args, **kwargs)
+
+    monkeypatch.setattr(vendors, "_create_self_bound_private_record", _create)
+    monkeypatch.setattr(vendors, "_rewrite_private_record_in_parent", _rewrite)
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.REFUSED
+
+    monkeypatch.setattr(vendors, "_create_self_bound_private_record", real_create)
+    monkeypatch.setattr(vendors, "_rewrite_private_record_in_parent", real_rewrite)
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.EXISTING_EXACT
+    _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+
+
+def test_peer_bootstrap_concurrent_invocations_leave_one_fence_and_one_genesis(tmp_path):
+    """Concurrent ceremonies converge on one exact durable installation epoch."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    barrier = threading.Barrier(2)
+    outcomes = []
+
+    def _run():
+        barrier.wait()
+        outcomes.append(_bootstrap_existing_peer(
+            anchor_path, state_path, peer_path, fence_path,
+        ))
+
+    workers = [threading.Thread(target=_run) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+        assert not worker.is_alive()
+
+    assert outcomes.count(vendors.CREATED_THIS_CALL) == 1
+    assert set(outcomes) <= {
+        vendors.CREATED_THIS_CALL, vendors.EXISTING_EXACT, vendors.REFUSED,
+    }
+    _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+
+
+@pytest.mark.parametrize(
+    "target_name,mutation",
+    (
+        ("state", "unlink"),
+        ("witness", "unlink"),
+        ("state", "replace"),
+        ("witness", "replace"),
+        ("state", "hardlink"),
+        ("witness", "symlink"),
+    ),
+)
+def test_peer_bootstrap_complete_never_rearms_missing_or_foreign_genesis(
+    tmp_path, target_name, mutation,
+):
+    """COMPLETE is the surviving no-rearm fact for every genesis mutation."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    fence_before = fence_path.read_bytes()
+    witness_path = vendors._peer_genesis_witness_path(state_path)
+    target = state_path if target_name == "state" else witness_path
+    original = target.read_bytes()
+    target.unlink()
+    if mutation == "replace":
+        target.write_bytes(original)
+        target.chmod(0o600)
+    elif mutation == "hardlink":
+        source = tmp_path / "foreign-hardlink.json"
+        source.write_bytes(original)
+        source.chmod(0o600)
+        os.link(source, target)
+    elif mutation == "symlink":
+        source = tmp_path / "foreign-symlink.json"
+        source.write_bytes(original)
+        source.chmod(0o600)
+        target.symlink_to(source)
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.REFUSED
+    assert fence_path.read_bytes() == fence_before
+    if mutation == "unlink":
+        assert not target.exists()
+
+
+@pytest.mark.parametrize("mutation", ("replace", "rewrite", "generation"))
+def test_peer_bootstrap_binds_exact_anchor_inode_digest_and_source_generation(
+    tmp_path, monkeypatch, mutation,
+):
+    """Changed anchor or source generation never inherits installation authority."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    fence_before = fence_path.read_bytes()
+    if mutation == "replace":
+        replacement = tmp_path / "replacement-anchor.json"
+        replacement.write_bytes(anchor_path.read_bytes())
+        replacement.chmod(0o600)
+        os.replace(replacement, anchor_path)
+    elif mutation == "rewrite":
+        changed = dict(provision)
+        changed["folder_id"] = _PEER_ALT_UUID
+        anchor_path.write_bytes(vendors._canonical_private_bytes(changed))
+    else:
+        monkeypatch.setattr(vendors, "PEER_SOURCE_GENERATION", "f" * 64)
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.REFUSED
+    assert fence_path.read_bytes() == fence_before
+
+
+@pytest.mark.parametrize(
+    "authorization_name",
+    ("none", "create", "rollback", "fresh_object"),
+)
+def test_peer_bootstrap_only_distinct_coordinator_authorization_can_create_fence(
+    tmp_path, authorization_name,
+):
+    """No generic object or existing create/rollback capability can bootstrap."""
+    _provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization = {
+        "none": None,
+        "create": vendors.CREATE_PEER_AUTHORIZATION,
+        "rollback": vendors.ROLLBACK_PEER_AUTHORIZATION,
+        "fresh_object": object(),
+    }[authorization_name]
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert not state_path.exists()
+    assert not vendors._peer_genesis_witness_path(state_path).exists()
+
+
+def test_peer_bootstrap_fence_is_closed_and_contains_no_raw_identity_or_path(tmp_path):
+    """The installation fence exposes only closed phases, digests and inode facts."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    fence = vendors._peer_bootstrap_fence_snapshot(fence_path)
+    assert fence is not None
+    assert set(fence.document) == vendors._PEER_BOOTSTRAP_FENCE_KEYS
+    assert fence.document["schema"] == vendors.PEER_BOOTSTRAP_FENCE_SCHEMA
+    assert fence.document["operation"] == vendors.PEER_BOOTSTRAP_OPERATION_KEY
+    assert fence.document["peer_operation"] == vendors.PEER_OPERATION_KEY
+    serialized = fence.raw.decode("utf-8")
+    for forbidden in (
+        provision["profile_id"], provision["folder_id"],
+        os.fspath(anchor_path), os.fspath(state_path), os.fspath(peer_path),
+        "credential", "account", "vendor response",
+    ):
+        assert forbidden not in serialized
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("missing", "wrong_schema", "gologin", "stealthfox", "noncanonical_id"),
+)
+def test_peer_bootstrap_absent_fence_requires_exact_canonical_v3_mimic_anchor(
+    tmp_path, mutation,
+):
+    """ABSENT is not a migration surface for any approximate anchor shape."""
+    _provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    if mutation == "missing":
+        anchor_path.unlink()
+    else:
+        document = json.loads(anchor_path.read_text(encoding="utf-8"))
+        if mutation == "wrong_schema":
+            document["schema"] = "mastermind.mas115_nonseat_canary_provision.v2"
+        elif mutation == "gologin":
+            document["vendor"] = "gologin"
+        elif mutation == "stealthfox":
+            document["browser_type"] = "stealthfox"
+        else:
+            document["profile_id"] = document["profile_id"].upper()
+        anchor_path.write_bytes(vendors._canonical_private_bytes(document))
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert not state_path.exists()
+    assert not vendors._peer_genesis_witness_path(state_path).exists()
+
+
+@pytest.mark.parametrize("foreign_coordinate", ("state", "witness", "provision"))
+def test_peer_bootstrap_absent_fence_refuses_any_preexisting_peer_coordinate(
+    tmp_path, foreign_coordinate,
+):
+    """No pre-fence bytes can be adopted as a bootstrap crash prefix."""
+    _provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    target = {
+        "state": state_path,
+        "witness": vendors._peer_genesis_witness_path(state_path),
+        "provision": peer_path,
+    }[foreign_coordinate]
+    target.write_text("{}\n", encoding="utf-8")
+    target.chmod(0o600)
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert target.exists()
+
+
+@pytest.mark.parametrize(
+    "mutation", ("unlink", "replace", "malformed", "hardlink", "symlink"),
+)
+def test_peer_bootstrap_complete_fence_itself_is_never_recreated_or_adopted(
+    tmp_path, mutation,
+):
+    """A consumed fence coordinate cannot be replaced or treated as ABSENT."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+    original = fence_path.read_bytes()
+    fence_path.unlink()
+    if mutation == "replace":
+        fence_path.write_bytes(original)
+        fence_path.chmod(0o600)
+    elif mutation == "malformed":
+        fence_path.write_text("{}\n", encoding="utf-8")
+        fence_path.chmod(0o600)
+    elif mutation == "hardlink":
+        source = tmp_path / "foreign-fence-hardlink.json"
+        source.write_bytes(original)
+        source.chmod(0o600)
+        os.link(source, fence_path)
+    elif mutation == "symlink":
+        source = tmp_path / "foreign-fence-symlink.json"
+        source.write_bytes(original)
+        source.chmod(0o600)
+        fence_path.symlink_to(source)
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.REFUSED
+    if mutation == "unlink":
+        assert not fence_path.exists()
+
+
+def test_peer_bootstrap_holds_one_parent_lock_without_reentry(tmp_path, monkeypatch):
+    """The nested genesis helper consumes the already-held bootstrap lock."""
+    _provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    real_open = vendors._open_private_parent
+    calls = []
+
+    def _open(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(vendors, "_open_private_parent", _open)
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    assert len(calls) == 1
+    assert calls[0][1] == {"exclusive": True}
+
+
 # --- mutation-kill discipline ----------------------------------------------
 
 

@@ -97,18 +97,21 @@ _MLX_PROFILE_CREATE_PATH = "/profile/create"
 _MLX_PROFILE_REMOVE_PATH = "/profile/remove"
 
 PEER_OPERATION_KEY = "web-sol-realm1-multilogin-profile-create-owner-20260902-sol-001"
+PEER_BOOTSTRAP_OPERATION_KEY = "web-sol-realm1-first-rollout-bootstrap-repair-20260903-sol-001"
 PEER_PROVISION_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_canary_peer.json"
 PEER_INTENT_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_peer_create_intent.json"
 PEER_GENESIS_WITNESS_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_peer_genesis_witness.json"
+PEER_BOOTSTRAP_FENCE_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_peer_bootstrap_fence.json"
 PEER_OWNERSHIP_RECEIPT_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_peer_release_receipt.json"
 PEER_INTENT_SCHEMA = "mastermind.mas115_nonseat_peer_lifecycle_state.v5"
 PEER_GENESIS_WITNESS_SCHEMA = "mastermind.mas115_nonseat_peer_genesis_witness.v1"
+PEER_BOOTSTRAP_FENCE_SCHEMA = "mastermind.mas115_nonseat_peer_bootstrap_fence.v1"
 PEER_RECEIPT_SCHEMA = "mastermind.mas115_nonseat_peer_lifecycle.v1"
 PEER_OWNERSHIP_FACT_SCHEMA = "mastermind.mas115_peer_downstream_ownership.v1"
 # Semantic source generation for the reviewed REALM1-C1 R2 lifecycle.  It is
 # deliberately independent of a self-referential Git commit hash, but changes
 # whenever this authority/state contract changes.
-PEER_SOURCE_GENERATION = "faa91f0817a4b960043f8d778ef99617c8fa7e99727271d6071199ac401f0b43"
+PEER_SOURCE_GENERATION = "093401d6e7b104c782dfab4375e3c5e8bd40acb3ce4e23ff8ce3b20ded625873"
 PF1_OPERATION_KEY = "web-sol-pf1-provider-continuation-falsifier-20260901-sol-001"
 INSTALL1_OPERATION_KEY = "web-sol-install1-two-profile-disposable-proof-20260902-sol-001"
 _MAX_OWNERSHIP_RECEIPT_AGE = timedelta(minutes=5)
@@ -158,6 +161,17 @@ _PEER_GENESIS_WITNESS_KEYS = frozenset({
     "folder_digest", "anchor_profile_digest", "peer_name_digest",
     "witness_dev", "witness_ino", "state_dev", "state_ino", "phase",
 })
+PEER_BOOTSTRAP_PHASE_PENDING = "PENDING"
+PEER_BOOTSTRAP_PHASE_COMPLETE = "COMPLETE"
+_PEER_BOOTSTRAP_FENCE_KEYS = frozenset({
+    "schema", "operation", "peer_operation", "source_generation",
+    "anchor_coordinate_digest", "state_coordinate_digest",
+    "genesis_witness_coordinate_digest", "peer_provision_coordinate_digest",
+    "anchor_document_digest", "anchor_dev", "anchor_ino",
+    "lifecycle_generation", "fence_dev", "fence_ino", "phase",
+    "state_document_digest", "state_dev", "state_ino",
+    "witness_document_digest", "witness_dev", "witness_ino",
+})
 _MAX_PEER_STATE_BYTES = 16 * 1024
 
 
@@ -169,6 +183,15 @@ class _PeerAuthorization:
 
 CREATE_PEER_AUTHORIZATION = _PeerAuthorization()
 ROLLBACK_PEER_AUTHORIZATION = _PeerAuthorization()
+
+
+class _PeerBootstrapAuthorization:
+    """Distinct opaque capability held only by the local setup coordinator."""
+
+    __slots__ = ()
+
+
+BOOTSTRAP_PEER_AUTHORIZATION = _PeerBootstrapAuthorization()
 
 PEER_EFFECT_CODES = frozenset({
     "NONE", "CREATE_DISPATCHED", "CREATE_APPLIED", "CREATE_EFFECT_UNKNOWN",
@@ -2653,24 +2676,16 @@ def _rewrite_private_record_in_parent(
             os.close(leaf_fd)
 
 
-def initialize_peer_lifecycle_state(
-    path, *, folder_id: str, anchor_profile_id: str, peer_name: str,
-    peer_provision_path=None, generation=None, snapshot_sink=None,
+def _initialize_peer_lifecycle_state_in_parent(
+    target: Path, parent_fd: int, *, folder_id: str,
+    anchor_profile_id: str, peer_name: str, peer_provision_path=None,
+    generation=None, snapshot_sink=None,
 ) -> str:
-    """Create the inert lifecycle genesis before create can be authorized.
-
-    This is a setup operation, not a create-operation fallback.  The runtime
-    create/rollback entrypoints never call it.  Once any exact lifecycle inode
-    exists it may only be accepted while still INITIALIZED; a missing inode is
-    therefore not reinterpreted as virgin state after a dispatch.
-    """
+    """Create/reconcile genesis while the caller holds its parent lock."""
+    target = _normalized_private_path(target)
     peer_provision_path = peer_provision_path or PEER_PROVISION_PATH
     generation = generation or PEER_SOURCE_GENERATION
-    witness_path = _peer_genesis_witness_path(path)
-    try:
-        target, parent_fd = _open_private_parent(path, exclusive=True)
-    except _PeerStateRefusal:
-        return REFUSED
+    witness_path = _peer_genesis_witness_path(target)
     try:
         provision_target = _normalized_private_path(peer_provision_path)
         witness_target = _normalized_private_path(witness_path)
@@ -2803,8 +2818,397 @@ def initialize_peer_lifecycle_state(
         return CREATED_THIS_CALL if created_state else EXISTING_EXACT
     except (_PeerStateRefusal, OSError):
         return REFUSED
+
+
+def initialize_peer_lifecycle_state(
+    path, *, folder_id: str, anchor_profile_id: str, peer_name: str,
+    peer_provision_path=None, generation=None, snapshot_sink=None,
+) -> str:
+    """Create the inert lifecycle genesis before create can be authorized.
+
+    This is a setup operation, not a create-operation fallback.  The runtime
+    create/rollback entrypoints never call it.  Once any exact lifecycle inode
+    exists it may only be accepted while still INITIALIZED; a missing inode is
+    therefore not reinterpreted as virgin state after a dispatch.
+    """
+    try:
+        target, parent_fd = _open_private_parent(path, exclusive=True)
+    except _PeerStateRefusal:
+        return REFUSED
+    try:
+        return _initialize_peer_lifecycle_state_in_parent(
+            target,
+            parent_fd,
+            folder_id=folder_id,
+            anchor_profile_id=anchor_profile_id,
+            peer_name=peer_name,
+            peer_provision_path=peer_provision_path,
+            generation=generation,
+            snapshot_sink=snapshot_sink,
+        )
     finally:
         os.close(parent_fd)
+
+
+def _peer_bootstrap_fence_path(state_path) -> Path:
+    """Return the one bootstrap fence coordinate for a lifecycle coordinate."""
+    target = _normalized_private_path(state_path)
+    if target == _normalized_private_path(PEER_INTENT_PATH):
+        return _normalized_private_path(PEER_BOOTSTRAP_FENCE_PATH)
+    return target.with_name(f"{target.name}.bootstrap")
+
+
+def _peer_bootstrap_fence_document(
+    *, anchor_path, state_path, witness_path, peer_provision_path,
+    anchor: _PrivateJsonSnapshot, fence_dev=None, fence_ino=None,
+    phase=PEER_BOOTSTRAP_PHASE_PENDING, state=None, witness=None,
+) -> dict:
+    return {
+        "schema": PEER_BOOTSTRAP_FENCE_SCHEMA,
+        "operation": PEER_BOOTSTRAP_OPERATION_KEY,
+        "peer_operation": PEER_OPERATION_KEY,
+        "source_generation": PEER_SOURCE_GENERATION,
+        "anchor_coordinate_digest": _core.sha256_hex(
+            os.fspath(_normalized_private_path(anchor_path))
+        ),
+        "state_coordinate_digest": _core.sha256_hex(
+            os.fspath(_normalized_private_path(state_path))
+        ),
+        "genesis_witness_coordinate_digest": _core.sha256_hex(
+            os.fspath(_normalized_private_path(witness_path))
+        ),
+        "peer_provision_coordinate_digest": _core.sha256_hex(
+            os.fspath(_normalized_private_path(peer_provision_path))
+        ),
+        "anchor_document_digest": anchor.sha256,
+        "anchor_dev": anchor.st_dev,
+        "anchor_ino": anchor.st_ino,
+        "lifecycle_generation": PEER_SOURCE_GENERATION,
+        "fence_dev": fence_dev,
+        "fence_ino": fence_ino,
+        "phase": phase,
+        "state_document_digest": None if state is None else state.sha256,
+        "state_dev": None if state is None else state.st_dev,
+        "state_ino": None if state is None else state.st_ino,
+        "witness_document_digest": None if witness is None else witness.sha256,
+        "witness_dev": None if witness is None else witness.st_dev,
+        "witness_ino": None if witness is None else witness.st_ino,
+    }
+
+
+def _peer_bootstrap_fence_shape_exact(document) -> bool:
+    if not isinstance(document, dict) or set(document) != _PEER_BOOTSTRAP_FENCE_KEYS:
+        return False
+    if (
+        document.get("schema") != PEER_BOOTSTRAP_FENCE_SCHEMA
+        or document.get("operation") != PEER_BOOTSTRAP_OPERATION_KEY
+        or document.get("peer_operation") != PEER_OPERATION_KEY
+        or document.get("source_generation") != PEER_SOURCE_GENERATION
+        or document.get("lifecycle_generation") != PEER_SOURCE_GENERATION
+        or document.get("phase") not in (
+            PEER_BOOTSTRAP_PHASE_PENDING, PEER_BOOTSTRAP_PHASE_COMPLETE,
+        )
+    ):
+        return False
+    for key in (
+        "anchor_coordinate_digest", "state_coordinate_digest",
+        "genesis_witness_coordinate_digest", "peer_provision_coordinate_digest",
+        "anchor_document_digest",
+    ):
+        if not isinstance(document.get(key), str) or _HEX64_RE.fullmatch(document[key]) is None:
+            return False
+    for key in ("anchor_dev", "anchor_ino", "fence_dev", "fence_ino"):
+        value = document.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return False
+    completion_keys = (
+        "state_document_digest", "state_dev", "state_ino",
+        "witness_document_digest", "witness_dev", "witness_ino",
+    )
+    if document["phase"] == PEER_BOOTSTRAP_PHASE_PENDING:
+        return all(document[key] is None for key in completion_keys)
+    for key in ("state_document_digest", "witness_document_digest"):
+        if not isinstance(document.get(key), str) or _HEX64_RE.fullmatch(document[key]) is None:
+            return False
+    for key in ("state_dev", "state_ino", "witness_dev", "witness_ino"):
+        value = document.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return False
+    return True
+
+
+def _peer_bootstrap_fence_snapshot(path):
+    """Read one exact self-bound fence without interpreting absence as virgin."""
+    try:
+        snapshot = _read_private_json_snapshot(path)
+    except _PeerStateRefusal:
+        return None
+    return snapshot if (
+        _peer_bootstrap_fence_shape_exact(snapshot.document)
+        and snapshot.document["fence_dev"] == snapshot.st_dev
+        and snapshot.document["fence_ino"] == snapshot.st_ino
+    ) else None
+
+
+def _peer_bootstrap_fence_matches(
+    fence, *, anchor_path, state_path, witness_path, peer_provision_path,
+    anchor, state=None, witness=None,
+) -> bool:
+    if fence is None or not _peer_bootstrap_fence_shape_exact(fence.document):
+        return False
+    expected = _peer_bootstrap_fence_document(
+        anchor_path=anchor_path,
+        state_path=state_path,
+        witness_path=witness_path,
+        peer_provision_path=peer_provision_path,
+        anchor=anchor,
+        fence_dev=fence.st_dev,
+        fence_ino=fence.st_ino,
+        phase=fence.document["phase"],
+        state=state,
+        witness=witness,
+    )
+    return fence.document == expected
+
+
+def _peer_bootstrap_anchor_shape_exact(document) -> bool:
+    """Accept only the canonical existing v3 Multilogin Mimic anchor."""
+    return (
+        _peer_provision_shape_exact(document)
+        and document.get("profile_id")
+        == _canonical_multilogin_profile_id(document.get("profile_id"))
+        and document.get("folder_id")
+        == _canonical_multilogin_profile_id(document.get("folder_id"))
+    )
+
+
+def _peer_bootstrap_complete_matches(
+    fence, *, anchor_path, state_path, witness_path, peer_provision_path,
+    anchor, state, witness,
+) -> bool:
+    if (
+        state is None
+        or witness is None
+        or fence.document.get("phase") != PEER_BOOTSTRAP_PHASE_COMPLETE
+        or not _peer_bootstrap_fence_matches(
+            fence,
+            anchor_path=anchor_path,
+            state_path=state_path,
+            witness_path=witness_path,
+            peer_provision_path=peer_provision_path,
+            anchor=anchor,
+            state=state,
+            witness=witness,
+        )
+        or state.document.get("phase") != PEER_PHASE_INITIALIZED
+        or not _state_matches_authority(
+            state,
+            folder_id=anchor.document["folder_id"],
+            anchor_profile_id=anchor.document["profile_id"],
+            peer_name=peer_profile_name(
+                anchor.document["folder_id"], anchor.document["profile_id"],
+            ),
+            peer_provision_path=peer_provision_path,
+            generation=PEER_SOURCE_GENERATION,
+        )
+        or witness.document.get("phase") != _PEER_GENESIS_WITNESS_BOUND
+        or not _peer_genesis_witness_matches_authority(
+            witness,
+            state_path=state_path,
+            peer_provision_path=peer_provision_path,
+            folder_id=anchor.document["folder_id"],
+            anchor_profile_id=anchor.document["profile_id"],
+            peer_name=peer_profile_name(
+                anchor.document["folder_id"], anchor.document["profile_id"],
+            ),
+            generation=PEER_SOURCE_GENERATION,
+        )
+    ):
+        return False
+    return (
+        state.document.get("genesis_witness_dev") == witness.st_dev
+        and state.document.get("genesis_witness_ino") == witness.st_ino
+        and witness.document.get("state_dev") == state.st_dev
+        and witness.document.get("state_ino") == state.st_ino
+    )
+
+
+def _bootstrap_peer_lifecycle_for_existing_anchor(
+    *, authorization, anchor_path, state_path, peer_provision_path,
+    bootstrap_fence_path,
+) -> str:
+    """Bootstrap the one historical v3 anchor under a monotonic fence.
+
+    This seam performs private local file I/O only.  It never reads a secret,
+    constructs an HTTP client, invokes a vendor API, or creates a profile.
+    PENDING can recover only its exact crash prefix; COMPLETE is read-only and
+    refuses any missing, replaced, linked, malformed, or mismatched record.
+    """
+    if authorization is not BOOTSTRAP_PEER_AUTHORIZATION:
+        return REFUSED
+    try:
+        anchor_target = _normalized_private_path(anchor_path)
+        state_target = _normalized_private_path(state_path)
+        witness_target = _peer_genesis_witness_path(state_target)
+        provision_target = _normalized_private_path(peer_provision_path)
+        fence_target = _normalized_private_path(bootstrap_fence_path)
+        coordinates = (
+            anchor_target, state_target, witness_target, provision_target,
+            fence_target,
+        )
+        if (
+            len(set(coordinates)) != len(coordinates)
+            or len({target.parent for target in coordinates}) != 1
+        ):
+            return REFUSED
+        anchor_target, parent_fd = _open_private_parent(
+            anchor_target, exclusive=True,
+        )
+    except (_PeerStateRefusal, OSError):
+        return REFUSED
+    try:
+        def _named_snapshot_or_none(target):
+            try:
+                os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return None
+            return _snapshot_from_parent(target, parent_fd)
+
+        anchor = _named_snapshot_or_none(anchor_target)
+        state = _named_snapshot_or_none(state_target)
+        witness = _named_snapshot_or_none(witness_target)
+        provision = _named_snapshot_or_none(provision_target)
+        fence = _named_snapshot_or_none(fence_target)
+        if (
+            anchor is None
+            or not _peer_bootstrap_anchor_shape_exact(anchor.document)
+            or provision is not None
+        ):
+            return REFUSED
+
+        if fence is not None:
+            if (
+                not _peer_bootstrap_fence_shape_exact(fence.document)
+                or fence.document.get("fence_dev") != fence.st_dev
+                or fence.document.get("fence_ino") != fence.st_ino
+            ):
+                return REFUSED
+            if fence.document.get("phase") == PEER_BOOTSTRAP_PHASE_COMPLETE:
+                return EXISTING_EXACT if _peer_bootstrap_complete_matches(
+                    fence,
+                    anchor_path=anchor_target,
+                    state_path=state_target,
+                    witness_path=witness_target,
+                    peer_provision_path=provision_target,
+                    anchor=anchor,
+                    state=state,
+                    witness=witness,
+                ) else REFUSED
+            if not _peer_bootstrap_fence_matches(
+                fence,
+                anchor_path=anchor_target,
+                state_path=state_target,
+                witness_path=witness_target,
+                peer_provision_path=provision_target,
+                anchor=anchor,
+            ):
+                return REFUSED
+            created_fence = False
+        else:
+            if state is not None or witness is not None:
+                return REFUSED
+            pending = _peer_bootstrap_fence_document(
+                anchor_path=anchor_target,
+                state_path=state_target,
+                witness_path=witness_target,
+                peer_provision_path=provision_target,
+                anchor=anchor,
+            )
+            fence = _create_self_bound_private_record(
+                fence_target,
+                parent_fd,
+                pending,
+                dev_key="fence_dev",
+                ino_key="fence_ino",
+                validator=_peer_bootstrap_fence_shape_exact,
+            )
+            if fence is None:
+                return REFUSED
+            created_fence = True
+
+        outcome = _initialize_peer_lifecycle_state_in_parent(
+            state_target,
+            parent_fd,
+            folder_id=anchor.document["folder_id"],
+            anchor_profile_id=anchor.document["profile_id"],
+            peer_name=peer_profile_name(
+                anchor.document["folder_id"], anchor.document["profile_id"],
+            ),
+            peer_provision_path=provision_target,
+            generation=PEER_SOURCE_GENERATION,
+        )
+        if outcome not in (CREATED_THIS_CALL, EXISTING_EXACT):
+            return REFUSED
+        current_anchor = _named_snapshot_or_none(anchor_target)
+        state = _named_snapshot_or_none(state_target)
+        witness = _named_snapshot_or_none(witness_target)
+        if (
+            current_anchor is None
+            or not _same_snapshot(current_anchor, anchor)
+            or state is None
+            or witness is None
+        ):
+            return REFUSED
+        complete = _peer_bootstrap_fence_document(
+            anchor_path=anchor_target,
+            state_path=state_target,
+            witness_path=witness_target,
+            peer_provision_path=provision_target,
+            anchor=anchor,
+            fence_dev=fence.st_dev,
+            fence_ino=fence.st_ino,
+            phase=PEER_BOOTSTRAP_PHASE_COMPLETE,
+            state=state,
+            witness=witness,
+        )
+        completed = _rewrite_private_record_in_parent(
+            fence_target,
+            parent_fd,
+            expected=fence,
+            next_document=complete,
+            validator=_peer_bootstrap_fence_shape_exact,
+        )
+        if completed is None:
+            # A crash seam may have committed the bytes but lost the return.
+            # Never claim that ambiguous call; the next invocation reconciles.
+            return REFUSED
+        if not _peer_bootstrap_complete_matches(
+            completed,
+            anchor_path=anchor_target,
+            state_path=state_target,
+            witness_path=witness_target,
+            peer_provision_path=provision_target,
+            anchor=anchor,
+            state=state,
+            witness=witness,
+        ):
+            return REFUSED
+        return CREATED_THIS_CALL if created_fence else EXISTING_EXACT
+    except (_PeerStateRefusal, OSError, KeyError, TypeError):
+        return REFUSED
+    finally:
+        os.close(parent_fd)
+
+
+def run_coordinator_peer_bootstrap(*, authorization) -> str:
+    """Run only the local, fixed-coordinate first-rollout bootstrap seam."""
+    return _bootstrap_peer_lifecycle_for_existing_anchor(
+        authorization=authorization,
+        anchor_path=_core.DEFAULT_PROVISION_PATH,
+        state_path=PEER_INTENT_PATH,
+        peer_provision_path=PEER_PROVISION_PATH,
+        bootstrap_fence_path=_peer_bootstrap_fence_path(PEER_INTENT_PATH),
+    )
 
 
 def _commit_peer_intent(

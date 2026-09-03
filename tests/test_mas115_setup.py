@@ -543,6 +543,175 @@ def _peer_anchor_provision(row: dict) -> dict:
     }
 
 
+def _bootstrap_coordinator_state(monkeypatch, *, running=False):
+    row = _mlx(4, running=running)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(
+        None, _selections(), observed_at="2026-08-23T12:00:00Z",
+    )
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt,
+        "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    return row, provision
+
+
+def test_peer_setup_bootstrap_command_delegates_only_after_exact_local_ceremony(monkeypatch):
+    """The coordinator owns one phrase and one opaque bootstrap capability."""
+    _row, _provision = _bootstrap_coordinator_state(monkeypatch)
+    expected_phrase = getattr(setup, "_CONFIRM_BOOTSTRAP_PEER", None)
+    assert expected_phrase == "BOOTSTRAP THE EXISTING DISPOSABLE PEER LIFECYCLE"
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: expected_phrase)
+    calls = []
+    bootstrap_authorization = getattr(
+        setup.vendors, "BOOTSTRAP_PEER_AUTHORIZATION", None,
+    )
+    assert bootstrap_authorization is not None
+    monkeypatch.setattr(
+        setup.vendors,
+        "run_coordinator_peer_bootstrap",
+        lambda **kwargs: calls.append(kwargs) or setup.vendors.CREATED_THIS_CALL,
+        raising=False,
+    )
+
+    assert setup.main(["bootstrap-peer-lifecycle"]) == 0
+    assert calls == [{"authorization": bootstrap_authorization}]
+
+
+def test_peer_setup_bootstrap_confirmation_mismatch_refuses_without_state_effect(monkeypatch):
+    """A generic Boolean/string or either existing ceremony cannot bootstrap."""
+    _bootstrap_coordinator_state(monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_CREATE_PEER)
+    monkeypatch.setattr(
+        setup.vendors,
+        "run_coordinator_peer_bootstrap",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("wrong phrase must create no bootstrap state"),
+        ),
+        raising=False,
+    )
+    handler = getattr(setup, "bootstrap_peer_interactive", None)
+    assert callable(handler), "the distinct bootstrap coordinator is missing"
+    with pytest.raises(setup.SetupRefusal, match="confirmation"):
+        handler()
+
+
+def test_peer_setup_bootstrap_running_anchor_refuses_before_confirmation_or_state(monkeypatch):
+    """A locally running profile_A can never seed the lifecycle genesis."""
+    _bootstrap_coordinator_state(monkeypatch, running=True)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("running anchor must refuse before confirmation"),
+        ),
+    )
+    monkeypatch.setattr(
+        setup.vendors,
+        "run_coordinator_peer_bootstrap",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("running anchor must create no bootstrap state"),
+        ),
+        raising=False,
+    )
+    handler = getattr(setup, "bootstrap_peer_interactive", None)
+    assert callable(handler), "the distinct bootstrap coordinator is missing"
+    with pytest.raises(setup.SetupRefusal, match="stopped"):
+        handler()
+
+
+def test_peer_setup_bootstrap_rechecks_stopped_anchor_after_confirmation(monkeypatch):
+    """A profile started while the operator types never receives bootstrap auth."""
+    _row, _provision = _bootstrap_coordinator_state(monkeypatch)
+    censuses = iter((
+        {"multilogin": [_mlx(4, running=False)], "gologin": []},
+        {"multilogin": [_mlx(4, running=True)], "gologin": []},
+    ))
+    monkeypatch.setattr(setup.chatgpt, "list_local_environments", lambda: next(censuses))
+    monkeypatch.setattr(
+        "builtins.input", lambda *_a, **_k: setup._CONFIRM_BOOTSTRAP_PEER,
+    )
+    monkeypatch.setattr(
+        setup.vendors,
+        "run_coordinator_peer_bootstrap",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("a newly running anchor must receive no authority"),
+        ),
+    )
+
+    with pytest.raises(setup.SetupRefusal, match="stopped"):
+        setup.bootstrap_peer_interactive()
+
+
+def test_peer_setup_bootstrap_refuses_missing_bindings_before_anchor_or_confirmation(monkeypatch):
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (None, ["stale"]))
+    monkeypatch.setattr(
+        setup,
+        "_load_current_provision",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse before anchor")),
+    )
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("must refuse before confirmation"),
+        ),
+    )
+    handler = getattr(setup, "bootstrap_peer_interactive", None)
+    assert callable(handler), "the distinct bootstrap coordinator is missing"
+    with pytest.raises(setup.SetupRefusal, match="enroll"):
+        handler()
+
+
+def test_peer_setup_bootstrap_coordinator_never_touches_secret_http_or_vendor_cli(monkeypatch):
+    """The ceremony performs local state bootstrap only, never profile work."""
+    _bootstrap_coordinator_state(monkeypatch)
+    handler = getattr(setup, "bootstrap_peer_interactive", None)
+    assert callable(handler), "the distinct bootstrap coordinator is missing"
+    source = inspect.getsource(handler)
+    for forbidden in (
+        "Credential(", ".expose(", "_open_keychain_credential_pipe",
+        "BoundedHttpClient(", "httpx.", "vendors.main(",
+    ):
+        assert forbidden not in source
+    monkeypatch.setattr(
+        "builtins.input", lambda *_a, **_k: setup._CONFIRM_BOOTSTRAP_PEER,
+    )
+    monkeypatch.setattr(
+        setup.vendors,
+        "run_coordinator_peer_bootstrap",
+        lambda **_kwargs: setup.vendors.EXISTING_EXACT,
+        raising=False,
+    )
+    assert handler() == 0
+
+
+def test_peer_setup_direct_vendor_cli_cannot_invoke_bootstrap():
+    """Only mas115_setup exposes the ceremony; the secret helper CLI does not."""
+    with pytest.raises(SystemExit) as exc_info:
+        setup.vendors.main(["bootstrap-peer-lifecycle"])
+    assert exc_info.value.code == 2
+
+
+def test_peer_setup_prepare_disposable_does_not_create_a_competing_bootstrap_fence(tmp_path):
+    """Ordinary new-anchor preparation keeps its existing genesis path only."""
+    provision = _peer_anchor_provision(_mlx(4, running=False))
+    anchor_path = tmp_path / "anchor.json"
+    state_path = tmp_path / "peer-state.json"
+    peer_path = tmp_path / "peer-provision.json"
+    assert setup._prepare_anchor_with_peer_lifecycle(
+        provision,
+        anchor_path=anchor_path,
+        state_path=state_path,
+        peer_provision_path=peer_path,
+    ) == setup.vendors.CREATED_THIS_CALL
+    fence_path_for = getattr(setup.vendors, "_peer_bootstrap_fence_path", None)
+    assert callable(fence_path_for), "the fixed bootstrap coordinate is missing"
+    assert not fence_path_for(state_path).exists()
+
+
 @pytest.mark.parametrize("deleted", ("anchor_and_state", "state_and_witness"))
 def test_peer_setup_loss_fence_never_recreates_a_consumed_genesis(tmp_path, deleted):
     """Setup does not treat missing runtime records as a fresh installation."""

@@ -44,6 +44,7 @@ from integrations.chairman_surfaces import mas115_multilogin_port_policy as port
 WORK_REF = "WS:CHAIRMAN-CONTROL-ROOM"
 SEAT_REFS = ("chatgpt1", "chatgpt2", "chatgpt3")
 _CONFIRM_ENROLL = "ENROLL THREE CHAIRMAN SEATS"
+_CONFIRM_BOOTSTRAP_PEER = "BOOTSTRAP THE EXISTING DISPOSABLE PEER LIFECYCLE"
 _CONFIRM_CREATE_PEER = "CREATE ONE DISPOSABLE PEER PROFILE"
 _CONFIRM_ROLLBACK_PEER = "REMOVE THE OPERATION-CREATED PEER PROFILE"
 _MAX_PRIVATE_URL_BYTES = 8 * 1024
@@ -532,6 +533,50 @@ def create_peer_interactive() -> int:
     ])
 
 
+def bootstrap_peer_interactive() -> int:
+    """Bootstrap lifecycle state for the exact historical stopped anchor.
+
+    This coordinator performs the current binding/census ceremony, then passes
+    one opaque in-process capability to the fixed-coordinate local state seam.
+    It has no credential, vendor HTTP, browser, or profile-create surface.
+    """
+    bound_doc, problems = sb.load_bindings()
+    if problems or bound_doc is None:
+        raise SetupRefusal(
+            "enroll all three Chairman ChatGPT seats before bootstrapping "
+            "the disposable peer lifecycle"
+        )
+    anchor_row = _matching_local_row(bound_doc)
+    if anchor_row.get("running") is True:
+        raise SetupRefusal(
+            "the disposable anchor must be stopped before lifecycle bootstrap"
+        )
+    if input(
+        f"Type {_CONFIRM_BOOTSTRAP_PEER!r} to bootstrap only the existing "
+        "disposable peer lifecycle: "
+    ).strip() != _CONFIRM_BOOTSTRAP_PEER:
+        raise SetupRefusal(
+            "peer-bootstrap confirmation did not match; no state was written"
+        )
+    # The operator may spend arbitrary time at the confirmation prompt. Re-run
+    # both exact local identity and non-seat/stopped gates immediately before
+    # releasing the bootstrap-only capability.
+    anchor_row = _matching_local_row(bound_doc)
+    if anchor_row.get("running") is True:
+        raise SetupRefusal(
+            "the disposable anchor must be stopped before lifecycle bootstrap"
+        )
+    outcome = vendors.run_coordinator_peer_bootstrap(
+        authorization=vendors.BOOTSTRAP_PEER_AUTHORIZATION,
+    )
+    if outcome not in (vendors.CREATED_THIS_CALL, vendors.EXISTING_EXACT):
+        raise SetupRefusal(
+            "the exact first-rollout bootstrap state could not be proven"
+        )
+    print(f"Peer lifecycle bootstrap: {outcome}. No profile or vendor effect occurred.")
+    return 0
+
+
 def rollback_peer_interactive() -> int:
     """Remove only the exact operation-created disposable peer profile.
 
@@ -601,6 +646,10 @@ def main(argv=None) -> int:
         "create-peer-profile", help="create the one missing stopped disposable peer profile",
     )
     create_peer_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
+    sub.add_parser(
+        "bootstrap-peer-lifecycle",
+        help="bootstrap local lifecycle state for the exact existing stopped anchor",
+    )
     rollback_peer_parser = sub.add_parser(
         "rollback-peer-profile", help="remove only the exact operation-created peer profile",
     )
@@ -645,6 +694,8 @@ def main(argv=None) -> int:
             if args.vendor != "multilogin":
                 raise SetupRefusal("GoLogin peer profiles remain unsupported; no disposable peer profile will be created")
             return create_peer_interactive()
+        if args.command == "bootstrap-peer-lifecycle":
+            return bootstrap_peer_interactive()
         if args.command == "rollback-peer-profile":
             if args.vendor != "multilogin":
                 raise SetupRefusal("GoLogin peer profiles remain unsupported; no disposable peer profile will be removed")
