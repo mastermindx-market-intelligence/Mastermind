@@ -18,11 +18,13 @@ import dataclasses
 import errno
 import fcntl
 import hashlib
+import inspect
 import json
 import os
 import re
 import signal
 import socket
+import sqlite3
 import stat
 import struct
 import subprocess
@@ -47,6 +49,13 @@ from control_plane.executive_runtime import (
     SCHEMA_VERSION,
     StateConflict,
     V2_HOST_EXECUTION_BINDING_KEYS,
+    normalize_executive_dialogue_source,
+)
+from control_plane.executive_terminal_return import (
+    TerminalReturnCandidate,
+    TerminalReturnError,
+    TerminalReturnProjectionError,
+    reduce_terminal_return,
 )
 from control_plane.model_router import ModelRouter, RoutingPolicyError
 from control_plane.executive_workspace import (
@@ -65,6 +74,7 @@ CONTROL_PROTOCOL_VERSION = "mastermind.executive_control/v1"
 DEFAULT_MAX_REQUEST_BYTES = 64 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_SLACK_TS_RE = re.compile(r"^[0-9]{10,16}\.[0-9]{6}$")
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
 _PROOF_WORKSPACE_RE = re.compile(r"^proof-([0-9a-f]{32})$")
 _COO_ROOT_SCAN_LIMIT = 64
@@ -76,6 +86,21 @@ _COO_ACTIVE_ATTEMPT_STATUSES = frozenset(
         AttemptStatus.CANCEL_REQUESTED,
     }
 )
+_COO_TERMINAL_RETURN_ROLES = frozenset({"plan", "work", "review", "repair"})
+_TERMINAL_RETURN_PROJECTION_SCHEMA = "mastermind.executive_terminal_return_projection/v1"
+_TERMINAL_RETURN_PREPARED_EVENT = "EXECUTIVE_TERMINAL_RETURN_PREPARED"
+_TERMINAL_RETURN_ATTEMPTED_EVENT = "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED"
+_TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT = (
+    "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED"
+)
+_TERMINAL_RETURN_EFFECT_UNKNOWN_EVENT = "EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN"
+_TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT = (
+    "EXECUTIVE_TERMINAL_RETURN_PROVEN_NO_EFFECT"
+)
+_TERMINAL_RETURN_APPLIED_EVENT = "EXECUTIVE_TERMINAL_RETURN_APPLIED"
+_TERMINAL_RETURN_RECEIPT_ACTIONS = frozenset({"POSTED", "RECOVERED", "DUPLICATE"})
+_TERMINAL_RETURN_STARTUP_REPLAY_LIMIT = 256
+_TERMINAL_RETURN_STARTUP_PHASE_AUDIT_LIMIT = 4096
 _WORKSPACE_ROTATION_SCHEMA = "mastermind.executive_workspace_rotation/v1"
 _PROOF_ARTIFACT = "research/executive_os_phase1c_worker_proof/receipt.md"
 _SERVICE_GIT_OBSERVATION_ALLOWLIST = frozenset(
@@ -141,6 +166,15 @@ class BackupBackendProtocol(Protocol):
     ) -> Any: ...
 
 
+TerminalReturnProjector = Callable[[TerminalReturnCandidate], Awaitable[None] | None]
+TerminalReturnProjectorFactory = Callable[
+    [Callable[[], Runtime], Path], TerminalReturnProjector
+]
+CeoIngressDialogueSourceProvider = Callable[
+    [str, str], Mapping[str, Any] | None
+]
+
+
 @dataclasses.dataclass(frozen=True)
 class ServiceConfig:
     """Reviewed host configuration; requests cannot override these values."""
@@ -169,6 +203,8 @@ class ServiceConfig:
     coo_default_quota_class: str = "codex-coo-default"
     coo_operator_model_alias: str = "coo.operator.readonly"
     coo_operator_quota_class: str = "codex-coo-operator"
+    terminal_return_armed: bool = False
+    terminal_return_socket_path: Path | None = None
     operator_harness_binary_digest: str = "0" * 64
     operator_harness_version: str = "unproven"
     allowed_peer_uids: tuple[int, ...] = ()
@@ -217,6 +253,23 @@ class ServiceConfig:
             raise ValueError(
                 "the COO Operator Harness cannot be armed while COO autonomy is off"
             )
+        if not isinstance(self.terminal_return_armed, bool):
+            raise ValueError("terminal-return arming must be boolean")
+        terminal_fields_present = self.terminal_return_socket_path is not None
+        if self.terminal_return_armed and not terminal_fields_present:
+            raise ValueError(
+                "terminal-return arming requires the Relay socket"
+            )
+        if terminal_fields_present:
+            terminal_socket = Path(self.terminal_return_socket_path)
+            if not terminal_socket.is_absolute():
+                raise ValueError("terminal-return socket path must be absolute")
+            terminal_socket = terminal_socket.resolve(strict=False)
+            if terminal_socket == self.socket_path:
+                raise ValueError(
+                    "terminal-return Agent Relay socket must differ from the control socket"
+                )
+            object.__setattr__(self, "terminal_return_socket_path", terminal_socket)
         for field_name in ("coo_model_alias", "coo_operator_model_alias"):
             alias = str(getattr(self, field_name)).strip().lower()
             if _ID_RE.fullmatch(alias) is None:
@@ -414,8 +467,16 @@ class ExecutiveControlService:
         ceo_ingress_socket_path: Path | str | None = None,
         ceo_ingress_peer_uid: int | None = None,
         ceo_ingress_grounding_provider: "ceo_ingress.GroundingProvider | None" = None,
+        ceo_ingress_dialogue_source_provider: (
+            CeoIngressDialogueSourceProvider | None
+        ) = None,
         ceo_ingress_armed: bool = False,
         ceo_ingress_activated_socket: socket.socket | None = None,
+        terminal_return_projector: TerminalReturnProjector | None = None,
+        terminal_return_projector_factory: (
+            TerminalReturnProjectorFactory | None
+        ) = None,
+        terminal_return_binding_resolver: Any | None = None,
     ) -> None:
         self.config = config
         self._runtime_factory = runtime_factory
@@ -455,6 +516,54 @@ class ExecutiveControlService:
         self._coo_cycle_lock = asyncio.Lock()
         self._dispatch_tasks: dict[str, asyncio.Task[Any]] = {}
         self._dispatch_errors: dict[str, str] = {}
+        # Default-off composition.  Agent Dialogue owns the concrete Relay
+        # projector and injects its factory at the host composition edge; the
+        # Executive control plane never reaches back into an integration.
+        if self.config.terminal_return_armed:
+            if terminal_return_projector is not None:
+                raise ValueError(
+                    "armed terminal-return composition cannot replace its canonical projector"
+                )
+            if terminal_return_binding_resolver is not None:
+                raise ValueError(
+                    "armed terminal-return composition owns its Runtime resolver"
+                )
+            if not callable(terminal_return_projector_factory):
+                raise ValueError(
+                    "armed terminal-return composition requires an injected "
+                    "Agent Dialogue projector factory"
+                )
+            self._terminal_return_projector = terminal_return_projector_factory(
+                lambda: self._require_runtime(),
+                Path(self.config.terminal_return_socket_path),
+            )
+            if not all(
+                callable(getattr(self._terminal_return_projector, method, None))
+                for method in ("project", "reconcile")
+            ):
+                raise ValueError(
+                    "terminal-return projector factory must return a projector "
+                    "with project() and reconcile()"
+                )
+        else:
+            if (
+                terminal_return_binding_resolver is not None
+                or terminal_return_projector_factory is not None
+            ):
+                raise ValueError(
+                    "terminal-return factory or binding resolver requires explicit arming"
+                )
+            self._terminal_return_projector = terminal_return_projector
+        # Process-local coalescing only. Runtime Events remain the durable phase
+        # authority; different candidates never wait behind one global I/O lock.
+        self._terminal_return_registry_lock = asyncio.Lock()
+        self._terminal_return_flights: dict[
+            str, tuple[str, asyncio.Task[None]]
+        ] = {}
+        self._terminal_return_requires_source = bool(
+            self.config.terminal_return_armed
+        )
+        self._terminal_return_last_diagnostic: str | None = None
         self._coo_execution_binding = self._load_coo_execution_binding()
         self._coo_tick_task: asyncio.Task[Any] | None = None
         self._coo_shutdown_event: asyncio.Event | None = None
@@ -501,6 +610,14 @@ class ExecutiveControlService:
                 raise ValueError(
                     "ceo_ingress_socket_path must differ from the Operator socket_path"
                 )
+            if (
+                config.terminal_return_socket_path is not None
+                and resolved_ceo_ingress_path
+                == config.terminal_return_socket_path
+            ):
+                raise ValueError(
+                    "terminal-return Relay socket must differ from CeoIngress"
+                )
             if ceo_ingress_peer_uid is None:
                 raise ValueError(
                     "ceo_ingress_peer_uid is required when ceo_ingress_socket_path is set"
@@ -535,6 +652,18 @@ class ExecutiveControlService:
             self._ceo_ingress_socket_path = resolved_ceo_ingress_path
         self._ceo_ingress_peer_uid = ceo_ingress_peer_uid
         self._ceo_ingress_grounding_provider = ceo_ingress_grounding_provider
+        if (
+            ceo_ingress_dialogue_source_provider is not None
+            and not callable(ceo_ingress_dialogue_source_provider)
+        ):
+            raise ValueError("ceo_ingress_dialogue_source_provider must be callable")
+        self._ceo_ingress_dialogue_source_provider = (
+            ceo_ingress_dialogue_source_provider
+        )
+        # A trusted dialogue-source provider is required at admission time, not
+        # at service construction.  Keeping startup independent of that provider
+        # lets the same armed process reconcile an already-admitted terminal
+        # result while the admission source is temporarily unavailable.
         # §9: host-owned/injected policy, default false.  Never set by a
         # request; PR-A models it as constructor/test policy only.
         self._ceo_ingress_armed = bool(ceo_ingress_armed)
@@ -736,6 +865,18 @@ class ExecutiveControlService:
             supervisor.reconcile_restart,
             requeue_lost=False,
         )
+        # Activation is the first moment this bootstrap-quarantined instance
+        # may resume durable terminal obligations.  Replay while admission is
+        # still closed; exposing READY first would create a race and omitting
+        # replay would strand every completion committed before the canary.
+        self._service_state = "ACTIVATING_CANARY"
+        try:
+            await self._replay_terminal_returns_on_startup()
+        except Exception:
+            self._service_state = "QUARANTINED"
+            raise
+        if self._service_state == "QUARANTINED":
+            raise StateConflict("Executive terminal-return replay was quarantined")
         self._service_state = "READY"
 
     def _acquire_service_lock(self) -> None:
@@ -1012,6 +1153,7 @@ class ExecutiveControlService:
                             requeue_lost=False,
                         )
                     )
+                await self._replay_terminal_returns_on_startup()
             if self._ceo_ingress_socket_path is not None:
                 # R1 §2.1 / R2 §3 atomic dual-listener startup.  Construct/bind
                 # BOTH listeners with no-accept first; only then start serving,
@@ -1053,6 +1195,7 @@ class ExecutiveControlService:
         # observes a stale true value.
         self._ceo_ingress_ready = False
         self._closing = True
+        deferred_terminal_cancel: asyncio.CancelledError | None = None
         if self._coo_shutdown_event is not None:
             self._coo_shutdown_event.set()
 
@@ -1092,6 +1235,10 @@ class ExecutiveControlService:
             await asyncio.gather(*coo_actions, return_exceptions=True)
         self._coo_action_tasks.clear()
 
+        # Dispatch finishers are terminal-return producers.  Stop/drain them
+        # before snapshotting the terminal flight registry so a finisher that
+        # seals during shutdown cannot create a shielded Relay send after the
+        # snapshot and outlive service ownership.
         tasks = [task for task in self._dispatch_tasks.values() if not task.done()]
         runtime = self.runtime
         if runtime is not None:
@@ -1119,6 +1266,38 @@ class ExecutiveControlService:
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
         self._dispatch_tasks.clear()
+
+        # A terminal-return flight may already have crossed the durable
+        # ATTEMPTED boundary. Drain it to POSTED/known-zero/EFFECT_UNKNOWN;
+        # cancellation here would manufacture the very ambiguity this bridge
+        # exists to prevent.  This snapshot deliberately follows every
+        # dispatch producer's terminal point.
+        terminal_flights = [
+            task
+            for _digest, task in self._terminal_return_flights.values()
+            if task is not current_task and not task.done()
+        ]
+        if terminal_flights:
+            terminal_drain = asyncio.gather(
+                *terminal_flights,
+                return_exceptions=True,
+            )
+            try:
+                await asyncio.shield(terminal_drain)
+            except asyncio.CancelledError as exc:
+                # ``close()`` is itself caller-owned and may be cancelled,
+                # but the already-ATTEMPTED Relay flight is service-owned.
+                # Defer the caller cancellation until the flight reaches a
+                # durable terminal phase and all service cleanup below has
+                # completed.  Shield every subsequent wait so a repeated
+                # cancellation request still cannot reach the owned flight.
+                deferred_terminal_cancel = exc
+                while not terminal_drain.done():
+                    try:
+                        await asyncio.shield(terminal_drain)
+                    except asyncio.CancelledError:
+                        continue
+        self._terminal_return_flights.clear()
 
         # §14.2 — CeoIngress handler tasks are NEVER cancelled here, unlike the
         # dispatch tasks above.  A handler whose sync ``submit_intent`` thread
@@ -1149,6 +1328,8 @@ class ExecutiveControlService:
                 if stat.S_ISSOCK(info.st_mode):
                     self._ceo_ingress_socket_path.unlink()
         self._release_service_lock()
+        if deferred_terminal_cancel is not None:
+            raise deferred_terminal_cancel
 
     async def serve_until_stopped(self) -> None:
         await self.start()
@@ -1456,6 +1637,17 @@ class ExecutiveControlService:
                     workspace_root=self.config.proof_workspace_root,
                     service_state=self._service_state,
                     ceo_ingress_armed=self._ceo_ingress_armed,
+                    # Strict-v2 selection is trusted host composition.  The
+                    # source-free public frame cannot opt itself into (or out
+                    # of) the terminal-return admission path.
+                    strict_v2_admission=(
+                        self.config.terminal_return_armed
+                        or self._ceo_ingress_dialogue_source_provider is not None
+                    ),
+                    execution_binding_provider=self._require_current_coo_binding,
+                    dialogue_source_provider=(
+                        self._ceo_ingress_dialogue_source_provider
+                    ),
                 )
             except ceo_ingress.CeoIngressError as exc:
                 await self._send_ceo_ingress_error(writer, exc.code, exc.message)
@@ -2134,17 +2326,69 @@ class ExecutiveControlService:
 
         normalized = ceo_intent.validate_intent(payload)
         binding: dict[str, Any] | None = None
+        dialogue_source: dict[str, Any] | None = None
         if normalized.get("schema") == ceo_intent.INTENT_SCHEMA_V2:
+            # Replay/status is entirely durable. A current source provider is
+            # admission evidence only and is never consulted for an existing
+            # command, including while that provider is unavailable or moved.
+            command_id = ceo_intent.command_id_for(str(normalized["intent_id"]))
+            existing = self._require_runtime().store.find_event_by_command_id(
+                command_id
+            )
+            if existing is not None:
+                return ceo_intent.submit_intent(
+                    self._require_runtime(),
+                    normalized,
+                    workspace_root=self.config.proof_workspace_root,
+                )
             if normalized["grounding"].get("mastermind_sha") != self.config.proof_base_sha:
                 raise ceo_intent.CeoIntentError(
                     "v2 intent grounding.mastermind_sha differs from the installed reviewed release"
                 )
             binding = self._require_current_coo_binding()
+            provider = self._ceo_ingress_dialogue_source_provider
+            if self.config.terminal_return_armed and provider is None:
+                raise ceo_intent.CeoIntentError(
+                    "trusted host dialogue source is unavailable"
+                )
+            if provider is not None:
+                intent_id = str(normalized["intent_id"])
+                workstream = str(normalized.get("workstream") or "")
+                try:
+                    first_source = provider(intent_id, workstream)
+                    if first_source is None:
+                        raise StateConflict("trusted source is absent")
+                    first_normalized = normalize_executive_dialogue_source(
+                        first_source,
+                        work_ref=workstream,
+                    )
+                    second_source = provider(intent_id, workstream)
+                    if second_source is None:
+                        raise StateConflict("trusted source is absent")
+                    second_normalized = normalize_executive_dialogue_source(
+                        second_source,
+                        work_ref=workstream,
+                    )
+                except Exception as exc:
+                    raise ceo_intent.CeoIntentError(
+                        "trusted host dialogue source is unavailable"
+                    ) from exc
+                if first_normalized != second_normalized:
+                    raise ceo_intent.CeoIntentConflict(
+                        "trusted host dialogue source changed immediately before root creation"
+                    )
+                dialogue_source = second_normalized.to_dict()
+        submit_kwargs: dict[str, Any] = {
+            "workspace_root": self.config.proof_workspace_root,
+        }
+        if binding is not None:
+            submit_kwargs["execution_binding"] = binding
+            submit_kwargs["dialogue_source"] = dialogue_source
+            submit_kwargs["require_dialogue_source"] = provider is not None
         receipt = ceo_intent.submit_intent(
             self._require_runtime(),
             normalized,
-            workspace_root=self.config.proof_workspace_root,
-            execution_binding=binding,
+            **submit_kwargs,
         )
         if binding is not None:
             job = self._require_runtime().jobs.get_job(str(receipt.get("job_id") or ""))
@@ -2439,6 +2683,11 @@ class ExecutiveControlService:
                         self._service_state = "QUARANTINED"
                     raise
                 if isinstance(started, OrchestrationDispatchOutcome):
+                    if started.outcome == "TERMINAL":
+                        await self._project_terminal_return(
+                            started.job_id,
+                            expected_attempt_id=started.attempt.attempt_id,
+                        )
                     return started
                 lease = getattr(started, "lease", None)
                 attempt = getattr(lease, "attempt", None)
@@ -2606,6 +2855,8 @@ class ExecutiveControlService:
                 continue
             root_id: str | None = None
             try:
+                if not self.config.coo_autonomy_armed:
+                    continue
                 root_id = self._next_bound_coo_root()
                 if root_id is not None:
                     await self._run_coo_cycle(root_id)
@@ -2634,10 +2885,965 @@ class ExecutiveControlService:
             # dispatch.  Quarantine all mutating requests until an operator
             # restarts and identity-safely reconciles the still-active attempt.
             self._service_state = "QUARANTINED"
+        else:
+            lease = getattr(active, "lease", None)
+            attempt = getattr(lease, "attempt", None)
+            attempt_id = getattr(attempt, "attempt_id", None)
+            if isinstance(attempt_id, str):
+                await self._project_terminal_return(
+                    job_id, expected_attempt_id=attempt_id
+                )
         finally:
             current = asyncio.current_task()
             if self._dispatch_tasks.get(job_id) is current:
                 self._dispatch_tasks.pop(job_id, None)
+
+    async def _replay_terminal_returns_on_startup(self) -> None:
+        """Re-offer durable terminal facts in canonical JobRegistry order."""
+
+        if self._terminal_return_projector is None:
+            return
+        runtime = self._require_runtime()
+        terminal_event_types = (
+            _TERMINAL_RETURN_PREPARED_EVENT,
+            _TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT,
+            _TERMINAL_RETURN_ATTEMPTED_EVENT,
+            _TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT,
+            _TERMINAL_RETURN_EFFECT_UNKNOWN_EVENT,
+            _TERMINAL_RETURN_APPLIED_EVENT,
+        )
+
+        # Phase evidence is authority-bearing, including an APPLIED receipt.
+        # Validate every existing family read-only before counting or creating
+        # any fresh obligation.  In particular, an orphan, alternate-command,
+        # malformed, or duplicate APPLIED row must never suppress replay merely
+        # because its aggregate id happens to equal a current Attempt id.
+        event_placeholders = ",".join("?" for _ in terminal_event_types)
+        with runtime.store.read() as connection:
+            phase_rows = connection.execute(
+                f"""
+                SELECT DISTINCT
+                       events.aggregate_type,
+                       events.aggregate_id,
+                       jobs.job_id,
+                       jobs.current_attempt_id,
+                       jobs.priority,
+                       jobs.created_at_ms
+                FROM events
+                LEFT JOIN jobs
+                  ON jobs.current_attempt_id=events.aggregate_id
+                WHERE events.aggregate_type='terminal_return_projection'
+                   OR events.event_type IN ({event_placeholders})
+                   OR events.command_id LIKE 'terminal-return:%'
+                ORDER BY jobs.priority DESC,jobs.created_at_ms,jobs.job_id,
+                         events.aggregate_type,events.aggregate_id
+                LIMIT ?
+                """,
+                (
+                    *terminal_event_types,
+                    _TERMINAL_RETURN_STARTUP_PHASE_AUDIT_LIMIT + 1,
+                ),
+            ).fetchall()
+
+        if len(phase_rows) > _TERMINAL_RETURN_STARTUP_PHASE_AUDIT_LIMIT:
+            self._service_state = "QUARANTINED"
+            self._terminal_return_last_diagnostic = (
+                "terminal-return:STARTUP_PHASE_AUDIT_LIMIT_EXCEEDED"
+            )
+            return
+
+        unresolved: list[tuple[int, int, str, str]] = []
+        saw_applied = False
+        saw_source_free = False
+        for row in phase_rows:
+            job_id = row["job_id"]
+            attempt_id = row["current_attempt_id"]
+            if (
+                row["aggregate_type"] != "terminal_return_projection"
+                or not isinstance(job_id, str)
+                or not isinstance(attempt_id, str)
+                or row["aggregate_id"] != attempt_id
+            ):
+                self._service_state = "QUARANTINED"
+                self._terminal_return_last_diagnostic = (
+                    "terminal-return:EVIDENCE_REFUSED"
+                )
+                return
+            try:
+                completion = runtime.validated_role_completion(
+                    job_id,
+                    expected_attempt_id=attempt_id,
+                )
+                candidate = reduce_terminal_return(material=completion)
+                _command_base, material = self._terminal_return_event_material(
+                    candidate
+                )
+                with runtime.store.read() as connection:
+                    phase = self._inspect_terminal_return_history(
+                        connection,
+                        candidate=candidate,
+                        material=material,
+                    )
+            except (RuntimeProofError, TerminalReturnError):
+                self._service_state = "QUARANTINED"
+                self._terminal_return_last_diagnostic = (
+                    "terminal-return:EVIDENCE_REFUSED"
+                )
+                return
+            if phase is None:
+                # The census found a namespace/event row, so a missing exact
+                # family is itself drift rather than a fresh obligation.
+                self._service_state = "QUARANTINED"
+                self._terminal_return_last_diagnostic = (
+                    "terminal-return:EVIDENCE_REFUSED"
+                )
+                return
+            if (
+                self._terminal_return_requires_source
+                and candidate.dialogue_source is None
+            ):
+                # A complete source-free historical family is valid inert
+                # history, not an armed Relay obligation.  It therefore
+                # consumes neither replay budget nor transport activity.
+                saw_source_free = True
+                continue
+            if phase == "APPLIED":
+                saw_applied = True
+            else:
+                unresolved.append(
+                    (
+                        int(row["priority"]),
+                        int(row["created_at_ms"]),
+                        job_id,
+                        attempt_id,
+                    )
+                )
+
+        if len(unresolved) > _TERMINAL_RETURN_STARTUP_REPLAY_LIMIT:
+            self._service_state = "QUARANTINED"
+            self._terminal_return_last_diagnostic = (
+                "terminal-return:STARTUP_REPLAY_LIMIT_EXCEEDED"
+            )
+            return
+
+        source_gate = ""
+        if self._terminal_return_requires_source:
+            # Historical source-free roots are intentionally ineligible for
+            # the armed bridge.  A partial source/digest record is retained in
+            # the candidate set so canonical Runtime validation can refuse it
+            # instead of laundering it as source-free history.
+            source_gate = """
+              AND EXISTS (
+                    SELECT 1
+                    FROM events AS root_created
+                    WHERE root_created.event_type='JOB_CREATED'
+                      AND root_created.job_id=jobs.root_job_id
+                      AND (
+                            json_type(
+                                root_created.payload_json,
+                                '$.provenance.dialogue_source'
+                            ) IS NOT NULL
+                            OR json_type(
+                                root_created.payload_json,
+                                '$.provenance.dialogue_source_digest'
+                            ) IS NOT NULL
+                      )
+              )
+            """
+            with runtime.store.read() as connection:
+                saw_source_free = saw_source_free or connection.execute(
+                    """
+                    SELECT 1
+                    FROM jobs
+                    WHERE status='COMPLETED'
+                      AND orchestration_role IN ('plan','work','review','repair')
+                      AND current_attempt_id IS NOT NULL
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM events AS phase
+                            WHERE phase.aggregate_type='terminal_return_projection'
+                              AND phase.aggregate_id=jobs.current_attempt_id
+                      )
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM events AS root_created
+                            WHERE root_created.event_type='JOB_CREATED'
+                              AND root_created.job_id=jobs.root_job_id
+                              AND (
+                                    json_type(
+                                        root_created.payload_json,
+                                        '$.provenance.dialogue_source'
+                                    ) IS NOT NULL
+                                    OR json_type(
+                                        root_created.payload_json,
+                                        '$.provenance.dialogue_source_digest'
+                                    ) IS NOT NULL
+                              )
+                      )
+                    LIMIT 1
+                    """
+                ).fetchone() is not None
+        with runtime.store.read() as connection:
+            fresh_rows = connection.execute(
+                f"""
+                SELECT job_id,current_attempt_id,priority,created_at_ms
+                FROM jobs
+                WHERE status='COMPLETED'
+                  AND orchestration_role IN ('plan','work','review','repair')
+                  AND current_attempt_id IS NOT NULL
+                  AND NOT EXISTS (
+                        SELECT 1
+                        FROM events AS phase
+                        WHERE phase.aggregate_type='terminal_return_projection'
+                          AND phase.aggregate_id=jobs.current_attempt_id
+                  )
+                  {source_gate}
+                ORDER BY priority DESC,created_at_ms,job_id
+                LIMIT ?
+                """,
+                (_TERMINAL_RETURN_STARTUP_REPLAY_LIMIT - len(unresolved) + 1,),
+            ).fetchall()
+        if len(unresolved) + len(fresh_rows) > _TERMINAL_RETURN_STARTUP_REPLAY_LIMIT:
+            self._service_state = "QUARANTINED"
+            self._terminal_return_last_diagnostic = (
+                "terminal-return:STARTUP_REPLAY_LIMIT_EXCEEDED"
+            )
+            return
+        for row in fresh_rows:
+            job_id = str(row["job_id"])
+            attempt_id = str(row["current_attempt_id"])
+            try:
+                completion = runtime.validated_role_completion(
+                    job_id,
+                    expected_attempt_id=attempt_id,
+                )
+                candidate = reduce_terminal_return(material=completion)
+            except (RuntimeProofError, TerminalReturnError):
+                self._service_state = "QUARANTINED"
+                self._terminal_return_last_diagnostic = (
+                    "terminal-return:EVIDENCE_REFUSED"
+                )
+                return
+            if (
+                self._terminal_return_requires_source
+                and candidate.dialogue_source is None
+            ):
+                # The SQL source gate intentionally admits partial records so
+                # Runtime can reject them.  A fully source-free candidate is
+                # inert history and does not become an armed obligation.
+                continue
+            unresolved.append(
+                (
+                    int(row["priority"]),
+                    int(row["created_at_ms"]),
+                    job_id,
+                    attempt_id,
+                )
+            )
+
+        # Phase-bearing and fresh candidates share one canonical JobRegistry
+        # order.  Classifying them in separate read-only passes must not change
+        # which obligation receives the earliest external projection.
+        unresolved.sort(key=lambda item: (-item[0], item[1], item[2]))
+        for _priority, _created_at_ms, job_id, attempt_id in unresolved:
+            await self._project_terminal_return(
+                job_id,
+                expected_attempt_id=attempt_id,
+            )
+        if saw_applied and not unresolved:
+            self._terminal_return_last_diagnostic = (
+                "terminal-return:ALREADY_APPLIED"
+            )
+        elif saw_source_free and not unresolved:
+            self._terminal_return_last_diagnostic = (
+                "terminal-return:SKIPPED_SOURCE_FREE"
+            )
+
+    @staticmethod
+    def _terminal_return_event_material(
+        candidate: TerminalReturnCandidate,
+    ) -> tuple[str, dict[str, Any]]:
+        terminal_digest = str(candidate.terminal_digest or "")
+        if re.fullmatch(r"[0-9a-f]{64}", terminal_digest) is None:
+            raise StateConflict("terminal-return candidate lacks a canonical terminal digest")
+        candidate_digest = hashlib.sha256(_canonical_json(candidate)).hexdigest()
+        command_base = (
+            f"terminal-return:{candidate.attempt_id}:{terminal_digest}"
+        )
+        return command_base, {
+            "schema_version": _TERMINAL_RETURN_PROJECTION_SCHEMA,
+            "job_id": candidate.job_id,
+            "attempt_id": candidate.attempt_id,
+            "worker_id": candidate.worker_id,
+            "root_job_id": candidate.root_job_id,
+            "message_key": candidate.message_key,
+            "terminal_digest": terminal_digest,
+            "candidate_digest": candidate_digest,
+        }
+
+    @staticmethod
+    def _validate_terminal_return_event(
+        event: Any,
+        *,
+        event_type: str,
+        command_id: str,
+        material: Mapping[str, Any],
+        applied: bool,
+    ) -> None:
+        expected_keys = set(material) | ({"projection_receipt"} if applied else set())
+        payload = getattr(event, "payload", None)
+        if (
+            event is None
+            or event.event_type != event_type
+            or event.command_id != command_id
+            or event.aggregate_type != "terminal_return_projection"
+            or event.aggregate_id != material["attempt_id"]
+            or event.job_id != material["job_id"]
+            or event.attempt_id != material["attempt_id"]
+            or event.worker_id != material["worker_id"]
+            or not isinstance(payload, dict)
+            or set(payload) != expected_keys
+            or any(payload.get(key) != value for key, value in material.items())
+        ):
+            raise StateConflict("terminal-return projection event drifted")
+        if applied:
+            normalized_receipt = (
+                ExecutiveControlService._normalize_terminal_return_projection_receipt(
+                    payload.get("projection_receipt"),
+                    message_key=str(material["message_key"]),
+                )
+            )
+            if payload.get("projection_receipt") != normalized_receipt:
+                raise StateConflict("terminal-return projection receipt drifted")
+
+    @staticmethod
+    def _normalize_terminal_return_projection_receipt(
+        receipt: Any,
+        *,
+        message_key: str,
+    ) -> dict[str, Any]:
+        """Freeze only one exact physical Relay RESULT as durable APPLIED proof."""
+
+        if dataclasses.is_dataclass(receipt) and not isinstance(receipt, type):
+            value = dataclasses.asdict(receipt)
+        elif isinstance(receipt, Mapping):
+            value = dict(receipt)
+        else:
+            raise StateConflict("terminal-return projection receipt is invalid")
+        expected = {
+            "action",
+            "message_key",
+            "fingerprint",
+            "message_ts",
+            "duplicate_timestamps",
+            "thread_ts",
+            "parent_author_user_id",
+            "parent_fingerprint",
+        }
+        duplicates = value.get("duplicate_timestamps")
+        if (
+            set(value) != expected
+            or value.get("action") not in _TERMINAL_RETURN_RECEIPT_ACTIONS
+            or value.get("message_key") != message_key
+            or not isinstance(value.get("fingerprint"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", value["fingerprint"]) is None
+            or not isinstance(value.get("message_ts"), str)
+            or _SLACK_TS_RE.fullmatch(value["message_ts"]) is None
+            or not isinstance(value.get("thread_ts"), str)
+            or _SLACK_TS_RE.fullmatch(value["thread_ts"]) is None
+            or not isinstance(value.get("parent_author_user_id"), str)
+            or re.fullmatch(r"[UW][A-Z0-9]{8,31}", value["parent_author_user_id"])
+            is None
+            or not isinstance(value.get("parent_fingerprint"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", value["parent_fingerprint"])
+            is None
+            or not isinstance(duplicates, (list, tuple))
+            or len(duplicates) != 0
+        ):
+            raise StateConflict("terminal-return projection receipt is invalid")
+        return {
+            "action": value["action"],
+            "message_key": value["message_key"],
+            "fingerprint": value["fingerprint"],
+            "message_ts": value["message_ts"],
+            "duplicate_timestamps": [],
+            "thread_ts": value["thread_ts"],
+            "parent_author_user_id": value["parent_author_user_id"],
+            "parent_fingerprint": value["parent_fingerprint"],
+        }
+
+    @staticmethod
+    def _terminal_return_phase_spec(
+        command_base: str,
+    ) -> tuple[tuple[str, str, str], ...]:
+        return (
+            (
+                "PREPARED",
+                _TERMINAL_RETURN_PREPARED_EVENT,
+                f"{command_base}:prepared",
+            ),
+            (
+                "PRE_SUBMIT_REFUSED",
+                _TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT,
+                f"{command_base}:pre-submit-refused",
+            ),
+            (
+                "ATTEMPTED",
+                _TERMINAL_RETURN_ATTEMPTED_EVENT,
+                f"{command_base}:attempted",
+            ),
+            (
+                "PROVEN_NO_EFFECT",
+                _TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT,
+                f"{command_base}:proven-no-effect",
+            ),
+            (
+                "EFFECT_UNKNOWN",
+                _TERMINAL_RETURN_EFFECT_UNKNOWN_EVENT,
+                f"{command_base}:effect-unknown",
+            ),
+            (
+                "APPLIED",
+                _TERMINAL_RETURN_APPLIED_EVENT,
+                f"{command_base}:applied",
+            ),
+        )
+
+    def _begin_terminal_return_projection(
+        self,
+        candidate: TerminalReturnCandidate,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Create PREPARED and validate the complete exact phase history."""
+
+        runtime = self._require_runtime()
+        command_base, material = self._terminal_return_event_material(candidate)
+        phase_spec = self._terminal_return_phase_spec(command_base)
+        applied_command = phase_spec[-1][2]
+        with runtime.store.transaction() as connection:
+            phase = self._inspect_terminal_return_history(
+                connection,
+                candidate=candidate,
+                material=material,
+            )
+            if phase is None:
+                prepared_command = phase_spec[0][2]
+                runtime.store.append_event(
+                    connection,
+                    aggregate_type="terminal_return_projection",
+                    aggregate_id=candidate.attempt_id,
+                    event_type=_TERMINAL_RETURN_PREPARED_EVENT,
+                    actor="executive-control-service",
+                    job_id=candidate.job_id,
+                    attempt_id=candidate.attempt_id,
+                    worker_id=candidate.worker_id,
+                    payload=material,
+                    command_id=prepared_command,
+                )
+                phase = "PREPARED"
+        return phase, applied_command, material
+
+    def _inspect_terminal_return_history(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        candidate: TerminalReturnCandidate,
+        material: Mapping[str, Any],
+    ) -> str | None:
+        """Validate one exact immutable projection family without mutating it."""
+
+        runtime = self._require_runtime()
+        command_base, expected_material = self._terminal_return_event_material(candidate)
+        if dict(material) != expected_material:
+            raise StateConflict("terminal-return projection material drifted")
+        phase_spec = self._terminal_return_phase_spec(command_base)
+        expected_by_command = {
+            command_id: (phase_name, event_type)
+            for phase_name, event_type, command_id in phase_spec
+        }
+        rows = connection.execute(
+            """
+            SELECT command_id,event_type,event_id
+            FROM events
+            WHERE aggregate_type='terminal_return_projection'
+              AND aggregate_id=?
+            ORDER BY event_id
+            LIMIT ?
+            """,
+            (candidate.attempt_id, len(phase_spec) + 1),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) > len(phase_spec):
+            raise StateConflict("terminal-return projection event drifted")
+
+        phases: list[str] = []
+        applied_receipt: dict[str, Any] | None = None
+        seen: set[str] = set()
+        for row in rows:
+            command_id = str(row["command_id"] or "")
+            expected = expected_by_command.get(command_id)
+            if (
+                expected is None
+                or row["event_type"] != expected[1]
+                or expected[0] in seen
+            ):
+                raise StateConflict("terminal-return projection event drifted")
+            phase_name, event_type = expected
+            event = runtime.store.get_event_by_command_id(
+                command_id,
+                connection=connection,
+            )
+            self._validate_terminal_return_event(
+                event,
+                event_type=event_type,
+                command_id=command_id,
+                material=material,
+                applied=phase_name == "APPLIED",
+            )
+            if phase_name == "APPLIED":
+                applied_receipt = self._normalize_terminal_return_projection_receipt(
+                    event.payload.get("projection_receipt"),
+                    message_key=candidate.message_key,
+                )
+            phases.append(phase_name)
+            seen.add(phase_name)
+
+        if phases[0] != "PREPARED":
+            raise StateConflict("terminal-return projection event drifted")
+        phase_rank = {
+            phase_name: index
+            for index, (phase_name, _event_type, _command_id) in enumerate(
+                phase_spec
+            )
+        }
+        if any(
+            phase_rank[current] >= phase_rank[following]
+            for current, following in zip(phases, phases[1:])
+        ):
+            raise StateConflict("terminal-return projection phase order drifted")
+        if "APPLIED" in seen and phases[-1] != "APPLIED":
+            raise StateConflict("terminal-return projection phase order drifted")
+        if "EFFECT_UNKNOWN" in seen and "ATTEMPTED" not in seen:
+            raise StateConflict("terminal-return projection phase order drifted")
+        if "PROVEN_NO_EFFECT" in seen and "ATTEMPTED" not in seen:
+            raise StateConflict("terminal-return projection phase order drifted")
+        if "APPLIED" in seen:
+            assert applied_receipt is not None
+            action = applied_receipt["action"]
+            prior_phase = phases[-2] if len(phases) >= 2 else None
+            if action == "POSTED" and (
+                "ATTEMPTED" not in seen
+                or prior_phase not in {"ATTEMPTED", "PROVEN_NO_EFFECT"}
+            ):
+                raise StateConflict("terminal-return projection phase order drifted")
+            if action == "RECOVERED" and (
+                "ATTEMPTED" not in seen
+                or prior_phase
+                not in {"ATTEMPTED", "PROVEN_NO_EFFECT", "EFFECT_UNKNOWN"}
+            ):
+                raise StateConflict("terminal-return projection phase order drifted")
+            if action == "DUPLICATE" and prior_phase not in {
+                "PREPARED",
+                "PRE_SUBMIT_REFUSED",
+                "ATTEMPTED",
+                "PROVEN_NO_EFFECT",
+            }:
+                raise StateConflict("terminal-return projection phase order drifted")
+        return phases[-1]
+
+    def _record_terminal_return_phase(
+        self,
+        candidate: TerminalReturnCandidate,
+        *,
+        phase: str,
+        material: Mapping[str, Any],
+    ) -> None:
+        runtime = self._require_runtime()
+        command_base, expected_material = self._terminal_return_event_material(candidate)
+        if dict(material) != expected_material:
+            raise StateConflict("terminal-return projection material drifted")
+        phase_by_name = {
+            phase_name: (event_type, command_id)
+            for phase_name, event_type, command_id in self._terminal_return_phase_spec(
+                command_base
+            )
+        }
+        if phase not in phase_by_name or phase in {"PREPARED", "APPLIED"}:
+            raise StateConflict("terminal-return projection phase is invalid")
+        event_type, command_id = phase_by_name[phase]
+        with runtime.store.transaction() as connection:
+            current_phase = self._inspect_terminal_return_history(
+                connection,
+                candidate=candidate,
+                material=material,
+            )
+            existing = runtime.store.get_event_by_command_id(
+                command_id,
+                connection=connection,
+            )
+            if existing is not None:
+                # The inspector validated this event and every predecessor as
+                # one exact immutable family inside the same write lock.
+                return
+            if current_phase is None:
+                raise StateConflict("terminal-return projection phase order drifted")
+            allowed_next = {
+                "PREPARED": {"PRE_SUBMIT_REFUSED", "ATTEMPTED"},
+                "PRE_SUBMIT_REFUSED": {"ATTEMPTED"},
+                "ATTEMPTED": {"PROVEN_NO_EFFECT", "EFFECT_UNKNOWN"},
+                # A later explicitly commissioned retry may cross the same
+                # already-recorded ATTEMPTED boundary.  Its ambiguous result
+                # advances the durable state; a second known-zero receipt is
+                # idempotent at the existing phase command.
+                "PROVEN_NO_EFFECT": {"EFFECT_UNKNOWN"},
+                "EFFECT_UNKNOWN": set(),
+                "APPLIED": set(),
+            }
+            if phase not in allowed_next[current_phase]:
+                raise StateConflict("terminal-return projection phase order drifted")
+            runtime.store.append_event(
+                connection,
+                aggregate_type="terminal_return_projection",
+                aggregate_id=candidate.attempt_id,
+                event_type=event_type,
+                actor="executive-control-service",
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                worker_id=candidate.worker_id,
+                payload=dict(material),
+                command_id=command_id,
+            )
+
+    def _complete_terminal_return_projection(
+        self,
+        candidate: TerminalReturnCandidate,
+        *,
+        applied_command: str,
+        material: Mapping[str, Any],
+        projection_receipt: Any,
+    ) -> None:
+        runtime = self._require_runtime()
+        command_base, expected_material = self._terminal_return_event_material(candidate)
+        phase_spec = self._terminal_return_phase_spec(command_base)
+        expected_applied_command = phase_spec[-1][2]
+        if (
+            dict(material) != expected_material
+            or applied_command != expected_applied_command
+        ):
+            raise StateConflict("terminal-return projection material drifted")
+        normalized_receipt = self._normalize_terminal_return_projection_receipt(
+            projection_receipt,
+            message_key=candidate.message_key,
+        )
+        payload = {**material, "projection_receipt": normalized_receipt}
+        # Refuse unserializable/non-finite callback output before touching the
+        # Runtime Event plane.
+        _canonical_json(payload)
+        with runtime.store.transaction() as connection:
+            prior_phase = self._inspect_terminal_return_history(
+                connection,
+                candidate=candidate,
+                material=material,
+            )
+            action = normalized_receipt["action"]
+            if action == "POSTED" and prior_phase not in {
+                "ATTEMPTED",
+                "PROVEN_NO_EFFECT",
+            }:
+                raise StateConflict("terminal-return projection phase order drifted")
+            if action == "RECOVERED" and prior_phase not in {
+                "ATTEMPTED",
+                "PROVEN_NO_EFFECT",
+                "EFFECT_UNKNOWN",
+            }:
+                raise StateConflict("terminal-return projection phase order drifted")
+            if action == "DUPLICATE" and prior_phase not in {
+                "PREPARED",
+                "PRE_SUBMIT_REFUSED",
+                "ATTEMPTED",
+                "PROVEN_NO_EFFECT",
+            }:
+                raise StateConflict("terminal-return projection phase order drifted")
+            existing = runtime.store.get_event_by_command_id(
+                applied_command,
+                connection=connection,
+            )
+            if existing is not None:
+                # The complete family, including APPLIED, was validated by the
+                # inspector under this transaction's write lock.
+                if existing.payload.get("projection_receipt") != normalized_receipt:
+                    raise StateConflict("terminal-return projection receipt drifted")
+                return
+            runtime.store.append_event(
+                connection,
+                aggregate_type="terminal_return_projection",
+                aggregate_id=candidate.attempt_id,
+                event_type=_TERMINAL_RETURN_APPLIED_EVENT,
+                actor="executive-control-service",
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                worker_id=candidate.worker_id,
+                payload=payload,
+                command_id=applied_command,
+            )
+
+    async def _project_terminal_return(
+        self, job_id: str, *, expected_attempt_id: str
+    ) -> None:
+        """Offer one freshly-reduced terminal candidate without changing Runtime truth."""
+
+        projector = self._terminal_return_projector
+        if projector is None:
+            self._terminal_return_last_diagnostic = "terminal-return:PROJECTOR_UNBOUND"
+            return
+        runtime = self._require_runtime()
+        try:
+            material = runtime.validated_role_completion(
+                job_id,
+                expected_attempt_id=expected_attempt_id,
+            )
+        except RuntimeProofError:
+            self._terminal_return_last_diagnostic = "terminal-return:EVIDENCE_REFUSED"
+            return
+        try:
+            candidate = reduce_terminal_return(material=material)
+        except TerminalReturnError as exc:
+            self._terminal_return_last_diagnostic = f"terminal-return:{exc.code}"
+            return
+        command_base, _event_material = self._terminal_return_event_material(
+            candidate
+        )
+        if self._terminal_return_requires_source and candidate.dialogue_source is None:
+            existing = runtime.events.list_events(
+                attempt_id=candidate.attempt_id,
+                aggregate_type="terminal_return_projection",
+                aggregate_id=candidate.attempt_id,
+                command_id_prefix=f"{command_base}:",
+            )
+            if not existing:
+                self._terminal_return_last_diagnostic = (
+                    "terminal-return:SKIPPED_SOURCE_FREE"
+                )
+                return
+
+        candidate_digest = hashlib.sha256(_canonical_json(candidate)).hexdigest()
+        async with self._terminal_return_registry_lock:
+            current = self._terminal_return_flights.get(command_base)
+            if current is not None:
+                current_digest, flight = current
+                if current_digest != candidate_digest:
+                    self._terminal_return_last_diagnostic = (
+                        "terminal-return:EVIDENCE_REFUSED"
+                    )
+                    return
+            else:
+                flight = asyncio.create_task(
+                    self._terminal_return_flight(
+                        command_base,
+                        candidate_digest,
+                        candidate,
+                    ),
+                    name=f"executive-terminal-return-{candidate.attempt_id}",
+                )
+                self._terminal_return_flights[command_base] = (
+                    candidate_digest,
+                    flight,
+                )
+        await asyncio.shield(flight)
+
+    async def _terminal_return_flight(
+        self,
+        command_base: str,
+        candidate_digest: str,
+        candidate: TerminalReturnCandidate,
+    ) -> None:
+        """Own one shielded same-candidate phase transition and Relay flight."""
+
+        try:
+            await self._project_terminal_return_once(candidate)
+        finally:
+            task = asyncio.current_task()
+            async with self._terminal_return_registry_lock:
+                current = self._terminal_return_flights.get(command_base)
+                if current == (candidate_digest, task):
+                    self._terminal_return_flights.pop(command_base, None)
+
+    async def _project_terminal_return_once(
+        self, candidate: TerminalReturnCandidate
+    ) -> None:
+        projector = self._terminal_return_projector
+        assert projector is not None
+        try:
+            phase, applied_command, event_material = (
+                self._begin_terminal_return_projection(candidate)
+            )
+        except RuntimeProofError:
+            self._service_state = "QUARANTINED"
+            self._terminal_return_last_diagnostic = "terminal-return:EVIDENCE_REFUSED"
+            return
+        if phase == "APPLIED":
+            self._terminal_return_last_diagnostic = "terminal-return:ALREADY_APPLIED"
+            return
+        reconciling = phase in {"ATTEMPTED", "EFFECT_UNKNOWN"}
+        retrying_known_zero = phase == "PROVEN_NO_EFFECT"
+        crossed_write_boundary = False
+
+        def before_write() -> None:
+            nonlocal crossed_write_boundary
+            try:
+                self._record_terminal_return_phase(
+                    candidate,
+                    phase="ATTEMPTED",
+                    material=event_material,
+                )
+            except RuntimeProofError:
+                self._service_state = "QUARANTINED"
+                self._terminal_return_last_diagnostic = (
+                    "terminal-return:EVIDENCE_REFUSED"
+                )
+                raise
+            crossed_write_boundary = True
+
+        def preserve_pre_write_refusal(code: str) -> None:
+            if retrying_known_zero:
+                # No new write boundary was crossed.  Preserve the prior exact
+                # no-effect fact rather than fabricating a later phase.
+                self._terminal_return_last_diagnostic = (
+                    f"terminal-return:PROVEN_NO_EFFECT:{code}"
+                )
+                return
+            try:
+                self._record_terminal_return_phase(
+                    candidate,
+                    phase="PRE_SUBMIT_REFUSED",
+                    material=event_material,
+                )
+            except RuntimeProofError:
+                self._service_state = "QUARANTINED"
+                self._terminal_return_last_diagnostic = (
+                    "terminal-return:EVIDENCE_REFUSED"
+                )
+                return
+            self._terminal_return_last_diagnostic = (
+                f"terminal-return:PRE_SUBMIT_REFUSED:{code}"
+            )
+
+        def preserve_effect_unknown(code: str | None = None) -> None:
+            try:
+                self._record_terminal_return_phase(
+                    candidate,
+                    phase="EFFECT_UNKNOWN",
+                    material=event_material,
+                )
+            except RuntimeProofError:
+                self._service_state = "QUARANTINED"
+                self._terminal_return_last_diagnostic = (
+                    "terminal-return:EVIDENCE_REFUSED"
+                )
+                return
+            suffix = f":{code}" if code else ""
+            self._terminal_return_last_diagnostic = (
+                f"terminal-return:EFFECT_UNKNOWN{suffix}"
+            )
+
+        try:
+            if reconciling:
+                reconcile = getattr(projector, "reconcile", None)
+                if not callable(reconcile):
+                    self._terminal_return_last_diagnostic = (
+                        "terminal-return:EFFECT_UNKNOWN"
+                    )
+                    return
+                result = reconcile(candidate)
+            else:
+                project = getattr(projector, "project", None)
+                target = project if callable(project) else projector
+                try:
+                    parameters = inspect.signature(target).parameters
+                except (TypeError, ValueError):
+                    parameters = {}
+                if "before_write" in parameters:
+                    result = target(candidate, before_write=before_write)
+                else:
+                    # Legacy injectable test projectors cannot expose their
+                    # transport boundary. Conservatively record possible
+                    # dispatch before invoking them; production always hooks it.
+                    before_write()
+                    result = target(candidate)
+            if inspect.isawaitable(result):
+                result = await result
+            if reconciling and result is None:
+                preserve_effect_unknown()
+                return
+            try:
+                normalized_receipt = (
+                    self._normalize_terminal_return_projection_receipt(
+                        result,
+                        message_key=candidate.message_key,
+                    )
+                )
+            except StateConflict:
+                # Receipt-shape failure is projector/transport evidence, not
+                # corruption of the Runtime phase family.  After ATTEMPTED it
+                # is therefore possible-effect uncertainty; before dispatch
+                # it is a known-zero protocol refusal.
+                if reconciling or crossed_write_boundary:
+                    preserve_effect_unknown("StateConflict")
+                else:
+                    preserve_pre_write_refusal("PRE_SUBMIT_PROTOCOL_REFUSED")
+                return
+            if not crossed_write_boundary and not reconciling:
+                if normalized_receipt["action"] != "DUPLICATE":
+                    raise TerminalReturnProjectionError(
+                        "PRE_SUBMIT_PROTOCOL_REFUSED"
+                    )
+            self._complete_terminal_return_projection(
+                candidate,
+                applied_command=applied_command,
+                material=event_material,
+                projection_receipt=normalized_receipt,
+            )
+            self._terminal_return_last_diagnostic = "terminal-return:APPLIED"
+        except asyncio.CancelledError:
+            raise
+        except RuntimeProofError:
+            # Runtime phase history is the projection authority.  Any drift
+            # discovered after PREPARED is an evidence-integrity failure, not
+            # a transport refusal and not permission to append a compensating
+            # phase against the corrupt family.
+            self._service_state = "QUARANTINED"
+            self._terminal_return_last_diagnostic = (
+                "terminal-return:EVIDENCE_REFUSED"
+            )
+        except TerminalReturnProjectionError as exc:
+            if reconciling:
+                preserve_effect_unknown()
+            elif crossed_write_boundary and exc.code == "TRANSPORT_UNAVAILABLE":
+                try:
+                    self._record_terminal_return_phase(
+                        candidate,
+                        phase="PROVEN_NO_EFFECT",
+                        material=event_material,
+                    )
+                except RuntimeProofError:
+                    self._service_state = "QUARANTINED"
+                    self._terminal_return_last_diagnostic = (
+                        "terminal-return:EVIDENCE_REFUSED"
+                    )
+                    return
+                self._terminal_return_last_diagnostic = (
+                    "terminal-return:PROVEN_NO_EFFECT:TRANSPORT_UNAVAILABLE"
+                )
+            elif crossed_write_boundary:
+                preserve_effect_unknown()
+            else:
+                preserve_pre_write_refusal(exc.code)
+        except Exception as exc:
+            code = type(exc).__name__
+            if reconciling or crossed_write_boundary:
+                preserve_effect_unknown(code)
+            else:
+                preserve_pre_write_refusal(code)
 
     async def _dispatch_job(self, job_id: str) -> dict[str, Any]:
         runtime = self._require_runtime()
@@ -2806,7 +4012,11 @@ class ExecutiveControlService:
             self._exact_args(args, {"intent_id"})
             intent_id = self._id(args["intent_id"], "intent_id")
             return _jsonable(
-                await asyncio.to_thread(ceo_intent.resolve_intent, runtime, intent_id)
+                await asyncio.to_thread(
+                    ceo_intent.resolve_intent,
+                    runtime,
+                    intent_id,
+                )
             )
         if command == "cancel":
             self._exact_args(args, {"job_id"})
