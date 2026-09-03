@@ -80,20 +80,33 @@ its private mount and network namespaces. Each boundary-bearing top-level
 command therefore uses one serialized privileged prelude on the single-use
 GitHub-hosted VM. It requires protected runner identity fields to say exactly
 `github-hosted`, Linux, x64, and `ubuntu24`; captures the original value of
-`kernel.apparmor_restrict_unprivileged_userns` as exactly `0` or `1`; invokes
-only `/usr/bin/sudo -n /usr/sbin/sysctl -w
-kernel.apparmor_restrict_unprivileged_userns=0`; and verifies a readback of `0`
-before the command. A self-hosted, unidentified, differently imaged, malformed,
-or noninteractive-sudo runner is refused before the boundary command.
+`kernel.apparmor_restrict_unprivileged_userns` as exactly `0` or `1`; and
+verifies an active readback of `0` before the command. Only an original value of
+`1` invokes `/usr/bin/sudo -n /usr/sbin/sysctl -w
+kernel.apparmor_restrict_unprivileged_userns=0`. An original value of `0` uses
+no privileged write. A self-hosted, unidentified, differently imaged,
+malformed, or noninteractive-sudo runner is refused before the boundary
+command. The hosted live tests hard-fail, rather than skip, when
+`GITHUB_ACTIONS=true` but any protected runner-identity field is incomplete or
+drifted; skips remain local-only outside GitHub Actions.
 
 The prelude restores the exact captured value and verifies that readback before
 its command's outcome can be accepted. Restoration failure overrides success:
 Phase P records `REFUSED / NOT_APPLIED`, while a Phase E invocation that may
 have launched records `RECONCILIATION_REQUIRED / EFFECT_UNKNOWN`; neither
 successful bundle nor result artifact is accepted. If the original was already
-`0`, the prelude records that fact internally, verifies `0`, and restores `0`;
-it does not claim to have re-enabled a mitigation. The mutable original value is
-not part of deterministic bundle content.
+`0`, the prelude proves both active and final state by readback without calling
+`sudo` or writing `0`; it does not claim to have re-enabled a mitigation. The
+mutable original value is not part of deterministic bundle content.
+
+Every semantic outcome published after normal restoration carries a closed
+`host_userns_policy` object: the fixed scope, exact control key and `/proc`
+path, observed original and active values, whether a privileged mutation was
+performed, separate active/restoration readback-verification booleans, the
+restored value equal to the original, and the fixed abrupt-termination cleanup
+mode. A policy failure receipt contains only observations reached before the
+failure; in particular it never supplies a restored value or claims verified
+restoration when the final readback is absent or differs.
 
 This is a temporary system-wide weakening of Ubuntu's user-namespace hardening,
 so the user-namespace kernel attack surface is exposed during each bounded
@@ -103,8 +116,9 @@ Landlock, seccomp, and process-group cleanup—not from AppArmor. Normal exit ha
 checked restoration. `SIGKILL`, forced job cancellation, or VM loss cannot
 guarantee the trap/finalizer runs; cleanup then relies on GitHub decommissioning
 the disposable VM. This workflow is not suitable for self-hosted runners and
-does not claim wholly unprivileged execution, AppArmor confinement, no `sudo`,
-no host-policy mutation, or restoration after abrupt termination.
+does not claim wholly unprivileged execution, AppArmor confinement, mutation-free
+execution when the original value is `1`, or restoration after abrupt
+termination.
 
 ## Closed request and fixed consumer
 

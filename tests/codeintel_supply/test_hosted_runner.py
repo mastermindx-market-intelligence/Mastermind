@@ -17,7 +17,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -45,13 +45,25 @@ def _github_hosted_environment(tmp_path: Path) -> dict[str, str]:
     }
 
 
+def _require_exact_github_hosted_userns_runner(
+    environment: Mapping[str, str],
+) -> None:
+    if runner.is_exact_github_hosted_userns_runner(environment):
+        return
+    if environment.get("GITHUB_ACTIONS") == "true":
+        pytest.fail(
+            "GitHub Actions runner identity drifted from the exact hosted "
+            "Ubuntu 24.04 x64 contract"
+        )
+    pytest.skip(
+        "live user-namespace boundary requires the exact GitHub-hosted "
+        "Ubuntu 24.04 x64 runner"
+    )
+
+
 @pytest.fixture
 def github_hosted_userns_policy() -> Iterator[runner.HostUsernsPolicyEvidence]:
-    if not runner.is_exact_github_hosted_userns_runner(os.environ):
-        pytest.skip(
-            "live user-namespace boundary requires the exact GitHub-hosted "
-            "Ubuntu 24.04 x64 runner"
-        )
+    _require_exact_github_hosted_userns_runner(os.environ)
     with runner.github_hosted_userns_policy_window() as evidence:
         yield evidence
 

@@ -744,17 +744,94 @@ class HostedRunnerError(RuntimeError):
         super().__init__(f"{code}: {detail}")
         self.code = code
         self.detail = detail
+        self.host_userns_policy_evidence: Mapping[str, object] | None = None
 
 
-@dataclass(frozen=True)
+@dataclass
 class HostUsernsPolicyEvidence:
     """Non-secret evidence for one bounded host-policy window."""
 
     scope: str
     original_value: int
-    active_value: int
+    active_value: int | None
+    control_key: str = HOST_USERNS_SYSCTL_KEY
+    control_path: str = os.fspath(HOST_USERNS_SYSCTL_PATH)
+    mutation_performed: bool | None = None
+    active_readback_verified: bool = False
+    restored_value: int | None = None
+    restore_readback_verified: bool = False
     normal_exit_requires_exact_restore: bool = True
     abrupt_termination_cleanup: str = "github_hosted_vm_decommission"
+
+
+def _host_userns_policy_base_evidence() -> dict[str, object]:
+    return {
+        "scope": HOST_USERNS_SCOPE,
+        "control_key": HOST_USERNS_SYSCTL_KEY,
+        "control_path": os.fspath(HOST_USERNS_SYSCTL_PATH),
+        "abrupt_termination_cleanup": "github_hosted_vm_decommission",
+    }
+
+
+def _host_userns_policy_failure_evidence(
+    evidence: HostUsernsPolicyEvidence | None,
+) -> dict[str, object]:
+    """Return only bounded policy facts known when a window failed."""
+
+    payload = _host_userns_policy_base_evidence()
+    if evidence is None:
+        payload["active_readback_verified"] = False
+        payload["restore_readback_verified"] = False
+        return payload
+    if type(evidence.original_value) is int and evidence.original_value in {0, 1}:
+        payload["original_value"] = evidence.original_value
+    if type(evidence.active_value) is int and evidence.active_value in {0, 1}:
+        payload["active_value"] = evidence.active_value
+    if isinstance(evidence.mutation_performed, bool):
+        payload["mutation_performed"] = evidence.mutation_performed
+    payload["active_readback_verified"] = evidence.active_readback_verified is True
+    if type(evidence.restored_value) is int and evidence.restored_value in {0, 1}:
+        payload["restored_value"] = evidence.restored_value
+    payload["restore_readback_verified"] = evidence.restore_readback_verified is True
+    return payload
+
+
+def _host_userns_policy_success_evidence(
+    evidence: HostUsernsPolicyEvidence,
+) -> dict[str, object]:
+    """Require a complete exact restore before publishing host-policy success."""
+
+    expected_mutation = evidence.original_value != HOST_USERNS_ACTIVE_VALUE
+    if (
+        evidence.scope != HOST_USERNS_SCOPE
+        or evidence.control_key != HOST_USERNS_SYSCTL_KEY
+        or evidence.control_path != os.fspath(HOST_USERNS_SYSCTL_PATH)
+        or type(evidence.original_value) is not int
+        or evidence.original_value not in {0, 1}
+        or type(evidence.active_value) is not int
+        or evidence.active_value != HOST_USERNS_ACTIVE_VALUE
+        or evidence.mutation_performed is not expected_mutation
+        or evidence.active_readback_verified is not True
+        or type(evidence.restored_value) is not int
+        or evidence.restored_value != evidence.original_value
+        or evidence.restore_readback_verified is not True
+        or evidence.abrupt_termination_cleanup != "github_hosted_vm_decommission"
+    ):
+        raise HostedRunnerError(
+            "RECEIPT_INVALID", "host user-namespace policy evidence is incomplete"
+        )
+    return {
+        "scope": evidence.scope,
+        "control_key": evidence.control_key,
+        "control_path": evidence.control_path,
+        "original_value": evidence.original_value,
+        "active_value": evidence.active_value,
+        "mutation_performed": evidence.mutation_performed,
+        "active_readback_verified": True,
+        "restored_value": evidence.restored_value,
+        "restore_readback_verified": True,
+        "abrupt_termination_cleanup": evidence.abrupt_termination_cleanup,
+    }
 
 
 def is_exact_github_hosted_userns_runner(environment: Mapping[str, str]) -> bool:
@@ -907,41 +984,57 @@ def github_hosted_userns_policy_window(
     """Temporarily admit namespace capabilities, then prove exact restoration."""
 
     candidate = dict(os.environ if environment is None else environment)
-    if not is_exact_github_hosted_userns_runner(candidate):
-        raise HostedRunnerError(
-            "HOST_USERNS_POLICY_UNAVAILABLE",
-            "only the exact disposable GitHub-hosted Ubuntu 24.04 x64 runner is admitted",
-        )
-    with _host_userns_policy_lock(candidate):
-        original = _read_host_userns_policy()
-        if type(original) is not int or original not in {0, 1}:
+    evidence: HostUsernsPolicyEvidence | None = None
+    try:
+        if not is_exact_github_hosted_userns_runner(candidate):
             raise HostedRunnerError(
                 "HOST_USERNS_POLICY_UNAVAILABLE",
-                "policy original is not exactly zero or one",
+                "only the exact disposable GitHub-hosted Ubuntu 24.04 x64 runner is admitted",
             )
-        activation_attempted = False
-        try:
-            activation_attempted = True
-            _write_host_userns_policy(HOST_USERNS_ACTIVE_VALUE, restoration=False)
-            if _read_host_userns_policy() != HOST_USERNS_ACTIVE_VALUE:
+        with _host_userns_policy_lock(candidate):
+            original = _read_host_userns_policy()
+            if type(original) is not int or original not in {0, 1}:
                 raise HostedRunnerError(
                     "HOST_USERNS_POLICY_UNAVAILABLE",
-                    "policy active-value readback differs",
+                    "policy original is not exactly zero or one",
                 )
-            yield HostUsernsPolicyEvidence(
+            evidence = HostUsernsPolicyEvidence(
                 scope=HOST_USERNS_SCOPE,
                 original_value=original,
-                active_value=HOST_USERNS_ACTIVE_VALUE,
+                active_value=None,
             )
-        finally:
-            if activation_attempted:
+            activation_attempted = False
+            try:
+                if original != HOST_USERNS_ACTIVE_VALUE:
+                    activation_attempted = True
+                    _write_host_userns_policy(
+                        HOST_USERNS_ACTIVE_VALUE, restoration=False
+                    )
+                    evidence.mutation_performed = True
+                else:
+                    evidence.mutation_performed = False
+                active_value = _read_host_userns_policy()
+                if type(active_value) is int and active_value in {0, 1}:
+                    evidence.active_value = active_value
+                if active_value != HOST_USERNS_ACTIVE_VALUE:
+                    raise HostedRunnerError(
+                        "HOST_USERNS_POLICY_UNAVAILABLE",
+                        "policy active-value readback differs",
+                    )
+                evidence.active_readback_verified = True
+                yield evidence
+            finally:
                 try:
-                    _write_host_userns_policy(original, restoration=True)
-                    if _read_host_userns_policy() != original:
+                    if activation_attempted:
+                        _write_host_userns_policy(original, restoration=True)
+                    restored_value = _read_host_userns_policy()
+                    if type(restored_value) is not int or restored_value != original:
                         raise HostedRunnerError(
                             "HOST_USERNS_POLICY_RESTORE_FAILED",
                             "policy restored-value readback differs",
                         )
+                    evidence.restored_value = restored_value
+                    evidence.restore_readback_verified = True
                 except HostedRunnerError as error:
                     if error.code == "HOST_USERNS_POLICY_RESTORE_FAILED":
                         raise
@@ -949,6 +1042,11 @@ def github_hosted_userns_policy_window(
                         "HOST_USERNS_POLICY_RESTORE_FAILED",
                         "exact original policy could not be restored",
                     ) from error
+    except HostedRunnerError as error:
+        error.host_userns_policy_evidence = _host_userns_policy_failure_evidence(
+            evidence
+        )
+        raise
 
 
 class _PhasePProxyServer(socketserver.ThreadingUnixStreamServer):
@@ -2071,6 +2169,7 @@ def write_network_seal_boundary_receipt(
     path: Path,
     *,
     effect_unknown: bool,
+    host_userns_policy: HostUsernsPolicyEvidence | None = None,
 ) -> Mapping[str, Any]:
     """Record a namespace-boundary refusal or conservative unknown effect."""
 
@@ -2081,27 +2180,32 @@ def write_network_seal_boundary_receipt(
         if effect_unknown
         else {"consumer_launched": False}
     )
+    evidence: dict[str, object] = {
+        "failure": {
+            "code": (
+                "NETWORK_SEAL_EFFECT_UNKNOWN"
+                if effect_unknown
+                else "NETWORK_SEAL_UNAVAILABLE"
+            ),
+            "detail": (
+                "sealed child ended without a durable receipt"
+                if effect_unknown
+                else "user and network namespace probe failed"
+            ),
+        },
+        **launch_evidence,
+        "runner": _runner_confounds(),
+    }
+    if host_userns_policy is not None:
+        evidence["host_userns_policy"] = _host_userns_policy_success_evidence(
+            host_userns_policy
+        )
     return write_semantic_receipt(
         path,
         request=request,
         status="RECONCILIATION_REQUIRED" if effect_unknown else "REFUSED",
         effect="EFFECT_UNKNOWN" if effect_unknown else "NOT_APPLIED",
-        evidence={
-            "failure": {
-                "code": (
-                    "NETWORK_SEAL_EFFECT_UNKNOWN"
-                    if effect_unknown
-                    else "NETWORK_SEAL_UNAVAILABLE"
-                ),
-                "detail": (
-                    "sealed child ended without a durable receipt"
-                    if effect_unknown
-                    else "user and network namespace probe failed"
-                ),
-            },
-            **launch_evidence,
-            "runner": _runner_confounds(),
-        },
+        evidence=evidence,
     )
 
 
@@ -2992,18 +3096,24 @@ def _write_phase_p_refusal(
     *,
     code: str,
     detail: str,
+    host_userns_policy: HostUsernsPolicyEvidence | None = None,
 ) -> None:
+    evidence: dict[str, object] = {
+        "failure": {"code": code, "detail": detail},
+        "phase": "P",
+        "consumer_launched": False,
+        "runner": _runner_confounds(),
+    }
+    if host_userns_policy is not None:
+        evidence["host_userns_policy"] = _host_userns_policy_success_evidence(
+            host_userns_policy
+        )
     write_semantic_receipt(
         receipt_path,
         request=request,
         status="REFUSED",
         effect="NOT_APPLIED",
-        evidence={
-            "failure": {"code": code, "detail": detail},
-            "phase": "P",
-            "consumer_launched": False,
-            "runner": _runner_confounds(),
-        },
+        evidence=evidence,
     )
 
 
@@ -4452,7 +4562,10 @@ def _receipt_staging_path(receipt_path: Path) -> tuple[Path, Path]:
 
 
 def _publish_staged_semantic_receipt(
-    staging_path: Path, receipt_path: Path, request: ExperimentRequest
+    staging_path: Path,
+    receipt_path: Path,
+    request: ExperimentRequest,
+    host_userns_policy: HostUsernsPolicyEvidence,
 ) -> None:
     receipt = load_semantic_receipt(staging_path)
     if receipt.get("request_digest") != request.digest:
@@ -4461,12 +4574,9 @@ def _publish_staged_semantic_receipt(
     if not isinstance(evidence, Mapping):  # pragma: no cover - receipt validator guards
         raise HostedRunnerError("RECEIPT_INVALID", "staged evidence is malformed")
     normalized_evidence = dict(evidence)
-    normalized_evidence["host_userns_policy"] = {
-        "scope": HOST_USERNS_SCOPE,
-        "required_active_value": HOST_USERNS_ACTIVE_VALUE,
-        "normal_restore_verified": True,
-        "abrupt_termination_cleanup": "github_hosted_vm_decommission",
-    }
+    normalized_evidence["host_userns_policy"] = _host_userns_policy_success_evidence(
+        host_userns_policy
+    )
     write_semantic_receipt(
         receipt_path,
         request=request,
@@ -4484,6 +4594,9 @@ def _write_host_userns_policy_failure(
     error: HostedRunnerError,
     effect_unknown: bool,
 ) -> None:
+    policy_evidence = error.host_userns_policy_evidence
+    if policy_evidence is None:
+        policy_evidence = _host_userns_policy_failure_evidence(None)
     write_semantic_receipt(
         receipt_path,
         request=request,
@@ -4496,12 +4609,7 @@ def _write_host_userns_policy_failure(
             },
             "phase": phase,
             "consumer_launch_state": "UNKNOWN" if effect_unknown else "NOT_LAUNCHED",
-            "host_userns_policy": {
-                "scope": HOST_USERNS_SCOPE,
-                "required_active_value": HOST_USERNS_ACTIVE_VALUE,
-                "normal_restore_verified": False,
-                "abrupt_termination_cleanup": "github_hosted_vm_decommission",
-            },
+            "host_userns_policy": policy_evidence,
             "runner": _runner_confounds(),
         },
     )
@@ -4519,8 +4627,10 @@ def reconcile_prior_runs_hosted(
 
     resolution: ReplayResolution | None = None
     body_error: HostedRunnerError | locks.ToolchainLockError | None = None
+    policy_evidence: HostUsernsPolicyEvidence | None = None
     try:
-        with github_hosted_userns_policy_window():
+        with github_hosted_userns_policy_window() as observed_policy:
+            policy_evidence = observed_policy
             try:
                 resolution = reconcile_prior_runs(
                     request,
@@ -4540,11 +4650,16 @@ def reconcile_prior_runs_hosted(
         )
         raise
     if body_error is not None:
+        if policy_evidence is None:  # pragma: no cover - context entry gates the body
+            raise HostedRunnerError(
+                "HOST_USERNS_POLICY_UNAVAILABLE", "policy evidence is unavailable"
+            )
         _write_phase_p_refusal(
             request,
             receipt_path,
             code=body_error.code,
             detail=_bounded_redacted(body_error.detail, 512),
+            host_userns_policy=policy_evidence,
         )
         raise body_error
     if resolution is None:  # pragma: no cover - exhaustive state guard
@@ -4566,9 +4681,11 @@ def prepare_phase_p_hosted(
     staging_directory, staging_receipt = _receipt_staging_path(receipt_path)
     result: Mapping[str, Any] | None = None
     body_error: HostedRunnerError | locks.ToolchainLockError | None = None
+    policy_evidence: HostUsernsPolicyEvidence | None = None
     try:
         try:
-            with github_hosted_userns_policy_window():
+            with github_hosted_userns_policy_window() as observed_policy:
+                policy_evidence = observed_policy
                 try:
                     result = prepare_phase_p_or_record_refusal(
                         forge_root,
@@ -4590,7 +4707,16 @@ def prepare_phase_p_hosted(
             )
             raise
         if staging_receipt.exists():
-            _publish_staged_semantic_receipt(staging_receipt, receipt_path, request)
+            if policy_evidence is None:  # pragma: no cover - staged inside context
+                raise HostedRunnerError(
+                    "HOST_USERNS_POLICY_UNAVAILABLE", "policy evidence is unavailable"
+                )
+            _publish_staged_semantic_receipt(
+                staging_receipt,
+                receipt_path,
+                request,
+                policy_evidence,
+            )
         if body_error is not None:
             raise body_error
         if result is None:  # pragma: no cover - exhaustive state guard
@@ -4636,8 +4762,10 @@ def probe_phase_e_hosted(request: ExperimentRequest, *, receipt_path: Path) -> N
 
     completed: subprocess.CompletedProcess[str] | None = None
     invocation_error: OSError | subprocess.TimeoutExpired | None = None
+    policy_evidence: HostUsernsPolicyEvidence | None = None
     try:
-        with github_hosted_userns_policy_window():
+        with github_hosted_userns_policy_window() as observed_policy:
+            policy_evidence = observed_policy
             try:
                 completed = _phase_e_namespace_probe()
             except (OSError, subprocess.TimeoutExpired) as error:
@@ -4652,7 +4780,16 @@ def probe_phase_e_hosted(request: ExperimentRequest, *, receipt_path: Path) -> N
         )
         raise
     if invocation_error is not None or completed is None or completed.returncode != 0:
-        write_network_seal_boundary_receipt(request, receipt_path, effect_unknown=False)
+        if policy_evidence is None:  # pragma: no cover - probe ran inside context
+            raise HostedRunnerError(
+                "HOST_USERNS_POLICY_UNAVAILABLE", "policy evidence is unavailable"
+            )
+        write_network_seal_boundary_receipt(
+            request,
+            receipt_path,
+            effect_unknown=False,
+            host_userns_policy=policy_evidence,
+        )
         raise HostedRunnerError(
             "NETWORK_SEAL_UNAVAILABLE", "user and network namespace probe failed"
         ) from invocation_error
@@ -4745,9 +4882,11 @@ def run_phase_e_hosted(
     attempted = False
     completed: subprocess.CompletedProcess[str] | None = None
     invocation_error: OSError | subprocess.TimeoutExpired | None = None
+    policy_evidence: HostUsernsPolicyEvidence | None = None
     try:
         try:
-            with github_hosted_userns_policy_window():
+            with github_hosted_userns_policy_window() as observed_policy:
+                policy_evidence = observed_policy
                 command = _phase_e_namespace_command(
                     forge_root=forge_root,
                     consumer_root=consumer_root,
@@ -4789,10 +4928,26 @@ def run_phase_e_hosted(
 
         receipt_missing = not staging_receipt.exists()
         if not receipt_missing:
-            _publish_staged_semantic_receipt(staging_receipt, receipt_path, request)
+            if policy_evidence is None:  # pragma: no cover - launch context gate
+                raise HostedRunnerError(
+                    "HOST_USERNS_POLICY_UNAVAILABLE", "policy evidence is unavailable"
+                )
+            _publish_staged_semantic_receipt(
+                staging_receipt,
+                receipt_path,
+                request,
+                policy_evidence,
+            )
         else:
+            if policy_evidence is None:  # pragma: no cover - launch context gate
+                raise HostedRunnerError(
+                    "HOST_USERNS_POLICY_UNAVAILABLE", "policy evidence is unavailable"
+                )
             write_network_seal_boundary_receipt(
-                request, receipt_path, effect_unknown=attempted
+                request,
+                receipt_path,
+                effect_unknown=attempted,
+                host_userns_policy=policy_evidence,
             )
         if receipt_missing:
             raise HostedRunnerError(
