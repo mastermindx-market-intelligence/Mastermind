@@ -12,7 +12,6 @@ import pytest
 
 from experiments.codeintel_supply import toolchain_lock as locks
 
-
 ROOT = Path(__file__).resolve().parents[2]
 LOCK_PATH = (
     ROOT
@@ -173,7 +172,9 @@ def test_actions_are_full_immutable_commits() -> None:
 
 def test_git_blob_identity_is_computed_over_git_header_and_bytes() -> None:
     body = b"go 1.25.9\n\ntoolchain go1.26.5\n"
-    expected = hashlib.sha1(b"blob " + str(len(body)).encode() + b"\0" + body).hexdigest()
+    expected = hashlib.sha1(
+        b"blob " + str(len(body)).encode() + b"\0" + body
+    ).hexdigest()
     assert locks.git_blob_sha1(body) == expected
 
 
@@ -235,7 +236,9 @@ def test_archive_validator_rejects_traversal_links_special_and_unsafe_modes(
         )
 
 
-def test_safe_extract_never_follows_preexisting_destination_symlink(tmp_path: Path) -> None:
+def test_safe_extract_never_follows_preexisting_destination_symlink(
+    tmp_path: Path,
+) -> None:
     archive = tmp_path / "go.tar.gz"
     archive.write_bytes(
         _tar_bytes(

@@ -1,0 +1,317 @@
+name: CodeIntel Z0 experiment bundle
+
+run-name: >-
+  codeintel-z0|op=${{ inputs.operation_key }}|consumer=${{ inputs.consumer_sha }}|tree=${{ inputs.consumer_tree_sha }}|forge=${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      consumer_sha:
+        description: Exact fixed Z0 consumer commit
+        required: true
+        type: string
+      consumer_tree_sha:
+        description: Exact fixed Z0 consumer tree
+        required: true
+        type: string
+      operation_key:
+        description: Closed Z0 operation
+        required: true
+        type: choice
+        default: mastermind-codeintel-z0-discovery-falsifier-20260830-sol-001
+        options:
+          - mastermind-codeintel-z0-discovery-falsifier-20260830-sol-001
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: codeintel-z0-${{ inputs.operation_key }}
+  cancel-in-progress: false
+
+jobs:
+  phase-p:
+    name: Phase P — acquire, verify, and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      disposition: ${{ steps.replay.outputs.disposition }}
+      prior_returncode: ${{ steps.replay.outputs.prior_returncode }}
+      bundle_name: ${{ steps.prepare.outputs.bundle_name }}
+      bundle_sha256: ${{ steps.prepare.outputs.bundle_sha256 }}
+      manifest_sha256: ${{ steps.prepare.outputs.manifest_sha256 }}
+    steps:
+      - name: Refuse non-protected source or repeated attempt
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/master" ]]; then
+            echo "::error::FORGE_SOURCE_REFUSED: source must be refs/heads/master"
+            exit 1
+          fi
+          if [[ "$GITHUB_RUN_ATTEMPT" != "1" ]]; then
+            echo "::error::EFFECT_UNKNOWN_REPLAY_BLOCKED: repeated run attempts are forbidden"
+            exit 1
+          fi
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        name: Check out exact forge source
+        with:
+          ref: ${{ github.sha }}
+          path: forge
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Derive closed normalized request
+        id: request
+        shell: bash
+        env:
+          INPUT_CONSUMER_SHA: ${{ inputs.consumer_sha }}
+          INPUT_CONSUMER_TREE_SHA: ${{ inputs.consumer_tree_sha }}
+          INPUT_OPERATION_KEY: ${{ inputs.operation_key }}
+        run: |
+          set -euo pipefail
+          readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
+          readonly REQUEST_PATH="$RUNNER_TEMP/codeintel-request.json"
+          /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+            derive-request \
+            --forge-root "$FORGE_ROOT" \
+            --operation-key "$INPUT_OPERATION_KEY" \
+            --consumer-sha "$INPUT_CONSUMER_SHA" \
+            --consumer-tree-sha "$INPUT_CONSUMER_TREE_SHA" \
+            --output "$REQUEST_PATH" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Reconcile the operation before acquisition
+        id: replay
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
+          /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+            reconcile-prior-runs \
+            --request "$RUNNER_TEMP/codeintel-request.json" \
+            --current-run-id "$GITHUB_RUN_ID" \
+            --destination "$RUNNER_TEMP/codeintel-prior/semantic-receipt.json" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Build exact deterministic bundle
+        id: prepare
+        if: steps.replay.outputs.disposition == 'PROCEED'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
+          /usr/bin/env \
+            GOTOOLCHAIN=local \
+            CGO_ENABLED=0 \
+            GOPROXY=https://proxy.golang.org \
+            GOSUMDB=sum.golang.org \
+            /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+              phase-p \
+              --forge-root "$FORGE_ROOT" \
+              --request "$RUNNER_TEMP/codeintel-request.json" \
+              --scratch "$RUNNER_TEMP/codeintel-phase-p-scratch" \
+              --output "$RUNNER_TEMP/codeintel-phase-p" \
+              --github-output "$GITHUB_OUTPUT" \
+              --receipt "$RUNNER_TEMP/codeintel-phase-p-receipt/semantic-receipt.json"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        name: Upload content-addressed bundle
+        if: steps.replay.outputs.disposition == 'PROCEED'
+        with:
+          name: codeintel-z0-${{ steps.prepare.outputs.bundle_sha256 }}
+          path: |
+            ${{ runner.temp }}/codeintel-phase-p/${{ steps.prepare.outputs.bundle_name }}
+            ${{ runner.temp }}/codeintel-phase-p/phase-p-result.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        name: Preserve Phase P refusal receipt
+        if: failure() && steps.replay.outputs.disposition == 'PROCEED'
+        with:
+          name: codeintel-z0-operation-9aae1af9ef430044fbba77ae0f87cf12d4425c75f577b4427c09ae66cec11bf4
+          path: ${{ runner.temp }}/codeintel-phase-p-receipt/semantic-receipt.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        name: Preserve identical prior semantic receipt
+        if: steps.replay.outputs.disposition == 'RETURN_PRIOR'
+        with:
+          name: codeintel-z0-operation-9aae1af9ef430044fbba77ae0f87cf12d4425c75f577b4427c09ae66cec11bf4
+          path: ${{ runner.temp }}/codeintel-prior/semantic-receipt.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Preserve prior semantic outcome
+        if: steps.replay.outputs.disposition == 'RETURN_PRIOR'
+        shell: bash
+        env:
+          PRIOR_RETURNCODE: ${{ steps.replay.outputs.prior_returncode }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$PRIOR_RETURNCODE" =~ ^[0-9]+$ ]]; then
+            echo "::error::RECEIPT_INVALID: prior return code is malformed"
+            exit 1
+          fi
+          if (( PRIOR_RETURNCODE != 0 )); then
+            exit "$PRIOR_RETURNCODE"
+          fi
+
+  phase-e:
+    name: Phase E — sealed Z0 invocation
+    needs: phase-p
+    if: needs.phase-p.outputs.disposition == 'PROCEED'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        name: Check out exact forge source
+        with:
+          ref: ${{ github.sha }}
+          path: forge
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        name: Check out the fixed Z0 carrier
+        with:
+          repository: mastermindx-market-intelligence/Mastermind
+          ref: refs/pull/407/head
+          path: consumer
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bind fixed local consumer branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          readonly CONSUMER_ROOT="$GITHUB_WORKSPACE/consumer"
+          /usr/bin/git -C "$CONSUMER_ROOT" switch -C codeintel-z0-consumer HEAD
+          /usr/bin/git -C "$CONSUMER_ROOT" status --porcelain=v1 --untracked-files=all
+
+      - name: Rederive closed normalized request
+        shell: bash
+        env:
+          INPUT_CONSUMER_SHA: ${{ inputs.consumer_sha }}
+          INPUT_CONSUMER_TREE_SHA: ${{ inputs.consumer_tree_sha }}
+          INPUT_OPERATION_KEY: ${{ inputs.operation_key }}
+        run: |
+          set -euo pipefail
+          readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
+          /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+            derive-request \
+            --forge-root "$FORGE_ROOT" \
+            --operation-key "$INPUT_OPERATION_KEY" \
+            --consumer-sha "$INPUT_CONSUMER_SHA" \
+            --consumer-tree-sha "$INPUT_CONSUMER_TREE_SHA" \
+            --output "$RUNNER_TEMP/codeintel-request.json"
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        name: Download exact content-addressed bundle
+        with:
+          name: codeintel-z0-${{ needs.phase-p.outputs.bundle_sha256 }}
+          path: ${{ runner.temp }}/codeintel-phase-e-download
+
+      - name: Prove namespace support and invoke fixed Z0 consumer
+        id: sealed
+        shell: bash
+        env:
+          BUNDLE_SHA256: ${{ needs.phase-p.outputs.bundle_sha256 }}
+          BUNDLE_NAME: ${{ needs.phase-p.outputs.bundle_name }}
+        run: |
+          set -euo pipefail
+          readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
+          readonly CONSUMER_ROOT="$GITHUB_WORKSPACE/consumer"
+          readonly BUNDLE_PATH="$RUNNER_TEMP/codeintel-phase-e-download/$BUNDLE_NAME"
+          readonly SEALED_HOME="$RUNNER_TEMP/codeintel-phase-e-home"
+          readonly REQUEST_PATH="$RUNNER_TEMP/codeintel-request.json"
+          readonly RECEIPT_PATH="$RUNNER_TEMP/codeintel-phase-e-receipt/semantic-receipt.json"
+          /usr/bin/mkdir -m 700 "$SEALED_HOME"
+          if ! /usr/bin/unshare --user --map-root-user --net /usr/bin/env -i \
+            PATH=/usr/bin:/bin \
+            /bin/bash --noprofile --norc -euo pipefail -c \
+              '/usr/sbin/ip link set lo up'; then
+            /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+              record-network-seal-refusal \
+              --request "$REQUEST_PATH" \
+              --receipt "$RECEIPT_PATH"
+            echo "::error::NETWORK_SEAL_UNAVAILABLE: user and network namespace probe failed"
+            exit 1
+          fi
+          set +e
+          /usr/bin/unshare --user --map-root-user --net \
+            /usr/bin/env -i \
+              HOME="$SEALED_HOME" \
+              LANG=C \
+              LC_ALL=C \
+              PATH=/usr/bin:/bin \
+              PYTHONHASHSEED=0 \
+              RUNNER_OS="${RUNNER_OS:-UNAVAILABLE}" \
+              RUNNER_ARCH="${RUNNER_ARCH:-UNAVAILABLE}" \
+              ImageOS="${ImageOS:-UNAVAILABLE}" \
+              ImageVersion="${ImageVersion:-UNAVAILABLE}" \
+              FORGE_ROOT="$FORGE_ROOT" \
+              CONSUMER_ROOT="$CONSUMER_ROOT" \
+              REQUEST_PATH="$REQUEST_PATH" \
+              BUNDLE_PATH="$BUNDLE_PATH" \
+              BUNDLE_SHA256="$BUNDLE_SHA256" \
+              SCRATCH_PATH="$RUNNER_TEMP/codeintel-phase-e-scratch" \
+              RESULT_PATH="$RUNNER_TEMP/codeintel-phase-e-result" \
+              RECEIPT_PATH="$RECEIPT_PATH" \
+              FIXED_CONSUMER_MODULE=experiments.code_discovery.z0_runner \
+              /bin/bash --noprofile --norc -euo pipefail -c '
+                /usr/sbin/ip link set lo up
+                exec /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+                  run-phase-e \
+                  --forge-root "$FORGE_ROOT" \
+                  --consumer-root "$CONSUMER_ROOT" \
+                  --request "$REQUEST_PATH" \
+                  --bundle "$BUNDLE_PATH" \
+                  --bundle-sha256 "$BUNDLE_SHA256" \
+                  --scratch "$SCRATCH_PATH" \
+                  --result-directory "$RESULT_PATH" \
+                  --receipt "$RECEIPT_PATH"
+              '
+          sealed_status=$?
+          set -e
+          if [[ ! -f "$RECEIPT_PATH" ]]; then
+            /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+              record-network-seal-effect-unknown \
+              --request "$REQUEST_PATH" \
+              --receipt "$RECEIPT_PATH"
+            sealed_status=1
+          fi
+          exit "$sealed_status"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        name: Upload semantic receipt and bounded Z0 result
+        if: always()
+        with:
+          name: codeintel-z0-operation-9aae1af9ef430044fbba77ae0f87cf12d4425c75f577b4427c09ae66cec11bf4
+          path: ${{ runner.temp }}/codeintel-phase-e-receipt/semantic-receipt.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        name: Upload bounded Z0 result files
+        if: steps.sealed.outcome == 'success'
+        with:
+          name: codeintel-z0-result-${{ needs.phase-p.outputs.bundle_sha256 }}
+          path: |
+            ${{ runner.temp }}/codeintel-phase-e-result/z0-result.json
+            ${{ runner.temp }}/codeintel-phase-e-result/z0-report.md
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 7

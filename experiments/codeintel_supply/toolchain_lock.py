@@ -15,13 +15,12 @@ import re
 import stat
 import subprocess
 import tarfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Final
 from urllib.parse import urlparse
-
 
 LOCK_SCHEMA_VERSION: Final = "mastermind.codeintel_experiment_toolchain_lock.v1"
 SCHEMA_FILENAME: Final = "codeintel-experiment-toolchain-lock.schema.json"
@@ -81,9 +80,11 @@ ACTION_COMMITS: Final = MappingProxyType(
 )
 ALLOWED_HOSTS: Final = (
     "api.github.com",
+    "dl.google.com",
     "github.com",
     "go.dev",
     "proxy.golang.org",
+    "storage.googleapis.com",
     "sum.golang.org",
 )
 HOST_UTILITY_CONFOUNDS: Final = (
@@ -100,7 +101,6 @@ HOST_UTILITY_CONFOUNDS: Final = (
 
 _SHA1_RE: Final = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256_RE: Final = re.compile(r"[0-9a-f]{64}\Z")
-_SAFE_NAME_RE: Final = re.compile(r"[A-Za-z0-9._+-]{1,128}\Z")
 _TOP_LEVEL_FIELDS: Final = frozenset(
     {
         "$schema",
@@ -174,7 +174,9 @@ def canonical_json_bytes(value: object) -> bytes:
             allow_nan=False,
         ).encode("ascii")
     except (TypeError, ValueError, UnicodeEncodeError) as error:
-        raise ToolchainLockError("INVALID_JSON", "value is not canonical JSON") from error
+        raise ToolchainLockError(
+            "INVALID_JSON", "value is not canonical JSON"
+        ) from error
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -187,7 +189,9 @@ def sha256_file(path: Path, *, max_bytes: int | None = None) -> str:
     candidate = Path(path)
     metadata = _regular_file_metadata(candidate, "FILE_UNSAFE")
     if max_bytes is not None and metadata.st_size > max_bytes:
-        raise ToolchainLockError("FILE_TOO_LARGE", f"{candidate.name} exceeds {max_bytes} bytes")
+        raise ToolchainLockError(
+            "FILE_TOO_LARGE", f"{candidate.name} exceeds {max_bytes} bytes"
+        )
     digest = hashlib.sha256()
     try:
         with candidate.open("rb") as source:
@@ -205,7 +209,9 @@ def git_blob_sha1(body: bytes) -> str:
     return hashlib.sha1(header + body).hexdigest()  # noqa: S324 - Git object identity
 
 
-def load_toolchain_lock(path: Path, *, schema_path: Path | None = None) -> ToolchainLock:
+def load_toolchain_lock(
+    path: Path, *, schema_path: Path | None = None
+) -> ToolchainLock:
     """Load and independently validate the committed closed lock and schema."""
 
     lock_path = Path(path)
@@ -360,6 +366,8 @@ def validate_lock_payload(
         ("consumer",),
         {
             "repository": "mastermindx-market-intelligence/Mastermind",
+            "pull_request": 407,
+            "carrier_ref": "refs/pull/407/head",
             "operation_key": Z0_OPERATION_KEY,
             "module": "experiments.code_discovery.z0_runner",
             "local_branch": "codeintel-z0-consumer",
@@ -423,18 +431,26 @@ def verify_zoekt_source(source_root: Path, lock: ToolchainLock) -> VerifiedZoekt
     try:
         metadata = root.lstat()
     except OSError as error:
-        raise ToolchainLockError("SOURCE_UNAVAILABLE", "Zoekt checkout is absent") from error
+        raise ToolchainLockError(
+            "SOURCE_UNAVAILABLE", "Zoekt checkout is absent"
+        ) from error
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-        raise ToolchainLockError("SOURCE_UNSAFE", "Zoekt checkout must be a real directory")
+        raise ToolchainLockError(
+            "SOURCE_UNSAFE", "Zoekt checkout must be a real directory"
+        )
     if _git(root, "status", "--porcelain=v1", "--untracked-files=all"):
         raise ToolchainLockError("SOURCE_DIRTY", "Zoekt checkout is not clean")
     remote = _git(root, "remote", "get-url", "origin")
     if remote.rstrip("/") != ZOEKT_SOURCE_URL:
-        raise ToolchainLockError("SOURCE_REPOSITORY_MISMATCH", "Zoekt origin is not fixed")
+        raise ToolchainLockError(
+            "SOURCE_REPOSITORY_MISMATCH", "Zoekt origin is not fixed"
+        )
     observed_commit = _git(root, "rev-parse", "HEAD")
     observed_tree = _git(root, "rev-parse", "HEAD^{tree}")
     if observed_commit != ZOEKT_COMMIT or observed_tree != ZOEKT_TREE:
-        raise ToolchainLockError("SOURCE_IDENTITY_MISMATCH", "Zoekt commit/tree differs")
+        raise ToolchainLockError(
+            "SOURCE_IDENTITY_MISMATCH", "Zoekt commit/tree differs"
+        )
 
     expected_blobs = {
         "go.mod": ZOEKT_GO_MOD_BLOB,
@@ -447,12 +463,16 @@ def verify_zoekt_source(source_root: Path, lock: ToolchainLock) -> VerifiedZoekt
             header, name = line.split("\t", 1)
             mode, kind, object_id = header.split(" ")
         except ValueError as error:
-            raise ToolchainLockError("SOURCE_CENSUS_INVALID", "malformed Git tree row") from error
+            raise ToolchainLockError(
+                "SOURCE_CENSUS_INVALID", "malformed Git tree row"
+            ) from error
         if mode != "100644" or kind != "blob":
             raise ToolchainLockError("SOURCE_FILE_UNSAFE", name)
         observed_blobs[name] = object_id
     if observed_blobs != expected_blobs:
-        raise ToolchainLockError("SOURCE_BLOB_MISMATCH", "Zoekt module/license blob differs")
+        raise ToolchainLockError(
+            "SOURCE_BLOB_MISMATCH", "Zoekt module/license blob differs"
+        )
 
     for path, expected_sha, expected_size in (
         ("go.mod", ZOEKT_GO_MOD_SHA256, 7104),
@@ -470,7 +490,8 @@ def verify_zoekt_source(source_root: Path, lock: ToolchainLock) -> VerifiedZoekt
         mode, kind, _object_id = header.split(" ")
         if kind != "blob" or mode not in {"100644", "100755"}:
             raise ToolchainLockError(
-                "SOURCE_FILE_UNSAFE", "Zoekt tree contains symlink/submodule/special entry"
+                "SOURCE_FILE_UNSAFE",
+                "Zoekt tree contains symlink/submodule/special entry",
             )
     return VerifiedZoektSource(
         commit=observed_commit,
@@ -512,7 +533,9 @@ def validate_tar_archive(
     except ToolchainLockError:
         raise
     except (OSError, tarfile.TarError) as error:
-        raise ToolchainLockError("ARCHIVE_UNSAFE", "archive cannot be parsed") from error
+        raise ToolchainLockError(
+            "ARCHIVE_UNSAFE", "archive cannot be parsed"
+        ) from error
 
     if not raw_members:
         raise ToolchainLockError("ARCHIVE_UNSAFE", "archive is empty")
@@ -538,8 +561,12 @@ def validate_tar_archive(
             raise ToolchainLockError("ARCHIVE_UNSAFE", f"oversized member {name}")
         total += size
         if total > max_total_bytes:
-            raise ToolchainLockError("ARCHIVE_UNSAFE", "expanded archive exceeds ceiling")
-        validated.append(ArchiveMember(name=name, kind=kind, size=size, mode=member.mode))
+            raise ToolchainLockError(
+                "ARCHIVE_UNSAFE", "expanded archive exceeds ceiling"
+            )
+        validated.append(
+            ArchiveMember(name=name, kind=kind, size=size, mode=member.mode)
+        )
     return tuple(sorted(validated, key=lambda member: member.name))
 
 
@@ -570,50 +597,70 @@ def safe_extract_tar(
         if root.exists() or root.is_symlink():
             metadata = root.lstat()
             if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-                raise ToolchainLockError("DESTINATION_UNSAFE", "destination is not a directory")
+                raise ToolchainLockError(
+                    "DESTINATION_UNSAFE", "destination is not a directory"
+                )
         else:
             root.mkdir(parents=True, mode=0o700)
     except OSError as error:
-        raise ToolchainLockError("DESTINATION_UNSAFE", "destination unavailable") from error
+        raise ToolchainLockError(
+            "DESTINATION_UNSAFE", "destination unavailable"
+        ) from error
 
-    for member in sorted(members, key=lambda row: (row.name.count("/"), row.name)):
-        target = root.joinpath(*PurePosixPath(member.name).parts)
-        _assert_existing_parents_are_directories(root, target.parent)
-        try:
-            if member.kind == "directory":
-                if target.exists() or target.is_symlink():
-                    metadata = target.lstat()
-                    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-                        raise ToolchainLockError("DESTINATION_UNSAFE", member.name)
-                else:
-                    target.mkdir(mode=member.mode & 0o755)
-            else:
+    try:
+        with tarfile.open(archive_path, mode="r:gz") as archive:
+            archive_members = {member.name.rstrip("/"): member for member in archive}
+            for member in sorted(
+                members, key=lambda row: (row.name.count("/"), row.name)
+            ):
+                target = root.joinpath(*PurePosixPath(member.name).parts)
+                _assert_existing_parents_are_directories(root, target.parent)
+                if member.kind == "directory":
+                    if target.exists() or target.is_symlink():
+                        metadata = target.lstat()
+                        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(
+                            metadata.st_mode
+                        ):
+                            raise ToolchainLockError("DESTINATION_UNSAFE", member.name)
+                    else:
+                        target.mkdir(mode=member.mode & 0o755)
+                    continue
                 target.parent.mkdir(parents=True, exist_ok=True)
                 flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
                 if hasattr(os, "O_NOFOLLOW"):
                     flags |= os.O_NOFOLLOW
                 descriptor = os.open(target, flags, member.mode & 0o755)
                 try:
-                    with tarfile.open(archive_path, mode="r:gz") as archive:
-                        source = archive.extractfile(member.name)
-                        if source is None:
-                            raise ToolchainLockError("ARCHIVE_UNSAFE", member.name)
-                        with os.fdopen(descriptor, "wb", closefd=False) as output:
-                            remaining = member.size
-                            while remaining:
-                                block = source.read(min(1024 * 1024, remaining))
-                                if not block:
-                                    raise ToolchainLockError("ARCHIVE_TRUNCATED", member.name)
-                                output.write(block)
-                                remaining -= len(block)
-                            if source.read(1):
-                                raise ToolchainLockError("ARCHIVE_SIZE_MISMATCH", member.name)
+                    raw_member = archive_members.get(member.name)
+                    source = (
+                        archive.extractfile(raw_member)
+                        if raw_member is not None
+                        else None
+                    )
+                    if source is None:
+                        raise ToolchainLockError("ARCHIVE_UNSAFE", member.name)
+                    with os.fdopen(descriptor, "wb", closefd=False) as output:
+                        remaining = member.size
+                        while remaining:
+                            block = source.read(min(1024 * 1024, remaining))
+                            if not block:
+                                raise ToolchainLockError(
+                                    "ARCHIVE_TRUNCATED", member.name
+                                )
+                            output.write(block)
+                            remaining -= len(block)
+                        if source.read(1):
+                            raise ToolchainLockError(
+                                "ARCHIVE_SIZE_MISMATCH", member.name
+                            )
                 finally:
                     os.close(descriptor)
-        except ToolchainLockError:
-            raise
-        except OSError as error:
-            raise ToolchainLockError("DESTINATION_UNSAFE", member.name) from error
+    except ToolchainLockError:
+        raise
+    except (OSError, tarfile.TarError) as error:
+        raise ToolchainLockError(
+            "DESTINATION_UNSAFE", "archive extraction failed"
+        ) from error
     return members
 
 
@@ -622,7 +669,9 @@ def _validate_schema_file(path: Path) -> None:
     try:
         schema = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ToolchainLockError("SCHEMA_INVALID", "schema must be UTF-8 JSON") from error
+        raise ToolchainLockError(
+            "SCHEMA_INVALID", "schema must be UTF-8 JSON"
+        ) from error
     if not isinstance(schema, Mapping):
         raise ToolchainLockError("SCHEMA_INVALID", "schema must be an object")
     expected = {
@@ -667,7 +716,9 @@ def _validate_urls(payload: Mapping[str, object]) -> None:
             raise ToolchainLockError("ACQUISITION_URL_FORBIDDEN", value)
 
 
-def _pin(payload: Mapping[str, object], path: tuple[str, ...], expected: object) -> None:
+def _pin(
+    payload: Mapping[str, object], path: tuple[str, ...], expected: object
+) -> None:
     observed = _value_at(payload, path)
     if observed != expected:
         raise ToolchainLockError("PIN_MISMATCH", f"{'.'.join(path)} differs")
@@ -681,10 +732,14 @@ def _require_exact_mapping(
         raise ToolchainLockError("PIN_MISMATCH", f"{'.'.join(path)} differs")
 
 
-def _mapping_at(payload: Mapping[str, object], path: tuple[str, ...]) -> Mapping[str, object]:
+def _mapping_at(
+    payload: Mapping[str, object], path: tuple[str, ...]
+) -> Mapping[str, object]:
     value = _value_at(payload, path)
     if not isinstance(value, Mapping):
-        raise ToolchainLockError("LOCK_SHAPE_MISMATCH", f"{'.'.join(path)} is not an object")
+        raise ToolchainLockError(
+            "LOCK_SHAPE_MISMATCH", f"{'.'.join(path)} is not an object"
+        )
     return value
 
 
@@ -725,7 +780,11 @@ def _safe_archive_name(name: str, expected_top_level: str) -> str:
         raise ToolchainLockError("ARCHIVE_UNSAFE", "traversal member path")
     if not parts or parts[0] != expected_top_level:
         raise ToolchainLockError("ARCHIVE_UNSAFE", "unexpected archive root")
-    if any(_SAFE_NAME_RE.fullmatch(part) is None for part in parts):
+    if len(name.encode("utf-8")) > 4096 or any(
+        len(part.encode("utf-8")) > 255
+        or any(ord(character) < 32 or ord(character) == 127 for character in part)
+        for part in parts
+    ):
         raise ToolchainLockError("ARCHIVE_UNSAFE", "unsupported member name")
     normalized = candidate.as_posix().rstrip("/")
     if not normalized:
@@ -737,7 +796,9 @@ def _assert_existing_parents_are_directories(root: Path, parent: Path) -> None:
     try:
         relative = parent.relative_to(root)
     except ValueError as error:
-        raise ToolchainLockError("DESTINATION_UNSAFE", "path escaped destination") from error
+        raise ToolchainLockError(
+            "DESTINATION_UNSAFE", "path escaped destination"
+        ) from error
     cursor = root
     for part in relative.parts:
         cursor /= part
@@ -750,7 +811,7 @@ def _assert_existing_parents_are_directories(root: Path, parent: Path) -> None:
 def _git(root: Path, *arguments: str) -> str:
     try:
         completed = subprocess.run(
-            ["git", "-C", os.fspath(root), *arguments],
+            ["/usr/bin/git", "-C", os.fspath(root), *arguments],
             check=False,
             capture_output=True,
             text=True,
@@ -758,7 +819,11 @@ def _git(root: Path, *arguments: str) -> str:
             env={"PATH": "/usr/bin:/bin:/usr/local/bin", "LANG": "C", "LC_ALL": "C"},
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise ToolchainLockError("GIT_INSPECTION_FAILED", "Git invocation failed") from error
+        raise ToolchainLockError(
+            "GIT_INSPECTION_FAILED", "Git invocation failed"
+        ) from error
     if completed.returncode != 0:
-        raise ToolchainLockError("GIT_INSPECTION_FAILED", "Git rejected source checkout")
+        raise ToolchainLockError(
+            "GIT_INSPECTION_FAILED", "Git rejected source checkout"
+        )
     return completed.stdout.strip()

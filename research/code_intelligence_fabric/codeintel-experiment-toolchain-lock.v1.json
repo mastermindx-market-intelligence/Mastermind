@@ -13,9 +13,11 @@
     "network_sealed_phase": "E",
     "allowed_hosts": [
       "api.github.com",
+      "dl.google.com",
       "github.com",
       "go.dev",
       "proxy.golang.org",
+      "storage.googleapis.com",
       "sum.golang.org"
     ],
     "fresh_empty_caches": true,
@@ -105,6 +107,8 @@
   },
   "consumer": {
     "repository": "mastermindx-market-intelligence/Mastermind",
+    "pull_request": 407,
+    "carrier_ref": "refs/pull/407/head",
     "operation_key": "mastermind-codeintel-z0-discovery-falsifier-20260830-sol-001",
     "module": "experiments.code_discovery.z0_runner",
     "local_branch": "codeintel-z0-consumer",
