@@ -76,10 +76,10 @@ Freeze the exact predecessor and implementation sequence for the first CEO Codex
 ## Ordered program sequence
 
 ```text
-1. PROTECT_CAPACITY_C1_SELECTION
-2. BUILD_CAPACITY_C2_ROOT_BOUND_COMMITMENT
-3. ADD_DISABLED_EXECUTIVE_CEO_CODEX_A_TARGET
-4. PROTECT_STAGE_B0_V5_1_ARCHITECTURE
+1. PROTECT_STAGE_B0_V5_1_ARCHITECTURE
+2. PROTECT_CAPACITY_C1_SELECTION
+3. BUILD_CAPACITY_C2_ROOT_BOUND_COMMITMENT
+4. ADD_DISABLED_EXECUTIVE_CEO_CODEX_A_TARGET
 5. RED_STAGE_B1_PRODUCTION_ROOT_AND_COMMITMENT_CHAIN
 6. IMPLEMENT_CLOSED_INITIAL_ASSIGNMENT_COMMAND_AND_EVENT
 7. IMPLEMENT_TRUSTED_REPLAY_CURRENT_TRUTH_REVALIDATION
@@ -92,7 +92,7 @@ Freeze the exact predecessor and implementation sequence for the first CEO Codex
 14. SEPARATE_DISPOSABLE_CANARY
 ```
 
-The first three steps are dependency work, not permission to hide C2 or target creation inside the records PR. Stage-B1 source does not START before all three protect.
+The architecture source is protected first so the predecessor and ownership law is durable before code waves begin. Steps 2-4 are separate dependency work. They are not permission to hide C2 or target creation inside Stage-B1. Stage-B1 source does not START before all three predecessors protect.
 
 ## Capacity C2 handoff requirement
 
@@ -109,12 +109,17 @@ The already-assigned Capacity/Fleet principal owns the next program wave after C
 
 The commitment is the only Stage-B destination authority. A C1 selection, RuntimeBinding, provider identity, caller field or model statement alone must fail.
 
+## SessionTarget predecessor requirement
+
+The SessionTargetRegistry owner must add exactly one disabled, production-unarmed `EXECUTIVE-CEO-CODEX-A` definition on a separate bounded carrier before Stage-B1 starts. That carrier owns `config/wake_session_targets.json` and the target-definition tests. Stage-B1 consumes and fingerprints the protected target; it never edits or recreates it.
+
+This separation preserves one owner for target vocabulary and one owner for root assignment.
+
 ## Stage-B1 exact source ceiling
 
-After predecessors protect, use at most seven paths:
+After predecessors protect, use at most six paths:
 
 ```text
-config/wake_session_targets.json
 control_plane/executive_runtime.py
 control_plane/runtime_binding_projection.py
 control_plane/sol_action_target_assignment.py
@@ -123,7 +128,7 @@ tests/test_autonomy_stage_b_initial_assignment.py
 tests/test_autonomy_stage_b_durable_target_transfer_source_law.py
 ```
 
-No eighth path without a finite decision request. Do not modify `control_plane/sol_action_target.py`, common provider identity, Wake ledger, Slack, Agent OS, Linear, deployment, credentials or production arming.
+No seventh path without a finite decision request. Do not modify `config/wake_session_targets.json`, `control_plane/sol_action_target.py`, common provider identity, Wake ledger, Slack, Agent OS, Linear, deployment, credentials or production arming.
 
 ## Complete implementation journey
 
@@ -133,7 +138,7 @@ No eighth path without a finite decision request. Do not modify `control_plane/s
 4. Revalidate the existing assignment Event if present. A replay is successful only while root, C2 commitment, target fingerprint and current binding still match.
 5. Freshly validate the CEO v2 root through the existing durable provenance and `JOB_CREATED` owner.
 6. Resolve the exact root-bound C2 commitment and canonical claimed Worker/Attempt.
-7. Resolve the unique disabled `EXECUTIVE-CEO-CODEX-A` definition and reproject the committed RuntimeBinding on the same connection.
+7. Resolve the unique protected disabled `EXECUTIVE-CEO-CODEX-A` definition and reproject the committed RuntimeBinding on the same connection.
 8. Compare all command claims; append revision-one `SOL_ACTION_TARGET_ASSIGNED` once.
 9. At action time, fold the root assignment, revalidate C2 and current binding, preserve the complete root/seat map and call unchanged Stage A with the actual actor RuntimeBinding.
 10. Wrong, sister, stale or replacement-generation actors are observer-only/refused. A future succession architecture is required before a new generation may act.
@@ -162,6 +167,7 @@ Tests must prove:
 - caller/destination cannot supply carrier, Worker, Attempt, RuntimeBinding or actor authority;
 - missing/foreign/cross-root/effect-unknown C2 commitment refuses;
 - missing or multiple Codex CEO target definitions refuse;
+- Stage-B1 never modifies or recreates the separately protected target definition;
 - command replay revalidates current root, commitment, target and binding;
 - moved binding/generation refuses after historical success;
 - one Event under concurrency and exact changed-payload conflict;
@@ -176,4 +182,4 @@ Green CI and merge are not production proof. The later canary must use a real ad
 
 ## Stop condition
 
-The records carrier stops at a current-base, three-path, independently reviewed V5.1 architecture. The source wave stops at `BUILT_NOT_PROVEN / INITIAL_ASSIGNMENT_ONLY / PRODUCTION_DISARMED`. Production acceptance remains a separate canary and explicit Sol/Chairman gate.
+The records carrier stops at a current-compatible, three-path, reviewed V5.1 architecture. The source wave stops at `BUILT_NOT_PROVEN / INITIAL_ASSIGNMENT_ONLY / PRODUCTION_DISARMED`. Production acceptance remains a separate canary and explicit Sol/Chairman gate.
