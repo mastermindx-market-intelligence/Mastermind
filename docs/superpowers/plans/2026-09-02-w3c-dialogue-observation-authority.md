@@ -58,6 +58,10 @@ Parent and final socket symlinks are forbidden. Startup may replace a stale sock
 
 The existing Relay process must own an exact ephemeral waiter registry around `wait_for_reply`. Missing waiter evidence is a fail-closed W3C hold, not `False`.
 
+The exact waiter key is parent fingerprint + operation key + session ref + target seat. At most one registration may be active for that key. A duplicate concurrent registration returns typed `CONFLICT` with zero effect rather than replacing the current waiter.
+
+Every accepted registration receives one opaque process-local registration token. Cleanup in `finally` is compare-and-delete over the exact key and exact token. Stale cleanup from an older cancelled/timed-out waiter is inert and cannot clear a newer waiter under the same logical key. Lookup is active only for the current exact registration. Restart clears the ephemeral registry; Wake identity remains the durable duplicate authority.
+
 ## Wave P1 - Executive active observation
 
 **Observable capability:** for one validated parent lookup, the Executive service returns one exact active-current-worker observation or a typed zero-effect refusal/unknown.
@@ -104,12 +108,17 @@ The existing Relay process must own an exact ephemeral waiter registry around `w
 2. Replace arbitrary iterable callback with `async -> immutable tuple`.
 3. Bound parent history, request time, response size, cardinality and in-flight collection count.
 4. Cancel and await one timed-out collection; never offload to an unkillable thread.
-5. Register the waiter before the first `wait_for_reply` poll and remove it in `finally`.
-6. Key active-waiter lookup by parent fingerprint + operation/session + target seat.
-7. Compose the client in the real Agent Relay entrypoint only when explicit default-disabled config is complete.
-8. Prove malformed, timeout or overflow input cannot stop the service or produce Wake.
+5. Register the waiter before the first `wait_for_reply` poll.
+6. Reject a duplicate active registration for the exact waiter key with typed `CONFLICT` and zero effect.
+7. Mint one opaque process-local registration token for each accepted registration.
+8. In `finally`, compare-and-delete only the exact key + token; stale cleanup is inert and cannot clear a newer waiter.
+9. Make lookup return active only for the current exact registration.
+10. Compose the client in the real Agent Relay entrypoint only when explicit default-disabled config is complete.
+11. Prove malformed, timeout or overflow input cannot stop the service or produce Wake.
 
-**Acceptance:** service remains responsive under collection failure; maximum one in-flight collection; no synchronous iterable or worker thread; exact hot waiter suppresses cold Wake; missing/failed waiter lookup produces zero persistence/provider effect; restart has no waiter but Wake identity remains the durable duplicate authority; no second service, cursor, queue or provider writer.
+**Acceptance:** service remains responsive under collection failure; maximum one in-flight collection; no synchronous iterable or worker thread; exact hot waiter suppresses cold Wake; duplicate registration never overwrites; stale A cleanup after B registration leaves B active; missing/failed waiter lookup produces zero persistence/provider effect; restart has no waiter but Wake identity remains the durable duplicate authority; no second service, cursor, queue or provider writer.
+
+Mutation proof must remove the registration token/compare-and-delete guard and demonstrate that the suite catches an old `finally` clearing a newer waiter.
 
 **Stop:** `BUILT_NOT_PROVEN / DEFAULT_DISARMED`; no live target.
 
@@ -139,7 +148,7 @@ validated parent -> observation authority -> exact Slack leaf -> deterministic a
 -> exact acknowledgement -> source resolution
 ```
 
-Adverse proof covers restart/reobserve, Slack/listener outage, stale or moved binding, hot waiter, request-only crash, post-submit uncertainty, wrong acknowledgement generation/turn, malformed/forked dialogue, secret leakage and target-unbound. Hard zeros: duplicate RESULT, Wake, provider turn, RuntimeBinding, Worker, Attempt, lifecycle, failover, Chairman message shuttle and title/account/time routing.
+Adverse proof covers restart/reobserve, Slack/listener outage, stale or moved binding, hot waiter, duplicate waiter registration, stale cleanup, request-only crash, post-submit uncertainty, wrong acknowledgement generation/turn, malformed/forked dialogue, secret leakage and target-unbound. Hard zeros: duplicate RESULT, Wake, provider turn, RuntimeBinding, Worker, Attempt, lifecycle, failover, Chairman message shuttle and title/account/time routing.
 
 ## Current disposition
 
