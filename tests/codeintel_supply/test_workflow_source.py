@@ -114,6 +114,16 @@ def test_phase_p_is_the_only_acquisition_and_build_boundary() -> None:
     assert "go install" not in source
 
 
+def test_phase_p_entrypoints_scrub_ambient_environment() -> None:
+    source = _source()
+    phase_p = source[source.index("  phase-p:") : source.index("  phase-e:")]
+    assert phase_p.count("/usr/bin/env -i") >= 3
+    assert 'GH_TOKEN="$GH_TOKEN"' in phase_p
+    assert "PATH=/usr/bin:/bin" in phase_p
+    assert "LANG=C" in phase_p
+    assert "LC_ALL=C" in phase_p
+
+
 def test_phase_e_mechanically_seals_network_before_fixed_consumer() -> None:
     source = _source()
     unshare = source.index("/usr/bin/unshare")

@@ -3,9 +3,22 @@ from __future__ import annotations
 import dataclasses
 import errno
 import hashlib
+import http.server
 import json
 import os
+import platform
+import shutil
+import signal
+import socket
+import socketserver
+import stat
+import subprocess
+import sys
+import tempfile
+import threading
+import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -253,6 +266,60 @@ def test_consumer_effective_diff_rejects_changed_symlink(tmp_path: Path) -> None
         )
 
 
+def test_consumer_effective_diff_rejects_cross_boundary_rename(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+    runner.run_checked(["git", "init", "-q", "-b", "codeintel-z0-consumer"], cwd=repo)
+    (repo / "control_plane").mkdir()
+    (repo / "control_plane/authority.py").write_text("outside\n", encoding="utf-8")
+    runner.run_checked(["git", "add", "."], cwd=repo)
+    runner.run_checked(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "base",
+        ],
+        cwd=repo,
+    )
+    forge_sha = runner.git_stdout(repo, "rev-parse", "HEAD")
+    (repo / "experiments/code_discovery").mkdir(parents=True)
+    runner.run_checked(
+        [
+            "git",
+            "mv",
+            "control_plane/authority.py",
+            "experiments/code_discovery/z0_runner.py",
+        ],
+        cwd=repo,
+    )
+    runner.run_checked(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "hostile cross-boundary rename",
+        ],
+        cwd=repo,
+    )
+    consumer_sha = runner.git_stdout(repo, "rev-parse", "HEAD")
+
+    with pytest.raises(runner.HostedRunnerError, match="CONSUMER_PATH_VIOLATION"):
+        runner.consumer_effective_paths(
+            repo, consumer_sha=consumer_sha, forge_sha=forge_sha
+        )
+
+
 def test_content_addressed_bundle_is_byte_identical_across_mtime_and_order(
     tmp_path: Path,
 ) -> None:
@@ -360,7 +427,15 @@ def test_github_replay_census_reads_every_page_and_rejects_movement(
         2: {"total_count": 2, "workflow_runs": [{"id": 102}]},
     }
 
-    def stable(endpoint: str) -> dict[str, object]:
+    network_environment = {
+        "HTTPS_PROXY": "http://127.0.0.1:12345",
+        "HTTP_PROXY": "http://127.0.0.1:12345",
+    }
+
+    def stable(
+        endpoint: str, *, network_environment: dict[str, str]
+    ) -> dict[str, object]:
+        assert network_environment["HTTPS_PROXY"] == "http://127.0.0.1:12345"
         page = int(endpoint.rsplit("page=", 1)[1])
         return pages[page]
 
@@ -369,10 +444,14 @@ def test_github_replay_census_reads_every_page_and_rejects_movement(
         "repos/example/actions/runs?event=workflow_dispatch",
         field="workflow_runs",
         max_rows=10,
+        network_environment=network_environment,
     )
     assert [row["id"] for row in rows] == [101, 102]
 
-    def moved(endpoint: str) -> dict[str, object]:
+    def moved(
+        endpoint: str, *, network_environment: dict[str, str]
+    ) -> dict[str, object]:
+        assert network_environment["HTTPS_PROXY"] == "http://127.0.0.1:12345"
         page = int(endpoint.rsplit("page=", 1)[1])
         if page == 1:
             return {"total_count": 2, "workflow_runs": [{"id": 101}]}
@@ -384,6 +463,7 @@ def test_github_replay_census_reads_every_page_and_rejects_movement(
             "repos/example/actions/runs?event=workflow_dispatch",
             field="workflow_runs",
             max_rows=10,
+            network_environment=network_environment,
         )
 
 
@@ -401,8 +481,15 @@ def test_prior_refusal_returns_identical_receipt_and_preserves_failure(
     )
     receipt_bytes = source.read_bytes()
 
-    def rows(endpoint: str, *, field: str, max_rows: int) -> list[dict[str, object]]:
+    def rows(
+        endpoint: str,
+        *,
+        field: str,
+        max_rows: int,
+        network_environment: dict[str, str],
+    ) -> list[dict[str, object]]:
         del max_rows
+        assert network_environment["HTTPS_PROXY"].startswith("http://127.0.0.1:")
         if field == "workflow_runs":
             return [
                 {
@@ -422,8 +509,14 @@ def test_prior_refusal_returns_identical_receipt_and_preserves_failure(
             }
         ]
 
-    def download(artifact_id: int, destination: Path) -> None:
+    def download(
+        artifact_id: int,
+        destination: Path,
+        *,
+        network_environment: dict[str, str],
+    ) -> None:
         assert artifact_id == 202
+        assert network_environment["HTTPS_PROXY"].startswith("http://127.0.0.1:")
         with runner.zipfile.ZipFile(
             destination, mode="w", compression=runner.zipfile.ZIP_STORED
         ) as archive:
@@ -670,9 +763,10 @@ def test_repeat_build_uses_only_supplied_go_and_fresh_explicit_caches(
         *,
         cwd: Path,
         env: dict[str, str] | None = None,
+        network_environment: dict[str, str] | None = None,
         timeout: float = 60,
     ) -> runner.subprocess.CompletedProcess[str]:
-        del cwd, timeout
+        del cwd, network_environment, timeout
         captured_env = dict(env or {})
         calls.append((list(argv), captured_env))
         if "build" in argv:
@@ -686,7 +780,7 @@ def test_repeat_build_uses_only_supplied_go_and_fresh_explicit_caches(
         )
         return runner.subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr(runner, "run_checked", fake_run_checked)
+    monkeypatch.setattr(runner, "_run_phase_p_checked", fake_run_checked)
     source = tmp_path / "source"
     source.mkdir()
     payload_bin = tmp_path / "payload/bin"
@@ -697,11 +791,18 @@ def test_repeat_build_uses_only_supplied_go_and_fresh_explicit_caches(
         go_binary=pinned_go,
         scratch=tmp_path / "scratch",
         payload_bin=payload_bin,
+        network_environment=runner._phase_p_client_environment(  # noqa: SLF001
+            "http://127.0.0.1:12345", tmp_path / "network-home"
+        ),
     )
 
     assert calls
     assert {call[0][0] for call in calls} == {os.fspath(pinned_go.resolve())}
     assert all(call[1]["GOTOOLCHAIN"] == "local" for call in calls)
+    assert all(call[1]["GOENV"] == "off" for call in calls)
+    assert all(call[1]["GOVCS"] == "*:off" for call in calls)
+    assert all(call[1]["HTTPS_PROXY"] == "http://127.0.0.1:12345" for call in calls)
+    assert all(call[1]["NO_PROXY"] == "" for call in calls)
     assert all(
         call[1]["PATH"].startswith(f"{pinned_go.parent.resolve()}:") for call in calls
     )
@@ -713,31 +814,46 @@ def test_repeat_build_uses_only_supplied_go_and_fresh_explicit_caches(
 def test_zoekt_checkout_ignores_ambient_git_and_fetches_only_exact_commit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls: list[list[str]] = []
+    calls: list[tuple[list[str], dict[str, str]]] = []
 
     def fake_run_checked(
         argv: list[str],
         *,
         cwd: Path,
         env: dict[str, str] | None = None,
+        network_environment: dict[str, str] | None = None,
         timeout: float = 60,
     ) -> runner.subprocess.CompletedProcess[str]:
-        del cwd, env, timeout
-        calls.append(list(argv))
+        del cwd, network_environment, timeout
+        calls.append((list(argv), dict(env or {})))
         return runner.subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
     monkeypatch.setattr(runner, "run_checked", fake_run_checked)
+    monkeypatch.setattr(runner, "_run_phase_p_checked", fake_run_checked)
     monkeypatch.setenv("PATH", os.fspath(tmp_path / "hostile-bin"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.fspath(tmp_path / "hostile.gitconfig"))
     destination = tmp_path / "zoekt"
-    runner._checkout_exact_zoekt(destination)  # noqa: SLF001 - exact hostile boundary
+    runner._checkout_exact_zoekt(  # noqa: SLF001 - exact hostile boundary
+        destination,
+        network_environment=runner._phase_p_client_environment(  # noqa: SLF001
+            "http://127.0.0.1:12345", tmp_path / "network-home"
+        ),
+    )
 
     assert calls
-    assert {argv[0] for argv in calls} == {"/usr/bin/git"}
-    fetch = next(argv for argv in calls if "fetch" in argv)
-    checkout = next(argv for argv in calls if "checkout" in argv)
+    assert {argv[0] for argv, _env in calls} == {"/usr/bin/git"}
+    fetch, fetch_env = next(call for call in calls if "fetch" in call[0])
+    checkout, _checkout_env = next(call for call in calls if "checkout" in call[0])
     assert fetch[-1] == runner.locks.ZOEKT_COMMIT
     assert checkout[-1] == runner.locks.ZOEKT_COMMIT
     assert "main" not in fetch
+    assert "http.proxy=http://127.0.0.1:12345" in fetch
+    assert "http.followRedirects=false" in fetch
+    assert "protocol.allow=never" in fetch
+    assert "protocol.https.allow=always" in fetch
+    assert fetch_env["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert fetch_env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert os.fspath(tmp_path / "hostile.gitconfig") not in fetch_env.values()
 
 
 def test_go_archive_rejects_disallowed_redirect_before_contact(
@@ -750,9 +866,10 @@ def test_go_archive_rejects_disallowed_redirect_before_contact(
         *,
         cwd: Path,
         env: dict[str, str] | None = None,
+        network_environment: dict[str, str] | None = None,
         timeout: float = 60,
     ) -> runner.subprocess.CompletedProcess[str]:
-        del cwd, env, timeout
+        del cwd, env, network_environment, timeout
         calls.append(list(argv))
         return runner.subprocess.CompletedProcess(
             argv,
@@ -764,14 +881,24 @@ def test_go_archive_rejects_disallowed_redirect_before_contact(
             stderr="",
         )
 
-    monkeypatch.setattr(runner, "run_checked", fake_run_checked)
+    monkeypatch.setattr(runner, "_run_phase_p_checked", fake_run_checked)
     with pytest.raises(
         runner.HostedRunnerError, match="ACQUISITION_REDIRECT_FORBIDDEN"
     ):
-        runner._download_exact_go_archive(tmp_path / "go.tar.gz")  # noqa: SLF001
+        runner._download_exact_go_archive(  # noqa: SLF001
+            tmp_path / "go.tar.gz",
+            network_environment=runner._phase_p_client_environment(  # noqa: SLF001
+                "http://127.0.0.1:12345", tmp_path / "network-home"
+            ),
+        )
 
     assert len(calls) == 1
     assert "--location" not in calls[0]
+    assert calls[0][1:4] == [
+        "--disable",
+        "--proxy",
+        "http://127.0.0.1:12345",
+    ]
     assert "https://evil.invalid/go.tar.gz" not in calls[0]
 
 
@@ -788,9 +915,10 @@ def test_go_archive_follows_only_each_validated_allowlisted_hop(
         *,
         cwd: Path,
         env: dict[str, str] | None = None,
+        network_environment: dict[str, str] | None = None,
         timeout: float = 60,
     ) -> runner.subprocess.CompletedProcess[str]:
-        del cwd, env, timeout
+        del cwd, env, network_environment, timeout
         calls.append(list(argv))
         url = argv[-1]
         if url == runner.locks.GO_ARCHIVE_URL:
@@ -802,15 +930,697 @@ def test_go_archive_follows_only_each_validated_allowlisted_hop(
             stdout = f"200\n{url}\n\n"
         return runner.subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr(runner, "run_checked", fake_run_checked)
+    monkeypatch.setattr(runner, "_run_phase_p_checked", fake_run_checked)
     monkeypatch.setattr(runner.locks, "GO_ARCHIVE_SIZE", len(body))
     monkeypatch.setattr(
         runner.locks, "GO_ARCHIVE_SHA256", hashlib.sha256(body).hexdigest()
     )
 
-    assert runner._download_exact_go_archive(destination) == redirect  # noqa: SLF001
+    assert (
+        runner._download_exact_go_archive(  # noqa: SLF001
+            destination,
+            network_environment=runner._phase_p_client_environment(  # noqa: SLF001
+                "http://127.0.0.1:12345", tmp_path / "network-home"
+            ),
+        )
+        == redirect
+    )
     assert [argv[-1] for argv in calls] == [runner.locks.GO_ARCHIVE_URL, redirect]
     assert all("--location" not in argv for argv in calls)
+
+
+def test_phase_p_allowlist_proxy_denies_non_allowlisted_connect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://hostile.invalid:8080")
+    monkeypatch.setenv("NO_PROXY", "github.com")
+
+    with runner._phase_p_allowlist_proxy(  # noqa: SLF001 - network boundary
+        tmp_path / "network-home"
+    ) as network_environment:
+        proxy = urlparse(network_environment["HTTPS_PROXY"])
+        assert proxy.hostname == "127.0.0.1"
+        assert proxy.port == runner._PHASE_P_PROXY_PORT  # noqa: SLF001
+        assert network_environment["HTTP_PROXY"] == network_environment["HTTPS_PROXY"]
+        assert network_environment["ALL_PROXY"] == network_environment["HTTPS_PROXY"]
+        assert network_environment["NO_PROXY"] == ""
+        assert network_environment["no_proxy"] == ""
+        assert "hostile.invalid" not in repr(network_environment)
+
+        gate_socket = Path(
+            network_environment[runner._PHASE_P_GATE_ENV]
+        )  # noqa: SLF001
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(5)
+        try:
+            client.connect(os.fspath(gate_socket))
+            client.sendall(
+                b"CONNECT evil.invalid:443 HTTP/1.1\r\n"
+                b"Host: evil.invalid:443\r\n\r\n"
+            )
+            response = client.recv(4096)
+        finally:
+            client.close()
+
+    assert response.startswith(b"HTTP/1.1 403 Forbidden\r\n")
+    with pytest.raises(
+        runner.HostedRunnerError, match="ACQUISITION_ALLOWLIST_UNAVAILABLE"
+    ):
+        runner._validated_phase_p_client_environment(  # noqa: SLF001
+            {**network_environment, "AMBIENT_PROXY_BYPASS": "1"}
+        )
+
+
+def test_phase_p_refuses_before_acquisition_when_allowlist_proxy_cannot_bind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_bind(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("fixture bind refusal")
+
+    monkeypatch.setattr(runner, "_PhasePProxyServer", fail_bind)
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        with runner._phase_p_allowlist_proxy(  # noqa: SLF001 - network boundary
+            tmp_path / "network-home"
+        ):
+            raise AssertionError("proxy context must not enter")
+
+    assert raised.value.code == "ACQUISITION_ALLOWLIST_UNAVAILABLE"
+    assert "could not bind" in raised.value.detail
+
+
+def test_phase_p_host_allowlist_uses_exact_names_and_one_pinned_suffix() -> None:
+    assert runner._acquisition_host_allowed("api.github.com")  # noqa: SLF001
+    assert runner._acquisition_host_allowed(  # noqa: SLF001
+        "productionresults.blob.core.windows.net"
+    )
+    assert not runner._acquisition_host_allowed("blob.core.windows.net")  # noqa: SLF001
+    assert not runner._acquisition_host_allowed(  # noqa: SLF001
+        "blob.core.windows.net.evil.invalid"
+    )
+    assert not runner._acquisition_host_allowed("127.0.0.1")  # noqa: SLF001
+
+
+def test_github_client_receives_only_fixed_config_token_and_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "fixture-token-value")
+    monkeypatch.setenv("GH_CONFIG_DIR", os.fspath(tmp_path / "hostile-gh-config"))
+    monkeypatch.setenv("HTTPS_PROXY", "http://hostile.invalid:8080")
+    captured: dict[str, object] = {}
+
+    def fake_run_checked(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str] | None = None,
+        network_environment: dict[str, str] | None = None,
+        timeout: float = 60,
+    ) -> runner.subprocess.CompletedProcess[str]:
+        del cwd, network_environment, timeout
+        captured["argv"] = list(argv)
+        captured["env"] = dict(env or {})
+        return runner.subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(runner, "_run_phase_p_checked", fake_run_checked)
+    network_environment = runner._phase_p_client_environment(  # noqa: SLF001
+        "http://127.0.0.1:12345", tmp_path / "network-home"
+    )
+
+    assert (
+        runner._gh_json(  # noqa: SLF001 - exact network client boundary
+            "repos/golang/go/git/ref/tags/go1.26.5",
+            network_environment=network_environment,
+        )
+        == {}
+    )
+    assert captured["argv"] == [
+        "/usr/bin/gh",
+        "api",
+        "repos/golang/go/git/ref/tags/go1.26.5",
+    ]
+    environment = captured["env"]
+    assert isinstance(environment, dict)
+    assert environment["GH_TOKEN"] == "fixture-token-value"
+    assert environment["GH_HOST"] == "github.com"
+    assert environment["GH_PROMPT_DISABLED"] == "1"
+    assert environment["GH_CONFIG_DIR"] == os.fspath(
+        (tmp_path / "network-home/gh").resolve()
+    )
+    assert environment["HTTPS_PROXY"] == "http://127.0.0.1:12345"
+    assert os.fspath(tmp_path / "hostile-gh-config") not in environment.values()
+    assert "hostile.invalid" not in repr(environment)
+
+
+def test_phase_p_clients_use_the_kernel_socket_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_boundary(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        network_environment: dict[str, str],
+        timeout: float = 60,
+    ) -> runner.subprocess.CompletedProcess[str]:
+        del cwd, timeout
+        captured["argv"] = list(argv)
+        captured["env"] = dict(env)
+        captured["network_environment"] = dict(network_environment)
+        return runner.subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(runner, "_run_phase_p_checked", fake_boundary)
+    network_environment = runner._phase_p_client_environment(  # noqa: SLF001
+        "http://127.0.0.1:12345", tmp_path / "network-home"
+    )
+
+    assert (
+        runner._gh_json(  # noqa: SLF001 - exact network client boundary
+            "repos/golang/go/git/ref/tags/go1.26.5",
+            network_environment=network_environment,
+        )
+        == {}
+    )
+    assert captured["argv"] == [
+        "/usr/bin/gh",
+        "api",
+        "repos/golang/go/git/ref/tags/go1.26.5",
+    ]
+    assert captured["network_environment"] == network_environment
+    assert runner._PHASE_P_LANDLOCK_MIN_ABI == 4  # noqa: SLF001
+    assert (
+        runner._PHASE_P_BOUNDARY_READY == b"CODEINTEL_PHASE_P_BOUNDARY_V1\n"
+    )  # noqa: SLF001
+
+
+def test_phase_p_process_refuses_when_kernel_boundary_receipt_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        argv: list[str], **kwargs: object
+    ) -> runner.subprocess.CompletedProcess[str]:
+        captured["argv"] = list(argv)
+        captured["kwargs"] = kwargs
+        return runner.subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "_invoke_phase_p_boundary", fake_run)
+    with runner._phase_p_allowlist_proxy(  # noqa: SLF001 - live gate fixture
+        tmp_path / "network-home"
+    ) as network_environment:
+        with pytest.raises(runner.HostedRunnerError) as raised:
+            runner._run_phase_p_checked(  # noqa: SLF001 - kernel boundary seam
+                ["/usr/bin/true"],
+                cwd=tmp_path,
+                env=network_environment,
+                network_environment=network_environment,
+            )
+
+    assert raised.value.code == "ACQUISITION_ALLOWLIST_UNAVAILABLE"
+    wrapper_argv = captured["argv"]
+    assert isinstance(wrapper_argv, list)
+    assert wrapper_argv[:11] == [
+        "/usr/bin/unshare",
+        "--user",
+        "--map-current-user",
+        "--keep-caps",
+        "--mount",
+        "--net",
+        "--",
+        "/usr/bin/python3",
+        "-I",
+        "-S",
+        "-c",
+    ]
+    assert wrapper_argv[-1] == "/usr/bin/true"
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["close_fds"] is True
+    assert kwargs["start_new_session"] is True
+    assert runner._PHASE_P_GATE_ENV not in kwargs["env"]  # noqa: SLF001
+
+
+def test_phase_p_process_accepts_only_unforgeable_boundary_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_run(
+        argv: list[str], **kwargs: object
+    ) -> runner.subprocess.CompletedProcess[str]:
+        status_fd = kwargs["pass_fds"][0]  # type: ignore[index]
+        os.write(status_fd, runner._PHASE_P_BOUNDARY_READY)  # noqa: SLF001
+        return runner.subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(runner, "_invoke_phase_p_boundary", fake_run)
+    with runner._phase_p_allowlist_proxy(  # noqa: SLF001 - live gate fixture
+        tmp_path / "network-home"
+    ) as network_environment:
+        completed = runner._run_phase_p_checked(  # noqa: SLF001 - boundary seam
+            ["/usr/bin/true"],
+            cwd=tmp_path,
+            env=network_environment,
+            network_environment=network_environment,
+        )
+        assert completed.stdout == "ok"
+
+        with pytest.raises(runner.HostedRunnerError) as raised:
+            runner._run_phase_p_checked(  # noqa: SLF001 - alternate proxy seam
+                ["/usr/bin/true"],
+                cwd=tmp_path,
+                env={
+                    **network_environment,
+                    "FTP_PROXY": "http://evil.invalid:8080",
+                },
+                network_environment=network_environment,
+            )
+    assert raised.value.code == "ACQUISITION_ALLOWLIST_UNAVAILABLE"
+
+
+def test_phase_p_process_timeout_never_blocks_on_a_leaked_receipt_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    leaked_writer = -1
+
+    def fake_timeout(argv: list[str], **kwargs: object) -> None:
+        nonlocal leaked_writer
+        leaked_writer = os.dup(kwargs["pass_fds"][0])  # type: ignore[index]
+        raise subprocess.TimeoutExpired(argv, 0.01)
+
+    monkeypatch.setattr(runner, "_invoke_phase_p_boundary", fake_timeout)
+    started = time.monotonic()
+    try:
+        with runner._phase_p_allowlist_proxy(  # noqa: SLF001 - live gate fixture
+            tmp_path / "network-home"
+        ) as network_environment:
+            with pytest.raises(runner.HostedRunnerError) as raised:
+                runner._run_phase_p_checked(  # noqa: SLF001 - timeout seam
+                    ["/usr/bin/true"],
+                    cwd=tmp_path,
+                    env=network_environment,
+                    network_environment=network_environment,
+                    timeout=0.01,
+                )
+        assert raised.value.code == "ACQUISITION_ALLOWLIST_UNAVAILABLE"
+        assert time.monotonic() - started < 1
+    finally:
+        if leaked_writer >= 0:
+            os.close(leaked_writer)
+
+
+def test_phase_p_boundary_bootstrap_is_fixed_valid_python() -> None:
+    compile(  # noqa: S102 - compile validates the fixed wrapper source
+        runner._PHASE_P_BOUNDARY_BOOTSTRAP,  # noqa: SLF001
+        "<codeintel-phase-p-boundary>",
+        "exec",
+    )
+
+
+def test_phase_p_boundary_timeout_kills_the_descendant_process_group(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "boundary-pids"
+    probe = (
+        "import os,time\n"
+        "os.fork()\n"
+        f"with open({os.fspath(pid_file)!r},'a',encoding='ascii') as target:\n"
+        " target.write(str(os.getpid())+'\\n')\n"
+        " target.flush()\n"
+        " os.fsync(target.fileno())\n"
+        "time.sleep(30)\n"
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        runner._invoke_phase_p_boundary(  # noqa: SLF001 - cleanup seam
+            [sys.executable, "-c", probe],
+            cwd=os.fspath(tmp_path),
+            env={"PATH": "/usr/bin:/bin"},
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=0.75,
+            close_fds=True,
+            pass_fds=(),
+            start_new_session=True,
+        )
+
+    pids = [int(row) for row in pid_file.read_text(encoding="ascii").splitlines()]
+    assert len(pids) == 2
+
+    def process_is_live(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        observed = subprocess.run(
+            ["/bin/ps", "-o", "stat=", "-p", str(pid)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        ).stdout.strip()
+        return bool(observed) and not observed.startswith("Z")
+
+    try:
+        deadline = time.monotonic() + 3
+        while any(process_is_live(pid) for pid in pids) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not any(process_is_live(pid) for pid in pids)
+    finally:
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux"
+    or platform.machine().lower() not in {"x86_64", "amd64"}
+    or shutil.which("go") is None,
+    reason="real Go loopback-bypass discriminator requires Linux/amd64 with Go",
+)
+def test_kernel_boundary_blocks_real_go_loopback_redirect_proxy_bypass(
+    tmp_path: Path,
+) -> None:
+    """Prove Go's built-in localhost proxy bypass cannot open a direct socket."""
+
+    source = tmp_path / "redirect_client.go"
+    binary = tmp_path / "redirect-client"
+    source.write_text(
+        """package main
+import (
+    "io"
+    "net/http"
+    "os"
+)
+func main() {
+    response, err := http.Get(os.Args[1])
+    if err != nil { os.Exit(23) }
+    defer response.Body.Close()
+    body, err := io.ReadAll(response.Body)
+    if err != nil || string(body) != "escaped" { os.Exit(24) }
+}
+""",
+        encoding="utf-8",
+    )
+    go = shutil.which("go")
+    assert go is not None
+    built = subprocess.run(
+        [go, "build", "-trimpath", "-o", os.fspath(binary), os.fspath(source)],
+        cwd=tmp_path,
+        env={
+            "CGO_ENABLED": "0",
+            "GO111MODULE": "off",
+            "GOTOOLCHAIN": "local",
+            "HOME": os.fspath(tmp_path),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert built.returncode == 0, built.stderr
+
+    sink_hits: list[str] = []
+    gate_hits: list[str] = []
+
+    class Sink(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
+            sink_hits.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Length", "7")
+            self.end_headers()
+            self.wfile.write(b"escaped")
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    class RedirectingProxy(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.2:{proxy_port}/escaped")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    proxy_hits: list[str] = []
+
+    class HostRedirectingProxy(RedirectingProxy):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
+            proxy_hits.append(self.path)
+            super().do_GET()
+
+    class GateRedirectingProxy(RedirectingProxy):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
+            gate_hits.append(self.path)
+            super().do_GET()
+
+    proxy = http.server.ThreadingHTTPServer(("127.0.0.1", 0), HostRedirectingProxy)
+    proxy_port = int(proxy.server_address[1])
+    sink = http.server.ThreadingHTTPServer(("127.0.0.2", proxy_port), Sink)
+
+    gate_directory = Path(tempfile.mkdtemp(prefix="ci-t-", dir="/tmp"))
+    os.chmod(gate_directory, 0o700)
+    gate_path = gate_directory / "gate.sock"
+
+    class UnixRedirectServer(socketserver.ThreadingUnixStreamServer):
+        daemon_threads = True
+        block_on_close = False
+
+    gate = UnixRedirectServer(os.fspath(gate_path), GateRedirectingProxy)
+    threads = [
+        threading.Thread(target=server.serve_forever, daemon=True)
+        for server in (sink, proxy, gate)
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        network_environment = runner._phase_p_client_environment(  # noqa: SLF001
+            f"http://127.0.0.1:{proxy_port}",
+            tmp_path / "network-home",
+            gate_socket=gate_path,
+        )
+        unsealed = subprocess.run(
+            [os.fspath(binary), "http://outside.invalid/start"],
+            cwd=tmp_path,
+            env=network_environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert unsealed.returncode == 0
+        assert sink_hits == ["/escaped"]
+        assert len(proxy_hits) == 1
+        sink_hits.clear()
+
+        with pytest.raises(runner.HostedRunnerError) as raised:
+            runner._run_phase_p_checked(  # noqa: SLF001 - kernel boundary probe
+                [os.fspath(binary), "http://outside.invalid/start"],
+                cwd=tmp_path,
+                env=network_environment,
+                network_environment=network_environment,
+                timeout=15,
+            )
+        assert raised.value.code == "SUBPROCESS_FAILED"
+        assert gate_hits == ["http://outside.invalid/start"]
+        assert sink_hits == []
+    finally:
+        for server in (proxy, sink, gate):
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=5)
+        shutil.rmtree(gate_directory, ignore_errors=True)
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux"
+    or platform.machine().lower() not in {"x86_64", "amd64"}
+    or os.geteuid() == 0,
+    reason="real Phase-P syscall boundary requires a non-root Linux/amd64 runner",
+)
+@pytest.mark.parametrize(
+    "probe",
+    [
+        "import errno,socket,sys\n"
+        "try: socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\n"
+        "except PermissionError as e: sys.exit(0 if e.errno==errno.EPERM else 31)\n"
+        "sys.exit(30)\n",
+        "import errno,socket,sys\n"
+        "try: socket.socket(socket.AF_INET6,socket.SOCK_STREAM)\n"
+        "except PermissionError as e: sys.exit(0 if e.errno==errno.EPERM else 31)\n"
+        "sys.exit(30)\n",
+        "import errno,socket,sys\n"
+        "try: socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)\n"
+        "except PermissionError as e: sys.exit(0 if e.errno==errno.EPERM else 31)\n"
+        "sys.exit(30)\n",
+        "import errno,socket,sys\n"
+        "try: socket.socket(socket.AF_INET,socket.SOCK_STREAM,socket.IPPROTO_UDP)\n"
+        "except PermissionError as e: sys.exit(0 if e.errno==errno.EPERM else 31)\n"
+        "sys.exit(30)\n",
+        "import errno,socket,sys\n"
+        "stream=socket.socket(socket.AF_INET,socket.SOCK_STREAM)\n"
+        "try: stream.sendto(b'x',0x20000000,('127.0.0.2',47853))\n"
+        "except PermissionError as e: sys.exit(0 if e.errno==errno.EPERM else 31)\n"
+        "sys.exit(30)\n",
+        "import ctypes,errno,sys\n"
+        "libc=ctypes.CDLL(None,use_errno=True)\n"
+        "result=libc.syscall(425,1,ctypes.c_void_p())\n"
+        "sys.exit(0 if result == -1 and ctypes.get_errno() == errno.EPERM else 30)\n",
+        "import errno,os,sys\n"
+        "try: os.open(f'/proc/{os.getppid()}/mem',os.O_RDWR)\n"
+        "except OSError as e: sys.exit(0 if e.errno in {errno.EACCES,errno.EPERM} else 31)\n"
+        "sys.exit(30)\n",
+    ],
+    ids=[
+        "udp",
+        "ipv6",
+        "unix",
+        "alternate-protocol",
+        "fastopen",
+        "io-uring",
+        "supervisor-memory",
+    ],
+)
+def test_kernel_boundary_denies_alternate_socket_and_async_paths(
+    tmp_path: Path, probe: str
+) -> None:
+    with runner._phase_p_allowlist_proxy(  # noqa: SLF001 - real kernel boundary
+        tmp_path / "network-home"
+    ) as network_environment:
+        completed = runner._run_phase_p_checked(  # noqa: SLF001 - hostile probe
+            ["/usr/bin/python3", "-I", "-S", "-c", probe],
+            cwd=tmp_path,
+            env=network_environment,
+            network_environment=network_environment,
+            timeout=15,
+        )
+    assert completed.returncode == 0
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux"
+    or platform.machine().lower() not in {"x86_64", "amd64"}
+    or os.geteuid() == 0,
+    reason="real Phase-P descriptor boundary requires non-root Linux/amd64",
+)
+def test_kernel_boundary_exec_inherits_no_socket_descriptor(tmp_path: Path) -> None:
+    probe = (
+        "import os,stat,sys\n"
+        "bad=[]\n"
+        "for name in os.listdir('/proc/self/fd'):\n"
+        " fd=int(name)\n"
+        " if fd <= 2: continue\n"
+        " try: mode=os.fstat(fd).st_mode\n"
+        " except OSError: continue\n"
+        " if stat.S_ISSOCK(mode): bad.append(fd)\n"
+        "sys.exit(30 if bad else 0)\n"
+    )
+    with runner._phase_p_allowlist_proxy(  # noqa: SLF001 - real kernel boundary
+        tmp_path / "network-home"
+    ) as network_environment:
+        completed = runner._run_phase_p_checked(  # noqa: SLF001 - hostile probe
+            ["/usr/bin/python3", "-I", "-S", "-c", probe],
+            cwd=tmp_path,
+            env=network_environment,
+            network_environment=network_environment,
+            timeout=15,
+        )
+    assert completed.returncode == 0
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux"
+    or platform.machine().lower() not in {"x86_64", "amd64"}
+    or os.geteuid() == 0,
+    reason="real Phase-P mount boundary requires non-root Linux/amd64",
+)
+def test_kernel_boundary_client_cannot_replace_the_parent_gate(tmp_path: Path) -> None:
+    probe = (
+        "import errno,os,sys\n"
+        "try: os.unlink(sys.argv[1])\n"
+        "except OSError as e: sys.exit(0 if e.errno == errno.EROFS else 31)\n"
+        "sys.exit(30)\n"
+    )
+    with runner._phase_p_allowlist_proxy(  # noqa: SLF001 - real mount boundary
+        tmp_path / "network-home"
+    ) as network_environment:
+        gate_path = Path(network_environment[runner._PHASE_P_GATE_ENV])  # noqa: SLF001
+        completed = runner._run_phase_p_checked(  # noqa: SLF001 - hostile probe
+            ["/usr/bin/python3", "-I", "-S", "-c", probe, os.fspath(gate_path)],
+            cwd=tmp_path,
+            env=network_environment,
+            network_environment=network_environment,
+            timeout=15,
+        )
+        assert completed.returncode == 0
+        assert stat.S_ISSOCK(gate_path.lstat().st_mode)
+
+
+def test_github_replay_artifact_download_uses_the_same_proxy_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "fixture-token-value")
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        argv: list[str], **kwargs: object
+    ) -> runner.subprocess.CompletedProcess[bytes]:
+        captured["argv"] = list(argv)
+        captured["env"] = dict(kwargs["env"])  # type: ignore[arg-type]
+        captured["network_environment"] = dict(  # type: ignore[arg-type]
+            kwargs["network_environment"]
+        )
+        output = kwargs["stdout"]
+        output.write(b"fixture zip bytes")  # type: ignore[attr-defined]
+        return runner.subprocess.CompletedProcess(argv, 0, stdout=None, stderr=b"")
+
+    monkeypatch.setattr(runner, "_run_phase_p_process", fake_run)
+    network_environment = runner._phase_p_client_environment(  # noqa: SLF001
+        "http://127.0.0.1:12345", tmp_path / "network-home"
+    )
+    destination = tmp_path / "receipt.zip"
+
+    runner._gh_download_artifact(  # noqa: SLF001 - replay network boundary
+        202,
+        destination,
+        network_environment=network_environment,
+    )
+
+    assert captured["argv"] == [
+        "/usr/bin/gh",
+        "api",
+        "-H",
+        "Accept: application/vnd.github+json",
+        "repos/mastermindx-market-intelligence/Mastermind/actions/artifacts/202/zip",
+    ]
+    environment = captured["env"]
+    assert isinstance(environment, dict)
+    assert environment["HTTPS_PROXY"] == "http://127.0.0.1:12345"
+    assert environment["NO_PROXY"] == ""
+    assert environment["GH_HOST"] == "github.com"
+    assert environment["GH_TOKEN"] == "fixture-token-value"
+    assert captured["network_environment"] == network_environment
+    assert destination.read_bytes() == b"fixture zip bytes"
+
+
+def test_go_module_inventory_requires_exact_pinned_main_module() -> None:
+    accepted = runner._normalize_go_module_inventory(  # noqa: SLF001
+        '{"Path":"github.com/sourcegraph/zoekt","Main":true}\n'
+    )
+    assert accepted == [{"path": "github.com/sourcegraph/zoekt", "main": True}]
+
+    with pytest.raises(runner.HostedRunnerError, match="DEPENDENCY_GRAPH_INVALID"):
+        runner._normalize_go_module_inventory(  # noqa: SLF001
+            '{"Path":"sourcegraph/zoekt","Main":true}\n'
+        )
 
 
 def test_network_denial_must_be_proven_before_consumer_launch() -> None:

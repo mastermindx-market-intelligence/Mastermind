@@ -35,6 +35,7 @@ contract.
 The admitted upstream identities are:
 
 - Zoekt repository: `sourcegraph/zoekt`
+- Zoekt Go module: `github.com/sourcegraph/zoekt`
 - Zoekt commit: `5f833dde1bc4b1a8f99007617b4b721e44506c4f`
 - Zoekt tree: `8135ec1d7329e7f8de43714ac5c7a2bad14bd7b5`
 - `go.mod` Git blob: `db33117af57ea746dff8064e70ce56e3721e44ba`
@@ -52,7 +53,7 @@ The admitted upstream identities are:
 - Go `LICENSE` Git blob: `2a7cf70da6e498df9c11ab6a5eaa2ddd7af34da4`
 - Go `LICENSE` SHA-256: `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad`
 - Build recipe SHA-256:
-  `fa55671482185857a29795df77b0bd5a15898bbd5dac7e993172273f1cf51335`
+  `50ac9f471a49fcda38359b1917277a736cadc8d45ee3a52db09dc6383974e2ae`
 
 The `go.mod` blob is a deliberate correction authorized on the source carrier.
 Primary GitHub commit/tree and contents reads agree on `db33117…`. The stale
@@ -102,10 +103,69 @@ are hashed before and after launch.
 
 ## Phase P: acquire, verify, build
 
-Phase P is the only network-enabled boundary. The implementation contains only
-fixed URLs and repositories and validates every effective URL against this exact
-host set: `api.github.com`, `dl.google.com`, `github.com`, `go.dev`,
-`proxy.golang.org`, `storage.googleapis.com`, and `sum.golang.org`.
+Phase P is the only subprocess network-enabled boundary. Each Phase P Python
+entrypoint starts with `/usr/bin/env -i`. Every subprocess invocation permitted
+to contact upstream receives a freshly constructed environment that points
+upper- and lower-case HTTP(S)/ALL proxy variables at `127.0.0.1:47853` and
+empties both `NO_PROXY` forms.
+
+Before each fixed `curl`, Git-fetch, Go, or `gh` client, the runner starts
+`/usr/bin/unshare --user --map-current-user --keep-caps --mount --net`. The
+bootstrap makes mount propagation private, bind-mounts the random parent-gate
+directory read-only, brings up and verifies a fresh network namespace containing
+only `lo`, and binds one relay listener at exactly `127.0.0.1:47853`. The relay
+crosses back to the host network namespace only through the read-only pathname
+Unix socket owned by the parent CONNECT gate. The hostile client never inherits
+that Unix socket or any other socket descriptor.
+
+The bootstrap retains the new namespace capabilities only long enough to freeze
+the gate mount and configure loopback. It then installs `no_new_privs`, clears
+ambient/effective/permitted/inheritable capability sets, and forks the client
+before starting relay threads. The client closes every descriptor except stdio
+and the one close-on-exec receipt pipe. It requires Landlock ABI 4 or newer and
+uses its port rule as defense in depth: TCP connect is admitted only for 47853,
+while fixed-port TCP bind is not admitted. A seccomp filter admits socket
+creation only for AF_INET stream sockets with protocol zero or TCP; it denies
+AF_UNIX, AF_INET6, datagram/raw/alternate-protocol sockets, socketpair,
+`io_uring`, namespace and mount changes, process-group escape, and
+`MSG_FASTOPEN`. The filter is inherited by every client descendant.
+
+Only after all checks succeed does the client emit
+`CODEINTEL_PHASE_P_BOUNDARY_V1` through the receipt pipe and execute the fixed
+argv. The parent refuses `ACQUISITION_ALLOWLIST_UNAVAILABLE` if `unshare`, the
+private read-only mount, the loopback census, capability clearing, Landlock,
+seccomp, descriptor closure, or the exact receipt fails. On normal exit or
+timeout, the outer new-session process group is killed to remove descendants.
+
+This topology is independent of client proxy-selection behavior. Go 1.26.5
+hard-bypasses configured proxies for `localhost` and loopback IPs. The hostile
+regression therefore uses a host proxy at `127.0.0.1:P` and a trap at
+`127.0.0.2:P` with the exact same port: the unsealed real Go client reaches the
+trap after a redirect, while the sealed client reaches the Unix-backed relay and
+then fails to find any listener at `127.0.0.2:P` inside its fresh namespace; the
+host trap records zero hits. A direct request to `127.0.0.1:P` reaches the
+CONNECT gate and is refused as non-CONNECT traffic. Landlock ABI 4 is explicitly
+port-only and is not represented as address-aware; the separate network
+namespace and exact bound relay endpoint provide the address boundary.
+
+The proxy refuses non-CONNECT traffic, every CONNECT port other than 443, and
+every authority outside this exact host set before opening an upstream socket:
+`api.github.com`, `dl.google.com`, `github.com`, `go.dev`,
+`proxy.golang.org`, `results-receiver.actions.githubusercontent.com`,
+`storage.googleapis.com`, and `sum.golang.org`. The only suffix rule is a strict
+subdomain of `blob.core.windows.net`, required for GitHub's pre-signed replay
+artifact redirect; the suffix apex and lookalike suffixes are refused.
+
+`curl` disables ambient curl configuration and receives the loopback proxy
+explicitly. Git receives an empty home, disables global and system config,
+disables prompts and redirects, allows only HTTPS transport, and receives the
+proxy explicitly. Go receives an empty home and caches, `GOENV=off`,
+`GONOPROXY=`, `GOINSECURE=`, and `GOVCS=*:off` in addition to its fixed proxy
+and checksum database. `gh` receives an empty config directory, fixed
+`GH_HOST=github.com`, disabled prompts, the loopback proxy, and only the workflow
+token. GitHub's pinned checkout/upload/download Actions and unavoidable hosted
+runner/control traffic execute outside this in-process proxy and remain explicit
+confounds; they are not represented as application-enforced egress.
 
 The phase performs the following sequence:
 
@@ -125,8 +185,9 @@ The phase performs the following sequence:
 5. Use fresh explicit `GOMODCACHE`, `GOPATH`, `GOCACHE`, and `HOME` directories.
    Set `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, `GOOS=linux`, `GOARCH=amd64`,
    `GOPROXY=https://proxy.golang.org`, `GOSUMDB=sum.golang.org`,
-   `GOPRIVATE=` and `GONOSUMDB=off`. Ambient Go and ambient Zoekt executables
-   are never resolved.
+   `GOPRIVATE=`, `GONOPROXY=`, `GOINSECURE=`, `GONOSUMDB=off`, `GOENV=off`,
+   and `GOVCS=*:off`. Ambient Go, ambient Zoekt executables, ambient VCS fallback,
+   and ambient network configuration are never resolved by the subprocess lane.
 6. Run `go mod download -json all`, `go mod verify`, and
    `go list -mod=readonly -m -json all`. Reject local or incompletely summed
    replacements and emit the normalized module inventory.
@@ -253,10 +314,11 @@ python3 -m py_compile experiments/codeintel_supply/toolchain_lock.py experiments
 git diff --check
 ```
 
-The hostile suite covers alternate checksum/source/tree/module/license pins
+The hostile suite covers alternate checksum/source/tree/main-module/license pins
 (including stale `a3917455…`), floating acquisition, action movement, archive
 traversal/link/special/mode attacks, unsafe extraction destinations, ambient Go
-and Git, bundle substitution and post-launch drift, consumer identity/path/mode
+and Git, disallowed CONNECT authorities and proxy bypass configuration, bundle
+substitution and post-launch drift, consumer identity/path/mode/cross-boundary-rename
 widening, arbitrary module/argv widening, network exposure, secret/private-path
 leaks, result bounds, process cleanup, changed replay requests, receipt tamper,
 and unknown effects.

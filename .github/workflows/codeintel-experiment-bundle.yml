@@ -74,8 +74,12 @@ jobs:
           set -euo pipefail
           readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
           readonly REQUEST_PATH="$RUNNER_TEMP/codeintel-request.json"
-          /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
-            derive-request \
+          /usr/bin/env -i \
+            PATH=/usr/bin:/bin \
+            LANG=C \
+            LC_ALL=C \
+            /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+              derive-request \
             --forge-root "$FORGE_ROOT" \
             --operation-key "$INPUT_OPERATION_KEY" \
             --consumer-sha "$INPUT_CONSUMER_SHA" \
@@ -91,8 +95,13 @@ jobs:
         run: |
           set -euo pipefail
           readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
-          /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
-            reconcile-prior-runs \
+          /usr/bin/env -i \
+            GH_TOKEN="$GH_TOKEN" \
+            PATH=/usr/bin:/bin \
+            LANG=C \
+            LC_ALL=C \
+            /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+              reconcile-prior-runs \
             --request "$RUNNER_TEMP/codeintel-request.json" \
             --current-run-id "$GITHUB_RUN_ID" \
             --destination "$RUNNER_TEMP/codeintel-prior/semantic-receipt.json" \
@@ -107,7 +116,15 @@ jobs:
         run: |
           set -euo pipefail
           readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
-          /usr/bin/env \
+          /usr/bin/env -i \
+            GH_TOKEN="$GH_TOKEN" \
+            PATH=/usr/bin:/bin \
+            LANG=C \
+            LC_ALL=C \
+            RUNNER_OS="${RUNNER_OS:-UNAVAILABLE}" \
+            RUNNER_ARCH="${RUNNER_ARCH:-UNAVAILABLE}" \
+            ImageOS="${ImageOS:-UNAVAILABLE}" \
+            ImageVersion="${ImageVersion:-UNAVAILABLE}" \
             GOTOOLCHAIN=local \
             CGO_ENABLED=0 \
             GOPROXY=https://proxy.golang.org \

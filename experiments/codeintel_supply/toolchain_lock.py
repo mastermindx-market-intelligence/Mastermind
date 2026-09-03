@@ -26,8 +26,23 @@ SCHEMA_FILENAME: Final = "codeintel-experiment-toolchain-lock.schema.json"
 SUPPORTED_MODE: Final = "Z0"
 SUPPORTED_PLATFORM: Final = "linux-x86_64"
 STRICT_JSON_MAX_BYTES: Final = 1_048_576
+PHASE_P_LANDLOCK_MIN_ABI: Final = 4
+PHASE_P_BOUNDARY_RECEIPT: Final = "CODEINTEL_PHASE_P_BOUNDARY_V1"
+PHASE_P_NETWORK_ENFORCEMENT: Final = (
+    "fresh_user_mount_netns_loopback_relay_parent_unix_gate_landlock_seccomp"
+)
+PHASE_P_NETWORK_NAMESPACE: Final = (
+    "fresh_user_mount_network_namespace_with_loopback_only"
+)
+PHASE_P_GATE_MOUNT: Final = "private_read_only_bind_mount"
+PHASE_P_RELAY_ENDPOINT: Final = "127.0.0.1:47853"
+PHASE_P_PARENT_GATE_TRANSPORT: Final = "pathname_unix_stream"
+PHASE_P_CLIENT_SOCKET_POLICY: Final = (
+    "af_inet_tcp_only_no_fastopen_no_io_uring_no_socket_inheritance"
+)
 
 ZOEKT_REPOSITORY: Final = "sourcegraph/zoekt"
+ZOEKT_MODULE_PATH: Final = "github.com/sourcegraph/zoekt"
 ZOEKT_SOURCE_URL: Final = "https://github.com/sourcegraph/zoekt.git"
 ZOEKT_COMMIT: Final = "5f833dde1bc4b1a8f99007617b4b721e44506c4f"
 ZOEKT_TREE: Final = "8135ec1d7329e7f8de43714ac5c7a2bad14bd7b5"
@@ -61,7 +76,7 @@ GO_LICENSE_SHA256: Final = (
 )
 
 BUILD_RECIPE_SHA256: Final = (
-    "fa55671482185857a29795df77b0bd5a15898bbd5dac7e993172273f1cf51335"
+    "50ac9f471a49fcda38359b1917277a736cadc8d45ee3a52db09dc6383974e2ae"
 )
 Z0_OPERATION_KEY: Final = "mastermind-codeintel-z0-discovery-falsifier-20260830-sol-001"
 
@@ -84,9 +99,11 @@ ALLOWED_HOSTS: Final = (
     "github.com",
     "go.dev",
     "proxy.golang.org",
+    "results-receiver.actions.githubusercontent.com",
     "storage.googleapis.com",
     "sum.golang.org",
 )
+ALLOWED_HOST_SUFFIXES: Final = ("blob.core.windows.net",)
 HOST_UTILITY_CONFOUNDS: Final = (
     "/bin/bash",
     "/usr/bin/curl",
@@ -360,6 +377,15 @@ def validate_lock_payload(
             "network_enabled_phase": "P",
             "network_sealed_phase": "E",
             "allowed_hosts": list(ALLOWED_HOSTS),
+            "allowed_host_suffixes": list(ALLOWED_HOST_SUFFIXES),
+            "network_enforcement": PHASE_P_NETWORK_ENFORCEMENT,
+            "network_namespace": PHASE_P_NETWORK_NAMESPACE,
+            "gate_mount": PHASE_P_GATE_MOUNT,
+            "relay_endpoint": PHASE_P_RELAY_ENDPOINT,
+            "parent_gate_transport": PHASE_P_PARENT_GATE_TRANSPORT,
+            "client_socket_policy": PHASE_P_CLIENT_SOCKET_POLICY,
+            "minimum_landlock_abi": PHASE_P_LANDLOCK_MIN_ABI,
+            "boundary_receipt": PHASE_P_BOUNDARY_RECEIPT,
             "fresh_empty_caches": True,
             "floating_resolution": False,
             "github_cache": False,
@@ -368,6 +394,7 @@ def validate_lock_payload(
 
     expected_zoekt = {
         "repository": ZOEKT_REPOSITORY,
+        "module_path": ZOEKT_MODULE_PATH,
         "source_url": ZOEKT_SOURCE_URL,
         "commit": ZOEKT_COMMIT,
         "tree": ZOEKT_TREE,
@@ -426,12 +453,16 @@ def validate_lock_payload(
         "environment": {
             "CGO_ENABLED": "0",
             "GOARCH": "amd64",
+            "GOENV": "off",
+            "GOINSECURE": "",
+            "GONOPROXY": "",
             "GONOSUMDB": "off",
             "GOOS": "linux",
             "GOPRIVATE": "",
             "GOPROXY": "https://proxy.golang.org",
             "GOSUMDB": "sum.golang.org",
             "GOTOOLCHAIN": "local",
+            "GOVCS": "*:off",
         },
         "go_build_flags": ["-trimpath", "-buildvcs=false", "-ldflags=-buildid="],
         "packages": {
@@ -911,7 +942,14 @@ def _git(root: Path, *arguments: str) -> str:
             capture_output=True,
             text=True,
             timeout=30,
-            env={"PATH": "/usr/bin:/bin:/usr/local/bin", "LANG": "C", "LC_ALL": "C"},
+            env={
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+                "PATH": "/usr/bin:/bin:/usr/local/bin",
+                "LANG": "C",
+                "LC_ALL": "C",
+            },
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise ToolchainLockError(

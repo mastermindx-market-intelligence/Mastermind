@@ -62,6 +62,27 @@ def test_committed_lock_is_closed_and_schema_bound() -> None:
     assert lock.sha256 == hashlib.sha256(LOCK_PATH.read_bytes()).hexdigest()
     assert lock.payload["$schema"] == SCHEMA_PATH.name
     assert lock.payload["build"]["recipe_sha256"] == lock.build_recipe_sha256
+    assert lock.payload["acquisition"]["network_enforcement"] == (
+        "fresh_user_mount_netns_loopback_relay_parent_unix_gate_landlock_seccomp"
+    )
+    assert lock.payload["acquisition"]["network_namespace"] == (
+        "fresh_user_mount_network_namespace_with_loopback_only"
+    )
+    assert lock.payload["acquisition"]["gate_mount"] == ("private_read_only_bind_mount")
+    assert lock.payload["acquisition"]["relay_endpoint"] == "127.0.0.1:47853"
+    assert lock.payload["acquisition"]["parent_gate_transport"] == (
+        "pathname_unix_stream"
+    )
+    assert lock.payload["acquisition"]["client_socket_policy"] == (
+        "af_inet_tcp_only_no_fastopen_no_io_uring_no_socket_inheritance"
+    )
+    assert lock.payload["acquisition"]["minimum_landlock_abi"] == 4
+    assert lock.payload["acquisition"]["boundary_receipt"] == (
+        "CODEINTEL_PHASE_P_BOUNDARY_V1"
+    )
+    assert lock.payload["acquisition"]["allowed_host_suffixes"] == (
+        "blob.core.windows.net",
+    )
     assert lock.payload["universal_ctags"] == {
         "enabled": False,
         "reason": "disabled_until_separately_content_addressed_and_admitted",
@@ -167,6 +188,7 @@ def test_authorized_zoekt_and_go_pins_match_primary_objects() -> None:
 
     assert zoekt["commit"] == "5f833dde1bc4b1a8f99007617b4b721e44506c4f"
     assert zoekt["tree"] == "8135ec1d7329e7f8de43714ac5c7a2bad14bd7b5"
+    assert zoekt["module_path"] == "github.com/sourcegraph/zoekt"
     assert zoekt["go_mod"]["git_blob_sha1"] == (
         "db33117af57ea746dff8064e70ce56e3721e44ba"
     )
@@ -190,6 +212,7 @@ def test_authorized_zoekt_and_go_pins_match_primary_objects() -> None:
     [
         (("zoekt", "commit"), "0" * 40),
         (("zoekt", "tree"), "1" * 40),
+        (("zoekt", "module_path"), "sourcegraph/zoekt"),
         # Regression for the stale packet digest superseded by the Sol ruling.
         (("zoekt", "go_mod", "git_blob_sha1"), "a3917455" + "0" * 32),
         (("zoekt", "go_sum", "git_blob_sha1"), "2" * 40),
@@ -224,6 +247,27 @@ def test_lock_rejects_floating_or_widened_acquisition() -> None:
         ),
         lambda value: value["acquisition"].__setitem__(
             "allowed_hosts", ["github.com", "example.invalid"]
+        ),
+        lambda value: value["acquisition"].__setitem__(
+            "allowed_host_suffixes", ["example.invalid"]
+        ),
+        lambda value: value["acquisition"].__setitem__(
+            "network_enforcement", "descriptive_only"
+        ),
+        lambda value: value["acquisition"].__setitem__(
+            "network_namespace", "host_network"
+        ),
+        lambda value: value["acquisition"].__setitem__("gate_mount", "mutable"),
+        lambda value: value["acquisition"].__setitem__(
+            "relay_endpoint", "127.0.0.2:47853"
+        ),
+        lambda value: value["acquisition"].__setitem__("parent_gate_transport", "tcp"),
+        lambda value: value["acquisition"].__setitem__(
+            "client_socket_policy", "ambient"
+        ),
+        lambda value: value["acquisition"].__setitem__("minimum_landlock_abi", 3),
+        lambda value: value["acquisition"].__setitem__(
+            "boundary_receipt", "UNVERIFIED"
         ),
         lambda value: value.__setitem__("serena", {"version": "latest"}),
         lambda value: value.__setitem__("mode", "C0"),

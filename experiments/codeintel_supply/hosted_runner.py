@@ -23,14 +23,17 @@ import selectors
 import shutil
 import signal
 import socket
+import socketserver
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import zipfile
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Final
@@ -55,6 +58,593 @@ _SHA1_RE: Final = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256_RE: Final = re.compile(r"[0-9a-f]{64}\Z")
 _OPERATION_RE: Final = re.compile(r"[a-z0-9][a-z0-9-]{0,127}\Z")
 _SAFE_BUNDLE_PART_RE: Final = re.compile(r"[A-Za-z0-9._+-]{1,128}\Z")
+_CONNECT_HOST_RE: Final = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?\Z")
+_CONNECT_HEADER_MAX_BYTES: Final = 16_384
+_PHASE_P_PROXY_PORT: Final = 47_853
+_PHASE_P_GATE_ENV: Final = "CODEINTEL_PHASE_P_GATE_SOCKET"
+_PHASE_P_LANDLOCK_MIN_ABI: Final = locks.PHASE_P_LANDLOCK_MIN_ABI
+_PHASE_P_BOUNDARY_READY: Final = locks.PHASE_P_BOUNDARY_RECEIPT.encode("ascii") + b"\n"
+_PHASE_P_BOUNDARY_BOOTSTRAP: Final = r"""
+import ctypes
+import fcntl
+import os
+import signal
+import socket
+import stat
+import struct
+import sys
+import threading
+
+LANDLOCK_CREATE_RULESET_VERSION = 1
+LANDLOCK_ACCESS_NET_BIND_TCP = 1 << 0
+LANDLOCK_ACCESS_NET_CONNECT_TCP = 1 << 1
+LANDLOCK_RULE_NET_PORT = 2
+PR_SET_NO_NEW_PRIVS = 38
+PR_SET_PDEATHSIG = 1
+PR_GET_DUMPABLE = 3
+PR_SET_DUMPABLE = 4
+PR_CAP_AMBIENT = 47
+PR_CAP_AMBIENT_CLEAR_ALL = 4
+SECCOMP_SET_MODE_FILTER = 1
+AUDIT_ARCH_X86_64 = 0xC000003E
+X32_SYSCALL_BIT = 0x40000000
+NR_SOCKET = 41
+NR_SENDTO = 44
+NR_SENDMSG = 46
+NR_CLONE = 56
+NR_SOCKETPAIR = 53
+NR_PTRACE = 101
+NR_SETPGID = 109
+NR_SETSID = 112
+NR_CAPSET = 126
+NR_PIVOT_ROOT = 155
+NR_PRCTL = 157
+NR_MOUNT = 165
+NR_UMOUNT2 = 166
+NR_UNSHARE = 272
+NR_SENDMMSG = 307
+NR_SETNS = 308
+NR_PROCESS_VM_READV = 310
+NR_PROCESS_VM_WRITEV = 311
+NR_SECCOMP = 317
+NR_BPF = 321
+NR_IO_URING_SETUP = 425
+NR_IO_URING_ENTER = 426
+NR_IO_URING_REGISTER = 427
+NR_OPEN_TREE = 428
+NR_MOVE_MOUNT = 429
+NR_FSOPEN = 430
+NR_FSCONFIG = 431
+NR_FSMOUNT = 432
+NR_FSPICK = 433
+NR_CLONE3 = 435
+NR_PIDFD_GETFD = 438
+NR_MOUNT_SETATTR = 442
+NR_LANDLOCK_CREATE_RULESET = 444
+NR_LANDLOCK_ADD_RULE = 445
+NR_LANDLOCK_RESTRICT_SELF = 446
+BPF_LD_W_ABS = 0x20
+BPF_JMP_JEQ_K = 0x15
+BPF_JMP_JSET_K = 0x45
+BPF_ALU_AND_K = 0x54
+BPF_RET_K = 0x06
+SECCOMP_RET_KILL_PROCESS = 0x80000000
+SECCOMP_RET_ERRNO = 0x00050000
+SECCOMP_RET_ALLOW = 0x7FFF0000
+EPERM = 1
+ENOSYS = 38
+AF_INET = 2
+SOCK_STREAM = 1
+SOCK_NONBLOCK = 0x800
+SOCK_CLOEXEC = 0x80000
+SOCKET_BASE_MASK = (~(SOCK_NONBLOCK | SOCK_CLOEXEC)) & 0xFFFFFFFF
+IPPROTO_TCP = 6
+MSG_FASTOPEN = 0x20000000
+CLONE_NAMESPACE_MASK = (
+    0x00020000
+    | 0x02000000
+    | 0x04000000
+    | 0x08000000
+    | 0x10000000
+    | 0x20000000
+    | 0x40000000
+)
+LINUX_CAPABILITY_VERSION_3 = 0x20080522
+SIOCGIFFLAGS = 0x8913
+SIOCSIFFLAGS = 0x8914
+IFF_UP = 0x1
+MS_RDONLY = 0x1
+MS_NOSUID = 0x2
+MS_NODEV = 0x4
+MS_NOEXEC = 0x8
+MS_REMOUNT = 0x20
+MS_BIND = 0x1000
+MS_REC = 0x4000
+MS_PRIVATE = 0x40000
+ST_RDONLY = 0x1
+
+
+class RulesetAttr(ctypes.Structure):
+    _fields_ = [
+        ("handled_access_fs", ctypes.c_uint64),
+        ("handled_access_net", ctypes.c_uint64),
+    ]
+
+
+class NetPortAttr(ctypes.Structure):
+    _fields_ = [
+        ("allowed_access", ctypes.c_uint64),
+        ("port", ctypes.c_uint64),
+    ]
+
+
+class CapHeader(ctypes.Structure):
+    _fields_ = [
+        ("version", ctypes.c_uint32),
+        ("pid", ctypes.c_int),
+    ]
+
+
+class CapData(ctypes.Structure):
+    _fields_ = [
+        ("effective", ctypes.c_uint32),
+        ("permitted", ctypes.c_uint32),
+        ("inheritable", ctypes.c_uint32),
+    ]
+
+
+class SockFilter(ctypes.Structure):
+    _fields_ = [
+        ("code", ctypes.c_ushort),
+        ("jt", ctypes.c_ubyte),
+        ("jf", ctypes.c_ubyte),
+        ("k", ctypes.c_uint32),
+    ]
+
+
+class SockFprog(ctypes.Structure):
+    _fields_ = [
+        ("len", ctypes.c_ushort),
+        ("filter", ctypes.POINTER(SockFilter)),
+    ]
+
+
+status_fd = -1
+
+
+def fail_closed():
+    try:
+        if status_fd >= 0:
+            os.close(status_fd)
+    except OSError:
+        pass
+    os._exit(125)
+
+
+def require_zero_capabilities(libc):
+    if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+        fail_closed()
+    if libc.prctl(PR_GET_DUMPABLE, 0, 0, 0, 0) != 0:
+        fail_closed()
+    if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+        fail_closed()
+    if libc.prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) != 0:
+        fail_closed()
+    header = CapHeader(LINUX_CAPABILITY_VERSION_3, 0)
+    data = (CapData * 2)(CapData(0, 0, 0), CapData(0, 0, 0))
+    if libc.syscall(NR_CAPSET, ctypes.byref(header), ctypes.byref(data)) != 0:
+        fail_closed()
+    capability_fields = {}
+    with open("/proc/self/status", encoding="ascii") as source:
+        for line in source:
+            if line.startswith(("CapInh:", "CapPrm:", "CapEff:", "CapAmb:")):
+                key, value = line.split(":", 1)
+                capability_fields[key] = int(value.strip(), 16)
+    if capability_fields != {"CapInh": 0, "CapPrm": 0, "CapEff": 0, "CapAmb": 0}:
+        fail_closed()
+
+
+def configure_and_verify_loopback():
+    control = socket.socket(socket.AF_INET, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+    try:
+        interface = bytearray(struct.pack("16sH22x", b"lo", 0))
+        fcntl.ioctl(control.fileno(), SIOCGIFFLAGS, interface, True)
+        flags = struct.unpack_from("H", interface, 16)[0]
+        struct.pack_into("H", interface, 16, flags | IFF_UP)
+        fcntl.ioctl(control.fileno(), SIOCSIFFLAGS, interface, True)
+    finally:
+        control.close()
+    if [name for _index, name in socket.if_nameindex()] != ["lo"]:
+        fail_closed()
+    with open("/proc/net/route", encoding="ascii") as source:
+        ipv4_rows = source.read().splitlines()[1:]
+    if any(row.split()[0] != "lo" for row in ipv4_rows if row.split()):
+        fail_closed()
+    with open("/proc/net/ipv6_route", encoding="ascii") as source:
+        ipv6_rows = source.read().splitlines()
+    if any(row.split()[-1] != "lo" for row in ipv6_rows if row.split()):
+        fail_closed()
+
+
+def freeze_gate_mount(libc, gate_path):
+    gate_parent = os.path.dirname(gate_path)
+    before_gate = os.lstat(gate_path)
+    before_parent = os.lstat(gate_parent)
+    libc.mount.argtypes = [
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.c_ulong,
+        ctypes.c_void_p,
+    ]
+    libc.mount.restype = ctypes.c_int
+    if libc.mount(None, b"/", None, MS_REC | MS_PRIVATE, None) != 0:
+        fail_closed()
+    encoded_parent = os.fsencode(gate_parent)
+    if libc.mount(encoded_parent, encoded_parent, None, MS_BIND, None) != 0:
+        fail_closed()
+    if libc.mount(
+        None,
+        encoded_parent,
+        None,
+        MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC,
+        None,
+    ) != 0:
+        fail_closed()
+    after_gate = os.lstat(gate_path)
+    after_parent = os.lstat(gate_parent)
+    if (
+        (after_gate.st_dev, after_gate.st_ino)
+        != (before_gate.st_dev, before_gate.st_ino)
+        or (after_parent.st_dev, after_parent.st_ino)
+        != (before_parent.st_dev, before_parent.st_ino)
+        or not os.statvfs(gate_parent).f_flag & ST_RDONLY
+    ):
+        fail_closed()
+
+
+def apply_landlock(libc, proxy_port):
+    abi = libc.syscall(
+        NR_LANDLOCK_CREATE_RULESET,
+        ctypes.c_void_p(),
+        ctypes.c_size_t(0),
+        ctypes.c_uint(LANDLOCK_CREATE_RULESET_VERSION),
+    )
+    if abi < 4:
+        fail_closed()
+
+    ruleset_attr = RulesetAttr(
+        0, LANDLOCK_ACCESS_NET_BIND_TCP | LANDLOCK_ACCESS_NET_CONNECT_TCP
+    )
+    ruleset_fd = libc.syscall(
+        NR_LANDLOCK_CREATE_RULESET,
+        ctypes.byref(ruleset_attr),
+        ctypes.sizeof(ruleset_attr),
+        0,
+    )
+    if ruleset_fd < 0:
+        fail_closed()
+    try:
+        proxy_rule = NetPortAttr(LANDLOCK_ACCESS_NET_CONNECT_TCP, proxy_port)
+        if libc.syscall(
+            NR_LANDLOCK_ADD_RULE,
+            ruleset_fd,
+            LANDLOCK_RULE_NET_PORT,
+            ctypes.byref(proxy_rule),
+            0,
+        ) != 0:
+            fail_closed()
+        if libc.syscall(NR_LANDLOCK_RESTRICT_SELF, ruleset_fd, 0) != 0:
+            fail_closed()
+    finally:
+        os.close(ruleset_fd)
+
+
+def apply_seccomp(libc):
+    instructions = []
+    labels = {}
+
+    def label(name):
+        labels[name] = len(instructions)
+
+    def statement(code, value):
+        instructions.append(("statement", code, value))
+
+    def jump(code, value, true_label, false_label):
+        instructions.append(("jump", code, value, true_label, false_label))
+
+    statement(BPF_LD_W_ABS, 4)
+    jump(BPF_JMP_JEQ_K, AUDIT_ARCH_X86_64, "load_number", "kill")
+    label("load_number")
+    statement(BPF_LD_W_ABS, 0)
+    jump(BPF_JMP_JSET_K, X32_SYSCALL_BIT, "kill", "check_socket")
+    label("check_socket")
+    jump(BPF_JMP_JEQ_K, NR_SOCKET, "socket_domain", "check_socketpair")
+    label("check_socketpair")
+    jump(BPF_JMP_JEQ_K, NR_SOCKETPAIR, "deny", "check_clone")
+    label("check_clone")
+    jump(BPF_JMP_JEQ_K, NR_CLONE, "clone_flags", "check_clone3")
+    label("check_clone3")
+    jump(BPF_JMP_JEQ_K, NR_CLONE3, "not_supported", "check_io_setup")
+    label("check_io_setup")
+    jump(BPF_JMP_JEQ_K, NR_IO_URING_SETUP, "deny", "check_io_enter")
+    label("check_io_enter")
+    jump(BPF_JMP_JEQ_K, NR_IO_URING_ENTER, "deny", "check_io_register")
+    label("check_io_register")
+    jump(BPF_JMP_JEQ_K, NR_IO_URING_REGISTER, "deny", "check_setns")
+    label("check_setns")
+    jump(BPF_JMP_JEQ_K, NR_SETNS, "deny", "check_unshare")
+    label("check_unshare")
+    jump(BPF_JMP_JEQ_K, NR_UNSHARE, "deny", "check_setpgid")
+    label("check_setpgid")
+    jump(BPF_JMP_JEQ_K, NR_SETPGID, "deny", "check_setsid")
+    label("check_setsid")
+    jump(BPF_JMP_JEQ_K, NR_SETSID, "deny", "check_mount")
+    label("check_mount")
+    jump(BPF_JMP_JEQ_K, NR_MOUNT, "deny", "check_umount")
+    label("check_umount")
+    jump(BPF_JMP_JEQ_K, NR_UMOUNT2, "deny", "check_pivot_root")
+    label("check_pivot_root")
+    jump(BPF_JMP_JEQ_K, NR_PIVOT_ROOT, "deny", "check_open_tree")
+    label("check_open_tree")
+    jump(BPF_JMP_JEQ_K, NR_OPEN_TREE, "deny", "check_move_mount")
+    label("check_move_mount")
+    jump(BPF_JMP_JEQ_K, NR_MOVE_MOUNT, "deny", "check_fsopen")
+    label("check_fsopen")
+    jump(BPF_JMP_JEQ_K, NR_FSOPEN, "deny", "check_fsconfig")
+    label("check_fsconfig")
+    jump(BPF_JMP_JEQ_K, NR_FSCONFIG, "deny", "check_fsmount")
+    label("check_fsmount")
+    jump(BPF_JMP_JEQ_K, NR_FSMOUNT, "deny", "check_fspick")
+    label("check_fspick")
+    jump(BPF_JMP_JEQ_K, NR_FSPICK, "deny", "check_mount_setattr")
+    label("check_mount_setattr")
+    jump(BPF_JMP_JEQ_K, NR_MOUNT_SETATTR, "deny", "check_prctl")
+    label("check_prctl")
+    jump(BPF_JMP_JEQ_K, NR_PRCTL, "prctl_option", "check_capset")
+    label("check_capset")
+    jump(BPF_JMP_JEQ_K, NR_CAPSET, "deny", "check_pidfd_getfd")
+    label("check_pidfd_getfd")
+    jump(BPF_JMP_JEQ_K, NR_PIDFD_GETFD, "deny", "check_process_vm_readv")
+    label("check_process_vm_readv")
+    jump(BPF_JMP_JEQ_K, NR_PROCESS_VM_READV, "deny", "check_process_vm_writev")
+    label("check_process_vm_writev")
+    jump(BPF_JMP_JEQ_K, NR_PROCESS_VM_WRITEV, "deny", "check_ptrace")
+    label("check_ptrace")
+    jump(BPF_JMP_JEQ_K, NR_PTRACE, "deny", "check_bpf")
+    label("check_bpf")
+    jump(BPF_JMP_JEQ_K, NR_BPF, "deny", "check_sendto")
+    label("check_sendto")
+    jump(BPF_JMP_JEQ_K, NR_SENDTO, "sendto_flags", "check_sendmsg")
+    label("check_sendmsg")
+    jump(BPF_JMP_JEQ_K, NR_SENDMSG, "sendmsg_flags", "check_sendmmsg")
+    label("check_sendmmsg")
+    jump(BPF_JMP_JEQ_K, NR_SENDMMSG, "sendmmsg_flags", "allow")
+
+    label("socket_domain")
+    statement(BPF_LD_W_ABS, 16)
+    jump(BPF_JMP_JEQ_K, AF_INET, "socket_type", "deny")
+    label("socket_type")
+    statement(BPF_LD_W_ABS, 24)
+    statement(BPF_ALU_AND_K, SOCKET_BASE_MASK)
+    jump(BPF_JMP_JEQ_K, SOCK_STREAM, "socket_protocol", "deny")
+    label("socket_protocol")
+    statement(BPF_LD_W_ABS, 32)
+    jump(BPF_JMP_JEQ_K, 0, "allow", "socket_protocol_tcp")
+    label("socket_protocol_tcp")
+    jump(BPF_JMP_JEQ_K, IPPROTO_TCP, "allow", "deny")
+
+    label("clone_flags")
+    statement(BPF_LD_W_ABS, 16)
+    jump(BPF_JMP_JSET_K, CLONE_NAMESPACE_MASK, "deny", "allow")
+    label("prctl_option")
+    statement(BPF_LD_W_ABS, 16)
+    jump(BPF_JMP_JEQ_K, PR_SET_PDEATHSIG, "deny", "allow")
+
+    label("sendto_flags")
+    statement(BPF_LD_W_ABS, 40)
+    jump(BPF_JMP_JSET_K, MSG_FASTOPEN, "deny", "allow")
+    label("sendmsg_flags")
+    statement(BPF_LD_W_ABS, 32)
+    jump(BPF_JMP_JSET_K, MSG_FASTOPEN, "deny", "allow")
+    label("sendmmsg_flags")
+    statement(BPF_LD_W_ABS, 40)
+    jump(BPF_JMP_JSET_K, MSG_FASTOPEN, "deny", "allow")
+
+    label("allow")
+    statement(BPF_RET_K, SECCOMP_RET_ALLOW)
+    label("deny")
+    statement(BPF_RET_K, SECCOMP_RET_ERRNO | EPERM)
+    label("not_supported")
+    statement(BPF_RET_K, SECCOMP_RET_ERRNO | ENOSYS)
+    label("kill")
+    statement(BPF_RET_K, SECCOMP_RET_KILL_PROCESS)
+
+    filters = []
+    for index, instruction in enumerate(instructions):
+        if instruction[0] == "statement":
+            _kind, code, value = instruction
+            filters.append(SockFilter(code, 0, 0, value))
+            continue
+        _kind, code, value, true_label, false_label = instruction
+        true_offset = labels[true_label] - index - 1
+        false_offset = labels[false_label] - index - 1
+        if not 0 <= true_offset <= 255 or not 0 <= false_offset <= 255:
+            fail_closed()
+        filters.append(SockFilter(code, true_offset, false_offset, value))
+    filter_array = (SockFilter * len(filters))(*filters)
+    program = SockFprog(len(filter_array), filter_array)
+    if libc.syscall(
+        NR_SECCOMP,
+        SECCOMP_SET_MODE_FILTER,
+        0,
+        ctypes.byref(program),
+    ) != 0:
+        fail_closed()
+
+
+def close_client_descriptors(keep_fd):
+    for descriptor in (0, 1, 2):
+        if stat.S_ISSOCK(os.fstat(descriptor).st_mode):
+            fail_closed()
+    if not stat.S_ISFIFO(os.fstat(keep_fd).st_mode):
+        fail_closed()
+    for name in os.listdir("/proc/self/fd"):
+        descriptor = int(name)
+        if descriptor <= 2 or descriptor == keep_fd:
+            continue
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+
+def relay_connection(client, gate_path, active, active_lock):
+    upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | socket.SOCK_CLOEXEC)
+
+    def pump(source, destination):
+        try:
+            while True:
+                block = source.recv(65536)
+                if not block:
+                    return
+                destination.sendall(block)
+        except OSError:
+            return
+        finally:
+            try:
+                destination.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+
+    try:
+        upstream.settimeout(5)
+        upstream.connect(gate_path)
+        client.settimeout(None)
+        upstream.settimeout(None)
+        with active_lock:
+            active.update((client, upstream))
+        request_pump = threading.Thread(
+            target=pump,
+            args=(client, upstream),
+            daemon=True,
+        )
+        request_pump.start()
+        pump(upstream, client)
+        request_pump.join(timeout=1)
+    except OSError:
+        return
+    finally:
+        with active_lock:
+            active.discard(client)
+            active.discard(upstream)
+        for connection in (client, upstream):
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+
+try:
+    status_fd = int(sys.argv[1])
+    proxy_port = int(sys.argv[2])
+    gate_path = sys.argv[3]
+    executable = sys.argv[4]
+    command = sys.argv[4:]
+    if (
+        sys.platform != "linux"
+        or os.uname().machine.lower() not in {"x86_64", "amd64"}
+        or os.geteuid() == 0
+        or not 1024 < proxy_port <= 65535
+        or proxy_port == 443
+        or not os.path.isabs(gate_path)
+        or len(os.fsencode(gate_path)) > 100
+        or not executable.startswith("/")
+        or not command
+    ):
+        fail_closed()
+    gate_metadata = os.lstat(gate_path)
+    gate_parent = os.path.dirname(gate_path)
+    parent_metadata = os.lstat(gate_parent)
+    if (
+        not stat.S_ISSOCK(gate_metadata.st_mode)
+        or not stat.S_ISDIR(parent_metadata.st_mode)
+        or stat.S_ISLNK(parent_metadata.st_mode)
+        or parent_metadata.st_uid != os.getuid()
+        or parent_metadata.st_mode & 0o077
+    ):
+        fail_closed()
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    freeze_gate_mount(libc, gate_path)
+    configure_and_verify_loopback()
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM | socket.SOCK_CLOEXEC)
+    listener.bind(("127.0.0.1", proxy_port))
+    listener.listen(64)
+    if listener.getsockname() != ("127.0.0.1", proxy_port):
+        fail_closed()
+    require_zero_capabilities(libc)
+
+    supervisor_pid = os.getpid()
+    client_pid = os.fork()
+    if client_pid == 0:
+        listener.close()
+        if libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0) != 0:
+            fail_closed()
+        if os.getppid() != supervisor_pid:
+            fail_closed()
+        close_client_descriptors(status_fd)
+        apply_landlock(libc, proxy_port)
+        apply_seccomp(libc)
+        os.write(status_fd, b"CODEINTEL_PHASE_P_BOUNDARY_V1\n")
+        os.close(status_fd)
+        status_fd = -1
+        os.execve(executable, command, os.environ)
+
+    os.close(status_fd)
+    status_fd = -1
+    listener.settimeout(0.05)
+    active = set()
+    active_lock = threading.Lock()
+    relay_threads = []
+    client_status = None
+    while client_status is None:
+        waited_pid, waited_status = os.waitpid(client_pid, os.WNOHANG)
+        if waited_pid == client_pid:
+            client_status = waited_status
+            break
+        try:
+            connection, _address = listener.accept()
+        except TimeoutError:
+            continue
+        connection.set_inheritable(False)
+        relay = threading.Thread(
+            target=relay_connection,
+            args=(connection, gate_path, active, active_lock),
+            daemon=True,
+        )
+        relay.start()
+        relay_threads.append(relay)
+    listener.close()
+    with active_lock:
+        active_snapshot = tuple(active)
+    for connection in active_snapshot:
+        try:
+            connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        connection.close()
+    for relay in relay_threads:
+        relay.join(timeout=1)
+    if os.WIFEXITED(client_status):
+        os._exit(os.WEXITSTATUS(client_status))
+    if os.WIFSIGNALED(client_status):
+        os._exit(128 + os.WTERMSIG(client_status))
+    fail_closed()
+except BaseException:
+    fail_closed()
+"""
 _SECRET_TEXT_PATTERNS: Final = (
     re.compile(r"(?i)authorization\s*:\s*(?:bearer|basic)\s+\S+"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
@@ -115,6 +705,494 @@ class HostedRunnerError(RuntimeError):
         super().__init__(f"{code}: {detail}")
         self.code = code
         self.detail = detail
+
+
+class _PhasePProxyServer(socketserver.ThreadingUnixStreamServer):
+    """Pathname-socket CONNECT gate in the parent network namespace."""
+
+    allow_reuse_address = False
+    daemon_threads = True
+    block_on_close = False
+    request_queue_size = 64
+
+    def handle_error(self, request: object, client_address: object) -> None:
+        del request, client_address
+
+
+class _PhasePProxyHandler(socketserver.BaseRequestHandler):
+    """Forward TLS only when the CONNECT authority is pinned by the lock."""
+
+    def handle(self) -> None:
+        client = self.request
+        try:
+            client.settimeout(15)
+            header = bytearray()
+            while b"\r\n\r\n" not in header:
+                block = client.recv(4096)
+                if not block:
+                    return
+                header.extend(block)
+                if len(header) > _CONNECT_HEADER_MAX_BYTES:
+                    _send_proxy_response(client, "431 Request Header Fields Too Large")
+                    return
+            raw_header, pending = bytes(header).split(b"\r\n\r\n", 1)
+            request_line = raw_header.split(b"\r\n", 1)[0].decode("ascii")
+            method, authority, version = request_line.split(" ")
+            if method != "CONNECT" or version not in {"HTTP/1.0", "HTTP/1.1"}:
+                _send_proxy_response(client, "405 Method Not Allowed")
+                return
+            if authority.count(":") != 1:
+                _send_proxy_response(client, "403 Forbidden")
+                return
+            host, port = authority.rsplit(":", 1)
+            host = host.lower()
+            if (
+                port != "443"
+                or _CONNECT_HOST_RE.fullmatch(host) is None
+                or not _acquisition_host_allowed(host)
+            ):
+                _send_proxy_response(client, "403 Forbidden")
+                return
+            try:
+                upstream = socket.create_connection((host, 443), timeout=30)
+            except OSError:
+                _send_proxy_response(client, "502 Bad Gateway")
+                return
+            with upstream:
+                client.settimeout(None)
+                upstream.settimeout(None)
+                _send_proxy_response(client, "200 Connection Established")
+                if pending:
+                    upstream.sendall(pending)
+                _relay_proxy_tunnel(client, upstream)
+        except (OSError, UnicodeDecodeError, ValueError):
+            return
+
+
+def _send_proxy_response(connection: socket.socket, status: str) -> None:
+    if status == "200 Connection Established":
+        response = f"HTTP/1.1 {status}\r\n\r\n"
+    else:
+        response = (
+            f"HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+        )
+    connection.sendall(response.encode("ascii"))
+
+
+def _relay_proxy_tunnel(client: socket.socket, upstream: socket.socket) -> None:
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(client, selectors.EVENT_READ, upstream)
+        selector.register(upstream, selectors.EVENT_READ, client)
+        while True:
+            events = selector.select(timeout=900)
+            if not events:
+                return
+            for key, _mask in events:
+                source = key.fileobj
+                destination = key.data
+                block = source.recv(65_536)
+                if not block:
+                    return
+                destination.sendall(block)
+    finally:
+        selector.close()
+
+
+def _acquisition_host_allowed(host: str) -> bool:
+    """Match one exact host or a strict subdomain of one reviewed suffix."""
+
+    if not isinstance(host, str) or host != host.lower():
+        return False
+    if _CONNECT_HOST_RE.fullmatch(host) is None:
+        return False
+    return host in locks.ALLOWED_HOSTS or any(
+        host.endswith(f".{suffix}") for suffix in locks.ALLOWED_HOST_SUFFIXES
+    )
+
+
+def _phase_p_client_environment(
+    proxy_url: str,
+    home: Path,
+    *,
+    gate_socket: Path | None = None,
+) -> dict[str, str]:
+    """Return a closed subprocess environment that cannot bypass the proxy."""
+
+    try:
+        parsed = urlparse(proxy_url)
+        port = parsed.port
+    except ValueError as error:
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "proxy URL is malformed"
+        ) from error
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or port is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "proxy URL is not loopback-only"
+        )
+    environment = {
+        "ALL_PROXY": proxy_url,
+        "HTTP_PROXY": proxy_url,
+        "HTTPS_PROXY": proxy_url,
+        "HOME": os.fspath(Path(home).resolve()),
+        "LANG": "C",
+        "LC_ALL": "C",
+        "NO_PROXY": "",
+        "PATH": "/usr/bin:/bin",
+        "TZ": "UTC",
+        "all_proxy": proxy_url,
+        "http_proxy": proxy_url,
+        "https_proxy": proxy_url,
+        "no_proxy": "",
+        _PHASE_P_GATE_ENV: os.fspath(
+            Path(gate_socket if gate_socket is not None else home / "gate.sock")
+        ),
+    }
+    return environment
+
+
+def _validated_phase_p_client_environment(
+    network_environment: Mapping[str, str],
+) -> dict[str, str]:
+    """Reject any missing, changed, or ambient field at a network client seam."""
+
+    try:
+        proxy_url = network_environment["HTTPS_PROXY"]
+        home = Path(network_environment["HOME"])
+        gate_socket = Path(network_environment[_PHASE_P_GATE_ENV])
+    except (KeyError, TypeError, ValueError) as error:
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "client environment is incomplete"
+        ) from error
+    if not isinstance(proxy_url, str):
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "client proxy is malformed"
+        )
+    expected = _phase_p_client_environment(proxy_url, home, gate_socket=gate_socket)
+    if dict(network_environment) != expected:
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "client environment is not closed"
+        )
+    return expected
+
+
+def _phase_p_proxy_port(network_environment: Mapping[str, str]) -> int:
+    """Return the exact unprivileged loopback proxy port or refuse closed."""
+
+    environment = _validated_phase_p_client_environment(network_environment)
+    try:
+        port = urlparse(environment["HTTPS_PROXY"]).port
+    except ValueError as error:  # pragma: no cover - validated above, defense in depth
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "proxy port is malformed"
+        ) from error
+    if port is None or not 1024 < port <= 65_535 or port == 443:
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE",
+            "proxy port cannot anchor the process egress boundary",
+        )
+    return port
+
+
+def _phase_p_gate_socket(network_environment: Mapping[str, str]) -> Path:
+    """Return the live parent-namespace Unix gate after exact inode checks."""
+
+    environment = _validated_phase_p_client_environment(network_environment)
+    gate = Path(environment[_PHASE_P_GATE_ENV])
+    if not gate.is_absolute() or len(os.fsencode(gate)) > 100:
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "gate socket path is unsafe"
+        )
+    try:
+        metadata = gate.lstat()
+        parent_metadata = gate.parent.lstat()
+    except OSError as error:
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "gate socket is unavailable"
+        ) from error
+    if (
+        not stat.S_ISSOCK(metadata.st_mode)
+        or not stat.S_ISDIR(parent_metadata.st_mode)
+        or stat.S_ISLNK(parent_metadata.st_mode)
+        or parent_metadata.st_uid != os.getuid()
+        or parent_metadata.st_mode & 0o077
+    ):
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "gate socket identity is unsafe"
+        )
+    return gate
+
+
+def _validated_phase_p_process_environment(
+    environment: Mapping[str, str],
+    network_environment: Mapping[str, str],
+) -> dict[str, str]:
+    """Keep every proxy field identical while permitting fixed tool settings."""
+
+    network = _validated_phase_p_client_environment(network_environment)
+    try:
+        candidate = dict(environment)
+    except (TypeError, ValueError) as error:
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "process environment is malformed"
+        ) from error
+    if any(
+        not isinstance(key, str)
+        or not isinstance(value, str)
+        or not key
+        or "\x00" in key
+        or "=" in key
+        or "\x00" in value
+        for key, value in candidate.items()
+    ):
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "process environment is malformed"
+        )
+    if any(candidate.get(key) != value for key, value in network.items()):
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE",
+            "process environment changed the network boundary",
+        )
+    allowed_proxy_keys = frozenset(network)
+    for key in candidate:
+        normalized = key.lower()
+        if (
+            normalized.endswith("_proxy")
+            or normalized in {"all_proxy", "http_proxy", "https_proxy", "no_proxy"}
+        ) and key not in allowed_proxy_keys:
+            raise HostedRunnerError(
+                "ACQUISITION_ALLOWLIST_UNAVAILABLE",
+                "process environment adds an alternate proxy control",
+            )
+    return candidate
+
+
+def _invoke_phase_p_boundary(
+    command: Sequence[str], **kwargs: Any
+) -> subprocess.CompletedProcess[Any]:
+    """Run one isolated wrapper and kill every residual member of its process group."""
+
+    timeout = kwargs.pop("timeout")
+    check = kwargs.pop("check")
+    if check is not False:  # pragma: no cover - private caller invariant
+        raise AssertionError("boundary wrapper must return its exact status")
+    process = subprocess.Popen(command, **kwargs)
+
+    def kill_group() -> None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    try:
+        try:
+            stdout_data, stderr_data = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            kill_group()
+            try:
+                process.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+            raise error
+    finally:
+        # The target cannot create a new session or process group after seccomp.
+        # Kill any forked descendant left after its tracked leader terminates.
+        kill_group()
+    assert process.returncode is not None
+    return subprocess.CompletedProcess(
+        command,
+        process.returncode,
+        stdout=stdout_data,
+        stderr=stderr_data,
+    )
+
+
+def _run_phase_p_process(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str],
+    network_environment: Mapping[str, str],
+    timeout: float,
+    text: bool,
+    stdout: int | io.BufferedWriter = subprocess.PIPE,
+) -> subprocess.CompletedProcess[Any]:
+    """Run one client after a child-only kernel TCP/datagram boundary is live."""
+
+    if (
+        not argv
+        or any(not isinstance(value, str) or "\x00" in value for value in argv)
+        or not Path(argv[0]).is_absolute()
+    ):
+        raise HostedRunnerError("INVALID_ARGV", "phase P subprocess argv is malformed")
+    process_environment = _validated_phase_p_process_environment(
+        env, network_environment
+    )
+    proxy_port = _phase_p_proxy_port(network_environment)
+    gate_socket = _phase_p_gate_socket(network_environment)
+    process_environment.pop(_PHASE_P_GATE_ENV)
+    status_read, status_write = os.pipe()
+    os.set_blocking(status_read, False)
+    completed: subprocess.CompletedProcess[Any] | None = None
+    caught: OSError | subprocess.TimeoutExpired | None = None
+    try:
+        try:
+            completed = _invoke_phase_p_boundary(
+                [
+                    "/usr/bin/unshare",
+                    "--user",
+                    "--map-current-user",
+                    "--keep-caps",
+                    "--mount",
+                    "--net",
+                    "--",
+                    "/usr/bin/python3",
+                    "-I",
+                    "-S",
+                    "-c",
+                    _PHASE_P_BOUNDARY_BOOTSTRAP,
+                    str(status_write),
+                    str(proxy_port),
+                    os.fspath(gate_socket),
+                    *argv,
+                ],
+                cwd=os.fspath(cwd),
+                env=process_environment,
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout,
+                stderr=subprocess.PIPE,
+                text=text,
+                timeout=timeout,
+                close_fds=True,
+                pass_fds=(status_write,),
+                start_new_session=True,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            caught = error
+    finally:
+        os.close(status_write)
+        try:
+            try:
+                boundary_status = os.read(status_read, 256)
+            except BlockingIOError:
+                boundary_status = b""
+        finally:
+            os.close(status_read)
+    if boundary_status != _PHASE_P_BOUNDARY_READY:
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE",
+            "kernel process egress boundary could not be established",
+        ) from caught
+    if caught is not None:
+        raise HostedRunnerError("SUBPROCESS_FAILED", Path(argv[0]).name) from caught
+    assert completed is not None
+    return completed
+
+
+def _run_phase_p_checked(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str],
+    network_environment: Mapping[str, str],
+    timeout: float = 60,
+) -> subprocess.CompletedProcess[str]:
+    """Run a fixed Phase-P network client and return bounded text."""
+
+    completed = _run_phase_p_process(
+        argv,
+        cwd=cwd,
+        env=env,
+        network_environment=network_environment,
+        timeout=timeout,
+        text=True,
+    )
+    if completed.returncode != 0:
+        detail = _bounded_redacted(completed.stderr or completed.stdout, 2048)
+        raise HostedRunnerError(
+            "SUBPROCESS_FAILED",
+            f"{Path(argv[0]).name} exited {completed.returncode}: {detail}",
+        )
+    return completed
+
+
+@contextmanager
+def _phase_p_allowlist_proxy(home: Path) -> Iterator[dict[str, str]]:
+    """Yield a scrubbed environment backed by a parent-namespace CONNECT gate."""
+
+    network_home = _fresh_directory(home, "ACQUISITION_ALLOWLIST_UNAVAILABLE")
+    (network_home / "gh").mkdir(mode=0o700)
+    gate_directory: Path | None = None
+    try:
+        gate_directory = Path(tempfile.mkdtemp(prefix="ci-p-", dir="/tmp"))
+        os.chmod(gate_directory, 0o700)
+        gate_socket = gate_directory / "gate.sock"
+        server = _PhasePProxyServer(os.fspath(gate_socket), _PhasePProxyHandler)
+    except OSError as error:
+        if gate_directory is not None:
+            shutil.rmtree(gate_directory, ignore_errors=True)
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "parent CONNECT gate could not bind"
+        ) from error
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.05},
+        name="codeintel-phase-p-allowlist",
+        daemon=True,
+    )
+    started = False
+    try:
+        thread.start()
+        started = True
+        if server.server_address != os.fspath(gate_socket):
+            raise HostedRunnerError(
+                "ACQUISITION_ALLOWLIST_UNAVAILABLE", "parent gate identity differs"
+            )
+        yield _phase_p_client_environment(
+            f"http://127.0.0.1:{_PHASE_P_PROXY_PORT}",
+            network_home,
+            gate_socket=gate_socket,
+        )
+    finally:
+        if started:
+            server.shutdown()
+        server.server_close()
+        if started:
+            thread.join(timeout=5)
+        if gate_directory is not None:
+            shutil.rmtree(gate_directory, ignore_errors=True)
+
+
+def _github_client_environment(
+    network_environment: Mapping[str, str],
+) -> dict[str, str]:
+    """Add only the workflow token and fixed gh configuration to the closed env."""
+
+    environment = _validated_phase_p_client_environment(network_environment)
+    environment.update(
+        {
+            "GH_CONFIG_DIR": os.fspath(Path(environment["HOME"]) / "gh"),
+            "GH_HOST": "github.com",
+            "GH_PROMPT_DISABLED": "1",
+        }
+    )
+    token = os.environ.get("GH_TOKEN")
+    if token:
+        environment["GH_TOKEN"] = token
+    return environment
 
 
 @dataclass(frozen=True)
@@ -404,6 +1482,7 @@ def consumer_effective_paths(
     raw = _git_bytes(
         root,
         "diff",
+        "--no-renames",
         "--name-only",
         "--diff-filter=ACDMRTUXB",
         "-z",
@@ -905,7 +1984,28 @@ def reconcile_prior_runs(
     destination: Path,
     github_output: Path | None = None,
 ) -> ReplayResolution:
-    """Reconcile all prior same-operation workflow runs before any new build."""
+    """Reconcile prior runs through the same deny-by-default Phase-P proxy."""
+
+    with tempfile.TemporaryDirectory(prefix="codeintel-replay-network-") as temporary:
+        with _phase_p_allowlist_proxy(Path(temporary) / "home") as network_environment:
+            return _reconcile_prior_runs_allowlisted(
+                request,
+                current_run_id=current_run_id,
+                destination=destination,
+                github_output=github_output,
+                network_environment=network_environment,
+            )
+
+
+def _reconcile_prior_runs_allowlisted(
+    request: ExperimentRequest,
+    *,
+    current_run_id: int,
+    destination: Path,
+    github_output: Path | None,
+    network_environment: Mapping[str, str],
+) -> ReplayResolution:
+    """Perform the bounded GitHub census with effective-host enforcement."""
 
     if current_run_id <= 0:
         raise HostedRunnerError("REPLAY_LOOKUP_INVALID", "current run id is invalid")
@@ -916,6 +2016,7 @@ def reconcile_prior_runs(
         "codeintel-experiment-bundle.yml/runs?event=workflow_dispatch",
         field="workflow_runs",
         max_rows=10_000,
+        network_environment=network_environment,
     )
     matching_runs: list[Mapping[str, Any]] = []
     for raw_run in raw_runs:
@@ -957,6 +2058,7 @@ def reconcile_prior_runs(
             f"repos/{FIXED_REPOSITORY}/actions/runs/{run_id}/artifacts",
             field="artifacts",
             max_rows=1_000,
+            network_environment=network_environment,
         )
         candidates = [
             artifact
@@ -984,7 +2086,11 @@ def reconcile_prior_runs(
             raise HostedRunnerError("REPLAY_LOOKUP_INVALID", "artifact id malformed")
         with tempfile.TemporaryDirectory(prefix="codeintel-prior-") as temporary:
             zip_path = Path(temporary) / "receipt.zip"
-            _gh_download_artifact(artifact_id, zip_path)
+            _gh_download_artifact(
+                artifact_id,
+                zip_path,
+                network_environment=network_environment,
+            )
             receipt_bytes = _read_receipt_from_artifact_zip(zip_path)
             receipt_path = Path(temporary) / "semantic-receipt.json"
             receipt_path.write_bytes(receipt_bytes)
@@ -1024,10 +2130,15 @@ def reconcile_prior_runs(
     return ReplayResolution(ReplayDisposition.RETURN_PRIOR, first_receipt)
 
 
-def _gh_download_artifact(artifact_id: int, destination: Path) -> None:
+def _gh_download_artifact(
+    artifact_id: int,
+    destination: Path,
+    *,
+    network_environment: Mapping[str, str],
+) -> None:
     try:
         with destination.open("xb") as output:
-            completed = subprocess.run(
+            completed = _run_phase_p_process(
                 [
                     "/usr/bin/gh",
                     "api",
@@ -1035,13 +2146,14 @@ def _gh_download_artifact(artifact_id: int, destination: Path) -> None:
                     "Accept: application/vnd.github+json",
                     f"repos/{FIXED_REPOSITORY}/actions/artifacts/{artifact_id}/zip",
                 ],
-                check=False,
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.PIPE,
+                cwd=Path.cwd(),
+                env=_github_client_environment(network_environment),
+                network_environment=network_environment,
                 timeout=60,
+                stdout=output,
+                text=False,
             )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except OSError as error:
         raise HostedRunnerError(
             "REPLAY_LOOKUP_INVALID", "artifact download failed"
         ) from error
@@ -1414,40 +2526,55 @@ def prepare_phase_p(
     for directory in (downloads, extracted, builds, payload / "bin", payload / "meta"):
         directory.mkdir(parents=True, mode=0o700)
 
-    go_archive = downloads / locks.GO_ARCHIVE_FILENAME
-    effective_url = _download_exact_go_archive(go_archive)
-    limits = lock.payload["limits"]
-    locks.safe_extract_tar(
-        go_archive,
-        extracted,
-        expected_sha256=locks.GO_ARCHIVE_SHA256,
-        expected_size=locks.GO_ARCHIVE_SIZE,
-        expected_top_level="go",
-        max_archive_bytes=int(limits["archive_bytes"]),
-        max_member_bytes=int(limits["archive_member_bytes"]),
-        max_total_bytes=int(limits["archive_total_bytes"]),
-    )
-    go_root = extracted / "go"
-    go_binary = go_root / "bin/go"
-    _verify_go_distribution(go_root, go_binary)
-    go_source_metadata = _verify_go_source_metadata()
+    with _phase_p_allowlist_proxy(scratch / "network-home") as network_environment:
+        go_archive = downloads / locks.GO_ARCHIVE_FILENAME
+        effective_url = _download_exact_go_archive(
+            go_archive, network_environment=network_environment
+        )
+        limits = lock.payload["limits"]
+        locks.safe_extract_tar(
+            go_archive,
+            extracted,
+            expected_sha256=locks.GO_ARCHIVE_SHA256,
+            expected_size=locks.GO_ARCHIVE_SIZE,
+            expected_top_level="go",
+            max_archive_bytes=int(limits["archive_bytes"]),
+            max_member_bytes=int(limits["archive_member_bytes"]),
+            max_total_bytes=int(limits["archive_total_bytes"]),
+        )
+        go_root = extracted / "go"
+        go_binary = go_root / "bin/go"
+        _verify_go_distribution(
+            go_root,
+            go_binary,
+            network_environment=network_environment,
+        )
+        go_source_metadata = _verify_go_source_metadata(
+            network_environment=network_environment
+        )
 
-    _checkout_exact_zoekt(source)
-    source_before = locks.verify_zoekt_source(source, lock)
-    build = _repeat_build_zoekt(
-        source,
-        go_binary=go_binary,
-        scratch=builds,
-        payload_bin=payload / "bin",
-    )
-    source_after = locks.verify_zoekt_source(source, lock)
-    if source_before != source_after:
-        raise HostedRunnerError("SOURCE_DRIFT", "Zoekt identity changed during build")
+        _checkout_exact_zoekt(source, network_environment=network_environment)
+        source_before = locks.verify_zoekt_source(source, lock)
+        build = _repeat_build_zoekt(
+            source,
+            go_binary=go_binary,
+            scratch=builds,
+            payload_bin=payload / "bin",
+            network_environment=network_environment,
+        )
+        source_after = locks.verify_zoekt_source(source, lock)
+        if source_before != source_after:
+            raise HostedRunnerError(
+                "SOURCE_DRIFT", "Zoekt identity changed during build"
+            )
 
     module_inventory = build["modules"]
+    main_module = next(
+        str(row["path"]) for row in module_inventory if bool(row["main"])
+    )
     sbom = {
         "schema_version": "mastermind.codeintel_go_module_inventory.v1",
-        "main_module": locks.ZOEKT_REPOSITORY,
+        "main_module": main_module,
         "go_version": locks.GO_VERSION,
         "go_mod_blob_sha1": locks.ZOEKT_GO_MOD_BLOB,
         "go_sum_blob_sha1": locks.ZOEKT_GO_SUM_BLOB,
@@ -1478,8 +2605,26 @@ def prepare_phase_p(
         "build_recipe_sha256": lock.build_recipe_sha256,
         "phase": "P",
         "network": {
-            "state": "ENABLED_FOR_ALLOWLISTED_ACQUISITION_ONLY",
+            "state": "SUBPROCESS_EGRESS_FRESH_NETNS_PROXY_ALLOWLISTED",
+            "enforcement": lock.payload["acquisition"]["network_enforcement"],
+            "network_namespace": lock.payload["acquisition"]["network_namespace"],
+            "gate_mount": lock.payload["acquisition"]["gate_mount"],
+            "relay_endpoint": lock.payload["acquisition"]["relay_endpoint"],
+            "parent_gate_transport": lock.payload["acquisition"][
+                "parent_gate_transport"
+            ],
+            "client_socket_policy": lock.payload["acquisition"]["client_socket_policy"],
+            "minimum_landlock_abi": _PHASE_P_LANDLOCK_MIN_ABI,
+            "boundary_receipt": _PHASE_P_BOUNDARY_READY.decode("ascii").strip(),
+            "landlock_role": "DEFENSE_IN_DEPTH_PORT_FILTER",
+            "direct_tcp_connect_policy": (
+                "ONLY_FIXED_RELAY_LISTENER_EXISTS_IN_FRESH_NAMESPACE"
+            ),
+            "parent_gate_descriptor_inherited_by_client": False,
+            "process_group_cleanup": "SIGKILL_AFTER_EXIT_OR_TIMEOUT",
             "allowed_hosts": list(locks.ALLOWED_HOSTS),
+            "allowed_host_suffixes": list(locks.ALLOWED_HOST_SUFFIXES),
+            "ambient_network_configuration_inherited": False,
             "go_archive_effective_host": urlparse(effective_url).hostname,
         },
         "runner": _runner_confounds(),
@@ -1909,7 +3054,10 @@ def run_phase_e(
         raise
 
 
-def _download_exact_go_archive(destination: Path) -> str:
+def _download_exact_go_archive(
+    destination: Path, *, network_environment: Mapping[str, str]
+) -> str:
+    client_environment = _validated_phase_p_client_environment(network_environment)
     target = Path(destination)
     parent = _real_directory(target.parent, "DOWNLOAD_DESTINATION_UNSAFE")
     if target.exists() or target.is_symlink():
@@ -1917,6 +3065,11 @@ def _download_exact_go_archive(destination: Path) -> str:
             "DOWNLOAD_DESTINATION_UNSAFE", "Go archive destination is occupied"
         )
     current_url = _validated_acquisition_url(locks.GO_ARCHIVE_URL)
+    proxy_url = client_environment.get("HTTPS_PROXY")
+    if not isinstance(proxy_url, str):
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "curl proxy is absent"
+        )
     visited: set[str] = set()
     for _hop in range(5):
         if current_url in visited:
@@ -1924,9 +3077,14 @@ def _download_exact_go_archive(destination: Path) -> str:
                 "ACQUISITION_REDIRECT_FORBIDDEN", "Go archive redirect cycle"
             )
         visited.add(current_url)
-        completed = run_checked(
+        completed = _run_phase_p_checked(
             [
                 "/usr/bin/curl",
+                "--disable",
+                "--proxy",
+                proxy_url,
+                "--noproxy",
+                "",
                 "--fail",
                 "--silent",
                 "--show-error",
@@ -1946,6 +3104,8 @@ def _download_exact_go_archive(destination: Path) -> str:
                 current_url,
             ],
             cwd=parent,
+            env=client_environment,
+            network_environment=network_environment,
             timeout=330,
         )
         fields = completed.stdout.splitlines()
@@ -2006,19 +3166,23 @@ def _validated_acquisition_url(value: str) -> str:
     return value
 
 
-def _verify_go_distribution(go_root: Path, go_binary: Path) -> None:
+def _verify_go_distribution(
+    go_root: Path,
+    go_binary: Path,
+    *,
+    network_environment: Mapping[str, str],
+) -> None:
     root = _real_directory(go_root, "GO_ARCHIVE_INVALID")
     binary = _verified_executable(go_binary, expected_sha256=None)
-    version = run_checked(
+    version_environment = {
+        **_validated_phase_p_client_environment(network_environment),
+        "GOTOOLCHAIN": "local",
+    }
+    version = _run_phase_p_checked(
         [os.fspath(binary), "version"],
         cwd=root,
-        env={
-            "HOME": os.fspath(root),
-            "LANG": "C",
-            "LC_ALL": "C",
-            "PATH": "/usr/bin:/bin",
-            "GOTOOLCHAIN": "local",
-        },
+        env=version_environment,
+        network_environment=network_environment,
         timeout=30,
     ).stdout.strip()
     if version != f"go version go{locks.GO_VERSION} linux/amd64":
@@ -2037,8 +3201,13 @@ def _verify_go_distribution(go_root: Path, go_binary: Path) -> None:
         raise HostedRunnerError("GO_LICENSE_MISMATCH", "archive license differs")
 
 
-def _verify_go_source_metadata() -> Mapping[str, str]:
-    tag = _gh_json(f"repos/golang/go/git/ref/tags/{locks.GO_SOURCE_TAG}")
+def _verify_go_source_metadata(
+    *, network_environment: Mapping[str, str]
+) -> Mapping[str, str]:
+    tag = _gh_json(
+        f"repos/golang/go/git/ref/tags/{locks.GO_SOURCE_TAG}",
+        network_environment=network_environment,
+    )
     tag_object = tag.get("object")
     if not isinstance(tag_object, Mapping):
         raise HostedRunnerError("GO_SOURCE_MISMATCH", "tag object absent")
@@ -2047,12 +3216,16 @@ def _verify_go_source_metadata() -> Mapping[str, str]:
         or tag_object.get("sha") != locks.GO_SOURCE_COMMIT
     ):
         raise HostedRunnerError("GO_SOURCE_MISMATCH", "tag commit differs")
-    commit = _gh_json(f"repos/golang/go/git/commits/{locks.GO_SOURCE_COMMIT}")
+    commit = _gh_json(
+        f"repos/golang/go/git/commits/{locks.GO_SOURCE_COMMIT}",
+        network_environment=network_environment,
+    )
     tree = commit.get("tree")
     if not isinstance(tree, Mapping) or tree.get("sha") != locks.GO_SOURCE_TREE:
         raise HostedRunnerError("GO_SOURCE_MISMATCH", "source tree differs")
     license_object = _gh_json(
-        f"repos/golang/go/contents/LICENSE?ref={locks.GO_SOURCE_COMMIT}"
+        f"repos/golang/go/contents/LICENSE?ref={locks.GO_SOURCE_COMMIT}",
+        network_environment=network_environment,
     )
     if license_object.get("sha") != locks.GO_LICENSE_BLOB:
         raise HostedRunnerError("GO_LICENSE_MISMATCH", "source license blob differs")
@@ -2065,10 +3238,14 @@ def _verify_go_source_metadata() -> Mapping[str, str]:
     }
 
 
-def _gh_json(endpoint: str) -> Mapping[str, Any]:
-    completed = run_checked(
+def _gh_json(
+    endpoint: str, *, network_environment: Mapping[str, str]
+) -> Mapping[str, Any]:
+    completed = _run_phase_p_checked(
         ["/usr/bin/gh", "api", endpoint],
         cwd=Path.cwd(),
+        env=_github_client_environment(network_environment),
+        network_environment=network_environment,
         timeout=60,
     )
     try:
@@ -2085,6 +3262,7 @@ def _gh_paginated_rows(
     *,
     field: str,
     max_rows: int,
+    network_environment: Mapping[str, str],
 ) -> list[Mapping[str, Any]]:
     """Read one complete bounded GitHub collection or fail closed on movement."""
 
@@ -2104,7 +3282,10 @@ def _gh_paginated_rows(
     rows: list[Mapping[str, Any]] = []
     seen_ids: set[int] = set()
     while expected_total is None or len(rows) < expected_total:
-        response = _gh_json(f"{endpoint}{separator}per_page=100&page={page}")
+        response = _gh_json(
+            f"{endpoint}{separator}per_page=100&page={page}",
+            network_environment=network_environment,
+        )
         total = response.get("total_count")
         raw_rows = response.get(field)
         if (
@@ -2155,11 +3336,25 @@ def _gh_paginated_rows(
     return rows
 
 
-def _checkout_exact_zoekt(destination: Path) -> None:
+def _checkout_exact_zoekt(
+    destination: Path, *, network_environment: Mapping[str, str]
+) -> None:
     if destination.exists() or destination.is_symlink():
         raise HostedRunnerError("SOURCE_CONFLICT", destination.name)
+    client_environment = _validated_phase_p_client_environment(network_environment)
+    proxy_url = client_environment.get("HTTPS_PROXY")
+    if not isinstance(proxy_url, str):
+        raise HostedRunnerError(
+            "ACQUISITION_ALLOWLIST_UNAVAILABLE", "Git proxy is absent"
+        )
+    git_environment = {
+        **client_environment,
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
     destination.mkdir(parents=True, mode=0o700)
-    run_checked(["/usr/bin/git", "init", "-q"], cwd=destination)
+    run_checked(["/usr/bin/git", "init", "-q"], cwd=destination, env=git_environment)
     run_checked(
         [
             "/usr/bin/git",
@@ -2169,12 +3364,21 @@ def _checkout_exact_zoekt(destination: Path) -> None:
             locks.ZOEKT_SOURCE_URL,
         ],
         cwd=destination,
+        env=git_environment,
     )
-    run_checked(
+    _run_phase_p_checked(
         [
             "/usr/bin/git",
             "-c",
             "protocol.version=2",
+            "-c",
+            f"http.proxy={proxy_url}",
+            "-c",
+            "http.followRedirects=false",
+            "-c",
+            "protocol.allow=never",
+            "-c",
+            "protocol.https.allow=always",
             "fetch",
             "--no-tags",
             "--depth=1",
@@ -2182,11 +3386,14 @@ def _checkout_exact_zoekt(destination: Path) -> None:
             locks.ZOEKT_COMMIT,
         ],
         cwd=destination,
+        env=git_environment,
+        network_environment=network_environment,
         timeout=300,
     )
     run_checked(
         ["/usr/bin/git", "checkout", "--detach", "--quiet", locks.ZOEKT_COMMIT],
         cwd=destination,
+        env=git_environment,
         timeout=60,
     )
 
@@ -2197,7 +3404,9 @@ def _repeat_build_zoekt(
     go_binary: Path,
     scratch: Path,
     payload_bin: Path,
+    network_environment: Mapping[str, str],
 ) -> Mapping[str, Any]:
+    client_environment = _validated_phase_p_client_environment(network_environment)
     go = _verified_executable(go_binary, expected_sha256=None)
     module_cache = scratch / "gomodcache"
     go_path = scratch / "gopath"
@@ -2205,8 +3414,15 @@ def _repeat_build_zoekt(
     for directory in (module_cache, go_path, home):
         directory.mkdir(parents=True, mode=0o700)
     common_env = {
+        **client_environment,
         "CGO_ENABLED": "0",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
         "GOARCH": "amd64",
+        "GOENV": "off",
+        "GOINSECURE": "",
+        "GONOPROXY": "",
         "GONOSUMDB": "off",
         "GOOS": "linux",
         "GOPATH": os.fspath(go_path),
@@ -2215,28 +3431,32 @@ def _repeat_build_zoekt(
         "GOPROXY": "https://proxy.golang.org",
         "GOSUMDB": "sum.golang.org",
         "GOTOOLCHAIN": "local",
+        "GOVCS": "*:off",
         "HOME": os.fspath(home),
         "LANG": "C",
         "LC_ALL": "C",
         "PATH": f"{go.parent}:/usr/bin:/bin",
         "TZ": "UTC",
     }
-    run_checked(
+    _run_phase_p_checked(
         [os.fspath(go), "mod", "download", "-json", "all"],
         cwd=source,
         env={**common_env, "GOCACHE": os.fspath(scratch / "download-cache")},
+        network_environment=network_environment,
         timeout=600,
     )
-    run_checked(
+    _run_phase_p_checked(
         [os.fspath(go), "mod", "verify"],
         cwd=source,
         env={**common_env, "GOCACHE": os.fspath(scratch / "verify-cache")},
+        network_environment=network_environment,
         timeout=300,
     )
-    inventory_output = run_checked(
+    inventory_output = _run_phase_p_checked(
         [os.fspath(go), "list", "-mod=readonly", "-m", "-json", "all"],
         cwd=source,
         env={**common_env, "GOCACHE": os.fspath(scratch / "list-cache")},
+        network_environment=network_environment,
         timeout=300,
     ).stdout
     modules = _normalize_go_module_inventory(inventory_output)
@@ -2255,7 +3475,7 @@ def _repeat_build_zoekt(
         env = {**common_env, "GOCACHE": os.fspath(cache)}
         for name, package in packages.items():
             target = output / name
-            run_checked(
+            _run_phase_p_checked(
                 [
                     os.fspath(go),
                     "build",
@@ -2269,6 +3489,7 @@ def _repeat_build_zoekt(
                 ],
                 cwd=source,
                 env=env,
+                network_environment=network_environment,
                 timeout=900,
             )
             executable = _verified_executable(target, expected_sha256=None)
@@ -2378,6 +3599,11 @@ def _normalize_go_module_inventory(raw: str) -> list[Mapping[str, object]]:
     if not modules or sum(bool(row["main"]) for row in modules) != 1:
         raise HostedRunnerError(
             "DEPENDENCY_GRAPH_INVALID", "main module census differs"
+        )
+    main_module = next(row for row in modules if bool(row["main"]))
+    if main_module["path"] != locks.ZOEKT_MODULE_PATH:
+        raise HostedRunnerError(
+            "DEPENDENCY_GRAPH_INVALID", "main module path differs from pinned go.mod"
         )
     modules.sort(key=lambda row: (str(row["path"]), str(row.get("version", ""))))
     assert_secret_free(modules)

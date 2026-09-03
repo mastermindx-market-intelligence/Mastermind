@@ -49,9 +49,21 @@
           "github.com",
           "go.dev",
           "proxy.golang.org",
+          "results-receiver.actions.githubusercontent.com",
           "storage.googleapis.com",
           "sum.golang.org"
         ],
+        "allowed_host_suffixes": [
+          "blob.core.windows.net"
+        ],
+        "network_enforcement": "fresh_user_mount_netns_loopback_relay_parent_unix_gate_landlock_seccomp",
+        "network_namespace": "fresh_user_mount_network_namespace_with_loopback_only",
+        "gate_mount": "private_read_only_bind_mount",
+        "relay_endpoint": "127.0.0.1:47853",
+        "parent_gate_transport": "pathname_unix_stream",
+        "client_socket_policy": "af_inet_tcp_only_no_fastopen_no_io_uring_no_socket_inheritance",
+        "minimum_landlock_abi": 4,
+        "boundary_receipt": "CODEINTEL_PHASE_P_BOUNDARY_V1",
         "fresh_empty_caches": true,
         "floating_resolution": false,
         "github_cache": false
@@ -60,6 +72,7 @@
     "zoekt": {
       "const": {
         "repository": "sourcegraph/zoekt",
+        "module_path": "github.com/sourcegraph/zoekt",
         "source_url": "https://github.com/sourcegraph/zoekt.git",
         "commit": "5f833dde1bc4b1a8f99007617b4b721e44506c4f",
         "tree": "8135ec1d7329e7f8de43714ac5c7a2bad14bd7b5",
@@ -119,12 +132,16 @@
           "environment": {
             "CGO_ENABLED": "0",
             "GOARCH": "amd64",
+            "GOENV": "off",
+            "GOINSECURE": "",
+            "GONOPROXY": "",
             "GONOSUMDB": "off",
             "GOOS": "linux",
             "GOPRIVATE": "",
             "GOPROXY": "https://proxy.golang.org",
             "GOSUMDB": "sum.golang.org",
-            "GOTOOLCHAIN": "local"
+            "GOTOOLCHAIN": "local",
+            "GOVCS": "*:off"
           },
           "go_build_flags": [
             "-trimpath",
@@ -137,7 +154,7 @@
           },
           "repeat_builds": 2
         },
-        "recipe_sha256": "fa55671482185857a29795df77b0bd5a15898bbd5dac7e993172273f1cf51335"
+        "recipe_sha256": "50ac9f471a49fcda38359b1917277a736cadc8d45ee3a52db09dc6383974e2ae"
       }
     },
     "universal_ctags": {
