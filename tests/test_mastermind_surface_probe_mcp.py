@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import mcp.types as mcp_types
 import pytest
 from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
+from starlette.testclient import TestClient
 
 from integrations.mastermind_surface_probe.probe import HostContextProbeConfig
 from integrations.mastermind_surface_probe.schemas import (
@@ -63,6 +65,38 @@ RAW_VALUES = tuple(
         "America/New_York",
     )
 )
+
+
+MCP_BODY = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "hc0-test", "version": "1.0"},
+    },
+}
+MCP_HEADERS = {
+    "accept": "application/json, text/event-stream",
+    "content-type": "application/json",
+}
+
+
+def _runtime_environ(**overrides: str) -> dict[str, str]:
+    environ = {
+        "MASTERMIND_SURFACE_PROBE_APP_REALM": "surface",
+        "MASTERMIND_SURFACE_PROBE_APP_GENERATION": "surface-probe-g1",
+        "MASTERMIND_SURFACE_PROBE_TRANSPORT_PROFILE": "secure-mcp-tunnel-dev",
+        "MASTERMIND_SURFACE_PROBE_HMAC_KEY_ID": "hc0-cohort-a",
+        "MASTERMIND_SURFACE_PROBE_HMAC_KEY_VERSION": "v1",
+        "MASTERMIND_SURFACE_PROBE_FINGERPRINT_SCOPE": "probe-cohort",
+        "MASTERMIND_SURFACE_PROBE_HMAC_KEY": (
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
+        ),
+    }
+    environ.update(overrides)
+    return environ
 
 
 def _config() -> HostContextProbeConfig:
@@ -208,17 +242,7 @@ def test_streamable_http_app_is_stateless_and_mounted_at_exact_path() -> None:
 
 
 def test_runtime_configuration_is_loopback_only_and_secret_safe() -> None:
-    environ = {
-        "MASTERMIND_SURFACE_PROBE_APP_REALM": "surface",
-        "MASTERMIND_SURFACE_PROBE_APP_GENERATION": "surface-probe-g1",
-        "MASTERMIND_SURFACE_PROBE_TRANSPORT_PROFILE": "secure-mcp-tunnel-dev",
-        "MASTERMIND_SURFACE_PROBE_HMAC_KEY_ID": "hc0-cohort-a",
-        "MASTERMIND_SURFACE_PROBE_HMAC_KEY_VERSION": "v1",
-        "MASTERMIND_SURFACE_PROBE_FINGERPRINT_SCOPE": "probe-cohort",
-        "MASTERMIND_SURFACE_PROBE_HMAC_KEY": (
-            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
-        ),
-    }
+    environ = _runtime_environ()
     runtime = load_runtime_configuration(environ)
     assert runtime.host == DEFAULT_HOST == "127.0.0.1"
     assert runtime.port == DEFAULT_PORT == 8011
@@ -239,6 +263,9 @@ def test_runtime_configuration_is_loopback_only_and_secret_safe() -> None:
         "host": "127.0.0.1",
         "port": 8011,
         "mcp_path": MCP_PATH,
+        "transport_allowlist_digest": runtime.transport_allowlist_digest,
+        "allowed_host_count": 1,
+        "allowed_origin_count": 1,
         "stateless": True,
         "json_response": True,
         "oauth_configured": False,
@@ -257,20 +284,223 @@ def test_runtime_configuration_is_loopback_only_and_secret_safe() -> None:
     ],
 )
 def test_runtime_configuration_refuses_non_exact_loopback_bind(host: str) -> None:
-    environ = {
-        "MASTERMIND_SURFACE_PROBE_APP_REALM": "surface",
-        "MASTERMIND_SURFACE_PROBE_APP_GENERATION": "surface-probe-g1",
-        "MASTERMIND_SURFACE_PROBE_TRANSPORT_PROFILE": "secure-mcp-tunnel-dev",
-        "MASTERMIND_SURFACE_PROBE_HMAC_KEY_ID": "hc0-cohort-a",
-        "MASTERMIND_SURFACE_PROBE_HMAC_KEY_VERSION": "v1",
-        "MASTERMIND_SURFACE_PROBE_FINGERPRINT_SCOPE": "probe-cohort",
-        "MASTERMIND_SURFACE_PROBE_HMAC_KEY": (
-            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
-        ),
-        "MASTERMIND_SURFACE_PROBE_HOST": host,
-    }
+    environ = _runtime_environ(MASTERMIND_SURFACE_PROBE_HOST=host)
     with pytest.raises(ValueError, match="INVALID_RUNTIME_CONFIGURATION"):
         load_runtime_configuration(environ)
+
+
+def test_runtime_configuration_canonicalizes_exact_tunnel_allowlists_and_binds_digest() -> None:
+    first = load_runtime_configuration(
+        _runtime_environ(
+            MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS=(
+                "mcp.example.test:*,mcp.example.test"
+            ),
+            MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS=(
+                "https://chatgpt.com,https://chat.openai.com"
+            ),
+        )
+    )
+    second = load_runtime_configuration(
+        _runtime_environ(
+            MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS=(
+                "mcp.example.test,mcp.example.test:*"
+            ),
+            MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS=(
+                "https://chat.openai.com,https://chatgpt.com"
+            ),
+        )
+    )
+
+    expected_hosts = (
+        "127.0.0.1:*",
+        "mcp.example.test",
+        "mcp.example.test:*",
+    )
+    expected_origins = (
+        "http://127.0.0.1:*",
+        "https://chat.openai.com",
+        "https://chatgpt.com",
+    )
+    assert first.allowed_hosts == second.allowed_hosts == expected_hosts
+    assert first.allowed_origins == second.allowed_origins == expected_origins
+    assert first.transport_allowlist_digest == second.transport_allowlist_digest
+    assert re.fullmatch(r"[0-9a-f]{64}", first.transport_allowlist_digest)
+
+    receipt = describe_runtime(first)
+    assert receipt["transport_allowlist_digest"] == first.transport_allowlist_digest
+    assert receipt["allowed_host_count"] == 3
+    assert receipt["allowed_origin_count"] == 3
+    rendered = json.dumps(receipt, sort_keys=True)
+    assert "mcp.example.test" not in rendered
+    assert "chatgpt.com" not in rendered
+    assert "chat.openai.com" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS", "https://mcp.example.test"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS", "mcp.example.test/path"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS", "user@mcp.example.test"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS", "*.example.test"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS", "mcp.example.test:*:443"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS", "mcp.example.test,mcp.example.test"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS", "mcp.example.test,,other.example.test"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS", "MCP.example.test"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS", "http://mcp.example.test"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS", "https://mcp.example.test/path"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS", "https://user@mcp.example.test"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS", "https://*.example.test"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS", "https://mcp.example.test:*"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS", "https://mcp.example.test?query=1"),
+        (
+            "MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS",
+            "https://chatgpt.com,https://chatgpt.com",
+        ),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS", "https://chatgpt.com,"),
+        ("MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS", "https://CHATGPT.com"),
+    ],
+)
+def test_runtime_configuration_refuses_unsafe_transport_allowlists(
+    variable: str,
+    value: str,
+) -> None:
+    with pytest.raises(ValueError, match="INVALID_RUNTIME_CONFIGURATION"):
+        load_runtime_configuration(_runtime_environ(**{variable: value}))
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        (
+            "MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS",
+            ",".join(f"h{index}.example.test" for index in range(9)),
+        ),
+        (
+            "MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS",
+            ",".join(f"https://h{index}.example.test" for index in range(9)),
+        ),
+        (
+            "MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS",
+            "a" * 254 + ".example.test",
+        ),
+        (
+            "MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS",
+            "https://" + "a" * 254 + ".example.test",
+        ),
+    ],
+)
+def test_runtime_configuration_bounds_transport_allowlists(
+    variable: str,
+    value: str,
+) -> None:
+    with pytest.raises(ValueError, match="INVALID_RUNTIME_CONFIGURATION"):
+        load_runtime_configuration(_runtime_environ(**{variable: value}))
+
+
+def _transport_app(runtime):
+    return build_streamable_http_app(
+        runtime.probe_config,
+        allowed_hosts=runtime.allowed_hosts,
+        allowed_origins=runtime.allowed_origins,
+        utc_now=lambda: FIXED_NOW,
+    )
+
+
+def _initialize(client: TestClient, *, origin: str | None = None, host: str | None = None):
+    headers = dict(MCP_HEADERS)
+    if origin is not None:
+        headers["origin"] = origin
+    if host is not None:
+        headers["host"] = host
+    return client.post(MCP_PATH, headers=headers, json=MCP_BODY)
+
+
+def test_exact_configured_tunnel_host_and_origin_reach_mcp_dispatch() -> None:
+    runtime = load_runtime_configuration(
+        _runtime_environ(
+            MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS=(
+                "mcp.example.test,mcp.example.test:*"
+            ),
+            MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS="https://chatgpt.com",
+        )
+    )
+    app = _transport_app(runtime)
+    with TestClient(app, base_url="https://mcp.example.test") as client:
+        accepted = _initialize(client, origin="https://chatgpt.com")
+        assert accepted.status_code == 200
+        assert accepted.json()["result"]["protocolVersion"] == "2025-06-18"
+
+        accepted_port = _initialize(
+            client,
+            origin="https://chatgpt.com",
+            host="mcp.example.test:443",
+        )
+        assert accepted_port.status_code == 200
+
+
+def test_loopback_transport_baseline_remains_accepted() -> None:
+    runtime = load_runtime_configuration(_runtime_environ())
+    app = _transport_app(runtime)
+    with TestClient(app, base_url="http://127.0.0.1:8011") as client:
+        accepted = _initialize(client, origin="http://127.0.0.1:8011")
+        assert accepted.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "evil.example.test",
+        "mcp.example.test.evil",
+        "mcp.example.test:443.evil",
+        "",
+    ],
+)
+def test_unconfigured_near_match_or_missing_host_is_refused(host: str) -> None:
+    runtime = load_runtime_configuration(
+        _runtime_environ(
+            MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS="mcp.example.test",
+            MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS="https://chatgpt.com",
+        )
+    )
+    app = _transport_app(runtime)
+    with TestClient(app, base_url="https://mcp.example.test") as client:
+        refused = _initialize(
+            client,
+            origin="https://chatgpt.com",
+            host=host,
+        )
+        assert refused.status_code == 421
+        assert refused.text == "Invalid Host header"
+
+
+def test_foreign_origin_is_refused_before_mcp_dispatch() -> None:
+    runtime = load_runtime_configuration(
+        _runtime_environ(
+            MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS="mcp.example.test",
+            MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS="https://chatgpt.com",
+        )
+    )
+    app = _transport_app(runtime)
+    with TestClient(app, base_url="https://mcp.example.test") as client:
+        refused = _initialize(client, origin="https://evil.example.test")
+        assert refused.status_code == 403
+        assert refused.text == "Invalid Origin header"
+
+
+def test_transport_allowlist_configuration_never_enters_model_visible_result() -> None:
+    runtime = load_runtime_configuration(
+        _runtime_environ(
+            MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS="mcp.example.test",
+            MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS="https://chatgpt.com",
+        )
+    )
+    result = _call_tool(
+        build_mcp_server(runtime.probe_config, utc_now=lambda: FIXED_NOW)
+    )
+    rendered = json.dumps(result.model_dump(by_alias=True), sort_keys=True)
+    assert "mcp.example.test" not in rendered
+    assert "chatgpt.com" not in rendered
 
 
 def test_launcher_is_a_thin_fixed_server_entrypoint() -> None:
