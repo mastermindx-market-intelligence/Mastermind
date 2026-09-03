@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import Any, Mapping, Protocol
 from urllib.parse import urlsplit
 
+from common.commission_ref import CommissionRefError, normalize_commission_ref
+
 MESSAGE_SCHEMA = "mastermind.agent_dialogue.v1"
 PARENT_SCHEMA = "mastermind.agent_dialogue_parent.v1"
 MESSAGE_DISCRIMINATOR = "MMX/AGENT_DIALOGUE_V1"
@@ -42,7 +44,6 @@ ERROR_CODES = frozenset(
 )
 
 _REPOSITORY_RE = re.compile(r"\A[A-Za-z0-9_.-]{1,80}/[A-Za-z0-9_.-]{1,100}\Z")
-_PATH_RE = re.compile(r"\A[A-Za-z0-9_.\-/]{1,300}\Z")
 _SHA40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 _SHA64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 _WORK_REF_RE = re.compile(r"\AWS:[A-Z0-9][A-Z0-9-]{1,63}\Z")
@@ -225,38 +226,13 @@ def _validate_repository(value: Any) -> str:
     return value
 
 
-def _validate_path(value: Any) -> str:
-    if (
-        not isinstance(value, str)
-        or _PATH_RE.fullmatch(value) is None
-        or value.startswith("/")
-        or "//" in value
-        or any(part in {"", ".", ".."} for part in value.split("/"))
-    ):
-        raise DialogueContractError("MESSAGE_INVALID")
-    return value
-
-
 def validate_commission_ref(value: Any) -> dict[str, str]:
-    item = _require_exact_keys(
-        value,
-        frozenset({"repository", "commit", "path", "content_sha256"}),
-        "MESSAGE_INVALID",
-    )
-    repository = _validate_repository(item["repository"])
-    commit = item["commit"]
-    content_sha256 = item["content_sha256"]
-    if not isinstance(commit, str) or _SHA40_RE.fullmatch(commit) is None:
+    """Translate the neutral canonical contract into dialogue wire vocabulary."""
+
+    try:
+        return normalize_commission_ref(value).to_dict()
+    except CommissionRefError:
         raise DialogueContractError("MESSAGE_INVALID")
-    if not isinstance(content_sha256, str) or _SHA64_RE.fullmatch(content_sha256) is None:
-        raise DialogueContractError("MESSAGE_INVALID")
-    path = _validate_path(item["path"])
-    return {
-        "repository": repository,
-        "commit": commit,
-        "path": path,
-        "content_sha256": content_sha256,
-    }
 
 
 def validate_applies_to(value: Any) -> dict[str, Any]:
