@@ -1,4 +1,4 @@
-"""Closed model-visible schemas for the bounded GitHub patch owner app."""
+"""Closed model-visible schemas for the bounded GitHub exact-repair app."""
 from __future__ import annotations
 
 import dataclasses
@@ -11,8 +11,8 @@ from integrations.mastermind_github_app.prepared_token import (
 )
 
 
-SERVER_NAME = "mastermind-github-patch"
-SERVER_VERSION = "0.1.0"
+SERVER_NAME = "mastermind-github-exact-repair"
+SERVER_VERSION = "0.2.0"
 
 _OPERATION_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
 _OID_PATTERN = r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
@@ -28,11 +28,30 @@ class ToolSpec:
     annotations: Mapping[str, object]
 
 
+def _replacement_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["old_text", "new_text"],
+        "properties": {
+            "old_text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 65_536,
+            },
+            "new_text": {
+                "type": "string",
+                "maxLength": 131_072,
+            },
+        },
+    }
+
+
 def _file_schema() -> dict[str, object]:
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["path", "expected_blob_oid", "unified_diff"],
+        "required": ["path", "expected_blob_oid", "replacements"],
         "properties": {
             "path": {
                 "type": "string",
@@ -41,10 +60,11 @@ def _file_schema() -> dict[str, object]:
                 "pattern": _PATH_PATTERN,
             },
             "expected_blob_oid": {"type": "string", "pattern": _OID_PATTERN},
-            "unified_diff": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 65_536,
+            "replacements": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 10,
+                "items": _replacement_schema(),
             },
         },
     }
@@ -52,11 +72,12 @@ def _file_schema() -> dict[str, object]:
 
 TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
-        name="prepare_branch_patch",
+        name="prepare_exact_branch_repair",
         description=(
-            "Prepare a strict bounded patch for the already-bound operation-owned feature branch. "
-            "The app resolves repository, branch, writer, authority, and allowed paths server-side; "
-            "preparation performs no GitHub mutation."
+            "Prepare exact unique old/new text replacements for the already-bound "
+            "operation-owned non-protected pull-request branch. The app resolves "
+            "repository, branch, writer, authority, and allowed paths server-side; "
+            "preparation performs no GitHub mutation and never returns complete file bytes."
         ),
         input_schema={
             "type": "object",
@@ -74,7 +95,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             },
         },
         annotations={
-            "title": "Prepare bounded branch patch",
+            "title": "Prepare exact branch repair",
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
@@ -82,10 +103,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
-        name="commit_branch_patch",
+        name="commit_exact_branch_repair",
         description=(
-            "Commit exactly one previously prepared branch patch after full current-source, "
-            "principal, authority, head, blob, effect, and confirmation revalidation."
+            "Commit exactly one previously prepared exact branch repair after full "
+            "principal, authority, carrier, writer, head, blob, effect, and current-source "
+            "revalidation."
         ),
         input_schema={
             "type": "object",
@@ -100,7 +122,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             },
         },
         annotations={
-            "title": "Commit bounded branch patch",
+            "title": "Commit exact branch repair",
             "readOnlyHint": False,
             "destructiveHint": True,
             "idempotentHint": True,
@@ -108,10 +130,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
-        name="reconcile_branch_patch",
+        name="reconcile_exact_branch_repair",
         description=(
-            "Read canonical GitHub evidence for one prepared branch patch and classify it as "
-            "NOT_APPLIED, APPLIED, or EFFECT_UNKNOWN without resubmitting."
+            "Read canonical GitHub evidence for one prepared exact branch repair and "
+            "classify it as NOT_APPLIED, APPLIED, or EFFECT_UNKNOWN without resubmitting."
         ),
         input_schema={
             "type": "object",
@@ -135,7 +157,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             },
         },
         annotations={
-            "title": "Reconcile bounded branch patch",
+            "title": "Reconcile exact branch repair",
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,

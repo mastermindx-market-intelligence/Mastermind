@@ -1,4 +1,4 @@
-"""Closed models and ports for the bounded Mastermind GitHub patch owner."""
+"""Closed models and owner ports for bounded exact GitHub branch repairs."""
 from __future__ import annotations
 
 import dataclasses
@@ -6,9 +6,9 @@ from enum import Enum
 from typing import Mapping, Protocol, Sequence
 
 
-RESULT_SCHEMA = "mastermind.github_patch_tool_result.v1"
-RECEIPT_SCHEMA = "mastermind.github_branch_patch_receipt.v1"
-REQUIRED_SCOPE = "mastermind.github.branch_patch"
+RESULT_SCHEMA = "mastermind.github_exact_repair_tool_result.v1"
+RECEIPT_SCHEMA = "mastermind.github_exact_branch_repair_receipt.v1"
+REQUIRED_SCOPE = "mastermind.github.exact_branch_repair"
 
 
 class ToolStatus(str, Enum):
@@ -70,6 +70,13 @@ class AuthenticatedPrincipal:
 
 @dataclasses.dataclass(frozen=True)
 class ResolvedPatchTarget:
+    """Server-owned exact operation/carrier/writer target facts.
+
+    The model never supplies this object. An accepted semantic owner resolves it
+    from the stable operation key and authenticated principal immediately before
+    preparation/commit/reconciliation.
+    """
+
     operation_key: str
     repository: str
     branch: str
