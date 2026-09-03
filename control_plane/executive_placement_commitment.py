@@ -36,6 +36,9 @@ EVENT_TYPE = "CAPACITY_PLACEMENT_COMMITTED"
 
 SESSION_ALIAS = "EXECUTIVE-CEO-CODEX-A"
 CARRIER_GENERATION = 1
+_GENERATION_ONE_TARGET_DEFINITION_FINGERPRINT = (
+    "f6636381fe18d7a05224d9e9fc5105d6d6727acc895b306f46659c40f6b6b7a5"
+)
 
 TARGET_DEFINITION_FINGERPRINT_KEYS = frozenset(
     {
@@ -85,8 +88,8 @@ RUNTIME_FACT_KEYS = frozenset(
     {
         "source_root_job_id",
         "source_root_revision",
-        "source_root_job_created_command_id",
-        "source_root_authority_fingerprint",
+        "source_job_created_command_id",
+        "source_authority_fingerprint",
         "session_alias",
         "target_definition_fingerprint",
         "carrier_generation",
@@ -94,7 +97,7 @@ RUNTIME_FACT_KEYS = frozenset(
         "carrier_job_created_command_id",
         "carrier_authority_fingerprint",
         "carrier_disposition",
-        "carrier_attempt_id",
+        "committed_carrier_attempt_id",
         "carrier_worker_id",
         "carrier_quota_class",
         "carrier_placement_snapshot_digest",
@@ -105,9 +108,8 @@ _EVENT_KEYS = frozenset(
     {
         "schema_version",
         "source_root_job_id",
-        "expected_source_root_revision",
-        "source_root_job_created_command_id",
-        "source_root_authority_fingerprint",
+        "source_job_created_command_id",
+        "source_authority_fingerprint",
         "responsibility_ref",
         "placement_mode",
         "selection_document_digest",
@@ -122,7 +124,7 @@ _EVENT_KEYS = frozenset(
         "carrier_job_created_command_id",
         "carrier_authority_fingerprint",
         "carrier_disposition",
-        "carrier_attempt_id",
+        "committed_carrier_attempt_id",
         "commitment_command_id",
         "command_fingerprint",
         "commitment_evidence_digest",
@@ -246,6 +248,32 @@ def fingerprint_target_definition(value: Any) -> str:
     """Hash exactly the protected six-field target-definition projection."""
 
     return digest(_canonical_target_definition(value))
+
+
+def _bound_generation_one_target_definition(value: Any) -> dict[str, Any]:
+    """Reconcile the protected alias-generation binding before command derivation.
+
+    Generation 1 is already bound to the protected SessionTarget definition.
+    A changed exact-shape projection is target drift, not authority to derive a
+    second initial carrier.  Malformed outer projections retain their closed
+    shape refusal; same-alias field drift fails as the fixed conflict required
+    by the no-succession contract.
+    """
+
+    try:
+        target = _canonical_target_definition(value)
+    except PlacementCommitmentError as exc:
+        if isinstance(value, Mapping):
+            supplied = dict(value)
+            if (
+                set(supplied) == TARGET_DEFINITION_FINGERPRINT_KEYS
+                and supplied.get("session_alias") == SESSION_ALIAS
+            ):
+                raise PlacementCommitmentError("TARGET_DEFINITION_CONFLICT") from exc
+        raise
+    if digest(target) != _GENERATION_ONE_TARGET_DEFINITION_FINGERPRINT:
+        raise PlacementCommitmentError("TARGET_DEFINITION_CONFLICT")
+    return target
 
 
 def _canonical_selection(value: Any) -> tuple[dict[str, Any], dict[str, Any], str]:
@@ -441,9 +469,7 @@ def build_commitment_plan(
         expected_source_root_revision,
         code="EXPECTED_SOURCE_ROOT_REVISION_INVALID",
     )
-    target = _canonical_target_definition(validated_target_facts)
-    if target["session_alias"] != SESSION_ALIAS:
-        raise PlacementCommitmentError("TARGET_DEFINITION_CONFLICT")
+    target = _bound_generation_one_target_definition(validated_target_facts)
     target_fingerprint = digest(target)
 
     selection, selected, placement_mode = _canonical_selection(placement_selection)
@@ -519,13 +545,13 @@ def _canonical_runtime_facts(value: Any) -> dict[str, Any]:
             facts["source_root_revision"],
             code="SOURCE_ROOT_REVISION_INVALID",
         ),
-        "source_root_job_created_command_id": _token(
-            facts["source_root_job_created_command_id"],
-            code="SOURCE_ROOT_CREATED_COMMAND_ID_INVALID",
+        "source_job_created_command_id": _token(
+            facts["source_job_created_command_id"],
+            code="SOURCE_JOB_CREATED_COMMAND_ID_INVALID",
         ),
-        "source_root_authority_fingerprint": _digest_token(
-            facts["source_root_authority_fingerprint"],
-            code="SOURCE_ROOT_AUTHORITY_FINGERPRINT_INVALID",
+        "source_authority_fingerprint": _digest_token(
+            facts["source_authority_fingerprint"],
+            code="SOURCE_AUTHORITY_FINGERPRINT_INVALID",
         ),
         "session_alias": _token(facts["session_alias"], code="SESSION_ALIAS_INVALID"),
         "target_definition_fingerprint": _digest_token(
@@ -546,8 +572,9 @@ def _canonical_runtime_facts(value: Any) -> dict[str, Any]:
             code="CARRIER_AUTHORITY_FINGERPRINT_INVALID",
         ),
         "carrier_disposition": disposition,
-        "carrier_attempt_id": _token(
-            facts["carrier_attempt_id"], code="CARRIER_ATTEMPT_ID_INVALID"
+        "committed_carrier_attempt_id": _token(
+            facts["committed_carrier_attempt_id"],
+            code="COMMITTED_CARRIER_ATTEMPT_ID_INVALID",
         ),
         "carrier_worker_id": _token(
             facts["carrier_worker_id"], code="CARRIER_WORKER_ID_INVALID"
@@ -593,7 +620,7 @@ def _runtime_facts_for_plan(
     if (
         facts["carrier_job_id"] == plan.source_root_job_id
         or facts["carrier_job_created_command_id"]
-        == facts["source_root_job_created_command_id"]
+        == facts["source_job_created_command_id"]
     ):
         raise PlacementCommitmentError(conflict_code)
     return facts
@@ -606,13 +633,8 @@ def _event_payload(
 ) -> dict[str, Any]:
     evidence = {
         "source_root_job_id": plan.source_root_job_id,
-        "expected_source_root_revision": plan.expected_source_root_revision,
-        "source_root_job_created_command_id": runtime_facts[
-            "source_root_job_created_command_id"
-        ],
-        "source_root_authority_fingerprint": runtime_facts[
-            "source_root_authority_fingerprint"
-        ],
+        "source_job_created_command_id": runtime_facts["source_job_created_command_id"],
+        "source_authority_fingerprint": runtime_facts["source_authority_fingerprint"],
         "responsibility_ref": plan.responsibility_ref,
         "placement_mode": plan.placement_mode,
         "selection_document_digest": plan.selection_document_digest,
@@ -629,7 +651,7 @@ def _event_payload(
         "carrier_job_created_command_id": (plan.carrier_job_created_command_id),
         "carrier_authority_fingerprint": runtime_facts["carrier_authority_fingerprint"],
         "carrier_disposition": runtime_facts["carrier_disposition"],
-        "carrier_attempt_id": runtime_facts["carrier_attempt_id"],
+        "committed_carrier_attempt_id": runtime_facts["committed_carrier_attempt_id"],
         "commitment_command_id": plan.commitment_command_id,
         "command_fingerprint": plan.command_fingerprint,
     }

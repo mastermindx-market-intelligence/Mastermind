@@ -51,8 +51,8 @@ _PLAN_WIRE_KEYS = {
 _RUNTIME_FACT_KEYS = {
     "source_root_job_id",
     "source_root_revision",
-    "source_root_job_created_command_id",
-    "source_root_authority_fingerprint",
+    "source_job_created_command_id",
+    "source_authority_fingerprint",
     "session_alias",
     "target_definition_fingerprint",
     "carrier_generation",
@@ -60,16 +60,15 @@ _RUNTIME_FACT_KEYS = {
     "carrier_job_created_command_id",
     "carrier_authority_fingerprint",
     "carrier_disposition",
-    "carrier_attempt_id",
+    "committed_carrier_attempt_id",
     "carrier_worker_id",
     "carrier_quota_class",
     "carrier_placement_snapshot_digest",
 }
 _EVENT_EVIDENCE_KEYS = {
     "source_root_job_id",
-    "expected_source_root_revision",
-    "source_root_job_created_command_id",
-    "source_root_authority_fingerprint",
+    "source_job_created_command_id",
+    "source_authority_fingerprint",
     "responsibility_ref",
     "placement_mode",
     "selection_document_digest",
@@ -84,7 +83,7 @@ _EVENT_EVIDENCE_KEYS = {
     "carrier_job_created_command_id",
     "carrier_authority_fingerprint",
     "carrier_disposition",
-    "carrier_attempt_id",
+    "committed_carrier_attempt_id",
     "commitment_command_id",
     "command_fingerprint",
 }
@@ -103,6 +102,12 @@ _SUPERSEDED_FIELDS = {
     "plan_attempt_id",
     "plan_digest",
     "committed_attempt_id",
+}
+_REMOVED_V6_EVENT_FIELDS = {
+    "expected_source_root_revision",
+    "source_root_job_created_command_id",
+    "source_root_authority_fingerprint",
+    "carrier_attempt_id",
 }
 _FORBIDDEN_EVENT_FIELDS = {
     *_SUPERSEDED_FIELDS,
@@ -241,8 +246,8 @@ def _runtime_facts(
     value: dict[str, object] = {
         "source_root_job_id": bound.source_root_job_id,
         "source_root_revision": bound.expected_source_root_revision,
-        "source_root_job_created_command_id": "CEO-V2-ROOT-CREATED-1",
-        "source_root_authority_fingerprint": _SOURCE_AUTHORITY_FINGERPRINT,
+        "source_job_created_command_id": "CEO-V2-ROOT-CREATED-1",
+        "source_authority_fingerprint": _SOURCE_AUTHORITY_FINGERPRINT,
         "session_alias": bound.session_alias,
         "target_definition_fingerprint": bound.target_definition_fingerprint,
         "carrier_generation": bound.carrier_generation,
@@ -253,7 +258,7 @@ def _runtime_facts(
             "new_session_materialization": "created",
             "existing_session_reuse": "reused",
         }[bound.placement_mode],
-        "carrier_attempt_id": "attempt-ceo-carrier-1",
+        "committed_carrier_attempt_id": "attempt-ceo-carrier-1",
         "carrier_worker_id": bound.selected_worker_id,
         "carrier_quota_class": bound.selected_quota_class,
         "carrier_placement_snapshot_digest": (
@@ -308,6 +313,7 @@ def test_v2_schemas_constants_and_literal_wire_shapes_are_pinned() -> None:
     assert set(payload) == _EVENT_KEYS
     assert not (_SUPERSEDED_FIELDS & set(plan.to_dict()))
     assert not (_SUPERSEDED_FIELDS & set(payload))
+    assert not (_REMOVED_V6_EVENT_FIELDS & set(payload))
 
 
 def test_target_fingerprint_and_carrier_command_use_exact_independent_domains() -> None:
@@ -344,6 +350,7 @@ def test_target_projection_rejects_missing_extra_and_non_mapping_values() -> Non
 @pytest.mark.parametrize(
     ("field", "changed"),
     (
+        ("session_alias", "EXECUTIVE-CEO-A"),
         ("target_seat", "coo"),
         ("reasoning_surface", "chatgpt-sol"),
         ("wake_transport", "chatgpt-gui"),
@@ -351,25 +358,46 @@ def test_target_projection_rejects_missing_extra_and_non_mapping_values() -> Non
         ("workstream", "prophet"),
     ),
 )
-def test_current_trusted_target_projection_changes_target_and_command_identity(
+def test_generation_one_target_definition_drift_is_a_fixed_conflict(
     field: str,
     changed: object,
 ) -> None:
     accepted = _plan()
-    changed_plan = _plan(target_facts=_target_facts(**{field: changed}))
-
-    assert changed_plan.target_definition_fingerprint != (
-        accepted.target_definition_fingerprint
-    )
-    assert changed_plan.carrier_job_created_command_id != (
-        accepted.carrier_job_created_command_id
-    )
-    assert changed_plan.commitment_command_id != accepted.commitment_command_id
-
-
-def test_fixed_alias_cannot_drift_in_trusted_target_projection() -> None:
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
-        _plan(target_facts=_target_facts(session_alias="EXECUTIVE-CEO-A"))
+        _plan(target_facts=_target_facts(**{field: changed}))
+    assert excinfo.value.code == "TARGET_DEFINITION_CONFLICT"
+    assert accepted.carrier_generation == 1
+    assert accepted.carrier_job_created_command_id == _CARRIER_COMMAND
+
+
+@pytest.mark.parametrize(
+    "allowed_transports",
+    (
+        ["codex-app-server", "chatgpt-gui"],
+        ["chatgpt-gui", "codex-app-server"],
+        ["codex-app-server", "codex-app-server"],
+    ),
+)
+def test_allowed_transport_extra_order_or_duplicate_cannot_mint_a_carrier(
+    allowed_transports: list[str],
+) -> None:
+    accepted = _plan()
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _plan(target_facts=_target_facts(allowed_transports=allowed_transports))
+    assert excinfo.value.code == "TARGET_DEFINITION_CONFLICT"
+    assert accepted.carrier_generation == 1
+    assert accepted.carrier_job_created_command_id == _CARRIER_COMMAND
+
+
+def test_target_conflict_precedes_any_alternate_carrier_command_derivation(
+    monkeypatch,
+) -> None:
+    def unexpected_carrier_derivation(*args, **kwargs):
+        pytest.fail("target drift reached carrier command derivation")
+
+    monkeypatch.setattr(c2, "_carrier_command_id", unexpected_carrier_derivation)
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _plan(target_facts=_target_facts(reasoning_surface="chatgpt-sol"))
     assert excinfo.value.code == "TARGET_DEFINITION_CONFLICT"
 
 
@@ -402,7 +430,7 @@ def test_builder_public_surfaces_have_no_caller_carrier_or_handoff_channel() -> 
         "target_definition_fingerprint",
         "carrier_generation",
         "carrier_job_id",
-        "carrier_attempt_id",
+        "committed_carrier_attempt_id",
         "carrier_job_created_command_id",
         "carrier_disposition",
     } & set(plan_parameters)
@@ -613,9 +641,8 @@ def test_event_binds_source_and_carrier_receipts_without_duplicate_placement() -
     assert payload == {
         "schema_version": "mastermind.capacity_placement_commitment/v2",
         "source_root_job_id": "job-source-1",
-        "expected_source_root_revision": 7,
-        "source_root_job_created_command_id": "CEO-V2-ROOT-CREATED-1",
-        "source_root_authority_fingerprint": _SOURCE_AUTHORITY_FINGERPRINT,
+        "source_job_created_command_id": "CEO-V2-ROOT-CREATED-1",
+        "source_authority_fingerprint": _SOURCE_AUTHORITY_FINGERPRINT,
         "responsibility_ref": "WS:CAP-C2",
         "placement_mode": "new_session_materialization",
         "selection_document_digest": plan.selection_document_digest,
@@ -632,13 +659,14 @@ def test_event_binds_source_and_carrier_receipts_without_duplicate_placement() -
         "carrier_job_created_command_id": _CARRIER_COMMAND,
         "carrier_authority_fingerprint": _CARRIER_AUTHORITY_FINGERPRINT,
         "carrier_disposition": "created",
-        "carrier_attempt_id": "attempt-ceo-carrier-1",
+        "committed_carrier_attempt_id": "attempt-ceo-carrier-1",
         "commitment_command_id": plan.commitment_command_id,
         "command_fingerprint": plan.command_fingerprint,
         "commitment_evidence_digest": payload["commitment_evidence_digest"],
     }
     evidence = {key: payload[key] for key in _EVENT_EVIDENCE_KEYS}
     assert payload["commitment_evidence_digest"] == _independent_digest(evidence)
+    assert "expected_source_root_revision" not in payload
     assert not {
         "carrier_worker_id",
         "carrier_quota_class",
@@ -692,9 +720,7 @@ def test_source_responsibility_and_alias_carrier_must_be_separate_jobs(
     if collapsed_identity == "job_id":
         facts["carrier_job_id"] = plan.source_root_job_id
     else:
-        facts["source_root_job_created_command_id"] = (
-            plan.carrier_job_created_command_id
-        )
+        facts["source_job_created_command_id"] = plan.carrier_job_created_command_id
 
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
         _event(plan, facts)
@@ -712,15 +738,38 @@ def test_identical_replay_rebuilds_byte_identical_event_from_current_truth() -> 
     assert _validate(payload, plan=plan, runtime_facts=facts) == payload
 
 
-def test_revision_changed_plan_reaches_same_command_but_replay_conflicts() -> None:
+def test_revision_movement_changes_precondition_but_not_immutable_event_bytes() -> None:
     accepted = _plan(revision=7)
-    historical = _event(accepted)
+    accepted_facts = _runtime_facts(accepted)
+    historical = _event(accepted, accepted_facts)
     current = _plan(revision=8)
     current_facts = _runtime_facts(current)
+    current_event = _event(current, current_facts)
 
     assert current.commitment_command_id == accepted.commitment_command_id
+    assert current.command_fingerprint == accepted.command_fingerprint
+    assert json.dumps(current_event, sort_keys=True, separators=(",", ":")) == (
+        json.dumps(historical, sort_keys=True, separators=(",", ":"))
+    )
+    assert (
+        _validate(historical, plan=current, runtime_facts=current_facts) == historical
+    )
+
+
+@pytest.mark.parametrize(("plan_revision", "runtime_revision"), ((8, 7), (7, 8)))
+def test_stale_runtime_revision_still_refuses_at_private_boundary(
+    plan_revision: int,
+    runtime_revision: int,
+) -> None:
+    current = _plan(revision=plan_revision)
+    historical = _event(current)
+    stale_facts = _runtime_facts(current, source_root_revision=runtime_revision)
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
-        _validate(historical, plan=current, runtime_facts=current_facts)
+        _event(current, stale_facts)
+    assert excinfo.value.code == "RUNTIME_FACTS_CONFLICT"
+
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(historical, plan=current, runtime_facts=stale_facts)
     assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
 
 
@@ -729,8 +778,8 @@ def test_revision_changed_plan_reaches_same_command_but_replay_conflicts() -> No
     (
         ("source_root_job_id", "job-source-2"),
         ("source_root_revision", 8),
-        ("source_root_job_created_command_id", "CEO-V2-ROOT-CREATED-2"),
-        ("source_root_authority_fingerprint", "c" * 64),
+        ("source_job_created_command_id", "CEO-V2-ROOT-CREATED-2"),
+        ("source_authority_fingerprint", "c" * 64),
         ("session_alias", "EXECUTIVE-CEO-A"),
         ("target_definition_fingerprint", "c" * 64),
         ("carrier_generation", 2),
@@ -738,7 +787,7 @@ def test_revision_changed_plan_reaches_same_command_but_replay_conflicts() -> No
         ("carrier_job_created_command_id", "SOL-CARRIER-" + "d" * 32),
         ("carrier_authority_fingerprint", "c" * 64),
         ("carrier_disposition", "reused"),
-        ("carrier_attempt_id", "attempt-ceo-carrier-2"),
+        ("committed_carrier_attempt_id", "attempt-ceo-carrier-2"),
         ("carrier_worker_id", "worker-2"),
         ("carrier_quota_class", "priority"),
         ("carrier_placement_snapshot_digest", "e" * 64),
@@ -763,9 +812,8 @@ def test_replay_refuses_each_current_runtime_drift(
     ("field", "changed"),
     (
         ("source_root_job_id", "job-source-2"),
-        ("expected_source_root_revision", 8),
-        ("source_root_job_created_command_id", "CEO-V2-ROOT-CREATED-2"),
-        ("source_root_authority_fingerprint", "c" * 64),
+        ("source_job_created_command_id", "CEO-V2-ROOT-CREATED-2"),
+        ("source_authority_fingerprint", "c" * 64),
         ("placement_mode", "existing_session_reuse"),
         ("selected_worker_id", "worker-2"),
         ("selected_quota_class", "priority"),
@@ -777,7 +825,7 @@ def test_replay_refuses_each_current_runtime_drift(
         ("carrier_job_created_command_id", "SOL-CARRIER-" + "d" * 32),
         ("carrier_authority_fingerprint", "c" * 64),
         ("carrier_disposition", "reused"),
-        ("carrier_attempt_id", "attempt-ceo-carrier-2"),
+        ("committed_carrier_attempt_id", "attempt-ceo-carrier-2"),
     ),
 )
 def test_forged_event_fact_cannot_self_authenticate_after_digest_rewrite(
@@ -828,6 +876,51 @@ def test_forbidden_event_field_is_refused_before_generic_shape(field: str) -> No
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
         _validate(payload)
     assert excinfo.value.code == "COMMITMENT_EVENT_FORBIDDEN_FIELD"
+
+
+@pytest.mark.parametrize(
+    ("current_name", "superseded_name"),
+    (
+        ("source_job_created_command_id", "source_root_job_created_command_id"),
+        ("source_authority_fingerprint", "source_root_authority_fingerprint"),
+        ("committed_carrier_attempt_id", "carrier_attempt_id"),
+    ),
+)
+def test_runtime_projection_rejects_each_superseded_fact_name(
+    current_name: str,
+    superseded_name: str,
+) -> None:
+    facts = _runtime_facts()
+    facts[superseded_name] = facts.pop(current_name)
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _event(runtime_facts=facts)
+    assert excinfo.value.code == "RUNTIME_FACTS_SHAPE_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("current_name", "superseded_name"),
+    (
+        ("source_job_created_command_id", "source_root_job_created_command_id"),
+        ("source_authority_fingerprint", "source_root_authority_fingerprint"),
+        ("committed_carrier_attempt_id", "carrier_attempt_id"),
+    ),
+)
+def test_event_rejects_each_superseded_fact_name(
+    current_name: str,
+    superseded_name: str,
+) -> None:
+    payload = _event()
+    payload[superseded_name] = payload.pop(current_name)
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(payload)
+    assert excinfo.value.code == "COMMITMENT_EVENT_SHAPE_INVALID"
+
+
+def test_event_rejects_removed_optimistic_revision_as_unknown_wire_field() -> None:
+    payload = {**_event(), "expected_source_root_revision": 7}
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(payload)
+    assert excinfo.value.code == "COMMITMENT_EVENT_SHAPE_INVALID"
 
 
 def test_v1_payload_is_not_accepted_or_upgraded() -> None:
