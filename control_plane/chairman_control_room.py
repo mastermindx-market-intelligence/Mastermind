@@ -1119,11 +1119,23 @@ def compose_control_room(
                 agent_os_state, generated_at
             )
         )
+        # Blocker 1 (review 5106453403): the same runtime_jobs already
+        # threaded into build_autonomy_snapshot above, grouped by workstream
+        # into its full candidate-root set -- threaded the same additive
+        # way as declared_blockers/unmapped_responsibilities so a card can
+        # render "ambiguous, reconciliation required" distinctly from "no
+        # Runtime evidence at all" (both leave root_job_id null).
+        autonomy_runtime_root_candidates = (
+            autonomy_control_room_projection.runtime_root_candidates_from_runtime_jobs(
+                runtime_jobs
+            )
+        )
         autonomy = autonomy_control_room_projection.project_autonomy(
             autonomy_snapshot,
             generated_at=generated_at,
             declared_blockers=autonomy_declared_blockers,
             unmapped_responsibilities=autonomy_unmapped_responsibilities,
+            runtime_root_candidates=autonomy_runtime_root_candidates,
         )
         # Dispatch-consumption is a SECOND pure pass over the cards just
         # produced, joined on the same exact (responsibility_ref, root_job_id)
@@ -1248,6 +1260,14 @@ def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | N
     report a quiet, job-free company — this never does that.  Distinct
     "executive_runtime:" degraded prefix from "executive_inbox:" so a caller
     can tell which read failed.
+
+    Each row also carries the Job's own ``root_job_id`` (review 5106453403,
+    Blocker 1) — the same public ``Job`` field
+    :func:`autonomy_control_room_projection.build_autonomy_snapshot` needs
+    to resolve ONE unique deduplicated Runtime root per workstream.
+    :func:`_group_jobs_by_ref` deliberately reconstructs its OWN
+    ``{job_id, status, workstream}`` shape and drops this extra key, so
+    adding it here changes nothing about ``work[].executive.jobs``.
     """
     db_path = root / executive_inbox.DB_RELATIVE_PATH
     if not db_path.is_file():
@@ -1277,7 +1297,12 @@ def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | N
         if not isinstance(workstream, str) or not workstream:
             continue
         status = getattr(job.status, "value", None) or str(job.status)
-        result.append({"job_id": job.job_id, "status": status, "workstream": workstream})
+        result.append({
+            "job_id": job.job_id,
+            "status": status,
+            "workstream": workstream,
+            "root_job_id": job.root_job_id,
+        })
     return result, None
 
 
@@ -1352,6 +1377,17 @@ def _gather_dispatch_evidence(
     ``root_job_id`` is missing/malformed, or when nothing genuine was found
     for it at all — this function never emits a content-free row just to
     claim a happy-path state.
+
+    Review 5106453403, Blockers 2-4 (closing the "40/40 UNKNOWN" defect):
+    a card's ``root_job_id`` is often an AGGREGATION root — the whole point
+    of Blocker 1 upstream — while the executable Attempt, the source of a
+    Wake obligation, and a durable terminal-return receipt all live on a
+    CHILD/carrier Job under that same root.  Every read below is therefore
+    scoped to the exact Runtime job TREE sharing this card's
+    ``root_job_id`` (``Job.root_job_id``, the DB-maintained invariant every
+    descendant at every ``Job.parent_job_id``/``Job.depth`` already
+    carries) — never to the root job_id alone, and never selected across
+    jobs by title, timestamp, or provider.
     """
     try:
         db_path = root / executive_inbox.DB_RELATIVE_PATH
@@ -1376,6 +1412,20 @@ def _gather_dispatch_evidence(
             except Exception:  # noqa: BLE001 — gather layer never raises
                 wake_repo = None
 
+        # Blockers 2-3: the whole Runtime job tree, read ONCE (not once per
+        # card) and grouped by `root_job_id` — the canonical, DB-maintained
+        # tree-membership field every job at every depth already carries.
+        # This is what "restrict candidates to the exact root" means in
+        # practice: a candidate job for card X can only ever come from
+        # `jobs_by_root.get(X's root_job_id)`.
+        try:
+            all_jobs = runtime.jobs.list_jobs()
+        except (executive_runtime.RuntimeProofError, ValueError, KeyError, OSError):
+            all_jobs = []
+        jobs_by_root: dict[str, list[Any]] = {}
+        for job in all_jobs:
+            jobs_by_root.setdefault(job.root_job_id, []).append(job)
+
         rows: list[dict[str, Any]] = []
         seen_keys: set[tuple[Any, Any]] = set()
 
@@ -1396,43 +1446,104 @@ def _gather_dispatch_evidence(
             row: dict[str, Any] = {}
             observed_at: str | None = None
             attempt = None
+            candidate_job = None
             found_evidence = False
 
-            # --- attempt state: executive_runtime, mandatory, no guard ---
-            try:
-                attempts = runtime.attempts.list_attempts(job_id=root_job_id)
-            except (executive_runtime.RuntimeProofError, ValueError, KeyError, OSError):
-                attempts = []
-            if attempts:
-                attempt = max(attempts, key=lambda a: a.attempt_number)
-                status_value = getattr(attempt.status, "value", None)
-                if isinstance(status_value, str) and status_value:
-                    row["attempt_state"] = status_value
-                    found_evidence = True
-                for ts in (attempt.finished_at, attempt.heartbeat_at, attempt.started_at):
-                    observed_at = _dispatch_evidence_newer(observed_at, ts)
+            tree_jobs = jobs_by_root.get(root_job_id, [])
 
-            # --- obligation status: WakeLedgerRepository + reconstruct_status ---
-            if wake_repo is not None:
+            # --- attempt state: the canonical CURRENT attempt of the ONE
+            # viable executable child/carrier Job in this root's tree —
+            # never `max(attempt_number)`, never the aggregation root
+            # itself unless IT is the (only) job carrying a live attempt.
+            attempt_candidates = [j for j in tree_jobs if j.current_attempt_id]
+            if len(attempt_candidates) == 1:
+                candidate_job = attempt_candidates[0]
                 try:
-                    wake_requested_events = runtime.events.list_events(
-                        aggregate_type=wake_ledger.WAKE_AGGREGATE_TYPE,
-                        job_id=root_job_id,
+                    attempt = runtime.attempts.get_attempt(candidate_job.current_attempt_id)
+                except (executive_runtime.RuntimeProofError, ValueError, KeyError, OSError):
+                    attempt = None
+                if attempt is not None:
+                    status_value = getattr(attempt.status, "value", None)
+                    if isinstance(status_value, str) and status_value:
+                        row["attempt_state"] = status_value
+                        found_evidence = True
+                    for ts in (attempt.finished_at, attempt.heartbeat_at, attempt.started_at):
+                        observed_at = _dispatch_evidence_newer(observed_at, ts)
+            # Zero candidates (no job in the tree has a live current
+            # attempt) or MULTIPLE viable candidates (two or more children
+            # each carrying one): this dimension is left unset either way —
+            # reconciliation-required, never a pick.
+
+            # --- durable terminal-return APPLIED receipt (Blocker 4): the
+            # SAME resolved candidate attempt, consulted for a matching
+            # EXECUTIVE_TERMINAL_RETURN_APPLIED event.  A terminal Attempt
+            # with NO such receipt (and no Dialogue/Observer watch proof)
+            # stays WATCH_UNPROVEN downstream — this never fabricates one.
+            if attempt is not None and candidate_job is not None:
+                try:
+                    applied_events = runtime.events.list_events(
+                        aggregate_type="terminal_return_projection",
+                        aggregate_id=attempt.attempt_id,
                     )
                 except Exception:  # noqa: BLE001 — gather layer never raises
-                    wake_requested_events = []
-                obligation_ids = [
-                    event.aggregate_id
-                    for event in wake_requested_events[:_DISPATCH_EVIDENCE_MAX_WAKE_REQUESTED]
-                    if event.event_type == "WAKE_REQUESTED" and event.aggregate_id
-                ]
-                # More than one candidate obligation for this root_job_id:
-                # this ROW cannot pick one without guessing (there is no
+                    applied_events = []
+                for event in applied_events:
+                    payload = getattr(event, "payload", None)
+                    if (
+                        event.event_type == "EXECUTIVE_TERMINAL_RETURN_APPLIED"
+                        and event.job_id == candidate_job.job_id
+                        and event.attempt_id == attempt.attempt_id
+                        and event.worker_id == attempt.worker_id
+                        and isinstance(payload, Mapping)
+                        and payload.get("root_job_id") == root_job_id
+                    ):
+                        row["terminal_return_state"] = "APPLIED"
+                        found_evidence = True
+                        observed_at = _dispatch_evidence_newer(observed_at, event.created_at)
+                        break
+
+            # --- obligation status: WakeLedgerRepository + reconstruct_status.
+            # Blocker 3: Wake persistence records the SOURCE job in
+            # `Event.job_id` (often a child), while the obligation's OWN
+            # persisted envelope separately carries `root_job_id` (the
+            # responsibility root) — so every job_id in this root's tree is
+            # searched, and each candidate is admitted only when its own
+            # parsed envelope's `root_job_id` matches this card's root
+            # exactly (never merely "same tree", to guard against a
+            # relocated/foreign envelope).
+            if wake_repo is not None and wake_persist is not None:
+                obligation_ids: set[str] = set()
+                seen_event_count = 0
+                for job in sorted(tree_jobs, key=lambda j: j.job_id):
+                    if seen_event_count >= _DISPATCH_EVIDENCE_MAX_WAKE_REQUESTED:
+                        break
+                    try:
+                        wake_requested_events = runtime.events.list_events(
+                            aggregate_type=wake_ledger.WAKE_AGGREGATE_TYPE,
+                            job_id=job.job_id,
+                        )
+                    except Exception:  # noqa: BLE001 — gather layer never raises
+                        wake_requested_events = []
+                    for event in wake_requested_events:
+                        if seen_event_count >= _DISPATCH_EVIDENCE_MAX_WAKE_REQUESTED:
+                            break
+                        seen_event_count += 1
+                        if event.event_type != "WAKE_REQUESTED" or not event.aggregate_id:
+                            continue
+                        try:
+                            obligation = wake_persist.parse_obligation(event.payload)
+                        except Exception:  # noqa: BLE001 — untrusted envelope
+                            continue
+                        if obligation.root_job_id != root_job_id:
+                            continue
+                        obligation_ids.add(event.aggregate_id)
+                # More than one candidate obligation under this root: this
+                # ROW cannot pick one without guessing (there is no
                 # recency/title rule in this codebase for that choice), so
                 # it leaves obligation_status unset rather than picking —
                 # conservative, never a fabricated single answer.
                 if len(obligation_ids) == 1:
-                    oid = obligation_ids[0]
+                    oid = next(iter(obligation_ids))
                     try:
                         persisted = wake_repo.list_wake_events(aggregate_id=oid)
                         status = wake_ledger.reconstruct_status(

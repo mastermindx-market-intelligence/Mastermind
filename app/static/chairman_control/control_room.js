@@ -1847,6 +1847,10 @@
       detailLine(node, "responsibility " + safeText(card.responsibility_ref), true);
       detailLine(node, "accountable " + safeText(card.accountable_seat) + " · state " + safeText(card.state, "not recorded"), true);
       detailLine(node, "root job " + safeText(card.root_job_id, "not recorded"), true);
+      if (card.root_job_ambiguous === true) {
+        var candidates = card.root_job_candidates || [];
+        detailLine(node, "root job ambiguous — " + candidates.length + " distinct Runtime roots cite this workstream, reconciliation required (never picked)", false);
+      }
     });
     body.appendChild(rails);
 

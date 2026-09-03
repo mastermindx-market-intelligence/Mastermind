@@ -1353,7 +1353,12 @@ def test_output_keys_is_a_closed_set():
     for card in doc["responsibilities"]:
         assert set(card.keys()) == {
             "responsibility_ref", "title", "accountable_seat", "state",
-            "root_job_id", "current_worker", "current_sol_target",
+            "root_job_id",
+            # Blocker 1 (review 5106453403): explicit ambiguity/
+            # reconciliation, distinct from plain "no Runtime evidence" —
+            # root_job_id itself stays null in both cases (never a pick).
+            "root_job_ambiguous", "root_job_candidates",
+            "current_worker", "current_sol_target",
             "owed_turn", "placement_state", "wake_outcome", "blocker",
             "declared_blocker", "freshness", "is_actionable",
             "actionability_reason", "chairman_decision_required",
@@ -3760,3 +3765,185 @@ def test_review_structural_refusal_still_accepts_legitimate_identifiers(value):
     card = _rv_card({**_RV_BASE, "watch_mechanism": value})
 
     assert card["reason"] != "dispatch_evidence_rejected"
+
+
+# ---------------------------------------------------------------------------
+# Blocker 1 (review 5106453403): real responsibility -> Executive root join.
+# ``build_autonomy_snapshot`` must stop discarding ``runtime_jobs`` and
+# thread a genuinely resolved, deduplicated Runtime root into
+# ``ResponsibilityFact.root_job_id`` -- never an inferred pick by title,
+# newest, max, or provider.  Zero roots stays null/UNKNOWN; MULTIPLE
+# distinct roots is explicit ambiguity/reconciliation, surfaced on the card
+# as ``root_job_ambiguous``/``root_job_candidates`` -- never a pick.
+# ---------------------------------------------------------------------------
+
+def test_build_autonomy_snapshot_threads_the_unique_runtime_root_into_the_card():
+    agent_os_state = _agent_os_state([_ws_row("ROOT-JOIN-WS", owner="coo-fable")])
+    runtime_jobs = [
+        {"job_id": "job-1", "status": "running", "workstream": "WS:ROOT-JOIN-WS",
+         "root_job_id": "JOB-ROOT-AAAA"},
+    ]
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=runtime_jobs, bindings=None,
+    )
+    assert len(snap.responsibilities) == 1
+    assert snap.responsibilities[0].root_job_id == "JOB-ROOT-AAAA"
+
+    doc = proj.project_autonomy(
+        snap, generated_at="2026-09-03T00:00:00Z",
+        runtime_root_candidates=proj.runtime_root_candidates_from_runtime_jobs(runtime_jobs),
+    )
+    card = _card(doc, "WS:ROOT-JOIN-WS")
+    assert card["root_job_id"] == "JOB-ROOT-AAAA"
+    assert card["root_job_ambiguous"] is False
+    assert card["root_job_candidates"] == ["JOB-ROOT-AAAA"]
+
+
+def test_build_autonomy_snapshot_zero_runtime_roots_stays_null():
+    agent_os_state = _agent_os_state([_ws_row("NO-RUNTIME-WS", owner="coo-fable")])
+    snap_no_jobs = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    assert snap_no_jobs.responsibilities[0].root_job_id is None
+
+    # A runtime job exists but cites a DIFFERENT workstream: still zero
+    # roots for THIS one.
+    runtime_jobs = [
+        {"job_id": "job-x", "status": "running", "workstream": "WS:SOME-OTHER-WS",
+         "root_job_id": "JOB-OTHER-1"},
+    ]
+    snap_unrelated = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=runtime_jobs, bindings=None,
+    )
+    assert snap_unrelated.responsibilities[0].root_job_id is None
+    doc = proj.project_autonomy(
+        snap_unrelated, generated_at="2026-09-03T00:00:00Z",
+        runtime_root_candidates=proj.runtime_root_candidates_from_runtime_jobs(runtime_jobs),
+    )
+    card = _card(doc, "WS:NO-RUNTIME-WS")
+    assert card["root_job_ambiguous"] is False
+    assert card["root_job_candidates"] == []
+
+
+def test_build_autonomy_snapshot_multiple_distinct_runtime_roots_is_never_picked():
+    """Two DISTINCT Runtime roots cite the same workstream: this must read
+    as explicit ambiguity/reconciliation on the card, never a silent pick
+    of one candidate -- not the alphabetically first, not the
+    alphabetically last, not the one that appears first/last in the input
+    list."""
+    agent_os_state = _agent_os_state([_ws_row("AMBIGUOUS-WS", owner="coo-fable")])
+    runtime_jobs = [
+        # Deliberately out of sort order and NOT last-wins: a naive
+        # "first seen"/"last seen"/max()/min() pick would return one of
+        # these two, never None.
+        {"job_id": "job-z", "status": "running", "workstream": "WS:AMBIGUOUS-WS",
+         "root_job_id": "JOB-ZZZZ-LATE"},
+        {"job_id": "job-a", "status": "queued", "workstream": "WS:AMBIGUOUS-WS",
+         "root_job_id": "JOB-AAAA-EARLY"},
+    ]
+    snap = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=runtime_jobs, bindings=None,
+    )
+    assert snap.responsibilities[0].root_job_id is None
+
+    doc = proj.project_autonomy(
+        snap, generated_at="2026-09-03T00:00:00Z",
+        runtime_root_candidates=proj.runtime_root_candidates_from_runtime_jobs(runtime_jobs),
+    )
+    card = _card(doc, "WS:AMBIGUOUS-WS")
+    assert card["root_job_id"] is None
+    assert card["root_job_ambiguous"] is True
+    assert card["root_job_candidates"] == ["JOB-AAAA-EARLY", "JOB-ZZZZ-LATE"]
+
+
+def test_build_autonomy_snapshot_deleting_the_runtime_job_join_makes_the_root_vanish():
+    """Falsifier: passing ``runtime_jobs=None`` (the join deleted) must make
+    the previously-threaded root vanish -- proves the card's
+    ``root_job_id`` is genuinely DERIVED from ``runtime_jobs``, not a
+    coincidence/hardcode."""
+    agent_os_state = _agent_os_state([_ws_row("DELETE-JOIN-WS", owner="coo-fable")])
+    runtime_jobs = [
+        {"job_id": "job-1", "status": "running", "workstream": "WS:DELETE-JOIN-WS",
+         "root_job_id": "JOB-PRESENT-1"},
+    ]
+    with_join = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=runtime_jobs, bindings=None,
+    )
+    without_join = proj.build_autonomy_snapshot(
+        inbox=None, boot_packet=None, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+    )
+    assert with_join.responsibilities[0].root_job_id == "JOB-PRESENT-1"
+    assert without_join.responsibilities[0].root_job_id is None
+
+
+# ---------------------------------------------------------------------------
+# Blocker 4 (review 5106453403): consume the durable terminal APPLIED
+# receipt.  A valid ``terminal_return_state="APPLIED"`` row (the gather
+# layer's own closed marker for a matching
+# ``EXECUTIVE_TERMINAL_RETURN_APPLIED`` receipt) lets a terminal Attempt
+# project RETURNED even with no Dialogue/Observer watch proof -- but
+# terminal Attempt status ALONE (no applied marker at all) still stays
+# WATCH_UNPROVEN, and live CONTINUE/STOP stays unavailable (no
+# ``sol_decision`` owner exists yet).
+# ---------------------------------------------------------------------------
+
+def test_dispatch_terminal_return_applied_receipt_projects_returned():
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+        ) | {"terminal_return_state": "APPLIED"}],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "RETURNED"
+    assert card["actionable"] is True
+
+
+def test_dispatch_terminal_attempt_alone_without_applied_marker_stays_unproven():
+    """Terminal Attempt alone remains insufficient -- no watch proof AND no
+    terminal_return_state marker must still render WATCH_UNPROVEN, never
+    RETURNED."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "WATCH_UNPROVEN"
+    assert card["actionable"] is False
+
+
+def test_dispatch_terminal_return_applied_never_unlocks_live_continue_stop():
+    """Live CONTINUE/STOP stays explicitly UNKNOWN until the W3C-I1 owner
+    protects: an applied-return-proven row with NO sol_decision evidence
+    must still render plain RETURNED, never CONTINUED/STOPPED."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            sol_decision="CONTINUE",
+        ) | {"terminal_return_state": "APPLIED"}],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    # sol_decision alone, with none of the required exact-carrier/child/
+    # operation identity fields, can never validate -- RETURNED stands.
+    assert card["dispatch_state"] == "RETURNED"

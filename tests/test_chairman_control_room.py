@@ -2435,3 +2435,344 @@ def test_build_control_room_wires_dispatch_evidence_without_raising(
             dispatch = card["dispatch"]
             assert dispatch["dispatch_state"] in ccr.autonomy_control_room_projection.DISPATCH_STATES
             assert dispatch["actionable"] is False  # no runtime DB -> no live evidence
+
+
+# ---------------------------------------------------------------------------
+# review 5106453403 -- four exact-head dispatch-connectivity blockers.
+# ---------------------------------------------------------------------------
+
+def test_read_runtime_jobs_carries_the_real_job_tree_root(tmp_path):
+    """Blocker 1's raw material: `_read_runtime_jobs` must carry each real
+    Job's own `root_job_id` (not just job_id/status/workstream) so the
+    projection can join a workstream to its ONE Runtime root without a
+    second Runtime read."""
+    from control_plane import executive_inbox as ei
+
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    root = runtime.jobs.create_job("root probe")
+    child = runtime.jobs.create_job("child probe", parent_job_id=root.job_id)
+
+    def _provenance(_runtime, job_id):
+        if job_id == root.job_id:
+            return {"workstream": "WS:ROOT-PROBE"}, None
+        if job_id == child.job_id:
+            return {"workstream": "WS:ROOT-PROBE"}, None
+        return None, None
+
+    import contextlib
+    import unittest.mock
+
+    with unittest.mock.patch.object(ei, "ceo_intent_provenance", side_effect=_provenance):
+        jobs, failure = ccr._read_runtime_jobs(tmp_path)
+
+    assert failure is None
+    by_id = {row["job_id"]: row for row in jobs}
+    assert by_id[root.job_id]["root_job_id"] == root.job_id
+    assert by_id[child.job_id]["root_job_id"] == root.job_id
+
+
+def test_end_to_end_build_control_room_threads_a_real_runtime_root_into_the_card(
+    tmp_path, monkeypatch, boot_packet, inbox, active_builds, bindings,
+):
+    """Blocker 1, end-to-end: a recognized Agent-OS responsibility plus a
+    REAL Runtime Job whose CEO-intent provenance names that same
+    workstream must produce a final autonomy CARD (not a hand-authored
+    gather input) carrying the real Executive root -- and deleting the
+    runtime-job join (monkeypatching `_read_runtime_jobs` to `(None,
+    None)`) must make that assertion fail (RED), proving this is a genuine
+    join, not a coincidence."""
+    from control_plane import executive_inbox as ei
+
+    macro_root = tmp_path / "macro"
+    (macro_root / "data" / "governance").mkdir(parents=True)
+    agent_os_state = {
+        "schema": "agent_os_state.v1",
+        "generator": "scripts/agentos.py status",
+        "generated_at": "2026-09-03T00:00:00Z",
+        "workstreams": [
+            {"key": "REAL-ROOT-JOIN", "title": "Real root join probe",
+             "status": "active", "owner": "coo-fable"},
+        ],
+    }
+    (macro_root / "data" / "governance" / "project_active_builds.json").write_text(
+        json.dumps(active_builds), encoding="utf-8"
+    )
+    (macro_root / "data" / "governance" / "agent_os_state.json").write_text(
+        json.dumps(agent_os_state), encoding="utf-8"
+    )
+    bindings_path = tmp_path / "bindings" / "surface_bindings.json"
+    sb.save_bindings(bindings, path=bindings_path)
+
+    fixture_packet = copy.deepcopy(boot_packet)
+    fixture_packet["macro"]["root"] = str(macro_root)
+    fixture_inbox = copy.deepcopy(inbox)
+    fixture_inbox["grounding"]["macro"]["root"] = str(macro_root)
+    monkeypatch.setattr(ccr.ceo_boot_packet, "build_packet", lambda **kwargs: fixture_packet)
+    monkeypatch.setattr(ccr.executive_inbox, "build_inbox", lambda **kwargs: fixture_inbox)
+
+    runtime = ccr.executive_runtime.Runtime.at(macro_root)
+    root = runtime.jobs.create_job("real root join probe")
+
+    def _provenance(_runtime, job_id):
+        if job_id == root.job_id:
+            return {"workstream": "WS:REAL-ROOT-JOIN"}, None
+        return None, None
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(ei, "ceo_intent_provenance", side_effect=_provenance):
+        doc = ccr.build_control_room(
+            repo_root=macro_root, now="2026-09-03T00:00:00Z", bindings_path=bindings_path,
+        )
+        card = next(
+            c for c in doc["autonomy"]["responsibilities"]
+            if c["responsibility_ref"] == "WS:REAL-ROOT-JOIN"
+        )
+        assert card["root_job_id"] == root.job_id
+
+        monkeypatch.setattr(ccr, "_read_runtime_jobs", lambda root: (None, None))
+        doc_without_join = ccr.build_control_room(
+            repo_root=macro_root, now="2026-09-03T00:00:00Z", bindings_path=bindings_path,
+        )
+        card_without_join = next(
+            c for c in doc_without_join["autonomy"]["responsibilities"]
+            if c["responsibility_ref"] == "WS:REAL-ROOT-JOIN"
+        )
+        assert card_without_join["root_job_id"] is None
+
+
+def test_gather_dispatch_evidence_resolves_the_child_carrier_not_the_aggregation_root(tmp_path):
+    """Blocker 2: the responsibility root is often an AGGREGATION root while
+    the executable Attempt belongs to a child/carrier Job.  The root here
+    never gets its own attempt at all -- proving the OLD
+    `list_attempts(job_id=root_job_id)` query would have found nothing for
+    this card."""
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture",
+    )
+    root = runtime.jobs.create_job("aggregation root probe")
+    child = runtime.jobs.create_job("carrier child", parent_job_id=root.job_id)
+    lease = runtime.attempts.claim_job(child.job_id, worker_id="worker-a")
+    assert lease is not None
+
+    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+
+    assert len(rows) == 1
+    assert rows[0]["attempt_state"] == "CLAIMED"
+
+
+def test_gather_dispatch_evidence_never_uses_max_attempt_number_across_a_stale_root_attempt(tmp_path):
+    """Proves the fix, not just its absence: the aggregation root itself
+    carries a STALE attempt (FAILED, then the job requeued) still sitting
+    in the `attempts` table -- the OLD `list_attempts(job_id=root_job_id)`
+    + `max(attempt_number)` query would have returned exactly that stale
+    FAILED attempt (the only/highest attempt_number row for that job_id).
+    The real, live carrier is the child's CLAIMED attempt."""
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture",
+    )
+    root = runtime.jobs.create_job("aggregation root probe")
+    root_lease = runtime.attempts.claim_job(root.job_id, worker_id="worker-a")
+    assert root_lease is not None
+    runtime.attempts.fail_attempt(
+        root_lease.attempt.attempt_id,
+        fence_generation=root_lease.attempt.fence_generation,
+        lease_token=root_lease.lease_token,
+        payload=ccr.executive_runtime.JobPayload(summary="stale", errors=["simulated"]),
+    )
+    runtime.jobs.requeue_job(root.job_id)  # clears root.current_attempt_id
+
+    child = runtime.jobs.create_job("carrier child", parent_job_id=root.job_id)
+    child_lease = runtime.attempts.claim_job(child.job_id, worker_id="worker-a")
+    assert child_lease is not None
+
+    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+
+    assert len(rows) == 1
+    # `max(attempt_number)` over `list_attempts(job_id=root.job_id)` alone
+    # is exactly the stale FAILED root attempt -- the wrong answer.
+    assert rows[0]["attempt_state"] == "CLAIMED"
+    assert rows[0]["attempt_state"] != "FAILED"
+
+
+def test_gather_dispatch_evidence_zero_attempt_candidates_stays_unknown(tmp_path):
+    """No job in the tree carries a live current attempt: `attempt_state`
+    must never appear (binding resolution may still contribute its own,
+    separately-attributed UNKNOWN evidence -- that is unrelated to attempt
+    selection and is unchanged by this blocker)."""
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    root = runtime.jobs.create_job("aggregation root probe")
+    runtime.jobs.create_job("carrier child, never claimed", parent_job_id=root.job_id)
+
+    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+    if rows:
+        assert "attempt_state" not in rows[0]
+        assert "terminal_return_state" not in rows[0]
+
+
+def test_gather_dispatch_evidence_multiple_attempt_candidates_never_picks_one(tmp_path):
+    """Two viable child carriers under the same root: reconciliation-
+    required, never a pick -- `attempt_state` must not appear at all."""
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture",
+    )
+    runtime.workers.register_worker(
+        "worker-b", provider="openai-codex", account_label="account-b", worker_type="fixture",
+    )
+    root = runtime.jobs.create_job("aggregation root probe")
+    child_one = runtime.jobs.create_job("carrier child one", parent_job_id=root.job_id)
+    child_two = runtime.jobs.create_job("carrier child two", parent_job_id=root.job_id)
+    lease_one = runtime.attempts.claim_job(child_one.job_id, worker_id="worker-a")
+    lease_two = runtime.attempts.claim_job(child_two.job_id, worker_id="worker-b")
+    assert lease_one is not None and lease_two is not None
+
+    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+    if rows:
+        assert "attempt_state" not in rows[0]
+
+
+def test_gather_dispatch_evidence_finds_a_child_job_wake_obligation_under_the_root(tmp_path):
+    """Blocker 3: `Event.job_id` records the SOURCE job (the child), while
+    the obligation's own `root_job_id` names the responsibility root -- the
+    OLD `list_events(job_id=root_job_id)` filter would have found nothing
+    for a child-sourced obligation."""
+    from control_plane import wake_events, wake_ledger as wl
+
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    root = runtime.jobs.create_job("aggregation root probe")
+    child = runtime.jobs.create_job("carrier child", parent_job_id=root.job_id)
+
+    obligation = wake_events.mint_obligation(
+        wake_kind="review_required",
+        source_kind="executive_runtime_event",
+        source_ref=f"runtime:job:{child.job_id}:1",
+        declared_target_seat="ceo",
+        job_id=child.job_id,
+        root_job_id=root.job_id,
+    )
+    repo = ccr.wake_persist.WakeLedgerRepository(runtime)
+    repo.append_record(wl.requested_record(obligation), obligation=obligation)
+
+    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+
+    assert len(rows) == 1
+    assert rows[0]["obligation_status"] == "PENDING_RETRYABLE"
+
+
+def test_gather_dispatch_evidence_two_child_obligations_under_the_root_stay_ambiguous(tmp_path):
+    from control_plane import wake_events, wake_ledger as wl
+
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    root = runtime.jobs.create_job("aggregation root probe")
+    child_one = runtime.jobs.create_job("carrier child one", parent_job_id=root.job_id)
+    child_two = runtime.jobs.create_job("carrier child two", parent_job_id=root.job_id)
+
+    repo = ccr.wake_persist.WakeLedgerRepository(runtime)
+    for index, child in enumerate((child_one, child_two), start=1):
+        obligation = wake_events.mint_obligation(
+            wake_kind="review_required",
+            source_kind="executive_runtime_event",
+            source_ref=f"runtime:job:{child.job_id}:{index}",
+            declared_target_seat="ceo",
+            job_id=child.job_id,
+            root_job_id=root.job_id,
+        )
+        repo.append_record(wl.requested_record(obligation), obligation=obligation)
+
+    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+    if rows:
+        assert "obligation_status" not in rows[0]
+
+
+def _persist_terminal_return_applied(
+    runtime, *, job_id, attempt_id, worker_id, root_job_id, terminal_digest="a" * 64,
+):
+    with runtime.store.transaction() as connection:
+        runtime.store.append_event(
+            connection,
+            aggregate_type="terminal_return_projection",
+            aggregate_id=attempt_id,
+            event_type="EXECUTIVE_TERMINAL_RETURN_APPLIED",
+            actor="executive_control_service",
+            job_id=job_id,
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+            payload={
+                "schema_version": "mastermind.executive_terminal_return_projection/v1",
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+                "root_job_id": root_job_id,
+                "message_key": "probe-key",
+                "terminal_digest": terminal_digest,
+                "candidate_digest": "b" * 64,
+            },
+        )
+
+
+def test_gather_dispatch_evidence_consumes_a_valid_terminal_return_applied_receipt(tmp_path):
+    """Blocker 4: a valid APPLIED receipt matching the exact root/job/
+    attempt/worker lets a terminal Attempt carry `terminal_return_state`
+    so the projection may render RETURNED."""
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture",
+    )
+    root = runtime.jobs.create_job("carrier probe")
+    lease = runtime.attempts.claim_job(root.job_id, worker_id="worker-a")
+    assert lease is not None
+    runtime.jobs.complete_job(
+        root.job_id,
+        ccr.executive_runtime.JobPayload(summary="done", current_state="complete"),
+    )
+
+    _persist_terminal_return_applied(
+        runtime, job_id=root.job_id, attempt_id=lease.attempt.attempt_id,
+        worker_id="worker-a", root_job_id=root.job_id,
+    )
+
+    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+    assert len(rows) == 1
+    assert rows[0]["terminal_return_state"] == "APPLIED"
+    assert rows[0]["attempt_state"] == "COMPLETED"
+
+
+def test_gather_dispatch_evidence_ignores_a_terminal_return_applied_receipt_with_mismatched_worker(tmp_path):
+    """A terminal Attempt with an APPLIED receipt that names a DIFFERENT
+    worker must never be consumed -- terminal Attempt status alone (or a
+    mismatched receipt) stays insufficient."""
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture",
+    )
+    runtime.workers.register_worker(
+        "worker-b", provider="openai-codex", account_label="account-b", worker_type="fixture",
+    )
+    root = runtime.jobs.create_job("carrier probe")
+    lease = runtime.attempts.claim_job(root.job_id, worker_id="worker-a")
+    assert lease is not None
+    runtime.jobs.complete_job(
+        root.job_id,
+        ccr.executive_runtime.JobPayload(summary="done", current_state="complete"),
+    )
+
+    _persist_terminal_return_applied(
+        runtime, job_id=root.job_id, attempt_id=lease.attempt.attempt_id,
+        worker_id="worker-b", root_job_id=root.job_id,
+    )
+
+    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+    assert len(rows) == 1
+    assert "terminal_return_state" not in rows[0]
+    assert rows[0]["attempt_state"] == "COMPLETED"

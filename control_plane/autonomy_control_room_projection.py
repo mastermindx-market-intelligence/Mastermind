@@ -990,6 +990,7 @@ def project_autonomy(
     generated_at: str,
     declared_blockers: Mapping[str, Mapping[str, Any]] | None = None,
     unmapped_responsibilities: Sequence[Mapping[str, Any]] | None = None,
+    runtime_root_candidates: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
     """Pure, deterministic projection of one Executive Steward snapshot.
 
@@ -1035,9 +1036,24 @@ def project_autonomy(
     for a genuinely idle estate — zero mapped responsibilities, nothing
     suppressed by a Steward-level issue, AND nothing suppressed as
     unmapped.
+
+    ``runtime_root_candidates`` (Blocker 1, review 5106453403) is optional
+    plain data — one entry per
+    :func:`runtime_root_candidates_from_runtime_jobs` result, keyed by
+    ``responsibility_ref`` — threaded the exact same additive way as
+    ``declared_blockers``/``unmapped_responsibilities``.  It never touches
+    ``root_job_id`` (which the Steward-owned fact already resolved to
+    ``None`` whenever a ref's candidate count is not exactly 1 — see
+    :func:`_resolved_runtime_root`: never a pick).  It only adds two
+    read-only fields to the matching card: ``root_job_candidates`` (the
+    sorted candidate list for this ref, or ``[]`` when absent here) and
+    ``root_job_ambiguous`` (``True`` exactly when that list has 2+ entries)
+    — so "no Runtime evidence at all" and "multiple DISTINCT Runtime roots,
+    reconciliation required" never read as the same null.
     """
     source_failure_codes = frozenset(f.code for f in snapshot.source_failures)
     declared_blockers = declared_blockers or {}
+    runtime_root_candidates = runtime_root_candidates or {}
     unmapped_rows = sorted(
         (dict(row) for row in (unmapped_responsibilities or ())),
         key=lambda row: (row.get("responsibility_ref") or "", row.get("reason") or ""),
@@ -1287,12 +1303,18 @@ def project_autonomy(
 
         owed_by_seat[owed_turn["seat"]] += 1
 
+        root_job_candidates = tuple(runtime_root_candidates.get(ref, ()))
         card = {
             "responsibility_ref": ref,
             "title": identity.title,
             "accountable_seat": identity.accountable_seat.value,
             "state": identity.state,
             "root_job_id": identity.root_job_id,
+            # Blocker 1: explicit ambiguity/reconciliation, distinct from
+            # plain "no Runtime evidence" -- root_job_id itself stays None
+            # in both cases (never a pick).
+            "root_job_candidates": sorted(root_job_candidates),
+            "root_job_ambiguous": len(root_job_candidates) > 1,
             "current_worker": current_worker,
             "current_sol_target": current_sol_target,
             "owed_turn": owed_turn,
@@ -1714,6 +1736,95 @@ _ACCOUNTABLE_SEAT_BY_OWNER: dict[str, Seat] = {
 }
 
 
+def _valid_root_job_id(value: Any) -> bool:
+    """Exact ``JOB-*`` shape check (mirrors ``executive_steward._require_job_
+    ref``, which this value is headed for) -- applied HERE, before
+    ``ResponsibilityFact`` construction, so a malformed ``root_job_id`` on
+    an otherwise-unrelated Runtime job row degrades to "no candidate" for
+    that row rather than aborting the whole responsibility's construction
+    (Fix 5's ``row_unreadable`` path is about the Agent-OS row itself, not
+    about auxiliary Runtime data joined in from a different source)."""
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and value.startswith("JOB-")
+        and not any(ch.isspace() for ch in value)
+    )
+
+
+def _runtime_roots_by_workstream(
+    runtime_jobs: Any,
+) -> dict[str, tuple[str, ...]]:
+    """Every DISTINCT, well-formed Runtime ``root_job_id`` cited under each
+    ``WS:<KEY>`` workstream ref, deduplicated and sorted for determinism.
+
+    Blocker 1 (review 5106453403): mirrors
+    ``chairman_control_room._group_jobs_by_ref``'s own workstream grouping
+    field-for-field (``job_id`` present, ``workstream`` a non-blank str) --
+    this function does not re-derive that join, it only adds the same kind
+    of validation to the sibling ``root_job_id`` field a public Runtime Job
+    also carries (``chairman_control_room._read_runtime_jobs``).  A row
+    whose ``root_job_id`` is absent or not a well-formed ``JOB-*`` token
+    contributes no candidate for its workstream -- never a guess, never a
+    title/newest/max/provider pick.
+    """
+    if not isinstance(runtime_jobs, Sequence) or isinstance(runtime_jobs, (str, bytes)):
+        return {}
+    grouped: dict[str, set[str]] = {}
+    for job in runtime_jobs:
+        if not isinstance(job, Mapping):
+            continue
+        workstream = job.get("workstream")
+        job_id = job.get("job_id")
+        root_job_id = job.get("root_job_id")
+        if not isinstance(workstream, str) or not workstream or job_id is None:
+            continue
+        if not _valid_root_job_id(root_job_id):
+            continue
+        grouped.setdefault(workstream, set()).add(root_job_id)
+    return {ref: tuple(sorted(roots)) for ref, roots in grouped.items()}
+
+
+def _resolved_runtime_root(candidates: tuple[str, ...]) -> str | None:
+    """ONE unique deduplicated Runtime root, or ``None``.
+
+    Zero candidates: no Runtime job cites this workstream at all -- stays
+    null (UNKNOWN downstream, via the existing ``runtime_root_missing``
+    routine-absence path).  Exactly one candidate: the accepted root.  Two
+    or more DISTINCT candidates: explicit ambiguity/reconciliation -- this
+    function still returns ``None`` (Law: never a pick -- no title, newest,
+    max, or provider tiebreak exists anywhere in this module); the caller
+    distinguishes the two null cases by re-consulting ``candidates`` itself
+    (``len(candidates) > 1``), which is exactly what
+    :func:`runtime_root_candidates_from_runtime_jobs` hands to
+    :func:`project_autonomy` so it can surface that distinction explicitly
+    on the rendered card.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def runtime_root_candidates_from_runtime_jobs(
+    runtime_jobs: Any,
+) -> dict[str, tuple[str, ...]]:
+    """Every workstream ref's full, deduplicated, sorted Runtime-root
+    candidate set (public wrapper over :func:`_runtime_roots_by_workstream`).
+
+    Blocker 1: plain data, threaded into :func:`project_autonomy`'s
+    ``runtime_root_candidates`` the same additive way as
+    ``declared_blockers``/``unmapped_responsibilities`` -- never a Steward
+    fact, never merged into ``ResponsibilityFact.root_job_id`` (which stays
+    ``None`` whenever this set's size is not exactly 1; see
+    :func:`_resolved_runtime_root`).  A ref with zero candidates is simply
+    absent from this mapping.  This is what lets the rendered card say
+    "ambiguous, reconciliation required" (2+ candidates) rather than
+    reading indistinguishably from "no Runtime job cites this workstream
+    at all" (0 candidates) -- both of which leave ``root_job_id`` null.
+    """
+    return _runtime_roots_by_workstream(runtime_jobs)
+
+
 def _workstream_ref(key: str) -> str:
     """The row's bare ``key`` as a full ``WS:<KEY>`` ref.
 
@@ -1770,8 +1881,21 @@ def _declared_blocker_receipt(row: Mapping[str, Any], key: str) -> dict[str, Any
 def _responsibility_facts_from_agent_os_state(
     agent_os_state: Mapping[str, Any] | None,
     generated_at: Any = None,
+    *,
+    runtime_jobs: Any = None,
 ) -> tuple[tuple[ResponsibilityFact, ...], dict[str, Seat], tuple[dict[str, Any], ...]]:
     """Real ``ResponsibilityFact`` rows, built only from structured fields.
+
+    ``runtime_jobs`` (Blocker 1, review 5106453403) is the same plain-data
+    list :func:`build_autonomy_snapshot` itself receives -- grouped by
+    workstream via :func:`_runtime_roots_by_workstream` and resolved to
+    ONE unique deduplicated Runtime root per workstream
+    (:func:`_resolved_runtime_root`), threaded into each constructed
+    fact's ``root_job_id``.  Zero candidates or ambiguous (2+ distinct)
+    candidates both resolve to ``None`` here -- never a title/newest/max/
+    provider pick; see :func:`runtime_root_candidates_from_runtime_jobs`
+    for how the ambiguous case is surfaced explicitly downstream instead
+    of reading identically to "no Runtime evidence at all".
 
     ``generated_at`` (Fix 1) is the injected reference timestamp, threaded
     straight through to :func:`_freshness_for` — the exact same argument
@@ -1839,6 +1963,7 @@ def _responsibility_facts_from_agent_os_state(
         return (), {}, ()
 
     observed_at, freshness = _freshness_for(agent_os_state.get("generated_at"), generated_at)
+    runtime_roots = _runtime_roots_by_workstream(runtime_jobs)
 
     facts: list[ResponsibilityFact] = []
     seat_by_key: dict[str, Seat] = {}
@@ -1876,13 +2001,20 @@ def _responsibility_facts_from_agent_os_state(
 
         status = row.get("status")
         state = status if isinstance(status, str) and status else None
+        ws_ref = _workstream_ref(key)
         try:
             fact = ResponsibilityFact(
-                responsibility_ref=_workstream_ref(key),
+                responsibility_ref=ws_ref,
                 title=title,
                 accountable_seat=seat,
                 state=state,
-                root_job_id=None,  # no workstreams[] row carries a JOB-* field
+                # Blocker 1 (review 5106453403): the ONE unique deduplicated
+                # Runtime root cited by this workstream's real Runtime jobs
+                # -- ``None`` for both zero candidates and 2+ distinct
+                # candidates (never a title/newest/max/provider pick; see
+                # runtime_root_candidates_from_runtime_jobs for how the
+                # ambiguous case is surfaced separately, on the card).
+                root_job_id=_resolved_runtime_root(runtime_roots.get(ws_ref, ())),
                 source=SourceRef(
                     owner=SourceOwner.AGENT_OS,
                     ref=source_ref,
@@ -2358,13 +2490,25 @@ def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[s
         if attempt_state in _ATTEMPT_IN_PROGRESS:
             return "STARTED", f"attempt_in_progress:{attempt_state}", historical
         if attempt_state in _ATTEMPT_TERMINAL:
-            if not _return_receipt_proven(row, generated_at):
-                # Blocker 3: "Attempt terminality ALONE is never a worker
-                # return" — a terminal Attempt with no validated exact-child
-                # Observer return receipt (closed return_kind + exact
-                # operation/carrier identity + observed edge + observation
-                # time) can never advance past this; RETURNED/CONTINUED/
-                # STOPPED are all unavailable.
+            # review 5106453403, Blocker 4: an ADDITIONAL, independent proof
+            # of return -- a validated durable EXECUTIVE_TERMINAL_RETURN_
+            # APPLIED receipt matching the exact root/job/attempt/worker
+            # (the gather layer's own `terminal_return_state == "APPLIED"`
+            # marker; see chairman_control_room._gather_dispatch_evidence).
+            # This is a DIFFERENT owner than the Dialogue/Observer watch/
+            # return receipt below (still unconsumed anywhere in this
+            # codebase) -- either one, alone, is sufficient; terminal
+            # Attempt status alone remains insufficient either way.
+            receipt_proven = _return_receipt_proven(row, generated_at)
+            applied_proven = row.get("terminal_return_state") == "APPLIED"
+            if not (receipt_proven or applied_proven):
+                # Blocker 3 (review 5103135217): "Attempt terminality ALONE
+                # is never a worker return" — a terminal Attempt with no
+                # validated exact-child Observer return receipt (closed
+                # return_kind + exact operation/carrier identity + observed
+                # edge + observation time) AND no durable terminal-return
+                # APPLIED receipt can never advance past this;
+                # RETURNED/CONTINUED/STOPPED are all unavailable.
                 return "WATCH_UNPROVEN", "watch_evidence_incomplete", historical
             return_dt = _parse_iso8601(row.get("return_observed_at"))
             decision = row.get("sol_decision")
@@ -2408,7 +2552,14 @@ def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[s
                 return "CONTINUED", "sol_continue_same_carrier", historical
             if valid_decision and decision == "STOP":
                 return "STOPPED", "sol_stop_same_carrier", historical
-            return "RETURNED", "awaiting_sol_decision", historical
+            if receipt_proven:
+                return "RETURNED", "awaiting_sol_decision", historical
+            # applied_proven only (review 5106453403, Blocker 4): a named,
+            # honest reason distinct from the Dialogue/Observer path -- live
+            # CONTINUE/STOP stays UNKNOWN here too (no sol_decision owner
+            # protects this path yet either), `valid_decision` above is
+            # structurally unreachable without watch_* identity to match.
+            return "RETURNED", "terminal_return_applied", historical
         return "UNKNOWN", f"unrecognized_attempt_state:{attempt_state}", historical
 
     # No Attempt evidence at all: Law 4 forbids inferring STARTED from
@@ -2456,6 +2607,13 @@ _DISPATCH_DATA_FIELDS = (
     "return_edge_ref", "return_observed_at", "sol_decision",
     "sol_decision_carrier_ref", "sol_decision_child_ref",
     "sol_decision_operation", "sol_decision_at",
+    # Blocker 4 (review 5106453403): the gather layer's own closed marker
+    # for a validated EXECUTIVE_TERMINAL_RETURN_APPLIED receipt matching
+    # the exact root/job/attempt/worker -- see
+    # _return_receipt_or_applied_proven below.  Deliberately its own field,
+    # never merged into the watch_*/return_* Dialogue/Observer vocabulary
+    # (a wholly different, still-unconsumed owner).
+    "terminal_return_state",
 )
 _DISPATCH_ALL_FIELDS = frozenset(_DISPATCH_JOIN_FIELDS + _DISPATCH_DATA_FIELDS)
 
@@ -2486,6 +2644,7 @@ _DISPATCH_CLOSED_VOCAB: dict[str, frozenset[str]] = {
     "effect_state": frozenset({"none", "applied", "effect_unknown"}),
     "return_kind": frozenset(_RETURN_KINDS),
     "sol_decision": frozenset({"CONTINUE", "STOP"}),
+    "terminal_return_state": frozenset({"APPLIED"}),
 }
 
 #: Bounded lengths (bytes, UTF-8).  A join field is bounded tighter — it is
@@ -2883,12 +3042,18 @@ def build_autonomy_snapshot(
     compositor's own call signature and to keep this function
     forward-extensible) but not read: a GitHub open PR has no corresponding
     Steward fact type in this vocabulary, and ``ResponsibilityFact``
-    construction is driven entirely by ``agent_os_state``'s own structured
+    construction is driven by ``agent_os_state``'s own structured
     ``workstreams[]`` fields — see module docstring point 8 for the full
     evidence, and point 9 for why every constructed surface's
-    ``reviewed_at`` is ``None``.  ``RuntimeFact`` is still never
-    constructed (``runtime_jobs`` carries none of its required fields), and
-    — bug-fix packet, 2026-09-01 — ``BlockerFact`` is never constructed by
+    ``reviewed_at`` is ``None``.  ``runtime_jobs`` (Blocker 1, review
+    5106453403) IS now read — but only for ``ResponsibilityFact.
+    root_job_id``, via :func:`_responsibility_facts_from_agent_os_state`'s
+    ``runtime_jobs`` keyword (:func:`_runtime_roots_by_workstream` +
+    :func:`_resolved_runtime_root`): ONE unique deduplicated Runtime root
+    per workstream, never a title/newest/max/provider pick.  ``RuntimeFact``
+    is still never constructed (``runtime_jobs`` carries none of its other
+    required fields), and — bug-fix packet, 2026-09-01 — ``BlockerFact`` is
+    never constructed by
     this function either: ``blockers`` on the returned snapshot is always
     ``()``.  ``agent_os_state``'s ``blocked_by``/``needs_ceo`` signal is
     real and is still surfaced, but honestly — call
@@ -2912,12 +3077,14 @@ def build_autonomy_snapshot(
     :func:`project_autonomy`'s ``unmapped_responsibilities`` parameter —
     the exact same shape of thread ``declared_blockers`` already uses.
     """
-    del active_builds, boot_packet, runtime_jobs  # documented: unused (point 8)
+    del active_builds, boot_packet  # documented: unused (point 8)
 
     attention_facts = _attention_facts_from_inbox(inbox, generated_at)
     surface_facts = _surface_facts_from_bindings(bindings, generated_at)
     responsibility_facts, _seat_by_key, _unmapped = (
-        _responsibility_facts_from_agent_os_state(agent_os_state, generated_at)
+        _responsibility_facts_from_agent_os_state(
+            agent_os_state, generated_at, runtime_jobs=runtime_jobs,
+        )
     )
 
     return ExecutiveStewardSnapshot(
@@ -2944,4 +3111,5 @@ __all__ = [
     "build_autonomy_snapshot",
     "declared_blockers_from_agent_os_state",
     "unmapped_responsibilities_from_agent_os_state",
+    "runtime_root_candidates_from_runtime_jobs",
 ]
