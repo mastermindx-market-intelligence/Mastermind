@@ -1088,3 +1088,94 @@ def test_post_effect_receipt_failure_quarantines_and_never_retries(
         assert adapters[0].lifecycle.count("provider_start") == 1
 
     asyncio.run(scenario())
+
+
+def test_ambiguous_provider_response_quarantines_and_never_retries(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+        original_factory = broker.operator_adapter_factory
+
+        def ambiguous_factory(*args):
+            assert original_factory is not None
+            adapter = original_factory(*args)
+
+            def ambiguous_start(**_kwargs):
+                adapter.lifecycle.append("provider_start")
+                raise TimeoutError("private ambiguous provider diagnostic")
+
+            adapter.start_session = ambiguous_start
+            return adapter
+
+        broker.operator_adapter_factory = ambiguous_factory
+        epoch = SessionEpochRef("epoch-ambiguous", "ATT-AMBIGUOUS", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-ambiguous", "epoch-ambiguous", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+
+        with pytest.raises(BrokerStateError, match="effect is unknown") as failed:
+            await broker.execute(
+                _request("ohf-start", payload, "ambiguous-first"), peer=peer
+            )
+        assert "private ambiguous provider diagnostic" not in str(failed.value)
+        assert adapters[0].lifecycle.count("provider_start") == 1
+        assert sweeper.calls == []
+
+        with pytest.raises(BrokerStateError, match="quarantined"):
+            await broker.execute(
+                _request("ohf-start", payload, "ambiguous-retry"), peer=peer
+            )
+        assert adapters[0].lifecycle.count("provider_start") == 1
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_provider_dispatch_stays_quarantined_while_thread_unwinds(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+        entered = threading.Event()
+        release = threading.Event()
+        original_factory = broker.operator_adapter_factory
+
+        def cancellable_factory(*args):
+            assert original_factory is not None
+            adapter = original_factory(*args)
+
+            def cancellable_start(**_kwargs):
+                adapter.lifecycle.append("provider_start")
+                entered.set()
+                assert release.wait(3)
+                return SessionStartObservation("thread-cancelled", adapter.process)
+
+            adapter.start_session = cancellable_start
+            return adapter
+
+        broker.operator_adapter_factory = cancellable_factory
+        epoch = SessionEpochRef("epoch-cancelled", "ATT-CANCELLED", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-cancelled", "epoch-cancelled", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+        task = asyncio.create_task(
+            broker.execute(
+                _request("ohf-start", payload, "cancelled-first"), peer=peer
+            )
+        )
+        assert await asyncio.to_thread(entered.wait, 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        with pytest.raises(BrokerStateError, match="quarantined"):
+            await broker.execute(
+                _request("ohf-start", payload, "cancelled-retry"), peer=peer
+            )
+        release.set()
+        await asyncio.sleep(0)
+        assert adapters[0].lifecycle.count("provider_start") == 1
+        assert sweeper.calls == []
+
+    asyncio.run(scenario())

@@ -105,7 +105,6 @@ from control_plane.operator_harness_wire import (
 )
 from control_plane.operator_materialization_receipt import (
     MATERIALIZATION_STATUS_SCHEMA,
-    MaterializationReceiptConflict,
     OperatorMaterializationReceipt,
     OperatorMaterializationReceiptError,
     build_operator_materialization_receipt,
@@ -1807,7 +1806,7 @@ class ExecutiveWorkerBroker:
         adapter: OperatorAdapter | None = None
         resource: OperatorAttemptResource | None = None
         state: _BrokerOperatorRun | None = None
-        effect_unknown = False
+        provider_dispatch_committed = False
         try:
             adapter, prompts, workspace = self._operator_factory(requested)
             if self.operator_resource_factory is not None:
@@ -1835,6 +1834,10 @@ class ExecutiveWorkerBroker:
                     epoch=epoch,
                     generation=generation,
                 )
+            # From this assignment onward no caller may infer that an adapter
+            # exception means "no provider effect".  The provider has no native
+            # idempotency key, so missing durable evidence is EFFECT_UNKNOWN.
+            provider_dispatch_committed = True
             if resume:
                 assert handoff is not None
                 observation = await self._operator_call(
@@ -1913,7 +1916,6 @@ class ExecutiveWorkerBroker:
                     expected_owner_uid=self.policy.worker_uid,
                 )
             except OperatorMaterializationReceiptError as exc:
-                effect_unknown = True
                 async with self._state_lock:
                     self._quarantined_reason = (
                         "operator materialization effect unknown"
@@ -1939,8 +1941,19 @@ class ExecutiveWorkerBroker:
                 while len(self._operator_session_attempts) > 64:
                     self._operator_session_attempts.popitem(last=False)
             return self._materialization_result(receipt)
-        except Exception:
-            if adapter is not None and state is None and not effect_unknown:
+        except BaseException as exc:
+            if provider_dispatch_committed and state is None:
+                async with self._state_lock:
+                    self._quarantined_reason = (
+                        "operator materialization effect unknown"
+                    )
+                if not isinstance(exc, Exception):
+                    raise
+                raise BrokerStateError(
+                    "operator materialization provider dispatch has no durable "
+                    "receipt; provider effect is unknown"
+                ) from exc
+            if adapter is not None and state is None and isinstance(exc, Exception):
                 try:
                     if resource is not None:
                         await self._operator_call(

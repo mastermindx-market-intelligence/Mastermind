@@ -172,6 +172,21 @@ def test_builder_refuses_secret_shaped_attestation_and_cross_identity_drift() ->
     with pytest.raises(OperatorMaterializationReceiptError, match="process identity"):
         build_operator_materialization_receipt(**values)
 
+    values = _inputs()
+    values.pop("expected_provider_session_id")
+    values["provider_home_identity"] = {
+        **values["provider_home_identity"],
+        "path": "/var/empty/../private/codex-01",
+    }
+    with pytest.raises(OperatorMaterializationReceiptError, match="canonical absolute"):
+        build_operator_materialization_receipt(**values)
+
+    values = _inputs()
+    values.pop("expected_provider_session_id")
+    values["observed_attestation"] = {1: "integer key"}
+    with pytest.raises(OperatorMaterializationReceiptError, match="keys must be strings"):
+        build_operator_materialization_receipt(**values)
+
 
 def test_create_only_persistence_round_trips_and_exact_replay_is_noop(
     tmp_path: Path,

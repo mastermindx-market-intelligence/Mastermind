@@ -61,6 +61,8 @@ from control_plane.operator_materialization_receipt import (
     OperatorMaterializationReceiptError,
     OperatorMaterializationStatusObservation,
     operator_materialization_status,
+    requested_profile_digest,
+    validate_materialization_request,
 )
 from control_plane.worker_browser_b1 import (
     BrowserReviewError,
@@ -217,6 +219,29 @@ class RemoteCodexOperatorAdapter:
     ) -> OperatorMaterializationStatusObservation:
         """Read one exact receipt status without invoking or mutating a provider."""
 
+        operation_kind = (
+            "resume_session" if provider_session is not None else "start_session"
+        )
+        expected_provider_session_id = (
+            provider_session.provider_session_id
+            if provider_session is not None
+            else None
+        )
+        try:
+            validate_materialization_request(
+                operation_command_id=operation_id.command_id,
+                operation_kind=operation_kind,
+                attempt_id=epoch.attempt_id,
+                worker_id=epoch.worker_id,
+                session_epoch_id=epoch.session_epoch_id,
+                process_generation_id=generation.process_generation_id,
+                generation_number=generation.generation_number,
+                expected_provider_session_id=expected_provider_session_id,
+            )
+        except OperatorMaterializationReceiptError as exc:
+            raise BrokerProtocolError(
+                "remote OHF materialization request identity is invalid"
+            ) from exc
         payload = {
             "operation_id": to_wire(operation_id),
             "requested": to_wire(requested),
@@ -229,11 +254,31 @@ class RemoteCodexOperatorAdapter:
             "ohf-materialization-status", payload, timeout_seconds=30
         )
         try:
-            return operator_materialization_status(result)
+            status = operator_materialization_status(result)
         except OperatorMaterializationReceiptError as exc:
             raise BrokerProtocolError(
                 "remote OHF materialization status is invalid"
             ) from exc
+        receipt = status.receipt
+        if receipt is not None and not (
+            receipt.operation_command_id == operation_id.command_id
+            and receipt.operation_kind == operation_kind
+            and receipt.attempt_id == epoch.attempt_id
+            and receipt.worker_id == epoch.worker_id
+            and receipt.session_epoch_id == epoch.session_epoch_id
+            and receipt.process_generation_id == generation.process_generation_id
+            and receipt.generation_number == generation.generation_number
+            and receipt.requested_profile_digest
+            == requested_profile_digest(to_wire(requested))
+            and (
+                expected_provider_session_id is None
+                or receipt.provider_session_id == expected_provider_session_id
+            )
+        ):
+            raise BrokerProtocolError(
+                "remote OHF materialization receipt identity is invalid"
+            )
+        return status
 
     def _receipt(self, generation: ProcessGenerationRef) -> dict[str, Any]:
         try:

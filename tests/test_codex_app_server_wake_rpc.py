@@ -16,6 +16,7 @@ from control_plane import runtime_binding_projection
 from control_plane.executive_worker_broker import (
     BrokerEffectUnknownError,
     BrokerPreSubmitError,
+    BrokerProtocolError,
     RemoteBrokerError,
 )
 from control_plane.operator_harness_contract import (
@@ -1548,6 +1549,19 @@ def test_remote_adapter_uses_one_bounded_materialization_status_request() -> Non
         "generation": to_wire(generation),
     }
     assert timeout == 30
+
+    drifted = dataclasses.replace(requested, requested_model="gpt-drift")
+    mismatched_remote = RemoteCodexOperatorAdapter(
+        FakeMaterializationStatusClient(dict(broker.response)),
+        turn_input_loader=lambda _turn: "unused",
+    )
+    with pytest.raises(BrokerProtocolError, match="identity"):
+        mismatched_remote.materialization_status(
+            operation_id=OperationId(f"ohf-op:start:{attempt_id}"),
+            requested=drifted,
+            epoch=epoch,
+            generation=generation,
+        )
 
 
 def _real_broker_with_owned_adapter(

@@ -11,6 +11,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import posixpath
 import re
 import stat
 from collections.abc import Mapping
@@ -159,6 +160,7 @@ def canonical_json_bytes(value: Any) -> bytes:
     """Encode canonical UTF-8 JSON or fail without lossy coercion."""
 
     try:
+        _validate_json_value(value)
         return json.dumps(
             value,
             sort_keys=True,
@@ -166,7 +168,9 @@ def canonical_json_bytes(value: Any) -> bytes:
             ensure_ascii=False,
             allow_nan=False,
         ).encode("utf-8", errors="strict")
-    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+    except OperatorMaterializationReceiptError:
+        raise
+    except (RecursionError, TypeError, ValueError, UnicodeEncodeError) as exc:
         raise OperatorMaterializationReceiptError(
             "materialization receipt contains noncanonical JSON data"
         ) from exc
@@ -569,7 +573,12 @@ def _process_credentials(value: object) -> dict[str, Any]:
 def _provider_home_identity(value: object) -> dict[str, Any]:
     raw = _closed_mapping(value, "provider home identity", _HOME_FIELDS)
     path = _text(raw["path"], "provider home path")
-    if not path.startswith("/") or "//" in path or Path(path).as_posix() != path:
+    if (
+        not path.startswith("/")
+        or "//" in path
+        or posixpath.normpath(path) != path
+        or (path != "/" and path.endswith("/"))
+    ):
         raise OperatorMaterializationReceiptError(
             "provider home path is not canonical absolute"
         )
@@ -595,6 +604,30 @@ def _json_object(value: object, name: str) -> dict[str, Any]:
     if len(encoded) > MAX_MATERIALIZATION_RECEIPT_BYTES:
         raise OperatorMaterializationReceiptError(f"{name} exceeds its byte ceiling")
     return json.loads(encoded.decode("utf-8"))
+
+
+def _validate_json_value(value: object, *, depth: int = 0) -> None:
+    if depth > 64:
+        raise OperatorMaterializationReceiptError(
+            "materialization receipt JSON nesting exceeds its bound"
+        )
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise OperatorMaterializationReceiptError(
+                    "materialization receipt JSON object keys must be strings"
+                )
+            _validate_json_value(item, depth=depth + 1)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _validate_json_value(item, depth=depth + 1)
+        return
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return
+    raise OperatorMaterializationReceiptError(
+        "materialization receipt contains a non-JSON value"
+    )
 
 
 def _refuse_credential_shaped_attestation(value: object) -> None:
