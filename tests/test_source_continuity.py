@@ -932,13 +932,9 @@ class _ProbeRunner:
             "--",
             *FINAL_OWNED_PATHS,
         ):
-            rows = []
-            for index, path in enumerate(FINAL_OWNED_PATHS):
-                rows.append(
-                    f"100644 blob {index + 7:x}" * 0
-                )
+            hex_chars = "789abc"
             payload = "".join(
-                f"100644 blob {str(index + 7) * 40} {100 + index}\t{path}\0"
+                f"100644 blob {hex_chars[index] * 40} {100 + index}\t{path}\0"
                 for index, path in enumerate(FINAL_OWNED_PATHS)
             )
             return self._done(stdout=payload)
@@ -1048,9 +1044,14 @@ def test_cli_collects_facts_with_canonical_read_only_probes_and_prints_one_recei
         assert call[1] not in forbidden
         assert kwargs.get("cwd") == WORKSPACE
         assert kwargs.get("env", {}).get("GIT_OPTIONAL_LOCKS") == "0"
+        assert kwargs.get("env", {}).get("GIT_NO_LAZY_FETCH") == "1"
         assert "GITHUB_TOKEN" not in kwargs.get("env", {})
     assert any(call[1] == "ls-tree" for call in runner.calls)
-    assert any(call[1:4] == ("diff", "--name-only", "-z") and call[-1] == f"{BASE_SHA}..{HEAD_SHA}" for call in runner.calls)
+    assert any(
+        call[1:4] == ("diff", "--name-only", "-z")
+        and call[-1] == f"{BASE_SHA}..{HEAD_SHA}"
+        for call in runner.calls
+    )
     assert http.calls
     assert all(call[0].startswith(API_ROOT + "/") for call in http.calls)
 
