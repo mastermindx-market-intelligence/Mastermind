@@ -1,17 +1,18 @@
 """Ephemeral W3C runtime primitives owned by the existing Agent Relay process.
 
 The waiter registry and candidate collector are deliberately process-local and
-persistence-free.  They own no dialogue, Wake, provider, lifecycle, target,
+persistence-free. They own no dialogue, Wake, provider, lifecycle, target,
 retry, queue, cursor, scheduler, thread pool, or durable authority.
 """
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import math
 import re
 import secrets
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
@@ -185,25 +186,35 @@ class ActiveWaiterRegistry:
             self.unregister(registration)
 
 
-class AsyncCandidateCollector(Generic[_T]):
-    """Collect one bounded immutable candidate tuple without blocking Relay.
+def _is_async_callable(value: object) -> bool:
+    """Return whether calling ``value`` starts in this event loop asynchronously."""
 
-    The source must be an async iterator.  No synchronous iterable, thread, or
-    executor fallback exists.  Only one collection may be in flight; every
-    exit path closes the iterator when it exposes ``aclose`` and releases the
-    in-flight guard so a later healthy pass can recover.
+    if inspect.iscoroutinefunction(value):
+        return True
+    return inspect.iscoroutinefunction(getattr(value, "__call__", None))
+
+
+class AsyncCandidateCollector(Generic[_T]):
+    """Acquire and collect one bounded immutable candidate tuple asynchronously.
+
+    The source itself must be an async callable and must return one async
+    iterator. Source acquisition and iteration share one absolute collection
+    timeout. No synchronous callback, iterable fallback, thread, or executor
+    escape exists. Only one collection may be in flight; every exit path closes
+    an acquired iterator when it exposes ``aclose`` and releases the in-flight
+    guard so a later healthy pass can recover.
     """
 
     def __init__(
         self,
         *,
-        source: Callable[[], AsyncIterator[_T]],
+        source: Callable[[], Awaitable[AsyncIterator[_T]]],
         max_candidates: int,
         timeout_seconds: float,
         cleanup_timeout_seconds: float = 1.0,
     ) -> None:
-        if not callable(source):
-            raise TypeError("source must be callable")
+        if not _is_async_callable(source):
+            raise TypeError("source must be an async callable")
         if (
             isinstance(max_candidates, bool)
             or not isinstance(max_candidates, int)
@@ -261,32 +272,41 @@ class AsyncCandidateCollector(Generic[_T]):
         iterator: object | None = None
         try:
             try:
-                iterator = self._source()
-            except Exception as exc:
-                raise CandidateCollectionUnavailable() from exc
-            if not hasattr(iterator, "__aiter__") or not hasattr(iterator, "__anext__"):
-                raise CandidateCollectionUnavailable()
-
-            values: list[_T] = []
-            try:
                 async with asyncio.timeout(self.timeout_seconds):
-                    async for value in iterator:  # type: ignore[union-attr]
-                        values.append(value)
-                        if len(values) > self.max_candidates:
-                            raise CandidateCollectionOverflow()
-            except CandidateCollectionOverflow:
+                    try:
+                        iterator = await self._source()
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        raise CandidateCollectionUnavailable() from exc
+
+                    if (
+                        not hasattr(iterator, "__aiter__")
+                        or not hasattr(iterator, "__anext__")
+                    ):
+                        raise CandidateCollectionUnavailable()
+
+                    values: list[_T] = []
+                    try:
+                        async for value in iterator:  # type: ignore[union-attr]
+                            values.append(value)
+                            if len(values) > self.max_candidates:
+                                raise CandidateCollectionOverflow()
+                    except (CandidateCollectionOverflow, asyncio.CancelledError):
+                        raise
+                    except Exception as exc:
+                        raise CandidateCollectionUnavailable() from exc
+                    return tuple(values)
+            except (CandidateCollectionOverflow, CandidateCollectionUnavailable):
                 raise
             except TimeoutError as exc:
                 raise CandidateCollectionTimeout() from exc
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                raise CandidateCollectionUnavailable() from exc
-            return tuple(values)
         finally:
-            if iterator is not None:
-                await self._close(iterator)
-            self._inflight = False
+            try:
+                if iterator is not None:
+                    await self._close(iterator)
+            finally:
+                self._inflight = False
 
 
 __all__ = [
