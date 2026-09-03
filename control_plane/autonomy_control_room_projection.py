@@ -1114,6 +1114,17 @@ def project_autonomy(
             contributing_sources.add(blocker_fact.source)
         contributing_sources.update(f.source for f in attention_facts)
         contributing_sources.update(surface_sources)
+        # Repair A1 (Sol review addendum, 2026-09-03): a plain Agent-OS
+        # `declared_blocker` can drive `owed_turn.seat == "chairman"`, yet its
+        # own SourceRef participated in freshness NOWHERE — so a years-old
+        # declared block resolved as fresh evidence and could raise an urgent
+        # Chairman call.  It is a contributing source like any other; only its
+        # OWNERSHIP is separate (never a BlockerFact, never merged into the
+        # Steward blocker), and folding the receipt in changes no attribution.
+        if declared_blocker_data is not None:
+            declared_source = declared_blocker_data.get("source")
+            if declared_source is not None:
+                contributing_sources.add(declared_source)
 
         # Stale (or otherwise problem-flagged) evidence a steward call
         # REFUSED/DEGRADED to hand back as `.data` (e.g. `stale_runtime_
@@ -1239,8 +1250,22 @@ def project_autonomy(
         # the Chairman is a Chairman decision.  Under-suppressing here is
         # the safe direction — silently hiding a Chairman decision behind
         # an unprovable "a worker is handling it" is not.
+        # Repair A2 (Sol review addendum, 2026-09-03): urgency is a claim about
+        # NOW, so it requires evidence that is current.  Without this gate the
+        # top-level `chairman_decisions` queue and the UI could render
+        # "YOUR CALL / Only you can decide" on a card simultaneously labelled
+        # HISTORY / not actionable — exactly the stale-history-as-urgency
+        # defect this surface exists to prevent.
+        #
+        # The gate is FRESHNESS, deliberately NOT general `is_actionable`: a
+        # CURRENT canonical EFFECT_UNKNOWN reconciliation blocker is a genuine
+        # Chairman decision even though retry/operation actionability is false.
+        # `freshness_unknown` is not `current` and therefore cannot be urgent.
+        # Nothing is erased: the historical owed_turn, blocker, attention and
+        # raw receipts stay on the card for inspection.
         chairman_decision_required = (
             owed_turn["seat"] == "chairman"
+            and freshness == Freshness.CURRENT.value
             and not any(f.target_seat in (Seat.CEO, Seat.COO) for f in attention_facts)
         )
         if chairman_decision_required and current_worker is not None:

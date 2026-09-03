@@ -780,7 +780,15 @@ def test_x1_autonomy_composition_leads_with_owed_action_not_event_volume() -> No
     assert decisions < ledger < listing < gaps
 
     ledger_fn = block[block.index("function auLedger(projection)") : block.index("function auDecisions")]
-    assert "projection.owed_by_seat" in ledger_fn
+    # Sol addendum 3 (2026-09-03) moved the ledger's source: it previously
+    # rendered the raw all-history `projection.owed_by_seat`, which let an
+    # all-stale packet display seat counts and light the Chairman cell while
+    # the reading beside it said history 40 / live 0.  The ledger is a
+    # CURRENT-ACTION surface, so its turns are derived from actionable cards.
+    # This assertion moved with that ruling; the ordering, seat-order and
+    # reading pins around it are unchanged.
+    assert "projection.responsibilities" in ledger_fn
+    assert "card.is_actionable !== true" in ledger_fn
     assert 'AU_SEAT_ORDER.forEach' in ledger_fn
     for pair in ('["live", counts.actionable]', '["history", counts.stale]', '["gated", counts.blocked]'):
         assert pair in ledger_fn
@@ -985,3 +993,63 @@ def test_x1_autonomy_declared_blocker_is_rendered_and_labelled_as_agent_os() -> 
         if ".ccr-au-declared" in line and not line.strip().startswith("*")
     )
     assert "#" not in declared_rules
+
+
+# ---------------------------------------------------------------------------
+# Sol review addenda 2 + 3 (2026-09-03): the action surface shows CURRENT work
+#
+# On the real all-stale packet the ledger lit the Chairman cell "is-yours" and
+# cards still offered an owed-action "Open" jump, both built from recorded
+# history, directly beside a reading that said history 40 / live 0.
+# ---------------------------------------------------------------------------
+
+
+def test_addendum2_no_owed_action_jump_from_a_non_actionable_card() -> None:
+    """Repair B: an owed-action Open is a present-tense instruction."""
+    block = _autonomy_js()
+    binding = block[block.index("function auOwedBinding(") :]
+    binding = binding[: binding.index("\n  }")]
+
+    # the actionability gate exists and precedes any destination lookup
+    assert "card.is_actionable !== true" in binding
+    assert binding.index("card.is_actionable !== true") < binding.index("auOwedSeat(card)")
+    # the older EFFECT_UNKNOWN hold suppression is retained, not replaced
+    assert "auIsHold(card)" in binding
+    # Detail stays reachable for forensic inspection of stale cards
+    assert 'text: "Detail"' in block or '"Detail"' in block
+
+
+def test_addendum3_seat_ledger_counts_only_currently_actionable_turns() -> None:
+    """Repair C: the ledger is a current-action surface, not a history tally."""
+    block = _autonomy_js()
+    ledger = block[block.index("function auLedger(") :]
+    ledger = ledger[: ledger.index("\n  }")]
+
+    # per-seat turns are derived from actionable cards, not raw owed_by_seat
+    assert "projection.responsibilities" in ledger
+    assert "card.is_actionable !== true" in ledger
+    # the raw all-history map is no longer the displayed allocation
+    assert "projection.owed_by_seat || {}" not in ledger
+    # the urgent Chairman treatment still keys off the derived count
+    assert 'seat === "chairman" && value > 0' in ledger
+    # history is preserved in the reading, not erased
+    assert '["history", counts.stale]' in ledger
+    assert '["carried", counts.total]' in ledger
+
+
+def test_addendum_turn_reason_token_matches_the_backend() -> None:
+    """Repair D: the UI keyed a token the backend never emits."""
+    js = JS.read_text(encoding="utf-8")
+    projection = (
+        ROOT / "control_plane" / "autonomy_control_room_projection.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"reason": "worker_runtime_present"' in projection
+    assert "worker_runtime_present:" in js
+    # Dead drift removed: the map KEY is gone, so nothing silently falls
+    # through to the default any more.  Both files still mention the old
+    # spelling in prose that explains why it was wrong, which is exactly the
+    # kind of note that stops the drift being reintroduced — so this asserts
+    # on the code, not on the word appearing anywhere in the file.
+    assert "worker_runtime_active:" not in js
+    assert '"worker_runtime_active"' not in projection

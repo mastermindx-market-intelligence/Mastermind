@@ -2754,3 +2754,100 @@ def test_final_fix3_one_microsecond_past_budget_boundary_is_stale():
     card = _card(doc, "WS:FINALFIX3-PAST-BOUNDARY")
 
     assert card["freshness"] == "stale"
+
+
+# ---------------------------------------------------------------------------
+# Sol review addenda (2026-09-03): stale history must never read as urgency
+#
+# On the real all-stale evidence packet the product could still raise
+# "YOUR CALL / Only you can decide" on a card simultaneously labelled
+# HISTORY / not actionable.  Urgency is a claim about NOW, so it requires
+# CURRENT evidence.  These are mutation-killing: each fails if its repair is
+# reverted.  Nothing is erased — every case below re-asserts that the
+# historical owed turn, attribution and receipts survive on the card.
+# ---------------------------------------------------------------------------
+
+
+def test_addendum_stale_chairman_attention_keeps_history_but_is_not_urgent():
+    """A STALE Chairman-targeted AttentionFact owes the turn but is history."""
+    snap = _snapshot(
+        responsibilities=(_responsibility(freshness="STALE"),),
+        attention=(_attention(attention_id="ATT-STALE-CHAIR", target="CHAIRMAN", freshness="STALE"),),
+    )
+    doc = proj.project_autonomy(snap, generated_at="2026-09-01T00:00:00Z")
+    card = _card(doc, "WS:AD-CR1A")
+
+    assert card["freshness"] == "stale"
+    assert card["chairman_decision_required"] is False
+    assert "WS:AD-CR1A" not in doc["chairman_decisions"]
+    # Recorded here because it is easy to assume otherwise: a STALE attention
+    # already yields no owed-turn signal at all, so this card is defended by
+    # the pre-existing owed-turn classifier rather than by the freshness gate.
+    # The identical CURRENT fact does produce seat "chairman" via
+    # "attention_targets_seat" — see the EFFECT_UNKNOWN positive control below.
+    assert card["owed_turn"]["seat"] == "unknown"
+    assert card["owed_turn"]["reason"] == "no_owed_turn_signal"
+    assert card["source_receipts"]  # receipts survive regardless
+
+
+def test_addendum_stale_chairman_blocker_keeps_history_but_is_not_urgent():
+    """A STALE Chairman-targeted BlockerFact: same rule, different fact kind."""
+    snap = _snapshot(
+        responsibilities=(_responsibility(freshness="STALE"),),
+        blockers=(_blocker(target="CHAIRMAN", freshness="STALE"),),
+    )
+    doc = proj.project_autonomy(snap, generated_at="2026-09-01T00:00:00Z")
+    card = _card(doc, "WS:AD-CR1A")
+
+    assert card["freshness"] == "stale"
+    assert card["chairman_decision_required"] is False
+    assert "WS:AD-CR1A" not in doc["chairman_decisions"]
+    assert card["blocker"] is not None  # attribution survives
+    assert card["owed_turn"]["seat"] == "chairman"
+
+
+def test_addendum_stale_declared_blocker_participates_in_freshness():
+    """Repair A1: a declared blocker's SourceRef is a contributing source.
+
+    Before the repair its receipt participated in freshness NOWHERE, so a
+    stale Agent-OS declared block could drive a Chairman turn on a card that
+    still resolved CURRENT.
+    """
+    snap = _snapshot(responsibilities=(_responsibility(),))  # identity is CURRENT
+    doc = proj.project_autonomy(
+        snap,
+        generated_at="2026-09-01T00:00:00Z",
+        declared_blockers={
+            "WS:AD-CR1A": _declared(target_seat="chairman", freshness="STALE"),
+        },
+    )
+    card = _card(doc, "WS:AD-CR1A")
+
+    # the stale declared receipt drags the whole card's freshness down
+    assert card["freshness"] == "stale"
+    assert card["chairman_decision_required"] is False
+    assert "WS:AD-CR1A" not in doc["chairman_decisions"]
+    # the declared block itself stays visible and separately attributed
+    assert card["declared_blocker"] is not None
+    assert card["declared_blocker"]["source"]["owner"] == "agent_os"
+    assert card["blocker"] is None  # never merged into the Steward blocker
+
+
+def test_addendum_current_effect_unknown_still_requires_a_chairman_decision():
+    """Positive control: the gate is FRESHNESS, deliberately not actionability.
+
+    A CURRENT canonical EFFECT_UNKNOWN reconciliation blocker is a genuine
+    Chairman decision even though retry/operation actionability is false.  A
+    gate on ``is_actionable`` would have wrongly silenced this.
+    """
+    snap = _snapshot(
+        responsibilities=(_responsibility(),),
+        blockers=(_blocker(target="CHAIRMAN", effect_state="EFFECT_UNKNOWN"),),
+    )
+    doc = proj.project_autonomy(snap, generated_at="2026-09-01T00:00:00Z")
+    card = _card(doc, "WS:AD-CR1A")
+
+    assert card["freshness"] == "current"
+    assert card["is_actionable"] is False
+    assert card["chairman_decision_required"] is True
+    assert "WS:AD-CR1A" in doc["chairman_decisions"]

@@ -1217,7 +1217,12 @@
     blocker_targets_seat: "A recorded gate names this seat.",
     agent_os_declared_blocker_targets_seat: "Agent OS declared this workstream blocked, naming this seat.",
     attention_targets_seat: "A canonical attention fact names this seat.",
-    worker_runtime_active: "A worker attempt is still running.",
+    // Repair D (Sol addendum, 2026-09-03): the backend reason token is
+    // `worker_runtime_present` and names PRESENCE, never activity — this
+    // map keyed `worker_runtime_active`, which the backend never emits, so
+    // the row silently fell through to its default. The wording follows the
+    // token: a runtime is attached; its liveness is not provable here.
+    worker_runtime_present: "A worker runtime is attached to this work.",
     no_owed_turn_signal: "No canonical source records whose move comes next.",
   };
   var AU_ACTIONABILITY = {
@@ -1295,6 +1300,14 @@
   function auOwedBinding(card) {
     if (REMOTE_READ_ONLY) return null;
     if (auIsHold(card)) return null;
+    // Repair B (Sol addendum 2, 2026-09-03): this suppressed only the
+    // EFFECT_UNKNOWN hold, so a stale/history card still offered
+    // "Open Sol/Fable/Worker" built from stale routing evidence while the
+    // same card read HISTORY / NOT ACTIONABLE. An owed-action jump is a
+    // present-tense instruction; only a currently actionable card may make
+    // one. Detail stays available for forensic inspection, and the global
+    // Surfaces address book is untouched.
+    if (card.is_actionable !== true) return null;
     var seat = auOwedSeat(card);
     if (seat === "unknown") return null;
     var work = STATE.workByRef[card.responsibility_ref];
@@ -1469,8 +1482,21 @@
   }
 
   function auLedger(projection) {
-    var owed = projection.owed_by_seat || {};
+    // Repair C (Sol addendum 3, 2026-09-03): `owed_by_seat` counts EVERY
+    // recorded responsibility, including pure history. On the real all-stale
+    // packet the ledger therefore showed seat counts and lit the Chairman
+    // cell "is-yours" while the reading beside it said history 40 / live 0.
+    // The ledger is a CURRENT-ACTION surface, so its per-seat turns are
+    // derived from actionable cards only. Nothing is erased: counts.stale,
+    // counts.total and each card's historical owed turn and receipts are
+    // unchanged and still inspectable on the cards themselves.
     var counts = projection.counts || {};
+    var owed = {};
+    (projection.responsibilities || []).forEach(function (card) {
+      if (!card || card.is_actionable !== true) return;
+      var seat = card.owed_turn && card.owed_turn.seat ? card.owed_turn.seat : "unknown";
+      owed[seat] = (typeof owed[seat] === "number" ? owed[seat] : 0) + 1;
+    });
     var ledger = el("section", { className: "ccr-au-ledger" });
 
     var track = el("div", { className: "ccr-au-ledger-track" });
