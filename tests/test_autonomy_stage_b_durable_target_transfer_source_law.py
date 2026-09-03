@@ -191,6 +191,30 @@ def validate_contract(contract: dict[str, Any]) -> None:
     assert carrier["succession_supported_now"] is False
 
     c2 = contract["capacity_c2_commitment"]
+    assert set(c2) == {
+        "aggregate_id",
+        "caller_may_supply_carrier_identity",
+        "changed_payload",
+        "command_schema",
+        "event_forbidden",
+        "event_required",
+        "event_schema",
+        "event_type",
+        "existing_session_reuse",
+        "historical_event_is_current_authority",
+        "identical_replay",
+        "implementation_waves",
+        "mode_disposition",
+        "new_session_materialization",
+        "optimistic_preconditions",
+        "owner",
+        "placement_modes",
+        "r1a_constraints",
+        "r1b_reuse",
+        "source_root_claimed",
+        "stable_command_fields",
+        "status",
+    }
     assert c2["owner"] == "CAPACITY_C2_EXISTING_EXECUTIVE_TRANSACTION_AND_CLAIM_OWNER"
     assert c2["status"] == "MISSING_SOURCE_IMPLEMENTATION"
     assert c2["event_type"] == "CAPACITY_PLACEMENT_COMMITTED"
@@ -205,6 +229,26 @@ def validate_contract(contract: dict[str, Any]) -> None:
         "new_session_materialization": "created",
         "existing_session_reuse": "reused",
     }
+    assert c2["event_required"] == [
+        "source_root_job_id",
+        "source_job_created_command_id",
+        "source_authority_fingerprint",
+        "placement_mode",
+        "session_alias",
+        "target_definition_fingerprint",
+        "carrier_job_id",
+        "carrier_job_created_command_id",
+        "carrier_authority_fingerprint",
+        "carrier_generation",
+        "carrier_disposition",
+        "committed_carrier_attempt_id",
+        "selected_worker_id",
+        "selected_quota_class",
+        "committed_placement_snapshot_digest",
+        "commitment_command_id",
+        "command_fingerprint",
+        "commitment_evidence_digest",
+    ]
     assert c2["implementation_waves"] == {
         "existing_session_reuse": {
             "disposition": "reused",
@@ -248,8 +292,7 @@ def validate_contract(contract: dict[str, Any]) -> None:
         "appends_one_root_commitment": True,
     }
     assert "expected_source_root_revision" in c2["optimistic_preconditions"]
-    assert "expected_source_root_revision" not in c2["stable_command_fields"]
-    for field in (
+    assert c2["stable_command_fields"] == [
         "source_root_job_id",
         "responsibility_ref",
         "placement_mode",
@@ -262,8 +305,7 @@ def validate_contract(contract: dict[str, Any]) -> None:
         "target_definition_fingerprint",
         "carrier_generation",
         "carrier_job_created_command_id",
-    ):
-        assert field in c2["stable_command_fields"]
+    ]
     for field in (
         "source_root_job_id",
         "source_job_created_command_id",
@@ -520,6 +562,22 @@ def test_source_law_is_mutation_discriminating() -> None:
             owner[path[-1]] = value
         return apply
 
+    def append(path: tuple[str, ...], value: Any) -> Callable[[dict[str, Any]], None]:
+        def apply(candidate: dict[str, Any]) -> None:
+            owner: Any = candidate
+            for part in path:
+                owner = owner[part]
+            owner.append(value)
+        return apply
+
+    def add(path: tuple[str, ...], value: Any) -> Callable[[dict[str, Any]], None]:
+        def apply(candidate: dict[str, Any]) -> None:
+            owner: Any = candidate
+            for part in path[:-1]:
+                owner = owner[part]
+            owner[path[-1]] = value
+        return apply
+
     mutations: list[Callable[[dict[str, Any]], None]] = [
         mutate(("current_state", "authorized_modes_now"), ["INITIAL_ASSIGNMENT"]),
         mutate(("current_state", "production_armed"), True),
@@ -539,6 +597,12 @@ def test_source_law_is_mutation_discriminating() -> None:
         mutate(("capacity_c2_commitment", "event_schema"), "mastermind.capacity_placement_commitment/v1"),
         mutate(("capacity_c2_commitment", "placement_modes"), ["new_session_materialization"]),
         mutate(("capacity_c2_commitment", "mode_disposition", "new_session_materialization"), "reused"),
+        append(("capacity_c2_commitment", "event_required"), "provider"),
+        append(("capacity_c2_commitment", "event_required"), "process_id"),
+        append(("capacity_c2_commitment", "event_required"), "model"),
+        append(("capacity_c2_commitment", "event_required"), "slack_channel_id"),
+        append(("capacity_c2_commitment", "event_required"), "runtime_binding_id"),
+        add(("capacity_c2_commitment", "provider_evidence"), {"provider": "codex"}),
         mutate(("implementation_dag", "STAGE-B1_INITIAL_ASSIGNMENT"), ["C2-R1B_EXISTING_CARRIER_REUSE"]),
         mutate(("capacity_c2_commitment", "implementation_waves", "existing_session_reuse", "wave"), "C2-R1A_INITIAL_CARRIER_COMMITMENT"),
         mutate(("capacity_c2_commitment", "r1a_constraints", "forbidden"), []),
