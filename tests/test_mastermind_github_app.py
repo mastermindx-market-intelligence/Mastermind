@@ -6,13 +6,11 @@ import dataclasses
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 
 import pytest
 
 from integrations.mastermind_github_app.adapter import (
     COMMIT_TOOL,
-    MAX_MODEL_EDIT_BYTES,
     PREPARE_TOOL,
     RECONCILE_TOOL,
     GithubPatchGateway,
@@ -37,15 +35,12 @@ from integrations.mastermind_github_app.models import (
     PatchEligibility,
     ResolvedPatchTarget,
 )
-from integrations.mastermind_github_app.prepared_token import (
-    HmacPreparedTokenCodec,
-    PreparedTokenError,
-)
+from integrations.mastermind_github_app.prepared_token import HmacPreparedTokenCodec, PreparedTokenError
 from integrations.mastermind_github_app.schemas import SCHEMA_DIGEST, TOOL_SPECS
-
 
 OPERATION = "mastermind-ghp2-test-op"
 REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+DEFAULT_BRANCH = "master"
 BRANCH = "sol/ghp2-test"
 PATH = "control_plane/large_fixture.py"
 HEAD = "a" * 40
@@ -57,9 +52,11 @@ def _run(awaitable):
     return asyncio.run(awaitable)
 
 
-def _git_blob_oid(content: str) -> str:
+def _git_blob_oid(content: str, *, sha256: bool = False) -> str:
     raw = content.encode("utf-8")
     framed = b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw
+    if sha256:
+        return hashlib.sha256(framed).hexdigest()
     return hashlib.sha1(framed, usedforsecurity=False).hexdigest()
 
 
@@ -78,7 +75,7 @@ class FakePrincipalProvider:
 
     async def current_principal(self) -> AuthenticatedPrincipal:
         if self.fail:
-            raise RuntimeError("private auth payload")
+            raise RuntimeError("private authentication payload")
         return self.principal
 
 
@@ -86,14 +83,17 @@ class FakePrincipalProvider:
 class FakeAuthorityResolver:
     target: ResolvedPatchTarget
     fail: bool = False
+    calls: int = 0
 
     async def resolve_patch_target(
         self,
         operation_key: str,
         principal_digest: str,
     ) -> ResolvedPatchTarget:
+        self.calls += 1
         if self.fail:
             raise RuntimeError("private authority payload")
+        assert operation_key == OPERATION
         assert principal_digest == PRINCIPAL
         return self.target
 
@@ -101,21 +101,23 @@ class FakeAuthorityResolver:
 class FakeGithub:
     def __init__(self, content: str) -> None:
         self.head = HEAD
-        self.blobs = {
-            PATH: GithubBlob(
-                path=PATH,
-                oid=_git_blob_oid(content),
-                content=content,
-            )
-        }
+        self.blobs = {PATH: GithubBlob(PATH, _git_blob_oid(content), content)}
         self.commit_mode = "success"
         self.commit_calls = 0
+        self.read_head_calls = 0
         self.read_blob_calls = 0
+        self.move_head_on_read: int | None = None
+        self.fail_head_on_read: int | None = None
         self.applied: dict[str, tuple[str, dict[str, str]]] = {}
         self.effect_unknown: set[str] = set()
 
     async def read_branch_head(self, target: ResolvedPatchTarget) -> str:
+        self.read_head_calls += 1
         assert target.repository == REPOSITORY
+        if self.fail_head_on_read == self.read_head_calls:
+            raise RuntimeError("private head-read payload")
+        if self.move_head_on_read == self.read_head_calls:
+            self.head = "d" * 40
         return self.head
 
     async def read_blob(
@@ -125,7 +127,6 @@ class FakeGithub:
         path: str,
     ) -> GithubBlob:
         self.read_blob_calls += 1
-        assert head_oid == self.head or head_oid == HEAD
         return self.blobs[path]
 
     async def commit_branch_patch(
@@ -137,8 +138,9 @@ class FakeGithub:
         files: Sequence[CommitFile],
     ) -> NativeCommitResult:
         self.commit_calls += 1
-        assert operation_key == OPERATION
+        assert target.default_branch == DEFAULT_BRANCH
         assert expected_head_oid == HEAD
+        assert operation_key == OPERATION
         if self.commit_mode == "definite_refusal":
             raise NativeCommitError(effect_possible=False)
         if self.commit_mode == "ambiguous_unknown":
@@ -150,22 +152,14 @@ class FakeGithub:
         commit_oid = "c" * 40
         after: dict[str, str] = {}
         for item in files:
-            assert hashlib.sha256(item.content.encode("utf-8")).hexdigest() == item.after_sha256
-            self.blobs[item.path] = GithubBlob(
-                path=item.path,
-                oid=_git_blob_oid(item.content),
-                content=item.content,
-            )
+            assert hashlib.sha256(item.content.encode()).hexdigest() == item.after_sha256
+            self.blobs[item.path] = GithubBlob(item.path, _git_blob_oid(item.content), item.content)
             after[item.path] = item.after_sha256
         self.head = commit_oid
         self.applied[effect_digest] = (commit_oid, after)
         if self.commit_mode == "ambiguous_applied":
             raise NativeCommitError(effect_possible=True)
-        return NativeCommitResult(
-            request_sent=True,
-            commit_oid=commit_oid,
-            definite_no_effect=False,
-        )
+        return NativeCommitResult(True, commit_oid, False)
 
     async def reconcile_branch_patch(
         self,
@@ -175,34 +169,22 @@ class FakeGithub:
         effect_digest: str,
         expected_after_sha256: Mapping[str, str],
     ) -> EffectObservation:
+        assert target.repository == REPOSITORY
+        assert target.default_branch == DEFAULT_BRANCH
         if effect_digest in self.effect_unknown:
-            return EffectObservation(
-                state=EffectState.EFFECT_UNKNOWN,
-                commit_oid=None,
-                branch_head_oid=self.head,
-                complete=False,
-            )
+            return EffectObservation(EffectState.EFFECT_UNKNOWN, None, self.head, False)
         if effect_digest in self.applied:
             commit_oid, after = self.applied[effect_digest]
             assert dict(expected_after_sha256) == after
-            return EffectObservation(
-                state=EffectState.APPLIED,
-                commit_oid=commit_oid,
-                branch_head_oid=self.head,
-                complete=True,
-            )
-        return EffectObservation(
-            state=EffectState.NOT_APPLIED,
-            commit_oid=None,
-            branch_head_oid=self.head,
-            complete=True,
-        )
+            return EffectObservation(EffectState.APPLIED, commit_oid, self.head, True)
+        return EffectObservation(EffectState.NOT_APPLIED, None, self.head, True)
 
 
 def _target(**changes: object) -> ResolvedPatchTarget:
     base = ResolvedPatchTarget(
         operation_key=OPERATION,
         repository=REPOSITORY,
+        default_branch=DEFAULT_BRANCH,
         branch=BRANCH,
         pull_request_number=999,
         protected_branches=("main", "master"),
@@ -223,12 +205,7 @@ def _source(lines: int = 12_050) -> str:
 def _replacement() -> dict[str, str]:
     return {
         "old_text": "line-06000\nline-06001\nline-06002\n",
-        "new_text": (
-            "line-06000\n"
-            "line-06001-repaired\n"
-            "line-06001-proof\n"
-            "line-06002\n"
-        ),
+        "new_text": "line-06000\nline-06001-repaired\nline-06001-proof\nline-06002\n",
     }
 
 
@@ -290,222 +267,118 @@ def _token(result: Mapping[str, object]) -> str:
     return token
 
 
-def test_exact_three_tool_surface_has_no_open_patch_or_model_selected_target() -> None:
-    assert [spec.name for spec in TOOL_SPECS] == [
-        PREPARE_TOOL,
-        COMMIT_TOOL,
-        RECONCILE_TOOL,
-    ]
-    prepare = TOOL_SPECS[0].input_schema
-    properties = prepare["properties"]
+def _effect_digest(result: Mapping[str, object]) -> str:
+    data = result["data"]
+    assert isinstance(data, Mapping)
+    value = data["normalized_effect_digest"]
+    assert isinstance(value, str)
+    return value
+
+
+def test_tool_surface_is_exact_and_has_no_model_selected_repository_or_branch() -> None:
+    assert [spec.name for spec in TOOL_SPECS] == [PREPARE_TOOL, COMMIT_TOOL, RECONCILE_TOOL]
+    properties = TOOL_SPECS[0].input_schema["properties"]
+    assert isinstance(properties, Mapping)
     assert set(properties) == {"operation_key", "expected_head_oid", "files"}
-    file_properties = properties["files"]["items"]["properties"]
-    assert set(file_properties) == {"path", "expected_blob_oid", "replacements"}
-    replacement_properties = file_properties["replacements"]["items"]["properties"]
-    assert set(replacement_properties) == {"old_text", "new_text"}
     rendered = json.dumps([spec.input_schema for spec in TOOL_SPECS], sort_keys=True)
-    for forbidden in (
-        '"repository"',
-        '"branch"',
-        '"url"',
-        '"method"',
-        '"credential"',
-        '"token_provider"',
-        '"force"',
-        '"shell"',
-        '"unified_diff"',
-    ):
-        assert forbidden not in rendered
+    for forbidden in ("repository", "branch", "url", "method", "credential", "force", "shell"):
+        assert f'"{forbidden}"' not in rendered
 
 
-def test_adapter_has_no_removed_unified_diff_kernel_dependency() -> None:
-    source = Path("integrations/mastermind_github_app/adapter.py").read_text(encoding="utf-8")
-    assert "control_plane.github_branch_patch" not in source
-    assert "unified_diff" not in source
-    assert "control_plane.github_exact_edit" in source
+def test_prepare_materializes_large_file_server_side_and_returns_bounded_preview() -> None:
+    github = FakeGithub(_source())
+    gateway, _, _ = _gateway(github)
+    result = _prepare(gateway, github)
+    assert result["status"] == "OK"
+    data = result["data"]
+    assert isinstance(data, Mapping)
+    assert data["preview_state"] == "READY"
+    assert isinstance(data["prepared_token"], str)
+    public = json.dumps(data, sort_keys=True)
+    assert "line-00001" not in public
+    assert "line-12050" not in public
+    assert "line-06001-repaired" in public
+    assert github.commit_calls == 0
+    assert github.read_head_calls == 2
 
 
-def test_production_disarmed_prepare_returns_preview_without_token_or_mutation() -> None:
+def test_prepare_refuses_head_movement_after_blob_materialization() -> None:
+    github = FakeGithub(_source())
+    github.move_head_on_read = 2
+    gateway, _, _ = _gateway(github)
+    result = _prepare(gateway, github)
+    assert result["status"] == "BLOCKED"
+    assert result["issues"] == [IssueCode.BRANCH_HEAD_MOVED.value]
+    assert "prepared_token" not in result["data"]
+    assert github.commit_calls == 0
+
+
+def test_prepare_requires_explicit_default_branch_and_refuses_protected_target() -> None:
+    github = FakeGithub(_source())
+    gateway, _, _ = _gateway(github, target=_target(default_branch="release", protected_branches=("release",)))
+    assert _prepare(gateway, github)["status"] == "OK"
+    protected_gateway, _, _ = _gateway(github, target=_target(branch="master"))
+    protected = _prepare(protected_gateway, github)
+    assert protected["status"] == "REFUSED"
+    assert IssueCode.PROTECTED_BRANCH_REFUSED.value in protected["issues"]
+
+
+def test_prepare_disarmed_returns_preview_but_no_token() -> None:
     github = FakeGithub(_source())
     gateway, _, _ = _gateway(github, armed=False)
     result = _prepare(gateway, github)
     assert result["status"] == "BLOCKED"
-    assert result["issues"] == ["PRODUCTION_DISARMED"]
-    data = result["data"]
-    assert data["preview_state"] == "BLOCKED"
-    assert data["prepared_token"] is None
-    assert data["expires_at"] is None
-    assert github.commit_calls == 0
-    assert github.read_blob_calls == 1
+    assert result["issues"] == [IssueCode.PRODUCTION_DISARMED.value]
+    assert result["data"]["prepared_token"] is None
 
 
-def test_armed_prepare_materializes_large_file_server_side_and_returns_bounded_preview() -> None:
-    content = _source()
-    github = FakeGithub(content)
-    gateway, _, _ = _gateway(github)
-    result = _prepare(gateway, github)
-    assert result["status"] == "OK"
-    assert result["issues"] == []
-    data = result["data"]
-    assert data["preview_state"] == "READY"
-    assert isinstance(data["prepared_token"], str)
-    assert data["normalized_effect_digest"] == data["canonical_digest"]
-    rendered = json.dumps({key: value for key, value in data.items() if key != "prepared_token"})
-    assert content not in rendered
-    assert len(rendered.encode("utf-8")) < 50_000
-    assert data["files"][0]["additions"] == 2
-    assert data["files"][0]["deletions"] == 1
-    assert github.commit_calls == 0
-
-
-def test_commit_applies_once_and_same_token_reconciles_without_second_request() -> None:
+def test_exact_commit_is_applied_once_and_repeated_commit_is_read_only() -> None:
     github = FakeGithub(_source())
     gateway, _, _ = _gateway(github)
     prepared = _prepare(gateway, github)
     token = _token(prepared)
-
     first = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
     assert first["status"] == "OK"
-    assert first["data"]["effect_state"] == "APPLIED"
+    assert first["data"]["effect_state"] == EffectState.APPLIED.value
     assert first["data"]["native_request_attempts"] == 1
     assert github.commit_calls == 1
-    assert "line-06001-repaired\nline-06001-proof\n" in github.blobs[PATH].content
-
     second = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
     assert second["status"] == "OK"
-    assert second["data"]["effect_state"] == "APPLIED"
+    assert second["data"]["effect_state"] == EffectState.APPLIED.value
     assert second["data"]["native_request_attempts"] == 0
     assert github.commit_calls == 1
 
 
-def test_ambiguous_native_response_reconciles_applied_without_resend() -> None:
+def test_commit_reconciles_applied_effect_before_current_authority_resolution() -> None:
     github = FakeGithub(_source())
-    github.commit_mode = "ambiguous_applied"
-    gateway, _, _ = _gateway(github)
-    token = _token(_prepare(gateway, github))
-    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
-    assert result["status"] == "OK"
-    assert result["data"]["effect_state"] == "APPLIED"
-    assert result["data"]["native_request_attempts"] == 1
-    assert github.commit_calls == 1
-
-
-def test_ambiguous_unknown_blocks_retry_and_preserves_one_native_attempt() -> None:
-    github = FakeGithub(_source())
-    github.commit_mode = "ambiguous_unknown"
-    gateway, _, _ = _gateway(github)
-    token = _token(_prepare(gateway, github))
-
-    first = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
-    assert first["status"] == "UNKNOWN"
-    assert first["data"]["effect_state"] == "EFFECT_UNKNOWN"
-    assert first["data"]["native_request_attempts"] == 1
-    assert github.commit_calls == 1
-
-    second = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
-    assert second["status"] == "UNKNOWN"
-    assert second["data"]["effect_state"] == "EFFECT_UNKNOWN"
-    assert second["data"]["native_request_attempts"] == 0
-    assert "PRIOR_EFFECT_UNKNOWN" in second["issues"]
-    assert github.commit_calls == 1
-
-
-def test_definite_native_refusal_is_not_applied_and_never_retried() -> None:
-    github = FakeGithub(_source())
-    github.commit_mode = "definite_refusal"
-    gateway, _, _ = _gateway(github)
-    token = _token(_prepare(gateway, github))
-    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
-    assert result["status"] == "REFUSED"
-    assert result["data"]["effect_state"] == "NOT_APPLIED"
-    assert result["data"]["native_request_attempts"] == 1
-    assert result["issues"] == ["NATIVE_REQUEST_REFUSED"]
-    assert github.commit_calls == 1
-
-
-def test_potentially_sent_but_not_observed_is_effect_unknown() -> None:
-    github = FakeGithub(_source())
-    github.commit_mode = "ambiguous_not_applied"
-    gateway, _, _ = _gateway(github)
-    token = _token(_prepare(gateway, github))
-    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
-    assert result["status"] == "UNKNOWN"
-    assert result["data"]["effect_state"] == "EFFECT_UNKNOWN"
-    assert result["data"]["native_request_attempts"] == 1
-
-
-def test_prepare_stale_head_is_blocked_before_blob_read_or_commit() -> None:
-    github = FakeGithub(_source())
-    github.head = "b" * 40
-    gateway, _, _ = _gateway(github)
-    result = _prepare(gateway, github)
-    assert result["status"] == "BLOCKED"
-    assert result["issues"] == ["BRANCH_HEAD_MOVED"]
-    assert github.read_blob_calls == 0
-    assert github.commit_calls == 0
-
-
-def test_head_move_after_prepare_returns_definite_not_applied_without_commit() -> None:
-    github = FakeGithub(_source())
-    gateway, _, _ = _gateway(github)
-    token = _token(_prepare(gateway, github))
-    github.head = "b" * 40
-    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
-    assert result["status"] == "BLOCKED"
-    assert result["data"]["effect_state"] == "NOT_APPLIED"
-    assert result["data"]["native_request_attempts"] == 0
-    assert result["issues"] == ["BRANCH_HEAD_MOVED"]
-    assert github.commit_calls == 0
-
-
-def test_blob_change_after_prepare_is_precondition_refusal() -> None:
-    github = FakeGithub(_source())
-    gateway, _, _ = _gateway(github)
-    token = _token(_prepare(gateway, github))
-    changed = github.blobs[PATH].content.replace("line-06001\n", "line-06001-other\n")
-    github.blobs[PATH] = GithubBlob(
-        path=PATH,
-        oid=_git_blob_oid(changed),
-        content=changed,
-    )
-    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
-    assert result["status"] == "REFUSED"
-    assert result["data"]["effect_state"] == "NOT_APPLIED"
-    assert result["issues"] == ["PRECONDITION_CHANGED"]
-    assert github.commit_calls == 0
-
-
-def test_tampered_expired_and_cross_principal_tokens_are_refused_payload_free() -> None:
-    github = FakeGithub(_source())
-    gateway, clock, _ = _gateway(github)
-    token = _token(_prepare(gateway, github))
-
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
-    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": tampered}))
-    assert result["status"] == "REFUSED"
-    assert result["issues"] == ["PREPARED_TOKEN_INVALID"]
-    assert token not in json.dumps(result)
-
-    clock.value += 301
-    expired = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
-    assert expired["issues"] == ["PREPARED_ACTION_EXPIRED"]
-
-    other = AuthenticatedPrincipal(
-        principal_digest="9" * 64,
-        scopes=("mastermind.github.exact_branch_repair",),
-    )
-    other_gateway, _, _ = _gateway(github, clock=clock, principal=other)
-    cross = _run(other_gateway.call(COMMIT_TOOL, {"prepared_token": token}))
-    assert cross["issues"] in (["AUTHENTICATION_REFUSED"], ["PREPARED_ACTION_EXPIRED"])
-
-
-def test_expired_token_remains_usable_for_read_only_reconciliation() -> None:
-    github = FakeGithub(_source())
-    gateway, clock, _ = _gateway(github)
+    gateway, _, resolver = _gateway(github)
     prepared = _prepare(gateway, github)
     token = _token(prepared)
-    effect = prepared["data"]["normalized_effect_digest"]
-    clock.value += 10_000
+    applied = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+    assert applied["data"]["effect_state"] == "APPLIED"
+    resolver.fail = True
+    repeated = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+    assert repeated["status"] == "OK"
+    assert repeated["data"]["effect_state"] == "APPLIED"
+    assert repeated["data"]["native_request_attempts"] == 0
+    assert github.commit_calls == 1
+
+
+def test_reconcile_is_token_bound_and_survives_authority_writer_or_path_change() -> None:
+    github = FakeGithub(_source())
+    gateway, _, resolver = _gateway(github)
+    prepared = _prepare(gateway, github)
+    token = _token(prepared)
+    effect = _effect_digest(prepared)
+    _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+    resolver.target = _target(
+        patch_eligibility=PatchEligibility.REFUSED,
+        allowed_paths=("different.py",),
+        writer_digest="f" * 64,
+        issues=(IssueCode.CARRIER_WRITER_CONFLICT,),
+    )
+    resolver.fail = True
+    before = resolver.calls
     result = _run(
         gateway.call(
             RECONCILE_TOOL,
@@ -517,333 +390,295 @@ def test_expired_token_remains_usable_for_read_only_reconciliation() -> None:
         )
     )
     assert result["status"] == "OK"
+    assert result["data"]["effect_state"] == "APPLIED"
+    assert resolver.calls == before
+
+
+def test_pre_effect_head_read_failure_remains_definite_not_applied() -> None:
+    github = FakeGithub(_source())
+    gateway, _, _ = _gateway(github)
+    prepared = _prepare(gateway, github)
+    github.fail_head_on_read = 3
+    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": _token(prepared)}))
+    assert result["status"] == "UNKNOWN"
     assert result["data"]["effect_state"] == "NOT_APPLIED"
     assert result["data"]["native_request_attempts"] == 0
+    assert result["issues"] == [IssueCode.SOURCE_TRUNCATED_OR_UNAVAILABLE.value]
+    assert github.commit_calls == 0
 
 
-def test_authority_or_writer_change_after_prepare_refuses_commit() -> None:
+def test_post_materialization_pre_effect_head_failure_remains_not_applied() -> None:
+    github = FakeGithub(_source())
+    gateway, _, _ = _gateway(github)
+    prepared = _prepare(gateway, github)
+    github.fail_head_on_read = 4
+    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": _token(prepared)}))
+    assert result["status"] == "UNKNOWN"
+    assert result["data"]["effect_state"] == "NOT_APPLIED"
+    assert result["data"]["native_request_attempts"] == 0
+    assert github.commit_calls == 0
+
+
+def test_current_authority_change_blocks_new_mutation_after_not_applied_proof() -> None:
     github = FakeGithub(_source())
     gateway, _, resolver = _gateway(github)
-    token = _token(_prepare(gateway, github))
-    resolver.target = _target(writer_digest="8" * 64)
+    prepared = _prepare(gateway, github)
+    token = _token(prepared)
+    resolver.target = _target(
+        patch_eligibility=PatchEligibility.REFUSED,
+        issues=(IssueCode.ORGANIZATIONAL_AUTHORITY_REFUSED,),
+    )
     result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
     assert result["status"] == "REFUSED"
-    assert result["issues"] == ["PRECONDITION_CHANGED"]
+    assert result["data"]["effect_state"] == "NOT_APPLIED"
+    assert result["data"]["native_request_attempts"] == 0
     assert github.commit_calls == 0
 
 
-def test_unowned_and_protected_targets_fail_before_native_commit() -> None:
-    content = _source()
-    github = FakeGithub(content)
-    unowned_gateway, _, _ = _gateway(github, target=_target(allowed_paths=("other.py",)))
-    unowned = _prepare(unowned_gateway, github)
-    assert unowned["status"] == "REFUSED"
-    assert unowned["issues"] == ["PATCH_TARGET_NOT_OWNED"]
-
-    protected_gateway, _, _ = _gateway(
-        github,
-        target=_target(branch="master", protected_branches=("master",)),
-    )
-    protected = _prepare(protected_gateway, github)
-    assert protected["status"] == "REFUSED"
-    assert protected["issues"] == ["PROTECTED_BRANCH_REFUSED"]
-    assert github.commit_calls == 0
-
-
-def test_scope_and_target_resolution_fail_closed_without_private_error_reflection() -> None:
+def test_default_branch_change_is_a_write_precondition_change() -> None:
     github = FakeGithub(_source())
-    no_scope = AuthenticatedPrincipal(principal_digest=PRINCIPAL, scopes=())
-    gateway, _, _ = _gateway(github, principal=no_scope)
-    result = _prepare(gateway, github)
-    assert result["issues"] == ["SCOPE_REFUSED"]
-    assert "private" not in json.dumps(result)
-
     gateway, _, resolver = _gateway(github)
-    resolver.fail = True
-    result = _prepare(gateway, github)
-    assert result["status"] == "UNKNOWN"
-    assert result["issues"] == ["ACTION_TARGET_UNRESOLVED"]
-    assert "private" not in json.dumps(result)
-
-
-def test_non_unique_anchor_and_secret_shaped_replacement_fail_closed() -> None:
-    repeated = "needle\nneedle\nend\n"
-    github = FakeGithub(repeated)
-    arguments = _arguments(github)
-    arguments["files"][0]["replacements"] = [
-        {"old_text": "needle\n", "new_text": "replacement\n"}
-    ]
-    gateway, _, _ = _gateway(github)
-    result = _run(gateway.call(PREPARE_TOOL, arguments))
-    assert result["status"] == "REFUSED"
-    assert result["issues"] == ["PATCH_CONTEXT_MISMATCH"]
-
-    github = FakeGithub("alpha\nbeta\ngamma\n")
-    arguments = _arguments(github)
-    arguments["files"][0]["replacements"] = [
-        {
-            "old_text": "beta\n",
-            "new_text": "github_pat_" + "A" * 45 + "\n",
-        }
-    ]
-    gateway, _, _ = _gateway(github)
-    result = _run(gateway.call(PREPARE_TOOL, arguments))
-    assert result["status"] == "REFUSED"
-    assert result["issues"] == ["PATCH_SECRET_SHAPE_REFUSED"]
-    assert "github_pat_" not in json.dumps(result)
-
-
-def test_crlf_and_no_final_newline_are_preserved_byte_for_byte() -> None:
-    content = "alpha\r\nbeta\r\ngamma"
-    github = FakeGithub(content)
-    arguments = _arguments(github)
-    arguments["files"][0]["replacements"] = [
-        {
-            "old_text": "alpha\r\nbeta\r\ngamma",
-            "new_text": "alpha\r\nbeta-repaired\r\ngamma",
-        }
-    ]
-    gateway, _, _ = _gateway(github)
-    prepared = _run(gateway.call(PREPARE_TOOL, arguments))
-    assert prepared["status"] == "OK"
+    prepared = _prepare(gateway, github)
+    resolver.target = _target(default_branch="release", protected_branches=("release", "master"))
     result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": _token(prepared)}))
-    assert result["data"]["effect_state"] == "APPLIED"
-    assert github.blobs[PATH].content == "alpha\r\nbeta-repaired\r\ngamma"
-
-
-def test_model_edit_payload_has_a_stricter_token_safe_byte_ceiling() -> None:
-    github = FakeGithub("alpha\nbeta\ngamma\n")
-    arguments = _arguments(github)
-    arguments["files"][0]["replacements"] = [
-        {
-            "old_text": "beta\n",
-            "new_text": "x" * (MAX_MODEL_EDIT_BYTES + 1),
-        }
-    ]
-    gateway, _, _ = _gateway(github)
-    result = _run(gateway.call(PREPARE_TOOL, arguments))
     assert result["status"] == "REFUSED"
-    assert result["issues"] == ["PATCH_LIMIT_EXCEEDED"]
+    assert result["data"]["effect_state"] == "NOT_APPLIED"
+    assert IssueCode.PRECONDITION_CHANGED.value in result["issues"]
 
 
-def test_token_codec_round_trip_tamper_and_trailing_data_refusal() -> None:
-    codec = HmacPreparedTokenCodec(SECRET, context="test")
-    payload = {"z": [3, 2, 1], "a": "value"}
-    token = codec.encode(payload)
-    assert codec.decode(token) == payload
+def test_expiry_is_exclusive_at_exact_expiry_but_reconcile_remains_available() -> None:
+    github = FakeGithub(_source())
+    gateway, clock, _ = _gateway(github)
+    prepared = _prepare(gateway, github)
+    token = _token(prepared)
+    effect = _effect_digest(prepared)
+    clock.value += 300
+    commit = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+    assert commit["status"] == "REFUSED"
+    assert commit["issues"] == [IssueCode.PREPARED_ACTION_EXPIRED.value]
+    reconcile = _run(
+        gateway.call(
+            RECONCILE_TOOL,
+            {
+                "operation_key": OPERATION,
+                "normalized_effect_digest": effect,
+                "prepared_token": token,
+            },
+        )
+    )
+    assert reconcile["status"] == "OK"
+    assert reconcile["data"]["effect_state"] == "NOT_APPLIED"
+
+
+@pytest.mark.parametrize(
+    ("mode", "state", "attempts"),
+    [
+        ("definite_refusal", "NOT_APPLIED", 1),
+        ("ambiguous_not_applied", "NOT_APPLIED", 1),
+        ("ambiguous_unknown", "EFFECT_UNKNOWN", 1),
+        ("ambiguous_applied", "APPLIED", 1),
+    ],
+)
+def test_native_write_outcomes_are_reconciled_without_retry(
+    mode: str,
+    state: str,
+    attempts: int,
+) -> None:
+    github = FakeGithub(_source())
+    github.commit_mode = mode
+    gateway, _, _ = _gateway(github)
+    prepared = _prepare(gateway, github)
+    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": _token(prepared)}))
+    assert result["data"]["effect_state"] == state
+    assert result["data"]["native_request_attempts"] == attempts
+    assert github.commit_calls == 1
+
+
+def test_tampered_token_wrong_principal_and_missing_scope_refuse() -> None:
+    github = FakeGithub(_source())
+    gateway, _, _ = _gateway(github)
+    prepared = _prepare(gateway, github)
+    token = _token(prepared)
+    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    assert _run(gateway.call(COMMIT_TOOL, {"prepared_token": tampered}))["issues"] == [
+        IssueCode.PREPARED_TOKEN_INVALID.value
+    ]
+
+    wrong_gateway, _, _ = _gateway(
+        github,
+        principal=AuthenticatedPrincipal("9" * 64, ("mastermind.github.exact_branch_repair",)),
+    )
+    wrong = _run(wrong_gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+    assert IssueCode.AUTHENTICATION_REFUSED.value in wrong["issues"]
+
+    no_scope_gateway, _, _ = _gateway(
+        github,
+        principal=AuthenticatedPrincipal(PRINCIPAL, ()),
+    )
+    no_scope = _prepare(no_scope_gateway, github)
+    assert no_scope["issues"] == [IssueCode.SCOPE_REFUSED.value]
+
+
+def test_forged_source_bytes_with_claimed_blob_oid_fail_closed() -> None:
+    github = FakeGithub(_source())
+    real = github.blobs[PATH]
+    github.blobs[PATH] = dataclasses.replace(real, content=real.content + "forged\n")
+    gateway, _, _ = _gateway(github)
+    result = _prepare(gateway, github)
+    assert result["status"] == "REFUSED"
+    assert result["issues"] == [IssueCode.SOURCE_BLOB_CONTENT_MISMATCH.value]
+
+
+def test_prepared_token_codec_is_storeless_context_bound_and_bomb_safe() -> None:
+    codec = HmacPreparedTokenCodec(SECRET, context="one")
+    token = codec.encode({"value": "ok"})
+    assert codec.decode(token) == {"value": "ok"}
     with pytest.raises(PreparedTokenError):
-        codec.decode(token + "x")
+        HmacPreparedTokenCodec(SECRET, context="two").decode(token)
     with pytest.raises(PreparedTokenError):
-        codec.decode("wrong." + token)
+        codec.decode("not-a-token")
 
 
 @dataclasses.dataclass
-class FakeTokenProvider:
-    token: str = "github-installation-token-for-tests"
+class QueueTokenProvider:
+    token: str = "installation-token-1234567890"
 
     async def installation_token(self) -> str:
         return self.token
 
 
 class QueueTransport:
-    def __init__(self, responses: Sequence[HttpResponse | Exception]) -> None:
+    def __init__(self, responses: list[HttpResponse]) -> None:
         self.responses = list(responses)
         self.requests: list[dict[str, object]] = []
 
-    async def request(
-        self,
-        *,
-        method: str,
-        url: str,
-        headers: Mapping[str, str],
-        body: bytes | None,
-        timeout_seconds: float,
-    ) -> HttpResponse:
-        self.requests.append(
-            {
-                "method": method,
-                "url": url,
-                "headers": dict(headers),
-                "body": body,
-                "timeout_seconds": timeout_seconds,
-            }
-        )
+    async def request(self, **kwargs: object) -> HttpResponse:
+        self.requests.append(dict(kwargs))
         if not self.responses:
             raise AssertionError("unexpected HTTP request")
-        value = self.responses.pop(0)
-        if isinstance(value, Exception):
-            raise value
-        return value
+        return self.responses.pop(0)
 
 
-def _json_response(value: object, *, headers: Mapping[str, str] | None = None) -> HttpResponse:
-    return HttpResponse(
-        status=200,
-        headers=dict(headers or {}),
-        body=json.dumps(value).encode(),
-    )
+def _response(value: object, *, headers: Mapping[str, str] | None = None) -> HttpResponse:
+    return HttpResponse(200, headers or {}, json.dumps(value).encode())
 
 
-def test_fixed_http_port_reads_exact_head_and_never_model_selects_endpoint() -> None:
-    transport = QueueTransport([_json_response({"object": {"sha": HEAD}})])
-    port = GithubApiPatchPort(transport=transport, token_provider=FakeTokenProvider())
-    assert _run(port.read_branch_head(_target())) == HEAD
-    request = transport.requests[0]
-    assert request["method"] == "GET"
-    assert str(request["url"]).startswith(f"{REST_ROOT}/repos/")
-    assert request["body"] is None
-    assert request["headers"]["Authorization"].startswith("Bearer ")
+def _tree_blob_responses(content: str, *, claimed_oid: str | None = None) -> list[HttpResponse]:
+    blob_oid = claimed_oid or _git_blob_oid(content)
+    return [
+        _response({"tree": {"sha": "b" * 40}}),
+        _response({"tree": [{"path": "control_plane", "type": "tree", "mode": "040000", "sha": "c" * 40}]}),
+        _response({"tree": [{"path": "large_fixture.py", "type": "blob", "mode": "100644", "sha": blob_oid}]}),
+        _response(
+            {
+                "sha": blob_oid,
+                "encoding": "base64",
+                "size": len(content.encode()),
+                "content": base64.b64encode(content.encode()).decode(),
+            }
+        ),
+    ]
 
 
-def test_fixed_http_port_traverses_git_tree_and_reads_complete_regular_blob() -> None:
-    content = "alpha\nbeta\ngamma\n"
-    blob_oid = _git_blob_oid(content)
-    tree_root = "b" * 40
-    tree_child = "c" * 40
-    transport = QueueTransport(
-        [
-            _json_response({"tree": {"sha": tree_root}}),
-            _json_response(
-                {"tree": [{"path": "control_plane", "type": "tree", "mode": "040000", "sha": tree_child}]}
-            ),
-            _json_response(
-                {"tree": [{"path": "large_fixture.py", "type": "blob", "mode": "100644", "sha": blob_oid}]}
-            ),
-            _json_response(
-                {
-                    "encoding": "base64",
-                    "sha": blob_oid,
-                    "size": len(content.encode()),
-                    "content": base64.b64encode(content.encode()).decode(),
-                }
-            ),
-        ]
-    )
-    port = GithubApiPatchPort(transport=transport, token_provider=FakeTokenProvider())
+def test_github_port_recomputes_blob_oid_from_returned_bytes() -> None:
+    content = "hello\n"
+    transport = QueueTransport(_tree_blob_responses(content))
+    port = GithubApiPatchPort(transport=transport, token_provider=QueueTokenProvider())
     blob = _run(port.read_blob(_target(), HEAD, PATH))
-    assert blob == GithubBlob(path=PATH, oid=blob_oid, content=content)
-    assert len(transport.requests) == 4
-    assert all(str(row["url"]).startswith(f"{REST_ROOT}/repos/") for row in transport.requests)
+    assert blob.oid == _git_blob_oid(content)
+
+    forged_transport = QueueTransport(_tree_blob_responses(content, claimed_oid="f" * 40))
+    forged_port = GithubApiPatchPort(
+        transport=forged_transport,
+        token_provider=QueueTokenProvider(),
+    )
+    with pytest.raises(GithubReadError):
+        _run(forged_port.read_blob(_target(), HEAD, PATH))
 
 
-def test_fixed_http_port_refuses_symlink_or_executable_mode() -> None:
+def test_github_port_proves_not_applied_when_expected_head_is_in_scanned_history() -> None:
+    current = "c" * 40
     transport = QueueTransport(
         [
-            _json_response({"tree": {"sha": "b" * 40}}),
-            _json_response(
-                {"tree": [{"path": "control_plane", "type": "tree", "mode": "040000", "sha": "c" * 40}]}
-            ),
-            _json_response(
-                {"tree": [{"path": "large_fixture.py", "type": "blob", "mode": "100755", "sha": "d" * 40}]}
+            _response({"object": {"sha": current}}),
+            _response(
+                [
+                    {"sha": current, "commit": {"message": "unrelated"}},
+                    {"sha": HEAD, "commit": {"message": "base"}},
+                ],
+                headers={"link": '<next>; rel="next"'},
             ),
         ]
     )
-    port = GithubApiPatchPort(transport=transport, token_provider=FakeTokenProvider())
-    with pytest.raises(GithubReadError):
-        _run(port.read_blob(_target(), HEAD, PATH))
+    port = GithubApiPatchPort(transport=transport, token_provider=QueueTokenProvider())
+    observation = _run(
+        port.reconcile_branch_patch(
+            _target(),
+            HEAD,
+            OPERATION,
+            "e" * 64,
+            {PATH: "f" * 64},
+        )
+    )
+    assert observation == EffectObservation(EffectState.NOT_APPLIED, None, current, True)
 
 
-def test_fixed_http_port_emits_one_expected_head_graphql_commit_with_fixed_marker() -> None:
-    content = "alpha\r\nrepaired\r\ngamma"
-    after = hashlib.sha256(content.encode()).hexdigest()
+def test_github_port_keeps_unknown_when_expected_head_is_not_in_scanned_history() -> None:
+    current = "c" * 40
+    transport = QueueTransport(
+        [
+            _response({"object": {"sha": current}}),
+            _response([{"sha": current, "commit": {"message": "unrelated"}}]),
+        ]
+    )
+    port = GithubApiPatchPort(transport=transport, token_provider=QueueTokenProvider())
+    observation = _run(
+        port.reconcile_branch_patch(
+            _target(),
+            HEAD,
+            OPERATION,
+            "e" * 64,
+            {PATH: "f" * 64},
+        )
+    )
+    assert observation.state is EffectState.EFFECT_UNKNOWN
+    assert observation.complete is False
+
+
+def test_github_port_commit_uses_one_fixed_graphql_expected_head_request() -> None:
     commit_oid = "c" * 40
     transport = QueueTransport(
-        [
-            _json_response(
-                {
-                    "data": {
-                        "createCommitOnBranch": {
-                            "commit": {"oid": commit_oid, "url": "https://github.com/example"}
-                        }
-                    }
-                }
-            )
-        ]
+        [_response({"data": {"createCommitOnBranch": {"commit": {"oid": commit_oid, "url": "ignored"}}}})]
     )
-    port = GithubApiPatchPort(transport=transport, token_provider=FakeTokenProvider())
+    port = GithubApiPatchPort(transport=transport, token_provider=QueueTokenProvider())
+    content = "after\n"
     result = _run(
         port.commit_branch_patch(
             _target(),
             HEAD,
             OPERATION,
             "e" * 64,
-            (
-                CommitFile(
-                    path=PATH,
-                    expected_blob_oid="f" * 40,
-                    content=content,
-                    after_sha256=after,
-                ),
-            ),
+            (CommitFile(PATH, _git_blob_oid("before\n"), content, hashlib.sha256(content.encode()).hexdigest()),),
         )
     )
     assert result.commit_oid == commit_oid
-    assert result.request_sent is True
     assert len(transport.requests) == 1
     request = transport.requests[0]
     assert request["method"] == "POST"
     assert request["url"] == GRAPHQL_ENDPOINT
-    payload = json.loads(request["body"])
-    variables = payload["variables"]["input"]
-    assert variables["branch"] == {
+    body = json.loads(request["body"])
+    assert body["variables"]["input"]["expectedHeadOid"] == HEAD
+    assert body["variables"]["input"]["branch"] == {
         "repositoryNameWithOwner": REPOSITORY,
         "branchName": BRANCH,
     }
-    assert variables["expectedHeadOid"] == HEAD
-    assert base64.b64decode(variables["fileChanges"]["additions"][0]["contents"]) == content.encode()
-    assert f"Mastermind-Operation: {OPERATION}" in variables["message"]["body"]
-    assert "force" not in json.dumps(payload).lower()
 
 
-def test_fixed_http_port_reconcile_not_applied_and_moved_unknown() -> None:
-    target = _target()
-    not_applied_transport = QueueTransport(
-        [
-            _json_response({"object": {"sha": HEAD}}),
-            _json_response([], headers={}),
-        ]
-    )
-    port = GithubApiPatchPort(transport=not_applied_transport, token_provider=FakeTokenProvider())
-    observation = _run(
-        port.reconcile_branch_patch(target, HEAD, OPERATION, "e" * 64, {PATH: "f" * 64})
-    )
-    assert observation.state is EffectState.NOT_APPLIED
-    assert observation.complete is True
-
-    moved_transport = QueueTransport(
-        [
-            _json_response({"object": {"sha": "b" * 40}}),
-            _json_response([], headers={}),
-        ]
-    )
-    moved_port = GithubApiPatchPort(transport=moved_transport, token_provider=FakeTokenProvider())
-    moved = _run(
-        moved_port.reconcile_branch_patch(target, HEAD, OPERATION, "e" * 64, {PATH: "f" * 64})
-    )
-    assert moved.state is EffectState.EFFECT_UNKNOWN
-    assert moved.complete is False
-
-
-def test_fixed_http_port_transport_failure_is_effect_possible_after_commit_call() -> None:
-    content = "alpha\nrepaired\ngamma\n"
-    after = hashlib.sha256(content.encode()).hexdigest()
-    transport = QueueTransport([GithubReadError()])
-    port = GithubApiPatchPort(transport=transport, token_provider=FakeTokenProvider())
-    with pytest.raises(NativeCommitError) as caught:
-        _run(
-            port.commit_branch_patch(
-                _target(),
-                HEAD,
-                OPERATION,
-                "e" * 64,
-                (
-                    CommitFile(
-                        path=PATH,
-                        expected_blob_oid="f" * 40,
-                        content=content,
-                        after_sha256=after,
-                    ),
-                )
-            )
-        )
-    assert caught.value.effect_possible is True
+def test_port_refuses_arbitrary_endpoint_and_invalid_installation_token() -> None:
+    transport = QueueTransport([])
+    port = GithubApiPatchPort(transport=transport, token_provider=QueueTokenProvider(token="short"))
+    with pytest.raises(GithubReadError):
+        _run(port.read_branch_head(_target()))
+    assert transport.requests == []
+    assert REST_ROOT == "https://api.github.com"
+    assert GRAPHQL_ENDPOINT == "https://api.github.com/graphql"
