@@ -2965,3 +2965,40 @@ def test_review_the_ancestor_walk_is_transitive_not_direct_parent_only():
     grandchild = _J("JOB-003", "JOB-002", "ATT-gk")
 
     assert _cand_ids([root, middle, grandchild]) == ["JOB-003"]
+
+
+@pytest.mark.parametrize(
+    "status", [None, "", "UNKNOWN_FUTURE_STATE", 123, object()],
+)
+def test_review_an_unclassifiable_status_never_evicts_a_known_live_ancestor(status):
+    """Liveness is a positive allowlist, not a terminal denylist.
+
+    A denylist treats an absent, empty, unrecognised or future status as
+    live, so such a descendant would evict a demonstrably RUNNING root and
+    the row would report a state nobody verified over one that was. Reporting
+    the ancestor we know is running beats reporting a descendant we cannot
+    classify.
+    """
+    class _J(_FakeJob):
+        def __init__(self, job_id, parent, attempt, job_status):
+            super().__init__(job_id, parent, "JOB-001", attempt)
+            self.status = job_status
+
+    root = _J("JOB-001", None, "ATT-root", "RUNNING")
+    child = _J("JOB-002", "JOB-001", "ATT-child", status)
+
+    assert _cand_ids([root, child]) == ["JOB-001"]
+
+
+def test_review_an_all_unclassifiable_tree_still_falls_back_to_the_ancestor_rule():
+    """Positive control for the allowlist: when nothing is classifiable there
+    is no live candidate, and the ancestor rule must still resolve rather
+    than the whole dimension going silent."""
+    class _J(_FakeJob):
+        def __init__(self, job_id, parent, attempt):
+            super().__init__(job_id, parent, "JOB-001", attempt)
+            self.status = "SOME_FUTURE_STATUS"
+
+    assert _cand_ids([
+        _J("JOB-001", None, "ATT-a"), _J("JOB-002", "JOB-001", "ATT-b"),
+    ]) == ["JOB-002"]

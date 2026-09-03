@@ -1362,9 +1362,17 @@ def _dispatch_evidence_newer(current: str | None, candidate: Any) -> str | None:
     return current
 
 
-#: Job statuses that mean the job is finished; a finished descendant must
-#: not evict a live ancestor from the executable frontier.
-_TERMINAL_JOB_STATUSES = frozenset({"FAILED", "LOST", "COMPLETED", "CANCELLED"})
+#: Job statuses that positively mean the job is still working.  A POSITIVE
+#: allowlist, not a terminal denylist: an absent, empty, unrecognised or
+#: future status is NOT proof of liveness, and a denylist would treat all of
+#: those as live and let them evict a demonstrably RUNNING ancestor -- the
+#: optimistic direction this module refuses everywhere else.  Reporting the
+#: ancestor we know is running beats reporting a descendant we cannot
+#: classify.  An all-unclassifiable tree simply has no live candidate and
+#: falls back to the ancestor rule, exactly as an all-terminal tree does.
+_LIVE_JOB_STATUSES = frozenset({
+    "QUEUED", "RUNNING", "CHECKPOINTED", "RATE_LIMITED", "CANCEL_REQUESTED",
+})
 
 
 def _executable_attempt_candidates(tree_jobs: Sequence[Any]) -> list[Any]:
@@ -1387,7 +1395,7 @@ def _executable_attempt_candidates(tree_jobs: Sequence[Any]) -> list[Any]:
     # make its still-working parent finished.
     def _is_live(job: Any) -> bool:
         status = getattr(job, "status", None)
-        return str(getattr(status, "value", status)) not in _TERMINAL_JOB_STATUSES
+        return str(getattr(status, "value", status)) in _LIVE_JOB_STATUSES
 
     live = [j for j in candidates if _is_live(j)]
     if live:
