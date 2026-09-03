@@ -1079,7 +1079,7 @@ def test_commission_wave_requires_a_remote_checkpoint_before_long_source_exposur
     assert "before long CI, review, or context-budget exposure" in text
     assert "same operation branch and Draft/HOLD PR" in text
     assert "does not grant receiver transfer, retry, Ready, merge, or writer release" in text
-    assert "refresh the receipt after head, path, base, or external-effect identity moves" in text
+    assert "Refresh the receipt after head, path, base, or external-effect identity moves" in text
 
 
 def test_session_close_keeps_remote_complete_nonterminal_until_writer_release() -> None:
