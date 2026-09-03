@@ -244,6 +244,10 @@ def test_closed_role_and_process_group_cleanup_leave_no_child_or_scratch(
         ).verify()
 
     manifest = _manifest(tmp_path)
+    seal = manifest.repositories[0].snapshot_seal
+    assert seal is not None
+    assert seal.git_dir == seal.common_dir
+    assert seal.git_dir_is_common_dir is True
     trace = tmp_path / "indexer-argv.txt"
     child_pid = tmp_path / "descendant.pid"
     server = _script(

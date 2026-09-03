@@ -40,6 +40,7 @@ _CLOSED_ENV: Final = {
     "GIT_ASKPASS": "/bin/false",
     "GIT_CONFIG_GLOBAL": "/dev/null",
     "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
     "GIT_OPTIONAL_LOCKS": "0",
     "GIT_TERMINAL_PROMPT": "0",
     "LANG": "C",

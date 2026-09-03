@@ -41,6 +41,7 @@ _CLOSED_GIT_ENV: Final = {
     "GIT_OPTIONAL_LOCKS": "0",
     "GIT_CONFIG_GLOBAL": "/dev/null",
     "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_ASKPASS": "/bin/false",
     "LANG": "C",
@@ -91,9 +92,13 @@ class _SnapshotSeal:
 
     root_device: int
     root_inode: int
+    git_dir: Path
+    git_dir_device: int
+    git_dir_inode: int
     common_dir: Path
     common_dir_device: int
     common_dir_inode: int
+    git_dir_is_common_dir: bool
     ref_label: str
     remote: str
     commit_sha: str
@@ -542,6 +547,12 @@ def _collect_snapshot_seal(
     try:
         root_metadata = root.stat()
         worktree = Path(_git_stdout(root, "rev-parse", "--show-toplevel")).resolve()
+        git_dir_text = _git_stdout(root, "rev-parse", "--git-dir")
+        git_dir = Path(git_dir_text)
+        if not git_dir.is_absolute():
+            git_dir = root / git_dir
+        git_dir = git_dir.resolve()
+        git_dir_metadata = git_dir.stat()
         common_text = _git_stdout(root, "rev-parse", "--git-common-dir")
         common_dir = Path(common_text)
         if not common_dir.is_absolute():
@@ -552,6 +563,10 @@ def _collect_snapshot_seal(
         raise IndexManifestError("source_snapshot_root Git common-dir is unavailable") from error
     if worktree != root:
         raise IndexManifestError("source_snapshot_root worktree identity disagrees")
+    if not stat.S_ISDIR(git_dir_metadata.st_mode):
+        raise IndexManifestError("source_snapshot_root Git dir is not a directory")
+    if not _filesystem_is_read_only(git_dir):
+        raise IndexManifestError("source_snapshot_root Git dir must be on an OS read-only filesystem")
     if not stat.S_ISDIR(common_metadata.st_mode):
         raise IndexManifestError("source_snapshot_root Git common-dir is not a directory")
     if not _filesystem_is_read_only(common_dir):
@@ -573,7 +588,9 @@ def _collect_snapshot_seal(
     selected_source_tree_digest = _digest_selected_files(tracked_files, includes, excludes)
     digest = _snapshot_seal_digest(
         root_metadata=root_metadata,
+        git_dir_metadata=git_dir_metadata,
         common_metadata=common_metadata,
+        git_dir_is_common_dir=git_dir == common_dir,
         ref_label=ref_label,
         remote=remote,
         commit_sha=commit_sha,
@@ -584,9 +601,13 @@ def _collect_snapshot_seal(
     return _SnapshotSeal(
         root_device=root_metadata.st_dev,
         root_inode=root_metadata.st_ino,
+        git_dir=git_dir,
+        git_dir_device=git_dir_metadata.st_dev,
+        git_dir_inode=git_dir_metadata.st_ino,
         common_dir=common_dir,
         common_dir_device=common_metadata.st_dev,
         common_dir_inode=common_metadata.st_ino,
+        git_dir_is_common_dir=git_dir == common_dir,
         ref_label=ref_label,
         remote=remote,
         commit_sha=commit_sha,
@@ -699,7 +720,9 @@ def _reject_untracked_or_special_paths(root: Path, tracked_files: Sequence[_Trac
 def _snapshot_seal_digest(
     *,
     root_metadata: os.stat_result,
+    git_dir_metadata: os.stat_result,
     common_metadata: os.stat_result,
+    git_dir_is_common_dir: bool,
     ref_label: str,
     remote: str,
     commit_sha: str,
@@ -712,8 +735,11 @@ def _snapshot_seal_digest(
         "mastermind.codeintel_snapshot_seal.v1",
         str(root_metadata.st_dev),
         str(root_metadata.st_ino),
+        str(git_dir_metadata.st_dev),
+        str(git_dir_metadata.st_ino),
         str(common_metadata.st_dev),
         str(common_metadata.st_ino),
+        "git_dir_is_common_dir" if git_dir_is_common_dir else "git_dir_is_distinct",
         ref_label,
         remote,
         commit_sha,
