@@ -56,6 +56,52 @@ def github_hosted_userns_policy() -> Iterator[runner.HostUsernsPolicyEvidence]:
         yield evidence
 
 
+def _restored_policy_evidence(
+    *, original_value: int = 1
+) -> runner.HostUsernsPolicyEvidence:
+    return runner.HostUsernsPolicyEvidence(
+        scope=runner.HOST_USERNS_SCOPE,
+        control_key=runner.HOST_USERNS_SYSCTL_KEY,
+        control_path=os.fspath(runner.HOST_USERNS_SYSCTL_PATH),
+        original_value=original_value,
+        active_value=runner.HOST_USERNS_ACTIVE_VALUE,
+        mutation_performed=original_value != runner.HOST_USERNS_ACTIVE_VALUE,
+        active_readback_verified=True,
+        restored_value=original_value,
+        restore_readback_verified=True,
+    )
+
+
+def _restored_policy_payload(*, original_value: int = 1) -> dict[str, object]:
+    return {
+        "scope": runner.HOST_USERNS_SCOPE,
+        "control_key": runner.HOST_USERNS_SYSCTL_KEY,
+        "control_path": os.fspath(runner.HOST_USERNS_SYSCTL_PATH),
+        "original_value": original_value,
+        "active_value": runner.HOST_USERNS_ACTIVE_VALUE,
+        "mutation_performed": original_value != runner.HOST_USERNS_ACTIVE_VALUE,
+        "active_readback_verified": True,
+        "restored_value": original_value,
+        "restore_readback_verified": True,
+        "abrupt_termination_cleanup": "github_hosted_vm_decommission",
+    }
+
+
+def test_live_fixture_fails_closed_on_github_actions_identity_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = _github_hosted_environment(tmp_path)
+    environment["RUNNER_ARCH"] = "ARM64"
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+
+    with pytest.raises(
+        pytest.fail.Exception,
+        match="GitHub Actions runner identity drifted",
+    ):
+        _require_exact_github_hosted_userns_runner(environment)
+
+
 def _request(**changes: str) -> runner.ExperimentRequest:
     values = {
         "operation_key": runner.Z0_OPERATION_KEY,
@@ -1163,6 +1209,41 @@ def test_userns_policy_window_sets_zero_and_restores_exact_original(
 
     assert state["value"] == 1
     assert writes == [0, 1]
+    assert evidence.control_key == runner.HOST_USERNS_SYSCTL_KEY
+    assert evidence.control_path == os.fspath(runner.HOST_USERNS_SYSCTL_PATH)
+    assert evidence.mutation_performed is True
+    assert evidence.active_readback_verified is True
+    assert evidence.restored_value == 1
+    assert evidence.restore_readback_verified is True
+
+
+def test_userns_policy_window_original_zero_proves_state_without_sudo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads = 0
+
+    def read() -> int:
+        nonlocal reads
+        reads += 1
+        return 0
+
+    def unexpected_write(value: int, *, restoration: bool) -> None:
+        pytest.fail(f"unexpected sysctl write: value={value} restoration={restoration}")
+
+    monkeypatch.setattr(runner, "_read_host_userns_policy", read)
+    monkeypatch.setattr(runner, "_write_host_userns_policy", unexpected_write)
+
+    with runner.github_hosted_userns_policy_window(
+        _github_hosted_environment(tmp_path)
+    ) as evidence:
+        assert evidence.original_value == 0
+        assert evidence.active_value == 0
+
+    assert reads >= 2
+    assert evidence.mutation_performed is False
+    assert evidence.active_readback_verified is True
+    assert evidence.restored_value == 0
+    assert evidence.restore_readback_verified is True
 
 
 @pytest.mark.parametrize(
@@ -1301,6 +1382,54 @@ def test_userns_policy_window_activation_write_failure_still_restores(
     assert writes == [(0, False), (1, True)]
 
 
+def test_phase_p_activation_failure_receipt_reports_only_observed_policy_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _request()
+    receipt = tmp_path / "receipts/semantic-receipt.json"
+    environment = _github_hosted_environment(tmp_path)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    state = {"value": 1}
+    writes: list[tuple[int, bool]] = []
+    monkeypatch.setattr(runner, "_read_host_userns_policy", lambda: state["value"])
+
+    def write(value: int, *, restoration: bool) -> None:
+        writes.append((value, restoration))
+        if not restoration:
+            raise runner.HostedRunnerError(
+                "HOST_USERNS_POLICY_UNAVAILABLE", "forced sudo refusal"
+            )
+        state["value"] = value
+
+    monkeypatch.setattr(runner, "_write_host_userns_policy", write)
+
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        runner.prepare_phase_p_hosted(
+            tmp_path,
+            request,
+            scratch_root=tmp_path / "scratch",
+            output_directory=tmp_path / "output",
+            github_output=tmp_path / "github-output",
+            receipt_path=receipt,
+        )
+
+    assert raised.value.code == "HOST_USERNS_POLICY_UNAVAILABLE"
+    assert writes == [(0, False), (1, True)]
+    payload = runner.load_semantic_receipt(receipt)
+    assert (payload["status"], payload["effect"]) == ("REFUSED", "NOT_APPLIED")
+    assert payload["evidence"]["host_userns_policy"] == {
+        "scope": runner.HOST_USERNS_SCOPE,
+        "control_key": runner.HOST_USERNS_SYSCTL_KEY,
+        "control_path": os.fspath(runner.HOST_USERNS_SYSCTL_PATH),
+        "original_value": 1,
+        "active_readback_verified": False,
+        "restored_value": 1,
+        "restore_readback_verified": True,
+        "abrupt_termination_cleanup": "github_hosted_vm_decommission",
+    }
+
+
 def test_userns_policy_window_rejects_failed_active_readback_and_restores(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1348,6 +1477,83 @@ def test_userns_policy_window_restore_failure_overrides_success(
             assert state["value"] == 0
 
     assert raised.value.code == "HOST_USERNS_POLICY_RESTORE_FAILED"
+
+
+def test_phase_e_restoration_failure_receipt_does_not_claim_restore_verified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _request()
+    forge = tmp_path / "forge"
+    consumer = tmp_path / "consumer"
+    forge.mkdir()
+    consumer.mkdir()
+    receipt = tmp_path / "receipts/semantic-receipt.json"
+    environment = _github_hosted_environment(tmp_path)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    state = {"value": 1}
+    monkeypatch.setattr(runner, "_read_host_userns_policy", lambda: state["value"])
+
+    def write(value: int, *, restoration: bool) -> None:
+        if restoration:
+            raise runner.HostedRunnerError(
+                "HOST_USERNS_POLICY_RESTORE_FAILED", "forced restore refusal"
+            )
+        state["value"] = value
+
+    def fake_invoke(
+        argv: list[str], **kwargs: object
+    ) -> runner.subprocess.CompletedProcess[str]:
+        del kwargs
+        staging = Path(
+            next(value for value in argv if value.startswith("RECEIPT_PATH=")).split(
+                "=", 1
+            )[1]
+        )
+        runner.write_semantic_receipt(
+            staging,
+            request=request,
+            status="COMPLETED",
+            effect="APPLIED",
+            evidence={"consumer_launched": True},
+        )
+        return runner.subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "_write_host_userns_policy", write)
+    monkeypatch.setattr(runner, "_invoke_phase_p_boundary", fake_invoke)
+
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        runner.run_phase_e_hosted(
+            forge,
+            consumer,
+            request,
+            request_path=tmp_path / "request.json",
+            bundle_path=tmp_path / "bundle.tar.gz",
+            bundle_sha256=SHA_A,
+            sealed_home=tmp_path / "sealed-home",
+            scratch_root=tmp_path / "scratch",
+            result_directory=tmp_path / "result",
+            receipt_path=receipt,
+        )
+
+    assert raised.value.code == "HOST_USERNS_POLICY_RESTORE_FAILED"
+    payload = runner.load_semantic_receipt(receipt)
+    assert (payload["status"], payload["effect"]) == (
+        "RECONCILIATION_REQUIRED",
+        "EFFECT_UNKNOWN",
+    )
+    assert payload["evidence"]["host_userns_policy"] == {
+        "scope": runner.HOST_USERNS_SCOPE,
+        "control_key": runner.HOST_USERNS_SYSCTL_KEY,
+        "control_path": os.fspath(runner.HOST_USERNS_SYSCTL_PATH),
+        "original_value": 1,
+        "active_value": 0,
+        "mutation_performed": True,
+        "active_readback_verified": True,
+        "restore_readback_verified": False,
+        "abrupt_termination_cleanup": "github_hosted_vm_decommission",
+    }
+    assert "restored_value" not in payload["evidence"]["host_userns_policy"]
 
 
 def test_phase_p_hosted_restore_failure_cannot_publish_success(
@@ -1472,11 +1678,7 @@ def test_phase_e_hosted_publishes_staged_receipt_only_after_restore(
 
     @contextmanager
     def restored() -> Iterator[runner.HostUsernsPolicyEvidence]:
-        yield runner.HostUsernsPolicyEvidence(
-            scope=runner.HOST_USERNS_SCOPE,
-            original_value=1,
-            active_value=0,
-        )
+        yield _restored_policy_evidence()
 
     def fake_invoke(
         argv: list[str], **kwargs: object
@@ -1515,12 +1717,7 @@ def test_phase_e_hosted_publishes_staged_receipt_only_after_restore(
 
     payload = runner.load_semantic_receipt(receipt)
     assert (payload["status"], payload["effect"]) == ("COMPLETED", "APPLIED")
-    assert payload["evidence"]["host_userns_policy"] == {
-        "scope": runner.HOST_USERNS_SCOPE,
-        "required_active_value": 0,
-        "normal_restore_verified": True,
-        "abrupt_termination_cleanup": "github_hosted_vm_decommission",
-    }
+    assert payload["evidence"]["host_userns_policy"] == _restored_policy_payload()
 
 
 def test_phase_e_hosted_zero_exit_without_receipt_is_effect_unknown(
@@ -1535,11 +1732,7 @@ def test_phase_e_hosted_zero_exit_without_receipt_is_effect_unknown(
 
     @contextmanager
     def restored() -> Iterator[runner.HostUsernsPolicyEvidence]:
-        yield runner.HostUsernsPolicyEvidence(
-            scope=runner.HOST_USERNS_SCOPE,
-            original_value=1,
-            active_value=0,
-        )
+        yield _restored_policy_evidence()
 
     monkeypatch.setattr(runner, "github_hosted_userns_policy_window", restored)
     monkeypatch.setattr(
@@ -1571,6 +1764,7 @@ def test_phase_e_hosted_zero_exit_without_receipt_is_effect_unknown(
         "EFFECT_UNKNOWN",
     )
     assert payload["evidence"]["consumer_launch_state"] == "UNKNOWN"
+    assert payload["evidence"]["host_userns_policy"] == _restored_policy_payload()
 
 
 def test_phase_e_hosted_namespace_argv_is_fixed_and_secret_free(
