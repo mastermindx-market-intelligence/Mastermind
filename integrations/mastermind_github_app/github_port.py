@@ -411,8 +411,13 @@ class GithubApiPatchPort:
         )
         parents = value.get("parents") if isinstance(value, Mapping) else None
         files = value.get("files") if isinstance(value, Mapping) else None
+        actor = value.get("author") if isinstance(value, Mapping) else None
         if (
-            not isinstance(parents, list)
+            not isinstance(actor, Mapping)
+            or actor.get("login") != target.expected_actor_login
+            or type(actor.get("id")) is not int
+            or actor.get("id") != target.expected_actor_id
+            or not isinstance(parents, list)
             or len(parents) != 1
             or not isinstance(parents[0], Mapping)
             or parents[0].get("sha") != expected_head_oid

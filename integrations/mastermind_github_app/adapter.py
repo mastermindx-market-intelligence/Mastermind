@@ -41,6 +41,8 @@ from integrations.mastermind_github_app.models import (
     GithubPatchPort,
     IssueCode,
     NativeCommitError,
+    PatchAttemptPermit,
+    PatchAttemptState,
     PatchAuthorityResolver,
     PatchEligibility,
     PrincipalProvider,
@@ -63,6 +65,10 @@ _OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$")
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 _REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$")
 _PATH_RE = re.compile(r"^[A-Za-z0-9._/-]{1,512}$")
+_ACTOR_LOGIN_RE = re.compile(
+    r"^(?=.{1,100}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?$"
+)
+_PERMIT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$")
 
 _TOKEN_KEYS = frozenset(
     {
@@ -78,11 +84,22 @@ _TOKEN_KEYS = frozenset(
         "branch",
         "pull_request_number",
         "protected_branches",
+        "protected_branches_complete",
         "allowed_paths",
+        "allowed_paths_complete",
+        "pull_request_state",
+        "branch_protected",
+        "carrier_state",
+        "writer_state",
         "carrier_digest",
         "writer_digest",
         "authority_digest",
         "source_digest",
+        "authorized_effect_digest",
+        "attempt_permit_id",
+        "attempt_permit_digest",
+        "expected_actor_login",
+        "expected_actor_id",
         "expected_head_oid",
         "files",
         "normalized_effect_digest",
@@ -166,6 +183,8 @@ class GithubPatchGateway:
             raise ValueError("config schema digest does not match tool schemas")
         if config.token_ttl_seconds < 30 or config.token_ttl_seconds > 900:
             raise ValueError("token ttl must be between 30 and 900 seconds")
+        if not self._valid_actor(config.expected_actor_login, config.expected_actor_id):
+            raise ValueError("expected GitHub App actor is malformed")
         self._config = config
         self._principal_provider = principal_provider
         self._authority_resolver = authority_resolver
@@ -214,6 +233,9 @@ class GithubPatchGateway:
         target, issue, status = await self._resolve_write_target(operation_key, principal)
         if target is None:
             return self._envelope(PREPARE_TOOL, status, now, {}, (issue,))
+        attempt_issue, attempt_status = self._attempt_readiness(target.attempt_permit)
+        if attempt_issue is not None:
+            return self._envelope(PREPARE_TOOL, attempt_status, now, {}, (attempt_issue,))
 
         head = await self._read_head(target)
         if head is None:
@@ -239,6 +261,8 @@ class GithubPatchGateway:
             } else ToolStatus.REFUSED
             return self._envelope(PREPARE_TOOL, status, now, {}, (issue,))
         assert compilation is not None
+        if compilation.canonical_digest != target.authorized_effect_digest:
+            return self._refusal(PREPARE_TOOL, now, IssueCode.OPERATION_KEY_CONFLICT)
 
         # Preparation is useful only while its preview still describes the exact
         # current branch head. A second head read closes the read/compile race.
@@ -347,6 +371,17 @@ class GithubPatchGateway:
                 issues=(IssueCode.PRECONDITION_CHANGED,),
                 status=ToolStatus.REFUSED,
             )
+        attempt_issue, attempt_status = self._attempt_readiness(target.attempt_permit)
+        if attempt_issue is not None:
+            return self._receipt(
+                COMMIT_TOOL,
+                now,
+                claims,
+                prior,
+                native_request_attempts=0,
+                issues=(attempt_issue,),
+                status=attempt_status,
+            )
 
         head = await self._read_head(target)
         if head is None:
@@ -425,6 +460,18 @@ class GithubPatchGateway:
                 native_request_attempts=0,
                 issues=(IssueCode.BRANCH_HEAD_MOVED,),
                 status=ToolStatus.BLOCKED,
+            )
+
+        attempt_issue, attempt_status = await self._claim_attempt(target, principal, claims)
+        if attempt_issue is not None:
+            return self._receipt(
+                COMMIT_TOOL,
+                now,
+                claims,
+                EffectObservation(EffectState.NOT_APPLIED, None, head_after, True),
+                native_request_attempts=0,
+                issues=(attempt_issue,),
+                status=attempt_status,
             )
 
         files = tuple(
@@ -554,11 +601,65 @@ class GithubPatchGateway:
                 target.issues[0] if target.issues else IssueCode.ORGANIZATIONAL_AUTHORITY_REFUSED,
                 ToolStatus.REFUSED,
             )
+        target = dataclasses.replace(
+            target,
+            expected_actor_login=self._config.expected_actor_login,
+            expected_actor_id=self._config.expected_actor_id,
+        )
         if not self._eligible_target_shape(target):
             return None, IssueCode.ACTION_TARGET_UNRESOLVED, ToolStatus.UNKNOWN
-        if target.branch == target.default_branch or target.branch in set(target.protected_branches):
+        if target.branch == target.default_branch:
             return None, IssueCode.PROTECTED_BRANCH_REFUSED, ToolStatus.REFUSED
         return target, IssueCode.INTERNAL_CONTRACT_ERROR, ToolStatus.OK
+
+    async def _claim_attempt(
+        self,
+        target: ResolvedPatchTarget,
+        principal: AuthenticatedPrincipal,
+        claims: _Claims,
+    ) -> tuple[IssueCode | None, ToolStatus]:
+        try:
+            permit = await self._authority_resolver.claim_patch_attempt(
+                claims.operation_key,
+                principal.principal_digest,
+                claims.normalized_effect_digest,
+                str(claims.raw["attempt_permit_id"]),
+                str(claims.raw["attempt_permit_digest"]),
+            )
+        except Exception:
+            return IssueCode.ATTEMPT_FENCE_UNKNOWN, ToolStatus.UNKNOWN
+        if not self._valid_attempt_permit(permit):
+            return IssueCode.ATTEMPT_FENCE_UNKNOWN, ToolStatus.UNKNOWN
+        if (
+            permit.permit_id != claims.raw["attempt_permit_id"]
+            or permit.permit_digest != claims.raw["attempt_permit_digest"]
+            or permit.operation_key != claims.operation_key
+            or permit.normalized_effect_digest != claims.normalized_effect_digest
+            or permit.permit_id != target.attempt_permit.permit_id
+            or permit.permit_digest != target.attempt_permit.permit_digest
+        ):
+            return IssueCode.ATTEMPT_FENCE_UNKNOWN, ToolStatus.UNKNOWN
+        if permit.state is PatchAttemptState.GRANTED:
+            return None, ToolStatus.OK
+        if permit.state in {PatchAttemptState.CONSUMED, PatchAttemptState.REFUSED}:
+            return IssueCode.ATTEMPT_PERMIT_REFUSED, ToolStatus.REFUSED
+        return IssueCode.ATTEMPT_FENCE_UNKNOWN, ToolStatus.UNKNOWN
+
+    def _attempt_readiness(
+        self,
+        permit: PatchAttemptPermit,
+    ) -> tuple[IssueCode | None, ToolStatus]:
+        if not self._valid_attempt_permit(permit):
+            return IssueCode.ATTEMPT_FENCE_UNKNOWN, ToolStatus.UNKNOWN
+        if permit.state is PatchAttemptState.AVAILABLE:
+            return None, ToolStatus.OK
+        if permit.state in {
+            PatchAttemptState.GRANTED,
+            PatchAttemptState.CONSUMED,
+            PatchAttemptState.REFUSED,
+        }:
+            return IssueCode.ATTEMPT_PERMIT_REFUSED, ToolStatus.REFUSED
+        return IssueCode.ATTEMPT_FENCE_UNKNOWN, ToolStatus.UNKNOWN
 
     async def _read_head(self, target: ResolvedPatchTarget) -> str | None:
         try:
@@ -576,6 +677,8 @@ class GithubPatchGateway:
         expected_head_oid: str,
         intents: tuple[ExactFileEditRequest, ...],
     ) -> tuple[ExactEditCompilation | None, IssueCode | None]:
+        if target.protected_branches_complete is not True:
+            return None, IssueCode.ACTION_TARGET_UNRESOLVED
         snapshots: list[ExactFileSnapshot] = []
         for intent in intents:
             try:
@@ -603,13 +706,13 @@ class GithubPatchGateway:
             default_branch=target.default_branch,
             branch=target.branch,
             pull_request_number=target.pull_request_number,
-            pull_request_state=PullRequestState.OPEN,
-            branch_protected=target.branch in set(target.protected_branches),
-            carrier_state=CarrierState.EXACT,
-            writer_state=WriterState.EXACT,
+            pull_request_state=target.pull_request_state,
+            branch_protected=target.branch_protected,
+            carrier_state=target.carrier_state,
+            writer_state=target.writer_state,
             observed_head_oid=expected_head_oid,
             allowed_paths=tuple(sorted(set(target.allowed_paths))),
-            allowed_paths_complete=True,
+            allowed_paths_complete=target.allowed_paths_complete,
         )
         request = ExactEditRequest(
             schema=INPUT_SCHEMA,
@@ -662,6 +765,11 @@ class GithubPatchGateway:
             or raw["policy_id"] != self._config.policy_id
         ):
             return None, IssueCode.APP_GENERATION_MISMATCH
+        if (
+            raw["expected_actor_login"] != self._config.expected_actor_login
+            or raw["expected_actor_id"] != self._config.expected_actor_id
+        ):
+            return None, IssueCode.APP_ACTOR_MISMATCH
         if now < claims.issued_at:
             return None, IssueCode.PREPARED_TOKEN_INVALID
         if enforce_expiry and now >= claims.expires_at:
@@ -681,12 +789,21 @@ class GithubPatchGateway:
             "writer_digest",
             "authority_digest",
             "source_digest",
+            "authorized_effect_digest",
+            "attempt_permit_digest",
         ):
             if not isinstance(raw[key], str) or not raw[key]:
                 raise ValueError("invalid claims")
         if _HEX64_RE.fullmatch(raw["principal_digest"]) is None:
             raise ValueError("invalid principal")
-        for key in ("carrier_digest", "writer_digest", "authority_digest", "source_digest"):
+        for key in (
+            "carrier_digest",
+            "writer_digest",
+            "authority_digest",
+            "source_digest",
+            "authorized_effect_digest",
+            "attempt_permit_digest",
+        ):
             self._sha256(raw[key])
         if raw["schema_digest"] != SCHEMA_DIGEST:
             raise ValueError("invalid schema digest")
@@ -696,6 +813,24 @@ class GithubPatchGateway:
         operation_key = self._operation(raw["operation_key"])
         expected_head_oid = self._oid(raw["expected_head_oid"])
         effect_digest = self._sha256(raw["normalized_effect_digest"])
+        if raw["authorized_effect_digest"] != effect_digest:
+            raise ValueError("effect is not owner-authorized")
+        if (
+            not isinstance(raw["attempt_permit_id"], str)
+            or _PERMIT_ID_RE.fullmatch(raw["attempt_permit_id"]) is None
+        ):
+            raise ValueError("invalid attempt permit")
+        if not self._valid_actor(raw["expected_actor_login"], raw["expected_actor_id"]):
+            raise ValueError("invalid actor")
+        if type(raw["branch_protected"]) is not bool:
+            raise ValueError("invalid branch protection fact")
+        if type(raw["protected_branches_complete"]) is not bool:
+            raise ValueError("invalid protected-ref coverage fact")
+        if type(raw["allowed_paths_complete"]) is not bool:
+            raise ValueError("invalid changed-path coverage fact")
+        PullRequestState(raw["pull_request_state"])
+        CarrierState(raw["carrier_state"])
+        WriterState(raw["writer_state"])
         pr_number = raw["pull_request_number"]
         if isinstance(pr_number, bool) or not isinstance(pr_number, int) or pr_number <= 0:
             raise ValueError("invalid PR")
@@ -775,11 +910,22 @@ class GithubPatchGateway:
             "branch": target.branch,
             "pull_request_number": target.pull_request_number,
             "protected_branches": sorted(set(target.protected_branches)),
+            "protected_branches_complete": target.protected_branches_complete,
             "allowed_paths": sorted(set(target.allowed_paths)),
+            "allowed_paths_complete": target.allowed_paths_complete,
+            "pull_request_state": target.pull_request_state.value,
+            "branch_protected": target.branch_protected,
+            "carrier_state": target.carrier_state.value,
+            "writer_state": target.writer_state.value,
             "carrier_digest": target.carrier_digest,
             "writer_digest": target.writer_digest,
             "authority_digest": target.authority_digest,
             "source_digest": target.source_digest,
+            "authorized_effect_digest": target.authorized_effect_digest,
+            "attempt_permit_id": target.attempt_permit.permit_id,
+            "attempt_permit_digest": target.attempt_permit.permit_digest,
+            "expected_actor_login": target.expected_actor_login,
+            "expected_actor_id": target.expected_actor_id,
             "expected_head_oid": expected_head_oid,
             "files": [
                 {
@@ -808,11 +954,27 @@ class GithubPatchGateway:
             branch=str(raw["branch"]),
             pull_request_number=int(raw["pull_request_number"]),
             protected_branches=tuple(str(item) for item in raw["protected_branches"]),
+            protected_branches_complete=bool(raw["protected_branches_complete"]),
             allowed_paths=tuple(str(item) for item in raw["allowed_paths"]),
+            allowed_paths_complete=bool(raw["allowed_paths_complete"]),
+            pull_request_state=PullRequestState(str(raw["pull_request_state"])),
+            branch_protected=bool(raw["branch_protected"]),
+            carrier_state=CarrierState(str(raw["carrier_state"])),
+            writer_state=WriterState(str(raw["writer_state"])),
             carrier_digest=str(raw["carrier_digest"]),
             writer_digest=str(raw["writer_digest"]),
             authority_digest=str(raw["authority_digest"]),
             source_digest=str(raw["source_digest"]),
+            authorized_effect_digest=str(raw["authorized_effect_digest"]),
+            attempt_permit=PatchAttemptPermit(
+                permit_id=str(raw["attempt_permit_id"]),
+                permit_digest=str(raw["attempt_permit_digest"]),
+                operation_key=str(raw["operation_key"]),
+                normalized_effect_digest=str(raw["authorized_effect_digest"]),
+                state=PatchAttemptState.AVAILABLE,
+            ),
+            expected_actor_login=str(raw["expected_actor_login"]),
+            expected_actor_id=int(raw["expected_actor_id"]),
             patch_eligibility=PatchEligibility.ELIGIBLE,
         )
 
@@ -824,11 +986,22 @@ class GithubPatchGateway:
             and target.branch == raw["branch"]
             and target.pull_request_number == raw["pull_request_number"]
             and sorted(set(target.protected_branches)) == raw["protected_branches"]
+            and target.protected_branches_complete is raw["protected_branches_complete"]
             and sorted(set(target.allowed_paths)) == raw["allowed_paths"]
+            and target.allowed_paths_complete is raw["allowed_paths_complete"]
+            and target.pull_request_state.value == raw["pull_request_state"]
+            and target.branch_protected is raw["branch_protected"]
+            and target.carrier_state.value == raw["carrier_state"]
+            and target.writer_state.value == raw["writer_state"]
             and target.carrier_digest == raw["carrier_digest"]
             and target.writer_digest == raw["writer_digest"]
             and target.authority_digest == raw["authority_digest"]
             and target.source_digest == raw["source_digest"]
+            and target.authorized_effect_digest == raw["authorized_effect_digest"]
+            and target.attempt_permit.permit_id == raw["attempt_permit_id"]
+            and target.attempt_permit.permit_digest == raw["attempt_permit_digest"]
+            and target.expected_actor_login == raw["expected_actor_login"]
+            and target.expected_actor_id == raw["expected_actor_id"]
             and target.patch_eligibility is PatchEligibility.ELIGIBLE
         )
 
@@ -947,10 +1120,16 @@ class GithubPatchGateway:
             and isinstance(target.protected_branches, tuple)
             and bool(target.protected_branches)
             and all(self._safe_branch(item) for item in target.protected_branches)
+            and type(target.protected_branches_complete) is bool
             and isinstance(target.allowed_paths, tuple)
             and bool(target.allowed_paths)
             and all(self._safe_path(item) for item in target.allowed_paths)
             and len(set(target.allowed_paths)) == len(target.allowed_paths)
+            and type(target.allowed_paths_complete) is bool
+            and isinstance(target.pull_request_state, PullRequestState)
+            and type(target.branch_protected) is bool
+            and isinstance(target.carrier_state, CarrierState)
+            and isinstance(target.writer_state, WriterState)
             and all(
                 isinstance(value, str) and _HEX64_RE.fullmatch(value) is not None
                 for value in (
@@ -958,8 +1137,33 @@ class GithubPatchGateway:
                     target.writer_digest,
                     target.authority_digest,
                     target.source_digest,
+                    target.authorized_effect_digest,
                 )
             )
+            and self._valid_attempt_permit(target.attempt_permit)
+            and target.attempt_permit.operation_key == target.operation_key
+            and target.attempt_permit.normalized_effect_digest == target.authorized_effect_digest
+            and self._valid_actor(target.expected_actor_login, target.expected_actor_id)
+        )
+
+    @staticmethod
+    def _valid_attempt_permit(value: object) -> bool:
+        return (
+            isinstance(value, PatchAttemptPermit)
+            and _PERMIT_ID_RE.fullmatch(value.permit_id) is not None
+            and _HEX64_RE.fullmatch(value.permit_digest) is not None
+            and _OPERATION_RE.fullmatch(value.operation_key) is not None
+            and _HEX64_RE.fullmatch(value.normalized_effect_digest) is not None
+            and isinstance(value.state, PatchAttemptState)
+        )
+
+    @staticmethod
+    def _valid_actor(login: object, actor_id: object) -> bool:
+        return (
+            isinstance(login, str)
+            and _ACTOR_LOGIN_RE.fullmatch(login) is not None
+            and type(actor_id) is int
+            and actor_id > 0
         )
 
     def _repository(self, value: object) -> str:

@@ -5,6 +5,8 @@ import dataclasses
 from enum import Enum
 from typing import Mapping, Protocol, Sequence
 
+from control_plane.github_exact_edit import CarrierState, PullRequestState, WriterState
+
 
 RESULT_SCHEMA = "mastermind.github_exact_repair_tool_result.v1"
 RECEIPT_SCHEMA = "mastermind.github_exact_branch_repair_receipt.v1"
@@ -30,6 +32,14 @@ class PatchEligibility(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class PatchAttemptState(str, Enum):
+    AVAILABLE = "AVAILABLE"
+    GRANTED = "GRANTED"
+    CONSUMED = "CONSUMED"
+    REFUSED = "REFUSED"
+    UNKNOWN = "UNKNOWN"
+
+
 class IssueCode(str, Enum):
     CAPABILITY_UNAVAILABLE = "CAPABILITY_UNAVAILABLE"
     PRODUCTION_DISARMED = "PRODUCTION_DISARMED"
@@ -38,6 +48,7 @@ class IssueCode(str, Enum):
     ORGANIZATIONAL_AUTHORITY_REFUSED = "ORGANIZATIONAL_AUTHORITY_REFUSED"
     ACTION_TARGET_UNRESOLVED = "ACTION_TARGET_UNRESOLVED"
     OPERATION_NOT_FOUND = "OPERATION_NOT_FOUND"
+    OPERATION_KEY_CONFLICT = "OPERATION_KEY_CONFLICT"
     OPERATION_CARRIER_CONFLICT = "OPERATION_CARRIER_CONFLICT"
     CARRIER_WRITER_CONFLICT = "CARRIER_WRITER_CONFLICT"
     PATCH_TARGET_NOT_OWNED = "PATCH_TARGET_NOT_OWNED"
@@ -55,8 +66,11 @@ class IssueCode(str, Enum):
     PREPARED_TOKEN_INVALID = "PREPARED_TOKEN_INVALID"
     PREPARED_ACTION_EXPIRED = "PREPARED_ACTION_EXPIRED"
     APP_GENERATION_MISMATCH = "APP_GENERATION_MISMATCH"
+    APP_ACTOR_MISMATCH = "APP_ACTOR_MISMATCH"
     PRECONDITION_CHANGED = "PRECONDITION_CHANGED"
     PRIOR_EFFECT_UNKNOWN = "PRIOR_EFFECT_UNKNOWN"
+    ATTEMPT_PERMIT_REFUSED = "ATTEMPT_PERMIT_REFUSED"
+    ATTEMPT_FENCE_UNKNOWN = "ATTEMPT_FENCE_UNKNOWN"
     NATIVE_REQUEST_REFUSED = "NATIVE_REQUEST_REFUSED"
     EFFECT_UNKNOWN = "EFFECT_UNKNOWN"
     RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
@@ -70,6 +84,17 @@ class AuthenticatedPrincipal:
 
 
 @dataclasses.dataclass(frozen=True)
+class PatchAttemptPermit:
+    """Owner-native one-shot permit; the app only consumes it atomically."""
+
+    permit_id: str
+    permit_digest: str
+    operation_key: str
+    normalized_effect_digest: str
+    state: PatchAttemptState
+
+
+@dataclasses.dataclass(frozen=True)
 class ResolvedPatchTarget:
     """Server-owned operation, carrier, writer, and repository target facts."""
 
@@ -79,11 +104,21 @@ class ResolvedPatchTarget:
     branch: str
     pull_request_number: int | None
     protected_branches: tuple[str, ...]
+    protected_branches_complete: bool
     allowed_paths: tuple[str, ...]
+    allowed_paths_complete: bool
+    pull_request_state: PullRequestState
+    branch_protected: bool
+    carrier_state: CarrierState
+    writer_state: WriterState
     carrier_digest: str
     writer_digest: str
     authority_digest: str
     source_digest: str
+    authorized_effect_digest: str
+    attempt_permit: PatchAttemptPermit
+    expected_actor_login: str
+    expected_actor_id: int
     patch_eligibility: PatchEligibility
     issues: tuple[IssueCode, ...] = ()
 
@@ -127,6 +162,8 @@ class AppConfig:
     app_generation: str
     schema_digest: str
     policy_id: str
+    expected_actor_login: str
+    expected_actor_id: int
     production_armed: bool = False
     required_scope: str = REQUIRED_SCOPE
     token_ttl_seconds: int = 300
@@ -163,6 +200,15 @@ class PatchAuthorityResolver(Protocol):
         operation_key: str,
         principal_digest: str,
     ) -> ResolvedPatchTarget: ...
+
+    async def claim_patch_attempt(
+        self,
+        operation_key: str,
+        principal_digest: str,
+        normalized_effect_digest: str,
+        permit_id: str,
+        permit_digest: str,
+    ) -> PatchAttemptPermit: ...
 
 
 class GithubPatchPort(Protocol):
@@ -221,6 +267,8 @@ __all__ = [
     "IssueCode",
     "NativeCommitError",
     "NativeCommitResult",
+    "PatchAttemptPermit",
+    "PatchAttemptState",
     "PatchAuthorityResolver",
     "PatchEligibility",
     "PrincipalProvider",

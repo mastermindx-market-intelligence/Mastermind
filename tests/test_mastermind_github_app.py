@@ -9,6 +9,18 @@ from collections.abc import Mapping, Sequence
 
 import pytest
 
+from control_plane.github_exact_edit import (
+    INPUT_SCHEMA,
+    CarrierState,
+    ExactEditAuthority,
+    ExactEditRequest,
+    ExactFileEditRequest,
+    ExactFileSnapshot,
+    ExactTextReplacement,
+    PullRequestState,
+    WriterState,
+    compile_exact_edit,
+)
 from integrations.mastermind_github_app.adapter import (
     COMMIT_TOOL,
     PREPARE_TOOL,
@@ -32,6 +44,8 @@ from integrations.mastermind_github_app.models import (
     IssueCode,
     NativeCommitError,
     NativeCommitResult,
+    PatchAttemptPermit,
+    PatchAttemptState,
     PatchEligibility,
     ResolvedPatchTarget,
 )
@@ -84,6 +98,8 @@ class FakeAuthorityResolver:
     target: ResolvedPatchTarget
     fail: bool = False
     calls: int = 0
+    attempt_claim_calls: int = 0
+    attempt_claimed: bool = False
 
     async def resolve_patch_target(
         self,
@@ -95,7 +111,35 @@ class FakeAuthorityResolver:
             raise RuntimeError("private authority payload")
         assert operation_key == OPERATION
         assert principal_digest == PRINCIPAL
+        if self.attempt_claimed:
+            return dataclasses.replace(
+                self.target,
+                attempt_permit=dataclasses.replace(
+                    self.target.attempt_permit,
+                    state=PatchAttemptState.CONSUMED,
+                ),
+            )
         return self.target
+
+    async def claim_patch_attempt(
+        self,
+        operation_key: str,
+        principal_digest: str,
+        normalized_effect_digest: str,
+        permit_id: str,
+        permit_digest: str,
+    ) -> PatchAttemptPermit:
+        self.attempt_claim_calls += 1
+        permit = self.target.attempt_permit
+        assert operation_key == permit.operation_key
+        assert principal_digest == PRINCIPAL
+        assert normalized_effect_digest == permit.normalized_effect_digest
+        assert permit_id == permit.permit_id
+        assert permit_digest == permit.permit_digest
+        if self.attempt_claimed:
+            return dataclasses.replace(permit, state=PatchAttemptState.CONSUMED)
+        self.attempt_claimed = True
+        return dataclasses.replace(permit, state=PatchAttemptState.GRANTED)
 
 
 class FakeGithub:
@@ -181,6 +225,17 @@ class FakeGithub:
 
 
 def _target(**changes: object) -> ResolvedPatchTarget:
+    authorized_effect = str(changes.pop("authorized_effect_digest", "0" * 64))
+    attempt_permit = changes.pop(
+        "attempt_permit",
+        PatchAttemptPermit(
+            permit_id="attempt-1",
+            permit_digest="7" * 64,
+            operation_key=OPERATION,
+            normalized_effect_digest=authorized_effect,
+            state=PatchAttemptState.AVAILABLE,
+        ),
+    )
     base = ResolvedPatchTarget(
         operation_key=OPERATION,
         repository=REPOSITORY,
@@ -188,14 +243,37 @@ def _target(**changes: object) -> ResolvedPatchTarget:
         branch=BRANCH,
         pull_request_number=999,
         protected_branches=("main", "master"),
+        protected_branches_complete=True,
         allowed_paths=(PATH,),
+        allowed_paths_complete=True,
+        pull_request_state=PullRequestState.OPEN,
+        branch_protected=False,
+        carrier_state=CarrierState.EXACT,
+        writer_state=WriterState.EXACT,
         carrier_digest="2" * 64,
         writer_digest="3" * 64,
         authority_digest="4" * 64,
         source_digest="5" * 64,
+        authorized_effect_digest=authorized_effect,
+        attempt_permit=attempt_permit,
+        expected_actor_login="resolver-cannot-select-actor",
+        expected_actor_id=987654,
         patch_eligibility=PatchEligibility.ELIGIBLE,
     )
     return dataclasses.replace(base, **changes)
+
+
+def _target_with_owner_facts(**changes: object) -> ResolvedPatchTarget:
+    changes.setdefault("expected_actor_login", "mastermind-github-exact-repair[bot]")
+    changes.setdefault("expected_actor_id", 123456)
+    attempt_state = changes.pop("attempt_permit_state", None)
+    target = _target(**changes)
+    if attempt_state is not None:
+        target = dataclasses.replace(
+            target,
+            attempt_permit=dataclasses.replace(target.attempt_permit, state=PatchAttemptState(attempt_state)),
+        )
+    return target
 
 
 def _source(lines: int = 12_050) -> str:
@@ -223,6 +301,40 @@ def _arguments(github: FakeGithub) -> dict[str, object]:
     }
 
 
+def _owner_effect_digest(github: FakeGithub, target: ResolvedPatchTarget) -> str:
+    blob = github.blobs[PATH]
+    authority = ExactEditAuthority(
+        operation_key=target.operation_key,
+        carrier_ref=f"github:carrier:{target.carrier_digest}",
+        source_ref=f"github:source:{target.source_digest}",
+        repository=target.repository,
+        default_branch=target.default_branch,
+        branch=target.branch,
+        pull_request_number=target.pull_request_number or 0,
+        pull_request_state=PullRequestState.OPEN,
+        branch_protected=False,
+        carrier_state=CarrierState.EXACT,
+        writer_state=WriterState.EXACT,
+        observed_head_oid=HEAD,
+        allowed_paths=target.allowed_paths,
+        allowed_paths_complete=True,
+    )
+    request = ExactEditRequest(
+        schema=INPUT_SCHEMA,
+        operation_key=OPERATION,
+        expected_head_oid=HEAD,
+        files=(
+            ExactFileEditRequest(
+                path=PATH,
+                expected_blob_oid=blob.oid,
+                replacements=(ExactTextReplacement(**_replacement()),),
+            ),
+        ),
+    )
+    snapshot = ExactFileSnapshot(PATH, blob.oid, "100644", blob.content.encode())
+    return compile_exact_edit(request, authority, (snapshot,)).canonical_digest
+
+
 def _gateway(
     github: FakeGithub,
     *,
@@ -236,13 +348,38 @@ def _gateway(
         principal_digest=PRINCIPAL,
         scopes=("mastermind.github.exact_branch_repair",),
     )
-    resolver = FakeAuthorityResolver(target or _target())
+    resolved_target = target or _target()
+    if resolved_target.authorized_effect_digest == "0" * 64:
+        can_compile = (
+            resolved_target.branch != resolved_target.default_branch
+            and resolved_target.pull_request_state is PullRequestState.OPEN
+            and resolved_target.branch_protected is False
+            and resolved_target.protected_branches_complete is True
+            and resolved_target.allowed_paths_complete is True
+            and resolved_target.carrier_state is CarrierState.EXACT
+            and resolved_target.writer_state is WriterState.EXACT
+            and _git_blob_oid(github.blobs[PATH].content) == github.blobs[PATH].oid
+        )
+        effect_digest = (
+            _owner_effect_digest(github, resolved_target) if can_compile else "6" * 64
+        )
+        resolved_target = dataclasses.replace(
+            resolved_target,
+            authorized_effect_digest=effect_digest,
+            attempt_permit=dataclasses.replace(
+                resolved_target.attempt_permit,
+                normalized_effect_digest=effect_digest,
+            ),
+        )
+    resolver = FakeAuthorityResolver(resolved_target)
     gateway = GithubPatchGateway(
         config=AppConfig(
             app_id="mastermind-github-exact-repair",
             app_generation="ghp2-exact-test-generation",
             schema_digest=SCHEMA_DIGEST,
             policy_id="ghp2-exact-test-policy",
+            expected_actor_login="mastermind-github-exact-repair[bot]",
+            expected_actor_id=123456,
             production_armed=armed,
             token_ttl_seconds=300,
         ),
@@ -273,6 +410,13 @@ def _effect_digest(result: Mapping[str, object]) -> str:
     value = data["normalized_effect_digest"]
     assert isinstance(value, str)
     return value
+
+
+def _resign_token(token: str, **changes: object) -> str:
+    codec = HmacPreparedTokenCodec(SECRET, context="ghp2-exact-test")
+    claims = codec.decode(token)
+    claims.update(changes)
+    return codec.encode(claims)
 
 
 def test_tool_surface_is_exact_and_has_no_model_selected_repository_or_branch() -> None:
@@ -323,6 +467,32 @@ def test_prepare_requires_explicit_default_branch_and_refuses_protected_target()
     assert IssueCode.PROTECTED_BRANCH_REFUSED.value in protected["issues"]
 
 
+@pytest.mark.parametrize(
+    ("owner_fact", "value", "issue"),
+    [
+        ("pull_request_state", PullRequestState.CLOSED, IssueCode.ORGANIZATIONAL_AUTHORITY_REFUSED.value),
+        ("branch_protected", True, IssueCode.PROTECTED_BRANCH_REFUSED.value),
+        ("protected_branches_complete", False, IssueCode.ACTION_TARGET_UNRESOLVED.value),
+        ("allowed_paths_complete", False, IssueCode.ACTION_TARGET_UNRESOLVED.value),
+        ("carrier_state", CarrierState.CONFLICT, IssueCode.OPERATION_CARRIER_CONFLICT.value),
+        ("writer_state", WriterState.UNKNOWN, IssueCode.CARRIER_WRITER_CONFLICT.value),
+    ],
+)
+def test_prepare_consumes_detailed_source_owner_authority_facts(
+    owner_fact: str,
+    value: object,
+    issue: str,
+) -> None:
+    github = FakeGithub(_source())
+    gateway, _, _ = _gateway(github, target=_target_with_owner_facts(**{owner_fact: value}))
+
+    result = _prepare(gateway, github)
+
+    assert result["status"] != "OK"
+    assert issue in result["issues"]
+    assert github.commit_calls == 0
+
+
 def test_prepare_disarmed_returns_preview_but_no_token() -> None:
     github = FakeGithub(_source())
     gateway, _, _ = _gateway(github, armed=False)
@@ -347,6 +517,158 @@ def test_exact_commit_is_applied_once_and_repeated_commit_is_read_only() -> None
     assert second["data"]["effect_state"] == EffectState.APPLIED.value
     assert second["data"]["native_request_attempts"] == 0
     assert github.commit_calls == 1
+
+
+def test_repeated_old_token_after_proven_not_applied_needs_fresh_owner_attempt_permit() -> None:
+    github = FakeGithub(_source())
+    github.commit_mode = "definite_refusal"
+    gateway, _, _ = _gateway(github, target=_target_with_owner_facts())
+    token = _token(_prepare(gateway, github))
+
+    first = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+    second = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+
+    assert first["data"]["effect_state"] == EffectState.NOT_APPLIED.value
+    assert first["data"]["native_request_attempts"] == 1
+    assert second["status"] == "REFUSED"
+    assert second["data"]["effect_state"] == EffectState.NOT_APPLIED.value
+    assert second["data"]["native_request_attempts"] == 0
+    assert github.commit_calls == 1
+
+
+def test_fresh_owner_attempt_permit_requires_a_new_prepared_action() -> None:
+    github = FakeGithub(_source())
+    github.commit_mode = "definite_refusal"
+    gateway, _, resolver = _gateway(github)
+    old_token = _token(_prepare(gateway, github))
+    first = _run(gateway.call(COMMIT_TOOL, {"prepared_token": old_token}))
+    assert first["data"]["effect_state"] == EffectState.NOT_APPLIED.value
+    effect = resolver.target.authorized_effect_digest
+    resolver.target = dataclasses.replace(
+        resolver.target,
+        attempt_permit=PatchAttemptPermit(
+            permit_id="attempt-2",
+            permit_digest="8" * 64,
+            operation_key=OPERATION,
+            normalized_effect_digest=effect,
+            state=PatchAttemptState.AVAILABLE,
+        ),
+    )
+    resolver.attempt_claimed = False
+
+    old_repeat = _run(gateway.call(COMMIT_TOOL, {"prepared_token": old_token}))
+    assert old_repeat["status"] == "REFUSED"
+    assert old_repeat["data"]["native_request_attempts"] == 0
+    fresh_token = _token(_prepare(gateway, github))
+    github.commit_mode = "success"
+    fresh = _run(gateway.call(COMMIT_TOOL, {"prepared_token": fresh_token}))
+
+    assert fresh["data"]["effect_state"] == EffectState.APPLIED.value
+    assert fresh["data"]["native_request_attempts"] == 1
+    assert github.commit_calls == 2
+
+
+def test_same_operation_with_changed_normalized_payload_conflicts_before_token() -> None:
+    github = FakeGithub(_source())
+    target = _target_with_owner_facts()
+    gateway, _, resolver = _gateway(github, target=target)
+    first = _prepare(gateway, github)
+    object.__setattr__(resolver.target, "authorized_effect_digest", _effect_digest(first))
+    changed = _arguments(github)
+    changed_files = changed["files"]
+    assert isinstance(changed_files, list)
+    changed_replacements = changed_files[0]["replacements"]
+    changed_replacements[0]["new_text"] = "line-06000\nline-06001-different\nline-06002\n"
+
+    result = _run(gateway.call(PREPARE_TOOL, changed))
+
+    assert result["status"] == "REFUSED"
+    assert result["issues"] == ["OPERATION_KEY_CONFLICT"]
+    assert "prepared_token" not in result["data"]
+    assert github.commit_calls == 0
+
+
+def test_prepared_token_binds_actor_authority_effect_and_attempt_fields() -> None:
+    github = FakeGithub(_source())
+    gateway, _, _ = _gateway(github, target=_target_with_owner_facts())
+    token = _token(_prepare(gateway, github))
+    claims = HmacPreparedTokenCodec(SECRET, context="ghp2-exact-test").decode(token)
+
+    assert claims["expected_actor_login"] == "mastermind-github-exact-repair[bot]"
+    assert claims["expected_actor_id"] == 123456
+    assert claims["pull_request_state"] == PullRequestState.OPEN.value
+    assert claims["carrier_state"] == CarrierState.EXACT.value
+    assert claims["writer_state"] == WriterState.EXACT.value
+    assert claims["authorized_effect_digest"] == claims["normalized_effect_digest"]
+    assert claims["attempt_permit_id"] == "attempt-1"
+    assert claims["attempt_permit_digest"] == "7" * 64
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"expected_actor_login": "different-writer"},
+        {"authority_digest": "8" * 64},
+        {"normalized_effect_digest": "8" * 64},
+        {"attempt_permit_digest": "8" * 64},
+    ],
+)
+def test_resigned_tampering_of_actor_authority_effect_or_attempt_refuses_before_native_request(
+    changes: dict[str, object],
+) -> None:
+    github = FakeGithub(_source())
+    gateway, _, _ = _gateway(github)
+    token = _token(_prepare(gateway, github))
+
+    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": _resign_token(token, **changes)}))
+
+    assert result["status"] == "REFUSED"
+    assert github.commit_calls == 0
+
+
+def test_commit_revalidates_detailed_authority_before_claiming_attempt() -> None:
+    github = FakeGithub(_source())
+    gateway, _, resolver = _gateway(github)
+    token = _token(_prepare(gateway, github))
+    resolver.target = dataclasses.replace(
+        resolver.target,
+        pull_request_state=PullRequestState.CLOSED,
+    )
+
+    result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+
+    assert result["status"] == "REFUSED"
+    assert result["data"]["effect_state"] == EffectState.NOT_APPLIED.value
+    assert result["data"]["native_request_attempts"] == 0
+    assert github.commit_calls == 0
+    assert resolver.attempt_claim_calls == 0
+
+
+def test_prior_effect_unknown_is_sticky_across_authority_and_permit_movement() -> None:
+    github = FakeGithub(_source())
+    github.commit_mode = "ambiguous_unknown"
+    gateway, _, resolver = _gateway(github)
+    token = _token(_prepare(gateway, github))
+    first = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+    calls_after_first = resolver.calls
+    resolver.target = dataclasses.replace(
+        resolver.target,
+        branch="sol/alternate-carrier",
+        attempt_permit=dataclasses.replace(
+            resolver.target.attempt_permit,
+            permit_id="alternate-attempt",
+            permit_digest="9" * 64,
+        ),
+    )
+
+    repeated = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+
+    assert first["data"]["effect_state"] == EffectState.EFFECT_UNKNOWN.value
+    assert repeated["status"] == "UNKNOWN"
+    assert repeated["data"]["effect_state"] == EffectState.EFFECT_UNKNOWN.value
+    assert repeated["data"]["native_request_attempts"] == 0
+    assert github.commit_calls == 1
+    assert resolver.calls == calls_after_first
 
 
 def test_commit_reconciles_applied_effect_before_current_authority_resolution() -> None:
@@ -643,6 +965,54 @@ def test_github_port_keeps_unknown_when_expected_head_is_not_in_scanned_history(
     )
     assert observation.state is EffectState.EFFECT_UNKNOWN
     assert observation.complete is False
+
+
+@pytest.mark.parametrize(
+    ("actor_login", "actor_id", "expected_state"),
+    [
+        ("mastermind-github-exact-repair[bot]", 123456, EffectState.APPLIED),
+        ("different-writer", 123456, EffectState.EFFECT_UNKNOWN),
+        ("mastermind-github-exact-repair[bot]", 999999, EffectState.EFFECT_UNKNOWN),
+    ],
+)
+def test_github_port_requires_exact_configured_app_actor_for_applied(
+    actor_login: str,
+    actor_id: int,
+    expected_state: EffectState,
+) -> None:
+    commit_oid = "c" * 40
+    content = "after\n"
+    after_digest = hashlib.sha256(content.encode()).hexdigest()
+    target = _target_with_owner_facts()
+    marker = GithubApiPatchPort._marker(OPERATION, "e" * 64, HEAD, {PATH: after_digest})
+    transport = QueueTransport(
+        [
+            _response({"object": {"sha": commit_oid}}),
+            _response([{"sha": commit_oid, "commit": {"message": marker}}]),
+            _response(
+                {
+                    "sha": commit_oid,
+                    "author": {"login": actor_login, "id": actor_id},
+                    "parents": [{"sha": HEAD}],
+                    "files": [{"status": "modified", "filename": PATH}],
+                }
+            ),
+            *_tree_blob_responses(content),
+        ]
+    )
+    port = GithubApiPatchPort(transport=transport, token_provider=QueueTokenProvider())
+
+    observation = _run(
+        port.reconcile_branch_patch(
+            target,
+            HEAD,
+            OPERATION,
+            "e" * 64,
+            {PATH: after_digest},
+        )
+    )
+
+    assert observation.state is expected_state
 
 
 def test_github_port_commit_uses_one_fixed_graphql_expected_head_request() -> None:
