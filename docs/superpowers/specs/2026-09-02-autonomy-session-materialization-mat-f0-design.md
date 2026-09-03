@@ -1,4 +1,4 @@
-# MAT-F0 — Durable, effect-certain Executive session materialization
+# MAT-F0 — Effect-certain Executive session materialization
 
 **Date:** 2026-09-02  
 **Owner:** Sol, AI CEO  
@@ -12,10 +12,10 @@
 
 ## 0. Executive ruling
 
-Mastermind does **not** need a new “session materialization service,” session database, lifecycle
-machine, queue, scheduler, target registry, retry plane, or provider router.
+Mastermind does **not** need another session service, session database, lifecycle machine, queue,
+scheduler, target registry, retry plane, or provider router.
 
-Most of the materialization journey already exists behind the default-off Executive Operator Harness:
+The real default-off producer already exists:
 
 ```text
 ExecutiveControlService
@@ -29,128 +29,125 @@ ExecutiveControlService
 → Codex App Server process + provider thread
 ```
 
-The missing capability is narrower and more important:
+The missing capability is effect-certain reconciliation at two symmetric boundaries:
 
-> When the provider process and thread were created but the control-side reply or Runtime bind was
-> lost, recover the exact same materialization—or quarantine and clean it up—without issuing another
-> `thread/start`, creating another Attempt, or inventing another truth store.
+```text
+G1: thread/start succeeds → worker reply or Runtime TX-3 bind is lost
+G2: thread/resume succeeds → worker reply or Runtime TX-11 bind is lost
+```
 
-The first vertical remains deliberately narrow: one already-admitted, exact-command-bound,
-read-only `plan` Job on the existing Codex App Server worker realm. General worker roles, another
-provider family, autonomous target assignment, cross-alias transfer, and ChatGPT-Web conversation
-creation remain separate waves.
+Neither boundary may issue the provider call again. The system must recover the exact observed
+materialization, or quarantine and clean it up, while preserving the same Executive Attempt and
+operation identity.
 
-This architecture adopts and hardens the existing producer path. It does not replace it.
+The first vertical is one command-bound, read-only `plan` Attempt on `openai-codex` /
+`codex-app-server`. General roles/providers, ChatGPT-Web creation, Stage-B responsibility transfer,
+Wake/ACK, and production arming remain separate.
 
-## 1. Outcome and completion standard
+## 1. Outcome and completion
 
-### User outcome
+### Chairman outcome
 
-The Chairman can submit one bounded Executive objective and have Mastermind create the required
-execution surface without personally opening a Codex session or relaying messages.
+One bounded Executive objective can acquire a real Codex execution surface without the Chairman
+opening a session, selecting a numbered account, or relaying a handoff.
 
 ### Machine outcome
 
-For one exact Executive Attempt, the system can prove all of the following:
+For one exact Attempt, Mastermind can prove:
 
 1. one deterministic dispatch command claimed one Attempt;
-2. one deterministic materialization command authorized at most one provider start submission;
-3. the exact worker, epoch, process generation, provider process, provider thread, profile,
-   attestation, and principal observations are recoverable after a lost response;
-4. the same materialization can be bound into Executive Runtime without another provider start;
-5. a restart either resumes the same provider thread through the existing G2 path or leaves the same
-   Attempt explicitly quarantined;
-6. terminal success is impossible until process, writer, owned resources, wait tasks, monitors,
-   stream pumps, and receipt completeness all reach an accepted terminal disposition.
+2. G1 start and G2 resume each use one deterministic provider-operation command;
+3. a successful provider process/thread observation survives a lost control response;
+4. the observation is imported through existing Runtime TX-3 or TX-11, never a parallel binding;
+5. currentness is re-derived from Runtime lease/fence/epoch/generation evidence, not from the receipt;
+6. committed dispatch with no receipt remains effect-unknown and cannot be retried;
+7. no successful terminal result exists until complete process/resource/task/pipe teardown is proven.
 
-### Real completion proof
+### Real proof
 
-MAT-C1 is not complete merely because tests pass or code merges. Completion requires one disposable,
-production-path Codex canary that creates exactly one process and one root provider thread, executes
-one harmless read-only turn, returns one typed result, survives an injected response-loss boundary,
-reconciles without a second `thread/start`, and proves full teardown.
+MAT-C1 is not complete at merge. Production proof requires one disposable read-only canary that:
+
+- creates one G1 process and one root provider thread;
+- loses a control response after the G1 receipt is durable;
+- imports and binds that same G1 with zero second `thread/start`;
+- proves G1 dead/released and allocates the existing lawful G2 resume;
+- loses a control response after the G2 receipt is durable while the broker still owns G2;
+- imports and binds that same G2 with zero second `thread/resume` and zero `thread/start`;
+- executes one harmless turn and returns one typed result;
+- proves complete teardown and zero second Attempt.
+
+A separate restart test must prove receipt-only G2 reconciliation after broker restart. Because current
+OHF permits no G3, a dead G2 after restart may terminalize or remain quarantined; it may not be
+presented as a successful continuation.
 
 ## 2. Capability ledger at the protected basis
 
-| Capability | State | Evidence / limit |
+| Capability | State | Limit |
 |---|---|---|
-| Executive Job/Attempt/Worker/Event lifecycle, lease and fence | `BUILT_NOT_PROVEN` | Existing Runtime v4; production arming is separate |
-| Exact command-bound planner dispatch | `BUILT_NOT_PROVEN` | `dispatch_cycle_job()` and service COO cycle; default-off |
-| Pre-provider Runtime start INTENT and dispatch commitment | `BUILT_NOT_PROVEN` | OHF reserve/dispatch receipts exist |
-| Codex App Server process + root thread creation | `BUILT_NOT_PROVEN` | Existing broker/adapter path; default-off |
-| Control-side bind, attestation and principal admission | `BUILT_NOT_PROVEN` | Existing TX-3 / admission path |
-| Same-Attempt G1 recovery and G2 native resume after a bound generation | `BUILT_NOT_PROVEN` | Existing `reconcile_restart()` path |
-| Durable terminal-return reduction | `BUILT_NOT_PROVEN` | RET1 protected; production projection remains separately gated |
-| Lost-response recovery after provider start but before Runtime bind | `NOT_BUILT` | No immutable worker materialization receipt or exact status read |
-| Broker-restart recovery of an unbound provider start | `NOT_BUILT` | Worker `_operator_run` is process-local |
-| Full teardown lifecycle including wait/monitor/pipe disposition | `PARTIAL` | Process-group absence alone is insufficient; teardown carrier remains held |
-| General role/provider materialization | `NOT_BUILT` | First vertical is Codex read-only planner only |
-| Stage-B action-authoritative target assignment | `SPEC_ONLY` | Separate responsibility/alias authority; must not be smuggled into MAT-C1 |
-| Unattended end-to-end production autonomy | `NOT_BUILT` | Requires later Wake/ACK/terminal-return/assignment proof |
+| Executive Job/Attempt/Worker/Event lifecycle, lease, fence | `BUILT_NOT_PROVEN` | production arming separate |
+| Exact command-bound planner dispatch | `BUILT_NOT_PROVEN` | default-off |
+| Runtime start/resume INTENT and provider-dispatch commitment | `BUILT_NOT_PROVEN` | existing OHF path |
+| Codex App Server `thread/start` and `thread/resume` | `BUILT_NOT_PROVEN` | provider-native idempotency false |
+| TX-3 start bind, TX-11 resume bind, TX-4 admission | `BUILT_NOT_PROVEN` | exact Runtime owner |
+| Bound G1 recovery and lawful same-session G2 resume | `BUILT_NOT_PROVEN` | no G3 |
+| RET1 terminal-return reduction | `BUILT_NOT_PROVEN` | production projection gated |
+| Lost G1 response before TX-3 | `NOT_BUILT` | no durable worker receipt/status import |
+| Lost G2 response before TX-11 | `NOT_BUILT` | same missing seam |
+| Broker-restart recovery of unbound G1/G2 | `NOT_BUILT` | worker active state is process-local |
+| Complete task/resource/pipe teardown | `PARTIAL` | process absence alone insufficient |
+| Stage-B action-authoritative target assignment | `SPEC_ONLY` | separate owner |
+| General unattended autonomy | `NOT_BUILT` | later end-to-end proof required |
 
 ## 3. Canonical ownership
 
-| Fact or effect | Canonical owner | MAT-F0 rule |
+| Fact/effect | Canonical owner | MAT-F0 rule |
 |---|---|---|
-| Job, Attempt, Worker, status, lease, fence, command and Event | Executive Runtime | Sole lifecycle and durable mutation authority |
-| Concrete worker/quota selection | Existing Executive dispatch/Capacity owner | Materialization consumes an exact selected Attempt; it does not select capacity |
-| Capability/profile/model/sandbox contract | Model Router + ExecutionCapabilityRegistry + Attempt effective grant | Revalidated before provider submission; model output grants nothing |
-| Start/resume/turn/stop operation ordering | OperatorHarnessOrchestrator + ExecutiveOperatorHarnessPort | Preserve command-first Runtime receipt before every provider mutation |
-| Actual provider process/thread effect | Worker broker + CodexOperatorAdapter | Provider I/O stays outside the Runtime transaction |
-| Lost-response materialization evidence | Existing worker `run_root`, through one immutable typed receipt | Evidence only; never lifecycle/currentness/authority |
-| Exact current binding projection | RuntimeBinding projection | Read-only projection after accepted Runtime bind |
-| Root responsibility → logical Sol alias | Stage B / SessionTarget authority | Explicitly outside MAT-C1 |
-| Wake delivery and consumption ACK | Wake/ACK owners | Downstream consumer; not a materialization prerequisite for initial assignment |
-| Terminal candidate reduction | RET1 | Consumes terminal Runtime evidence; does not create or clean sessions |
-| Cross-session organizational continuity | Agent OS | Records the ruling/handoff, never provider or lifecycle truth |
-| Code and immutable proof | GitHub | Exact implementation/evidence truth |
-| Slack dialogue | Slack | Transport only; no materialization authority |
+| Job, Attempt, lease, fence, command, Event, current epoch/writer | Executive Runtime | sole lifecycle authority |
+| Worker/quota selection | existing dispatch/Capacity owner | materialization consumes selection |
+| Requested profile/effective grant | capability policy + Attempt | revalidated before provider I/O |
+| Operation ordering | OperatorHarnessOrchestrator + ExecutiveOperatorHarnessPort | Runtime intent/dispatch first |
+| Provider process/thread effect | worker broker + CodexOperatorAdapter | outside Runtime transaction |
+| Lost-response observation | immutable worker receipt under existing `BrokerPolicy.run_root` | evidence only |
+| G1/G2 bind and admission | existing TX-3/TX-11/TX-4 | no new Runtime transaction type by default |
+| RuntimeBinding | existing projection | only after accepted Runtime bind |
+| Root responsibility → Sol alias | Stage B / SessionTarget authority | outside MAT-C1 |
+| Wake/ACK | Wake owners | downstream, separate |
+| Terminal reduction | RET1 | not cleanup or materialization |
+| Organizational continuity | Agent OS | not execution truth |
+| Code/proof | GitHub | exact implementation truth |
+| Slack | transport | no lifecycle or target authority |
 
-## 4. Current-source archaeology and the exact gap
+## 4. Exact current gap
 
-The protected source already enforces the safe side of the boundary:
+Protected source already performs the safe ordering:
 
-1. `ExecutiveOperatorSupervisor.start_cycle_job()` accepts only an exact planner Job and delegates
-   the exact command-bound claim to Executive Runtime.
-2. `OperatorHarnessOrchestrator.start_attempt()` validates the requested profile, seals the Attempt,
-   extends the lease, commits the Runtime start INTENT/writer fence, commits provider dispatch, and
-   only then calls the provider adapter.
-3. `ExecutiveOperatorHarnessPort` maps every operation onto existing Runtime methods; it owns no
-   state.
-4. `ExecutiveWorkerBroker` runs under a distinct worker UID and accepts only typed AF_UNIX requests.
-5. `CodexOperatorAdapter` starts one private App Server process, validates effective configuration,
-   calls `thread/start`, requires an exact root thread and `thread/started` confirmation, and keeps
-   generation state in memory.
-6. The orchestrator records durable `EFFECT_UNKNOWN` when provider start or subsequent bind cannot
-   be safely reconciled from the immediate response.
-7. `ExecutiveOperatorSupervisor.reconcile_restart()` never cross-Attempt requeues. It can recover an
-   exact **already-bound** generation and resume the same provider session through G2.
+1. exact planner dispatch creates one Attempt and lease;
+2. `start_attempt()` reserves G1, commits provider dispatch, then calls the worker;
+3. `resume()` reserves G2, commits provider dispatch, then calls the worker;
+4. worker `ohf-start` and `ohf-resume` both enter `_ohf_start(..., resume=<bool>)`;
+5. `CodexOperatorAdapter` validates one private App Server process and the exact provider session;
+6. Runtime records `EFFECT_UNKNOWN` when provider I/O may have occurred but bind/response is lost;
+7. `reconcile_restart()` never creates a second Attempt, but it requires already-bound identity.
 
-The gap is between items 5 and 7:
+The unbound gaps are:
 
 ```text
-Runtime start INTENT + provider-dispatch commitment
-→ provider process/thread successfully created
-→ control reply lost OR Runtime bind failed
-→ worker has process-local state
-→ Runtime has no provider_session_id/process identity
+G1_UNBOUND:
+  start INTENT + dispatch commitment + provider start observation
+  + no TX-3 APPLIED
+
+G2_UNBOUND:
+  resume INTENT + dispatch commitment + provider resume observation
+  + no TX-11 APPLIED
 ```
 
-The current recovery method requires the Runtime generation already to contain exact process and
-provider-session identity. The worker broker’s `_operator_run` is process-local and is lost on broker
-restart. The provider declares no native idempotency for `thread/start`. Reissuing start is therefore
-forbidden.
+The broker’s active operator state is process-local. A broker restart loses current adapter ownership.
+The provider exposes no start idempotency. Reissuing either call is forbidden.
 
-This state is `MATERIALIZED_UNBOUND`.
+## 5. Immutable worker evidence receipt
 
-## 5. Chosen architecture: one immutable worker evidence receipt
-
-MAT-C1 adds one typed, immutable, secret-safe **materialization evidence receipt** under the existing
-worker `BrokerPolicy.run_root`. This is not a store of current state and not a lifecycle authority.
-
-### 5.1 Fixed evidence location
-
-The worker derives the location; no caller supplies a path:
+MAT-C1 adds one typed, immutable, secret-safe receipt contract. Each modifying provider operation has
+its own receipt, derived from the exact operation command:
 
 ```text
 <BrokerPolicy.run_root>/
@@ -159,17 +156,12 @@ The worker derives the location; no caller supplies a path:
       receipt.json
 ```
 
-The directory and file must be non-symlink, single-link where applicable, worker-owned, mode 0700/0600,
-and created with exclusive create plus file and parent-directory `fsync`. Existing content is never
-overwritten. A semantic mismatch at the same command identity is a conflict.
+The path is worker-derived. Caller-supplied paths, “latest” scans, mtimes, and directory order are
+forbidden.
 
-The receipt remains evidence after import. Deleting it early must never be required for correctness.
-Retention may later be bounded by a separate evidence-retention policy after terminal proof; MAT-C1
-does not invent one.
+### 5.1 Receipt schema
 
-### 5.2 Receipt content
-
-The receipt schema is `mastermind.operator_materialization_receipt/v1` and contains exactly:
+`mastermind.operator_materialization_receipt/v1` contains exactly:
 
 ```text
 schema
@@ -190,35 +182,47 @@ created_at
 receipt_digest
 ```
 
-`receipt_digest` is SHA-256 over canonical receipt bytes with that field omitted.
+The receipt contains no credentials, tokens, auth contents, prompt, transcript, raw model output,
+Slack principal, account email, Job objective, branch, or arbitrary path. Typed principal/home fields
+use only the already-reviewed secret-safe wire shapes.
 
-The receipt contains no token, credential, auth file content, raw model output, prompt, transcript,
-Slack principal, account email, Job objective, branch, worktree contents, or arbitrary filesystem
-path. The typed provider-home observation may contain only the already-reviewed identity fields
-currently admitted by the principal contract.
+The receipt grants no currentness, lifecycle state, authority, target, retry, completion, or cleanup
+claim.
 
-The receipt does not say that the Attempt is current, authoritative, complete, successful, or
-eligible. Those facts remain Runtime-derived.
+### 5.2 Durability
 
-### 5.3 Write point
+Within the broker’s existing exact-operation exclusion boundary:
 
-The worker persists the receipt:
+1. validate profile and exact operation identity;
+2. check for an existing receipt before provider I/O;
+3. perform `thread/start` or `thread/resume` once;
+4. validate provider session, process, attestation, process credentials, and provider-home identity;
+5. exclusive-create worker-owned 0700 directories and 0600 receipt;
+6. write canonical bytes, `fsync` file and newly material parent directories;
+7. reopen and validate exact bytes;
+8. only then publish process-local active state and return success.
 
-1. after `thread/start` or `thread/resume` returns an exact provider session;
-2. after the adapter has validated root-session identity and collected typed attestation, process
-   credentials, and provider-home identity;
-3. before the worker broker returns success to the control process;
-4. before the control process attempts Runtime bind.
+Existing receipt + exact semantics is reconciliation, not another provider call. Existing receipt +
+different semantics is conflict. A persistence failure after provider effect triggers at most one
+same-process cleanup attempt and remains effect-unknown.
 
-If persistence fails after provider creation, the broker must not report success. It performs at most
-one bounded same-process cleanup attempt, reports effect uncertainty, and never starts again under a
-new command.
+### 5.3 Read-only status
 
-### 5.4 Read path
+One exact broker read, conceptually `ohf-materialization-status`, accepts:
 
-MAT-C1 adds one read-only broker operation, conceptually
-`ohf-materialization-status`, accepting only the exact operation command, Attempt, epoch, and process
-generation identities. It may return:
+```text
+operation_command_id
+operation_kind
+attempt_id
+worker_id
+session_epoch_id
+process_generation_id
+generation_number
+requested_profile_digest
+expected_provider_session_id | null
+```
+
+It returns exactly:
 
 ```text
 ABSENT
@@ -227,24 +231,19 @@ RECEIPT_ONLY_AFTER_RESTART
 CONFLICT
 ```
 
-It performs no provider start, resume, turn, stop, cancel, target assignment, lease mutation, or
-Runtime mutation.
+It performs no provider, Runtime, lease, target, retry, stop, or cleanup mutation.
 
-A duplicate `ohf-start` with the same identity may return the same receipt when the worker can prove
-exact semantic equality, but the control-side reconciliation path must use the read-only status
-operation rather than blindly resubmitting the modifying call.
-
-## 6. Machine-readable architecture freeze
+## 6. Normative architecture freeze
 
 <!-- MAT_F0_CONTRACT_BEGIN -->
 ```json
 {
-  "schema": "mastermind.session_materialization_f0_contract.v1",
+  "schema": "mastermind.session_materialization_f0_contract.v2",
   "operation": "autonomy-session-materialization-mat-f0-architecture-freeze-20260902-sol-001",
   "protected_source_sha": "2c59fc6a987b02b2ca3db4e59fb90a5246eaed12",
   "records_wave": "MAT-F0",
-  "records_state_after_merge": "SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT / PROTECTED",
   "implementation_wave": "MAT-C1",
+  "records_state_after_merge": "SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT / PROTECTED",
   "first_vertical": {
     "provider": "openai-codex",
     "surface": "codex-app-server",
@@ -262,21 +261,31 @@ operation rather than blindly resubmitting the modifying call.
   ],
   "canonical_worker_chain": [
     "control_plane.remote_codex_operator_adapter.RemoteCodexOperatorAdapter",
-    "control_plane.executive_worker_broker.ExecutiveWorkerBroker",
+    "control_plane.executive_worker_broker.ExecutiveWorkerBroker._ohf_start",
     "control_plane.codex_operator_adapter.CodexOperatorAdapter"
   ],
   "lifecycle_authority": "control_plane.executive_runtime",
   "outer_dispatch_command": "coo-cycle:<root_job_id>:dispatch:<job_id>:attempt:<attempt_number>",
-  "materialization_operation_command": "ohf-op:start:<attempt_id>",
+  "materialization_operation_commands": {
+    "start_session": "ohf-op:start:<attempt_id>",
+    "resume_session": "ohf-op:recover-resume:<attempt_id>"
+  },
+  "runtime_bind_owners": {
+    "start_session": "TX-3 / bind_start_result",
+    "resume_session": "TX-11 / bind_resume_result",
+    "attestation_and_principal": "TX-4 / seal_attestation"
+  },
   "provider_call_inside_runtime_transaction": false,
   "provider_native_idempotency": false,
+  "maximum_generation": 2,
   "worker_receipt": {
     "schema": "mastermind.operator_materialization_receipt/v1",
     "authority": "EVIDENCE_ONLY",
     "root_owner": "control_plane.executive_worker_broker.BrokerPolicy.run_root",
     "path": ".operator-materializations/<sha256(operation_command_id)>/receipt.json",
-    "write_owner": "control_plane.executive_worker_broker.ExecutiveWorkerBroker",
+    "write_owner": "control_plane.executive_worker_broker.ExecutiveWorkerBroker._ohf_start",
     "read_owner": "exact typed broker status operation",
+    "operation_kinds": ["start_session", "resume_session"],
     "atomic_create": true,
     "overwrite": false,
     "canonical_digest": true,
@@ -305,6 +314,7 @@ operation rather than blindly resubmitting the modifying call.
       "lease",
       "fence",
       "current worker",
+      "current generation",
       "current target",
       "completion",
       "retry permission"
@@ -320,53 +330,52 @@ operation rather than blindly resubmitting the modifying call.
       "CONFLICT"
     ]
   },
-  "derived_states": [
-    "PRE_SUBMIT_REFUSED",
-    "DISPATCH_COMMITTED_UNOBSERVED",
-    "MATERIALIZED_UNBOUND",
-    "BOUND_CURRENT",
-    "RUNNING_TURN",
-    "TERMINAL_RESULT_SEALED",
-    "TERMINAL_RELEASED",
-    "CLEANUP_INCOMPLETE",
-    "MATERIALIZATION_IDENTITY_UNKNOWN",
-    "EFFECT_UNKNOWN"
-  ],
-  "materialized_unbound_formula": [
-    "exact Runtime start INTENT exists",
-    "exact Runtime provider-dispatch commitment exists",
-    "exact immutable worker materialization receipt exists",
-    "matching Runtime bind/APPLIED receipt is absent"
-  ],
-  "normal_order": [
-    "revalidate service, autonomy, worker, capability and workspace identities",
-    "claim one exact Attempt with the existing dispatch command",
-    "reserve the existing Runtime epoch and generation",
-    "commit the existing provider-dispatch receipt",
-    "call provider outside the Runtime transaction",
-    "validate process, root provider session, attestation and principal evidence",
-    "persist the immutable worker receipt before replying",
-    "validate and import the receipt into the existing Runtime bind path",
-    "seal attestation and principal evidence",
-    "project RuntimeBinding read-only",
-    "execute one bounded turn",
-    "seal result",
-    "prove complete teardown",
-    "abandon epoch and terminalize the same Attempt",
-    "project terminal return through RET1"
-  ],
+  "unbound_formulas": {
+    "G1_START_UNBOUND": [
+      "exact start INTENT exists",
+      "exact start provider-dispatch commitment exists",
+      "exact start worker receipt exists",
+      "matching TX-3 APPLIED is absent"
+    ],
+    "G2_RESUME_UNBOUND": [
+      "exact resume INTENT exists",
+      "exact resume provider-dispatch commitment exists",
+      "exact resume worker receipt exists",
+      "matching TX-11 APPLIED is absent"
+    ]
+  },
+  "import_law": {
+    "G1_START_UNBOUND": [
+      "same Attempt lease/fence takeover",
+      "validate exact G1 receipt and Runtime command evidence",
+      "TX-3 bind exact historical start observation",
+      "TX-4 seal exact attestation and principal",
+      "reconcile exact process",
+      "if dead/released, existing G2 resume may be allocated"
+    ],
+    "G2_RESUME_UNBOUND": [
+      "same Attempt lease/fence takeover",
+      "validate bound/released G1 and exact G2 receipt/command evidence",
+      "require same provider_session_id as G1",
+      "TX-11 bind exact historical resume observation",
+      "TX-4 seal exact attestation and principal",
+      "recover current G2 directly; never allocate G3"
+    ]
+  },
   "effect_unknown_law": {
     "same_carrier": true,
-    "status_read_before_any_modifying_replay": true,
+    "status_read_before_modifying_replay": true,
     "blind_retry": false,
     "cross_worker_failover": false,
     "second_attempt": false,
-    "second_provider_start": false,
-    "missing_receipt_after_dispatch": "MATERIALIZATION_IDENTITY_UNKNOWN / QUARANTINE"
+    "second_start": false,
+    "second_resume": false,
+    "missing_receipt_after_committed_dispatch": "MATERIALIZATION_IDENTITY_UNKNOWN / QUARANTINE"
   },
   "restart_law": {
-    "receipt_exists": "bind the exact historical G1 evidence, reconcile the exact process, then use existing same-session G2 resume when lawful",
-    "receipt_missing": "do not recreate; preserve effect uncertainty and quarantine the same Attempt",
+    "G1_receipt_only": "bind and seal historical G1, reconcile process, then resume same provider session as G2 only after dead/released proof",
+    "G2_receipt_only": "bind and seal historical G2, reconcile or terminalize it; dead G2 cannot create G3",
+    "missing_receipt": "do not recreate; preserve effect uncertainty and quarantine the same Attempt",
     "process_absence_proves_remote_thread_absence": false
   },
   "teardown_acceptance": {
@@ -397,231 +406,96 @@ operation rather than blindly resubmitting the modifying call.
     "runtime_binding_rows_written_outside_existing_owner": false
   },
   "production_arming": false,
-  "next": "MAT-C1_EFFECT_CERTAIN_UNBOUND_RECEIPT_AND_RECONCILIATION"
+  "next": "MAT-C1_EFFECT_CERTAIN_G1_G2_RECEIPT_AND_RECONCILIATION"
 }
 ```
 <!-- MAT_F0_CONTRACT_END -->
 
-The JSON block is normative. Prose may explain it but may not widen it.
+The JSON block is normative. Prose may explain but may not widen it.
 
-## 7. State derivation
+## 7. Derived states, not new lifecycle states
 
-These labels are projections over existing Runtime Events plus the worker receipt. They are not new
-database enums.
+```text
+PRE_SUBMIT_REFUSED
+DISPATCH_COMMITTED_UNOBSERVED
+G1_START_UNBOUND
+G2_RESUME_UNBOUND
+BOUND_CURRENT_G1
+BOUND_CURRENT_G2
+RUNNING_TURN
+TERMINAL_RESULT_SEALED
+TERMINAL_RELEASED
+CLEANUP_INCOMPLETE
+MATERIALIZATION_IDENTITY_UNKNOWN
+EFFECT_UNKNOWN
+```
 
-### `PRE_SUBMIT_REFUSED`
+They are projections over existing Runtime events plus exact receipt evidence. They never become a
+new database enum or authority surface.
 
-The profile, identity, capacity, lease, workspace, authority, or configuration gate refused before
-provider-dispatch commitment. A later corrected operation may be considered under the owning
-command/retry law because no provider effect began.
+## 8. Reconciliation
 
-### `DISPATCH_COMMITTED_UNOBSERVED`
+### G1 receipt; broker still owns live G1
 
-The Runtime provider-dispatch commitment exists, but neither a worker receipt nor a Runtime bind is
-currently observable. This is not proof that no provider call occurred.
+Read exact status, validate against current same-Attempt lease/fence and Runtime start command, import
+through TX-3 and TX-4, then continue that G1. Zero second start.
 
-### `MATERIALIZED_UNBOUND`
+### G1 receipt; broker restarted
 
-The exact worker receipt proves provider materialization, while the Runtime bind/APPLIED receipt is
-absent. This is recoverable under the same operation and generation; it is never permission to start
-again.
+Import historical G1 through TX-3/TX-4. The receipt does not assert liveness. Use exact
+process/UID-sweep reconciliation. If G1 is dead/released, existing G2 may resume the same provider
+session. Ambiguity quarantines. Zero second start.
 
-### `BOUND_CURRENT`
+### G2 receipt; broker still owns live G2
 
-The existing Runtime bind, attestation, principal admission, lease, fence, epoch, and current writer
-all validate. RuntimeBinding may now be projected read-only.
+Validate bound/released G1, exact resume command, G2 identity, and unchanged provider session. Import
+through TX-11/TX-4 and continue that G2 directly. Zero second resume and zero start.
 
-### `MATERIALIZATION_IDENTITY_UNKNOWN`
+### G2 receipt; broker restarted
 
-Provider dispatch committed, no exact worker receipt exists, and the effect cannot be reconstructed.
-The same Attempt remains quarantined. Local process absence does not prove remote thread absence.
+Import historical G2 through TX-11/TX-4, then reconcile exact process/resources. If it can be proven
+live and still safely owned, continue G2; otherwise stop/terminalize/quarantine it. A dead G2 cannot
+allocate G3.
 
-### `CLEANUP_INCOMPLETE`
+### Committed dispatch; receipt absent
 
-The provider process may be absent, yet one or more owned wait/monitor/stream/resource tasks or
-capture-completeness facts remain unresolved. No successful terminal Attempt is allowed.
+This is `MATERIALIZATION_IDENTITY_UNKNOWN`. Local process absence does not prove no remote thread.
+No start, resume, new Attempt, account change, or carrier failover is allowed.
 
-## 8. Exact normal sequence
+### Receipt conflict
 
-1. The service revalidates current autonomy receipt, installed configuration, worker identity,
-   capability profile, workspace identity, and exact base.
-2. Existing Executive dispatch creates/returns one command-bound Attempt and lease.
-3. The supervisor derives `ohf-op:start:<attempt_id>`.
-4. Runtime reserves the session epoch and G1 process generation under the Attempt lease/fence.
-5. Runtime commits provider dispatch for that exact operation.
-6. The control-side proxy sends one typed `ohf-start` request to the exact worker broker.
-7. The worker broker first checks the derived receipt path and active generation identity.
-8. With no prior receipt/state, the worker creates one adapter/resource and calls provider start.
-9. The Codex adapter validates one private App Server process, one exact root provider thread, and the
-   effective profile.
-10. The worker broker gathers typed start, attestation, process-principal, and provider-home facts.
-11. The worker broker writes and fsyncs the immutable receipt.
-12. Only then does it return the typed receipt to the control side.
-13. The control side validates the receipt against the leased Attempt, operation, epoch, generation,
-   expected profile digest, worker, and current Runtime command receipts.
-14. Existing Runtime bind/APPLIED and attestation/principal admission commit.
-15. RuntimeBinding is projected; no target assignment occurs.
-16. One bounded turn executes.
-17. The role result is sealed.
-18. Stop/cancel/reconcile proves dead/released plus complete owned-task/resource/pipe disposition.
-19. The epoch is abandoned and the same Attempt terminalizes.
-20. RET1 may project the typed terminal candidate.
+Any mismatch in operation kind/command, Attempt, worker, epoch, generation, profile digest, expected
+provider session, process identity, or typed evidence refuses. No overwrite or adoption.
 
-## 9. Lost-response and restart reconciliation
-
-### 9.1 Worker receipt exists; broker still owns the live generation
-
-The control-side failure records `EFFECT_UNKNOWN`. Reconciliation reads the exact materialization
-status. The broker returns the existing receipt and live identity without another provider call.
-The control validates and binds that receipt, then continues the same Attempt.
-
-### 9.2 Worker receipt exists; broker restarted
-
-The new broker validates the immutable receipt from its fixed run root. It does not reconstruct
-lifecycle state or claim the generation current. The control validates and binds the historical G1
-start evidence. Existing process reconciliation then determines:
-
-- exact process still alive but transport ownership lost → bounded exact cleanup, then dead/released;
-- exact process dead/released → preserve that observation;
-- identity mismatch or ambiguous process → quarantine.
-
-Once G1 is exactly bound and proven released, the existing G2 native-resume path may resume the same
-`provider_session_id`. It must not call `thread/start`.
-
-### 9.3 Dispatch committed; receipt absent
-
-This remains `MATERIALIZATION_IDENTITY_UNKNOWN`. The broker may perform its existing UID sweep and
-prove local process quiescence, but that does not prove a remote provider thread was never created.
-The system must not start, resume an unknown ID, create another Attempt, or fail over. A human or
-future provider-side reconciliation owner may resolve it; MAT-C1 does not fabricate one.
-
-### 9.4 Same command with changed semantics
-
-Any mismatch in Attempt, worker, epoch, generation, requested-profile digest, operation kind, or
-provider identity is `MATERIALIZATION_RECEIPT_CONFLICT`. No overwrite, adoption, or second effect.
-
-## 10. Concurrency and exactly-once claims
-
-MAT-C1 may claim:
-
-- exactly one Executive Attempt for the exact dispatch command;
-- at most one provider start **submission** for the exact materialization command while the reviewed
-  worker receipt and broker exclusion rules hold;
-- no blind retry after an uncertain provider effect;
-- deterministic reconciliation of an existing receipt.
-
-MAT-C1 must not claim:
-
-- distributed exactly-once provider execution under arbitrary host power loss;
-- provider-native idempotency;
-- proof that no orphan remote thread exists when dispatch committed but no receipt survived;
-- successful cleanup from process-group absence alone;
-- autonomous responsibility assignment.
-
-A crash after provider effect but before receipt durability can leave an unknown orphan. The correct
-response is fail-closed quarantine, not a second start.
-
-## 11. Teardown and capture truth
-
-The held teardown finding is incorporated as architecture:
+## 9. Teardown law
 
 ```text
 process group absent
-≠ wait task finished
-≠ monitor finished
-≠ inherited stdout/stderr descriptors closed
-≠ complete capture
-≠ safe terminal Attempt
+≠ wait task terminal
+≠ monitor terminal
+≠ inherited stdout/stderr closed
+≠ capture complete
+≠ safe Attempt completion
 ```
 
-Every owned asynchronous/process resource must be either:
+Every owned task/resource is `COMPLETED` or `CANCELLED_AND_JOINED`. Partial output remains partial.
+A shared future reaper would require separate accepted source law; MAT-C1 creates none.
 
-```text
-COMPLETED
-CANCELLED_AND_JOINED
-```
+## 10. Security boundaries
 
-A pending task may not be silently abandoned, reclassified as detached success, or hidden behind a
-bounded wait timeout. If an accepted future shared reaper owns such tasks, that transfer must have a
-named durable receipt and independent source law; MAT-C1 creates no reaper.
+- strict canonical JSON, exact key sets, duplicate-key refusal, bounded bytes;
+- SHA-256-derived exact path; no caller path or directory scan;
+- worker owner/mode, non-symlink and link-count checks;
+- exclusive create and no overwrite;
+- existing typed nested contracts validated before write and import;
+- no secrets, prompts, transcript or raw output;
+- fixed bounded AF_UNIX errors;
+- no wall-clock/currentness election;
+- receipt cannot bypass Runtime command, lease, fence, worker, profile, epoch, or generation checks.
 
-Partial output is recorded as partial. Byte counts/digests and a completeness bit must not be
-upgraded after an interrupted drain.
+## 11. Implementation boundary
 
-## 12. Authority and separation laws
-
-1. Receipt possession grants no Job, Attempt, target, retry, merge, release, or Chairman authority.
-2. The worker cannot select another Worker, quota class, account, model, provider, or Attempt.
-3. The control cannot accept a receipt whose worker/profile/epoch/generation differs from the current
-   command-bound Attempt.
-4. Stage B remains the only future owner of durable root responsibility → logical alias assignment.
-5. RuntimeBinding remains a projection from accepted current Runtime evidence; the receipt does not
-   become a binding row.
-6. Wake/ACK remains downstream attention/consumption. Initial materialization does not require a
-   circular Wake ACK.
-7. Terminal return is not provider cleanup and provider cleanup is not terminal return.
-8. Slack delivery or provider UI visibility proves none of these states.
-9. Model prose cannot originate a provider call, receipt, bind, retry, or cleanup decision.
-
-## 13. Failure taxonomy
-
-| Failure | Required state/action |
-|---|---|
-| Profile/identity/workspace/config refusal before dispatch | `PRE_SUBMIT_REFUSED`; zero provider call |
-| Dispatch commit response lost | Query Runtime command; do not resend through another carrier |
-| Worker unavailable before request write | no provider effect; preserve same command |
-| Worker timeout after request write | `EFFECT_UNKNOWN`; query materialization status |
-| Receipt exists and matches | import/bind same generation |
-| Receipt exists but differs | `CONFLICT`; no adoption or overwrite |
-| Receipt missing after dispatch | `MATERIALIZATION_IDENTITY_UNKNOWN`; quarantine |
-| Broker restart with receipt | validate receipt; bind/reconcile G1; optionally resume same thread as G2 |
-| Broker restart without receipt | never create; local sweep is not remote-thread absence |
-| Process identity mismatch | quarantine; no kill/adopt by guessed PID |
-| Provider session differs on resume | conflict; no continuation |
-| Lease/fence moved | refuse stale actor |
-| Teardown task or pipe pending | `CLEANUP_INCOMPLETE`; no successful terminalization |
-| Response ambiguity after Runtime bind | reconcile existing Runtime command; no second bind/start |
-| Capacity loss after START | return through current Capacity/Attempt reconciliation; no account hopping |
-
-## 14. Security and data boundaries
-
-- Receipt serialization is strict canonical JSON with exact key sets and bounded byte size.
-- All nested typed values are validated by their existing wire contracts before persistence and
-  again before import.
-- Receipt paths are derived from SHA-256 of the operation command; caller path input is forbidden.
-- Symlink components, multi-link files, wrong owner/mode, partial JSON, digest mismatch, duplicate
-  keys, unknown keys, and non-canonical bytes refuse.
-- Provider credentials remain only in the dedicated provider home and are never read into the
-  receipt.
-- Raw provider stdout/stderr, transcript content, prompts, and model results do not enter the receipt.
-- Error messages crossing AF_UNIX remain fixed, bounded, and secret-safe.
-- Receipt reads are exact identity lookups, not directory scans that elect “latest.”
-- Wall-clock timestamps never elect current materialization.
-
-## 15. Architecture freeze and no-rebuild boundary
-
-MAT-C1 may add one pure typed receipt contract/helper and extend the existing broker, remote adapter,
-and supervisor. It may not add:
-
-- a materialization database/table;
-- a new Job/Attempt/Worker/Event lifecycle;
-- a “current sessions” registry;
-- another lease/fence;
-- a retry queue;
-- a provider-selection router;
-- a target-assignment store;
-- a daemon or scheduler per materialization;
-- an out-of-band process launcher;
-- a Slack-driven start path;
-- an automatic second Attempt;
-- a generic shell/API endpoint.
-
-The existing service, dispatch, OHF port, Runtime, worker broker, and provider adapter remain the
-canonical path.
-
-## 16. Implementation boundary
-
-The expected MAT-C1 source surface is deliberately small:
+Expected MAT-C1 paths:
 
 ```text
 Create:
@@ -634,18 +508,19 @@ Modify:
   control_plane/executive_operator_supervisor.py
   tests/test_executive_operator_broker.py
   tests/test_executive_operator_supervisor.py
-  tests/test_ohf_p1b_runtime_orchestrator.py   # only if needed for the exact loss seam
+  tests/test_ohf_p1b_runtime_orchestrator.py   # only if exact loss injection needs it
   tests/test_autonomy_session_materialization_source_law.py
 ```
 
-The implementation PR must transition the MAT-F0 source-law test from the protected
-`NOT_BUILT` characterization to exact implementation proof. Leaving the absence assertion unchanged
-would intentionally keep repository CI red once `ohf-materialization-status` exists.
+The source-law test must transition from protected `NOT_BUILT` characterizations to exact G1/G2
+implementation proof while preserving every no-rebuild, no-retry, separation, and teardown law.
 
-Protected/no-edit absent a new Sol ruling:
+Protected absent a new Sol ruling:
 
 ```text
 control_plane/executive_runtime.py
+control_plane/operator_harness_orchestrator.py
+control_plane/executive_operator_harness_port.py
 control_plane/session_targets.py
 control_plane/sol_action_target.py
 control_plane/runtime_binding_projection.py
@@ -655,97 +530,41 @@ data/control_plane/*
 ops production arming/configuration
 ```
 
-If current-source archaeology proves the expected surface cannot implement the contract without an
-owner change, return to Sol before widening.
+If existing TX-3/TX-11/TX-4 cannot import exact historical evidence without change, return to Sol;
+do not widen Runtime or the orchestrator by convenience.
 
-## 17. Dependency and release gates
+## 12. Gates
 
-### MAT-F0 protection
+MAT-C1 source work requires:
 
-This records-only architecture may be protected independently after exact-head CI and independent
-review. It creates no runtime or provider effect.
+1. MAT-F0 protected;
+2. current-base collision archaeology;
+3. current Skillpack and owner re-pin;
+4. production proof held if teardown protection is not yet complete.
 
-### MAT-C1 source implementation
+The production canary additionally requires exact installed release, host identity/autonomy gates,
+accepted complete teardown, explicit bounded arming, and independent release review.
 
-MAT-C1 may start only after:
+## 13. Required discriminators
 
-1. MAT-F0 is protected;
-2. current-base path collision archaeology is complete;
-3. the teardown lifecycle contract represented by the current held teardown carrier is protected or
-   MAT-C1 is proven path-disjoint and keeps production proof held;
-4. exact current Skillpack and owner contracts are re-pinned.
+MAT-C1 must kill these mutations:
 
-Capacity C1/C2, Stage B, Wake, ACK, and W3C do not need to be falsely declared complete merely to
-implement this bounded source seam.
+1. second `thread/start` after G1 receipt or uncertainty;
+2. second `thread/resume` after G2 receipt or uncertainty;
+3. G3 allocation;
+4. missing receipt interpreted as no effect;
+5. receipt treated as currentness/authority;
+6. changed profile/Attempt/epoch/generation/provider session adopted;
+7. stale lease/fence imports receipt;
+8. broker restart calls provider before status/import;
+9. process absence completes pending tasks/pipes;
+10. partial capture upgraded to complete;
+11. Stage B/Capacity/Wake authority imported;
+12. source-law test deleted or weakened instead of transitioned.
 
-### Production canary
+## 14. Exact next action
 
-A production canary additionally requires:
-
-- current host autonomy/secret-canary/identity gates green;
-- exact worker/provider home and installed release attested;
-- one approved disposable Job/Attempt/profile;
-- no overlapping materialization or teardown writer;
-- exact cleanup lifecycle protected;
-- current production configuration explicitly armed for the canary;
-- one independent exact-release review.
-
-The canary does not arm general autonomy.
-
-## 18. Acceptance tests
-
-MAT-C1 must include mutation-discriminating tests for:
-
-1. provider start succeeds, control reply is lost before Runtime bind, status returns the exact
-   receipt, and the same G1 binds with **zero second `thread/start`**;
-2. broker restarts after receipt durability but before Runtime bind; the receipt imports and the same
-   provider session is resumed as G2 without another root thread;
-3. dispatch committed but receipt absent; start/resume/failover are refused;
-4. same command + changed Attempt/profile/generation conflicts;
-5. two concurrent exact starts produce at most one provider call and one receipt;
-6. receipt path traversal, symlink, overwrite, multi-link, owner/mode, digest, duplicate-key,
-   unknown-key, and partial-write attacks refuse;
-7. stale lease/fence, wrong worker, wrong provider home, wrong profile, or wrong workspace refuses
-   before provider call;
-8. process absent while wait/monitor/stream task remains pending produces `CLEANUP_INCOMPLETE`;
-9. partial stream capture remains marked partial;
-10. Runtime bind response loss reconciles by command and never restarts provider;
-11. receipt cannot mutate Runtime or grant target/authority;
-12. Stage-B/session-target files remain unchanged;
-13. the MAT-F0 source-law test is updated in the same implementation carrier so it validates the
-    built receipt/status/import seam rather than preserving the pre-implementation absence claim.
-
-## 19. Production proof packet
-
-The real canary return must preserve:
-
-```text
-protected release SHA
-Job ID
-Attempt ID
-dispatch command ID
-materialization operation command ID
-session epoch ID
-G1/G2 process generation IDs
-worker materialization receipt digest
-provider start call count
-provider root thread count
-Runtime bind/APPLIED command
-served model/profile/capability evidence
-turn INTENT/APPLIED and typed result
-process dead + provider writer released
-wait/monitor/stream/resource terminal receipts
-UID sweep receipt
-terminal Attempt/Event receipt
-RET1 candidate identity
-proof of zero second Attempt and zero second thread/start
-```
-
-Secrets, prompts, transcript text, provider credentials, and raw model output remain excluded.
-
-## 20. Exact next action
-
-After MAT-F0 exact-head review and protection, commission one bounded MAT-C1 worker to implement the
-immutable receipt plus same-operation status/import seam on the existing Executive/OHF path. Keep the
-current session-materialization recovery child on PRE_START/HOLD until that protected architecture
-SHA is posted to its exact Slack carrier.
+After exact-head CI, independent review, and MAT-F0 protection, commission one bounded MAT-C1 source
+wave for symmetric G1 start and G2 resume receipts/status/import on the existing Executive/OHF path.
+The held session-materialization child remains PRE_START until the protected architecture SHA is
+posted to its exact Slack carrier.
