@@ -286,6 +286,12 @@ class ServerConfig:
     #: ``tmp_path`` here instead.
     claude_projects_dir: str | None = None
     codex_sessions_dir: str | None = None
+    #: CAP-C1: optional path to a placement-selection facts document,
+    #: passed straight through to ``ccr.build_control_room``'s own
+    #: ``placement_selection_path`` parameter. ``None`` (the default) means
+    #: no ``placement_selection`` section is composed at all — see
+    #: ``control_plane.chairman_control_room._read_placement_selection``.
+    placement_selection_path: str | Path | None = None
     #: Overrides for the ``chatgpt`` adapter's managed-browser environment
     #: store roots (Sol architecture correction, MAS-113, 2026-08-22) —
     #: ``None`` (the production default) means the adapter's own real default
@@ -393,6 +399,7 @@ def _compose_state_doc(
             now=generated_at,
             timeout=timeout,
             bindings_path=config.bindings_path,
+            placement_selection_path=config.placement_selection_path,
         )
     return _compose_with_live_active_builds(config, live_active_builds, generated_at, timeout=timeout)
 
@@ -446,6 +453,16 @@ def _compose_with_live_active_builds(
     agent_os_state, agent_os_state_failure = ccr._read_agent_os_state(macro_root_resolved)
     runtime_jobs, runtime_jobs_failure = ccr._read_runtime_jobs(root)
     bindings, binding_problems = sb.load_bindings(config.bindings_path)
+    # CAP-C1 (review 5086941171 BLOCKER 3): this warm path replicates
+    # build_control_room()'s gather sequencing, and the placement read was
+    # the one step it never replicated. Without it a populated live
+    # active-build cache silently dropped a CONFIGURED placement selection
+    # from /api/state — no section and no degradation, so the omission was
+    # invisible. Same reader, same argument, same degraded row as the cold
+    # path; `placement_selection_path=None` stays a true no-op on both.
+    placement_selection, placement_selection_failure = ccr._read_placement_selection(
+        config.placement_selection_path
+    )
 
     doc = ccr.compose_control_room(
         inbox=inbox,
@@ -456,6 +473,7 @@ def _compose_with_live_active_builds(
         bindings=bindings,
         binding_problems=binding_problems,
         generated_at=generated_at,
+        placement_selection=placement_selection,
     )
 
     extra_degraded: list[str] = []
@@ -467,6 +485,8 @@ def _compose_with_live_active_builds(
         extra_degraded.append(f"agent_os_state: {agent_os_state_failure}")
     if runtime_jobs_failure:
         extra_degraded.append(f"executive_runtime: {runtime_jobs_failure}")
+    if placement_selection_failure:
+        extra_degraded.append(f"placement_selection: {placement_selection_failure}")
     if extra_degraded:
         doc = dict(doc)
         doc["degraded"] = sorted(list(doc["degraded"]) + extra_degraded)
@@ -1259,6 +1279,41 @@ def run_check(config: ServerConfig) -> int:
             len(attention.get("chairman", [])), len(attention.get("ceo", [])), len(attention.get("coo", []))
         )
     )
+    # CAP-C1 (reviewer m-9; addendum B): one line when a placement_selection
+    # section is actually present; a degraded marker when the flag was
+    # given but the section came back None (the failure detail itself
+    # lives in the `degraded` list printed below, never repeated here). No
+    # line at all when the flag was never given — this stays exactly as
+    # quiet as every other never-asked-for optional feature. For
+    # state=selected the line also names the no-commitment discriminator
+    # (addendum B: selection creates no reservation/Job/Attempt/Worker/
+    # RuntimeBinding/provider effect); for tie_abstained it names every
+    # tied id (addendum A: C1 has no tie-breaker authority, so an exact tie
+    # always abstains); every other non-selected state names its exclusion
+    # count.
+    placement_selection = doc.get("placement_selection")
+    if placement_selection is not None:
+        state = placement_selection.get("state")
+        selected = placement_selection.get("selected")
+        selected_mode = placement_selection.get("selected_mode")
+        tied = placement_selection.get("tied_worker_ids") or []
+        exclusions = placement_selection.get("exclusions") or []
+        if state == "selected" and selected is not None:
+            # Mode wave: names the winning mode AND the strengthened
+            # no-commitment string — selecting a fresh lane still creates
+            # no session, no reservation, nothing.
+            detail = (
+                f"selected={selected.get('worker_id')} mode={selected_mode} "
+                "commitment=none (no session created or committed; no reservation/"
+                "worker/attempt/runtime-binding/provider effect)"
+            )
+        elif state == "tie_abstained":
+            detail = f"tied={','.join(tied)}"
+        else:
+            detail = f"exclusions={len(exclusions)}"
+        print(f"placement_selection: state={state} {detail}")
+    elif config.placement_selection_path:
+        print("placement_selection: degraded (see degraded list)")
     if doc["degraded"]:
         print("degraded:")
         for entry in doc["degraded"]:
@@ -1287,6 +1342,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", default=None, help="Mastermind checkout root (default: this repo)")
     parser.add_argument("--macro-root", default=None, help="Macro checkout root (default: auto-resolved)")
     parser.add_argument("--bindings-path", default=None, help="surface_bindings.json path (default: platform default)")
+    parser.add_argument(
+        "--placement-selection", default=None,
+        help="CAP-C1: path to a placement-selection facts document (default: no placement_selection "
+             "section composed)",
+    )
     parser.add_argument("--open", action="store_true", help="open the Control Room URL after startup")
     parser.add_argument("--check", action="store_true", help="build one document + capability census, print, exit 0")
     parser.add_argument(
@@ -1306,11 +1366,15 @@ def _build_config(args: argparse.Namespace) -> ServerConfig:
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _REPO_ROOT
     macro_root = _resolve_macro_root_simple(args.macro_root, os.environ, repo_root)
     bindings_path = Path(args.bindings_path).expanduser() if args.bindings_path else None
+    placement_selection_path = (
+        Path(args.placement_selection).expanduser() if args.placement_selection else None
+    )
     token = secrets.token_urlsafe(32)
     return ServerConfig(
         repo_root=repo_root,
         macro_root=macro_root,
         bindings_path=bindings_path,
+        placement_selection_path=placement_selection_path,
         token=token,
         origin=f"http://{HOST}:{args.port}",
         port=args.port,
