@@ -17,6 +17,7 @@ import pytest
 
 from experiments.code_discovery import processes as processes_module
 from experiments.code_discovery.index_manifest import (
+    IndexManifest,
     load_index_manifest,
     source_tree_digest,
 )
@@ -43,9 +44,14 @@ def _git(root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _manifest(tmp_path: Path) -> object:
+def _manifest(
+    tmp_path: Path,
+    *,
+    repository_id: str = "mastermind",
+    repository_name: str = "mastermindx-market-intelligence/Mastermind",
+) -> object:
     source = tmp_path / "source"
-    source.mkdir()
+    source.mkdir(parents=True)
     _git(source, "init", "-q", "-b", "master")
     _git(source, "config", "user.name", "CodeIntel test")
     _git(source, "config", "user.email", "codeintel@example.invalid")
@@ -54,7 +60,7 @@ def _manifest(tmp_path: Path) -> object:
         "remote",
         "add",
         "origin",
-        "git@github.com:mastermindx-market-intelligence/Mastermind.git",
+        f"git@github.com:{repository_name}.git",
     )
     (source / "engine").mkdir()
     (source / "engine" / "core.py").write_text("VALUE = 'source'\n")
@@ -69,8 +75,8 @@ def _manifest(tmp_path: Path) -> object:
                 "schema_version": "mastermind.codeintel_index_manifest.v1",
                 "repositories": [
                     {
-                        "repository_id": "mastermind",
-                        "repository_name": "mastermindx-market-intelligence/Mastermind",
+                        "repository_id": repository_id,
+                        "repository_name": repository_name,
                         "source_snapshot_root": str(source),
                         "ref_label": "master",
                         "commit_sha": _git(source, "rev-parse", "HEAD"),
@@ -137,7 +143,7 @@ def _webserver(path: Path, trace: Path) -> ExecutableSpec:
             "payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], "
             "'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], "
             "'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], "
-            "'Crashes': 0, 'Stats': {}}}).encode()\n"
+            "'ReposMap': {}, 'Crashes': 0, 'Stats': {}}}).encode()\n"
             "while True:\n"
             "    connection, _ = listener.accept()\n"
             "    with connection:\n"
@@ -243,7 +249,7 @@ def test_closed_role_and_process_group_cleanup_leave_no_child_or_scratch(
             "index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
             "metadata = json.loads(next(index.rglob('z0-index-meta.json')).read_text())\n"
             "identity = metadata['Metadata']\n"
-            "payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], 'Crashes': 0, 'Stats': {}}}).encode()\n"
+            "payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], 'ReposMap': {}, 'Crashes': 0, 'Stats': {}}}).encode()\n"
             "while True:\n"
             "    connection, _ = listener.accept()\n"
             "    with connection:\n"
@@ -323,13 +329,14 @@ def test_build_uses_frozen_pinned_argv_closed_environment_and_exact_status(
     assert status.coverage == "covered"
 
     argv = trace.read_text().splitlines()
-    assert argv[:6] == [
-        f"--index={tmp_path / 'disposable-shards' / status.shard_namespace}",
+    assert argv[:7] == [
+        f"--index={tmp_path / 'disposable-shards' / ('generation-' + processes._generation_id)}",
         "--branches=master",
         "--prefix=refs/heads/",
         "--incremental=false",
         "--submodules=false",
-        f"--meta={tmp_path / 'disposable-shards' / status.shard_namespace / 'z0-index-meta.json'}",
+        "--disable_ctags=true",
+        f"--meta={tmp_path / 'disposable-shards' / ('generation-' + processes._generation_id) / status.shard_namespace / 'z0-index-meta.json'}",
     ]
     assert argv[-2] == str(manifest.repositories[0].source_snapshot_root)
     assert argv[-1] == "secret="
@@ -337,6 +344,7 @@ def test_build_uses_frozen_pinned_argv_closed_environment_and_exact_status(
         (
             tmp_path
             / "disposable-shards"
+            / ("generation-" + processes._generation_id)
             / status.shard_namespace
             / "z0-index-meta.json"
         ).read_text()
@@ -356,6 +364,107 @@ def test_build_uses_frozen_pinned_argv_closed_environment_and_exact_status(
     processes.close()
 
 
+def test_indexer_environment_is_hermetic_and_can_resolve_pinned_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pinned indexer gets only a fixed Git-capable environment."""
+
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-environment.json"
+    indexer = _script(
+        tmp_path / "zoekt-git-index",
+        "import json, os\n"
+        "from pathlib import Path\n"
+        f"Path({str(trace)!r}).write_text(json.dumps(dict(os.environ), sort_keys=True))\n",
+    )
+    webserver = _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt")
+    monkeypatch.setenv("HOME", "/private/inherited-home")
+    monkeypatch.setenv("HTTPS_PROXY", "http://inherited.invalid")
+    processes = _process_set(tmp_path, indexer, webserver)
+
+    processes.build_indexes(manifest)
+
+    observed = json.loads(trace.read_text())
+    observed.pop("__CF_USER_TEXT_ENCODING", None)
+    assert observed == {
+        "GIT_ASKPASS": "/bin/false",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin",
+        "TZ": "UTC",
+    }
+    processes.close()
+
+
+def test_operation_index_root_exposes_all_distinct_built_shards_to_the_webserver(
+    tmp_path: Path,
+) -> None:
+    """Pinned direct-root shard discovery must see every logical repository in one run."""
+
+    first = _manifest(tmp_path / "first")
+    second = _manifest(
+        tmp_path / "second",
+        repository_id="mastermind-terminal",
+        repository_name="mastermindx-market-intelligence/Mastermind-Terminal",
+    )
+    manifest = IndexManifest(
+        schema_version=first.schema_version,  # type: ignore[union-attr]
+        repositories=(
+            first.repositories[0],  # type: ignore[union-attr]
+            second.repositories[0],  # type: ignore[union-attr]
+        ),
+    )
+    indexer = _script(
+        tmp_path / "visible-indexer",
+        "import sys\n"
+        "from pathlib import Path\n"
+        "index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
+        "metadata = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--meta=')))\n"
+        "(index / (metadata.parent.name + '.zoekt')).write_text(metadata.read_text())\n",
+    )
+    webserver = _script(
+        tmp_path / "visible-webserver",
+        "import json, socket, sys\n"
+        "from pathlib import Path\n"
+        "listen = next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--listen='))\n"
+        "host, port = listen.rsplit(':', 1)\n"
+        "listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+        "listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+        "listener.bind((host, int(port)))\n"
+        "listener.listen()\n"
+        "index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
+        "repos = []\n"
+        "for shard in sorted(index.glob('*.zoekt')):\n"
+        "    metadata = json.loads(shard.read_text())\n"
+        "    identity = metadata['Metadata']\n"
+        "    repos.append({'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}})\n"
+        "payload = json.dumps({'List': {'Repos': repos, 'ReposMap': {}, 'Crashes': 0, 'Stats': {}}}).encode()\n"
+        "while True:\n"
+        "    connection, _ = listener.accept()\n"
+        "    with connection:\n"
+        "        connection.recv(4096)\n"
+        "        response = (b'HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\n' + f'Content-Length: {len(payload)}\\r\\nConnection: close\\r\\n\\r\\n'.encode() + payload)\n"
+        "        connection.sendall(response)\n",
+        role="zoekt-webserver",
+    )
+    processes = _process_set(tmp_path, indexer, webserver)
+
+    statuses = processes.build_indexes(manifest)
+    try:
+        endpoint = processes.start_search()
+        assert endpoint.host == "127.0.0.1"
+        assert {status.repository_id for status in statuses} == {
+            "mastermind",
+            "mastermind-terminal",
+        }
+        assert len(processes._repository_identities) == 2
+    finally:
+        processes.close()
+
+
 def test_refuses_stale_generation_and_detects_binary_change_after_index(
     tmp_path: Path,
 ) -> None:
@@ -366,7 +475,7 @@ def test_refuses_stale_generation_and_detects_binary_change_after_index(
     indexer = _indexer(tmp_path / "zoekt-git-index", trace)
     webserver = _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt")
     processes = _process_set(tmp_path, indexer, webserver)
-    stale = tmp_path / "disposable-shards" / manifest.repositories[0].shard_namespace
+    stale = tmp_path / "disposable-shards" / ("generation-" + processes._generation_id)
     stale.mkdir(parents=True)
     (stale / "prior-generation").write_text("do not merge")
 
@@ -394,6 +503,7 @@ def test_tampered_logical_shard_receipt_refuses_serving(tmp_path: Path) -> None:
     receipt = (
         tmp_path
         / "disposable-shards"
+        / ("generation-" + processes._generation_id)
         / status.shard_namespace
         / "z0-index-receipt.json"
     )
@@ -524,6 +634,7 @@ def test_identity_probe_accepts_pinned_list_envelope_and_rejects_crashes(
                         "Stats": {"Repos": 1},
                     }
                 ],
+                "ReposMap": {},
                 "Crashes": crashes,
                 "Stats": {"Repos": 1},
             }
@@ -541,6 +652,62 @@ def test_identity_probe_accepts_pinned_list_envelope_and_rejects_crashes(
     )
     assert not processes_module._loopback_has_exact_identities(
         endpoint, processes._repository_identities
+    )
+    processes.close()
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda listing: listing.pop("ReposMap"),
+        lambda listing: listing.__setitem__("ReposMap", None),
+        lambda listing: listing.__setitem__("ReposMap", []),
+        lambda listing: listing.__setitem__("ReposMap", {"unexpected": {}}),
+        lambda listing: listing.__setitem__("Stats", []),
+        lambda listing: listing["Repos"][0].__setitem__("Unexpected", {}),
+        lambda listing: listing["Repos"][0].__setitem__("IndexMetadata", []),
+        lambda listing: listing["Repos"][0].__setitem__("Stats", []),
+    ],
+)
+def test_identity_probe_rejects_non_pinned_list_envelope_and_entry_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutate: object
+) -> None:
+    """Only the exact pinned RepoList and RepoListEntry JSON shape can establish readiness."""
+
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-argv.txt"
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+    processes.build_indexes(manifest)
+    identity = processes._repository_identities[0]
+    listing: dict[str, object] = {
+        "Repos": [
+            {
+                "Repository": {
+                    "Name": identity.repository_name,
+                    "Metadata": identity.metadata,
+                    "Branches": [
+                        {"Name": identity.ref_label, "Version": identity.commit_sha}
+                    ],
+                },
+                "IndexMetadata": {},
+                "Stats": {},
+            }
+        ],
+        "ReposMap": {},
+        "Crashes": 0,
+        "Stats": {},
+    }
+    mutate(listing)  # type: ignore[operator]
+    monkeypatch.setattr(
+        processes_module, "_post_loopback_list", lambda _endpoint: {"List": listing}
+    )
+
+    assert not processes_module._loopback_has_exact_identities(
+        LoopbackEndpoint("127.0.0.1", 6072), processes._repository_identities
     )
     processes.close()
 
@@ -627,6 +794,7 @@ def test_identity_http_boundary_rejects_redirect_oversize_and_strict_json(
                         "Stats": {},
                     }
                 ],
+                "ReposMap": {},
                 "Crashes": 0,
                 "Stats": {},
             }
@@ -758,7 +926,7 @@ def test_delayed_bind_failure_cannot_use_an_unrelated_listener_as_readiness(
             "            index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
             "            metadata = json.loads(next(index.rglob('z0-index-meta.json')).read_text())\n"
             "            identity = metadata['Metadata']\n"
-            "            payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], 'Crashes': 0, 'Stats': {}}}).encode()\n"
+            "            payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], 'ReposMap': {}, 'Crashes': 0, 'Stats': {}}}).encode()\n"
             "            response = (b'HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\n' + f'Content-Length: {len(payload)}\\r\\nConnection: close\\r\\n\\r\\n'.encode() + payload)\n"
             "            connection.sendall(response)\n"
         ),
@@ -827,7 +995,7 @@ def test_late_wrong_identity_listener_cannot_false_start_before_bind_failure(
             "            index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
             "            metadata = json.loads(next(index.rglob('z0-index-meta.json')).read_text())\n"
             "            identity = metadata['Metadata']\n"
-            "            payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], 'Crashes': 0, 'Stats': {}}}).encode()\n"
+            "            payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], 'ReposMap': {}, 'Crashes': 0, 'Stats': {}}}).encode()\n"
             "            response = (b'HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\n' + f'Content-Length: {len(payload)}\\r\\nConnection: close\\r\\n\\r\\n'.encode() + payload)\n"
             "            connection.sendall(response)\n"
         ),
@@ -1031,7 +1199,7 @@ def test_bounded_output_and_search_process_exit_are_typed_and_cleanup_is_idempot
     webserver_argv = (tmp_path / "webserver-argv.txt").read_text().splitlines()
     assert webserver_argv == [
         f"--listen={endpoint.authority}",
-        f"--index={tmp_path / 'disposable-shards'}",
+        f"--index={tmp_path / 'disposable-shards' / ('generation-' + processes._generation_id)}",
         f"--log_dir={tmp_path / 'disposable-logs' / 'startup-1'}",
         "--html=true",
         "--rpc=true",

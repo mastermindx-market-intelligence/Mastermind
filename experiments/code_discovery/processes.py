@@ -31,7 +31,16 @@ _MAX_STARTUP_ATTEMPTS: Final = 3
 _STARTUP_STABILITY_SECONDS: Final = 0.20
 _IDENTITY_PROBE_TIMEOUT_SECONDS: Final = 0.25
 _MAX_IDENTITY_RESPONSE_BYTES: Final = 64 * 1024
-_CLOSED_ENV: Final = {"LANG": "C", "LC_ALL": "C"}
+_CLOSED_ENV: Final = {
+    "GIT_ASKPASS": "/bin/false",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "LANG": "C",
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin",
+    "TZ": "UTC",
+}
 _HOST_ROLES: Final = frozenset({"zoekt-git-index", "zoekt-webserver"})
 _STARTUP_CATEGORIES: Final = frozenset(
     {
@@ -314,6 +323,7 @@ class ZoektProcessSet:
         self._generation_id = hashlib.sha256(
             os.urandom(32) + os.fspath(self.shard_root).encode("utf-8")
         ).hexdigest()
+        self._operation_index_root: Path | None = None
 
     @property
     def startup_attempt_receipts(self) -> tuple[StartupAttemptReceipt, ...]:
@@ -328,23 +338,33 @@ class ZoektProcessSet:
 
         self._require_open()
         _assert_external_to_sources(self.shard_root, self.log_root, manifest.repositories)
+        operation_index_root = self.shard_root / f"generation-{self._generation_id}"
+        if operation_index_root.exists():
+            raise StaleShardGenerationError(
+                "stale shard generation requires host discard: "
+                f"{operation_index_root}"
+            )
+        operation_index_root.mkdir(mode=0o700)
+        self._operation_index_root = operation_index_root
         statuses: list[RepositoryIndexStatus] = []
         identities: list[_RepositoryIdentity] = []
         for spec in manifest.repositories:
-            generation = self.shard_root / spec.shard_namespace
-            if generation.exists():
+            repository_root = operation_index_root / spec.shard_namespace
+            if repository_root.exists():
                 raise StaleShardGenerationError(
-                    f"stale shard generation requires host discard: {generation}"
+                    f"stale shard generation requires host discard: {repository_root}"
                 )
-            generation.mkdir(mode=0o700)
-            metadata_path = generation / "z0-index-meta.json"
+            repository_root.mkdir(mode=0o700)
+            metadata_path = repository_root / "z0-index-meta.json"
             metadata = _index_identity_metadata(spec, self._generation_id)
             _write_json(
                 metadata_path,
                 {"Name": spec.repository_name, "Metadata": metadata},
             )
             self.indexer.verify()
-            argv = _indexer_argv(self.indexer, spec, generation, metadata_path)
+            argv = _indexer_argv(
+                self.indexer, spec, operation_index_root, metadata_path
+            )
             _run_bounded(
                 self.indexer,
                 argv,
@@ -365,8 +385,9 @@ class ZoektProcessSet:
                 observed_at=now,
                 freshness_seconds=0.0,
             )
-            _write_json(generation / "z0-index-receipt.json", _receipt_payload(status))
-            _verify_receipt(generation / "z0-index-receipt.json", status)
+            receipt_path = repository_root / "z0-index-receipt.json"
+            _write_json(receipt_path, _receipt_payload(status))
+            _verify_receipt(receipt_path, status)
             statuses.append(status)
             identities.append(
                 _RepositoryIdentity(
@@ -389,10 +410,14 @@ class ZoektProcessSet:
             raise ZoektProcessError("search process is already running")
         if not self._statuses:
             raise ZoektProcessError("build_indexes must complete before start_search")
+        if self._operation_index_root is None or not self._operation_index_root.is_dir():
+            raise ZoektProcessError("operation index root is unavailable")
         for status in self._statuses:
             assert status.shard_namespace is not None
             _verify_receipt(
-                self.shard_root / status.shard_namespace / "z0-index-receipt.json",
+                self._operation_index_root
+                / status.shard_namespace
+                / "z0-index-receipt.json",
                 status,
             )
         self.webserver.verify()
@@ -406,13 +431,13 @@ class ZoektProcessSet:
                 raise ZoektProcessError("startup attempt log root already exists")
             attempt_log_root.mkdir(mode=0o700)
             argv = _webserver_argv(
-                self.webserver, endpoint, self.shard_root, attempt_log_root
+                self.webserver, endpoint, self._operation_index_root, attempt_log_root
             )
             try:
                 process = _spawn_exact(
                     self.webserver,
                     argv,
-                    cwd=self.shard_root,
+                    cwd=self._operation_index_root,
                 )
             except Exception:
                 cleanup_complete = _remove_attempt_log_root(attempt_log_root)
@@ -726,6 +751,7 @@ def _indexer_argv(
         "--prefix=refs/heads/",
         "--incremental=false",
         "--submodules=false",
+        "--disable_ctags=true",
         f"--meta={metadata_path}",
         os.fspath(spec.source_snapshot_root),
     )
@@ -941,22 +967,39 @@ def _loopback_has_exact_identities(
 
     try:
         payload = _post_loopback_list(endpoint)
+        if set(payload) != {"List"}:
+            return False
         listing = payload.get("List")
-        if not isinstance(listing, dict) or set(listing) != {"Repos", "Crashes", "Stats"}:
+        if not isinstance(listing, dict) or set(listing) != {
+            "Repos",
+            "ReposMap",
+            "Crashes",
+            "Stats",
+        }:
             return False
         repositories = listing.get("Repos")
+        repositories_by_id = listing.get("ReposMap")
         crashes = listing.get("Crashes")
+        aggregate_stats = listing.get("Stats")
+        if not isinstance(repositories_by_id, dict) or repositories_by_id:
+            return False
         if type(crashes) is not int or crashes != 0:
+            return False
+        if not isinstance(aggregate_stats, dict):
             return False
         if not isinstance(repositories, list) or len(repositories) != len(expected):
             return False
         observed: list[_RepositoryIdentity] = []
         for item in repositories:
-            if not isinstance(item, dict) or not {
+            if not isinstance(item, dict) or set(item) != {
                 "Repository",
                 "IndexMetadata",
                 "Stats",
-            }.issubset(item):
+            }:
+                return False
+            if not isinstance(item["IndexMetadata"], dict) or not isinstance(
+                item["Stats"], dict
+            ):
                 return False
             repository = item["Repository"]
             if not isinstance(repository, dict):

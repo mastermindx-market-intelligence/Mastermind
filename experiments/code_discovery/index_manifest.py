@@ -91,8 +91,12 @@ def load_index_manifest(path: Path) -> IndexManifest:
     manifest_path = Path(path)
     _require_regular_file(manifest_path, "manifest")
     try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        payload = json.loads(
+            manifest_path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_non_finite_json_constant,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as error:
         raise IndexManifestError("manifest must be valid UTF-8 JSON") from error
     if not isinstance(payload, Mapping):
         raise IndexManifestError("manifest must be an object")
@@ -419,7 +423,6 @@ def _tracked_regular_files(root: Path) -> tuple[tuple[str, Path], ...]:
         raise IndexManifestError("source_snapshot_root must be a Git worktree")
 
     files: list[tuple[str, Path]] = []
-    basenames: set[str] = set()
     for raw_entry in completed.stdout.split(b"\0"):
         if not raw_entry:
             continue
@@ -439,10 +442,6 @@ def _tracked_regular_files(root: Path) -> tuple[tuple[str, Path], ...]:
             raise IndexManifestError(f"source snapshot contains submodule: {relative}")
         if mode not in {"100644", "100755"}:
             raise IndexManifestError(f"source snapshot contains special tracked path: {relative}")
-        basename = PurePosixPath(relative).name
-        if basename in basenames:
-            raise IndexManifestError(f"source snapshot contains duplicate basename: {basename}")
-        basenames.add(basename)
         file_path = root / relative
         try:
             metadata = file_path.lstat()
@@ -456,6 +455,19 @@ def _tracked_regular_files(root: Path) -> tuple[tuple[str, Path], ...]:
             raise IndexManifestError(f"source snapshot contains unresolved LFS pointer: {relative}")
         files.append((relative, file_path))
     return tuple(files)
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for key, value in pairs:
+        if key in payload:
+            raise ValueError("manifest JSON contains duplicate keys")
+        payload[key] = value
+    return payload
+
+
+def _reject_non_finite_json_constant(value: str) -> object:
+    raise ValueError(f"manifest JSON constant is forbidden: {value}")
 
 
 def _is_lfs_pointer(path: Path) -> bool:
