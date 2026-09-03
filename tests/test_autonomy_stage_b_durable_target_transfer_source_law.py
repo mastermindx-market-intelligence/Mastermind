@@ -439,7 +439,12 @@ def test_protected_runtime_proves_aggregation_root_and_handoff_before_claim() ->
         runtime_text, module_function(tree, "_validated_aggregation_handoff")
     )
     assert "COO_AGGREGATION_HANDOFF_READY" in handoff
-    assert "aggregation handoff refuses living child Jobs" in handoff
+    assert "_current_orchestration_tree_material(" in handoff
+
+    tree_material = source_segment(
+        runtime_text, module_function(tree, "_current_orchestration_tree_material")
+    )
+    assert "aggregation handoff refuses living child Jobs" in tree_material
 
     dispatch = source_segment(
         runtime_text, module_function(tree, "_assert_orchestration_dispatch_eligible")
