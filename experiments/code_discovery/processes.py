@@ -809,7 +809,9 @@ def _wait_for_loopback(
             raise ZoektProcessExited(
                 f"ZOEKT_PROCESS_EXITED: zoekt-webserver exited with {process.returncode}"
             )
-        reachable = _loopback_is_open(endpoint)
+        reachable = _loopback_is_open(endpoint) and _process_owns_listener(
+            process.pid, endpoint
+        )
         now = time.monotonic()
         if reachable:
             if stable_since is None:
@@ -819,7 +821,50 @@ def _wait_for_loopback(
         else:
             stable_since = None
         time.sleep(0.02)
-    raise ZoektProcessTimeout("zoekt-webserver did not bind loopback before timeout")
+    raise ZoektProcessTimeout(
+        "zoekt-webserver did not bind an owned loopback listener before timeout"
+    )
+
+
+def _process_owns_listener(process_id: int, endpoint: LoopbackEndpoint) -> bool:
+    """Prove that one Linux process holds the exact IPv4 loopback listener."""
+
+    if endpoint.host != "127.0.0.1":
+        raise ZoektProcessError("listener ownership requires exact IPv4 loopback")
+
+    process_root = Path("/proc") / str(process_id)
+    try:
+        socket_inodes = {
+            target.removeprefix("socket:[").removesuffix("]")
+            for descriptor in (process_root / "fd").iterdir()
+            if (target := os.readlink(descriptor)).startswith("socket:[")
+            and target.endswith("]")
+        }
+        tcp_rows = (process_root / "net" / "tcp").read_text(
+            encoding="ascii"
+        ).splitlines()[1:]
+    except (OSError, UnicodeError) as error:
+        raise ZoektProcessError("listener ownership evidence is unavailable") from error
+
+    for row in tcp_rows:
+        fields = row.split()
+        if len(fields) <= 9:
+            raise ZoektProcessError("listener ownership evidence is malformed")
+        if fields[3] != "0A":
+            continue
+        try:
+            address_hex, port_hex = fields[1].split(":", maxsplit=1)
+            address = socket.inet_ntoa(bytes.fromhex(address_hex)[::-1])
+            port = int(port_hex, 16)
+        except (OSError, ValueError) as error:
+            raise ZoektProcessError("listener ownership evidence is malformed") from error
+        if (
+            address == endpoint.host
+            and port == endpoint.port
+            and fields[9] in socket_inodes
+        ):
+            return True
+    return False
 
 
 def _signal_process_group(group_id: int, sig: signal.Signals) -> None:

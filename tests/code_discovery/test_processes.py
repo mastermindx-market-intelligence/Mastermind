@@ -398,6 +398,58 @@ def test_first_bind_collision_is_cleaned_and_second_attempt_starts(
         processes.close()
 
 
+def test_delayed_bind_failure_cannot_use_an_unrelated_listener_as_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-argv.txt"
+    server = _script(
+        tmp_path / "delayed-bind-webserver",
+        (
+            "import socket, sys, time\n"
+            "listen = next(argument.split('=', 1)[1] for argument in sys.argv "
+            "if argument.startswith('--listen='))\n"
+            "host, port = listen.rsplit(':', 1)\n"
+            "listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+            "listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+            "try:\n"
+            "    listener.bind((host, int(port)))\n"
+            "except OSError:\n"
+            "    sys.stderr.write('address already in use\\n')\n"
+            "    sys.stderr.flush()\n"
+            "    time.sleep(0.6)\n"
+            "    raise SystemExit(98)\n"
+            "listener.listen()\n"
+            "while True: time.sleep(1)\n"
+        ),
+        role="zoekt-webserver",
+    )
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        server,
+    )
+    processes.build_indexes(manifest)
+
+    occupant = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    occupant.bind(("127.0.0.1", 0))
+    occupant.listen()
+    occupied_port = int(occupant.getsockname()[1])
+    real_reserve = processes_module._reserve_loopback_port
+    ports = iter((occupied_port, real_reserve()))
+
+    monkeypatch.setattr(processes_module, "_reserve_loopback_port", lambda: next(ports))
+    try:
+        endpoint = processes.start_search()
+        assert endpoint.port != occupied_port
+        assert [
+            receipt.category for receipt in processes.startup_attempt_receipts
+        ] == ["BIND_COLLISION", "STARTED"]
+    finally:
+        occupant.close()
+        processes.close()
+
+
 def test_non_bind_exit_is_not_retried_and_public_diagnostics_do_not_echo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
