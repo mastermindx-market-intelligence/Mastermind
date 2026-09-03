@@ -269,6 +269,10 @@ def test_launchd_entrypoint_boots_under_isolated_python_from_foreign_cwd(
 
 
 def _w3c_candidate(runtime, *, stale_parent: bool = False):
+    from control_plane.executive_dialogue_observation import (
+        ACTIVE_CURRENT_WORKER,
+        DialogueCandidateReference,
+    )
     from tests.test_company_dialogue_runtime_binding import (
         THREAD_TS,
         caller,
@@ -281,16 +285,31 @@ def _w3c_candidate(runtime, *, stale_parent: bool = False):
     current = snapshot(
         parent_fingerprint=("f" * 64 if stale_parent else dialogue_parent["fingerprint"])
     )
+    from tests.test_slack_agent_dialogue_turn_routing_facts import _binding_for
+
     return runtime.RelayTurnCandidate(
         delegation_identity=identity(),
         dialogue_parent=dialogue_parent,
         thread_ts=THREAD_TS,
         current_worker=current,
         actor=caller(),
+        candidate=DialogueCandidateReference(
+            mode=ACTIVE_CURRENT_WORKER,
+            root_job_id=current.root_job_id,
+            job_id=current.job_id,
+            attempt_id=current.attempt_id,
+            worker_id=current.worker_id,
+            evidence_digest="e" * 64,
+        ),
+        target_bindings={"coo": _binding_for("coo"), "ceo": _binding_for("ceo")},
     )
 
 
 def _terminal_w3c_material(runtime):
+    from control_plane.executive_dialogue_observation import (
+        TERMINAL_RESULT,
+        DialogueCandidateReference,
+    )
     from integrations.slack_agent_dialogue.contract_v2 import (
         render_message_v2,
         render_parent_v2,
@@ -304,6 +323,7 @@ def _terminal_w3c_material(runtime):
     from tests.test_company_dialogue_runtime_binding import THREAD_TS, caller, identity, parent
     from tests.test_slack_agent_dialogue_engine_v2 import ExactV2AuthorityPolicy
     from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _binding_for,
         _terminal_binding,
         _terminal_candidate,
         _terminal_receipt,
@@ -370,6 +390,15 @@ def _terminal_w3c_material(runtime):
         actor=caller(),
         terminal_candidate=terminal,
         terminal_projection_receipt=receipt,
+        candidate=DialogueCandidateReference(
+            mode=TERMINAL_RESULT,
+            root_job_id=terminal.root_job_id,
+            job_id=terminal.job_id,
+            attempt_id=terminal.attempt_id,
+            worker_id=terminal.worker_id,
+            evidence_digest="f" * 64,
+        ),
+        target_bindings={"coo": _binding_for("coo"), "ceo": _binding_for("ceo")},
     )
     return relay_candidate, binding, engine
 
@@ -1088,13 +1117,6 @@ def test_turn_runtime_factory_reuses_the_existing_relay_slack_client(
     socket_root: Path,
 ) -> None:
     runtime = _runtime()
-    from control_plane.executive_runtime import Runtime
-    from control_plane.wake_persist import WakeLedgerRepository
-    from integrations.executive_wake.registry import WakeDispatcherRegistry
-    from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
-        RuntimeTerminalReturnBindingResolver,
-    )
-    from tests.test_executive_wake_persisted_dispatch import _POLICY
     from tests.test_slack_agent_dialogue_turn_routing_facts import (
         _binding_for,
         _registry,
@@ -1105,22 +1127,19 @@ def test_turn_runtime_factory_reuses_the_existing_relay_slack_client(
     )
     token_file = _token_file(tmp_path)
     service = runtime.build_service(_config(runtime, socket_root, token_file))
+    client = runtime.ExecutiveDialogueObservationClient(
+        runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
+    )
     turn_runtime = runtime.build_turn_runtime(
         service,
         registry=_registry(),
-        repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger")),
-        dispatchers=WakeDispatcherRegistry(),
-        current_binding_for=_binding_for,
-        retry_policy=_POLICY,
-        observation_client=runtime.ExecutiveDialogueObservationClient(
-            runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
-        ),
-        terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
+        observation_client=client,
     )
 
     assert turn_runtime.observer.client is service.engine.client
     assert turn_runtime.observer.client is service.engine_v2.client
     assert turn_runtime.observer.policy is service.engine.policy
+    assert turn_runtime.observer.wake_carrier is client
     assert service.engine_v2.active_waiter_registry is not None
     assert (
         turn_runtime.active_waiter_registry
@@ -1154,6 +1173,8 @@ def test_real_observation_source_discovers_parents_through_shared_v2_engine() ->
                 dialogue_parent=dict(parent),
                 thread_ts=thread_ts,
                 delegation_identity=active.delegation_identity,
+                candidate=active.candidate,
+                target_bindings=active.target_bindings,
                 current_worker=active.current_worker,
                 actor=active.actor,
             )
@@ -1177,6 +1198,83 @@ def test_real_observation_source_discovers_parents_through_shared_v2_engine() ->
     assert observed[0].dialogue_parent == candidate.dialogue_parent
     assert client.calls == [(candidate.dialogue_parent, candidate.thread_ts)]
     assert engine.client.channel_history_call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("code", "outcome"),
+    [
+        ("TRANSPORT_UNAVAILABLE", "RECONCILIATION_INCOMPLETE"),
+        ("HELD_ZERO_EFFECT", "RECONCILIATION_INCOMPLETE"),
+        ("UNKNOWN_ZERO_EFFECT", "RECONCILIATION_INCOMPLETE"),
+        ("UNAVAILABLE_ZERO_EFFECT", "RECONCILIATION_INCOMPLETE"),
+        ("RESPONSE_REFUSED", "REFUSED"),
+        ("REFUSED_ZERO_EFFECT", "REFUSED"),
+        ("CONFLICT_ZERO_EFFECT", "REFUSED"),
+    ],
+)
+def test_real_observation_failure_is_one_attempt_without_parent_fallback(
+    code: str,
+    outcome: str,
+) -> None:
+    runtime = _runtime()
+    from integrations.slack_agent_dialogue.contract_v2 import render_parent_v2
+    from integrations.slack_agent_dialogue.engine import SlackMessage
+    from tests.test_company_dialogue_runtime_binding import parent
+    from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _binding_for,
+        _registry,
+    )
+
+    _candidate, _binding, engine = _terminal_w3c_material(runtime)
+    second_parent = parent(
+        operation_key="exec-job-201",
+        session_ref="asd-session-exec-job-201",
+        created_at="2026-08-31T22:01:00Z",
+    )
+    engine.client.add_parent(
+        SlackMessage(
+            ts="1788000001.123456",
+            author_user_id=engine.policy.relay_bot_user_id,
+            text=render_parent_v2(second_parent),
+        )
+    )
+
+    class ObservationClient:
+        calls = 0
+
+        async def resolve(self, **_kwargs):
+            self.calls += 1
+            raise runtime.ExecutiveObservationClientError(code)
+
+    class Observer:
+        calls = 0
+
+        async def reconcile_once(self, **_kwargs):
+            self.calls += 1
+            raise AssertionError("failed observation must not reach the observer")
+
+    observation_client = ObservationClient()
+    observer = Observer()
+    source = runtime.build_executive_observation_candidate_source(
+        engine,
+        observation_client,
+        maximum=4,
+    )
+    turn_runtime = runtime.AgentRelayTurnRuntime(
+        observer=observer,
+        registry=_registry(),
+        current_binding_for=_binding_for,
+        candidate_source=source,
+        **_w3c_dependencies(runtime, engine=engine),
+        _executive_observation_source=True,
+    )
+
+    receipt = asyncio.run(turn_runtime.reconcile_once())[0]
+
+    assert observation_client.calls == 1
+    assert observer.calls == 0
+    assert receipt.outcome.value == outcome
+    assert receipt.reason == code
 
 
 def test_ephemeral_executive_listener_to_relay_source_vertical(
@@ -1304,13 +1402,6 @@ def test_build_turn_runtime_selects_real_observation_source_when_enabled(
     socket_root: Path,
 ) -> None:
     runtime = _runtime()
-    from control_plane.executive_runtime import Runtime
-    from control_plane.wake_persist import WakeLedgerRepository
-    from integrations.executive_wake.registry import WakeDispatcherRegistry
-    from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
-        RuntimeTerminalReturnBindingResolver,
-    )
-    from tests.test_executive_wake_persisted_dispatch import _POLICY
     from tests.test_slack_agent_dialogue_turn_routing_facts import (
         _binding_for,
         _registry,
@@ -1342,12 +1433,7 @@ def test_build_turn_runtime_selects_real_observation_source_when_enabled(
     turn_runtime = runtime.build_turn_runtime(
         service,
         registry=_registry(),
-        repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger")),
-        dispatchers=WakeDispatcherRegistry(),
-        current_binding_for=_binding_for,
-        retry_policy=_POLICY,
         observation_client=client,
-        terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
     )
 
     assert asyncio.run(turn_runtime.reconcile_once()) == ()
@@ -1387,7 +1473,6 @@ def test_build_turn_runtime_refuses_parallel_candidate_authority_seams(
             registry=_registry(),
             repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger")),
             dispatchers=WakeDispatcherRegistry(),
-            current_binding_for=_binding_for,
             retry_policy=_POLICY,
             candidate_source=lambda: (),
             observation_client=runtime.ExecutiveDialogueObservationClient(
@@ -1402,7 +1487,6 @@ def test_build_turn_runtime_refuses_parallel_candidate_authority_seams(
             registry=_registry(),
             repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger-2")),
             dispatchers=WakeDispatcherRegistry(),
-            current_binding_for=_binding_for,
             retry_policy=_POLICY,
             observation_client=runtime.ExecutiveDialogueObservationClient(
                 "/tmp/not-the-dedicated-executive-observation.sock"
@@ -1479,7 +1563,11 @@ def test_slow_observation_collection_leaves_relay_v1_and_v2_responsive(
                 )
                 assert response["ok"] is True
             release.set()
-            assert await asyncio.wait_for(collection, timeout=1) == ()
+            with pytest.raises(
+                runtime.ExecutiveObservationClientError,
+                match="UNAVAILABLE_ZERO_EFFECT",
+            ):
+                await asyncio.wait_for(collection, timeout=1)
         finally:
             release.set()
             await asyncio.gather(collection, return_exceptions=True)
@@ -1490,6 +1578,9 @@ def test_slow_observation_collection_leaves_relay_v1_and_v2_responsive(
 
 def test_terminal_observation_candidate_uses_executive_revalidated_binding() -> None:
     runtime = _runtime()
+    from control_plane.executive_dialogue_observation import (
+        terminal_projection_receipt_reference,
+    )
     from tests.test_slack_agent_dialogue_turn_routing_facts import (
         _binding_for,
         _registry,
@@ -1500,6 +1591,9 @@ def test_terminal_observation_candidate_uses_executive_revalidated_binding() -> 
         candidate,
         current_worker=None,
         actor=None,
+        terminal_projection_receipt=terminal_projection_receipt_reference(
+            candidate.terminal_projection_receipt
+        ),
     )
 
     class NeverLocalResolver:
@@ -1539,22 +1633,39 @@ def test_terminal_observation_candidate_uses_executive_revalidated_binding() -> 
     assert receipt.reason == "EXECUTIVE_OBSERVATION_TERMINAL"
     assert observer.calls == 1
 
+    drifted = dataclasses.replace(
+        candidate,
+        terminal_projection_receipt=dataclasses.replace(
+            candidate.terminal_projection_receipt,
+            receipt_digest="f" * 64,
+        ),
+    )
+    drifted_runtime = runtime.AgentRelayTurnRuntime(
+        observer=observer,
+        registry=_registry(),
+        current_binding_for=_binding_for,
+        candidate_source=lambda: (drifted,),
+        **_w3c_dependencies(
+            runtime,
+            engine=engine,
+            terminal_binding_resolver=NeverLocalResolver(),
+        ),
+        _executive_observation_source=True,
+    )
 
-@pytest.mark.parametrize("missing", ["registry", "resolver"])
-def test_turn_runtime_composition_refuses_missing_trusted_owner(
+    refused = asyncio.run(drifted_runtime.reconcile_once())[0]
+
+    assert refused.outcome is runtime.ObservationOutcome.REFUSED
+    assert refused.reason == "TERMINAL_RESULT_RECEIPT_MISMATCH"
+    assert observer.calls == 1
+
+
+def test_turn_runtime_composition_refuses_missing_shared_waiter_owner(
     monkeypatch,
     tmp_path: Path,
     socket_root: Path,
-    missing: str,
 ) -> None:
     runtime = _runtime()
-    from control_plane.executive_runtime import Runtime
-    from control_plane.wake_persist import WakeLedgerRepository
-    from integrations.executive_wake.registry import WakeDispatcherRegistry
-    from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
-        RuntimeTerminalReturnBindingResolver,
-    )
-    from tests.test_executive_wake_persisted_dispatch import _POLICY
     from tests.test_slack_agent_dialogue_turn_routing_facts import (
         _binding_for,
         _registry,
@@ -1568,26 +1679,15 @@ def test_turn_runtime_composition_refuses_missing_trusted_owner(
     service = runtime.build_service(
         _config(runtime, socket_root, _token_file(tmp_path / "owner-token"))
     )
-    if missing == "registry":
-        service.engine_v2._active_waiter_registry = None
-    resolver = (
-        object()
-        if missing == "resolver"
-        else RuntimeTerminalReturnBindingResolver(lambda: None)
-    )
+    service.engine_v2._active_waiter_registry = None
 
     with pytest.raises(runtime.RelayRuntimeError, match="RUNTIME_INVALID"):
         runtime.build_turn_runtime(
             service,
             registry=_registry(),
-            repository=WakeLedgerRepository(Runtime.at(tmp_path / "owner-ledger")),
-            dispatchers=WakeDispatcherRegistry(),
-            current_binding_for=_binding_for,
-            retry_policy=_POLICY,
             observation_client=runtime.ExecutiveDialogueObservationClient(
                 runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
             ),
-            terminal_binding_resolver=resolver,
         )
 
 
@@ -1653,3 +1753,79 @@ def test_run_relay_keeps_af_unix_service_available_while_turn_loop_runs(
         assert not service.config.socket_path.exists()
 
     asyncio.run(scenario())
+
+
+def test_configured_coordination_path_builds_real_remote_overlay_without_factory(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    os.chown(socket_root, os.geteuid(), os.getegid())
+    socket_root.chmod(0o710)
+    relay_path = socket_root / "agent-relay.sock"
+    coordination_path = socket_root / "dialogue-coordination.sock"
+    monkeypatch.setattr(runtime, "AGENT_RELAY_SOCKET_PATH", relay_path)
+    monkeypatch.setattr(
+        runtime,
+        "EXECUTIVE_OBSERVATION_SOCKET_PATH",
+        coordination_path,
+    )
+    monkeypatch.setattr(service_module, "_peer_uid", lambda _connection: 450)
+    config = dataclasses.replace(
+        _config(runtime, socket_root, _token_file(tmp_path / "configured-token")),
+        dialogue_coordination_socket_path=coordination_path,
+        w3c_enabled=True,
+    )
+    service = runtime.build_service(config)
+    monkeypatch.setattr(runtime, "build_service", lambda _config: service)
+    built: list[dict[str, object]] = []
+    original_build = runtime.build_turn_runtime
+
+    def capture_build(actual_service, **kwargs):
+        built.append(dict(kwargs))
+        return original_build(actual_service, **kwargs)
+
+    monkeypatch.setattr(runtime, "build_turn_runtime", capture_build)
+    started = asyncio.Event()
+
+    async def controlled_turn_loop(_self):
+        started.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(
+        runtime.AgentRelayTurnRuntime,
+        "serve_forever",
+        controlled_turn_loop,
+    )
+
+    async def scenario() -> None:
+        task = asyncio.create_task(runtime.run_relay(config))
+        for _attempt in range(200):
+            if relay_path.exists() and started.is_set():
+                break
+            if task.done():
+                await task
+            await asyncio.sleep(0.005)
+        else:
+            raise AssertionError("configured remote turn overlay did not start")
+        try:
+            response = await call_service(relay_path, _request(CONTROL_VERSION_V2))
+            assert response["ok"] is True
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(scenario())
+
+    assert len(built) == 1
+    assert set(built[0]) == {
+        "registry",
+        "observation_client",
+    }
+    assert isinstance(
+        built[0]["observation_client"],
+        runtime.ExecutiveDialogueObservationClient,
+    )
+    assert built[0]["observation_client"].socket_path == coordination_path

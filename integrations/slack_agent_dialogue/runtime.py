@@ -6,8 +6,9 @@ Slack client into the existing V1 and V2 engines, and serves their closed
 request surface over one group-reachable, peer-credentialled Unix socket.
 
 W3C adds only an optional, production-disarmed in-process turn loop. The loop
-recomputes exact-current-worker and target bindings on every pass and delegates
-all history, Wake persistence, retry, and provider effects to existing owners.
+recomputes exact-current-worker and proposed target routing on every pass, then
+delegates all Wake persistence, retry, binding/current-writer authority, and
+provider effects to the Executive owner over the dedicated coordination socket.
 A completed terminal RESULT remains explicitly held until an accepted owner
 supplies a durable post-time dialogue binding; W3C never weakens WP-3 to infer it.
 """
@@ -15,17 +16,23 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import inspect
 import os
 import stat
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence, Union
 
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
+from control_plane.executive_dialogue_observation import (
+    DialogueCandidateReference,
+    TerminalProjectionReceiptReference,
+    terminal_projection_receipt_reference,
+)
 from control_plane.executive_runtime import (
     AttemptStatus,
     ExecutiveDialogueSource,
@@ -36,6 +43,7 @@ from control_plane.session_targets import (
     RuntimeBinding,
     SessionTargetRegistry,
     WakeRoute,
+    load_session_targets,
 )
 from control_plane.wake_events import utc_now_iso
 from control_plane.wake_ledger import WakeRetryPolicy
@@ -142,6 +150,10 @@ class _ActiveWaiterLookupContext:
     parent_fingerprint: str
     operation_key: str
     session_ref: str
+    dialogue_parent: Mapping[str, Any]
+    thread_ts: str
+    candidate: DialogueCandidateReference | None
+    target_bindings: Mapping[str, RuntimeBinding | None]
 
 
 class PrivateRelayAuthorityPolicy:
@@ -182,6 +194,8 @@ class RelayRuntimeConfig:
     allowed_peer_uids: tuple[int, ...]
     allowed_sol_user_ids: tuple[str, ...]
     allowed_parent_user_ids: tuple[str, ...]
+    dialogue_coordination_socket_path: Path | None = None
+    w3c_enabled: bool = False
 
     def __post_init__(self) -> None:
         try:
@@ -207,6 +221,23 @@ class RelayRuntimeConfig:
             socket_group_gid=os.getegid(),
         )
         object.__setattr__(self, "socket_path", service_config.socket_path)
+        coordination_path = self.dialogue_coordination_socket_path
+        if coordination_path is not None:
+            try:
+                coordination_path = Path(coordination_path)
+            except (TypeError, ValueError):
+                raise RelayRuntimeError("RUNTIME_INVALID") from None
+            if coordination_path != EXECUTIVE_OBSERVATION_SOCKET_PATH:
+                raise RelayRuntimeError("RUNTIME_INVALID")
+            object.__setattr__(
+                self,
+                "dialogue_coordination_socket_path",
+                coordination_path,
+            )
+        if type(self.w3c_enabled) is not bool:
+            raise RelayRuntimeError("RUNTIME_INVALID")
+        if self.w3c_enabled and coordination_path is None:
+            raise RelayRuntimeError("RUNTIME_INVALID")
         DialoguePolicy(
             workspace_id=self.workspace_id,
             channel_id=self.channel_id,
@@ -237,7 +268,13 @@ class RelayTurnCandidate:
     current_worker: CurrentWorkerDialogueSnapshot | None
     actor: WorkerDialogueCaller | None
     terminal_candidate: TerminalReturnCandidate | None = None
-    terminal_projection_receipt: TerminalReturnProjectionReceipt | None = None
+    terminal_projection_receipt: (
+        TerminalReturnProjectionReceipt | TerminalProjectionReceiptReference | None
+    ) = None
+    candidate: DialogueCandidateReference | None = None
+    target_bindings: Mapping[str, RuntimeBinding | None] = field(
+        default_factory=dict
+    )
 
 
 _CandidateSource = Callable[
@@ -302,13 +339,10 @@ def build_executive_observation_candidate_source(
 
         async def observations() -> AsyncIterator[RelayTurnCandidate]:
             for discovered in parents:
-                try:
-                    resolved = await resolve(
-                        parent=discovered.parent,
-                        thread_ts=discovered.thread_ts,
-                    )
-                except ExecutiveObservationClientError:
-                    continue
+                resolved = await resolve(
+                    parent=discovered.parent,
+                    thread_ts=discovered.thread_ts,
+                )
                 if (
                     type(resolved) is not ResolvedDialogueObservation
                     or resolved.state != "RESOLVED"
@@ -326,6 +360,8 @@ def build_executive_observation_candidate_source(
                     terminal_projection_receipt=(
                         resolved.terminal_projection_receipt
                     ),
+                    candidate=resolved.candidate,
+                    target_bindings=dict(resolved.target_bindings),
                 )
 
         return observations()
@@ -443,7 +479,10 @@ class AgentRelayTurnRuntime:
             or not isinstance(dialogue_engine_v2, DialogueEngineV2)
             or dialogue_engine_v2.active_waiter_registry
             is not active_waiter_registry
-            or not callable(getattr(terminal_binding_resolver, "resolve", None))
+            or (
+                not _executive_observation_source
+                and not callable(getattr(terminal_binding_resolver, "resolve", None))
+            )
         ):
             # AgentRelayTurnRuntime *is* the enabled W3C overlay.  Unlike an
             # ordinary standalone DialogueEngineV2 it has no compatibility
@@ -476,6 +515,8 @@ class AgentRelayTurnRuntime:
         *,
         context: DialogueContextV2,
         routing: object,
+        dialogue_parent: Mapping[str, Any],
+        thread_ts: str,
     ) -> ObservationReceipt:
         scope = self._active_waiter_context
         engine = self._dialogue_engine_v2
@@ -493,23 +534,19 @@ class AgentRelayTurnRuntime:
             raise ActiveWaiterStateUnavailable() from None
         if not isinstance(parent_fingerprint, str) or not parent_fingerprint:
             raise ActiveWaiterStateUnavailable()
-        token = scope.set(
-            _ActiveWaiterLookupContext(
-                # Routing is the immutable accepted owner projection.  The
-                # candidate mapping remains untrusted and may be mutable while
-                # terminal Slack verification awaits transport reads.
-                parent_fingerprint=parent_fingerprint,
-                operation_key=context.operation_key,
-                session_ref=context.session_ref,
-            )
+        candidate_scope = scope.get()
+        if (
+            not isinstance(candidate_scope, _ActiveWaiterLookupContext)
+            or candidate_scope.parent_fingerprint != parent_fingerprint
+            or candidate_scope.operation_key != context.operation_key
+            or candidate_scope.session_ref != context.session_ref
+            or candidate_scope.thread_ts != thread_ts
+        ):
+            raise ActiveWaiterStateUnavailable()
+        return await self.observer.reconcile_once(
+            context=context,
+            routing=routing,
         )
-        try:
-            return await self.observer.reconcile_once(
-                context=context,
-                routing=routing,
-            )
-        finally:
-            scope.reset(token)
 
     @staticmethod
     def _context_from_binding(binding: object) -> DialogueContextV2:
@@ -618,6 +655,14 @@ class AgentRelayTurnRuntime:
         current_worker = candidate.current_worker
         terminal = candidate.terminal_candidate
         receipt = candidate.terminal_projection_receipt
+        try:
+            dialogue_parent = copy.deepcopy(dict(candidate.dialogue_parent))
+            thread_ts = str(candidate.thread_ts)
+        except (TypeError, ValueError):
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TERMINAL_RESULT_BINDING_MISMATCH",
+            )
         resolver = self._terminal_binding_resolver
         engine = self._dialogue_engine_v2
         if current_worker is None:
@@ -625,7 +670,14 @@ class AgentRelayTurnRuntime:
         if (
             type(current_worker) is not CurrentWorkerDialogueSnapshot
             or type(terminal) is not TerminalReturnCandidate
-            or type(receipt) is not TerminalReturnProjectionReceipt
+            or (
+                self._executive_observation_source
+                and type(receipt) is not TerminalProjectionReceiptReference
+            )
+            or (
+                not self._executive_observation_source
+                and type(receipt) is not TerminalReturnProjectionReceipt
+            )
             or resolver is None
             or engine is None
         ):
@@ -654,30 +706,21 @@ class AgentRelayTurnRuntime:
 
         try:
             context = self._context_from_binding(resolved)
-            expected_message = build_terminal_result_message(
-                terminal,
-                context.normalized(),
-            )
-            if (
-                receipt.message_key != expected_message["message_key"]
-                or receipt.fingerprint != expected_message["fingerprint"]
-                or receipt.parent_author_user_id
-                != engine.policy.relay_bot_user_id
-            ):
-                raise TurnRoutingFactsError(
-                    "TERMINAL_RESULT_RECEIPT_MISMATCH"
+            expected_message = None
+            if not self._executive_observation_source:
+                expected_message = build_terminal_result_message(
+                    terminal,
+                    context.normalized(),
                 )
-            routing = resolve_terminal_turn_routing_facts(
-                delegation_identity=candidate.delegation_identity,
-                dialogue_parent=candidate.dialogue_parent,
-                thread_ts=candidate.thread_ts,
-                current_worker=current_worker,
-                terminal_candidate=terminal,
-                projection_receipt=receipt,
-                resolved_binding=resolved,
-                registry=self.registry,
-                current_binding_for=self._current_binding_for,
-            )
+                if (
+                    receipt.message_key != expected_message["message_key"]
+                    or receipt.fingerprint != expected_message["fingerprint"]
+                    or receipt.parent_author_user_id
+                    != engine.policy.relay_bot_user_id
+                ):
+                    raise TurnRoutingFactsError(
+                        "TERMINAL_RESULT_RECEIPT_MISMATCH"
+                    )
         except TurnRoutingFactsError as exc:
             return self._receipt(ObservationOutcome.REFUSED, exc.code)
         except Exception:
@@ -689,33 +732,72 @@ class AgentRelayTurnRuntime:
         try:
             bound = await engine.bind_or_verify_relay_parent_thread(context)
             if (
-                bound.thread_ts != candidate.thread_ts
-                or bound.thread_ts != receipt.thread_ts
-                or bound.parent_fingerprint != receipt.parent_fingerprint
+                bound.thread_ts != thread_ts
                 or bound.parent_fingerprint
-                != candidate.dialogue_parent["fingerprint"]
-                or bound.parent_author_user_id != receipt.parent_author_user_id
+                != dialogue_parent["fingerprint"]
                 or bound.parent_author_user_id != engine.policy.relay_bot_user_id
             ):
                 raise ValueError("receipt does not bind canonical parent")
             physical = await engine.read_thread(
-                thread_ts=candidate.thread_ts,
+                thread_ts=thread_ts,
                 context=context,
             )
             matches = [
                 item
                 for item in physical.messages
-                if item.message["message_key"] == receipt.message_key
+                if item.message["message_key"] == terminal.message_key
             ]
             if len(matches) != 1:
                 raise ValueError("terminal result is absent or ambiguous")
             observed = matches[0]
-            if (
+            if self._executive_observation_source:
+                if (
+                    observed.message.get("fingerprint")
+                    != receipt.message_fingerprint
+                    or observed.duplicate_timestamps != ()
+                ):
+                    raise ValueError("physical terminal result drifted")
+                reconstructed_receipt = TerminalReturnProjectionReceipt(
+                    action=receipt.action,
+                    message_key=terminal.message_key,
+                    fingerprint=receipt.message_fingerprint,
+                    message_ts=observed.primary_ts,
+                    duplicate_timestamps=(),
+                    thread_ts=thread_ts,
+                    parent_author_user_id=engine.policy.relay_bot_user_id,
+                    parent_fingerprint=str(
+                        dialogue_parent["fingerprint"]
+                    ),
+                )
+                if (
+                    terminal_projection_receipt_reference(reconstructed_receipt)
+                    != receipt
+                ):
+                    raise ValueError("physical terminal receipt digest drifted")
+                receipt = reconstructed_receipt
+            elif (
                 dict(observed.message) != expected_message
                 or observed.primary_ts != receipt.message_ts
                 or observed.duplicate_timestamps != receipt.duplicate_timestamps
+                or bound.thread_ts != receipt.thread_ts
+                or bound.parent_fingerprint != receipt.parent_fingerprint
+                or bound.parent_author_user_id != receipt.parent_author_user_id
             ):
                 raise ValueError("physical terminal result drifted")
+
+            routing = resolve_terminal_turn_routing_facts(
+                delegation_identity=candidate.delegation_identity,
+                dialogue_parent=dialogue_parent,
+                thread_ts=thread_ts,
+                current_worker=current_worker,
+                terminal_candidate=terminal,
+                projection_receipt=receipt,
+                resolved_binding=resolved,
+                registry=self.registry,
+                current_binding_for=self._current_binding_for,
+            )
+        except TurnRoutingFactsError as exc:
+            return self._receipt(ObservationOutcome.REFUSED, exc.code)
         except DialogueEngineError as exc:
             if exc.code in {
                 "TRANSPORT_UNAVAILABLE",
@@ -745,6 +827,8 @@ class AgentRelayTurnRuntime:
             return await self._observe(
                 context=context,
                 routing=routing,
+                dialogue_parent=dialogue_parent,
+                thread_ts=thread_ts,
             )
         except ActiveWaiterStateUnavailable:
             return self._receipt(
@@ -841,6 +925,8 @@ class AgentRelayTurnRuntime:
             return await self._observe(
                 context=context,
                 routing=routing,
+                dialogue_parent=candidate.dialogue_parent,
+                thread_ts=candidate.thread_ts,
             )
         except ActiveWaiterStateUnavailable:
             return self._receipt(
@@ -857,6 +943,41 @@ class AgentRelayTurnRuntime:
         self,
         candidate: object,
     ) -> ObservationReceipt:
+        if not isinstance(candidate, RelayTurnCandidate):
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TURN_CANDIDATE_INVALID",
+            )
+        try:
+            parent_fingerprint = str(candidate.dialogue_parent["fingerprint"])
+            operation_key = str(candidate.dialogue_parent["operation_key"])
+            session_ref = str(candidate.dialogue_parent["session_ref"])
+            if self._executive_observation_source and (
+                not isinstance(candidate.candidate, DialogueCandidateReference)
+                or not isinstance(candidate.target_bindings, Mapping)
+                or set(candidate.target_bindings) != {"coo", "ceo"}
+                or any(
+                    value is not None and not isinstance(value, RuntimeBinding)
+                    for value in candidate.target_bindings.values()
+                )
+            ):
+                raise ActiveWaiterStateUnavailable()
+            token = self._active_waiter_context.set(
+                _ActiveWaiterLookupContext(
+                    parent_fingerprint=parent_fingerprint,
+                    operation_key=operation_key,
+                    session_ref=session_ref,
+                    dialogue_parent=dict(candidate.dialogue_parent),
+                    thread_ts=candidate.thread_ts,
+                    candidate=candidate.candidate,
+                    target_bindings=dict(candidate.target_bindings),
+                )
+            )
+        except Exception:
+            return self._receipt(
+                ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                "ACTIVE_WAITER_STATE_UNAVAILABLE",
+            )
         try:
             return await self._reconcile_candidate_inner(candidate)
         except asyncio.CancelledError:
@@ -871,11 +992,30 @@ class AgentRelayTurnRuntime:
                 ObservationOutcome.REFUSED,
                 "TURN_CANDIDATE_PROCESSING_FAILED",
             )
+        finally:
+            self._active_waiter_context.reset(token)
 
     async def reconcile_once(self) -> tuple[ObservationReceipt, ...]:
         try:
             collected = await self._candidate_collector.collect()
-        except CandidateCollectionUnavailable:
+        except CandidateCollectionUnavailable as exc:
+            cause = exc.__cause__
+            if (
+                self._executive_observation_source
+                and isinstance(cause, ExecutiveObservationClientError)
+            ):
+                outcome = (
+                    ObservationOutcome.RECONCILIATION_INCOMPLETE
+                    if cause.code
+                    in {
+                        "TRANSPORT_UNAVAILABLE",
+                        "HELD_ZERO_EFFECT",
+                        "UNKNOWN_ZERO_EFFECT",
+                        "UNAVAILABLE_ZERO_EFFECT",
+                    }
+                    else ObservationOutcome.REFUSED
+                )
+                return (self._receipt(outcome, cause.code),)
             return (
                 self._receipt(
                     ObservationOutcome.REFUSED,
@@ -1018,13 +1158,13 @@ def build_turn_runtime(
     service: AgentDialogueService,
     *,
     registry: SessionTargetRegistry,
-    repository: WakeLedgerRepository,
-    dispatchers: WakeDispatcherRegistry,
-    current_binding_for: Callable[[str], RuntimeBinding | None],
-    retry_policy: WakeRetryPolicy,
+    current_binding_for: Callable[[str], RuntimeBinding | None] | None = None,
+    repository: WakeLedgerRepository | None = None,
+    dispatchers: WakeDispatcherRegistry | None = None,
+    retry_policy: WakeRetryPolicy | None = None,
     candidate_source: _CandidateSource | None = None,
     observation_client: ExecutiveDialogueObservationClient | None = None,
-    terminal_binding_resolver: RuntimeTerminalReturnBindingResolver,
+    terminal_binding_resolver: RuntimeTerminalReturnBindingResolver | None = None,
     emitted_at: Callable[[], str] = utc_now_iso,
     poll_interval_seconds: float = 1.0,
     max_candidates_per_pass: int = DEFAULT_MAX_TURN_CANDIDATES_PER_PASS,
@@ -1040,10 +1180,16 @@ def build_turn_runtime(
         raise RelayRuntimeError("RUNTIME_INVALID")
     if (candidate_source is None) == (observation_client is None):
         raise RelayRuntimeError("RUNTIME_INVALID")
-    if observation_client is not None:
+    executive_observation_source = observation_client is not None
+    if executive_observation_source:
         if (
             not isinstance(observation_client, ExecutiveDialogueObservationClient)
             or observation_client.socket_path != EXECUTIVE_OBSERVATION_SOCKET_PATH
+            or any(
+                value is not None
+                for value in (repository, dispatchers, retry_policy)
+            )
+            or current_binding_for is not None
         ):
             raise RelayRuntimeError("RUNTIME_INVALID")
         candidate_source = build_executive_observation_candidate_source(
@@ -1051,16 +1197,20 @@ def build_turn_runtime(
             observation_client,
             maximum=max_candidates_per_pass,
         )
-    executive_observation_source = observation_client is not None
     # ``candidate_source`` is the protected pre-I1 unit-test compatibility
     # seam.  Production composition supplies ``observation_client`` above.
     assert candidate_source is not None
     active_waiters = service.engine_v2.active_waiter_registry
     if not isinstance(active_waiters, ActiveWaiterRegistry):
         raise RelayRuntimeError("RUNTIME_INVALID")
-    if not isinstance(
-        terminal_binding_resolver,
-        RuntimeTerminalReturnBindingResolver,
+    if not executive_observation_source and not callable(current_binding_for):
+        raise RelayRuntimeError("RUNTIME_INVALID")
+    if (
+        not executive_observation_source
+        and not isinstance(
+            terminal_binding_resolver,
+            RuntimeTerminalReturnBindingResolver,
+        )
     ):
         raise RelayRuntimeError("RUNTIME_INVALID")
     waiter_context: ContextVar[_ActiveWaiterLookupContext | None] = ContextVar(
@@ -1068,8 +1218,24 @@ def build_turn_runtime(
         default=None,
     )
 
+    def candidate_binding_for(seat: str) -> RuntimeBinding | None:
+        scope = waiter_context.get()
+        if scope is None or set(scope.target_bindings) != {"coo", "ceo"}:
+            raise ActiveWaiterStateUnavailable()
+        value = scope.target_bindings.get(seat)
+        if value is not None and not isinstance(value, RuntimeBinding):
+            raise ActiveWaiterStateUnavailable()
+        return value
+
+    binding_for = (
+        candidate_binding_for
+        if executive_observation_source
+        else current_binding_for
+    )
+    assert callable(binding_for)
+
     def current_for_route(route: WakeRoute) -> RuntimeBinding | None:
-        return current_binding_for(route.target_seat)
+        return binding_for(route.target_seat)
 
     def exact_active_waiter(source_ref: str, target_seat: str) -> bool:
         if not isinstance(source_ref, str) or not source_ref:
@@ -1090,23 +1256,41 @@ def build_turn_runtime(
         if type(observed) is not bool:
             raise ActiveWaiterStateUnavailable()
         return observed
-
-    observer = compose_persisted_turn_observer(
-        policy=service.engine.policy,
-        client=service.engine.client,
-        registry=registry,
-        repository=repository,
-        dispatchers=dispatchers,
-        current_binding_for=current_for_route,
-        retry_policy=retry_policy,
-        binding_for=current_binding_for,
-        has_active_waiter=exact_active_waiter,
-        emitted_at=emitted_at,
-    )
+    if executive_observation_source:
+        assert observation_client is not None
+        observation_client.bind_wake_context(waiter_context)
+        observer = DialogueTurnObserver(
+            policy=service.engine.policy,
+            client=service.engine.client,
+            registry=registry,
+            wake_carrier=observation_client,
+            binding_for=binding_for,
+            has_active_waiter=exact_active_waiter,
+            emitted_at=emitted_at,
+        )
+    else:
+        if (
+            not isinstance(repository, WakeLedgerRepository)
+            or not isinstance(dispatchers, WakeDispatcherRegistry)
+            or not isinstance(retry_policy, WakeRetryPolicy)
+        ):
+            raise RelayRuntimeError("RUNTIME_INVALID")
+        observer = compose_persisted_turn_observer(
+            policy=service.engine.policy,
+            client=service.engine.client,
+            registry=registry,
+            repository=repository,
+            dispatchers=dispatchers,
+            current_binding_for=current_for_route,
+            retry_policy=retry_policy,
+            binding_for=binding_for,
+            has_active_waiter=exact_active_waiter,
+            emitted_at=emitted_at,
+        )
     return AgentRelayTurnRuntime(
         observer=observer,
         registry=registry,
-        current_binding_for=current_binding_for,
+        current_binding_for=binding_for,
         candidate_source=candidate_source,
         poll_interval_seconds=poll_interval_seconds,
         max_candidates_per_pass=max_candidates_per_pass,
@@ -1138,12 +1322,29 @@ async def run_relay(
     """Run Agent Relay; an injected W3C overlay can never terminate it."""
 
     service = build_service(config)
-    if turn_runtime_factory is None:
+    if config.w3c_enabled:
+        if turn_runtime_factory is not None:
+            raise RelayRuntimeError("RUNTIME_INVALID")
+        try:
+            turn_runtime = build_turn_runtime(
+                service,
+                registry=load_session_targets(),
+                observation_client=ExecutiveDialogueObservationClient(
+                    config.dialogue_coordination_socket_path
+                ),
+            )
+        except Exception:
+            raise RelayRuntimeError("RUNTIME_INVALID") from None
+    elif turn_runtime_factory is None:
         await service.serve_forever()
         return
+    else:
+        try:
+            turn_runtime = turn_runtime_factory(service)
+        except Exception:
+            raise RelayRuntimeError("RUNTIME_INVALID") from None
 
     try:
-        turn_runtime = turn_runtime_factory(service)
         turn_serve = turn_runtime.serve_forever
         if not callable(turn_serve):
             raise TypeError("turn runtime serve_forever is not callable")
@@ -1175,6 +1376,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--allowed-peer-uid", required=True, type=int, action="append")
     parser.add_argument("--allowed-sol-user-id", required=True, action="append")
     parser.add_argument("--allowed-parent-user-id", required=True, action="append")
+    parser.add_argument("--dialogue-coordination-socket-path")
+    parser.add_argument("--enable-w3c", action="store_true")
     return parser
 
 
@@ -1190,6 +1393,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             allowed_peer_uids=tuple(namespace.allowed_peer_uid),
             allowed_sol_user_ids=tuple(namespace.allowed_sol_user_id),
             allowed_parent_user_ids=tuple(namespace.allowed_parent_user_id),
+            dialogue_coordination_socket_path=(
+                None
+                if namespace.dialogue_coordination_socket_path is None
+                else Path(namespace.dialogue_coordination_socket_path)
+            ),
+            w3c_enabled=namespace.enable_w3c,
         )
         asyncio.run(run_relay(config))
         return 0

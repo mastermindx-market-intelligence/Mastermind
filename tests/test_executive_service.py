@@ -47,17 +47,26 @@ from control_plane.executive_ambient_process import (
 )
 from control_plane.executive_service import (
     CONTROL_PROTOCOL_VERSION,
+    DialogueWakeTarget,
+    DialogueWakeResult,
+    ExecutiveDialogueWakeBridge,
     ExecutiveControlService,
     ServiceConfig,
     ServiceError,
     send_control_request,
 )
 from control_plane.executive_dialogue_observation import (
+    RECONCILE_WAKE,
     REQUEST_SCHEMA as OBSERVATION_REQUEST_SCHEMA,
     RESPONSE_SCHEMA as OBSERVATION_RESPONSE_SCHEMA,
+    SUBMIT_WAKE,
+    WAKE_RESPONSE_SCHEMA,
     ActiveObservationFacts,
+    CanonicalTerminalWakeCandidate,
+    DialogueCandidateReference,
     DialogueObservationFacts,
     PublicRuntimeBindingFacts,
+    reduce_dialogue_observation,
 )
 from control_plane.executive_terminal_return import (
     TerminalReturnCandidate,
@@ -65,6 +74,8 @@ from control_plane.executive_terminal_return import (
     reduce_terminal_return,
 )
 from control_plane.executive_orchestration_result import canonical_digest
+from control_plane.session_targets import WakeRoute
+from control_plane.wake_events import mint_obligation
 from control_plane import executive_runtime as er_mod
 from tests.test_executive_os_phase1fc import (
     _complete_ohf_role,
@@ -444,17 +455,82 @@ def _observation_facts(parent: dict) -> DialogueObservationFacts:
 
 
 def _observation_request(parent: dict | None = None) -> bytes:
+    parent = parent or dialogue_parent()
     return (
         json.dumps(
             {
                 "schema": OBSERVATION_REQUEST_SCHEMA,
-                "parent": parent or dialogue_parent(),
+                "request_id": "observation-request-001",
+                "parent": parent,
             },
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
         + b"\n"
     )
+
+
+def _dialogue_wake_request(operation: str) -> bytes:
+    parent = dialogue_parent()
+    source_response = reduce_dialogue_observation(
+        parent=parent,
+        thread_ts="1788000000.123456",
+        facts=_observation_facts(parent),
+    )
+    observation = source_response["observation"]
+    candidate = DialogueCandidateReference(
+        mode=source_response["mode"],
+        root_job_id=observation["root_job_id"],
+        job_id=observation["job_id"],
+        attempt_id=observation["attempt_id"],
+        worker_id=observation["worker_id"],
+        evidence_digest=observation["evidence_digest"],
+    )
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "a" * 64,
+        declared_target_seat="ceo",
+        root_job_id="JOB-100",
+        source_workstream="WS:CHAIRMAN-CONTROL-ROOM",
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    route = WakeRoute(
+        obligation_id=obligation.obligation_id,
+        session_alias="EXECUTIVE-CEO-A",
+        target_seat="ceo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        binding_id="bind-dialogue-wake-0001",
+        binding_generation=7,
+        route_digest="1" * 16,
+        destination_digest="2" * 16,
+        policy_digest="3" * 16,
+        root_job_id="JOB-100",
+        workstream=None,
+        production_armed=True,
+        target_enabled=True,
+        transport_implemented=True,
+        requires_runtime_binding=True,
+        binding_ready=True,
+        human_required=False,
+        policy_version="wake-policy-v1",
+        interface_version="codex-app-server-wake/v1",
+    )
+    return json.dumps(
+        {
+            "schema": "mastermind.dialogue_wake_request/v1",
+            "operation": operation,
+            "parent": parent,
+            "thread_ts": "1788000000.123456",
+            "candidate": candidate.to_dict(),
+            "obligation": obligation.to_dict(),
+            "route": route.to_dict(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 
 def test_absent_dialogue_observation_has_no_listener_lifecycle_state(
@@ -592,10 +668,335 @@ def test_dialogue_observation_authenticates_before_parse_and_refuses_second_fram
                 "reason": "REQUEST_REFUSED",
             }
             assert calls == []
+
+            oversized = await exchange(
+                observation_path,
+                b"x" * (64 * 1024 + 1) + b"\n",
+            )
+            assert oversized == {
+                "schema": OBSERVATION_RESPONSE_SCHEMA,
+                "state": "HELD",
+                "reason": "REQUEST_REFUSED",
+            }
+            assert calls == []
         finally:
             await service.close()
 
     asyncio.run(exercise())
+
+
+def test_dialogue_coordination_dispatches_closed_wake_operations_on_same_listener(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: 457)
+    calls: list[tuple[Runtime, object]] = []
+
+    async def wake_handler(runtime: Runtime, request: object) -> DialogueWakeResult:
+        calls.append((runtime, request))
+        if request.operation == RECONCILE_WAKE:
+            return DialogueWakeResult("MISSING", "WAKE_NOT_RECORDED")
+        return DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+
+    async def exchange(path: Path, payload: bytes) -> dict:
+        reader, writer = await asyncio.open_unix_connection(path)
+        writer.write(payload)
+        await writer.drain()
+        response = json.loads(await reader.readline())
+        writer.close()
+        await writer.wait_closed()
+        return response
+
+    async def exercise() -> None:
+        observation_path = short_socket_root / "coordination" / "dialogue.sock"
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root / "operator"),
+            supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_observation_facts_provider=(
+                lambda _runtime, parent: _observation_facts(parent)
+            ),
+            dialogue_wake_handler=wake_handler,
+        )
+        await service.start()
+        try:
+            assert service.runtime is not None
+            before = len(service.runtime.events.list_events())
+            reconcile = await exchange(
+                observation_path,
+                _dialogue_wake_request(RECONCILE_WAKE) + b"\n",
+            )
+            submit = await exchange(
+                observation_path,
+                _dialogue_wake_request(SUBMIT_WAKE) + b"\n",
+            )
+            assert reconcile == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "MISSING",
+                "reason": "WAKE_NOT_RECORDED",
+            }
+            assert submit == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }
+            assert len(calls) == 2
+            assert all(runtime is service.runtime for runtime, _request in calls)
+            assert [request.operation for _runtime, request in calls] == [
+                RECONCILE_WAKE,
+                SUBMIT_WAKE,
+            ]
+            assert len(service.runtime.events.list_events()) == before
+
+            forged = json.loads(_dialogue_wake_request(SUBMIT_WAKE))
+            forged["candidate"]["evidence_digest"] = "f" * 64
+            refused_candidate = await exchange(
+                observation_path,
+                json.dumps(forged).encode("utf-8") + b"\n",
+            )
+            assert refused_candidate == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "MISSING",
+                "reason": "CANDIDATE_BINDING_REQUIRED",
+            }
+            assert len(calls) == 2
+
+            unknown = json.loads(_dialogue_wake_request(SUBMIT_WAKE))
+            unknown["operation"] = "WAKE_FAILOVER"
+            refused = await exchange(
+                observation_path,
+                json.dumps(unknown).encode("utf-8") + b"\n",
+            )
+            assert refused == {
+                "schema": OBSERVATION_RESPONSE_SCHEMA,
+                "state": "HELD",
+                "reason": "REQUEST_REFUSED",
+            }
+            assert len(calls) == 2
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from control_plane.operator_harness_contract import AttentionTurnObservation
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import WakeRetryPolicy
+    from control_plane.executive_dialogue_observation import (
+        DialogueWakeRequest,
+    )
+    from tests.test_wake_ack_ingress import _admitted_runtime
+
+    runtime, sealed, generation = _admitted_runtime(tmp_path / "wake-bridge")
+    target = SessionTarget(
+        session_alias="COO-CODEX",
+        target_seat="coo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=True,
+    )
+    registry = SessionTargetRegistry(
+        schema=TARGET_SCHEMA,
+        lifecycle_authority="executive_os",
+        production_armed=True,
+        policy_version="dialogue-wake-test",
+        default_alias_by_seat={"coo": target.session_alias},
+        workstream_alias_by_seat={},
+        root_job_bindings={"JOB-100": {"coo": target.session_alias}},
+        targets={target.session_alias: target},
+    )
+    binding = project_runtime_binding(runtime, sealed.attempt_id, target)
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "c" * 64,
+        declared_target_seat="coo",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        root_job_id="JOB-100",
+        source_workstream="WS:CHAIRMAN-CONTROL-ROOM",
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+
+    class OperatorAdapter:
+        calls: list[dict[str, object]] = []
+
+        def deliver_attention(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return AttentionTurnObservation(
+                process_generation_id=generation.process_generation_id,
+                provider_session_id=binding.native_handle,
+                nudge_id=kwargs["nudge_id"],
+                provider_native_turn_id="turn-dialogue-wake-001",
+                accepted=True,
+                delivered=True,
+            )
+
+    operator = OperatorAdapter()
+    provider_calls = 0
+
+    def target_provider(_runtime, _parent, _obligation):
+        nonlocal provider_calls
+        provider_calls += 1
+        return DialogueWakeTarget(
+            registry=registry,
+            runtime_binding=binding,
+            target_attempt_id=sealed.attempt_id,
+            process_generation_id=generation.process_generation_id,
+            operator_adapter=operator,
+        )
+
+    bridge = ExecutiveDialogueWakeBridge(
+        target_provider=target_provider,
+        retry_policy=WakeRetryPolicy(
+            max_delivery_attempts=1,
+            retry_cooldown_s=1,
+            accepted_ttl_s=60,
+            target_unavailable_backoff_s=1,
+            reenable_on_binding_rotation=False,
+            armed=True,
+        ),
+    )
+    request = DialogueWakeRequest(
+        operation=SUBMIT_WAKE,
+        parent=dialogue_parent(),
+        thread_ts="1788000000.123456",
+        candidate=DialogueCandidateReference(
+            mode="ACTIVE_CURRENT_WORKER",
+            root_job_id="JOB-100",
+            job_id=sealed.job_id,
+            attempt_id=sealed.attempt_id,
+            worker_id="worker-a",
+            evidence_digest="4" * 64,
+        ),
+        obligation=obligation,
+        proposed_route=route,
+    )
+
+    first = asyncio.run(bridge(runtime, request))
+    second = asyncio.run(bridge(runtime, request))
+
+    assert first == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+    assert second == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+    assert provider_calls == 2
+    assert len(operator.calls) == 1
+
+    candidate_job = runtime.jobs.get_job(sealed.job_id)
+    assert candidate_job is not None
+    candidate_root = candidate_job.root_job_id
+    production_registry = dataclasses.replace(
+        registry,
+        root_job_bindings={
+            candidate_root: {"coo": target.session_alias},
+        },
+    )
+    monkeypatch.setattr(
+        "control_plane.session_targets.load_session_targets",
+        lambda: production_registry,
+    )
+    with runtime.store.read() as connection:
+        target_bindings = es_mod._dialogue_target_bindings_for_root(
+            runtime,
+            connection,
+            root_job_id=candidate_root,
+            registry=production_registry,
+        )
+    assert target_bindings["coo"] == PublicRuntimeBindingFacts(
+        session_alias=binding.session_alias,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+        reasoning_surface="codex",
+    )
+    assert target_bindings["ceo"] is None
+
+    production_obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "d" * 64,
+        declared_target_seat="coo",
+        job_id=candidate_job.job_id,
+        attempt_id=sealed.attempt_id,
+        root_job_id=candidate_root,
+        source_workstream="WS:CHAIRMAN-CONTROL-ROOM",
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:02Z",
+    )
+    production_request = dataclasses.replace(
+        request,
+        candidate=dataclasses.replace(
+            request.candidate,
+            root_job_id=candidate_root,
+            job_id=candidate_job.job_id,
+            attempt_id=sealed.attempt_id,
+        ),
+        obligation=production_obligation,
+        proposed_route=route_obligation(
+            production_obligation,
+            production_registry,
+            binding=binding,
+        ),
+    )
+    production_bridge = ExecutiveDialogueWakeBridge(
+        target_provider=None,
+        operator_adapter=operator,
+        retry_policy=bridge._retry_policy,
+    )
+    production_result = asyncio.run(
+        production_bridge(runtime, production_request)
+    )
+    assert production_result == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+    assert len(operator.calls) == 2
+
+    moved = dataclasses.replace(
+        request,
+        proposed_route=dataclasses.replace(route, binding_generation=99),
+    )
+    refused = asyncio.run(bridge(runtime, moved))
+    assert refused == DialogueWakeResult("MISSING", "WAKE_ROUTE_REFUSED")
+    assert len(operator.calls) == 2
+
+    stale_binding_bridge = ExecutiveDialogueWakeBridge(
+        target_provider=lambda *_args: dataclasses.replace(
+            target_provider(runtime, request.parent, obligation),
+            runtime_binding=dataclasses.replace(
+                binding,
+                binding_generation=binding.binding_generation + 1,
+            ),
+        ),
+        retry_policy=bridge._retry_policy,
+    )
+    stale = asyncio.run(stale_binding_bridge(runtime, request))
+    assert stale == DialogueWakeResult("MISSING", "CURRENT_BINDING_REFUSED")
+    assert len(operator.calls) == 2
+
+    monkeypatch.setattr(
+        runtime.operator_harness,
+        "current_writer_generation",
+        lambda _epoch: dataclasses.replace(
+            generation,
+            generation_number=generation.generation_number + 1,
+        ),
+    )
+    writer_refused = asyncio.run(bridge(runtime, request))
+    assert writer_refused == DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
+    assert len(operator.calls) == 2
 
 
 def test_dialogue_observation_shutdown_never_unlinks_replaced_inode(
@@ -627,6 +1028,70 @@ def test_dialogue_observation_shutdown_never_unlinks_replaced_inode(
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("failure_phase", ["chown", "chmod", "post_bind_validation"])
+def test_dialogue_observation_bind_failure_cleans_only_its_owned_inode_and_lock(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_phase: str,
+) -> None:
+    observation_root = short_socket_root / "observation-bind-failure"
+    observation_root.mkdir(mode=0o710)
+    os.chown(observation_root, os.geteuid(), os.getegid())
+    observation_root.chmod(0o710)
+    observation_path = observation_root / "dialogue-observation.sock"
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root / "operator"),
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        dialogue_observation_socket_path=observation_path,
+        dialogue_observation_peer_uid=457,
+        dialogue_observation_group_gid=os.getegid(),
+        dialogue_observation_facts_provider=(
+            lambda _runtime, parent: _observation_facts(parent)
+        ),
+    )
+
+    if failure_phase == "chown":
+        real_chown = es_mod.os.chown
+
+        def fail_chown(path, *args, **kwargs):
+            if Path(path) == observation_path:
+                raise OSError("injected dialogue socket chown failure")
+            return real_chown(path, *args, **kwargs)
+
+        monkeypatch.setattr(es_mod.os, "chown", fail_chown)
+    elif failure_phase == "chmod":
+        real_chmod = Path.chmod
+
+        def fail_chmod(path: Path, *args, **kwargs):
+            if path == observation_path:
+                raise OSError("injected dialogue socket chmod failure")
+            return real_chmod(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "chmod", fail_chmod)
+    else:
+        real_lstat = Path.lstat
+        calls = 0
+
+        def fail_validation(path: Path, *args, **kwargs):
+            nonlocal calls
+            if path == observation_path:
+                calls += 1
+                if calls == 3:
+                    raise OSError("injected post-bind validation failure")
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "lstat", fail_validation)
+
+    with pytest.raises(ServiceError, match="CAPABILITY_NOT_READY"):
+        asyncio.run(service.start())
+
+    assert not observation_path.exists()
+    assert service._dialogue_observation_server is None
+    assert service._dialogue_observation_inode is None
+    assert service._lock_fd is None
+
+
 def test_dialogue_observation_parent_symlink_fails_capability_not_ready(
     tmp_path: Path, short_socket_root: Path,
 ) -> None:
@@ -644,6 +1109,235 @@ def test_dialogue_observation_parent_symlink_fails_capability_not_ready(
     )
     with pytest.raises(ServiceError, match="CAPABILITY_NOT_READY"):
         asyncio.run(service.start())
+
+
+def test_dialogue_observation_prefilters_exact_parent_before_candidate_bound(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root / "operator"),
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        dialogue_observation_socket_path=(
+            short_socket_root / "observation-filter" / "dialogue-observation.sock"
+        ),
+        dialogue_observation_peer_uid=457,
+        dialogue_observation_group_gid=os.getegid(),
+    )
+    queries: list[tuple[str, tuple[object, ...]]] = []
+    matching_count = 0
+
+    class Cursor:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def fetchall(self):
+            return self._rows
+
+    class Connection:
+        def execute(self, sql, parameters=()):
+            nonlocal matching_count
+            normalized = " ".join(str(sql).split())
+            values = tuple(parameters)
+            queries.append((normalized, values))
+            if "dialogue_source_digest" in normalized:
+                return Cursor([{"job_id": "JOB-100"}])
+            return Cursor([{} for _ in range(matching_count)])
+
+    class ReadContext:
+        def __enter__(self):
+            return Connection()
+
+        def __exit__(self, *_args):
+            return False
+
+    fake_runtime = SimpleNamespace(store=SimpleNamespace(read=ReadContext))
+    parent = dialogue_parent()
+    requested_source = es_mod.normalize_executive_dialogue_source(
+        {
+            "schema_version": es_mod.EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
+            "work_ref": parent["work_ref"],
+            "commission_ref": parent["commission_ref"],
+            "watch_mode": parent["watch_mode"],
+        }
+    )
+    monkeypatch.setattr(
+        es_mod,
+        "_dialogue_source_from_root_creation",
+        lambda _connection, *, root_job_id: requested_source,
+    )
+
+    facts = service._runtime_dialogue_observation_facts(fake_runtime, parent)
+
+    assert facts.complete is True
+    assert facts.active == ()
+    assert facts.terminal == ()
+    sql, parameters = queries[0]
+    assert "EXISTS" in sql
+    assert "j.orchestration_role='aggregation'" in sql
+    assert "j.root_job_id=j.job_id" in sql
+    assert "$.provenance.dialogue_source_digest" in sql
+    assert len(parameters) == 1
+    assert isinstance(parameters[0], str)
+    assert len(parameters[0]) == 64
+    child_sql, child_parameters = queries[1]
+    assert "j.root_job_id=?" in child_sql
+    assert "('exec-' || lower(j.job_id))=?" in child_sql
+    assert "('asd-session-exec-' || lower(j.job_id))=?" in child_sql
+    assert "LIMIT 5" in child_sql
+    assert child_parameters == (
+        "JOB-100",
+        parent["operation_key"],
+        parent["session_ref"],
+    )
+
+    matching_count = 5
+    overflow = service._runtime_dialogue_observation_facts(fake_runtime, parent)
+    assert overflow.complete is False
+    assert overflow.active == ()
+    assert overflow.terminal == ()
+
+
+def test_public_terminal_wake_read_reuses_real_service_projection_and_wake_owners(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from integrations.slack_agent_dialogue.contract_v2 import (
+        PARENT_SCHEMA_V2,
+        build_parent_v2,
+    )
+    from control_plane.wake_ledger import requested_record
+    from control_plane.wake_persist import WakeLedgerRepository
+    from tests import test_executive_os_phase1fc as phase1fc_fixtures
+
+    original_submit = phase1fc_fixtures.submit_intent
+
+    def sourced_submit(runtime, payload):
+        return original_submit(
+            runtime,
+            {**payload, "workstream": "WS:EXECUTIVE-OS"},
+            dialogue_source=_terminal_dialogue_source(),
+            require_dialogue_source=True,
+        )
+
+    monkeypatch.setattr(phase1fc_fixtures, "submit_intent", sourced_submit)
+    runtime, _cycle, _dispatches, _root, _planner, work, _seal = (
+        _cycle_through_completed_work(
+            tmp_path / "runtime",
+            intent_id="CEO-SERVICE-CANONICAL-TERMINAL-WAKE-READ",
+            review_workers=["worker-b"],
+        )
+    )
+    observed: dict[str, object] = {}
+
+    class ApplyingProjector:
+        async def project(self, candidate, *, before_write):
+            source = _terminal_dialogue_source()
+            parent = build_parent_v2(
+                {
+                    "schema": PARENT_SCHEMA_V2,
+                    "work_ref": source["work_ref"],
+                    "commission_ref": source["commission_ref"],
+                    "session_ref": candidate.session_ref,
+                    "operation_key": candidate.operation_key,
+                    "watch_mode": source["watch_mode"],
+                    "allowed_sol_user_ids": ["U0BRETDUAS2"],
+                    "created_at": "2026-09-03T01:00:00Z",
+                }
+            )
+            observed["candidate"] = candidate
+            observed["parent"] = parent
+            before_write()
+            return {
+                **_projection_receipt(candidate),
+                "thread_ts": "1787961600.000001",
+                "parent_fingerprint": parent["fingerprint"],
+            }
+
+        async def reconcile(self, _candidate):
+            raise AssertionError("fresh projection must not reconcile")
+
+    service = ExecutiveControlService(
+        _config(tmp_path / "service"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        terminal_return_projector=ApplyingProjector(),
+    )
+    service.runtime = runtime
+    asyncio.run(
+        service._project_terminal_return(
+            work.attempt.job_id,
+            expected_attempt_id=work.attempt.attempt_id,
+        )
+    )
+    terminal = observed["candidate"]
+    parent = observed["parent"]
+    original_read = runtime.store.read
+    read_calls = 0
+
+    def counted_read():
+        nonlocal read_calls
+        read_calls += 1
+        return original_read()
+
+    monkeypatch.setattr(runtime.store, "read", counted_read)
+    terminal_facts = service._runtime_dialogue_observation_facts(runtime, parent)
+    assert read_calls == 1
+    assert len(terminal_facts.terminal) == 1
+    assert terminal_facts.terminal[0].binding_revalidated is True
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "e" * 64,
+        declared_target_seat="ceo",
+        job_id=terminal.job_id,
+        attempt_id=terminal.attempt_id,
+        root_job_id=terminal.root_job_id,
+        source_workstream="WS:EXECUTIVE-OS",
+        source_created_at="2026-09-03T01:00:02Z",
+        emitted_at="2026-09-03T01:00:03Z",
+    )
+    WakeLedgerRepository(runtime).append_record(
+        requested_record(obligation),
+        obligation=obligation,
+    )
+
+    exact_candidate = CanonicalTerminalWakeCandidate(
+        root_job_id=terminal.root_job_id,
+        job_id=terminal.job_id,
+        attempt_id=terminal.attempt_id,
+        worker_id=terminal.worker_id,
+    )
+    result = service.read_canonical_dialogue_terminal_wake(
+        source_root_job_id=terminal.root_job_id,
+        candidate=exact_candidate,
+    )
+    with runtime.store.read() as connection:
+        event_count_before = int(
+            connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        )
+        same_snapshot = service.read_canonical_dialogue_terminal_wake(
+            source_root_job_id=terminal.root_job_id,
+            candidate=exact_candidate,
+            connection=connection,
+        )
+    replay = service.read_canonical_dialogue_terminal_wake(
+        source_root_job_id=terminal.root_job_id,
+        candidate=exact_candidate,
+    )
+    with runtime.store.read() as connection:
+        event_count_after = int(
+            connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        )
+
+    assert result.state == "RESOLVED"
+    assert result.terminal_applied is True
+    assert result.wake is not None
+    assert result.wake.obligation_id == obligation.obligation_id
+    assert result.wake.status == "PENDING_RETRYABLE"
+    assert same_snapshot.to_dict() == result.to_dict()
+    assert replay.to_dict() == result.to_dict()
+    assert event_count_after == event_count_before
 
 
 @pytest.mark.parametrize("node_kind", ["socket", "symlink"])
@@ -4529,18 +5223,33 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             "dialogue_observation_socket_path",
             "dialogue_observation_launchd_socket_name",
             "dialogue_observation_peer_uid",
+            "dialogue_bridge_armed",
+            "dialogue_wake_retry_policy",
+        }
+        unarmed_wake_policy = {
+            "max_delivery_attempts": None,
+            "retry_cooldown_s": None,
+            "accepted_ttl_s": None,
+            "target_unavailable_backoff_s": None,
+            "reenable_on_binding_rotation": True,
+            "armed": False,
+        }
+        observation_fields = {
+            "dialogue_observation_socket_path": (
+                "/var/run/mastermind-dialogue-observation/"
+                "dialogue-observation.sock"
+            ),
+            "dialogue_observation_launchd_socket_name": "DialogueObservation",
+            "dialogue_observation_peer_uid": 457,
+            "dialogue_bridge_armed": False,
+            "dialogue_wake_retry_policy": unarmed_wake_policy,
         }
         assert not (observation_keys & set(unarmed))
         for missing in observation_keys:
             partial_path = tmp_path / f"control-observation-missing-{missing}.json"
             partial = {
                 **raw,
-                "dialogue_observation_socket_path": (
-                    "/var/run/mastermind-dialogue-observation/"
-                    "dialogue-observation.sock"
-                ),
-                "dialogue_observation_launchd_socket_name": "DialogueObservation",
-                "dialogue_observation_peer_uid": 457,
+                **observation_fields,
             }
             partial.pop(missing)
             partial_path.write_text(json.dumps(partial), encoding="utf-8")
@@ -4553,12 +5262,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             json.dumps(
                 {
                     **raw,
-                    "dialogue_observation_socket_path": (
-                        "/var/run/mastermind-dialogue-observation/"
-                        "dialogue-observation.sock"
-                    ),
-                    "dialogue_observation_launchd_socket_name": "DialogueObservation",
-                    "dialogue_observation_peer_uid": 457,
+                    **observation_fields,
                 }
             ),
             encoding="utf-8",
@@ -4569,6 +5273,31 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
         ).resolve(strict=False)
         assert observation_loaded["dialogue_observation_peer_uid"] == 457
+        assert observation_loaded["dialogue_bridge_armed"] is False
+
+        armed_observation_path = tmp_path / "control-observation-armed.json"
+        armed_observation_path.write_text(
+            json.dumps(
+                {
+                    **raw,
+                    **observation_fields,
+                    "dialogue_bridge_armed": True,
+                    "dialogue_wake_retry_policy": {
+                        "max_delivery_attempts": 1,
+                        "retry_cooldown_s": 15,
+                        "accepted_ttl_s": 300,
+                        "target_unavailable_backoff_s": 60,
+                        "reenable_on_binding_rotation": True,
+                        "armed": True,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        armed_observation_path.chmod(0o400)
+        armed_observation_loaded = service_cli.load_control_config(
+            armed_observation_path
+        )
 
         terminal_return_path = tmp_path / "control-terminal-return.json"
         terminal_return_path.write_text(
@@ -4674,12 +5403,36 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                 initial_canary=json.loads(canary.read_text(encoding="utf-8")),
             )
         observation_kwargs = captured["kwargs"]
+        assert activated_names == ["Operator"]
+        assert "dialogue_observation_socket_path" not in observation_kwargs
+        assert "dialogue_wake_handler" not in observation_kwargs
+
+        captured.clear()
+        activated_names.clear()
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(
+                service_cli,
+                "activate_launchd_socket",
+                lambda name: (activated_names.append(name), listener)[1],
+            )
+            composition_patch.setattr(
+                service_cli, "ExecutiveControlService", capture_service
+            )
+            service_cli._service_from_config(
+                armed_observation_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        observation_kwargs = captured["kwargs"]
         assert activated_names == ["Operator", "DialogueObservation"]
         assert observation_kwargs["dialogue_observation_peer_uid"] == 457
         assert observation_kwargs["dialogue_observation_group_gid"] == 457
         assert observation_kwargs["dialogue_observation_socket_path"] == Path(
             "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
         ).resolve(strict=False)
+        assert isinstance(
+            observation_kwargs["dialogue_wake_handler"],
+            ExecutiveDialogueWakeBridge,
+        )
 
         captured.clear()
         with monkeypatch.context() as composition_patch:

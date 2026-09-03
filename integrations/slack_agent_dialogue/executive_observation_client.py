@@ -1,4 +1,4 @@
-"""One-shot bounded client for the dedicated Executive observation listener."""
+"""One-shot client for the dedicated Executive dialogue-coordination listener."""
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -14,18 +15,27 @@ from typing import Any, Mapping
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
 from control_plane.executive_dialogue_observation import (
     ACTIVE_CURRENT_WORKER,
+    RECONCILE_WAKE,
+    SUBMIT_WAKE,
+    DialogueCandidateReference,
     MAX_RESPONSE_BYTES,
     REQUEST_SCHEMA,
     RESPONSE_SCHEMA,
     TERMINAL_RESULT,
+    TerminalProjectionReceiptReference,
+    WAKE_REQUEST_SCHEMA,
+    WAKE_RESPONSE_SCHEMA,
 )
 from control_plane.executive_runtime import (
     AttemptStatus,
+    EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
     ExecutiveDialogueSource,
     WorkerStatus,
 )
 from control_plane.executive_terminal_return import TerminalReturnCandidate
-from control_plane.session_targets import RuntimeBinding
+from control_plane.session_targets import RuntimeBinding, WakeRoute, route_digest
+from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
+from control_plane.wake_events import WakeObligation, mint_obligation
 from integrations.mastermind_company_mcp.schemas import (
     SERVER_IDENTITY,
     SERVER_VERSION,
@@ -39,12 +49,12 @@ from integrations.slack_agent_dialogue.contract import DialogueContractError
 from integrations.slack_agent_dialogue.contract_v2 import validate_parent_v2
 from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
     ResolvedTerminalReturnBinding,
-    TerminalReturnProjectionReceipt,
 )
+from integrations.slack_agent_dialogue.turn_observer import WakeCarrierState
 
 
 _STATES = frozenset(
-    {"RESOLVED", "UNAVAILABLE", "UNKNOWN", "CONFLICT", "HELD", "REFUSED"}
+    {"RESOLVED", "UNAVAILABLE", "UNKNOWN", "CONFLICT", "HELD"}
 )
 _RESPONSE_FLAGS = frozenset(
     {
@@ -54,7 +64,10 @@ _RESPONSE_FLAGS = frozenset(
         "lifecycle_write_authorized",
     }
 )
-_RESOLVED_KEYS = frozenset({"schema", "state", "mode", "observation"}) | _RESPONSE_FLAGS
+_RESOLVED_KEYS = (
+    frozenset({"schema", "state", "mode", "observation", "target_bindings"})
+    | _RESPONSE_FLAGS
+)
 _CLOSED_KEYS = frozenset({"schema", "state", "reason"})
 _DIGEST_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 _THREAD_TS_RE = re.compile(r"\A[1-9][0-9]{9,15}\.[0-9]{6}\Z")
@@ -88,10 +101,12 @@ class ResolvedDialogueObservation:
     dialogue_parent: Mapping[str, Any]
     thread_ts: str
     delegation_identity: ExecutiveDelegationIdentity
+    candidate: DialogueCandidateReference
+    target_bindings: Mapping[str, RuntimeBinding | None]
     current_worker: CurrentWorkerDialogueSnapshot | None
     actor: WorkerDialogueCaller | None
     terminal_candidate: TerminalReturnCandidate | None = None
-    terminal_projection_receipt: TerminalReturnProjectionReceipt | None = None
+    terminal_projection_receipt: TerminalProjectionReceiptReference | None = None
     terminal_binding: ResolvedTerminalReturnBinding | None = None
 
 
@@ -185,6 +200,198 @@ class ExecutiveDialogueObservationClient:
         self.socket_path = path
         self.timeout_seconds = float(timeout_seconds)
         self.max_response_bytes = max_response_bytes
+        self._wake_context: ContextVar[Any] | None = None
+
+    def bind_wake_context(
+        self,
+        context: ContextVar[Any],
+    ) -> None:
+        """Bind once to the exact candidate scope owned by Agent Relay."""
+
+        if not isinstance(context, ContextVar) or self._wake_context is not None:
+            raise ValueError("Wake request context is invalid or already bound")
+        self._wake_context = context
+
+    def _wake_request(
+        self,
+        *,
+        operation: str,
+        obligation: WakeObligation,
+        route: WakeRoute,
+    ) -> dict[str, Any]:
+        if (
+            operation not in {RECONCILE_WAKE, SUBMIT_WAKE}
+            or not isinstance(obligation, WakeObligation)
+            or not isinstance(route, WakeRoute)
+            or route.obligation_id != obligation.obligation_id
+            or self._wake_context is None
+        ):
+            raise WakePreSubmitError("dialogue Wake request is not bound")
+        context = self._wake_context.get()
+        try:
+            if isinstance(context, Mapping):
+                if set(context) != {"parent", "thread_ts", "candidate"}:
+                    raise KeyError
+                parent_value = context["parent"]
+                thread_value = context["thread_ts"]
+                candidate_value = context["candidate"]
+            else:
+                parent_value = context.dialogue_parent
+                thread_value = context.thread_ts
+                candidate_value = context.candidate
+            parent = _validated_parent(parent_value)
+            thread_ts = _validated_thread_ts(thread_value)
+            if not isinstance(candidate_value, DialogueCandidateReference):
+                raise TypeError
+            candidate = candidate_value.to_dict()
+            if (
+                obligation.root_job_id != candidate_value.root_job_id
+                or obligation.source_workstream != parent["work_ref"]
+                or obligation.job_id not in {None, candidate_value.job_id}
+                or obligation.attempt_id not in {None, candidate_value.attempt_id}
+            ):
+                raise ValueError
+            observation_digest = hashlib.sha256(
+                _canonical_json(
+                    {
+                        "schema": "mastermind.dialogue_observation_identity/v1",
+                        "attention_source_ref": obligation.source_ref,
+                        "parent_fingerprint": parent["fingerprint"],
+                        "operation_key": parent["operation_key"],
+                        "candidate": candidate,
+                    }
+                )
+            ).hexdigest()
+            correlated_obligation = mint_obligation(
+                wake_kind=obligation.wake_kind,
+                source_kind=obligation.source_kind,
+                source_ref="agent_dialogue_attention:" + observation_digest,
+                declared_target_seat=obligation.declared_target_seat,
+                job_id=candidate_value.job_id,
+                attempt_id=candidate_value.attempt_id,
+                root_job_id=candidate_value.root_job_id,
+                workstream=obligation.workstream,
+                source_workstream=obligation.source_workstream,
+                source_created_at=obligation.source_created_at,
+                emitted_at=obligation.emitted_at,
+            )
+            correlated_route = dataclasses.replace(
+                route,
+                obligation_id=correlated_obligation.obligation_id,
+                route_digest=route_digest(
+                    obligation_id=correlated_obligation.obligation_id,
+                    destination=route.destination_digest,
+                    policy_digest=route.policy_digest,
+                ),
+            )
+        except (
+            AttributeError,
+            ExecutiveObservationClientError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
+            raise WakePreSubmitError("dialogue Wake parent context is invalid") from None
+        return {
+            "schema": WAKE_REQUEST_SCHEMA,
+            "operation": operation,
+            "parent": parent,
+            "thread_ts": thread_ts,
+            "candidate": candidate,
+            "obligation": correlated_obligation.to_dict(),
+            "route": correlated_route.to_dict(),
+        }
+
+    async def _wake_exchange(
+        self,
+        request: Mapping[str, Any],
+        *,
+        submit: bool,
+    ) -> dict[str, Any]:
+        writer: asyncio.StreamWriter | None = None
+        may_have_reached_executive = False
+        try:
+            async with asyncio.timeout(self.timeout_seconds):
+                reader, writer = await asyncio.open_unix_connection(
+                    self.socket_path,
+                    limit=self.max_response_bytes + 1,
+                )
+                may_have_reached_executive = True
+                writer.write(_canonical_json(dict(request)) + b"\n")
+                await writer.drain()
+                try:
+                    raw = await reader.readuntil(b"\n")
+                except (asyncio.IncompleteReadError, asyncio.LimitOverrunError):
+                    raise ValueError("Wake response frame refused") from None
+                if not raw or len(raw) > self.max_response_bytes:
+                    raise ValueError("Wake response frame refused")
+                await asyncio.sleep(0)
+                if getattr(reader, "_buffer", b""):
+                    raise ValueError("multiple Wake response frames refused")
+                try:
+                    response = _strict_json(raw)
+                except ExecutiveObservationClientError:
+                    raise ValueError("Wake response JSON refused") from None
+                if (
+                    set(response) != {"schema", "state", "reason"}
+                    or response.get("schema") != WAKE_RESPONSE_SCHEMA
+                    or response.get("state")
+                    not in {"MISSING", "RECORDED", "EFFECT_UNKNOWN"}
+                    or not isinstance(response.get("reason"), str)
+                ):
+                    raise ValueError("Wake response refused")
+                return response
+        except (WakeEffectUnknownError, WakePreSubmitError):
+            raise
+        except Exception:
+            if submit and may_have_reached_executive:
+                raise WakeEffectUnknownError(
+                    "dialogue Wake submit effect is unknown"
+                ) from None
+            raise WakePreSubmitError(
+                "dialogue Wake coordination is unavailable"
+            ) from None
+        finally:
+            if writer is not None:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except (BrokenPipeError, ConnectionError, OSError):
+                    pass
+
+    async def reconcile(
+        self,
+        obligation: WakeObligation,
+        route: WakeRoute,
+    ) -> WakeCarrierState:
+        response = await self._wake_exchange(
+            self._wake_request(
+                operation=RECONCILE_WAKE,
+                obligation=obligation,
+                route=route,
+            ),
+            submit=False,
+        )
+        return WakeCarrierState(response["state"])
+
+    async def submit(
+        self,
+        obligation: WakeObligation,
+        route: WakeRoute,
+    ) -> None:
+        response = await self._wake_exchange(
+            self._wake_request(
+                operation=SUBMIT_WAKE,
+                obligation=obligation,
+                route=route,
+            ),
+            submit=True,
+        )
+        if response["state"] == "RECORDED":
+            return
+        if response["state"] == "EFFECT_UNKNOWN":
+            raise WakeEffectUnknownError("Executive recorded an unknown Wake effect")
+        raise WakePreSubmitError("Executive proved no Wake submit effect")
 
     async def _exchange(self, request: Mapping[str, Any]) -> dict[str, Any]:
         writer: asyncio.StreamWriter | None = None
@@ -229,6 +436,10 @@ class ExecutiveDialogueObservationClient:
         response = await self._exchange(
             {
                 "schema": REQUEST_SCHEMA,
+                "request_id": (
+                    "observation-"
+                    + hashlib.sha256(_canonical_json(canonical_parent)).hexdigest()[:32]
+                ),
                 "parent": canonical_parent,
             }
         )
@@ -247,22 +458,54 @@ class ExecutiveDialogueObservationClient:
             set(response) != _RESOLVED_KEYS
             or any(response.get(flag) is not False for flag in _RESPONSE_FLAGS)
             or not isinstance(response.get("observation"), dict)
+            or not isinstance(response.get("target_bindings"), dict)
         ):
             raise ExecutiveObservationClientError("RESPONSE_REFUSED")
         mode = response.get("mode")
+        target_bindings = self._target_bindings(response["target_bindings"])
         if mode == ACTIVE_CURRENT_WORKER:
             return self._active(
                 parent=canonical_parent,
                 thread_ts=canonical_thread_ts,
                 observation=response["observation"],
+                target_bindings=target_bindings,
             )
         if mode == TERMINAL_RESULT:
             return self._terminal(
                 parent=canonical_parent,
                 thread_ts=canonical_thread_ts,
                 observation=response["observation"],
+                target_bindings=target_bindings,
             )
         raise ExecutiveObservationClientError("RESPONSE_REFUSED")
+
+    @staticmethod
+    def _target_bindings(
+        value: Mapping[str, Any],
+    ) -> dict[str, RuntimeBinding | None]:
+        if set(value) != {"coo", "ceo"}:
+            raise ExecutiveObservationClientError("RESPONSE_REFUSED")
+        result: dict[str, RuntimeBinding | None] = {}
+        for seat in ("coo", "ceo"):
+            raw = value[seat]
+            if raw is None:
+                result[seat] = None
+                continue
+            if not isinstance(raw, dict) or set(raw) != {
+                "session_alias",
+                "binding_id",
+                "binding_generation",
+                "reasoning_surface",
+            }:
+                raise ExecutiveObservationClientError("RESPONSE_REFUSED")
+            try:
+                binding = RuntimeBinding(**raw)
+            except (TypeError, ValueError):
+                raise ExecutiveObservationClientError("RESPONSE_REFUSED") from None
+            if binding.native_handle is not None or binding.account_label is not None:
+                raise ExecutiveObservationClientError("RESPONSE_REFUSED")
+            result[seat] = binding
+        return result
 
     @staticmethod
     def _active(
@@ -270,6 +513,7 @@ class ExecutiveDialogueObservationClient:
         parent: Mapping[str, Any],
         thread_ts: str,
         observation: Mapping[str, Any],
+        target_bindings: Mapping[str, RuntimeBinding | None],
     ) -> ResolvedDialogueObservation:
         keys = {
             "root_job_id",
@@ -359,12 +603,22 @@ class ExecutiveDialogueObservationClient:
             operation_key=str(parent["operation_key"]),
             session_ref=str(parent["session_ref"]),
         )
+        candidate = DialogueCandidateReference(
+            mode=ACTIVE_CURRENT_WORKER,
+            root_job_id=current.root_job_id,
+            job_id=current.job_id,
+            attempt_id=current.attempt_id,
+            worker_id=current.worker_id,
+            evidence_digest=evidence_digest,
+        )
         return ResolvedDialogueObservation(
             state="RESOLVED",
             mode=ACTIVE_CURRENT_WORKER,
             dialogue_parent=dict(parent),
             thread_ts=thread_ts,
             delegation_identity=identity,
+            candidate=candidate,
+            target_bindings=dict(target_bindings),
             current_worker=current,
             actor=actor,
         )
@@ -375,6 +629,7 @@ class ExecutiveDialogueObservationClient:
         parent: Mapping[str, Any],
         thread_ts: str,
         observation: Mapping[str, Any],
+        target_bindings: Mapping[str, RuntimeBinding | None],
     ) -> ResolvedDialogueObservation:
         if set(observation) != {
             "candidate",
@@ -397,48 +652,64 @@ class ExecutiveDialogueObservationClient:
         if not isinstance(candidate_value, dict) or not isinstance(receipt_value, dict):
             raise ExecutiveObservationClientError("RESPONSE_REFUSED")
         candidate_keys = {
-            "job_id", "attempt_id", "worker_id", "root_job_id", "role",
-            "operation_key", "session_ref", "runtime_status", "result_status",
-            "result_envelope_digest", "terminal_evidence_digest",
-            "artifact_receipt_digest", "validation_receipt_digest",
-            "effective_grant_digest", "terminal_at", "message_key", "summary",
-            "review_verdict", "dialogue_source",
+            "job_id", "attempt_id", "worker_id", "root_job_id",
+            "runtime_status", "result_status", "result_envelope_digest",
+            "terminal_evidence_digest", "artifact_receipt_digest",
+            "validation_receipt_digest", "effective_grant_digest", "terminal_at",
+            "projection_command_digest",
         }
-        receipt_keys = {
-            "action", "message_key", "fingerprint", "message_ts",
-            "duplicate_timestamps", "thread_ts", "parent_author_user_id",
-            "parent_fingerprint",
-        }
+        receipt_keys = {"action", "message_fingerprint", "receipt_digest"}
         if set(candidate_value) != candidate_keys or set(receipt_value) != receipt_keys:
             raise ExecutiveObservationClientError("RESPONSE_REFUSED")
-        if material["projection_receipt_digest"] != _digest(receipt_value):
-            raise ExecutiveObservationClientError("RESPONSE_REFUSED")
-        source_value = candidate_value.get("dialogue_source")
-        if not isinstance(source_value, dict):
+        if material["projection_receipt_digest"] != receipt_value.get(
+            "receipt_digest"
+        ):
             raise ExecutiveObservationClientError("RESPONSE_REFUSED")
         try:
-            source = ExecutiveDialogueSource(**source_value)
+            candidate_material = dict(candidate_value)
+            projection_command_digest = candidate_material.pop(
+                "projection_command_digest"
+            )
+            if _DIGEST_RE.fullmatch(str(projection_command_digest)) is None:
+                raise ValueError
+            source = ExecutiveDialogueSource(
+                schema_version=EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
+                work_ref=str(parent["work_ref"]),
+                commission_ref=parent["commission_ref"],
+                watch_mode=parent["watch_mode"],
+            )
             candidate = TerminalReturnCandidate(
-                **{**candidate_value, "dialogue_source": source}
+                **candidate_material,
+                role="worker",
+                operation_key=str(parent["operation_key"]),
+                session_ref=str(parent["session_ref"]),
+                message_key=(
+                    "asd-exec-result-"
+                    + str(candidate_material["terminal_evidence_digest"])
+                ),
+                summary="",
+                review_verdict=None,
+                dialogue_source=source,
             )
-            duplicates = receipt_value.get("duplicate_timestamps")
-            if not isinstance(duplicates, list):
-                raise TypeError
-            receipt = TerminalReturnProjectionReceipt(
-                **{**receipt_value, "duplicate_timestamps": tuple(duplicates)}
-            )
+            receipt = TerminalProjectionReceiptReference(**receipt_value)
         except (TypeError, ValueError):
             raise ExecutiveObservationClientError("RESPONSE_REFUSED") from None
+        expected_projection_command_digest = hashlib.sha256(
+            (
+                f"terminal-return:{candidate.attempt_id}:"
+                f"{candidate.terminal_digest}:applied"
+            ).encode("ascii")
+        ).hexdigest()
         if (
             candidate.operation_key != parent["operation_key"]
             or candidate.session_ref != parent["session_ref"]
             or source.work_ref != parent["work_ref"]
             or source.commission_ref.to_dict() != parent["commission_ref"]
             or source.watch_mode != parent["watch_mode"]
-            or receipt.parent_fingerprint != parent["fingerprint"]
-            or receipt.thread_ts != thread_ts
-            or receipt.message_key != candidate.message_key
-            or receipt.duplicate_timestamps != ()
+            or receipt.action not in {"POSTED", "RECOVERED", "DUPLICATE"}
+            or projection_command_digest != expected_projection_command_digest
+            or _DIGEST_RE.fullmatch(receipt.message_fingerprint) is None
+            or _DIGEST_RE.fullmatch(receipt.receipt_digest) is None
             or candidate.runtime_status != "COMPLETED"
             or candidate.result_status != "RESULT"
         ):
@@ -463,12 +734,22 @@ class ExecutiveDialogueObservationClient:
             operation_key=candidate.operation_key,
             session_ref=candidate.session_ref,
         )
+        candidate_ref = DialogueCandidateReference(
+            mode=TERMINAL_RESULT,
+            root_job_id=candidate.root_job_id,
+            job_id=candidate.job_id,
+            attempt_id=candidate.attempt_id,
+            worker_id=candidate.worker_id,
+            evidence_digest=evidence,
+        )
         return ResolvedDialogueObservation(
             state="RESOLVED",
             mode=TERMINAL_RESULT,
             dialogue_parent=dict(parent),
             thread_ts=thread_ts,
             delegation_identity=identity,
+            candidate=candidate_ref,
+            target_bindings=dict(target_bindings),
             current_worker=None,
             actor=None,
             terminal_candidate=candidate,

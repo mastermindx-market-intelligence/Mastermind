@@ -41,6 +41,7 @@ from control_plane.executive_agent_capabilities import CapabilityPolicyError
 from control_plane.executive_coo_cycle import CooCycle, CooCycleOutcome
 from control_plane.executive_runtime import (
     AttemptStatus,
+    EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
     Job,
     JobStatus,
     OrchestrationDispatchOutcome,
@@ -61,14 +62,23 @@ from control_plane.executive_runtime import (
 from control_plane.executive_dialogue_observation import (
     MAX_REQUEST_BYTES as DIALOGUE_OBSERVATION_MAX_REQUEST_BYTES,
     RESPONSE_SCHEMA as DIALOGUE_OBSERVATION_RESPONSE_SCHEMA,
+    WAKE_RESPONSE_SCHEMA as DIALOGUE_WAKE_RESPONSE_SCHEMA,
     ActiveObservationFacts,
+    CanonicalTerminalWakeCandidate,
+    CanonicalTerminalWakeRead,
+    DialogueCandidateReference,
     DialogueObservationFacts,
     DialogueObservationProtocolError,
+    DialogueWakeRequest,
+    RECONCILE_WAKE,
+    SUBMIT_WAKE,
     PublicRuntimeBindingFacts,
     TerminalObservationFacts,
     TerminalProjectionReceiptFacts,
     parse_observation_request,
+    parse_wake_request,
     reduce_dialogue_observation,
+    read_canonical_terminal_wake,
     response_bytes as dialogue_observation_response_bytes,
 )
 from control_plane.executive_terminal_return import (
@@ -198,6 +208,392 @@ CeoIngressDialogueSourceProvider = Callable[
 DialogueObservationFactsProvider = Callable[
     [Runtime, Mapping[str, Any]], DialogueObservationFacts
 ]
+DialogueWakeHandler = Callable[
+    [Runtime, DialogueWakeRequest], Awaitable["DialogueWakeResult"] | "DialogueWakeResult"
+]
+
+
+@dataclasses.dataclass(frozen=True)
+class DialogueWakeResult:
+    state: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        if self.state not in {"MISSING", "RECORDED", "EFFECT_UNKNOWN"}:
+            raise ValueError("dialogue Wake result state is invalid")
+        if re.fullmatch(r"[A-Z][A-Z0-9_]{2,127}", self.reason) is None:
+            raise ValueError("dialogue Wake result reason is invalid")
+
+
+@dataclasses.dataclass(frozen=True)
+class DialogueWakeTarget:
+    """Executive-owned Stage-B1 resolution of one proposed Wake target."""
+
+    registry: Any
+    runtime_binding: Any
+    target_attempt_id: str
+    process_generation_id: str
+    operator_adapter: Any
+
+    def __post_init__(self) -> None:
+        if (
+            not str(self.target_attempt_id or "").strip()
+            or not str(self.process_generation_id or "").strip()
+            or not callable(getattr(self.operator_adapter, "deliver_attention", None))
+        ):
+            raise ValueError("dialogue Wake target is incomplete")
+
+
+DialogueWakeTargetProvider = Callable[
+    [Runtime, Mapping[str, Any], Any], DialogueWakeTarget | None
+]
+
+
+def _dialogue_candidate_from_response(
+    response: Mapping[str, Any],
+) -> DialogueCandidateReference | None:
+    """Project the exact public candidate identity from a fresh source read."""
+
+    try:
+        if response.get("state") != "RESOLVED":
+            return None
+        mode = response["mode"]
+        observation = response["observation"]
+        candidate = (
+            observation
+            if mode == "ACTIVE_CURRENT_WORKER"
+            else observation["candidate"]
+        )
+        return DialogueCandidateReference(
+            mode=mode,
+            root_job_id=candidate["root_job_id"],
+            job_id=candidate["job_id"],
+            attempt_id=candidate["attempt_id"],
+            worker_id=candidate["worker_id"],
+            evidence_digest=observation["evidence_digest"],
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _dialogue_target_bindings_for_root(
+    runtime: Runtime,
+    connection: sqlite3.Connection,
+    *,
+    root_job_id: str,
+    registry: Any,
+) -> dict[str, PublicRuntimeBindingFacts | None]:
+    """Project the exact current COO/CEO writers for one candidate root.
+
+    The candidate enumeration, OHF proof and public projection deliberately use
+    the caller's one Runtime read snapshot.  A missing, stale or non-unique seat
+    stays unavailable; no historical or seat-adjacent fallback is permitted.
+    """
+
+    from control_plane.runtime_binding_projection import project_runtime_binding
+
+    result: dict[str, PublicRuntimeBindingFacts | None] = {
+        "coo": None,
+        "ceo": None,
+    }
+    rows = connection.execute(
+        """
+        SELECT current_attempt_id
+        FROM jobs
+        WHERE root_job_id=?
+          AND current_attempt_id IS NOT NULL
+          AND status IN ('RUNNING','CHECKPOINTED','CANCEL_REQUESTED')
+        ORDER BY job_id
+        """,
+        (root_job_id,),
+    ).fetchall()
+    by_seat: dict[str, list[PublicRuntimeBindingFacts]] = {
+        "coo": [],
+        "ceo": [],
+    }
+    for row in rows:
+        attempt_id = str(row["current_attempt_id"] or "")
+        try:
+            source = runtime.current_harness_binding_source(
+                attempt_id,
+                connection=connection,
+            )
+            seat = str(source.owner_seat or "").lower()
+            if seat not in by_seat:
+                continue
+            root_alias = registry.root_job_bindings.get(root_job_id, {}).get(seat)
+            target = (
+                registry.get(root_alias)
+                if root_alias is not None
+                else registry.resolve(seat)
+            )
+            binding = project_runtime_binding(
+                runtime,
+                attempt_id,
+                target,
+                connection=connection,
+            )
+            by_seat[seat].append(
+                PublicRuntimeBindingFacts(
+                    session_alias=binding.session_alias,
+                    binding_id=binding.binding_id,
+                    binding_generation=binding.binding_generation,
+                    reasoning_surface=str(binding.reasoning_surface or ""),
+                )
+            )
+        except Exception:
+            continue
+    for seat, bindings in by_seat.items():
+        if len(bindings) == 1:
+            result[seat] = bindings[0]
+    return result
+
+
+class ExecutiveDialogueWakeBridge:
+    """Re-resolve a Relay proposal into existing Executive Wake owners."""
+
+    def __init__(
+        self,
+        *,
+        target_provider: DialogueWakeTargetProvider | None,
+        retry_policy: Any,
+        operator_adapter: Any = None,
+    ) -> None:
+        from control_plane.wake_ledger import WakeRetryPolicy
+
+        if target_provider is not None and not callable(target_provider):
+            raise TypeError("target_provider must be callable or None")
+        if not isinstance(retry_policy, WakeRetryPolicy):
+            raise TypeError("retry_policy must be WakeRetryPolicy")
+        if operator_adapter is not None and not callable(
+            getattr(operator_adapter, "deliver_attention", None)
+        ):
+            raise TypeError("operator_adapter must support deliver_attention")
+        self._target_provider = target_provider
+        self._retry_policy = retry_policy
+        self._operator_adapter = operator_adapter
+
+    def _resolve_current_target(
+        self,
+        runtime: Runtime,
+        request: DialogueWakeRequest,
+    ) -> DialogueWakeTarget | None:
+        from control_plane.runtime_binding_projection import project_runtime_binding
+        from control_plane.session_targets import load_session_targets
+
+        operator_adapter = self._operator_adapter
+        if not callable(getattr(operator_adapter, "deliver_attention", None)):
+            return None
+        root_job_id = request.candidate.root_job_id
+        seat = request.obligation.declared_target_seat
+        resolved: list[DialogueWakeTarget] = []
+        with runtime.store.read() as connection:
+            registry = load_session_targets()
+            rows = connection.execute(
+                """
+                SELECT current_attempt_id
+                FROM jobs
+                WHERE root_job_id=?
+                  AND current_attempt_id IS NOT NULL
+                  AND status IN ('RUNNING','CHECKPOINTED','CANCEL_REQUESTED')
+                ORDER BY job_id
+                """,
+                (root_job_id,),
+            ).fetchall()
+            for row in rows:
+                attempt_id = str(row["current_attempt_id"] or "")
+                try:
+                    source = runtime.current_harness_binding_source(
+                        attempt_id,
+                        connection=connection,
+                    )
+                    if source.owner_seat != seat:
+                        continue
+                    seat_map = registry.root_job_bindings.get(root_job_id, {})
+                    alias = seat_map.get(seat)
+                    target = (
+                        registry.get(alias)
+                        if alias is not None
+                        else registry.resolve(seat)
+                    )
+                    if alias is None:
+                        root_bindings = {
+                            key: dict(value)
+                            for key, value in registry.root_job_bindings.items()
+                        }
+                        root_bindings[root_job_id] = {
+                            **root_bindings.get(root_job_id, {}),
+                            seat: target.session_alias,
+                        }
+                        registry = registry.with_root_job_bindings(root_bindings)
+                    binding = project_runtime_binding(
+                        runtime,
+                        attempt_id,
+                        target,
+                        connection=connection,
+                    )
+                    generation_rows = connection.execute(
+                        """
+                        SELECT g.process_generation_id
+                        FROM process_generations AS g
+                        JOIN harness_session_epochs AS e
+                          ON e.session_epoch_id=g.session_epoch_id
+                        WHERE e.attempt_id=?
+                          AND e.state='CURRENT'
+                          AND g.executive_writer_held=1
+                          AND g.generation_number=?
+                        """,
+                        (attempt_id, binding.binding_generation),
+                    ).fetchall()
+                    if len(generation_rows) != 1:
+                        continue
+                    resolved.append(
+                        DialogueWakeTarget(
+                            registry=registry,
+                            runtime_binding=binding,
+                            target_attempt_id=attempt_id,
+                            process_generation_id=str(
+                                generation_rows[0]["process_generation_id"]
+                            ),
+                            operator_adapter=operator_adapter,
+                        )
+                    )
+                except Exception:
+                    continue
+        return resolved[0] if len(resolved) == 1 else None
+
+    async def __call__(
+        self,
+        runtime: Runtime,
+        request: DialogueWakeRequest,
+    ) -> DialogueWakeResult:
+        from control_plane.runtime_binding_projection import project_runtime_binding
+        from control_plane.session_targets import (
+            RuntimeBinding,
+            SessionTargetRegistry,
+            route_obligation,
+        )
+        from control_plane.wake_dispatcher import (
+            WakeEffectUnknownError,
+            WakePreSubmitError,
+        )
+        from control_plane.wake_persist import WakeLedgerRepository
+        from integrations.executive_wake.codex_app_server import (
+            CodexAppServerWakeDispatcher,
+        )
+        from integrations.executive_wake.codex_app_server_rpc import (
+            CodexCurrentWriterWakeClient,
+        )
+        from integrations.executive_wake.registry import WakeDispatcherRegistry
+        from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+            PersistedWakeCarrier,
+        )
+
+        if not isinstance(runtime, Runtime) or not isinstance(
+            request, DialogueWakeRequest
+        ):
+            return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
+        if (
+            request.obligation.root_job_id != request.candidate.root_job_id
+            or request.obligation.job_id != request.candidate.job_id
+            or request.obligation.attempt_id != request.candidate.attempt_id
+            or request.obligation.source_workstream != request.parent["work_ref"]
+        ):
+            return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
+        provider = self._target_provider
+        try:
+            resolved = (
+                provider(runtime, request.parent, request.obligation)
+                if callable(provider)
+                else self._resolve_current_target(runtime, request)
+            )
+        except Exception:
+            return DialogueWakeResult(
+                "MISSING", "STAGE_B1_RUNTIME_PROVIDER_REQUIRED"
+            )
+        if (
+            not isinstance(resolved, DialogueWakeTarget)
+            or not isinstance(resolved.registry, SessionTargetRegistry)
+            or not isinstance(resolved.runtime_binding, RuntimeBinding)
+        ):
+            return DialogueWakeResult(
+                "MISSING", "STAGE_B1_RUNTIME_PROVIDER_REQUIRED"
+            )
+        try:
+            target = resolved.registry.get(resolved.runtime_binding.session_alias)
+            current_binding = project_runtime_binding(
+                runtime,
+                resolved.target_attempt_id,
+                target,
+            )
+            if current_binding != resolved.runtime_binding:
+                return DialogueWakeResult("MISSING", "CURRENT_BINDING_REFUSED")
+            authoritative_route = route_obligation(
+                request.obligation,
+                resolved.registry,
+                binding=current_binding,
+            )
+            if authoritative_route != request.proposed_route:
+                return DialogueWakeResult("MISSING", "WAKE_ROUTE_REFUSED")
+            epoch, generation = runtime.operator_harness.generation_refs(
+                resolved.process_generation_id
+            )
+            if (
+                epoch.attempt_id != resolved.target_attempt_id
+                or runtime.operator_harness.current_writer_generation(epoch)
+                != generation
+            ):
+                return DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
+            wake_client = CodexCurrentWriterWakeClient(
+                operator_adapter=resolved.operator_adapter,
+                generation=generation,
+                attempt_id=resolved.target_attempt_id,
+                runtime_binding=current_binding,
+            )
+            carrier = PersistedWakeCarrier(
+                repository=WakeLedgerRepository(runtime),
+                dispatchers=WakeDispatcherRegistry(
+                    {
+                        "codex-app-server": CodexAppServerWakeDispatcher(
+                            wake_client
+                        )
+                    }
+                ),
+                current_binding_for=lambda _route: project_runtime_binding(
+                    runtime,
+                    resolved.target_attempt_id,
+                    target,
+                ),
+                retry_policy=self._retry_policy,
+                target_registry=resolved.registry,
+            )
+        except Exception:
+            return DialogueWakeResult("MISSING", "WAKE_TARGET_UNAVAILABLE")
+
+        try:
+            if request.operation == RECONCILE_WAKE:
+                state = await carrier.reconcile(
+                    request.obligation,
+                    authoritative_route,
+                )
+                reasons = {
+                    "MISSING": "WAKE_NOT_RECORDED",
+                    "RECORDED": "WAKE_RECORDED",
+                    "EFFECT_UNKNOWN": "WAKE_EFFECT_UNKNOWN",
+                }
+                return DialogueWakeResult(state.value, reasons[state.value])
+            if request.operation != SUBMIT_WAKE:
+                return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
+            await carrier.submit(request.obligation, authoritative_route)
+            return DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+        except WakePreSubmitError:
+            return DialogueWakeResult("MISSING", "WAKE_TARGET_UNAVAILABLE")
+        except WakeEffectUnknownError:
+            return DialogueWakeResult("EFFECT_UNKNOWN", "WAKE_EFFECT_UNKNOWN")
+        except Exception:
+            return DialogueWakeResult(
+                "EFFECT_UNKNOWN", "WAKE_COORDINATION_EFFECT_UNKNOWN"
+            )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -508,6 +904,7 @@ class ExecutiveControlService:
         dialogue_observation_facts_provider: (
             DialogueObservationFactsProvider | None
         ) = None,
+        dialogue_wake_handler: DialogueWakeHandler | None = None,
         dialogue_observation_activated_socket: socket.socket | None = None,
     ) -> None:
         self.config = config
@@ -710,9 +1107,11 @@ class ExecutiveControlService:
         # lease, or table backs this.
         self._ceo_ingress_tasks: set[asyncio.Task[Any]] = set()
 
-        # Optional W3C read-only listener.  It shares this process, Runtime,
-        # service lock, startup reconciliation and shutdown owner.  An absent
-        # path is the byte-compatible default-disabled composition.
+        # Optional W3C coordination listener.  Observation remains read-only;
+        # Wake requests are re-authorized and executed only through existing
+        # Executive-owned Stage-B1 owners.  The listener shares this process,
+        # Runtime, service lock, startup reconciliation and shutdown owner.  An
+        # absent path is the byte-compatible default-disabled composition.
         if dialogue_observation_socket_path is None:
             if any(
                 value is not None
@@ -720,6 +1119,7 @@ class ExecutiveControlService:
                     dialogue_observation_peer_uid,
                     dialogue_observation_group_gid,
                     dialogue_observation_facts_provider,
+                    dialogue_wake_handler,
                     dialogue_observation_activated_socket,
                 )
             ):
@@ -756,6 +1156,10 @@ class ExecutiveControlService:
                 and not callable(dialogue_observation_facts_provider)
             ):
                 raise ValueError("dialogue observation facts provider must be callable")
+            if dialogue_wake_handler is not None and not callable(
+                dialogue_wake_handler
+            ):
+                raise ValueError("dialogue Wake handler must be callable")
             if dialogue_observation_activated_socket is not None:
                 if dialogue_observation_activated_socket.family != socket.AF_UNIX:
                     raise ValueError(
@@ -790,6 +1194,7 @@ class ExecutiveControlService:
                 if dialogue_observation_facts_provider is not None
                 else self._runtime_dialogue_observation_facts
             )
+            self._dialogue_wake_handler = dialogue_wake_handler
             self._dialogue_observation_activated_socket = (
                 dialogue_observation_activated_socket
             )
@@ -1295,6 +1700,17 @@ class ExecutiveControlService:
                 **options,
             )
             try:
+                bound = path.lstat()
+                if (
+                    not stat.S_ISSOCK(bound.st_mode)
+                    or stat.S_ISLNK(bound.st_mode)
+                    or bound.st_uid != os.geteuid()
+                ):
+                    raise ServiceError("CAPABILITY_NOT_READY")
+                self._dialogue_observation_inode = (
+                    bound.st_dev,
+                    bound.st_ino,
+                )
                 os.chown(path, os.geteuid(), gid, follow_symlinks=False)
                 path.chmod(0o660)
                 info = path.lstat()
@@ -1306,9 +1722,10 @@ class ExecutiveControlService:
                 or info.st_uid != os.geteuid()
                 or info.st_gid != gid
                 or stat.S_IMODE(info.st_mode) != 0o660
+                or (info.st_dev, info.st_ino)
+                != self._dialogue_observation_inode
             ):
                 raise ServiceError("CAPABILITY_NOT_READY")
-            self._dialogue_observation_inode = (info.st_dev, info.st_ino)
             return
 
         activated, self._dialogue_observation_activated_socket = (
@@ -1790,30 +2207,91 @@ class ExecutiveControlService:
         active: list[ActiveObservationFacts] = []
         terminal: list[TerminalObservationFacts] = []
         registry = load_session_targets()
+        try:
+            requested_source = normalize_executive_dialogue_source(
+                {
+                    "schema_version": EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
+                    "work_ref": parent["work_ref"],
+                    "commission_ref": parent["commission_ref"],
+                    "watch_mode": parent["watch_mode"],
+                },
+                work_ref=parent["work_ref"],
+            )
+            requested_source_digest = hashlib.sha256(
+                json.dumps(
+                    requested_source.to_dict(),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+        except (KeyError, RuntimeProofError, TypeError, ValueError):
+            return DialogueObservationFacts(complete=False)
         with runtime.store.read() as connection:
+            root_rows = connection.execute(
+                """
+                SELECT j.job_id
+                FROM jobs AS j
+                WHERE j.orchestration_role='aggregation'
+                  AND j.root_job_id=j.job_id
+                  AND EXISTS (
+                    SELECT 1 FROM events AS root_event
+                    WHERE root_event.event_type='JOB_CREATED'
+                      AND root_event.job_id=j.job_id
+                      AND json_extract(
+                        root_event.payload_json,
+                        '$.provenance.dialogue_source_digest'
+                      )=?
+                  )
+                ORDER BY j.job_id
+                LIMIT 2
+                """,
+                (requested_source_digest,),
+            ).fetchall()
+            if len(root_rows) != 1:
+                return DialogueObservationFacts(
+                    complete=not bool(len(root_rows) > 1)
+                )
+            root_job_id = str(root_rows[0]["job_id"] or "")
+            try:
+                source = _dialogue_source_from_root_creation(
+                    connection,
+                    root_job_id=root_job_id,
+                )
+            except RuntimeProofError:
+                return DialogueObservationFacts(complete=False)
+            if source != requested_source:
+                return DialogueObservationFacts(complete=False)
             rows = connection.execute(
                 """
-                SELECT * FROM jobs
-                WHERE orchestration_role IN ('plan','work','review','repair')
-                  AND current_attempt_id IS NOT NULL
-                  AND status IN ('RUNNING','CHECKPOINTED','CANCEL_REQUESTED','COMPLETED')
-                ORDER BY job_id
+                SELECT j.* FROM jobs AS j
+                WHERE j.root_job_id=?
+                  AND j.orchestration_role IN ('plan','work','review','repair')
+                  AND j.current_attempt_id IS NOT NULL
+                  AND j.status IN ('RUNNING','CHECKPOINTED','CANCEL_REQUESTED','COMPLETED')
+                  AND ('exec-' || lower(j.job_id))=?
+                  AND ('asd-session-exec-' || lower(j.job_id))=?
+                ORDER BY j.job_id
                 LIMIT 5
-                """
+                """,
+                (
+                    root_job_id,
+                    parent["operation_key"],
+                    parent["session_ref"],
+                ),
             ).fetchall()
             if len(rows) > 4:
                 return DialogueObservationFacts(complete=False)
             for job_row in rows:
-                root_job_id = str(job_row["root_job_id"] or "")
-                try:
-                    source = _dialogue_source_from_root_creation(
-                        connection,
-                        root_job_id=root_job_id,
-                    )
-                except RuntimeProofError:
+                if str(job_row["root_job_id"] or "") != root_job_id:
                     continue
-                if not self._dialogue_source_matches_parent(source, parent):
-                    continue
+                target_bindings = _dialogue_target_bindings_for_root(
+                    runtime,
+                    connection,
+                    root_job_id=root_job_id,
+                    registry=registry,
+                )
                 job = _job_from_row(job_row)
                 try:
                     identity = derive_delegation_identity(job)
@@ -1945,6 +2423,7 @@ class ExecutiveControlService:
                                 expected.get("tool_schema_digest") or ""
                             ),
                             company_dialogue_attested=attested,
+                            target_bindings=target_bindings,
                         )
                     )
                     continue
@@ -2019,46 +2498,218 @@ class ExecutiveControlService:
                             candidate=candidate,
                             projection_receipt=receipt,
                             projection_effect=phase or "MISSING",
-                            binding_revalidated=False,
+                            binding_revalidated=bool(
+                                candidate.dialogue_source == source
+                                and identity.root_job_id == candidate.root_job_id
+                                and identity.operation_key == candidate.operation_key
+                                and identity.session_ref == candidate.session_ref
+                                and candidate.operation_key
+                                == parent["operation_key"]
+                                and candidate.session_ref == parent["session_ref"]
+                            ),
+                            target_bindings=target_bindings,
                         )
                     )
                 except (RuntimeProofError, PersistenceError, TerminalReturnError, ValueError):
                     continue
 
-        # Terminal Runtime revalidation is intentionally fresh and follows the
-        # single-snapshot Event-family proof.  Drift turns the candidate into a
-        # fixed HELD response; it never falls back to historical Events.
-        if terminal:
-            checked: list[TerminalObservationFacts] = []
-            for item in terminal:
-                if item.projection_effect != "APPLIED":
-                    checked.append(item)
-                    continue
-                try:
-                    material = runtime.validated_role_completion(
-                        item.candidate.job_id,
-                        expected_attempt_id=item.candidate.attempt_id,
-                    )
-                    if reduce_terminal_return(material=material) != item.candidate:
-                        raise ValueError("terminal candidate drifted")
-                    source = material.dialogue_source
-                    identity = derive_delegation_identity(material.job)
-                    if (
-                        source is None
-                        or not self._dialogue_source_matches_parent(source, parent)
-                        or identity.operation_key != item.candidate.operation_key
-                        or identity.session_ref != item.candidate.session_ref
-                        or identity.root_job_id != item.candidate.root_job_id
-                    ):
-                        raise ValueError("terminal dialogue binding drifted")
-                except Exception:
-                    checked.append(item)
-                else:
-                    checked.append(dataclasses.replace(item, binding_revalidated=True))
-            terminal = checked
         return DialogueObservationFacts(
             active=tuple(active),
             terminal=tuple(terminal),
+        )
+
+    def _runtime_canonical_terminal_facts(
+        self,
+        runtime: Runtime,
+        candidate: CanonicalTerminalWakeCandidate,
+        connection: sqlite3.Connection,
+    ) -> DialogueObservationFacts:
+        """Reconstruct one exact terminal projection inside the caller's snapshot.
+
+        This is the trusted local read adapter for the canonical Control Room
+        view.  It deliberately accepts no dialogue parent, Slack identifier,
+        phase assertion, receipt, or projection material from its caller.
+        """
+
+        from control_plane.executive_delegation_identity import (
+            derive_delegation_identity,
+        )
+
+        rows = connection.execute(
+            """
+            SELECT * FROM jobs
+            WHERE root_job_id=?
+              AND job_id=?
+              AND current_attempt_id=?
+              AND status=?
+              AND orchestration_role IN ('plan','work','review','repair')
+            ORDER BY job_id
+            LIMIT 2
+            """,
+            (
+                candidate.root_job_id,
+                candidate.job_id,
+                candidate.attempt_id,
+                JobStatus.COMPLETED.value,
+            ),
+        ).fetchall()
+        if len(rows) > 1:
+            return DialogueObservationFacts(complete=False)
+        if not rows:
+            return DialogueObservationFacts()
+
+        job_row = rows[0]
+        root_job_id = str(job_row["root_job_id"] or "")
+        role = str(job_row["orchestration_role"] or "")
+        try:
+            source = _dialogue_source_from_root_creation(
+                connection,
+                root_job_id=root_job_id,
+            )
+            job = _job_from_row(job_row)
+            identity = derive_delegation_identity(job)
+            attempt_row, seal, terminal_receipt, role_result_digest = (
+                _validated_role_completion_material(
+                    connection,
+                    job_row=job_row,
+                    expected_role=role,
+                    root_job_id=root_job_id,
+                )
+            )
+            if (
+                str(attempt_row["attempt_id"] or "") != candidate.attempt_id
+                or str(attempt_row["worker_id"] or "") != candidate.worker_id
+            ):
+                return DialogueObservationFacts()
+            job_result = _strict_canonical_json_loads(
+                str(job_row["result_json"]),
+                name="canonical terminal Job result",
+            )
+            attempt_result = _strict_canonical_json_loads(
+                str(attempt_row["result_json"]),
+                name="canonical terminal Attempt result",
+            )
+            if job_result != terminal_receipt or attempt_result != terminal_receipt:
+                raise StateConflict("terminal result receipt drifted")
+            envelope = seal.get("result_envelope")
+            envelope_digest = seal.get("result_envelope_digest")
+            if (
+                not isinstance(envelope, dict)
+                or not isinstance(envelope_digest, str)
+                or not isinstance(role_result_digest, str)
+            ):
+                raise StateConflict("terminal result material is incomplete")
+            completion = ValidatedRoleCompletion(
+                job=job,
+                attempt=_attempt_from_row(attempt_row),
+                result_envelope=dict(envelope),
+                terminal_receipt=dict(terminal_receipt),
+                result_digest=envelope_digest,
+                role_result_digest=role_result_digest,
+                execution_mode=str(
+                    attempt_row["execution_mode"]
+                    or AttemptExecutionMode.SEALED_WORKER.value
+                ),
+                dialogue_source=source,
+            )
+            terminal_candidate = reduce_terminal_return(material=completion)
+            if (
+                terminal_candidate.root_job_id != candidate.root_job_id
+                or terminal_candidate.job_id != candidate.job_id
+                or terminal_candidate.attempt_id != candidate.attempt_id
+                or terminal_candidate.worker_id != candidate.worker_id
+                or terminal_candidate.dialogue_source != source
+                or identity.root_job_id != terminal_candidate.root_job_id
+                or identity.operation_key != terminal_candidate.operation_key
+                or identity.session_ref != terminal_candidate.session_ref
+            ):
+                return DialogueObservationFacts()
+            command_base, event_material = self._terminal_return_event_material(
+                terminal_candidate
+            )
+        except (
+            RuntimeProofError,
+            PersistenceError,
+            TerminalReturnError,
+            TypeError,
+            ValueError,
+        ):
+            return DialogueObservationFacts(complete=False)
+
+        try:
+            phase = self._inspect_terminal_return_history(
+                connection,
+                candidate=terminal_candidate,
+                material=event_material,
+            )
+        except (RuntimeProofError, PersistenceError, TypeError, ValueError):
+            return DialogueObservationFacts(
+                terminal=(
+                    TerminalObservationFacts(
+                        candidate=terminal_candidate,
+                        projection_receipt=None,
+                        projection_effect="CONFLICT",
+                        binding_revalidated=False,
+                    ),
+                )
+            )
+
+        receipt: TerminalProjectionReceiptFacts | None = None
+        if phase == "APPLIED":
+            try:
+                applied_command = self._terminal_return_phase_spec(command_base)[-1][2]
+                applied_event = runtime.store.get_event_by_command_id(
+                    applied_command,
+                    connection=connection,
+                )
+                if applied_event is None:
+                    raise StateConflict("terminal APPLIED receipt disappeared")
+                normalized = self._normalize_terminal_return_projection_receipt(
+                    applied_event.payload.get("projection_receipt"),
+                    message_key=terminal_candidate.message_key,
+                )
+                normalized["duplicate_timestamps"] = tuple(
+                    normalized["duplicate_timestamps"]
+                )
+                receipt = TerminalProjectionReceiptFacts(**normalized)
+            except (RuntimeProofError, PersistenceError, TypeError, ValueError):
+                return DialogueObservationFacts(
+                    terminal=(
+                        TerminalObservationFacts(
+                            candidate=terminal_candidate,
+                            projection_receipt=None,
+                            projection_effect="CONFLICT",
+                            binding_revalidated=False,
+                        ),
+                    )
+                )
+
+        return DialogueObservationFacts(
+            terminal=(
+                TerminalObservationFacts(
+                    candidate=terminal_candidate,
+                    projection_receipt=receipt,
+                    projection_effect=phase or "MISSING",
+                    binding_revalidated=True,
+                ),
+            )
+        )
+
+    def read_canonical_dialogue_terminal_wake(
+        self,
+        *,
+        source_root_job_id: str,
+        candidate: CanonicalTerminalWakeCandidate,
+        connection: sqlite3.Connection | None = None,
+    ) -> CanonicalTerminalWakeRead:
+        """Expose the bounded canonical terminal/Wake read to local consumers."""
+
+        return read_canonical_terminal_wake(
+            runtime=self._require_runtime(),
+            source_root_job_id=source_root_job_id,
+            candidate=candidate,
+            facts_provider=self._runtime_canonical_terminal_facts,
+            connection=connection,
         )
 
     async def _handle_dialogue_observation_connection(
@@ -2138,41 +2789,88 @@ class ExecutiveControlService:
                     },
                 )
                 return
+            provider = self._dialogue_observation_facts_provider
+            runtime = self._require_runtime()
             try:
                 request = parse_observation_request(raw)
             except DialogueObservationProtocolError:
-                await self._send_dialogue_observation(
-                    writer,
-                    {
-                        "schema": DIALOGUE_OBSERVATION_RESPONSE_SCHEMA,
-                        "state": "HELD",
-                        "reason": "REQUEST_REFUSED",
-                    },
+                try:
+                    wake_request = parse_wake_request(raw)
+                except DialogueObservationProtocolError:
+                    await self._send_dialogue_observation(
+                        writer,
+                        {
+                            "schema": DIALOGUE_OBSERVATION_RESPONSE_SCHEMA,
+                            "state": "HELD",
+                            "reason": "REQUEST_REFUSED",
+                        },
+                    )
+                    return
+                wake_result = DialogueWakeResult(
+                    "MISSING", "STAGE_B1_RUNTIME_PROVIDER_REQUIRED"
                 )
-                return
-            provider = self._dialogue_observation_facts_provider
-            runtime = self._require_runtime()
-            if not callable(provider):
+                if callable(provider):
+                    try:
+                        facts = await asyncio.to_thread(
+                            provider, runtime, wake_request.parent
+                        )
+                        source_response = reduce_dialogue_observation(
+                            parent=wake_request.parent,
+                            thread_ts=wake_request.thread_ts,
+                            facts=facts,
+                        )
+                    except Exception:
+                        source_response = {}
+                    if (
+                        source_response.get("state") == "RESOLVED"
+                        and _dialogue_candidate_from_response(source_response)
+                        == wake_request.candidate
+                    ):
+                        wake_handler = self._dialogue_wake_handler
+                        if callable(wake_handler):
+                            try:
+                                candidate = wake_handler(runtime, wake_request)
+                                if inspect.isawaitable(candidate):
+                                    candidate = await candidate
+                                if not isinstance(candidate, DialogueWakeResult):
+                                    raise TypeError("untyped dialogue Wake result")
+                                wake_result = candidate
+                            except Exception:
+                                wake_result = DialogueWakeResult(
+                                    "EFFECT_UNKNOWN",
+                                    "WAKE_COORDINATION_EFFECT_UNKNOWN",
+                                )
+                    else:
+                        wake_result = DialogueWakeResult(
+                            "MISSING", "CANDIDATE_BINDING_REQUIRED"
+                        )
                 response = {
-                    "schema": DIALOGUE_OBSERVATION_RESPONSE_SCHEMA,
-                    "state": "HELD",
-                    "reason": "OBSERVATION_FACTS_UNAVAILABLE",
+                    "schema": DIALOGUE_WAKE_RESPONSE_SCHEMA,
+                    "state": wake_result.state,
+                    "reason": wake_result.reason,
                 }
             else:
-                try:
-                    facts = await asyncio.to_thread(
-                        provider, runtime, request.parent
-                    )
-                    response = reduce_dialogue_observation(
-                        parent=request.parent,
-                        facts=facts,
-                    )
-                except Exception:
+                if not callable(provider):
                     response = {
                         "schema": DIALOGUE_OBSERVATION_RESPONSE_SCHEMA,
-                        "state": "UNKNOWN",
-                        "reason": "ACTIVE_RUNTIME_UNAVAILABLE",
+                        "state": "HELD",
+                        "reason": "OBSERVATION_FACTS_UNAVAILABLE",
                     }
+                else:
+                    try:
+                        facts = await asyncio.to_thread(
+                            provider, runtime, request.parent
+                        )
+                        response = reduce_dialogue_observation(
+                            parent=request.parent,
+                            facts=facts,
+                        )
+                    except Exception:
+                        response = {
+                            "schema": DIALOGUE_OBSERVATION_RESPONSE_SCHEMA,
+                            "state": "UNKNOWN",
+                            "reason": "ACTIVE_RUNTIME_UNAVAILABLE",
+                        }
             await self._send_dialogue_observation(writer, response)
         finally:
             writer.close()
@@ -4835,7 +5533,10 @@ __all__ = [
     "CONTROL_PROTOCOL_VERSION",
     "DEFAULT_MAX_REQUEST_BYTES",
     "DEFAULT_MAX_RESPONSE_BYTES",
+    "DialogueWakeResult",
+    "DialogueWakeTarget",
     "ExecutiveControlService",
+    "ExecutiveDialogueWakeBridge",
     "ServiceConfig",
     "ServiceError",
     "SupervisorProtocol",

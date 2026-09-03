@@ -30,12 +30,14 @@ from control_plane.executive_autonomy import (
     validate_runtime_guard_file,
 )
 from control_plane.executive_service import (
+    ExecutiveDialogueWakeBridge,
     ExecutiveControlService,
     ServiceConfig,
     ServiceError,
     activate_launchd_socket,
     send_control_request,
 )
+from control_plane.wake_ledger import WakeRetryPolicy
 
 
 CONTROL_CONFIG_SCHEMA_VERSION = "mastermind.executive_control_config/v1"
@@ -105,6 +107,11 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_peer_uid",
         "terminal_return_armed",
         "terminal_return_socket_path",
+        "dialogue_observation_socket_path",
+        "dialogue_observation_launchd_socket_name",
+        "dialogue_observation_peer_uid",
+        "dialogue_bridge_armed",
+        "dialogue_wake_retry_policy",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -120,14 +127,16 @@ _TERMINAL_RETURN_CONFIG_KEYS = frozenset(
         "terminal_return_socket_path",
     }
 )
-_DIALOGUE_OBSERVATION_CONFIG_KEYS = frozenset(
+_DIALOGUE_BRIDGE_CONFIG_KEYS = frozenset(
     {
         "dialogue_observation_socket_path",
         "dialogue_observation_launchd_socket_name",
         "dialogue_observation_peer_uid",
+        "dialogue_bridge_armed",
+        "dialogue_wake_retry_policy",
     }
 )
-_CONFIG_DISABLED_EXTENSIONS = _DIALOGUE_OBSERVATION_CONFIG_KEYS
+_CONFIG_DISABLED_EXTENSIONS = frozenset()
 
 
 def _absolute_path(value: str) -> Path:
@@ -256,8 +265,8 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
     if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
         raise ServiceError("terminal-return control config fields must be supplied together")
-    observation_present = keys & _DIALOGUE_OBSERVATION_CONFIG_KEYS
-    if observation_present and observation_present != _DIALOGUE_OBSERVATION_CONFIG_KEYS:
+    observation_present = keys & _DIALOGUE_BRIDGE_CONFIG_KEYS
+    if observation_present and observation_present != _DIALOGUE_BRIDGE_CONFIG_KEYS:
         raise ServiceError(
             "dialogue-observation control config fields must be supplied together"
         )
@@ -316,6 +325,53 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             raise ServiceError(
                 "dialogue observation peer uid must be Agent Relay uid 457"
             )
+        if type(config["dialogue_bridge_armed"]) is not bool:
+            raise ServiceError("control config dialogue_bridge_armed must be boolean")
+        retry_policy = config["dialogue_wake_retry_policy"]
+        retry_keys = {
+            "max_delivery_attempts",
+            "retry_cooldown_s",
+            "accepted_ttl_s",
+            "target_unavailable_backoff_s",
+            "reenable_on_binding_rotation",
+            "armed",
+        }
+        if not isinstance(retry_policy, dict) or set(retry_policy) != retry_keys:
+            raise ServiceError(
+                "control config dialogue_wake_retry_policy fields drifted"
+            )
+        for name in (
+            "max_delivery_attempts",
+            "retry_cooldown_s",
+            "accepted_ttl_s",
+            "target_unavailable_backoff_s",
+        ):
+            value = retry_policy[name]
+            if value is not None and (
+                type(value) is not int or value < 1
+            ):
+                raise ServiceError(
+                    f"control config dialogue_wake_retry_policy.{name} "
+                    "must be null or a positive integer"
+                )
+        for name in ("reenable_on_binding_rotation", "armed"):
+            if type(retry_policy[name]) is not bool:
+                raise ServiceError(
+                    f"control config dialogue_wake_retry_policy.{name} "
+                    "must be boolean"
+                )
+        if retry_policy["armed"] is not config["dialogue_bridge_armed"]:
+            raise ServiceError(
+                "dialogue bridge and Wake retry policy arming must match"
+            )
+        try:
+            config["dialogue_wake_retry_policy"] = WakeRetryPolicy(
+                **retry_policy
+            )
+        except (TypeError, ValueError) as exc:
+            raise ServiceError(
+                "control config dialogue_wake_retry_policy is invalid"
+            ) from exc
     if config["control_uid"] != os.geteuid():
         raise ServiceError("control service effective uid does not match control config")
     if config["worker_uid"] == config["control_uid"]:
@@ -924,7 +980,15 @@ def _service_from_config(
             "ceo_ingress_activated_socket": ceo_listener,
         }
     dialogue_observation_kwargs: dict[str, Any] = {}
-    if _DIALOGUE_OBSERVATION_CONFIG_KEYS <= set(raw):
+    if (
+        _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)
+        and raw["dialogue_bridge_armed"] is True
+    ):
+        def dialogue_wake_turn_input_loader(_turn):
+            raise ServiceError(
+                "dialogue Wake adapter cannot load provider turns"
+            )
+
         observation_listener = activate_launchd_socket(
             str(raw["dialogue_observation_launchd_socket_name"])
         )
@@ -937,6 +1001,14 @@ def _service_from_config(
                 raw["dialogue_observation_peer_uid"]
             ),
             "dialogue_observation_group_gid": 457,
+            "dialogue_wake_handler": ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=raw["dialogue_wake_retry_policy"],
+                operator_adapter=RemoteCodexOperatorAdapter(
+                    client,
+                    turn_input_loader=dialogue_wake_turn_input_loader,
+                ),
+            ),
             "dialogue_observation_activated_socket": observation_listener,
         }
     if config.terminal_return_socket_path is not None:
