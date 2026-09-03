@@ -356,7 +356,7 @@ def test_infinite_yielding_source_is_cut_off_at_max_plus_one() -> None:
     runtime = _runtime_module()
     yielded: list[int] = []
 
-    def source():
+    async def source():
         index = 0
         while True:
             yielded.append(index)
@@ -383,7 +383,7 @@ def test_infinite_yielding_source_is_cut_off_at_max_plus_one() -> None:
 def test_source_failure_after_partial_iteration_has_zero_candidate_effect() -> None:
     runtime = _runtime_module()
 
-    def source():
+    async def source():
         yield _w3c_candidate(runtime)
         raise RuntimeError("private source failure")
 
