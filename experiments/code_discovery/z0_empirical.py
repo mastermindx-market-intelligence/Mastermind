@@ -18,8 +18,9 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
-from .baseline_search import AnswerKey
+from .baseline_search import AnswerKey, SourceCensus, SourceCensusError, census_sealed_sources
 from .evaluation_manifest import EvaluationManifest, EvaluationQuery
+from .index_manifest import IndexManifest
 
 
 LEDGER_SCHEMA_VERSION: Final = "mastermind.codeintel_z0_evaluation_ledger.v1"
@@ -109,13 +110,14 @@ _ZERO_RESULT_AUTHORITY_VALUES: Final = frozenset(
         "NONAUTHORITATIVE_UNHEALTHY",
         "NONAUTHORITATIVE_TRUNCATED_OR_INCOMPLETE",
         "NONAUTHORITATIVE_IDENTITY_UNKNOWN",
+        "NONAUTHORITATIVE_SOURCE_SET_MISMATCH",
         "NOT_APPLICABLE_MATCHES_RETURNED",
     }
 )
 _QUERY_RECEIPT_FAILURE_STAGES: Final = frozenset({"FACTORY", "VALIDATION"})
 _QUERY_RECEIPT_FAILURE_CODES: Final = frozenset({"RESULT_SCHEMA_INVALID"})
 _ANSWER_KEY_PAYLOAD_FIELDS: Final = frozenset(
-    {"case_id", "census_digest", "query", "expected", "forbidden"}
+    {"case_id", "census_digest", "query", "path_policy_digest", "expected", "forbidden"}
 )
 _ANSWER_KEY_QUERY_FIELDS: Final = frozenset(
     {
@@ -138,20 +140,19 @@ _QUERY_RECEIPT_FIELDS: Final = frozenset(
     {
         "schema_version",
         "trial_id",
+        "query_identity",
         "query_index",
         "candidate",
+        "query_plan_digest",
         "query_digest",
         "normalized_arguments_digest",
         "evaluation_manifest_digest",
-        "requested_sources",
+        "source_statuses",
         "index_identity",
         "started_at",
         "ended_at",
         "monotonic_duration_ms",
         "status",
-        "coverage",
-        "health",
-        "freshness",
         "query_completeness",
         "matches",
         "limits",
@@ -163,6 +164,21 @@ _QUERY_RECEIPT_FIELDS: Final = frozenset(
         "raw_response_digest",
         "normalized_response_digest",
         "correction_of",
+    }
+)
+_SOURCE_STATUS_FIELDS: Final = frozenset(
+    {
+        "logical_repository",
+        "canonical_repository_digest",
+        "requested_ref",
+        "requested_commit",
+        "requested_tree",
+        "indexed_commit",
+        "indexed_tree",
+        "generation_id",
+        "coverage",
+        "health",
+        "freshness",
     }
 )
 _FAILURE_CODES: Final = frozenset(
@@ -196,25 +212,6 @@ _FAILURE_CODES: Final = frozenset(
         "RESULT_SCHEMA_INVALID",
     }
 )
-REQUIRED_FAILURE_INJECTIONS: Final = (
-    "SOURCE_HEAD_OR_TREE_MISMATCH",
-    "INCOMPLETE_SOURCE_MANIFEST",
-    "FAILED_BUILD_PUBLISHED",
-    "PARTIAL_BUILD_PUBLISHED",
-    "CORRUPT_SHARD",
-    "DISK_PRESSURE",
-    "CREDENTIAL_ACCESS_ATTEMPT",
-    "DUPLICATE_REPOSITORY_IDENTITY",
-    "SOURCE_ROOT_SYMLINK",
-    "SUBMODULE_ESCAPE",
-    "EXTERNAL_PATH_TRAVERSAL",
-    "QUERY_TIMEOUT",
-    "QUERY_CANCELLED",
-    "INCOMPLETE_DESIRED_SET",
-    "GENERATION_RACE",
-)
-
-
 class EvidenceError(ValueError):
     """A receipt would make the empirical evidence ambiguous or self-serving."""
 
@@ -224,12 +221,66 @@ class QueryReceiptError(EvidenceError):
 
 
 @dataclass(frozen=True)
+class QueryPlan:
+    """One answer-key-derived execution object shared by both candidate adapters.
+
+    It is deliberately richer than ``EvaluationQuery``: the latter is the
+    public manifest projection, while the plan carries the only executable
+    normalized query/filter bytes.  A candidate never receives a caller-made
+    lookalike object or a case label detached from its repetition identity.
+    """
+
+    query_identity: str
+    evaluation_manifest_digest: str
+    case_id: str
+    family: str
+    repetition_index: int
+    warm_or_cold: str
+    query_index: int
+    candidate_order: tuple[str, str]
+    query: str
+    regex: bool
+    case_sensitive: bool
+    logical_repo_ids: tuple[str, ...]
+    refs: tuple[str, ...]
+    path_prefixes: tuple[str, ...]
+    languages: tuple[str, ...]
+    max_results: int
+    max_context_lines: int
+    timeout_ms: int
+    query_digest: str
+    filters_digest: str
+    answer_key_digest: str
+    forbidden_answer_digest: str
+    normalized_arguments_digest: str
+    digest: str
+
+    def trial_id(self, candidate: str) -> str:
+        if candidate not in {"baseline", "zoekt"}:
+            raise EvidenceError("query plan candidate is not in the closed vocabulary")
+        return f"{self.query_identity}:{candidate}"
+
+
+@dataclass(frozen=True)
+class TrialIdentity:
+    """The one immutable query/repetition/candidate address in the ledger."""
+
+    query_identity: str
+    candidate: str
+    trial_id: str
+
+
+@dataclass(frozen=True)
 class NormalizedQueryReceipt:
     """Immutable, model-safe query facts with mechanically derived absence authority."""
 
     trial_id: str
+    query_identity: str
+    query_index: int
     candidate: str
+    query_plan_digest: str
     query_digest: str
+    normalized_arguments_digest: str
     evaluation_manifest_digest: str
     status: str
     query_completeness: str
@@ -239,8 +290,173 @@ class NormalizedQueryReceipt:
     digest: str
 
 
+def build_query_plan(
+    evaluation_manifest: EvaluationManifest,
+    query: EvaluationQuery,
+    answer_key: AnswerKey,
+) -> QueryPlan:
+    """Derive the sole executable query object from the bound AnswerKey bytes.
+
+    The manifest commits to digests and the source-derived answer key commits
+    to the raw query.  Joining both documents here prevents a candidate from
+    receiving query text, filters, or budgets that differ from the grader's
+    truth.  Every returned field is frozen and hash-bound before either
+    baseline or Zoekt is called.
+    """
+
+    if not isinstance(evaluation_manifest, EvaluationManifest):
+        raise EvidenceError("query plan requires an EvaluationManifest")
+    if not isinstance(query, EvaluationQuery):
+        raise EvidenceError("query plan requires an EvaluationQuery")
+    if not isinstance(answer_key, AnswerKey):
+        raise EvidenceError("query plan requires a source-derived AnswerKey")
+    if query not in evaluation_manifest.queries:
+        raise EvidenceError("query plan query is not in the frozen manifest")
+    if answer_key.case_id != query.case_id:
+        raise EvidenceError("answer key case does not bind the frozen query")
+    if hashlib.sha256(answer_key.canonical_bytes).hexdigest() != answer_key.digest:
+        raise EvidenceError("answer key digest does not bind canonical bytes")
+    if answer_key.digest != query.answer_key_digest:
+        raise EvidenceError("answer key digest does not bind frozen query")
+    try:
+        answer_payload = _strict_receipt_json(answer_key.canonical_bytes)
+        _exact_receipt_fields(answer_payload, _ANSWER_KEY_PAYLOAD_FIELDS, "answer key")
+        if _canonical_json(answer_payload) != answer_key.canonical_bytes:
+            raise EvidenceError("answer key must use canonical JSON")
+        if answer_payload["case_id"] != query.case_id:
+            raise EvidenceError("answer key canonical case does not bind frozen query")
+        expected_policy_digest = evaluation_manifest.path_policy_rules.get(
+            "policy_document_digest"
+        )
+        if (
+            not isinstance(expected_policy_digest, str)
+            or answer_payload["path_policy_digest"] != expected_policy_digest
+            or answer_key.path_policy_digest != expected_policy_digest
+        ):
+            raise EvidenceError("answer key does not bind the frozen path-policy digest")
+        raw_query = _receipt_mapping(answer_payload["query"], "answer key query")
+        _validate_answer_key_query(raw_query)
+        forbidden = _answer_key_forbidden_identities(answer_payload["forbidden"])
+        expected = _answer_key_expected_identities(answer_payload["expected"])
+        _validate_identities(answer_key.expected_identities)
+        _validate_identities(answer_key.forbidden_identities)
+    except (EvidenceError, QueryReceiptError) as error:
+        raise EvidenceError("answer key cannot derive a query plan") from error
+    if (
+        expected != answer_key.expected_identities
+        or forbidden != answer_key.forbidden_identities
+        or set(expected) & set(forbidden)
+    ):
+        raise EvidenceError("answer key public identities disagree with canonical bytes")
+
+    query_text = raw_query["query"]
+    regex = raw_query["regex"]
+    case_sensitive = raw_query["case_sensitive"]
+    repository_ids = tuple(raw_query["repository_ids"])
+    refs = tuple(raw_query["refs"])
+    path_prefixes = tuple(raw_query["path_prefixes"])
+    languages = tuple(raw_query["languages"])
+    max_results = raw_query["limit"]
+    max_context_lines = raw_query["context_lines"]
+    timeout_ms = raw_query["timeout_ms"]
+    assert isinstance(query_text, str)
+    assert type(regex) is bool and type(case_sensitive) is bool
+    assert isinstance(max_results, int)
+    assert isinstance(max_context_lines, int)
+    assert isinstance(timeout_ms, int)
+    query_material = {
+        "query": query_text,
+        "regex": regex,
+        "case_sensitive": case_sensitive,
+    }
+    filters_material = {
+        "logical_repo_ids": list(repository_ids),
+        "refs": list(refs),
+        "path_prefixes": list(path_prefixes),
+        "languages": list(languages),
+        "max_results": max_results,
+        "max_context_lines": max_context_lines,
+        "timeout_ms": timeout_ms,
+    }
+    if hashlib.sha256(_canonical_json(query_material)).hexdigest() != query.query_digest:
+        raise EvidenceError("query digest does not bind the answer-key query bytes")
+    if hashlib.sha256(_canonical_json(filters_material)).hexdigest() != query.filters_digest:
+        raise EvidenceError("filters digest does not bind the answer-key query filters")
+    if (
+        repository_ids != query.logical_repo_ids
+        or refs != query.refs
+        or path_prefixes != query.path_prefixes
+        or languages != query.languages
+        or max_results != query.max_results
+        or max_context_lines != query.max_context_lines
+        or timeout_ms != query.timeout_ms
+    ):
+        raise EvidenceError("answer-key query fields do not bind manifest query fields")
+    if (
+        hashlib.sha256(_canonical_json([list(item) for item in forbidden])).hexdigest()
+        != query.forbidden_answer_digest
+    ):
+        raise EvidenceError("forbidden answer digest does not bind source-derived identities")
+    normalized_material = {
+        "query_identity": query.identity,
+        "evaluation_manifest_digest": evaluation_manifest.digest,
+        "case_id": query.case_id,
+        "family": query.family,
+        "repetition_index": query.repetition_index,
+        "warm_or_cold": query.warm_or_cold,
+        "query_index": query.query_index,
+        "candidate_order": list(query.candidate_order),
+        "query": query_material,
+        "filters": filters_material,
+        "query_digest": query.query_digest,
+        "filters_digest": query.filters_digest,
+        "answer_key_digest": query.answer_key_digest,
+        "forbidden_answer_digest": query.forbidden_answer_digest,
+    }
+    normalized_arguments_digest = hashlib.sha256(
+        _canonical_json(normalized_material)
+    ).hexdigest()
+    plan_digest = hashlib.sha256(
+        _canonical_json(
+            {
+                "schema": "mastermind.codeintel_query_plan.v1",
+                "normalized_arguments_digest": normalized_arguments_digest,
+                "answer_key_digest": answer_key.digest,
+            }
+        )
+    ).hexdigest()
+    return QueryPlan(
+        query_identity=query.identity,
+        evaluation_manifest_digest=evaluation_manifest.digest,
+        case_id=query.case_id,
+        family=query.family,
+        repetition_index=query.repetition_index,
+        warm_or_cold=query.warm_or_cold,
+        query_index=query.query_index,
+        candidate_order=query.candidate_order,
+        query=query_text,
+        regex=regex,
+        case_sensitive=case_sensitive,
+        logical_repo_ids=repository_ids,
+        refs=refs,
+        path_prefixes=path_prefixes,
+        languages=languages,
+        max_results=max_results,
+        max_context_lines=max_context_lines,
+        timeout_ms=timeout_ms,
+        query_digest=query.query_digest,
+        filters_digest=query.filters_digest,
+        answer_key_digest=query.answer_key_digest,
+        forbidden_answer_digest=query.forbidden_answer_digest,
+        normalized_arguments_digest=normalized_arguments_digest,
+        digest=plan_digest,
+    )
+
+
 def parse_normalized_query_receipt(
     document: bytes | bytearray | str | Mapping[str, object],
+    *,
+    query_plan: QueryPlan,
 ) -> NormalizedQueryReceipt:
     """Validate one closed query receipt and derive its absence authority.
 
@@ -249,33 +465,56 @@ def parse_normalized_query_receipt(
     decision gate can consume them.
     """
 
+    if not isinstance(query_plan, QueryPlan):
+        raise QueryReceiptError("query receipt requires its immutable QueryPlan")
     payload = _strict_receipt_json(document)
     _exact_receipt_fields(payload, _QUERY_RECEIPT_FIELDS, "query receipt")
     if payload["schema_version"] != QUERY_RECEIPT_SCHEMA_VERSION:
         raise QueryReceiptError("query receipt has an unexpected schema_version")
     trial_id = _receipt_text(payload["trial_id"], "trial_id")
-    if ":" not in trial_id:
-        raise QueryReceiptError("trial_id must bind case and candidate")
-    case_id, candidate_from_trial = trial_id.split(":", 1)
-    if not case_id or candidate_from_trial not in {"baseline", "zoekt"}:
-        raise QueryReceiptError("trial_id must bind a closed candidate")
+    query_identity = _receipt_text(payload["query_identity"], "query_identity")
+    candidate_from_trial = trial_id.rsplit(":", 1)[-1]
+    if (
+        candidate_from_trial not in {"baseline", "zoekt"}
+        or trial_id != f"{query_identity}:{candidate_from_trial}"
+    ):
+        raise QueryReceiptError("trial_id must bind the full query identity and candidate")
     candidate = _receipt_text(payload["candidate"], "candidate")
     if candidate != candidate_from_trial:
         raise QueryReceiptError("candidate must agree with trial_id")
+    query_index = _receipt_nonnegative_int(payload["query_index"], "query_index")
+    if query_index < 1:
+        raise QueryReceiptError("query_index must be positive")
+    query_plan_digest = _receipt_sha256(payload["query_plan_digest"], "query_plan_digest")
     query_digest = _receipt_sha256(payload["query_digest"], "query_digest")
     evaluation_manifest_digest = _receipt_sha256(
         payload["evaluation_manifest_digest"], "evaluation_manifest_digest"
     )
-    _receipt_sha256(payload["normalized_arguments_digest"], "normalized_arguments_digest")
-    _validate_requested_sources(payload["requested_sources"])
-    _validate_index_identity(payload["index_identity"])
+    normalized_arguments_digest = _receipt_sha256(
+        payload["normalized_arguments_digest"], "normalized_arguments_digest"
+    )
+    index_identity = _receipt_mapping(payload["index_identity"], "index_identity")
+    _validate_index_identity(index_identity)
+    generation_id = _receipt_text(index_identity["generation_id"], "generation_id")
+    source_statuses = _validate_source_statuses(
+        payload["source_statuses"], index_generation_id=generation_id
+    )
+    _validate_receipt_binds_query_plan(
+        query_plan=query_plan,
+        trial_id=trial_id,
+        query_identity=query_identity,
+        query_index=query_index,
+        candidate=candidate,
+        query_plan_digest=query_plan_digest,
+        query_digest=query_digest,
+        normalized_arguments_digest=normalized_arguments_digest,
+        evaluation_manifest_digest=evaluation_manifest_digest,
+        source_statuses=source_statuses,
+    )
     _receipt_text(payload["started_at"], "started_at")
     _receipt_text(payload["ended_at"], "ended_at")
     _receipt_nonnegative_int(payload["monotonic_duration_ms"], "monotonic_duration_ms")
     status = _receipt_closed_value(payload["status"], _QUERY_STATUSES, "status")
-    coverage = _receipt_closed_list(payload["coverage"], _COVERAGE_VALUES, "coverage")
-    health = _receipt_closed_list(payload["health"], _HEALTH_VALUES, "health")
-    freshness = _receipt_closed_list(payload["freshness"], _FRESHNESS_VALUES, "freshness")
     completeness = _receipt_closed_value(
         payload["query_completeness"],
         _QUERY_COMPLETENESS_VALUES,
@@ -299,9 +538,8 @@ def parse_normalized_query_receipt(
     if payload["correction_of"] is not None:
         _receipt_sha256(payload["correction_of"], "correction_of")
     expected_zero_authority = derive_zero_result_authority(
-        coverage=coverage,
-        health=health,
-        freshness=freshness,
+        source_statuses=source_statuses,
+        expected_logical_repo_ids=query_plan.logical_repo_ids,
         query_completeness=completeness,
         truncated=limits["truncated"],
         returned_count=limits["returned_count"],
@@ -328,8 +566,12 @@ def parse_normalized_query_receipt(
     assert isinstance(frozen, Mapping)
     return NormalizedQueryReceipt(
         trial_id=trial_id,
+        query_identity=query_identity,
+        query_index=query_index,
         candidate=candidate,
+        query_plan_digest=query_plan_digest,
         query_digest=query_digest,
+        normalized_arguments_digest=normalized_arguments_digest,
         evaluation_manifest_digest=evaluation_manifest_digest,
         status=status,
         query_completeness=completeness,
@@ -342,9 +584,8 @@ def parse_normalized_query_receipt(
 
 def derive_zero_result_authority(
     *,
-    coverage: tuple[str, ...],
-    health: tuple[str, ...],
-    freshness: tuple[str, ...],
+    source_statuses: tuple[Mapping[str, object], ...],
+    expected_logical_repo_ids: tuple[str, ...],
     query_completeness: str,
     truncated: bool,
     returned_count: int,
@@ -352,10 +593,24 @@ def derive_zero_result_authority(
 ) -> str:
     """Derive the sole absence authority value from closed normalized state."""
 
+    actual_logical_repo_ids = tuple(
+        item.get("logical_repository") for item in source_statuses
+    )
+    if actual_logical_repo_ids != expected_logical_repo_ids:
+        return "NONAUTHORITATIVE_SOURCE_SET_MISMATCH"
     if returned_count > 0:
         return "NOT_APPLICABLE_MATCHES_RETURNED"
     if not response_identity_known:
         return "NONAUTHORITATIVE_IDENTITY_UNKNOWN"
+    if any(
+        item.get("requested_commit") != item.get("indexed_commit")
+        or item.get("requested_tree") != item.get("indexed_tree")
+        for item in source_statuses
+    ):
+        return "NONAUTHORITATIVE_IDENTITY_UNKNOWN"
+    coverage = tuple(item.get("coverage") for item in source_statuses)
+    health = tuple(item.get("health") for item in source_statuses)
+    freshness = tuple(item.get("freshness") for item in source_statuses)
     if "SOURCE_IDENTITY_MISMATCH" in coverage or "UNKNOWN" in coverage:
         return "NONAUTHORITATIVE_IDENTITY_UNKNOWN"
     if any(value != "FULLY_COVERED" for value in coverage):
@@ -402,6 +657,44 @@ class ResourceObservation:
 
 
 @dataclass(frozen=True)
+class GenerationExecutionReceipt:
+    """Measured build/publish environment for one immutable source generation."""
+
+    evaluation_manifest_digest: str
+    source_blob_census_digest: str
+    source_path_policy_digest: str
+    zoekt_source_commit: str
+    zoekt_binary_digest: str
+    go_toolchain_digest: str
+    module_graph_digest: str
+    ctags_disposition_digest: str
+    configuration_digest: str
+    sandbox_digest: str
+    selected_file_count: int | str
+    selected_byte_count: int | str
+    shard_count: int | str
+    build_ms: int | str
+    refresh_ms: int | str
+    query_ms: int | str
+    cpu_ms: int | str
+    rss_bytes: int | str
+    disk_bytes: int | str
+    disk_io_bytes: int | str
+    process_count: int | str
+    open_file_peak: int | str
+    network_attempt_count: int | str
+    credential_access_count: int | str
+    source_write_count: int | str
+    output_digest: str
+    published_generation_id: str | None
+    prior_generation_id: str | None
+    effect: str
+    cleanup_state: str
+    cleanup_receipt_digest: str
+    correction_of: str | None
+
+
+@dataclass(frozen=True)
 class GenerationReceipt:
     """One repository/ref indexing result, whether it succeeded or failed."""
 
@@ -413,6 +706,7 @@ class GenerationReceipt:
     indexed_commit_sha: str | None
     shard_digest: str | None
     failure_code: str | None
+    execution: GenerationExecutionReceipt | None = None
 
 
 @dataclass(frozen=True)
@@ -433,6 +727,20 @@ class FailureInjectionReceipt:
     cleanup_state: str
     correction_of: str | None
     evidence_digest: str
+    execution: "FailureExecutionReceipt | None" = None
+
+
+@dataclass(frozen=True)
+class FailureExecutionReceipt:
+    """Typed execution proof for one actual injected fault, not a caller label."""
+
+    injection_id: str
+    expected_failure_code: str
+    observed_failure_code: str
+    expected_effect: str
+    observed_effect: str
+    cleanup_state: str
+    execution_receipt_digest: str
 
 
 @dataclass(frozen=True)
@@ -450,6 +758,11 @@ class TrialReceipt:
     """One trial from the preregistered alternating candidate order."""
 
     trial_id: str
+    query_identity: str
+    query_index: int
+    query_plan_digest: str
+    normalized_arguments_digest: str
+    query_receipt_digest: str
     attempt_index: int
     outcome: str
     answer_key_digest: str
@@ -476,9 +789,106 @@ class CandidateTrialObservation:
     failure_code: str | None
 
 
-TrialExecutor = Callable[[EvaluationQuery], CandidateTrialObservation]
+@dataclass(frozen=True)
+class CandidateTransport:
+    """Opaque candidate transport material; it contains no grader semantics."""
+
+    receipt_document: bytes | bytearray | str | Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class EvaluationBundleIdentity:
+    """Exact host-captured bundle identities required by one real evidence run.
+
+    This type intentionally carries only identities, not binary paths, endpoints,
+    credentials, or an execution command.  The orchestration layer can therefore
+    bind observed receipts to the reviewed bundle without gaining a mechanism to
+    start a service, install a dependency, or access an account.
+    """
+
+    zoekt_source_commit: str
+    zoekt_git_index_digest: str
+    zoekt_webserver_digest: str
+    go_toolchain_digest: str
+    module_graph_digest: str
+    ctags_disposition_digest: str
+    configuration_digest: str
+    sandbox_digest: str
+    tool_schema_digest: str
+
+
+@dataclass(frozen=True)
+class CapturedCandidateAdapter:
+    """Read-only transport capture for exactly one candidate implementation.
+
+    Host runners may populate this object after they have performed an
+    independently authorized disposable experiment.  It does not execute a
+    command: it only returns the already-captured opaque receipt document for a
+    frozen ``QueryPlan``.
+    """
+
+    candidate: str
+    transports: Mapping[str, CandidateTransport]
+
+    def __post_init__(self) -> None:
+        if self.candidate not in {"baseline", "zoekt"}:
+            raise EvidenceError("captured adapter candidate is not in the closed vocabulary")
+        if not isinstance(self.transports, Mapping):
+            raise EvidenceError("captured adapter transports must be a mapping")
+        copied: dict[str, CandidateTransport] = {}
+        for query_identity, transport in self.transports.items():
+            if not isinstance(query_identity, str) or not query_identity:
+                raise EvidenceError("captured adapter query identity is invalid")
+            if not isinstance(transport, CandidateTransport):
+                raise EvidenceError("captured adapter transport is invalid")
+            copied[query_identity] = transport
+        object.__setattr__(self, "transports", MappingProxyType(copied))
+
+    def transport_for(self, plan: QueryPlan) -> CandidateTransport:
+        """Return existing transport material; a missing row is retained as failure."""
+
+        if not isinstance(plan, QueryPlan):
+            raise EvidenceError("captured adapter requires a QueryPlan")
+        transport = self.transports.get(plan.query_identity)
+        if transport is None:
+            raise EvidenceError("captured adapter is missing the frozen query transport")
+        return transport
+
+
+@dataclass(frozen=True)
+class CapturedEvaluation:
+    """A complete host capture consumed without any live runtime operation.
+
+    The capture deliberately separates generation facts, paired candidate
+    transport, adversarial fault receipts, and the final path/topology evidence.
+    Every field is fed through the same append-only ledger validation used for
+    direct test fixtures; this class merely removes production callbacks from
+    the public orchestration entry point.
+    """
+
+    generation_id: str
+    generation_receipts: tuple[GenerationReceipt, ...]
+    baseline: CapturedCandidateAdapter
+    zoekt: CapturedCandidateAdapter
+    failure_injection_receipts: tuple[FailureInjectionReceipt, ...]
+    decision_evidence: DecisionEvidence | None
+
+
+@dataclass(frozen=True)
+class EmpiricalEvaluationArtifacts:
+    """Canonical in-memory evidence artifacts emitted by the inert orchestrator."""
+
+    ledger_bytes: bytes
+    ledger_digest: str
+    evidence: EvaluationEvidence
+    decision: str | None
+    result_bytes: bytes
+    result_digest: str
+
+
+TrialExecutor = Callable[[QueryPlan], CandidateTransport]
 QueryReceiptFactory = Callable[
-    [EvaluationQuery, str, int, CandidateTrialObservation],
+    [QueryPlan, TrialIdentity, CandidateTransport],
     NormalizedQueryReceipt,
 ]
 
@@ -489,6 +899,36 @@ class TrialGrade:
 
     recall: float
     false_positive_count: int
+
+
+@dataclass(frozen=True)
+class ComparativeEvidence:
+    """Closed measured comparison used by the decision law, never a caller vote."""
+
+    metrics: Mapping[str, Mapping[str, float]]
+    measurement_digest: str
+
+
+@dataclass(frozen=True)
+class DecisionEvidence:
+    """Bound path/topology/freshness/reproducibility evidence for one final gate."""
+
+    manifest_digest: str
+    path_policy_id: str
+    path_policy_measurements_digest: str
+    p0_non_recall_justification: str | None
+    topology_id: str
+    topology_measurements_digest: str
+    freshness_receipt_digest: str
+    reproducibility_receipt_digest: str
+    comparative: ComparativeEvidence
+    safety_complete: bool
+    correctness_complete: bool
+    freshness_complete: bool
+    reproducibility_complete: bool
+    path_policy_complete: bool
+    topology_complete: bool
+    constitutional_failure: bool
 
 
 @dataclass(frozen=True)
@@ -508,6 +948,8 @@ class EvaluationEvidence:
     recorded_failure_injection_count: int
     all_resources_known: bool
     all_identity_bound: bool
+    decision: str | None
+    decision_evidence: DecisionEvidence | None
     reasons: tuple[str, ...]
     canonical_bytes: bytes
 
@@ -526,6 +968,8 @@ class EvaluationEvidence:
             "recorded_failure_injection_count": self.recorded_failure_injection_count,
             "all_resources_known": self.all_resources_known,
             "all_identity_bound": self.all_identity_bound,
+            "decision": self.decision,
+            "decision_evidence": _decision_evidence_payload(self.decision_evidence),
             "reasons": list(self.reasons),
         }
 
@@ -533,38 +977,42 @@ class EvaluationEvidence:
 def build_decision_from_evidence(
     evidence: EvaluationEvidence,
     *,
-    repositories_safe: bool,
     ledger: EvaluationLedger,
     evaluation_manifest: EvaluationManifest,
     answer_keys: Mapping[str, AnswerKey],
-) -> str:
-    """Return a production-inert decision only from its bound ledger inputs."""
+) -> str | None:
+    """Return a final only from complete real measured evidence, otherwise null."""
 
     if not isinstance(evidence, EvaluationEvidence):
         raise EvidenceError("decision builder requires EvaluationEvidence")
-    if type(repositories_safe) is not bool:
-        raise EvidenceError("repositories_safe must be a boolean")
-    if not repositories_safe:
-        return NO_SAFE_GLOBAL_INDEX
     if not isinstance(ledger, EvaluationLedger):
         raise EvidenceError("decision builder requires an EvaluationLedger")
     if not isinstance(evaluation_manifest, EvaluationManifest):
         raise EvidenceError("decision builder requires an EvaluationManifest")
     if not _manifest_binds_ledger(evaluation_manifest, ledger):
-        return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
+        return None
     if not _answer_keys_bind_manifest(evaluation_manifest, ledger, answer_keys):
-        return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
+        return None
     frozen = ledger.freeze()
     if evidence != frozen:
-        return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
+        return None
     if not _trial_grades_bind_answer_keys(ledger, answer_keys):
+        return None
+    if not _bound_evidence_summary_is_final_eligible(frozen):
+        return None
+    decision_evidence = frozen.decision_evidence
+    assert decision_evidence is not None
+    if decision_evidence.topology_id == "NO_SAFE_TOPOLOGY" or decision_evidence.constitutional_failure:
+        return NO_SAFE_GLOBAL_INDEX
+    if not _zoekt_has_preregistered_material_advantage(
+        evaluation_manifest,
+        decision_evidence.comparative,
+    ):
         return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
-    if _bound_evidence_summary_is_acceptance_eligible(frozen):
-        return ZOEKT_FACADE_ACCEPTED_FOR_CI3
-    return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
+    return ZOEKT_FACADE_ACCEPTED_FOR_CI3
 
 
-def _bound_evidence_summary_is_acceptance_eligible(
+def _bound_evidence_summary_is_final_eligible(
     evidence: EvaluationEvidence,
 ) -> bool:
     """Check the summary only after the builder bound it to its source ledger."""
@@ -594,6 +1042,9 @@ def _bound_evidence_summary_is_acceptance_eligible(
         or not evidence.all_resources_known
         or type(evidence.all_identity_bound) is not bool
         or not evidence.all_identity_bound
+        or evidence.decision is not None
+        or not isinstance(evidence.decision_evidence, DecisionEvidence)
+        or not _decision_evidence_is_complete(evidence.decision_evidence)
         or type(evidence.reasons) is not tuple
         or evidence.reasons
         or any(
@@ -607,6 +1058,86 @@ def _bound_evidence_summary_is_acceptance_eligible(
     ):
         return False
     return True
+
+
+def _decision_evidence_is_complete(evidence: DecisionEvidence) -> bool:
+    """Completion is a conjunction of observed safety, truth, and reproducibility."""
+
+    return (
+        evidence.safety_complete
+        and evidence.correctness_complete
+        and evidence.freshness_complete
+        and evidence.reproducibility_complete
+        and evidence.path_policy_complete
+        and evidence.topology_complete
+        and all(
+            isinstance(value, str) and _SHA256_RE.fullmatch(value) is not None
+            for value in (
+                evidence.manifest_digest,
+                evidence.path_policy_measurements_digest,
+                evidence.topology_measurements_digest,
+                evidence.freshness_receipt_digest,
+                evidence.reproducibility_receipt_digest,
+                evidence.comparative.measurement_digest,
+            )
+        )
+    )
+
+
+def _validate_comparative_metrics(metrics: Mapping[str, Mapping[str, float]]) -> None:
+    if not isinstance(metrics, Mapping) or not metrics:
+        raise EvidenceError("comparative metrics must be a non-empty mapping")
+    for metric, values in metrics.items():
+        _require_identifier(metric, "comparative metric")
+        if not isinstance(values, Mapping) or set(values) != {"baseline", "zoekt"}:
+            raise EvidenceError("comparative metric must contain baseline and zoekt values")
+        for candidate, value in values.items():
+            if type(value) not in {int, float} or not math.isfinite(float(value)) or value < 0:
+                raise EvidenceError(f"comparative metric {metric}/{candidate} is invalid")
+
+
+def _zoekt_has_preregistered_material_advantage(
+    manifest: EvaluationManifest,
+    comparative: ComparativeEvidence,
+) -> bool:
+    """Apply only manifest-supplied materiality rules; ties always stay baseline."""
+
+    _validate_comparative_metrics(comparative.metrics)
+    rules = manifest.materiality_bands
+    positive_rules = rules.get("required_positive_advantage_any")
+    if isinstance(positive_rules, tuple):
+        for rule in positive_rules:
+            if not isinstance(rule, Mapping):
+                return False
+            metric = rule.get("metric")
+            if not isinstance(metric, str) or metric not in comparative.metrics:
+                continue
+            baseline = comparative.metrics[metric]["baseline"]
+            zoekt = comparative.metrics[metric]["zoekt"]
+            fraction = rule.get("zoekt_at_most_fraction_of_baseline")
+            delta = rule.get("zoekt_minus_baseline_minimum")
+            if (
+                type(fraction) in {int, float}
+                and baseline > 0
+                and zoekt <= baseline * float(fraction)
+            ):
+                return True
+            if type(delta) in {int, float} and zoekt - baseline >= float(delta):
+                return True
+        return False
+
+    recall_delta = rules.get("minimum_recall_delta")
+    latency_delta = rules.get("minimum_useful_latency_delta_ms")
+    if type(recall_delta) not in {int, float} or type(latency_delta) not in {int, float}:
+        return False
+    recall = comparative.metrics.get("critical_path_recall")
+    latency = comparative.metrics.get("time_to_first_useful_ms")
+    return bool(
+        recall is not None
+        and recall["zoekt"] - recall["baseline"] > float(recall_delta)
+        or latency is not None
+        and latency["baseline"] - latency["zoekt"] > float(latency_delta)
+    )
 
 
 def _manifest_binds_ledger(
@@ -631,21 +1162,27 @@ def _answer_keys_bind_manifest(
 ) -> bool:
     if not isinstance(ledger, EvaluationLedger) or not isinstance(answer_keys, Mapping):
         return False
-    expected_by_case = {
-        query.case_id: query.answer_key_digest for query in evaluation_manifest.queries
+    expected_by_query = {
+        query.identity: query.answer_key_digest
+        for query in evaluation_manifest.queries
     }
-    if set(answer_keys) != set(expected_by_case):
+    if set(answer_keys) != set(expected_by_query):
         return False
-    for case_id, expected_digest in expected_by_case.items():
-        answer_key = answer_keys[case_id]
+    for query in evaluation_manifest.queries:
+        expected_digest = expected_by_query[query.identity]
+        answer_key = answer_keys[query.identity]
         if (
             not isinstance(answer_key, AnswerKey)
-            or answer_key.case_id != case_id
+            or answer_key.case_id != query.case_id
             or answer_key.digest != expected_digest
             or not _answer_key_binds_canonical_source(
                 answer_key, ledger._source_census_digest
             )
         ):
+            return False
+        try:
+            build_query_plan(evaluation_manifest, query, answer_key)
+        except EvidenceError:
             return False
     return True
 
@@ -687,6 +1224,8 @@ def _answer_key_binds_canonical_source(
         if payload["census_digest"] != source_census_digest:
             return False
         _require_sha256(payload["census_digest"], "answer key census_digest")
+        if payload["path_policy_digest"] is not None:
+            _require_sha256(payload["path_policy_digest"], "answer key path_policy_digest")
         _validate_answer_key_query(payload["query"])
         expected = _answer_key_expected_identities(payload["expected"])
         forbidden = _answer_key_forbidden_identities(payload["forbidden"])
@@ -697,6 +1236,7 @@ def _answer_key_binds_canonical_source(
     return (
         expected == answer_key.expected_identities
         and forbidden == answer_key.forbidden_identities
+        and answer_key.path_policy_digest == payload["path_policy_digest"]
         and not (set(expected) & set(forbidden))
     )
 
@@ -800,10 +1340,10 @@ def _trial_grades_bind_answer_keys(
     if tuple(item.trial_id for item in ledger.trial_receipts) != ledger.manifest.trial_order:
         return False
     for receipt in ledger.trial_receipts:
-        case_id, _candidate = receipt.trial_id.split(":", 1)
         try:
+            query, _identity = ledger._query_and_identity_for_trial(receipt.trial_id)
             grade = grade_candidate_result(
-                answer_keys[case_id], receipt.returned_identities
+                answer_keys[query.identity], receipt.returned_identities
             )
         except (EvidenceError, KeyError):
             return False
@@ -840,6 +1380,8 @@ class EvaluationLedger:
         self._query_receipts: list[NormalizedQueryReceipt] = []
         self._trial_receipts: list[TrialReceipt] = []
         self._active_generation_id: str | None = None
+        self._query_plans: dict[str, QueryPlan] = {}
+        self._decision_evidence: DecisionEvidence | None = None
 
     @property
     def manifest(self) -> EvaluationManifest:
@@ -872,6 +1414,115 @@ class EvaluationLedger:
     @property
     def active_generation_id(self) -> str | None:
         return self._active_generation_id
+
+    @property
+    def query_plans(self) -> tuple[QueryPlan, ...]:
+        """Return the bound immutable plans in manifest query order."""
+
+        return tuple(self._query_plans[query.identity] for query in self._manifest.queries
+                     if query.identity in self._query_plans)
+
+    @property
+    def decision_evidence(self) -> DecisionEvidence | None:
+        return self._decision_evidence
+
+    def record_decision_evidence(self, evidence: DecisionEvidence) -> None:
+        """Append the one actual policy/topology comparison gate for this ledger."""
+
+        if self._decision_evidence is not None:
+            raise EvidenceError("decision evidence cannot be overwritten or retried")
+        if not isinstance(evidence, DecisionEvidence):
+            raise EvidenceError("decision evidence must have the closed receipt shape")
+        if evidence.manifest_digest != self._manifest.digest:
+            raise EvidenceError("decision evidence manifest digest does not bind this ledger")
+        if evidence.path_policy_id not in self._manifest.path_policy_candidates:
+            raise EvidenceError("decision evidence has an unregistered path policy")
+        if evidence.topology_id not in {"T0", "T1", "NO_SAFE_TOPOLOGY"}:
+            raise EvidenceError("decision evidence has an unknown topology")
+        for label, value in (
+            ("path_policy_measurements_digest", evidence.path_policy_measurements_digest),
+            ("topology_measurements_digest", evidence.topology_measurements_digest),
+            ("freshness_receipt_digest", evidence.freshness_receipt_digest),
+            ("reproducibility_receipt_digest", evidence.reproducibility_receipt_digest),
+        ):
+            _require_sha256(value, label)
+        if not isinstance(evidence.comparative, ComparativeEvidence):
+            raise EvidenceError("decision evidence requires closed comparative measurements")
+        _require_sha256(evidence.comparative.measurement_digest, "comparative measurement digest")
+        _validate_comparative_metrics(evidence.comparative.metrics)
+        for label, value in (
+            ("safety_complete", evidence.safety_complete),
+            ("correctness_complete", evidence.correctness_complete),
+            ("freshness_complete", evidence.freshness_complete),
+            ("reproducibility_complete", evidence.reproducibility_complete),
+            ("path_policy_complete", evidence.path_policy_complete),
+            ("topology_complete", evidence.topology_complete),
+            ("constitutional_failure", evidence.constitutional_failure),
+        ):
+            if type(value) is not bool:
+                raise EvidenceError(f"decision evidence {label} must be boolean")
+        if evidence.path_policy_id == "P0":
+            allowed = self._manifest.path_policy_rules.get(
+                "p0_allowed_non_recall_justifications"
+            )
+            if (
+                not isinstance(evidence.p0_non_recall_justification, str)
+                or not isinstance(allowed, tuple)
+                or evidence.p0_non_recall_justification not in allowed
+            ):
+                raise EvidenceError(
+                    "P0 requires an actual preregistered non-recall justification"
+                )
+        elif evidence.p0_non_recall_justification is not None:
+            raise EvidenceError("only P0 may carry a non-recall justification")
+        self._decision_evidence = evidence
+
+    def bind_query_plans(self, plans: Mapping[str, QueryPlan]) -> None:
+        """Bind every manifest query to its one AnswerKey-derived execution plan.
+
+        Plans must be bound before any receipt exists.  This prevents a caller
+        from changing raw query bytes between the baseline execution, the
+        Zoekt execution, and the grader's receipt validation.
+        """
+
+        if self._query_receipts or self._trial_receipts:
+            raise EvidenceError("query plans must bind before any trial evidence")
+        if not isinstance(plans, Mapping):
+            raise EvidenceError("query plans must be a mapping")
+        expected = {query.identity for query in self._manifest.queries}
+        if set(plans) != expected:
+            raise EvidenceError("query plans must cover every frozen manifest query")
+        bound: dict[str, QueryPlan] = {}
+        for query in self._manifest.queries:
+            plan = plans[query.identity]
+            if not isinstance(plan, QueryPlan):
+                raise EvidenceError("query plans must contain QueryPlan entries")
+            if (
+                plan.query_identity != query.identity
+                or plan.evaluation_manifest_digest != self._manifest.digest
+                or plan.case_id != query.case_id
+                or plan.family != query.family
+                or plan.repetition_index != query.repetition_index
+                or plan.warm_or_cold != query.warm_or_cold
+                or plan.query_index != query.query_index
+                or plan.candidate_order != query.candidate_order
+                or plan.query_digest != query.query_digest
+                or plan.filters_digest != query.filters_digest
+                or plan.answer_key_digest != query.answer_key_digest
+                or plan.forbidden_answer_digest != query.forbidden_answer_digest
+                or plan.logical_repo_ids != query.logical_repo_ids
+                or plan.refs != query.refs
+                or plan.path_prefixes != query.path_prefixes
+                or plan.languages != query.languages
+                or plan.max_results != query.max_results
+                or plan.max_context_lines != query.max_context_lines
+                or plan.timeout_ms != query.timeout_ms
+                or _SHA256_RE.fullmatch(plan.digest) is None
+                or _SHA256_RE.fullmatch(plan.normalized_arguments_digest) is None
+            ):
+                raise EvidenceError("query plan does not bind its frozen manifest query")
+            bound[query.identity] = plan
+        self._query_plans = bound
 
     def record_generation(self, receipt: GenerationReceipt) -> None:
         """Append one exact build outcome; source movement and omission are errors."""
@@ -916,6 +1567,11 @@ class EvaluationLedger:
                 _require_sha1(receipt.indexed_commit_sha, "indexed_commit_sha")
             if receipt.shard_digest is not None:
                 _require_sha256(receipt.shard_digest, "shard_digest")
+        if receipt.execution is None:
+            if self._run_kind == "real":
+                raise EvidenceError("real generation requires measured execution receipt")
+        else:
+            self._validate_generation_execution(receipt, expected)
         self._generation_receipts.append(receipt)
 
     def publish_generation(self, generation_id: str) -> PublicationReceipt:
@@ -963,10 +1619,34 @@ class EvaluationLedger:
             raise EvidenceError("query receipt cannot replace a retained failure")
         if self._active_generation_id is None:
             raise EvidenceError("query receipt requires a published full generation")
-        case_id, candidate = receipt.trial_id.split(":", 1)
-        if receipt.candidate != candidate:
+        query, identity = self._query_and_identity_for_trial(receipt.trial_id)
+        if receipt.candidate != identity.candidate:
             raise EvidenceError("query receipt candidate does not bind trial_id")
-        query = next(item for item in self._manifest.queries if item.case_id == case_id)
+        if receipt.query_identity != query.identity:
+            raise EvidenceError("query receipt query identity does not bind trial_id")
+        if receipt.query_index != query.query_index:
+            raise EvidenceError("query receipt query index does not bind frozen query")
+        plan = self._query_plans.get(query.identity)
+        if plan is None:
+            raise EvidenceError("query receipt requires a bound answer-key query plan")
+        try:
+            canonical_receipt = parse_normalized_query_receipt(
+                receipt.canonical_bytes, query_plan=plan
+            )
+        except QueryReceiptError as error:
+            raise EvidenceError(
+                "query receipt canonical bytes do not satisfy the frozen query contract"
+            ) from error
+        if canonical_receipt != receipt:
+            raise EvidenceError(
+                "query receipt object does not bind its canonical normalized state"
+            )
+        if receipt.query_plan_digest != plan.digest:
+            raise EvidenceError("query receipt query plan digest does not bind frozen query")
+        if receipt.normalized_arguments_digest != plan.normalized_arguments_digest:
+            raise EvidenceError(
+                "query receipt normalized arguments do not bind frozen query plan"
+            )
         if receipt.query_digest != query.query_digest:
             raise EvidenceError("query receipt query_digest does not bind frozen query")
         if receipt.evaluation_manifest_digest != self._manifest.digest:
@@ -979,32 +1659,38 @@ class EvaluationLedger:
             raise EvidenceError("query receipt generation manifest identity mismatch")
         if index_identity["source_epoch_digest"] != self._source_census_digest:
             raise EvidenceError("query receipt source epoch identity mismatch")
-        requested_sources = receipt.payload["requested_sources"]
-        assert isinstance(requested_sources, tuple)
+        source_statuses = receipt.payload["source_statuses"]
+        assert isinstance(source_statuses, tuple)
         corpus_by_id = self._corpus_by_logical_id()
-        requested_ids: set[str] = set()
-        for source in requested_sources:
-            if not isinstance(source, Mapping):
-                raise EvidenceError("query receipt requested source shape is invalid")
-            logical_id = source["logical_repository"]
+        source_ids: list[str] = []
+        for source_status in source_statuses:
+            if not isinstance(source_status, Mapping):
+                raise EvidenceError("query receipt source status shape is invalid")
+            logical_id = source_status["logical_repository"]
             if not isinstance(logical_id, str) or logical_id not in corpus_by_id:
-                raise EvidenceError("query receipt requested source identity is unregistered")
+                raise EvidenceError("query receipt source status identity is unregistered")
             expected_source = corpus_by_id[logical_id]
             canonical_digest = hashlib.sha256(
                 expected_source["canonical_repository"].encode("utf-8")
             ).hexdigest()
             if (
-                source["canonical_repository_digest"] != canonical_digest
-                or source["requested_ref"] != expected_source["ref"]
-                or source["requested_commit"] != expected_source["commit"]
-                or source["requested_tree"] != expected_source["tree"]
+                source_status["canonical_repository_digest"] != canonical_digest
+                or source_status["requested_ref"] != expected_source["ref"]
+                or source_status["requested_commit"] != expected_source["commit"]
+                or source_status["requested_tree"] != expected_source["tree"]
+                or source_status["indexed_commit"] != expected_source["commit"]
+                or source_status["indexed_tree"] != expected_source["tree"]
+                or source_status["generation_id"] != self._active_generation_id
             ):
                 raise EvidenceError(
-                    "query receipt requested source identity does not bind frozen corpus"
+                    "query receipt source status does not bind frozen corpus/generation"
                 )
-            requested_ids.add(logical_id)
-        if requested_ids != set(corpus_by_id):
-            raise EvidenceError("query receipt requested source set is incomplete")
+            source_ids.append(logical_id)
+        if tuple(source_ids) != plan.logical_repo_ids:
+            raise EvidenceError(
+                "query receipt source statuses do not bind the query source subset/order"
+            )
+        _observation_from_query_receipt(self, query, receipt)
         self._query_receipts.append(receipt)
 
     def record_query_receipt_failure(self, receipt: QueryReceiptFailureReceipt) -> None:
@@ -1035,7 +1721,7 @@ class EvaluationLedger:
 
         if not isinstance(receipt, FailureInjectionReceipt):
             raise EvidenceError("failure injection must be a FailureInjectionReceipt")
-        if receipt.failure_code not in REQUIRED_FAILURE_INJECTIONS:
+        if receipt.failure_code not in self._manifest.failure_injections:
             raise EvidenceError("failure injection is not preregistered")
         if any(
             item.failure_code == receipt.failure_code
@@ -1049,6 +1735,30 @@ class EvaluationLedger:
         if receipt.correction_of is not None:
             _require_sha256(receipt.correction_of, "correction_of")
         _require_sha256(receipt.evidence_digest, "evidence_digest")
+        execution = receipt.execution
+        if not isinstance(execution, FailureExecutionReceipt):
+            raise EvidenceError("failure injection requires a typed execution receipt")
+        _require_identifier(execution.injection_id, "injection_id")
+        if execution.injection_id != receipt.failure_code:
+            raise EvidenceError("failure execution receipt does not bind preregistered injection")
+        if (
+            execution.expected_failure_code not in _FAILURE_CODES
+            or execution.observed_failure_code != execution.expected_failure_code
+        ):
+            raise EvidenceError("failure execution receipt must retain the expected typed failure")
+        if (
+            execution.expected_effect not in {"PUBLISH_REFUSED", "NO_EFFECT"}
+            or execution.observed_effect != execution.expected_effect
+        ):
+            raise EvidenceError("failure execution receipt effect does not match expected effect")
+        if (
+            execution.cleanup_state != "SUCCEEDED"
+            or execution.cleanup_state != receipt.cleanup_state
+        ):
+            raise EvidenceError("failure execution receipt cleanup is not successful")
+        _require_sha256(execution.execution_receipt_digest, "execution_receipt_digest")
+        if receipt.evidence_digest != execution.execution_receipt_digest:
+            raise EvidenceError("failure injection evidence must be its typed execution receipt")
         self._failure_injection_receipts.append(receipt)
 
     def record_trial(self, receipt: TrialReceipt) -> None:
@@ -1066,10 +1776,43 @@ class EvaluationLedger:
             raise EvidenceError("trial requires a published full generation")
         if receipt.generation_id != self._active_generation_id:
             raise EvidenceError("trial generation is not the active published generation")
-        case_id, candidate = receipt.trial_id.split(":", 1)
-        if candidate not in {"baseline", "zoekt"}:
-            raise EvidenceError("trial candidate is not in the closed vocabulary")
-        query = next(item for item in self._manifest.queries if item.case_id == case_id)
+        query, identity = self._query_and_identity_for_trial(receipt.trial_id)
+        plan = self._query_plans.get(query.identity)
+        if plan is None:
+            raise EvidenceError("trial requires a bound answer-key query plan")
+        query_receipt = next(
+            (
+                item
+                for item in self._query_receipts
+                if item.trial_id == receipt.trial_id
+            ),
+            None,
+        )
+        failure_receipt = next(
+            (
+                item
+                for item in self._query_receipt_failure_receipts
+                if item.trial_id == receipt.trial_id
+            ),
+            None,
+        )
+        if query_receipt is None and failure_receipt is None:
+            raise EvidenceError(
+                "trial requires its validated normalized query receipt or retained failure"
+            )
+        if (
+            receipt.query_identity != query.identity
+            or receipt.query_index != query.query_index
+            or receipt.query_plan_digest != plan.digest
+            or receipt.normalized_arguments_digest != plan.normalized_arguments_digest
+        ):
+            raise EvidenceError("trial does not bind its validated query receipt and plan")
+        if query_receipt is not None and receipt.query_receipt_digest != query_receipt.digest:
+            raise EvidenceError("trial does not bind its validated query receipt and plan")
+        if failure_receipt is not None and receipt.query_receipt_digest != failure_receipt.evidence_digest:
+            raise EvidenceError("trial does not bind its retained query receipt failure")
+        if query_receipt is not None and query_receipt.candidate != identity.candidate:
+            raise EvidenceError("trial receipt candidate does not bind query receipt")
         if receipt.answer_key_digest != query.answer_key_digest:
             raise EvidenceError("trial answer_key_digest does not match frozen query")
         if receipt.source_census_digest != self._source_census_digest:
@@ -1096,6 +1839,22 @@ class EvaluationLedger:
         else:
             if receipt.query_completed or receipt.failure_code not in _FAILURE_CODES:
                 raise EvidenceError("failed trial requires incomplete query and known failure_code")
+        expected_observation = (
+            _observation_from_query_receipt(self, query, query_receipt)
+            if query_receipt is not None
+            else _callback_failure("error", "RESULT_SCHEMA_INVALID")
+        )
+        if (
+            receipt.outcome != expected_observation.outcome
+            or receipt.query_completed != expected_observation.query_completed
+            or receipt.truncated != expected_observation.truncated
+            or receipt.returned_identities != expected_observation.returned_identities
+            or receipt.resource != expected_observation.resource
+            or receipt.failure_code != expected_observation.failure_code
+        ):
+            raise EvidenceError(
+                "trial semantic observation must be mechanically derived from query receipt"
+            )
         self._trial_receipts.append(receipt)
 
     def freeze(self) -> EvaluationEvidence:
@@ -1109,7 +1868,9 @@ class EvaluationLedger:
         query_receipts_by_trial = {
             item.trial_id: item for item in self._query_receipts
         }
-        queries_by_case = {item.case_id: item for item in self._manifest.queries}
+        queries_by_identity = {
+            item.identity: item for item in self._manifest.queries
+        }
         transport_failed = tuple(
             item
             for item in self._trial_receipts
@@ -1120,7 +1881,9 @@ class EvaluationLedger:
             for item in self._trial_receipts
             if _trial_grade_fails(
                 item,
-                queries_by_case[item.trial_id.split(":", 1)[0]],
+                queries_by_identity[
+                    self._query_and_identity_for_trial(item.trial_id)[0].identity
+                ],
             )
         )
         failed = tuple(
@@ -1138,7 +1901,7 @@ class EvaluationLedger:
         )
         all_failure_injections_recorded = {
             item.failure_code for item in self._failure_injection_receipts
-        } == set(REQUIRED_FAILURE_INJECTIONS)
+        } == set(self._manifest.failure_injections)
         all_identity_bound = (
             self._active_generation_id is not None
             and all(item.generation_id == self._active_generation_id for item in self._trial_receipts)
@@ -1147,6 +1910,11 @@ class EvaluationLedger:
                 for item in self._trial_receipts
             )
         )
+        all_generation_execution_eligible = all(
+            _generation_execution_is_decision_eligible(item.execution)
+            for item in self._generation_receipts
+            if item.status == "succeeded"
+        ) and bool(self._generation_receipts)
         reasons: list[str] = []
         if recorded_ids != expected_trial_ids:
             reasons.append("MISSING_OR_UNEXPECTED_TRIALS")
@@ -1164,12 +1932,15 @@ class EvaluationLedger:
             reasons.append("UNKNOWN_RESOURCE_OBSERVATION")
         if not all_identity_bound:
             reasons.append("UNBOUND_GENERATION_OR_SOURCE")
+        if not all_generation_execution_eligible:
+            reasons.append("INCOMPLETE_GENERATION_EXECUTION_RECEIPT")
+        if self._decision_evidence is None:
+            reasons.append("MISSING_PATH_TOPOLOGY_FRESHNESS_REPRODUCIBILITY_EVIDENCE")
+        elif not _decision_evidence_is_complete(self._decision_evidence):
+            reasons.append("INCOMPLETE_PATH_TOPOLOGY_FRESHNESS_REPRODUCIBILITY_EVIDENCE")
         if self._run_kind == "synthetic":
-            state = "NON_DECISION_SYNTHETIC_ONLY"
-        elif reasons:
-            state = "NON_DECISION_INCOMPLETE_EVIDENCE"
-        else:
-            state = "ELIGIBLE_REAL_EMPIRICAL_EVIDENCE"
+            reasons.append("SYNTHETIC_EVIDENCE")
+        state = "NON_DECISION" if reasons else "ELIGIBLE_REAL_EMPIRICAL_EVIDENCE"
         return EvaluationEvidence(
             state=state,
             manifest_digest=self._manifest.digest,
@@ -1180,10 +1951,12 @@ class EvaluationLedger:
             required_trial_count=len(expected_trial_ids),
             recorded_trial_count=len(self._trial_receipts),
             failed_trial_count=len(failed),
-            required_failure_injection_count=len(REQUIRED_FAILURE_INJECTIONS),
+            required_failure_injection_count=len(self._manifest.failure_injections),
             recorded_failure_injection_count=len(self._failure_injection_receipts),
             all_resources_known=all_resources_known,
             all_identity_bound=all_identity_bound,
+            decision=None,
+            decision_evidence=self._decision_evidence,
             reasons=tuple(reasons),
             canonical_bytes=canonical,
         )
@@ -1214,10 +1987,87 @@ class EvaluationLedger:
                 _query_receipt_payload(item) for item in self._query_receipts
             ],
             "trial_receipts": [_trial_payload(item) for item in self._trial_receipts],
+            "decision_evidence": _decision_evidence_payload(self._decision_evidence),
         }
 
     def _corpus_by_logical_id(self) -> dict[str, dict[str, str]]:
         return {str(item["logical_repo_id"]): dict(item) for item in self._manifest.corpus}
+
+    def _validate_generation_execution(
+        self,
+        receipt: GenerationReceipt,
+        expected_source: Mapping[str, str],
+    ) -> None:
+        """Bind source, bundle, host safety, publish effect, and cleanup facts."""
+
+        execution = receipt.execution
+        assert isinstance(execution, GenerationExecutionReceipt)
+        if execution.evaluation_manifest_digest != self._manifest.digest:
+            raise EvidenceError("generation execution manifest digest does not bind ledger")
+        if execution.source_blob_census_digest != expected_source["blob_census_digest"]:
+            raise EvidenceError("generation execution source blob census does not bind corpus")
+        if (
+            execution.source_path_policy_digest
+            != expected_source["include_exclude_policy_digest"]
+        ):
+            raise EvidenceError("generation execution path policy does not bind corpus")
+        _require_sha1(execution.zoekt_source_commit, "zoekt_source_commit")
+        for label, digest in (
+            ("zoekt_binary_digest", execution.zoekt_binary_digest),
+            ("go_toolchain_digest", execution.go_toolchain_digest),
+            ("module_graph_digest", execution.module_graph_digest),
+            ("ctags_disposition_digest", execution.ctags_disposition_digest),
+            ("configuration_digest", execution.configuration_digest),
+            ("sandbox_digest", execution.sandbox_digest),
+            ("output_digest", execution.output_digest),
+            ("cleanup_receipt_digest", execution.cleanup_receipt_digest),
+        ):
+            _require_sha256(digest, label)
+        for label, value in (
+            ("selected_file_count", execution.selected_file_count),
+            ("selected_byte_count", execution.selected_byte_count),
+            ("shard_count", execution.shard_count),
+            ("build_ms", execution.build_ms),
+            ("refresh_ms", execution.refresh_ms),
+            ("query_ms", execution.query_ms),
+            ("cpu_ms", execution.cpu_ms),
+            ("rss_bytes", execution.rss_bytes),
+            ("disk_bytes", execution.disk_bytes),
+            ("disk_io_bytes", execution.disk_io_bytes),
+            ("process_count", execution.process_count),
+            ("open_file_peak", execution.open_file_peak),
+            ("network_attempt_count", execution.network_attempt_count),
+            ("credential_access_count", execution.credential_access_count),
+            ("source_write_count", execution.source_write_count),
+        ):
+            if value != UNKNOWN_RESOURCE and (type(value) is not int or value < 0):
+                raise EvidenceError(f"generation execution {label} is invalid")
+        if execution.effect not in {"PUBLISHED", "PUBLISH_REFUSED", "UNKNOWN"}:
+            raise EvidenceError("generation execution effect is not closed")
+        if execution.cleanup_state not in {"SUCCEEDED", "FAILED", UNKNOWN_RESOURCE}:
+            raise EvidenceError("generation execution cleanup state is not closed")
+        if execution.correction_of is not None:
+            _require_sha256(execution.correction_of, "generation execution correction_of")
+        if receipt.status == "succeeded":
+            if execution.effect not in {"PUBLISHED", "UNKNOWN"}:
+                raise EvidenceError("successful generation has an invalid observed effect")
+            if execution.published_generation_id not in {receipt.generation_id, None}:
+                raise EvidenceError("generation execution published pointer is mismatched")
+        elif execution.effect == "PUBLISHED":
+            raise EvidenceError("failed or partial generation cannot publish")
+
+    def _query_and_identity_for_trial(
+        self, trial_id: str
+    ) -> tuple[EvaluationQuery, TrialIdentity]:
+        if not isinstance(trial_id, str) or ":" not in trial_id:
+            raise EvidenceError("trial_id must bind a query identity and candidate")
+        query_identity, candidate = trial_id.rsplit(":", 1)
+        if candidate not in {"baseline", "zoekt"}:
+            raise EvidenceError("trial candidate is not in the closed vocabulary")
+        for query in self._manifest.queries:
+            if query.identity == query_identity:
+                return query, TrialIdentity(query_identity, candidate, trial_id)
+        raise EvidenceError("trial_id is not in the preregistered query identity set")
 
 
 def run_paired_trials(
@@ -1228,11 +2078,13 @@ def run_paired_trials(
     answer_keys: Mapping[str, AnswerKey],
     query_receipt_factory: QueryReceiptFactory,
 ) -> tuple[TrialReceipt, ...]:
-    """Run the frozen alternating order exactly once and retain every outcome.
+    """Test-only paired harness over opaque transport inputs.
 
-    Executors receive the same immutable query declaration for a case. A
-    timeout or callback crash becomes a typed failed trial and the remaining
-    preregistered trials still run; callers cannot rerun only the bad row.
+    Production uses :func:`run_empirical_evaluation`; this seam exists to
+    exercise adversarial transport mutations.  It still gives both candidates
+    the exact same immutable ``QueryPlan`` object for a query/repetition and
+    derives every graded semantic field from a validated receipt, never from
+    an executor-owned observation.
     """
 
     if not isinstance(ledger, EvaluationLedger):
@@ -1246,42 +2098,62 @@ def run_paired_trials(
     if not callable(query_receipt_factory):
         raise EvidenceError("paired harness requires a normalized query receipt factory")
     executors = {"baseline": baseline_executor, "zoekt": zoekt_executor}
-    by_case = {query.case_id: query for query in ledger.manifest.queries}
     if not _answer_keys_bind_manifest(ledger.manifest, ledger, answer_keys):
         raise EvidenceError("answer keys do not bind the frozen source-derived bytes")
+    plans = {
+        query.identity: build_query_plan(
+            ledger.manifest,
+            query,
+            answer_keys[query.identity],
+        )
+        for query in ledger.manifest.queries
+    }
+    ledger.bind_query_plans(plans)
     receipts: list[TrialReceipt] = []
-    for query_index, trial_id in enumerate(ledger.manifest.trial_order):
-        case_id, candidate = trial_id.split(":", 1)
-        query = by_case[case_id]
+    for trial_id in ledger.manifest.trial_order:
+        query, identity = ledger._query_and_identity_for_trial(trial_id)
+        plan = plans[query.identity]
+        query_receipt: NormalizedQueryReceipt | None = None
+        query_receipt_failure_digest: str | None = None
         try:
-            observation = executors[candidate](query)
-            if not isinstance(observation, CandidateTrialObservation):
-                raise TypeError("candidate executor returned an invalid observation")
+            transport = executors[identity.candidate](plan)
+            if not isinstance(transport, CandidateTransport):
+                raise TypeError("candidate executor returned invalid transport material")
         except TimeoutError:
-            observation = _callback_failure("timeout", "TIMEOUT")
-        except Exception:
-            observation = _callback_failure("error", "PROCESS_CRASH")
-        try:
-            query_receipt = query_receipt_factory(
-                query,
-                trial_id,
-                query_index,
-                observation,
-            )
-        except Exception as error:
+            error = TimeoutError("candidate transport timed out")
             _retain_query_receipt_failure(ledger, trial_id, "FACTORY", error)
             observation = _callback_failure("error", "RESULT_SCHEMA_INVALID")
+            query_receipt_failure_digest = ledger.query_receipt_failure_receipts[-1].evidence_digest
+        except Exception:
+            error = RuntimeError("candidate transport failed")
+            _retain_query_receipt_failure(ledger, trial_id, "FACTORY", error)
+            observation = _callback_failure("error", "PROCESS_CRASH")
+            query_receipt_failure_digest = ledger.query_receipt_failure_receipts[-1].evidence_digest
         else:
             try:
+                query_receipt = query_receipt_factory(plan, identity, transport)
                 if not isinstance(query_receipt, NormalizedQueryReceipt):
                     raise EvidenceError("query receipt factory returned an invalid receipt")
                 ledger.record_query_receipt(query_receipt)
+                observation = _observation_from_query_receipt(ledger, query, query_receipt)
             except Exception as error:
                 _retain_query_receipt_failure(ledger, trial_id, "VALIDATION", error)
                 observation = _callback_failure("error", "RESULT_SCHEMA_INVALID")
-        grade = grade_candidate_result(answer_keys[case_id], observation.returned_identities)
+                query_receipt_failure_digest = ledger.query_receipt_failure_receipts[-1].evidence_digest
+        grade = grade_candidate_result(
+            answer_keys[query.identity], observation.returned_identities
+        )
         receipt = TrialReceipt(
             trial_id=trial_id,
+            query_identity=query.identity,
+            query_index=query.query_index,
+            query_plan_digest=plan.digest,
+            normalized_arguments_digest=plan.normalized_arguments_digest,
+            query_receipt_digest=(
+                query_receipt.digest
+                if query_receipt is not None
+                else query_receipt_failure_digest
+            ) or "0" * 64,
             attempt_index=1,
             outcome=observation.outcome,
             answer_key_digest=query.answer_key_digest,
@@ -1300,6 +2172,414 @@ def run_paired_trials(
     return tuple(receipts)
 
 
+def run_empirical_evaluation(
+    evaluation_manifest: EvaluationManifest,
+    *,
+    index_manifest: IndexManifest,
+    source_census: SourceCensus,
+    answer_keys: Mapping[str, AnswerKey],
+    bundle: EvaluationBundleIdentity,
+    capture: CapturedEvaluation,
+    generated_at: str,
+) -> EmpiricalEvaluationArtifacts:
+    """Materialize one real evidence capture without launching a runtime.
+
+    This is deliberately not a runner for Zoekt, a process manager, an endpoint
+    creator, or an installation mechanism.  A separately authorized host may
+    capture a disposable experiment, but this public entry point accepts only
+    its typed receipts, proves them against the sealed source/bundle/plan, and
+    returns canonical immutable artifact bytes.  An incomplete capture remains
+    ``NON_DECISION``; it is never filled in, retried, or promoted here.
+    """
+
+    _validate_real_evaluation_inputs(
+        evaluation_manifest,
+        index_manifest=index_manifest,
+        source_census=source_census,
+        answer_keys=answer_keys,
+        bundle=bundle,
+        capture=capture,
+        generated_at=generated_at,
+    )
+    ledger = EvaluationLedger(
+        evaluation_manifest,
+        run_kind="real",
+        source_census_digest=source_census.digest,
+    )
+    if not _answer_keys_bind_manifest(evaluation_manifest, ledger, answer_keys):
+        raise EvidenceError("answer keys do not bind the sealed real evaluation input")
+
+    for receipt in capture.generation_receipts:
+        _validate_generation_bundle_binding(receipt, bundle)
+        ledger.record_generation(receipt)
+    publication = ledger.publish_generation(capture.generation_id)
+
+    plans = {
+        query.identity: build_query_plan(
+            evaluation_manifest,
+            query,
+            answer_keys[query.identity],
+        )
+        for query in evaluation_manifest.queries
+    }
+    ledger.bind_query_plans(plans)
+    if publication.state == "PUBLISHED":
+        _record_captured_paired_trials(
+            ledger,
+            plans=plans,
+            answer_keys=answer_keys,
+            bundle=bundle,
+            baseline=capture.baseline,
+            zoekt=capture.zoekt,
+        )
+    elif capture.baseline.transports or capture.zoekt.transports:
+        raise EvidenceError(
+            "captured query transports are forbidden when full generation publication failed"
+        )
+
+    for receipt in capture.failure_injection_receipts:
+        ledger.record_failure_injection(receipt)
+    if capture.decision_evidence is not None:
+        ledger.record_decision_evidence(capture.decision_evidence)
+
+    evidence = ledger.freeze()
+    decision = build_decision_from_evidence(
+        evidence,
+        ledger=ledger,
+        evaluation_manifest=evaluation_manifest,
+        answer_keys=answer_keys,
+    )
+    ledger_bytes = _canonical_json(ledger.to_payload())
+    ledger_digest = hashlib.sha256(ledger_bytes).hexdigest()
+    result_payload = _result_payload_from_real_capture(
+        ledger,
+        evidence=evidence,
+        decision=decision,
+        bundle=bundle,
+        generated_at=generated_at,
+    )
+    result_bytes = _canonical_json(result_payload)
+    return EmpiricalEvaluationArtifacts(
+        ledger_bytes=ledger_bytes,
+        ledger_digest=ledger_digest,
+        evidence=evidence,
+        decision=decision,
+        result_bytes=result_bytes,
+        result_digest=hashlib.sha256(result_bytes).hexdigest(),
+    )
+
+
+def _validate_real_evaluation_inputs(
+    evaluation_manifest: EvaluationManifest,
+    *,
+    index_manifest: IndexManifest,
+    source_census: SourceCensus,
+    answer_keys: Mapping[str, AnswerKey],
+    bundle: EvaluationBundleIdentity,
+    capture: CapturedEvaluation,
+    generated_at: str,
+) -> None:
+    """Reject caller-made lookalikes before a real capture reaches the ledger."""
+
+    if not isinstance(evaluation_manifest, EvaluationManifest):
+        raise EvidenceError("real evaluation requires an EvaluationManifest")
+    if not isinstance(index_manifest, IndexManifest):
+        raise EvidenceError("real evaluation requires a sealed IndexManifest")
+    if not isinstance(source_census, SourceCensus):
+        raise EvidenceError("real evaluation requires a sealed SourceCensus")
+    if not isinstance(answer_keys, Mapping):
+        raise EvidenceError("real evaluation answer keys must be a mapping")
+    if not isinstance(bundle, EvaluationBundleIdentity):
+        raise EvidenceError("real evaluation requires exact bundle identities")
+    if not isinstance(capture, CapturedEvaluation):
+        raise EvidenceError("real evaluation requires a captured runtime result")
+    if (
+        not isinstance(generated_at, str)
+        or not generated_at
+        or len(generated_at.encode("utf-8")) > 128
+        or any(ord(character) < 32 or ord(character) == 127 for character in generated_at)
+    ):
+        raise EvidenceError("generated_at must be bounded printable text")
+    _validate_bundle_identity(bundle)
+    _validate_sealed_source_binding(evaluation_manifest, index_manifest, source_census)
+    _require_identifier(capture.generation_id, "captured generation_id")
+    if not isinstance(capture.generation_receipts, tuple) or not capture.generation_receipts:
+        raise EvidenceError("real evaluation requires captured generation receipts")
+    if any(
+        not isinstance(receipt, GenerationReceipt)
+        or receipt.generation_id != capture.generation_id
+        for receipt in capture.generation_receipts
+    ):
+        raise EvidenceError("captured generation receipts do not bind one generation")
+    if (
+        not isinstance(capture.baseline, CapturedCandidateAdapter)
+        or capture.baseline.candidate != "baseline"
+        or not isinstance(capture.zoekt, CapturedCandidateAdapter)
+        or capture.zoekt.candidate != "zoekt"
+    ):
+        raise EvidenceError("real evaluation requires baseline and zoekt captured adapters")
+    allowed_query_identities = {query.identity for query in evaluation_manifest.queries}
+    for adapter in (capture.baseline, capture.zoekt):
+        if set(adapter.transports) - allowed_query_identities:
+            raise EvidenceError("captured adapter contains an unregistered query transport")
+    if not isinstance(capture.failure_injection_receipts, tuple):
+        raise EvidenceError("captured failure receipts must be an immutable tuple")
+    if capture.decision_evidence is not None and not isinstance(
+        capture.decision_evidence, DecisionEvidence
+    ):
+        raise EvidenceError("captured decision evidence has an invalid shape")
+
+
+def _validate_bundle_identity(bundle: EvaluationBundleIdentity) -> None:
+    """Require every captured executable/toolchain identity before ledger writes."""
+
+    _require_sha1(bundle.zoekt_source_commit, "bundle zoekt_source_commit")
+    for label, value in (
+        ("bundle zoekt_git_index_digest", bundle.zoekt_git_index_digest),
+        ("bundle zoekt_webserver_digest", bundle.zoekt_webserver_digest),
+        ("bundle go_toolchain_digest", bundle.go_toolchain_digest),
+        ("bundle module_graph_digest", bundle.module_graph_digest),
+        ("bundle ctags_disposition_digest", bundle.ctags_disposition_digest),
+        ("bundle configuration_digest", bundle.configuration_digest),
+        ("bundle sandbox_digest", bundle.sandbox_digest),
+        ("bundle tool_schema_digest", bundle.tool_schema_digest),
+    ):
+        _require_sha256(value, label)
+
+
+def _validate_sealed_source_binding(
+    evaluation_manifest: EvaluationManifest,
+    index_manifest: IndexManifest,
+    source_census: SourceCensus,
+) -> None:
+    """Bind the exact manifest corpus to both source types without rereading disk."""
+
+    if (
+        not isinstance(source_census.canonical_bytes, bytes)
+        or hashlib.sha256(source_census.canonical_bytes).hexdigest() != source_census.digest
+    ):
+        raise EvidenceError("sealed source census digest does not bind canonical bytes")
+    _require_sha256(source_census.digest, "sealed source census digest")
+    try:
+        observed_census = census_sealed_sources(index_manifest)
+    except SourceCensusError as error:
+        raise EvidenceError("source seal revalidation failed") from error
+    if (
+        observed_census.digest != source_census.digest
+        or observed_census.canonical_bytes != source_census.canonical_bytes
+    ):
+        raise EvidenceError("sealed source census no longer matches the parent source seal")
+    if index_manifest.schema_version != "mastermind.codeintel_index_manifest.v1":
+        raise EvidenceError("IndexManifest has an unexpected sealed schema version")
+    corpus_by_id = {
+        str(row["logical_repo_id"]): row for row in evaluation_manifest.corpus
+    }
+    specs_by_id = {spec.repository_id: spec for spec in index_manifest.repositories}
+    if set(specs_by_id) != set(corpus_by_id):
+        raise EvidenceError("IndexManifest does not cover exactly the frozen source corpus")
+    for logical_repo_id, row in corpus_by_id.items():
+        spec = specs_by_id[logical_repo_id]
+        if (
+            spec.repository_name != row["canonical_repository"]
+            or spec.ref_label != row["ref"]
+            or spec.commit_sha != row["commit"]
+        ):
+            raise EvidenceError("IndexManifest source identity does not bind frozen corpus")
+    if not isinstance(source_census.records, tuple):
+        raise EvidenceError("sealed source census records must be immutable")
+    for record in source_census.records:
+        if not isinstance(record.logical_repo_id, str) or record.logical_repo_id not in corpus_by_id:
+            raise EvidenceError("sealed source census names an unregistered repository")
+        row = corpus_by_id[record.logical_repo_id]
+        if (
+            record.canonical_repository != row["canonical_repository"]
+            or record.ref != row["ref"]
+            or record.commit != row["commit"]
+            or record.tree != row["tree"]
+        ):
+            raise EvidenceError("sealed source census identity does not bind frozen corpus")
+
+
+def _validate_generation_bundle_binding(
+    receipt: GenerationReceipt,
+    bundle: EvaluationBundleIdentity,
+) -> None:
+    """Reject a generation whose observed build identity differs from its bundle."""
+
+    if not isinstance(receipt, GenerationReceipt):
+        raise EvidenceError("captured generation receipt has an invalid shape")
+    execution = receipt.execution
+    if not isinstance(execution, GenerationExecutionReceipt):
+        raise EvidenceError("real generation lacks an observed execution receipt")
+    if (
+        execution.zoekt_source_commit != bundle.zoekt_source_commit
+        or execution.zoekt_binary_digest != bundle.zoekt_git_index_digest
+        or execution.go_toolchain_digest != bundle.go_toolchain_digest
+        or execution.module_graph_digest != bundle.module_graph_digest
+        or execution.ctags_disposition_digest != bundle.ctags_disposition_digest
+        or execution.configuration_digest != bundle.configuration_digest
+        or execution.sandbox_digest != bundle.sandbox_digest
+    ):
+        raise EvidenceError("generation execution receipt does not bind the exact bundle")
+
+
+def _validate_query_bundle_binding(
+    receipt: NormalizedQueryReceipt,
+    bundle: EvaluationBundleIdentity,
+) -> None:
+    """Require the normalized response to attest the same query-side bundle."""
+
+    identity = receipt.payload.get("index_identity")
+    if not isinstance(identity, Mapping):
+        raise EvidenceError("query receipt lacks an index identity")
+    if (
+        identity.get("zoekt_source_commit") != bundle.zoekt_source_commit
+        or identity.get("zoekt_binary_digest") != bundle.zoekt_webserver_digest
+        or identity.get("go_toolchain_digest") != bundle.go_toolchain_digest
+        or identity.get("module_graph_digest") != bundle.module_graph_digest
+        or identity.get("ctags_disposition_digest") != bundle.ctags_disposition_digest
+        or identity.get("configuration_digest") != bundle.configuration_digest
+        or identity.get("sandbox_digest") != bundle.sandbox_digest
+    ):
+        raise EvidenceError("query receipt does not bind the exact bundle")
+
+
+def _record_captured_paired_trials(
+    ledger: EvaluationLedger,
+    *,
+    plans: Mapping[str, QueryPlan],
+    answer_keys: Mapping[str, AnswerKey],
+    bundle: EvaluationBundleIdentity,
+    baseline: CapturedCandidateAdapter,
+    zoekt: CapturedCandidateAdapter,
+) -> tuple[TrialReceipt, ...]:
+    """Consume every frozen trial order from opaque captured transport only."""
+
+    adapters = {"baseline": baseline, "zoekt": zoekt}
+    receipts: list[TrialReceipt] = []
+    for trial_id in ledger.manifest.trial_order:
+        query, identity = ledger._query_and_identity_for_trial(trial_id)
+        plan = plans[query.identity]
+        query_receipt: NormalizedQueryReceipt | None = None
+        query_receipt_failure_digest: str | None = None
+        try:
+            transport = adapters[identity.candidate].transport_for(plan)
+            query_receipt = parse_normalized_query_receipt(
+                transport.receipt_document, query_plan=plan
+            )
+            _validate_query_bundle_binding(query_receipt, bundle)
+            ledger.record_query_receipt(query_receipt)
+            observation = _observation_from_query_receipt(ledger, query, query_receipt)
+        except Exception as error:
+            _retain_query_receipt_failure(ledger, trial_id, "VALIDATION", error)
+            observation = _callback_failure("error", "RESULT_SCHEMA_INVALID")
+            query_receipt_failure_digest = ledger.query_receipt_failure_receipts[-1].evidence_digest
+            query_receipt = None
+        grade = grade_candidate_result(
+            answer_keys[query.identity], observation.returned_identities
+        )
+        receipt = TrialReceipt(
+            trial_id=trial_id,
+            query_identity=query.identity,
+            query_index=query.query_index,
+            query_plan_digest=plan.digest,
+            normalized_arguments_digest=plan.normalized_arguments_digest,
+            query_receipt_digest=(
+                query_receipt.digest
+                if query_receipt is not None
+                else query_receipt_failure_digest
+            )
+            or "0" * 64,
+            attempt_index=1,
+            outcome=observation.outcome,
+            answer_key_digest=query.answer_key_digest,
+            source_census_digest=ledger._source_census_digest,
+            generation_id=ledger.active_generation_id or "",
+            query_completed=observation.query_completed,
+            truncated=observation.truncated,
+            returned_identities=observation.returned_identities,
+            recall=grade.recall,
+            false_positive_count=grade.false_positive_count,
+            resource=observation.resource,
+            failure_code=observation.failure_code,
+        )
+        ledger.record_trial(receipt)
+        receipts.append(receipt)
+    return tuple(receipts)
+
+
+def _result_payload_from_real_capture(
+    ledger: EvaluationLedger,
+    *,
+    evidence: EvaluationEvidence,
+    decision: str | None,
+    bundle: EvaluationBundleIdentity,
+    generated_at: str,
+) -> dict[str, object]:
+    """Build the strict result envelope from ledger-owned facts and bundle IDs."""
+
+    payload = ledger.to_payload()
+    corpus_by_id = ledger._corpus_by_logical_id()
+    statuses = []
+    for receipt in sorted(
+        ledger.generation_receipts,
+        key=lambda item: (item.generation_id, item.logical_repo_id),
+    ):
+        source = corpus_by_id[receipt.logical_repo_id]
+        statuses.append(
+            {
+                "logical_repo_id": receipt.logical_repo_id,
+                "canonical_repository": source["canonical_repository"],
+                "ref": source["ref"],
+                "source_commit": receipt.source_commit,
+                "source_tree": receipt.source_tree,
+                "indexed_commit_sha": receipt.indexed_commit_sha,
+                "shard_digest": receipt.shard_digest,
+                "generation_id": receipt.generation_id,
+                "status": receipt.status,
+            }
+        )
+    return {
+        "schema_version": "mastermind.codeintel_z0_result.v1",
+        "decision": decision,
+        "generated_at": generated_at,
+        "manifest_digest": ledger.manifest.digest,
+        "source_census_digest": ledger._source_census_digest,
+        "path_policy_digest": ledger.manifest.path_policy_rules["policy_document_digest"],
+        "tool_schema_digest": bundle.tool_schema_digest,
+        "zoekt_source_commit": bundle.zoekt_source_commit,
+        "binary_digests": {
+            "zoekt_git_index": bundle.zoekt_git_index_digest,
+            "zoekt_webserver": bundle.zoekt_webserver_digest,
+            "go_toolchain": bundle.go_toolchain_digest,
+            "module_graph": bundle.module_graph_digest,
+            "ctags_disposition": bundle.ctags_disposition_digest,
+            "configuration": bundle.configuration_digest,
+            "sandbox": bundle.sandbox_digest,
+        },
+        "source_bundle": {
+            "protected_source": dict(ledger.manifest.protected_source),
+            "authority_blobs": dict(ledger.manifest.authority_blobs),
+            "real_preregistration_digest": ledger.manifest.real_preregistration_digest,
+            "corpus": [dict(row) for row in ledger.manifest.corpus],
+            "active_generation_id": ledger.active_generation_id,
+        },
+        "repository_statuses": statuses,
+        "resource_observations": {
+            "generation_receipts_digest": hashlib.sha256(
+                _canonical_json(payload["generation_receipts"])
+            ).hexdigest(),
+            "query_receipts_digest": hashlib.sha256(
+                _canonical_json(payload["query_receipts"])
+            ).hexdigest(),
+            "failure_injection_receipts_digest": hashlib.sha256(
+                _canonical_json(payload["failure_injection_receipts"])
+            ).hexdigest(),
+        },
+        "evaluation_evidence": evidence.to_result_payload(),
+    }
+
+
 def _callback_failure(outcome: str, failure_code: str) -> CandidateTrialObservation:
     return CandidateTrialObservation(
         outcome=outcome,
@@ -1311,6 +2591,104 @@ def _callback_failure(outcome: str, failure_code: str) -> CandidateTrialObservat
             rss_bytes=UNKNOWN_RESOURCE,
             disk_bytes=UNKNOWN_RESOURCE,
         ),
+        failure_code=failure_code,
+    )
+
+
+def _observation_from_query_receipt(
+    ledger: EvaluationLedger,
+    query: EvaluationQuery,
+    receipt: NormalizedQueryReceipt,
+) -> CandidateTrialObservation:
+    """Mechanically project one validated receipt into the grader's only truth.
+
+    Candidate callbacks may supply transport bytes, but they cannot separately
+    nominate returned identities, completion, resources, or failure status.
+    This projection is used both when a trial is recorded and by the test-only
+    harness, so a mismatch is retained as ``RESULT_SCHEMA_INVALID`` instead of
+    being graded optimistically.
+    """
+
+    if not isinstance(ledger, EvaluationLedger) or not isinstance(query, EvaluationQuery):
+        raise EvidenceError("query receipt observation requires bound ledger and query")
+    payload = receipt.payload
+    matches = payload["matches"]
+    limits = payload["limits"]
+    resources = payload["resource_observation"]
+    if not isinstance(matches, tuple) or not isinstance(limits, Mapping) or not isinstance(resources, Mapping):
+        raise EvidenceError("normalized query receipt has malformed semantic payload")
+    corpus = ledger._corpus_by_logical_id()
+    returned: list[tuple[str, str, str, str, int, int]] = []
+    for raw_match in matches:
+        if not isinstance(raw_match, Mapping):
+            raise EvidenceError("normalized query receipt match has malformed shape")
+        logical_id = raw_match["logical_repository"]
+        if not isinstance(logical_id, str) or logical_id not in query.logical_repo_ids:
+            raise EvidenceError("query receipt match escapes its requested source subset")
+        source = corpus.get(logical_id)
+        if source is None:
+            raise EvidenceError("query receipt match names an unknown source")
+        if (
+            raw_match["ref"] != source["ref"]
+            or raw_match["indexed_commit"] != source["commit"]
+            or raw_match["indexed_tree"] != source["tree"]
+        ):
+            raise EvidenceError("query receipt match does not bind frozen source identity")
+        path = raw_match["repository_relative_path"]
+        range_value = raw_match["range"]
+        if not isinstance(path, str) or not isinstance(range_value, Mapping):
+            raise EvidenceError("query receipt match identity is malformed")
+        start = range_value["start_line"]
+        end = range_value["end_line"]
+        if type(start) is not int or type(end) is not int or start < 1 or end < start:
+            raise EvidenceError("query receipt match line range is invalid")
+        returned.append(
+            (
+                logical_id,
+                source["canonical_repository"],
+                source["ref"],
+                path,
+                start,
+                end,
+            )
+        )
+    identities = tuple(returned)
+    _validate_identities(identities)
+    resource = ResourceObservation(
+        cpu_ms=resources["cpu_ms"],
+        rss_bytes=resources["peak_rss"],
+        disk_bytes=resources["disk_io"],
+    )
+    status = receipt.status
+    complete = receipt.query_completeness == "COMPLETE"
+    truncated = bool(limits["truncated"]) or not complete
+    if status in {"SUCCESS", "ZERO_RESULTS"} and complete and not truncated:
+        return CandidateTrialObservation(
+            outcome="completed",
+            query_completed=True,
+            truncated=False,
+            returned_identities=identities,
+            resource=resource,
+            failure_code=None,
+        )
+    if status == "TIMEOUT":
+        outcome, failure_code = "timeout", "TIMEOUT"
+    elif status == "CANCELLED":
+        outcome, failure_code = "cancelled", "QUERY_CANCELLED"
+    elif status == "STALE":
+        outcome, failure_code = "error", "SOURCE_MOVED"
+    elif status == "INDEX_FAILED":
+        outcome, failure_code = "error", "CORRUPT_INDEX"
+    elif status == "REFUSED":
+        outcome, failure_code = "error", "INCOMPLETE_DESIRED_SET"
+    else:
+        outcome, failure_code = "error", "RESULT_SCHEMA_INVALID"
+    return CandidateTrialObservation(
+        outcome=outcome,
+        query_completed=False,
+        truncated=True,
+        returned_identities=identities,
+        resource=resource,
         failure_code=failure_code,
     )
 
@@ -1376,9 +2754,7 @@ def _query_receipt_is_decision_eligible(receipt: NormalizedQueryReceipt) -> bool
     """Require exact identity, bounded completion, and no unobserved side effect."""
 
     payload = receipt.payload
-    coverage = payload["coverage"]
-    health = payload["health"]
-    freshness = payload["freshness"]
+    source_statuses = payload["source_statuses"]
     limits = payload["limits"]
     resources = payload["resource_observation"]
     security = payload["security_observation"]
@@ -1392,9 +2768,17 @@ def _query_receipt_is_decision_eligible(receipt: NormalizedQueryReceipt) -> bool
         return False
     if receipt.query_completeness != "COMPLETE" or limits["truncated"] is not False:
         return False
-    if coverage != ("FULLY_COVERED",) or health != ("HEALTHY",):
+    if not isinstance(source_statuses, tuple) or not source_statuses:
         return False
-    if freshness != ("EXACT_SHA_CURRENT",):
+    if not all(
+        isinstance(status, Mapping)
+        and status.get("coverage") == "FULLY_COVERED"
+        and status.get("health") == "HEALTHY"
+        and status.get("freshness") == "EXACT_SHA_CURRENT"
+        and status.get("requested_commit") == status.get("indexed_commit")
+        and status.get("requested_tree") == status.get("indexed_tree")
+        for status in source_statuses
+    ):
         return False
     if any(value == UNKNOWN_RESOURCE for value in resources.values()):
         return False
@@ -1417,10 +2801,76 @@ def _query_receipt_is_decision_eligible(receipt: NormalizedQueryReceipt) -> bool
     return receipt.zero_result_authority == "NOT_APPLICABLE_MATCHES_RETURNED"
 
 
+def _generation_execution_is_decision_eligible(
+    execution: GenerationExecutionReceipt | None,
+) -> bool:
+    if not isinstance(execution, GenerationExecutionReceipt):
+        return False
+    measured = (
+        execution.selected_file_count,
+        execution.selected_byte_count,
+        execution.shard_count,
+        execution.build_ms,
+        execution.refresh_ms,
+        execution.query_ms,
+        execution.cpu_ms,
+        execution.rss_bytes,
+        execution.disk_bytes,
+        execution.disk_io_bytes,
+        execution.process_count,
+        execution.open_file_peak,
+        execution.network_attempt_count,
+        execution.credential_access_count,
+        execution.source_write_count,
+    )
+    return (
+        all(type(value) is int and value >= 0 for value in measured)
+        and execution.network_attempt_count == 0
+        and execution.credential_access_count == 0
+        and execution.source_write_count == 0
+        and execution.cleanup_state == "SUCCEEDED"
+        and execution.effect in {"PUBLISHED", "PUBLISH_REFUSED"}
+        and execution.output_digest != UNKNOWN_RESOURCE
+        and execution.cleanup_receipt_digest != UNKNOWN_RESOURCE
+    )
+
+
 def _query_receipt_payload(receipt: NormalizedQueryReceipt) -> dict[str, object]:
     payload = _thaw_receipt_json(receipt.payload)
     assert isinstance(payload, dict)
     return payload
+
+
+def _decision_evidence_payload(evidence: DecisionEvidence | None) -> dict[str, object] | None:
+    if evidence is None:
+        return None
+    return {
+        "manifest_digest": evidence.manifest_digest,
+        "path_policy_id": evidence.path_policy_id,
+        "path_policy_measurements_digest": evidence.path_policy_measurements_digest,
+        "p0_non_recall_justification": evidence.p0_non_recall_justification,
+        "topology_id": evidence.topology_id,
+        "topology_measurements_digest": evidence.topology_measurements_digest,
+        "freshness_receipt_digest": evidence.freshness_receipt_digest,
+        "reproducibility_receipt_digest": evidence.reproducibility_receipt_digest,
+        "comparative": {
+            "metrics": {
+                str(metric): {
+                    "baseline": values["baseline"],
+                    "zoekt": values["zoekt"],
+                }
+                for metric, values in evidence.comparative.metrics.items()
+            },
+            "measurement_digest": evidence.comparative.measurement_digest,
+        },
+        "safety_complete": evidence.safety_complete,
+        "correctness_complete": evidence.correctness_complete,
+        "freshness_complete": evidence.freshness_complete,
+        "reproducibility_complete": evidence.reproducibility_complete,
+        "path_policy_complete": evidence.path_policy_complete,
+        "topology_complete": evidence.topology_complete,
+        "constitutional_failure": evidence.constitutional_failure,
+    }
 
 
 def _strict_receipt_json(
@@ -1452,35 +2902,80 @@ def _strict_receipt_json(
     return dict(payload)
 
 
-def _validate_requested_sources(value: object) -> None:
+def _validate_source_statuses(
+    value: object,
+    *,
+    index_generation_id: str,
+) -> tuple[Mapping[str, object], ...]:
+    """Validate one status row per requested source against one query generation.
+
+    Coverage, health, and freshness deliberately live on the same row as the
+    immutable source identity.  There is no independent list whose one healthy
+    value could accidentally bless several requested repositories.
+    """
+
     if not isinstance(value, list) or not value:
-        raise QueryReceiptError("requested_sources must be a non-empty list")
-    identities: set[tuple[str, str, str]] = set()
-    expected = frozenset(
-        {
-            "logical_repository",
-            "canonical_repository_digest",
-            "requested_ref",
-            "requested_commit",
-            "requested_tree",
-        }
-    )
+        raise QueryReceiptError("source_statuses must be a non-empty ordered list")
+    statuses: list[Mapping[str, object]] = []
+    logical_repositories: set[str] = set()
     for index, raw in enumerate(value):
-        source = _receipt_mapping(raw, f"requested_sources[{index}]")
-        _exact_receipt_fields(source, expected, f"requested_sources[{index}]")
-        logical_repository = _receipt_text(
-            source["logical_repository"], "logical_repository"
+        label = f"source_statuses[{index}]"
+        source = _receipt_mapping(raw, label)
+        _exact_receipt_fields(source, _SOURCE_STATUS_FIELDS, label)
+        logical_repository = _receipt_text(source["logical_repository"], label)
+        if logical_repository in logical_repositories:
+            raise QueryReceiptError("source_statuses contains duplicate logical_repository")
+        logical_repositories.add(logical_repository)
+        _receipt_sha256(source["canonical_repository_digest"], label)
+        _receipt_text(source["requested_ref"], label)
+        _receipt_sha1(source["requested_commit"], label)
+        _receipt_sha1(source["requested_tree"], label)
+        _receipt_sha1(source["indexed_commit"], label)
+        _receipt_sha1(source["indexed_tree"], label)
+        generation_id = _receipt_text(source["generation_id"], label)
+        if generation_id != index_generation_id:
+            raise QueryReceiptError(
+                "source_statuses generation_id must bind index_identity generation"
+            )
+        _receipt_closed_value(source["coverage"], _COVERAGE_VALUES, label)
+        _receipt_closed_value(source["health"], _HEALTH_VALUES, label)
+        _receipt_closed_value(source["freshness"], _FRESHNESS_VALUES, label)
+        statuses.append(source)
+    return tuple(statuses)
+
+
+def _validate_receipt_binds_query_plan(
+    *,
+    query_plan: QueryPlan,
+    trial_id: str,
+    query_identity: str,
+    query_index: int,
+    candidate: str,
+    query_plan_digest: str,
+    query_digest: str,
+    normalized_arguments_digest: str,
+    evaluation_manifest_digest: str,
+    source_statuses: tuple[Mapping[str, object], ...],
+) -> None:
+    """Reject a receipt unless its identity and source rows match one frozen plan."""
+
+    if (
+        trial_id != query_plan.trial_id(candidate)
+        or query_identity != query_plan.query_identity
+        or query_index != query_plan.query_index
+        or query_plan_digest != query_plan.digest
+        or query_digest != query_plan.query_digest
+        or normalized_arguments_digest != query_plan.normalized_arguments_digest
+        or evaluation_manifest_digest != query_plan.evaluation_manifest_digest
+    ):
+        raise QueryReceiptError("query receipt does not bind its immutable QueryPlan")
+    source_ids = tuple(item["logical_repository"] for item in source_statuses)
+    if source_ids != query_plan.logical_repo_ids:
+        raise QueryReceiptError(
+            "source_statuses do not bind the exact QueryPlan source subset/order"
         )
-        canonical_digest = _receipt_sha256(
-            source["canonical_repository_digest"], "canonical_repository_digest"
-        )
-        requested_ref = _receipt_text(source["requested_ref"], "requested_ref")
-        _receipt_sha1(source["requested_commit"], "requested_commit")
-        _receipt_sha1(source["requested_tree"], "requested_tree")
-        identity = (logical_repository, canonical_digest, requested_ref)
-        if identity in identities:
-            raise QueryReceiptError("requested_sources contains duplicate identity")
-        identities.add(identity)
+    if any(item["requested_ref"] not in query_plan.refs for item in source_statuses):
+        raise QueryReceiptError("source_statuses requested_ref is outside the QueryPlan")
 
 
 def _validate_index_identity(value: object) -> None:
@@ -1765,6 +3260,7 @@ def _thaw_receipt_json(value: object) -> object:
 
 
 def _generation_payload(receipt: GenerationReceipt) -> dict[str, object]:
+    execution = receipt.execution
     return {
         "schema_version": GENERATION_RECEIPT_SCHEMA_VERSION,
         "generation_id": receipt.generation_id,
@@ -1775,6 +3271,44 @@ def _generation_payload(receipt: GenerationReceipt) -> dict[str, object]:
         "indexed_commit_sha": receipt.indexed_commit_sha,
         "shard_digest": receipt.shard_digest,
         "failure_code": receipt.failure_code,
+        "execution_receipt": (
+            None
+            if execution is None
+            else {
+                "evaluation_manifest_digest": execution.evaluation_manifest_digest,
+                "source_blob_census_digest": execution.source_blob_census_digest,
+                "source_path_policy_digest": execution.source_path_policy_digest,
+                "zoekt_source_commit": execution.zoekt_source_commit,
+                "zoekt_binary_digest": execution.zoekt_binary_digest,
+                "go_toolchain_digest": execution.go_toolchain_digest,
+                "module_graph_digest": execution.module_graph_digest,
+                "ctags_disposition_digest": execution.ctags_disposition_digest,
+                "configuration_digest": execution.configuration_digest,
+                "sandbox_digest": execution.sandbox_digest,
+                "selected_file_count": execution.selected_file_count,
+                "selected_byte_count": execution.selected_byte_count,
+                "shard_count": execution.shard_count,
+                "build_ms": execution.build_ms,
+                "refresh_ms": execution.refresh_ms,
+                "query_ms": execution.query_ms,
+                "cpu_ms": execution.cpu_ms,
+                "rss_bytes": execution.rss_bytes,
+                "disk_bytes": execution.disk_bytes,
+                "disk_io_bytes": execution.disk_io_bytes,
+                "process_count": execution.process_count,
+                "open_file_peak": execution.open_file_peak,
+                "network_attempt_count": execution.network_attempt_count,
+                "credential_access_count": execution.credential_access_count,
+                "source_write_count": execution.source_write_count,
+                "output_digest": execution.output_digest,
+                "published_generation_id": execution.published_generation_id,
+                "prior_generation_id": execution.prior_generation_id,
+                "effect": execution.effect,
+                "cleanup_state": execution.cleanup_state,
+                "cleanup_receipt_digest": execution.cleanup_receipt_digest,
+                "correction_of": execution.correction_of,
+            }
+        ),
         "index_build_receipt": {
             "schema_version": INDEX_BUILD_RECEIPT_SCHEMA_VERSION,
             "logical_repo_id": receipt.logical_repo_id,
@@ -1795,6 +3329,7 @@ def _publication_payload(receipt: PublicationReceipt) -> dict[str, object]:
 
 
 def _failure_injection_payload(receipt: FailureInjectionReceipt) -> dict[str, object]:
+    execution = receipt.execution
     return {
         "schema_version": CORRECTION_RECEIPT_SCHEMA_VERSION,
         "failure_code": receipt.failure_code,
@@ -1805,6 +3340,19 @@ def _failure_injection_payload(receipt: FailureInjectionReceipt) -> dict[str, ob
         },
         "correction_of": receipt.correction_of,
         "evidence_digest": receipt.evidence_digest,
+        "execution": (
+            None
+            if execution is None
+            else {
+                "injection_id": execution.injection_id,
+                "expected_failure_code": execution.expected_failure_code,
+                "observed_failure_code": execution.observed_failure_code,
+                "expected_effect": execution.expected_effect,
+                "observed_effect": execution.observed_effect,
+                "cleanup_state": execution.cleanup_state,
+                "execution_receipt_digest": execution.execution_receipt_digest,
+            }
+        ),
     }
 
 
@@ -1824,6 +3372,11 @@ def _trial_payload(receipt: TrialReceipt) -> dict[str, object]:
     return {
         "schema_version": QUERY_TRIAL_RECEIPT_SCHEMA_VERSION,
         "trial_id": receipt.trial_id,
+        "query_identity": receipt.query_identity,
+        "query_index": receipt.query_index,
+        "query_plan_digest": receipt.query_plan_digest,
+        "normalized_arguments_digest": receipt.normalized_arguments_digest,
+        "query_receipt_digest": receipt.query_receipt_digest,
         "attempt_index": receipt.attempt_index,
         "outcome": receipt.outcome,
         "answer_key_digest": receipt.answer_key_digest,

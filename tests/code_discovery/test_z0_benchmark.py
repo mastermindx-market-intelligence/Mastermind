@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,13 @@ _MANIFEST = (
 )
 
 
-def _measurement(policy_id: str, case_id: str, **overrides: object) -> PathPolicyMeasurement:
+def _measurement(
+    policy_id: str,
+    case_id: str,
+    *,
+    manifest: object | None = None,
+    **overrides: object,
+) -> PathPolicyMeasurement:
     values: dict[str, object] = {
         "policy_id": policy_id,
         "case_id": case_id,
@@ -40,13 +47,25 @@ def _measurement(policy_id: str, case_id: str, **overrides: object) -> PathPolic
         "refresh_seconds": 1.0,
         "query_latency_ms": 10.0,
     }
+    if manifest is not None:
+        values.update(
+            {
+                "manifest_digest": getattr(manifest, "digest"),
+                "source_census_digest": "a" * 64,
+                "policy_rule_digest": getattr(manifest, "path_policy_rules")[
+                    "policy_document_digest"
+                ],
+            }
+        )
     values.update(overrides)
     return PathPolicyMeasurement(**values)
 
 
-def _complete(**overrides: object) -> tuple[PathPolicyMeasurement, ...]:
+def _complete(
+    *, manifest: object | None = None, **overrides: object
+) -> tuple[PathPolicyMeasurement, ...]:
     return tuple(
-        _measurement(policy, case, **overrides)
+        _measurement(policy, case, manifest=manifest, **overrides)
         for policy in ("P0", "P1", "P2")
         for case in ("E1", "X3", "R3", "A1")
     )
@@ -136,6 +155,15 @@ def test_p0_requires_a_manifest_bound_preregistered_justification() -> None:
                 relevant_path_recall=0.9,
             )
     manifest = load_evaluation_manifest(_MANIFEST)
+    measurements = list(_complete(manifest=manifest))
+    for index, measurement in enumerate(measurements):
+        if measurement.policy_id in {"P1", "P2"}:
+            measurements[index] = _measurement(
+                measurement.policy_id,
+                measurement.case_id,
+                manifest=manifest,
+                relevant_path_recall=0.9,
+            )
 
     with pytest.raises(PathPolicyError, match="manifest-bound"):
         select_path_policy(
@@ -149,14 +177,21 @@ def test_p0_requires_a_manifest_bound_preregistered_justification() -> None:
             evaluation_manifest=manifest,
             p0_justification=P0Justification(
                 manifest_digest=manifest.digest,
-                tie_break_rule_digest="f" * 64,
+                policy_rule_digest="f" * 64,
+                non_recall_reason="cross_repo_trace_required_by_preregistered_case",
+                evidence_digest="a" * 64,
             ),
         )
 
     assert select_path_policy(
         tuple(measurements),
         evaluation_manifest=manifest,
-        p0_justification=P0Justification.from_manifest(manifest),
+        p0_justification=P0Justification(
+            manifest_digest=manifest.digest,
+            policy_rule_digest=manifest.path_policy_rules["policy_document_digest"],
+            non_recall_reason="cross_repo_trace_required_by_preregistered_case",
+            evidence_digest="a" * 64,
+        ),
     ) == "P0"
 
 
@@ -178,3 +213,26 @@ def test_topology_is_selected_only_inside_t0_t1_resource_envelopes() -> None:
         TopologyMeasurement("T1", cpu_ms=21, rss_bytes=1, disk_bytes=1),
     )
     assert select_topology(unsafe, envelopes) == NO_SAFE_TOPOLOGY
+
+
+def test_epoch1_path_policy_binds_the_real_e1_x3_r3_a1_case_topology() -> None:
+    """The repair cannot silently fall back to the former wrong repo/path families."""
+
+    policy_path = (
+        Path(__file__).parent.parent.parent
+        / "research"
+        / "code_intelligence_fabric"
+        / "z0-path-policy.json"
+    )
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    cases = {row["id"]: row for row in policy["benchmark_cases"]}
+
+    assert "control_plane/executive_agent_capabilities.py" in cases["E1"]["critical_paths"]
+    assert set(cases["X3"]["repository_refs"]) == {"macro/main", "mastermind/master"}
+    assert cases["R3"]["critical_paths"] == [
+        "scripts/verify_slack_agent_dialogue_metadata.py",
+        "integrations/slack_agent_dialogue/metadata_verifier.py",
+        "tests/test_slack_agent_dialogue_metadata_static_fences.py",
+    ]
+    assert "integrations/mastermind_company_mcp/server.py" in cases["A1"]["critical_paths"]
+    assert "R3:mastermind-terminal/src/app" in policy["legacy_aliases_forbidden"]

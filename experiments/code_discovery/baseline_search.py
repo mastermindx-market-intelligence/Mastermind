@@ -11,11 +11,19 @@ import hashlib
 import json
 import re
 import stat
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from time import monotonic
 from typing import Final
+
+from .index_manifest import (
+    IndexManifest,
+    IndexManifestError,
+    RepositorySpec,
+    source_tree_digest,
+)
 
 
 _SHA1_RE: Final = re.compile(r"[0-9a-f]{40}\Z")
@@ -71,6 +79,7 @@ class SourceRecord:
     language: str
     text: str
     content_digest: str
+    git_blob_sha: str | None
 
 
 @dataclass(frozen=True)
@@ -91,6 +100,15 @@ class SourceCensus:
     excluded: tuple[ExcludedSource, ...]
     canonical_bytes: bytes
     digest: str
+
+
+@dataclass(frozen=True)
+class _SealedSourcePath:
+    """One selected tracked path and the Git blob that must provide its bytes."""
+
+    path: Path
+    relative_path: str
+    blob_sha: str
 
 
 @dataclass(frozen=True)
@@ -159,6 +177,7 @@ class AnswerKey:
     forbidden_identities: tuple[tuple[str, str, str, str, int, int], ...]
     canonical_bytes: bytes
     digest: str
+    path_policy_digest: str | None = None
 
 
 def census_sources(snapshots: tuple[SourceSnapshot, ...]) -> SourceCensus:
@@ -169,6 +188,60 @@ def census_sources(snapshots: tuple[SourceSnapshot, ...]) -> SourceCensus:
     binary, and oversize files are skipped with a disposition receipt.
     """
 
+    return _census_snapshot_files(
+        snapshots,
+        selected_paths=None,
+        maximum_source_bytes=_MAX_SOURCE_BYTES,
+        legacy_dispositions=True,
+    )
+
+
+def census_sealed_sources(
+    manifest: IndexManifest,
+    *,
+    maximum_selected_file_bytes: int | None = None,
+) -> SourceCensus:
+    """Census exactly the parent-sealed selected Git bytes for a real candidate pair.
+
+    ``SourceSnapshot`` remains useful for synthetic hostile fixtures, but cannot
+    attest a real run: its root and identity fields are caller supplied.  Real
+    baseline work must start from the parent ``IndexManifest`` and reverify the
+    clean Git seal both before and after reading bytes.  No private 256-byte or
+    generated/vendor policy is applied here; the sealed manifest is the one
+    source-selection authority shared with Zoekt.
+    """
+
+    if not isinstance(manifest, IndexManifest):
+        raise SourceCensusError("sealed baseline requires an IndexManifest")
+    if maximum_selected_file_bytes is not None and (
+        type(maximum_selected_file_bytes) is not int
+        or maximum_selected_file_bytes < 1
+    ):
+        raise SourceCensusError("maximum_selected_file_bytes must be positive or null")
+    snapshots: list[SourceSnapshot] = []
+    selected_paths: dict[str, tuple[_SealedSourcePath, ...]] = {}
+    for spec in manifest.repositories:
+        snapshot, selected = _sealed_snapshot_and_selected_paths(spec)
+        snapshots.append(snapshot)
+        selected_paths[snapshot.logical_repo_id] = selected
+    census = _census_snapshot_files(
+        tuple(snapshots),
+        selected_paths=selected_paths,
+        maximum_source_bytes=maximum_selected_file_bytes,
+        legacy_dispositions=False,
+    )
+    for spec in manifest.repositories:
+        _sealed_snapshot_and_selected_paths(spec)
+    return census
+
+
+def _census_snapshot_files(
+    snapshots: tuple[SourceSnapshot, ...],
+    *,
+    selected_paths: dict[str, tuple[_SealedSourcePath, ...]] | None,
+    maximum_source_bytes: int | None,
+    legacy_dispositions: bool,
+) -> SourceCensus:
     if not isinstance(snapshots, tuple) or not snapshots:
         raise SourceCensusError("snapshots must be a non-empty tuple")
     seen_logical: set[str] = set()
@@ -178,14 +251,38 @@ def census_sources(snapshots: tuple[SourceSnapshot, ...]) -> SourceCensus:
     for snapshot in snapshots:
         _validate_snapshot(snapshot, seen_logical, seen_repository_ref)
         root = snapshot.root
-        for candidate in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+        candidates: tuple[Path, ...] | tuple[_SealedSourcePath, ...] = (
+            sorted(root.rglob("*"), key=lambda item: item.as_posix())
+            if selected_paths is None
+            else selected_paths[snapshot.logical_repo_id]
+        )
+        for selected in candidates:
+            candidate = selected if isinstance(selected, Path) else selected.path
+            expected_blob_sha = (
+                None if isinstance(selected, Path) else selected.blob_sha
+            )
             relative = candidate.relative_to(root).as_posix()
+            if (
+                not legacy_dispositions
+                and not isinstance(selected, _SealedSourcePath)
+            ):
+                raise SourceCensusError("sealed selected source census is malformed")
+            if (
+                isinstance(selected, _SealedSourcePath)
+                and relative != selected.relative_path
+            ):
+                raise SourceCensusError("sealed source path escaped its selected census")
             mode = candidate.lstat().st_mode
             if stat.S_ISLNK(mode):
                 raise SourceCensusError(f"symlink source entry is forbidden: {relative}")
             if not stat.S_ISREG(mode):
                 continue
-            disposition = _disposition(relative, candidate)
+            disposition = _disposition(
+                relative,
+                candidate,
+                maximum_source_bytes=maximum_source_bytes,
+                legacy_dispositions=legacy_dispositions,
+            )
             if disposition is not None:
                 excluded.append(
                     ExcludedSource(
@@ -197,7 +294,13 @@ def census_sources(snapshots: tuple[SourceSnapshot, ...]) -> SourceCensus:
                 )
                 continue
             raw = candidate.read_bytes()
+            if expected_blob_sha is not None and _git_blob_sha(raw) != expected_blob_sha:
+                raise SourceCensusError(
+                    f"sealed selected source bytes disagree with Git blob: {relative}"
+                )
             if b"\x00" in raw:
+                if not legacy_dispositions:
+                    raise SourceCensusError("sealed selected source contains binary bytes")
                 excluded.append(
                     ExcludedSource(
                         snapshot.logical_repo_id,
@@ -210,6 +313,8 @@ def census_sources(snapshots: tuple[SourceSnapshot, ...]) -> SourceCensus:
             try:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError:
+                if not legacy_dispositions:
+                    raise SourceCensusError("sealed selected source is not UTF-8 text")
                 excluded.append(
                     ExcludedSource(
                         snapshot.logical_repo_id,
@@ -221,6 +326,8 @@ def census_sources(snapshots: tuple[SourceSnapshot, ...]) -> SourceCensus:
                 continue
             language = _LANGUAGES.get(candidate.suffix.lower())
             if language is None:
+                if not legacy_dispositions:
+                    raise SourceCensusError("sealed selected source has no supported language")
                 excluded.append(
                     ExcludedSource(
                         snapshot.logical_repo_id,
@@ -241,6 +348,7 @@ def census_sources(snapshots: tuple[SourceSnapshot, ...]) -> SourceCensus:
                     language=language,
                     text=text,
                     content_digest=hashlib.sha256(raw).hexdigest(),
+                    git_blob_sha=expected_blob_sha,
                 )
             )
     records.sort(key=lambda item: _record_order(item))
@@ -266,6 +374,23 @@ def baseline_search(
     monotonic_clock: Callable[[], float] = monotonic,
 ) -> BaselineResult:
     """Search every eligible source line with shared filters and limits."""
+
+    return _baseline_search(
+        census,
+        query,
+        monotonic_clock=monotonic_clock,
+        result_limit=query.limit,
+    )
+
+
+def _baseline_search(
+    census: SourceCensus,
+    query: BaselineQuery,
+    *,
+    monotonic_clock: Callable[[], float] = monotonic,
+    result_limit: int | None,
+) -> BaselineResult:
+    """Search the same query contract, optionally retaining the full answer key."""
 
     _validate_census(census)
     pattern = _compile_query(query)
@@ -308,35 +433,35 @@ def baseline_search(
         if timed_out:
             break
     matches.sort(key=lambda item: (*item.identity, item.preview))
+    retained = matches if result_limit is None else matches[:result_limit]
     return BaselineResult(
-        matches=tuple(matches[: query.limit]),
+        matches=tuple(retained),
         total_match_count=len(matches),
-        truncated=timed_out or len(matches) > query.limit,
+        truncated=timed_out or (result_limit is not None and len(matches) > result_limit),
         census_digest=census.digest,
         query_completed=not timed_out,
         failure_code="TIMEOUT" if timed_out else None,
     )
 
 
-def derive_answer_key(census: SourceCensus, case_id: str, query: BaselineQuery) -> AnswerKey:
+def derive_answer_key(
+    census: SourceCensus,
+    case_id: str,
+    query: BaselineQuery,
+    *,
+    path_policy_digest: str | None = None,
+) -> AnswerKey:
     """Derive a frozen answer key only from the direct-source baseline census."""
 
     if not isinstance(case_id, str) or not case_id:
         raise SourceCensusError("case_id must be non-empty text")
-    unlimited = BaselineQuery(
-        query=query.query,
-        regex=query.regex,
-        case_sensitive=query.case_sensitive,
-        repository_ids=query.repository_ids,
-        refs=query.refs,
-        path_prefixes=query.path_prefixes,
-        languages=query.languages,
-        limit=100,
-        context_lines=query.context_lines,
-        timeout_ms=query.timeout_ms,
-    )
-    result = baseline_search(census, unlimited)
-    if result.truncated:
+    if path_policy_digest is not None and (
+        not isinstance(path_policy_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", path_policy_digest) is None
+    ):
+        raise SourceCensusError("path_policy_digest must be a lowercase SHA-256 or null")
+    result = _baseline_search(census, query, result_limit=None)
+    if not result.query_completed:
         raise SourceCensusError("answer key exceeds frozen exhaustive baseline budget")
     expected = tuple(match.identity for match in result.matches)
     expected_set = set(expected)
@@ -349,7 +474,8 @@ def derive_answer_key(census: SourceCensus, case_id: str, query: BaselineQuery) 
         {
             "case_id": case_id,
             "census_digest": census.digest,
-            "query": _query_payload(unlimited),
+            "query": _query_payload(query),
+            "path_policy_digest": path_policy_digest,
             "expected": [_match_payload(match) for match in result.matches],
             "forbidden": [list(identity) for identity in forbidden],
         }
@@ -360,7 +486,182 @@ def derive_answer_key(census: SourceCensus, case_id: str, query: BaselineQuery) 
         forbidden_identities=forbidden,
         canonical_bytes=canonical,
         digest=hashlib.sha256(canonical).hexdigest(),
+        path_policy_digest=path_policy_digest,
     )
+
+
+def _sealed_snapshot_and_selected_paths(
+    spec: RepositorySpec,
+) -> tuple[SourceSnapshot, tuple[_SealedSourcePath, ...]]:
+    """Reverify and enumerate the exact selected bytes named by one source seal."""
+
+    if not isinstance(spec, RepositorySpec):
+        raise SourceCensusError("sealed baseline contains an invalid repository spec")
+    root = spec.source_snapshot_root
+    try:
+        observed_digest = source_tree_digest(
+            root,
+            spec.included_prefixes,
+            spec.excluded_globs,
+        )
+        if observed_digest != spec.source_tree_digest:
+            raise SourceCensusError(
+                f"sealed source tree digest disagrees for {spec.repository_id}"
+            )
+        observed_head = _sealed_git_text(root, "rev-parse", "--verify", "HEAD")
+        if observed_head != spec.commit_sha:
+            raise SourceCensusError(
+                f"sealed source commit disagrees for {spec.repository_id}"
+            )
+        observed_ref = _sealed_git_text(
+            root, "symbolic-ref", "--quiet", "--short", "HEAD"
+        )
+        if observed_ref != spec.ref_label:
+            raise SourceCensusError(
+                f"sealed source ref disagrees for {spec.repository_id}"
+            )
+        observed_tree = _sealed_git_text(
+            root, "rev-parse", "--verify", "HEAD^{tree}"
+        )
+        if _SHA1_RE.fullmatch(observed_tree) is None:
+            raise SourceCensusError(
+                f"sealed source tree is malformed for {spec.repository_id}"
+            )
+        return (
+            SourceSnapshot(
+                logical_repo_id=spec.repository_id,
+                canonical_repository=spec.repository_name,
+                ref=spec.ref_label,
+                commit=observed_head,
+                tree=observed_tree,
+                root=root,
+            ),
+            _sealed_selected_paths(spec),
+        )
+    except IndexManifestError as error:
+        raise SourceCensusError(
+            f"sealed source verification failed for {spec.repository_id}"
+        ) from error
+
+
+def _sealed_selected_paths(spec: RepositorySpec) -> tuple[_SealedSourcePath, ...]:
+    """Repeat the manifest's exact tracked-file selection without local policy."""
+
+    root = spec.source_snapshot_root
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-s", "-z"],
+            check=False,
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise SourceCensusError(
+            f"sealed source Git census failed for {spec.repository_id}"
+        ) from error
+    if completed.returncode != 0:
+        raise SourceCensusError(
+            f"sealed source is not an inspectable Git worktree: {spec.repository_id}"
+        )
+
+    selected: list[_SealedSourcePath] = []
+    overlapping: list[str] = []
+    for raw_entry in completed.stdout.split(b"\0"):
+        if not raw_entry:
+            continue
+        try:
+            index_entry, raw_relative = raw_entry.split(b"\t", 1)
+            mode, blob_sha, stage = index_entry.decode("ascii").split(" ")
+            relative = raw_relative.decode("utf-8")
+        except (UnicodeDecodeError, ValueError) as error:
+            raise SourceCensusError(
+                f"sealed source Git census is malformed for {spec.repository_id}"
+            ) from error
+        if stage != "0" or _SHA1_RE.fullmatch(blob_sha) is None:
+            raise SourceCensusError(
+                f"sealed source Git census is ambiguous for {spec.repository_id}"
+            )
+        if mode == "120000":
+            raise SourceCensusError(f"sealed source contains tracked symlink: {relative}")
+        if mode == "160000":
+            raise SourceCensusError(f"sealed source contains submodule: {relative}")
+        if mode not in {"100644", "100755"}:
+            raise SourceCensusError(f"sealed source contains special path: {relative}")
+        if _unsafe_repository_relative_path(relative):
+            raise SourceCensusError(f"sealed source path is unsafe: {relative}")
+        included = any(
+            PurePosixPath(relative).match(rule) for rule in spec.included_prefixes
+        )
+        excluded = any(
+            PurePosixPath(relative).match(rule) for rule in spec.excluded_globs
+        )
+        if included and excluded:
+            overlapping.append(relative)
+            continue
+        if not included:
+            continue
+        candidate = root / relative
+        try:
+            candidate_mode = candidate.lstat().st_mode
+        except OSError as error:
+            raise SourceCensusError(
+                f"sealed tracked source disappeared: {relative}"
+            ) from error
+        if stat.S_ISLNK(candidate_mode) or not stat.S_ISREG(candidate_mode):
+            raise SourceCensusError(
+                f"sealed tracked source must be a regular file: {relative}"
+            )
+        selected.append(
+            _SealedSourcePath(
+                path=candidate,
+                relative_path=relative,
+                blob_sha=blob_sha,
+            )
+        )
+    if overlapping:
+        raise SourceCensusError(
+            "sealed source policy overlaps selected paths: "
+            + ", ".join(sorted(overlapping)[:3])
+        )
+    if not selected:
+        raise SourceCensusError(
+            f"sealed source policy selects no tracked files: {spec.repository_id}"
+        )
+    return tuple(sorted(selected, key=lambda item: item.relative_path))
+
+
+def _sealed_git_text(root: Path, *arguments: str) -> str:
+    """Read one exact Git fact; a failed command is a source-seal failure."""
+
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise SourceCensusError("sealed source Git inspection failed") from error
+    if completed.returncode != 0:
+        raise SourceCensusError("sealed source Git inspection failed")
+    return completed.stdout.strip()
+
+
+def _unsafe_repository_relative_path(relative: str) -> bool:
+    path = PurePosixPath(relative)
+    return (
+        not relative
+        or path.is_absolute()
+        or "\\" in relative
+        or any(part in {"", ".", ".."} for part in path.parts)
+    )
+
+
+def _git_blob_sha(raw: bytes) -> str:
+    return hashlib.sha1(
+        b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw
+    ).hexdigest()
 
 
 def _validate_snapshot(
@@ -393,7 +694,20 @@ def _validate_snapshot(
     seen_repository_ref.add(repository_ref)
 
 
-def _disposition(relative: str, candidate: Path) -> str | None:
+def _disposition(
+    relative: str,
+    candidate: Path,
+    *,
+    maximum_source_bytes: int | None,
+    legacy_dispositions: bool,
+) -> str | None:
+    if not legacy_dispositions:
+        if (
+            maximum_source_bytes is not None
+            and candidate.stat().st_size > maximum_source_bytes
+        ):
+            return "oversize"
+        return None
     parts = tuple(relative.split("/"))
     if any(part in _EXCLUDED_PATH_PARTS for part in parts):
         if ".git" in parts:
@@ -403,7 +717,7 @@ def _disposition(relative: str, candidate: Path) -> str | None:
         return "vendor"
     if candidate.suffix.lower() in _BINARY_SUFFIXES:
         return "binary"
-    if candidate.stat().st_size > _MAX_SOURCE_BYTES:
+    if maximum_source_bytes is not None and candidate.stat().st_size > maximum_source_bytes:
         return "oversize"
     return None
 
@@ -479,8 +793,8 @@ def _canonical_json(value: object) -> bytes:
     ).encode("utf-8")
 
 
-def _record_payload(record: SourceRecord) -> dict[str, str]:
-    return {
+def _record_payload(record: SourceRecord) -> dict[str, str | None]:
+    payload: dict[str, str | None] = {
         "logical_repo_id": record.logical_repo_id,
         "canonical_repository": record.canonical_repository,
         "ref": record.ref,
@@ -489,7 +803,9 @@ def _record_payload(record: SourceRecord) -> dict[str, str]:
         "path": record.path,
         "language": record.language,
         "content_digest": record.content_digest,
+        "git_blob_sha": record.git_blob_sha,
     }
+    return payload
 
 
 def _excluded_payload(record: ExcludedSource) -> dict[str, str | None]:

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import shutil
+import hashlib
+import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -12,8 +15,13 @@ from experiments.code_discovery.baseline_search import (
     SourceCensusError,
     SourceSnapshot,
     baseline_search,
+    census_sealed_sources,
     census_sources,
     derive_answer_key,
+)
+from experiments.code_discovery.index_manifest import (
+    load_index_manifest,
+    source_tree_digest,
 )
 
 
@@ -188,3 +196,67 @@ def test_census_fails_closed_for_duplicate_or_external_or_symlinked_source_ident
     )
     with pytest.raises(SourceCensusError, match="symlink"):
         census_sources((symlinked,))
+
+
+def test_sealed_baseline_uses_manifest_selected_bytes_without_legacy_256_byte_cap(
+    tmp_path: Path,
+) -> None:
+    """A real baseline must search the parent-sealed corpus, not a weaker local walk."""
+
+    root = tmp_path / "sealed-source"
+    root.mkdir()
+    for args in (
+        ("init", "-q", "-b", "master"),
+        ("config", "user.name", "CodeIntel test"),
+        ("config", "user.email", "codeintel@example.invalid"),
+        ("remote", "add", "origin", "git@github.com:synthetic-org/sealed.git"),
+    ):
+        subprocess.run(["git", "-C", str(root), *args], check=True)
+    (root / "engine").mkdir()
+    (root / "engine" / "ordinary.py").write_text(
+        "SEALED_SENTINEL = '" + ("x" * 300) + "'\n", encoding="utf-8"
+    )
+    (root / "vendor").mkdir()
+    (root / "vendor" / "ignored.py").write_text("SEALED_SENTINEL = 'wrong'\n")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "sealed source"], check=True)
+    manifest_path = tmp_path / "index-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "mastermind.codeintel_index_manifest.v1",
+                "repositories": [
+                    {
+                        "repository_id": "sealed",
+                        "repository_name": "synthetic-org/sealed",
+                        "source_snapshot_root": str(root),
+                        "ref_label": "master",
+                        "commit_sha": subprocess.check_output(
+                            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+                        ).strip(),
+                        "included_prefixes": ["engine/**"],
+                        "excluded_globs": ["vendor/**"],
+                        "source_tree_digest": source_tree_digest(
+                            root, ("engine/**",), ("vendor/**",)
+                        ),
+                    }
+                ],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_index_manifest(manifest_path)
+
+    census = census_sealed_sources(manifest)
+    result = baseline_search(census, BaselineQuery(query="SEALED_SENTINEL"))
+
+    assert [record.path for record in census.records] == ["engine/ordinary.py"]
+    assert result.total_match_count == 1
+    assert result.matches[0].source_content_digest == hashlib.sha256(
+        (root / "engine" / "ordinary.py").read_bytes()
+    ).hexdigest()
+
+    (root / "engine" / "ordinary.py").write_text("SEALED_SENTINEL = 'moved'\n")
+    with pytest.raises(SourceCensusError, match="sealed"):
+        census_sealed_sources(manifest)

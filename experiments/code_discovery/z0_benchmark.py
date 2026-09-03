@@ -39,32 +39,30 @@ class PathPolicyMeasurement:
     refresh_seconds: float
     query_latency_ms: float
     hard_failure_code: str | None = None
+    manifest_digest: str | None = None
+    source_census_digest: str | None = None
+    policy_rule_digest: str | None = None
 
 
 @dataclass(frozen=True)
 class P0Justification:
-    """The manifest-bound preregistered authority required for a P0 winner."""
+    """Actual preregistered non-recall evidence required for a P0 winner."""
 
     manifest_digest: str
-    tie_break_rule_digest: str
+    policy_rule_digest: str
+    non_recall_reason: str
+    evidence_digest: str
 
     def __post_init__(self) -> None:
         for label, digest in (
             ("manifest_digest", self.manifest_digest),
-            ("tie_break_rule_digest", self.tie_break_rule_digest),
+            ("policy_rule_digest", self.policy_rule_digest),
+            ("evidence_digest", self.evidence_digest),
         ):
             if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
                 raise PathPolicyError(f"{label} must be a lowercase SHA-256")
-
-    @classmethod
-    def from_manifest(cls, manifest: EvaluationManifest) -> P0Justification:
-        if not isinstance(manifest, EvaluationManifest):
-            raise PathPolicyError("P0 justification requires an EvaluationManifest")
-        return cls(
-            manifest_digest=manifest.digest,
-            tie_break_rule_digest=manifest.tie_break_rule_digest,
-        )
-
+        if not isinstance(self.non_recall_reason, str) or not self.non_recall_reason:
+            raise PathPolicyError("non_recall_reason must be non-empty text")
 
 @dataclass(frozen=True)
 class TopologyEnvelope:
@@ -115,15 +113,21 @@ def select_path_policy(
             "constitutional failure dominates path-policy performance: "
             + ",".join(sorted(failures))
         )
+    required_cases = _required_cases(evaluation_manifest)
     if set(by_policy) != PATH_POLICY_IDS:
         raise PathPolicyError("P0, P1 and P2 each require complete measured evidence")
-    if any(set(cases) != REQUIRED_BENCHMARK_CASES for cases in by_policy.values()):
-        raise PathPolicyError("each policy must cover E1, X3, R3 and A1")
+    if any(set(cases) != required_cases for cases in by_policy.values()):
+        raise PathPolicyError("each policy must cover every preregistered benchmark case")
+
+    _validate_measurement_manifest_binding(by_policy, evaluation_manifest)
 
     candidates = [
         policy_id
         for policy_id, cases in by_policy.items()
-        if all(item.relevant_path_recall == 1.0 for item in cases.values())
+        if all(
+            item.relevant_path_recall >= _required_recall(item.case_id, evaluation_manifest)
+            for item in cases.values()
+        )
     ]
     if not candidates:
         raise PathPolicyError("no policy reaches full answer-key recall")
@@ -160,10 +164,21 @@ def _has_manifest_bound_p0_justification(
         isinstance(evaluation_manifest, EvaluationManifest)
         and isinstance(p0_justification, P0Justification)
         and p0_justification.manifest_digest == evaluation_manifest.digest
-        and (
-            p0_justification.tie_break_rule_digest
-            == evaluation_manifest.tie_break_rule_digest
+        and isinstance(
+            evaluation_manifest.path_policy_rules.get("policy_document_digest"), str
         )
+        and p0_justification.policy_rule_digest
+        == evaluation_manifest.path_policy_rules["policy_document_digest"]
+        and isinstance(
+            evaluation_manifest.path_policy_rules.get(
+                "p0_allowed_non_recall_justifications"
+            ),
+            tuple,
+        )
+        and p0_justification.non_recall_reason
+        in evaluation_manifest.path_policy_rules[
+            "p0_allowed_non_recall_justifications"
+        ]
     )
 
 
@@ -245,8 +260,8 @@ def select_topology(
 def _validate_measurement(measurement: PathPolicyMeasurement) -> None:
     if measurement.policy_id not in PATH_POLICY_IDS:
         raise PathPolicyError("unknown path policy")
-    if measurement.case_id not in REQUIRED_BENCHMARK_CASES:
-        raise PathPolicyError("unknown benchmark case")
+    if not isinstance(measurement.case_id, str) or not measurement.case_id:
+        raise PathPolicyError("benchmark case must be non-empty text")
     if not 0.0 <= measurement.relevant_path_recall <= 1.0:
         raise PathPolicyError("recall must be in 0..1")
     numeric_values = (
@@ -265,6 +280,45 @@ def _validate_measurement(measurement: PathPolicyMeasurement) -> None:
         or not measurement.hard_failure_code
     ):
         raise PathPolicyError("hard_failure_code must be non-empty text or None")
+
+
+def _required_cases(manifest: EvaluationManifest | None) -> frozenset[str]:
+    if manifest is None:
+        return REQUIRED_BENCHMARK_CASES
+    if not isinstance(manifest, EvaluationManifest):
+        raise PathPolicyError("evaluation_manifest must be an EvaluationManifest")
+    return frozenset(query.case_id for query in manifest.queries)
+
+
+def _required_recall(case_id: str, manifest: EvaluationManifest | None) -> float:
+    if manifest is None:
+        return 1.0
+    rows = tuple(query for query in manifest.queries if query.case_id == case_id)
+    if not rows:
+        raise PathPolicyError("measurement case is not in the preregistered manifest")
+    return max(max(row.recall_threshold, row.completeness_threshold) for row in rows)
+
+
+def _validate_measurement_manifest_binding(
+    by_policy: dict[str, dict[str, PathPolicyMeasurement]],
+    manifest: EvaluationManifest | None,
+) -> None:
+    if manifest is None:
+        return
+    rule_digest = manifest.path_policy_rules.get("policy_document_digest")
+    if not isinstance(rule_digest, str) or _SHA256_RE.fullmatch(rule_digest) is None:
+        raise PathPolicyError("manifest lacks a closed path-policy rule digest")
+    for cases in by_policy.values():
+        for measurement in cases.values():
+            if (
+                measurement.manifest_digest != manifest.digest
+                or measurement.policy_rule_digest != rule_digest
+                or not isinstance(measurement.source_census_digest, str)
+                or _SHA256_RE.fullmatch(measurement.source_census_digest) is None
+            ):
+                raise PathPolicyError(
+                    "path-policy measurement is not bound to manifest rules and source census"
+                )
 
 
 def _policy_cost(

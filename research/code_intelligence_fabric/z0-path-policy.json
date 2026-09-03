@@ -1,43 +1,122 @@
 {
-  "schema_version": "mastermind.codeintel_z0_path_policy.v1",
+  "schema_version": "mastermind.codeintel_z0_path_policy.v2",
+  "authority": {
+    "benchmark_charter_blob": "55b51089101e71cb3864d49da05a727df686556c",
+    "epoch1_preregistration_sha256": "ba88036fe2a8e7ae9dcd1feaa30e5e88aa7b381ca2a01c4f26000799f02a7eeb"
+  },
   "benchmark_cases": [
     {
       "id": "E1",
-      "repository_ref": "mastermind/master",
-      "critical_paths": ["control_plane/**", "docs/sol_skills/**"],
-      "query_families": ["exact authority owner", "carrier receipt provenance"]
+      "repository_refs": ["mastermind/master"],
+      "critical_paths": [
+        "config/executive_agent_capabilities.json",
+        "control_plane/executive_agent_capabilities.py",
+        "control_plane/operator_harness_contract.py",
+        "control_plane/codex_operator_adapter.py",
+        "control_plane/model_router.py",
+        "control_plane/executive_supervisor.py",
+        "control_plane/executive_operator_supervisor.py",
+        "scripts/executive_os_phase1c_worker.py",
+        "tests/test_executive_agent_capabilities.py",
+        "tests/test_codex_operator_adapter.py"
+      ],
+      "critical_symbols": [
+        "ExecutionCapabilityRegistry",
+        "McpServerGrant",
+        "CapabilityIdentity",
+        "app_server_security_config_projection"
+      ],
+      "query_families": ["exact_symbol", "authority_boundary", "configuration_consumer"]
     },
     {
       "id": "X3",
-      "repository_ref": "macro/main",
-      "critical_paths": ["scripts/**", "agentos/**", ".github/workflows/**"],
-      "query_families": ["cross-repository execution evidence", "workflow owner"]
+      "repository_refs": ["macro/main", "mastermind/master"],
+      "critical_paths": [
+        "macro:agentos/workstreams/WS-EXECUTIVE-CAPACITY-FABRIC.md",
+        "macro:agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md",
+        "macro:agentos/decisions/DEC-EXECUTIVE-CAPACITY-FABRIC-OWNERSHIP-AND-CONTRACT.md",
+        "macro:agentos/decisions/DEC-CHAIRMAN-CONTROL-ROOM-P0-ARCHITECTURE-ACCEPTED.md",
+        "mastermind:control_plane/chairman_control_room.py",
+        "mastermind:scripts/chairman_control_room.py",
+        "mastermind:docs/CHAIRMAN_CONTROL_ROOM.md",
+        "mastermind:research/MASTERMIND_EXECUTIVE_CAPACITY_CF2F_CLAIM_EVIDENCE_AND_ACQUISITION_FREEZE_2026-08-25.md"
+      ],
+      "critical_symbols": [
+        "mastermind.provider_capacity.v1",
+        "mastermind.chairman_control_room.v1"
+      ],
+      "query_families": ["cross_repository_contract", "workstream_to_implementation", "held_dependency"]
     },
     {
       "id": "R3",
-      "repository_ref": "mastermind-terminal/master",
-      "critical_paths": ["src/**", "app/**", "tests/**"],
-      "query_families": ["terminal source owner", "regression surface"]
+      "repository_refs": ["mastermind/master"],
+      "critical_paths": [
+        "scripts/verify_slack_agent_dialogue_metadata.py",
+        "integrations/slack_agent_dialogue/metadata_verifier.py",
+        "tests/test_slack_agent_dialogue_metadata_static_fences.py"
+      ],
+      "critical_symbols": ["_REPO_ROOT", "test_documented_direct_cli_runs_without_pythonpath"],
+      "query_families": ["hermetic_subprocess", "metadata_verifier", "direct_script_import"]
     },
     {
       "id": "A1",
-      "repository_ref": "macro/main",
-      "critical_paths": ["engine/**", "lib/**", "config/**"],
-      "query_families": ["application source owner", "configuration provenance"]
+      "repository_refs": ["mastermind/master"],
+      "critical_paths": [
+        "integrations/mastermind_company_mcp/schemas.py",
+        "integrations/mastermind_company_mcp/adapter.py",
+        "integrations/mastermind_company_mcp/server.py",
+        "tests/test_mastermind_company_mcp.py",
+        "tests/test_mastermind_company_mcp_mutation.py",
+        "tests/test_executive_agent_capabilities.py",
+        "control_plane/executive_agent_capabilities.py",
+        "config/executive_agent_capabilities.json"
+      ],
+      "critical_symbols": [
+        "TOOL_SPECS",
+        "TOOL_SCHEMA_DIGEST",
+        "validate_tool_arguments",
+        "DialogueBindingResolver",
+        "ExecutionCapabilityRegistry"
+      ],
+      "query_families": ["six_tool_surface", "authority_widening", "registration_consumer"]
+    },
+    {
+      "id": "T1",
+      "repository_refs": ["terminal/master"],
+      "critical_paths": [
+        "terminal/lib/workspaceMigrate.ts",
+        "terminal/lib/workspaceMenuOps.ts",
+        "terminal/e2e/layoutStore.ts",
+        "terminal/e2e/w2a-workspaces.spec.ts",
+        "terminal/lib/__tests__/workspaceVectors.test.ts",
+        "terminal/lib/__tests__/workspaceMigrate.test.ts",
+        "terminal/lib/__tests__/workspaceOwnership.test.ts",
+        "terminal/lib/__tests__/workspaceMenuOps.test.ts",
+        "terminal/docs/W2A_WORKSPACE_UX_SPEC.md"
+      ],
+      "critical_symbols": ["migrateLegacy"],
+      "query_families": ["typescript_symbol", "wrapper_consumer", "e2e_source_law"]
     }
+  ],
+  "legacy_aliases_forbidden": [
+    "E1:carrier_receipt_provenance",
+    "X3:macro_only",
+    "R3:mastermind-terminal/src/app",
+    "A1:macro/engine/lib/config"
   ],
   "policies": [
     {
       "id": "P0",
-      "description": "Broad repository minus binaries and caches only"
+      "description": "All selected tracked regular bytes under the frozen corpus policy.",
+      "allowed_non_recall_justifications": ["cross_repo_trace_required_by_preregistered_case"]
     },
     {
       "id": "P1",
-      "description": "Initial reviewed source-bearing include policy"
+      "description": "Reviewed source-bearing include policy measured against every frozen case."
     },
     {
       "id": "P2",
-      "description": "P1 plus individually justified narrow data or config additions"
+      "description": "P1 plus individually answer-key-proven narrow additions, each receipted before run."
     }
   ]
 }
