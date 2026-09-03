@@ -488,6 +488,114 @@ def test_identity_probe_rejects_missing_wrong_and_ambiguous_repositories(
     processes.close()
 
 
+def test_identity_probe_accepts_pinned_list_envelope_and_rejects_crashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the real pinned List/RepoListEntry wire contract can establish readiness."""
+
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-argv.txt"
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+    processes.build_indexes(manifest)
+    identity = processes._repository_identities[0]
+    endpoint = LoopbackEndpoint("127.0.0.1", 6071)
+
+    def pinned_payload(*, crashes: int) -> dict[str, object]:
+        return {
+            "List": {
+                "Repos": [
+                    {
+                        "Repository": {
+                            "Name": identity.repository_name,
+                            "Metadata": identity.metadata,
+                            "Branches": [
+                                {
+                                    "Name": identity.ref_label,
+                                    "Version": identity.commit_sha,
+                                }
+                            ],
+                        },
+                        "IndexMetadata": {"LanguageMap": {}},
+                        "Stats": {"Repos": 1},
+                    }
+                ],
+                "Crashes": crashes,
+                "Stats": {"Repos": 1},
+            }
+        }
+
+    monkeypatch.setattr(
+        processes_module, "_post_loopback_list", lambda _endpoint: pinned_payload(crashes=0)
+    )
+    assert processes_module._loopback_has_exact_identities(
+        endpoint, processes._repository_identities
+    )
+
+    monkeypatch.setattr(
+        processes_module, "_post_loopback_list", lambda _endpoint: pinned_payload(crashes=1)
+    )
+    assert not processes_module._loopback_has_exact_identities(
+        endpoint, processes._repository_identities
+    )
+    processes.close()
+
+
+def test_final_identity_probe_collision_marker_vetoes_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A marker captured during the final successful probe cannot be lost before STARTED."""
+
+    class AliveProcess:
+        returncode = None
+
+        def poll(self) -> None:
+            return None
+
+    class Capture:
+        marker_present = False
+
+        def raise_if_overflow(self) -> None:
+            return None
+
+        def snapshot(self) -> object:
+            if self.marker_present:
+                return processes_module._CaptureSnapshot(
+                    stdout=b"",
+                    stderr=b"address already in use",
+                    stdout_bytes=0,
+                    stderr_bytes=len(b"address already in use"),
+                    truncated=False,
+                    sha256="0" * 64,
+                )
+            return processes_module._empty_capture_snapshot()
+
+    capture = Capture()
+    probe_calls = 0
+
+    def successful_probe(_endpoint: LoopbackEndpoint, _expected: object) -> bool:
+        nonlocal probe_calls
+        probe_calls += 1
+        if probe_calls == 2:
+            capture.marker_present = True
+        return True
+
+    monkeypatch.setattr(processes_module, "_loopback_has_exact_identities", successful_probe)
+    monkeypatch.setattr(processes_module, "_STARTUP_STABILITY_SECONDS", 0.0)
+    with pytest.raises(processes_module.ZoektProcessTimeout):
+        processes_module._wait_for_loopback(
+            AliveProcess(),  # type: ignore[arg-type]
+            capture,  # type: ignore[arg-type]
+            LoopbackEndpoint("127.0.0.1", 6072),
+            0.08,
+            endpoint_was_open_before_spawn=False,
+            expected_identities=(),
+        )
+
+
 def test_first_bind_collision_is_cleaned_and_second_attempt_starts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
