@@ -13,6 +13,7 @@ from pathlib import Path
 import secrets
 import socket
 import stat
+import time
 from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
@@ -200,6 +201,8 @@ def _complete_transport_handshake(
     *,
     expected_instance_id: str,
     challenge_factory: Callable[[], str] | None = None,
+    deadline: native.Deadline | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """Complete two bound challenges before any action document is sent."""
 
@@ -220,8 +223,17 @@ def _complete_transport_handshake(
         challenge_nonce=first_challenge,
     )
     try:
-        native.write_frame(writer, first)
-        first_ack = native.read_frame(reader)
+        native.write_frame(
+            writer,
+            first,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
+        first_ack = native.read_frame(
+            reader,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
     except native.NativeHostError as exc:
         raise WebSolExtensionError("transport_handshake_failed") from exc
     accepted_first = _accepted_transport_ack(
@@ -245,8 +257,17 @@ def _complete_transport_handshake(
         challenge_nonce=second_challenge,
     )
     try:
-        native.write_frame(writer, second)
-        second_ack = native.read_frame(reader)
+        native.write_frame(
+            writer,
+            second,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
+        second_ack = native.read_frame(
+            reader,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
     except native.NativeHostError as exc:
         raise WebSolExtensionError("transport_handshake_failed") from exc
     return _accepted_transport_ack(
@@ -255,6 +276,37 @@ def _complete_transport_handshake(
         expected_challenge=second_challenge,
         expected_boot_nonce=accepted_first["boot_nonce"],
     )
+
+
+class _FrameWriteProgress:
+    """Track bytes a writer accepted without changing framing or retry law."""
+
+    def __init__(self, stream, *, expected_bytes: int):
+        self._stream = stream
+        self._expected_bytes = expected_bytes
+        self.accepted_bytes = 0
+        self._write_raised = False
+
+    def __getattr__(self, name: str):
+        return getattr(self._stream, name)
+
+    def write(self, payload: bytes):
+        try:
+            written = self._stream.write(payload)
+        except BaseException:
+            self._write_raised = True
+            raise
+        if type(written) is int and 0 < written <= len(payload):
+            self.accepted_bytes += written
+        return written
+
+    @property
+    def frame_complete(self) -> bool:
+        return self.accepted_bytes >= self._expected_bytes
+
+    @property
+    def effect_possible(self) -> bool:
+        return self._write_raised or self.frame_complete
 
 
 def _transport_failure_code(
@@ -276,25 +328,52 @@ def _exchange_web_sol_socket(
     path: Path,
     expected_instance_id: str,
     challenge_factory: Callable[[], str] | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     _private_socket(path)
+    deadline = native.Deadline(
+        ends_at=monotonic() + SOCKET_TIMEOUT_SECONDS,
+    )
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    connection.settimeout(SOCKET_TIMEOUT_SECONDS)
+    connection.settimeout(deadline.remaining(monotonic))
     sent = False
     try:
         connection.connect(str(path))
         reader = connection.makefile("rb", buffering=0)
         writer = connection.makefile("wb", buffering=0)
         try:
+            handshake_kwargs = {
+                "expected_instance_id": expected_instance_id,
+                "deadline": deadline,
+                "monotonic": monotonic,
+            }
+            if challenge_factory is not None:
+                handshake_kwargs["challenge_factory"] = challenge_factory
             _complete_transport_handshake(
                 reader,
                 writer,
-                expected_instance_id=expected_instance_id,
-                challenge_factory=challenge_factory,
+                **handshake_kwargs,
             )
-            native.write_frame(writer, request)
+            action_writer = _FrameWriteProgress(
+                writer,
+                expected_bytes=len(native.encode_frame(request)),
+            )
+            try:
+                native.write_frame(
+                    action_writer,
+                    request,
+                    deadline=deadline,
+                    monotonic=monotonic,
+                )
+            except native.NativeHostError:
+                sent = action_writer.effect_possible
+                raise
             sent = True
-            response = native.read_frame(reader)
+            response = native.read_frame(
+                reader,
+                deadline=deadline,
+                monotonic=monotonic,
+            )
         finally:
             reader.close()
             writer.close()
