@@ -803,3 +803,96 @@ def test_task_text_byte_limits_accept_the_boundary_and_report_one_over(
         and finding.message == "task field exceeds maximum allowed size"
         for finding in report.tasks[0].audit.findings
     )
+
+
+@pytest.mark.parametrize(
+    ("title", "enabled", "audit_kind", "prompt"),
+    (
+        (["x" * 4097], False, "SOL_WATCHER", _prompt()),
+        ({"nested": "x" * 4097}, True, "NON_WATCHER", "ordinary reminder"),
+        ([0] * 5000, False, "NON_WATCHER", "ordinary reminder"),
+        ([], True, "NON_WATCHER", "ordinary reminder"),
+        ({}, False, "SOL_WATCHER", _prompt()),
+        (42, True, "NON_WATCHER", "ordinary reminder"),
+        (True, False, "NON_WATCHER", "ordinary reminder"),
+    ),
+)
+def test_non_string_titles_are_bounded_invalid_export_rows(
+    title: object,
+    enabled: bool,
+    audit_kind: str,
+    prompt: str,
+    tmp_path,
+    capsys,
+) -> None:
+    task = {
+        "id": "bounded-title-fixture",
+        "title": title,
+        "is_enabled": enabled,
+        "audit_kind": audit_kind,
+        "prompt": prompt,
+    }
+
+    report = audit_tasks([task])
+    assert report.valid is False
+    assert report.invalid_export_tasks == 1
+    row = report.tasks[0]
+    assert row.title == ""
+    assert row.audit is not None
+    assert any(
+        finding.code is FindingCode.INVALID_TASK
+        and finding.field == "title"
+        and finding.message == "title must be a string or null"
+        for finding in row.audit.findings
+    )
+
+    source = tmp_path / "non-string-title.json"
+    source.write_text(json.dumps([task]), encoding="utf-8")
+    assert watcher_audit_cli.main([str(source)]) == 1
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    wire = json.loads(captured.out)
+    assert wire["valid"] is False
+    assert wire["summary"]["invalid_export_tasks"] == 1
+    assert wire["tasks"][0]["title"] == ""
+
+
+@pytest.mark.parametrize("shape", ("array", "object", "ignored-metadata"))
+def test_under_limit_recursive_json_returns_fixed_non_echoing_error(
+    shape: str,
+    tmp_path,
+    capsys,
+    monkeypatch,
+) -> None:
+    depth = 10_000
+    nested_array = b"[" * depth + b"0" + b"]" * depth
+    if shape == "array":
+        raw = nested_array
+    elif shape == "object":
+        raw = b'{"x":' * depth + b"0" + b"}" * depth
+    else:
+        raw = b'{"tasks":[],"extra":' + nested_array + b"}"
+    assert len(raw) < watcher_audit_cli.MAX_INPUT_BYTES
+
+    core_calls = 0
+
+    def unexpected_core_call(_tasks):
+        nonlocal core_calls
+        core_calls += 1
+        raise AssertionError("audit core must not receive recursively invalid JSON")
+
+    monkeypatch.setattr(watcher_audit_cli, "audit_tasks", unexpected_core_call)
+    source = tmp_path / f"recursive-{shape}.json"
+    source.write_bytes(raw)
+
+    assert watcher_audit_cli.main([str(source)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert core_calls == 0
+    assert "Traceback" not in captured.err
+    assert "RecursionError" not in captured.err
+    assert json.loads(captured.err) == {
+        "schema": "mastermind.sol_watcher_audit_error.v1",
+        "error": "INVALID_INPUT",
+        "message": "input is invalid",
+    }
