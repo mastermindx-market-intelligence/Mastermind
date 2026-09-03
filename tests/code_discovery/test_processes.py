@@ -9,6 +9,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -447,6 +448,91 @@ def test_delayed_bind_failure_cannot_use_an_unrelated_listener_as_readiness(
         ] == ["BIND_COLLISION", "STARTED"]
     finally:
         occupant.close()
+        processes.close()
+
+
+def test_late_wrong_identity_listener_cannot_false_start_before_bind_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An endpoint opened after spawn is not the launched server without its identity."""
+
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-argv.txt"
+    server = _script(
+        tmp_path / "late-bind-webserver",
+        (
+            "import socket, sys, time\n"
+            "listen = next(argument.split('=', 1)[1] for argument in sys.argv "
+            "if argument.startswith('--listen='))\n"
+            "host, port = listen.rsplit(':', 1)\n"
+            "time.sleep(0.45)\n"
+            "listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+            "try:\n"
+            "    listener.bind((host, int(port)))\n"
+            "except OSError:\n"
+            "    sys.stderr.write('address already in use\\n')\n"
+            "    sys.stderr.flush()\n"
+            "    raise SystemExit(98)\n"
+            "listener.listen()\n"
+            "while True: time.sleep(1)\n"
+        ),
+        role="zoekt-webserver",
+    )
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        server,
+    )
+    processes.build_indexes(manifest)
+
+    first_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    first_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    first_ready = threading.Event()
+    first_stop = threading.Event()
+
+    def serve_wrong_identity(port: int) -> None:
+        first_listener.bind(("127.0.0.1", port))
+        first_listener.listen()
+        first_listener.settimeout(0.05)
+        first_ready.set()
+        while not first_stop.is_set():
+            try:
+                connection, _ = first_listener.accept()
+            except TimeoutError:
+                continue
+            with connection:
+                connection.recv(4096)
+                connection.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                    b"Content-Length: 12\r\nConnection: close\r\n\r\n{\"Repos\":[]}"
+                )
+
+    real_reserve = processes_module._reserve_loopback_port
+    first_port, second_port = real_reserve(), real_reserve()
+    ports = iter((first_port, second_port))
+    real_spawn = processes_module._spawn_exact
+
+    def spawn_then_open_listener(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_spawn(*args, **kwargs)  # type: ignore[arg-type]
+        if not first_ready.is_set():
+            threading.Thread(
+                target=serve_wrong_identity, args=(first_port,), daemon=True
+            ).start()
+            assert first_ready.wait(timeout=1)
+        return process
+
+    monkeypatch.setattr(processes_module, "_reserve_loopback_port", lambda: next(ports))
+    monkeypatch.setattr(processes_module, "_spawn_exact", spawn_then_open_listener)
+    try:
+        endpoint = processes.start_search()
+        assert endpoint.port == second_port
+        assert [receipt.category for receipt in processes.startup_attempt_receipts] == [
+            "BIND_COLLISION",
+            "STARTED",
+        ]
+    finally:
+        first_stop.set()
+        first_listener.close()
         processes.close()
 
 
