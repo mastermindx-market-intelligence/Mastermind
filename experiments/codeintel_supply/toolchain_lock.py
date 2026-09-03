@@ -92,16 +92,19 @@ Z0_OPERATION_KEY: Final = "mastermind-codeintel-z0-discovery-falsifier-20260830-
 
 ACTION_COMMITS: Final = MappingProxyType(
     {
-        "checkout": ("actions/checkout", "11bd71901bbe5b1630ceea73d27597364c9af683"),
+        "checkout": ("actions/checkout", "3d3c42e5aac5ba805825da76410c181273ba90b1"),
         "download_artifact": (
             "actions/download-artifact",
-            "d3f86a106a0bac45b974a628896c90dbdf5c8093",
+            "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         ),
         "upload_artifact": (
             "actions/upload-artifact",
-            "ea165f8d65b6e75b540449e92b4886f43607fa02",
+            "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         ),
     }
+)
+CONSUMER_TOOL_SCHEMA_DIGEST: Final = (
+    "4762c5dd05d807db5ee3793fd4c349aa4527fe1bd154bd6dd8ff9945ec1666ca"
 )
 ALLOWED_HOSTS: Final = (
     "api.github.com",
@@ -116,6 +119,7 @@ ALLOWED_HOSTS: Final = (
 ALLOWED_HOST_SUFFIXES: Final = ("blob.core.windows.net",)
 HOST_UTILITY_CONFOUNDS: Final = (
     "/bin/bash",
+    "/bin/mount",
     "/usr/bin/curl",
     "/usr/bin/env",
     "/usr/bin/git",
@@ -512,11 +516,10 @@ def validate_lock_payload(
         ("consumer",),
         {
             "repository": "mastermindx-market-intelligence/Mastermind",
-            "pull_request": 407,
-            "carrier_ref": "refs/pull/407/head",
             "operation_key": Z0_OPERATION_KEY,
             "module": "experiments.code_discovery.z0_runner",
             "local_branch": "codeintel-z0-consumer",
+            "tool_schema_digest": CONSUMER_TOOL_SCHEMA_DIGEST,
             "path_policy": "research/code_intelligence_fabric/z0-path-policy.json",
             "index_includes": ["experiments/code_discovery/*"],
             "index_excludes": [],

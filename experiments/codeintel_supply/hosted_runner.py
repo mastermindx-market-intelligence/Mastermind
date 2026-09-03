@@ -36,6 +36,7 @@ import zipfile
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, Final
 from urllib.parse import urljoin, urlparse
@@ -730,6 +731,35 @@ _RECEIPT_STATE_PAIRS: Final = frozenset(
         ("RECONCILIATION_REQUIRED", "EFFECT_UNKNOWN"),
     }
 )
+_Z0_RESULT_FIELDS: Final = frozenset(
+    {
+        "schema_version",
+        "decision",
+        "generated_at",
+        "manifest_digest",
+        "path_policy_digest",
+        "tool_schema_digest",
+        "zoekt_source_commit",
+        "binary_digests",
+        "repository_statuses",
+        "resource_observations",
+    }
+)
+_Z0_STATUS_FIELDS: Final = frozenset(
+    {
+        "repository_id",
+        "ref_label",
+        "indexed_commit_sha",
+        "source_tree_digest",
+        "shard_namespace",
+        "health",
+        "coverage",
+        "generated_at",
+        "observed_at",
+        "freshness_seconds",
+    }
+)
+_Z0_NON_ACCEPTANCE_DECISION: Final = "ZOEKT_REQUIRES_ARCHITECTURE_REVISION"
 _CONSUMER_BOOTSTRAP: Final = (
     "import runpy,sys;"
     "sys.path.insert(0,sys.argv.pop(1));"
@@ -1713,11 +1743,12 @@ def run_checked(
 
 
 def git_stdout(root: Path, *arguments: str) -> str:
-    return run_checked(
-        ["/usr/bin/git", "-C", os.fspath(root), *arguments],
-        cwd=Path(root),
-        timeout=30,
-    ).stdout.strip()
+    try:
+        return _git_bytes(root, *arguments).decode("utf-8").strip()
+    except UnicodeDecodeError as error:
+        raise HostedRunnerError(
+            "GIT_INSPECTION_FAILED", "Git returned non-UTF-8 identity bytes"
+        ) from error
 
 
 def verify_consumer_checkout(
@@ -1750,10 +1781,6 @@ def verify_consumer_checkout(
         branch = git_stdout(root, "symbolic-ref", "--quiet", "--short", "HEAD")
     except HostedRunnerError:
         branch = "DETACHED"
-    if branch != FIXED_CONSUMER_BRANCH:
-        raise HostedRunnerError(
-            "CONSUMER_BRANCH_MISMATCH", "consumer is not bound to the fixed local role"
-        )
     for raw in _git_bytes(root, "ls-files", "-s", "-z").split(b"\0"):
         if not raw:
             continue
@@ -1876,8 +1903,7 @@ def selected_source_digest(
     """Mirror the protected Z0 consumer's selected regular-file digest."""
 
     source_root = _real_directory(root, "CONSUMER_MISMATCH")
-    rows: list[tuple[str, Path]] = []
-    basenames: set[str] = set()
+    rows: list[tuple[str, bytes]] = []
     raw = _git_bytes(source_root, "ls-files", "-s", "-z")
     for entry in raw.split(b"\0"):
         if not entry:
@@ -1899,25 +1925,25 @@ def selected_source_digest(
                 or _SHA1_RE.fullmatch(object_id) is None
             ):
                 raise HostedRunnerError("CONSUMER_FILE_UNSAFE", relative)
-            if path.name in basenames:
-                raise HostedRunnerError(
-                    "CONSUMER_FILE_UNSAFE", f"duplicate basename {path.name}"
-                )
-            basenames.add(path.name)
             file_path = source_root / relative
             metadata = file_path.lstat()
             if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
                 raise HostedRunnerError("CONSUMER_FILE_UNSAFE", relative)
-            rows.append((relative, file_path))
+            body = file_path.read_bytes()
+            if locks.git_blob_sha1(body) != object_id:
+                raise HostedRunnerError(
+                    "CONSUMER_FILE_UNSAFE", f"working bytes differ from Git blob: {relative}"
+                )
+            rows.append((relative, hashlib.sha256(body).digest()))
     if not rows:
         raise HostedRunnerError(
             "CONSUMER_PATH_VIOLATION", "index rules select no files"
         )
     digest = hashlib.sha256()
-    for relative, file_path in sorted(rows):
+    for relative, content_digest in sorted(rows):
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(hashlib.sha256(file_path.read_bytes()).digest())
+        digest.update(content_digest)
         digest.update(b"\0")
     return digest.hexdigest()
 
@@ -2824,6 +2850,7 @@ def derive_request(
     )
     lock = locks.load_toolchain_lock(lock_path, schema_path=schema_path)
     workflow_path = root / FIXED_WORKFLOW_PATH
+    _validate_workflow_action_pins(workflow_path, lock)
     workflow_sha256 = locks.sha256_file(workflow_path, max_bytes=1_048_576)
     return ExperimentRequest.from_values(
         operation_key=operation_key,
@@ -3277,7 +3304,20 @@ def run_phase_e(
             log_root=log_root,
         )
         validate_cleanup(cleanup)
-        artifacts = _result_artifact_census(outputs)
+        if launch.returncode == 0:
+            artifacts = _validate_success_artifacts(
+                output=outputs,
+                request=request,
+                manifest_payload=manifest_payload,
+                path_policy=path_policy,
+                source_digest=source_before,
+                binary_digests=binary_before,
+                expected_tool_schema_digest=str(
+                    consumer_policy["tool_schema_digest"]
+                ),
+            )
+        else:
+            artifacts = _result_artifact_census(outputs)
         evidence = {
             "forge": {
                 "commit_sha": request.forge_sha,
@@ -3287,8 +3327,6 @@ def run_phase_e(
             },
             "consumer": {
                 **dataclasses.asdict(consumer),
-                "carrier_ref": consumer_policy["carrier_ref"],
-                "pull_request": consumer_policy["pull_request"],
                 "merge_base": merge_base,
                 "changed_paths": list(changed_paths),
                 "source_digest_before": source_before,
@@ -4042,6 +4080,48 @@ def _manifest_file_digest(manifest: Mapping[str, Any], relative: str) -> str:
     return digest
 
 
+def _validate_workflow_action_pins(
+    workflow_path: Path, lock: locks.ToolchainLock
+) -> None:
+    """Require every workflow Action use to equal the independently pinned lock."""
+
+    candidate = _regular_file(
+        workflow_path, "ACTION_PIN_MISMATCH", max_bytes=1_048_576
+    )
+    try:
+        source = candidate.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise HostedRunnerError(
+            "ACTION_PIN_MISMATCH", "workflow source is unavailable"
+        ) from error
+    observed: dict[str, set[str]] = {}
+    for repository, commit in re.findall(
+        r"(?m)^\s*- uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^\s#]+)",
+        source,
+    ):
+        observed.setdefault(repository, set()).add(commit)
+    expected = {
+        str(row["repository"]): str(row["commit"])
+        for row in lock.payload["actions"].values()
+    }
+    if set(observed) != set(expected) or any(
+        commits != {expected[repository]}
+        for repository, commits in observed.items()
+    ):
+        raise HostedRunnerError(
+            "ACTION_PIN_MISMATCH", "workflow Action pins differ from the closed lock"
+        )
+    if (
+        source.count("ref: ${{ inputs.consumer_sha }}") != 1
+        or "refs/pull/" in source
+        or "switch -C" in source
+    ):
+        raise HostedRunnerError(
+            "ACTION_PIN_MISMATCH",
+            "workflow consumer checkout is not bound to the immutable input SHA",
+        )
+
+
 def _require_within_root(path: Path, root: Path) -> None:
     try:
         path.resolve().relative_to(root.resolve())
@@ -4049,6 +4129,21 @@ def _require_within_root(path: Path, root: Path) -> None:
         raise HostedRunnerError(
             "CONSUMER_PATH_POLICY_UNSAFE", "path escaped consumer root"
         ) from error
+
+
+def _require_outside_consumer_root(path: Path, consumer_root: Path) -> None:
+    try:
+        Path(path).resolve().relative_to(Path(consumer_root).resolve())
+    except ValueError:
+        return
+    except OSError as error:
+        raise HostedRunnerError(
+            "CONSUMER_MOUNT_SEAL_UNSAFE", "boundary path cannot be resolved"
+        ) from error
+    raise HostedRunnerError(
+        "CONSUMER_MOUNT_SEAL_UNSAFE",
+        "writable Phase E path overlaps the consumer source root",
+    )
 
 
 def _regular_file(path: Path, code: str, *, max_bytes: int) -> Path:
@@ -4224,6 +4319,191 @@ def _cleanup_candidate_scratch(
         process_group_dead=_process_group_dead(process_group),
         unexpected_residue=residue,
     )
+
+
+def _validate_success_artifacts(
+    *,
+    output: Path,
+    request: ExperimentRequest,
+    manifest_payload: Mapping[str, object],
+    path_policy: Path,
+    source_digest: str,
+    binary_digests: Mapping[str, str],
+    expected_tool_schema_digest: str,
+) -> Mapping[str, object]:
+    """Validate the consumer's complete zero-exit evidence before success."""
+
+    result_path = _regular_file(
+        Path(output) / "z0-result.json",
+        "RESULT_ARTIFACT_REQUIRED",
+        max_bytes=1_048_576,
+    )
+    report_path = _regular_file(
+        Path(output) / "z0-report.md",
+        "RESULT_ARTIFACT_REQUIRED",
+        max_bytes=1_048_576,
+    )
+    result_bytes = result_path.read_bytes()
+    report_bytes = report_path.read_bytes()
+    assert_secret_free(result_bytes)
+    assert_secret_free(report_bytes)
+
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        decoded: dict[str, object] = {}
+        for key, value in pairs:
+            if key in decoded:
+                raise ValueError(f"duplicate key: {key}")
+            decoded[key] = value
+        return decoded
+
+    def reject_non_finite(value: str) -> object:
+        raise ValueError(f"non-finite value: {value}")
+
+    try:
+        payload = json.loads(
+            result_bytes.decode("utf-8"),
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=reject_non_finite,
+        )
+    except (UnicodeDecodeError, ValueError) as error:
+        raise HostedRunnerError(
+            "RESULT_JSON_INVALID", "z0-result.json is not strict UTF-8 JSON"
+        ) from error
+    if not isinstance(payload, Mapping) or set(payload) != _Z0_RESULT_FIELDS:
+        raise HostedRunnerError(
+            "RESULT_IDENTITY_MISMATCH", "result top-level fields differ"
+        )
+
+    repositories = manifest_payload.get("repositories")
+    if not isinstance(repositories, list) or len(repositories) != 1:
+        raise HostedRunnerError(
+            "RESULT_IDENTITY_MISMATCH", "host manifest identity is unavailable"
+        )
+    manifest_row = repositories[0]
+    if not isinstance(manifest_row, Mapping):
+        raise HostedRunnerError(
+            "RESULT_IDENTITY_MISMATCH", "host manifest row is unavailable"
+        )
+    material_fields = (
+        "repository_id",
+        "repository_name",
+        "ref_label",
+        "commit_sha",
+        "included_prefixes",
+        "excluded_globs",
+        "source_tree_digest",
+    )
+    try:
+        material_row = {field: manifest_row[field] for field in material_fields}
+    except KeyError as error:
+        raise HostedRunnerError(
+            "RESULT_IDENTITY_MISMATCH", "host manifest material fields differ"
+        ) from error
+    expected_manifest_digest = locks.sha256_bytes(
+        locks.canonical_json_bytes(
+            {
+                "schema_version": "mastermind.codeintel_index_manifest.v1",
+                "repositories": [material_row],
+            }
+        )
+    )
+    expected_binaries = {
+        "zoekt_git_index": binary_digests.get("zoekt-git-index"),
+        "zoekt_webserver": binary_digests.get("zoekt-webserver"),
+    }
+    expected_resource_observations = {
+        "benchmarks_complete": False,
+        "benchmark_gate": "separate evidenced ingestion required",
+        "production_inert": True,
+        "endpoint_scope": "loopback_disposable_only",
+    }
+    if (
+        payload.get("schema_version") != "mastermind.codeintel_z0_result.v1"
+        or payload.get("decision") != _Z0_NON_ACCEPTANCE_DECISION
+        or payload.get("manifest_digest") != expected_manifest_digest
+        or payload.get("path_policy_digest")
+        != locks.sha256_file(path_policy, max_bytes=1_048_576)
+        or payload.get("tool_schema_digest") != expected_tool_schema_digest
+        or payload.get("zoekt_source_commit") != locks.ZOEKT_COMMIT
+        or payload.get("binary_digests") != expected_binaries
+        or payload.get("resource_observations") != expected_resource_observations
+    ):
+        raise HostedRunnerError(
+            "RESULT_IDENTITY_MISMATCH", "result request/source/tool identity differs"
+        )
+
+    def require_utc_timestamp(value: object) -> str:
+        if not isinstance(value, str) or not value or len(value) > 128:
+            raise HostedRunnerError(
+                "RESULT_IDENTITY_MISMATCH", "result timestamp is malformed"
+            )
+        try:
+            observed = datetime.fromisoformat(value)
+        except ValueError as error:
+            raise HostedRunnerError(
+                "RESULT_IDENTITY_MISMATCH", "result timestamp is malformed"
+            ) from error
+        if observed.tzinfo is None or observed.utcoffset() != timedelta(0):
+            raise HostedRunnerError(
+                "RESULT_IDENTITY_MISMATCH", "result timestamp is not UTC"
+            )
+        return value
+
+    generated_at = require_utc_timestamp(payload.get("generated_at"))
+    statuses = payload.get("repository_statuses")
+    if not isinstance(statuses, list) or len(statuses) != 1:
+        raise HostedRunnerError(
+            "RESULT_IDENTITY_MISMATCH", "result repository status census differs"
+        )
+    status_row = statuses[0]
+    if not isinstance(status_row, Mapping) or set(status_row) != _Z0_STATUS_FIELDS:
+        raise HostedRunnerError(
+            "RESULT_IDENTITY_MISMATCH", "result repository status fields differ"
+        )
+    shard_material = "\0".join(
+        (
+            "mastermind",
+            FIXED_REPOSITORY,
+            FIXED_CONSUMER_BRANCH,
+            request.consumer_sha,
+            source_digest,
+        )
+    ).encode("utf-8")
+    expected_shard = f"z0-{hashlib.sha256(shard_material).hexdigest()[:24]}"
+    freshness = status_row.get("freshness_seconds")
+    if (
+        status_row.get("repository_id") != "mastermind"
+        or status_row.get("ref_label") != FIXED_CONSUMER_BRANCH
+        or status_row.get("indexed_commit_sha") != request.consumer_sha
+        or status_row.get("source_tree_digest") != source_digest
+        or status_row.get("shard_namespace") != expected_shard
+        or status_row.get("health") != "healthy"
+        or status_row.get("coverage") != "covered"
+        or isinstance(freshness, bool)
+        or freshness != 0.0
+    ):
+        raise HostedRunnerError(
+            "RESULT_IDENTITY_MISMATCH", "result repository status identity differs"
+        )
+    require_utc_timestamp(status_row.get("generated_at"))
+    require_utc_timestamp(status_row.get("observed_at"))
+
+    expected_report = (
+        "# Z0 Global Discovery Falsifier Result\n\n"
+        f"Decision: {_Z0_NON_ACCEPTANCE_DECISION}\n\n"
+        f"Generated at: {generated_at}\n\n"
+        "## Repository/ref status\n\n"
+        f"- mastermind/{FIXED_CONSUMER_BRANCH}: health=healthy; "
+        f"coverage=covered; indexed_sha={request.consumer_sha}\n\n"
+        "This is a disposable production-inert experiment result. It does not "
+        "provision a persistent service, capability profile, credential, MCP "
+        "endpoint, CI3 grant, or deployment.\n"
+    ).encode("utf-8")
+    if report_bytes != expected_report:
+        raise HostedRunnerError(
+            "RESULT_REPORT_MISMATCH", "z0-report.md does not bind result identity"
+        )
+    return _result_artifact_census(Path(output))
 
 
 def _result_artifact_census(output: Path) -> Mapping[str, object]:
@@ -4482,9 +4762,15 @@ def _git_bytes(root: Path, *arguments: str) -> bytes:
             capture_output=True,
             timeout=30,
             env={
-                "PATH": "/usr/bin:/bin:/usr/local/bin",
+                "PATH": "/usr/bin:/bin",
+                "GIT_OPTIONAL_LOCKS": "0",
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_ASKPASS": "/bin/false",
                 "LANG": "C",
                 "LC_ALL": "C",
+                "TZ": "UTC",
             },
         )
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -4732,16 +5018,19 @@ def _phase_e_namespace_probe() -> subprocess.CompletedProcess[str]:
             "/usr/bin/unshare",
             "--user",
             "--map-root-user",
+            "--mount",
             "--net",
             "--",
             "/usr/bin/env",
             "-i",
             "PATH=/usr/bin:/bin",
-            "/usr/sbin/ip",
-            "link",
-            "set",
-            "lo",
-            "up",
+            "/bin/bash",
+            "--noprofile",
+            "--norc",
+            "-euo",
+            "pipefail",
+            "-c",
+            "/bin/mount --make-rprivate / && /usr/sbin/ip link set lo up",
         ],
         cwd="/",
         env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
@@ -4807,8 +5096,20 @@ def _phase_e_namespace_command(
     result_directory: Path,
     receipt_path: Path,
 ) -> list[str]:
+    consumer = _real_directory(consumer_root, "CONSUMER_MOUNT_SEAL_UNSAFE")
+    for external in (
+        sealed_home,
+        sealed_home / "tmp",
+        scratch_root,
+        result_directory,
+        receipt_path.parent,
+        bundle_path.parent,
+        request_path.parent,
+    ):
+        _require_outside_consumer_root(external, consumer)
     inner_environment = {
         "HOME": os.fspath(sealed_home),
+        "TMPDIR": os.fspath(sealed_home / "tmp"),
         "LANG": "C",
         "LC_ALL": "C",
         "PATH": "/usr/bin:/bin",
@@ -4835,6 +5136,7 @@ def _phase_e_namespace_command(
         "/usr/bin/unshare",
         "--user",
         "--map-root-user",
+        "--mount",
         "--net",
         "--",
         "/usr/bin/env",
@@ -4848,6 +5150,32 @@ def _phase_e_namespace_command(
         "-c",
         """
 /usr/sbin/ip link set lo up
+/bin/mount --make-rprivate /
+readonly CONSUMER_ID_BEFORE="$(/usr/bin/python3 -c 'import os,sys; value=os.stat(sys.argv[1]); print(f"{value.st_dev}:{value.st_ino}")' "$CONSUMER_ROOT")"
+/bin/mount --bind "$CONSUMER_ROOT" "$CONSUMER_ROOT"
+/bin/mount -o remount,bind,ro,nosuid,nodev,noexec "$CONSUMER_ROOT"
+readonly CONSUMER_ID_AFTER="$(/usr/bin/python3 -c 'import os,sys; value=os.stat(sys.argv[1]); print(f"{value.st_dev}:{value.st_ino}")' "$CONSUMER_ROOT")"
+test "$CONSUMER_ID_BEFORE" = "$CONSUMER_ID_AFTER"
+/usr/bin/python3 - "$CONSUMER_ROOT" "$TMPDIR" <<'PY'
+import errno
+import os
+import sys
+
+consumer_root, tmpdir = sys.argv[1:]
+os.makedirs(tmpdir, mode=0o700, exist_ok=True)
+if not os.statvfs(consumer_root).f_flag & os.ST_RDONLY:
+    raise SystemExit("consumer root lacks ST_RDONLY")
+probe = os.path.join(consumer_root, ".codeintel-read-only-probe")
+try:
+    descriptor = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+except OSError as error:
+    if error.errno != errno.EROFS:
+        raise
+else:
+    os.close(descriptor)
+    os.unlink(probe)
+    raise SystemExit("consumer write unexpectedly succeeded")
+PY
 exec /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \\
   run-phase-e \\
   --forge-root "$FORGE_ROOT" \\

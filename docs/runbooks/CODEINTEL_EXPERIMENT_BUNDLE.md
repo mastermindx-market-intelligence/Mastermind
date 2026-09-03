@@ -62,9 +62,9 @@ tests require its rejection.
 
 All Actions are immutable commits:
 
-- `actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683`
-- `actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093`
-- `actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02`
+- `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1`
+- `actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c`
+- `actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`
 
 The execution platform is exactly GitHub-hosted `ubuntu-24.04`, Linux amd64.
 The runner image/version, kernel, Python version, pinned Actions, and unavoidable
@@ -134,9 +134,10 @@ the forge commit/tree, lock digest, and workflow digest from a clean checkout an
 writes one canonical request plus its SHA-256. A caller cannot choose a URL,
 repository, ref, module, executable, path policy, mode, command, or argv suffix.
 
-Phase E independently checks out the fixed carrier `refs/pull/407/head`, binds
-it to local branch `codeintel-z0-consumer`, and rejects it unless its HEAD and
-tree exactly equal the normalized request. The repository must normalize to
+Phase E independently checks out the request's exact 40-character
+`consumer_sha`; no pull ref, branch, tag, or default branch is executable
+policy. It rejects the detached checkout unless its repository, HEAD, and tree
+exactly equal the normalized request. The repository must normalize to
 `mastermindx-market-intelligence/Mastermind`. The effective consumer diff is
 derived from the Git merge base with the forge commit and must stay inside the
 fixed Z0 ceiling. Every changed consumer path must be a regular Git blob, and
@@ -292,28 +293,41 @@ Phase E downloads only the Phase P content-addressed artifact and then:
    extraction.
 4. Rechecks exact consumer repository, commit, tree, effective path census, path
    modes, path policy, and selected source digest.
-5. Runs the separate `/usr/bin/unshare --user --map-root-user --net` probe in
-   one host-policy window and verifies exact restoration. Failure writes a
-   durable `REFUSED / NOT_APPLIED` receipt with `NETWORK_SEAL_UNAVAILABLE` (or
-   the typed host-policy failure); no consumer is launched.
+5. Runs the separate
+   `/usr/bin/unshare --user --map-root-user --mount --net` probe in one
+   host-policy window, makes the new mount tree private, and verifies exact
+   host-policy restoration. Failure writes a durable `REFUSED / NOT_APPLIED`
+   receipt with `NETWORK_SEAL_UNAVAILABLE` (or the typed host-policy failure);
+   no consumer is launched.
 6. Opens a second host-policy window for exactly one sealed invocation, enters a
-   fresh user and network namespace through `/usr/bin/env -i`, and verifies
-   exact restoration before accepting the staged semantic receipt. No
-   GitHub or Actions credential is passed. Only loopback is raised.
-7. Inside that namespace, requires the interface census to be exactly `lo`, the
+   fresh user, mount, and network namespace through `/usr/bin/env -i`, and
+   verifies exact restoration before accepting the staged semantic receipt.
+   No GitHub or Actions credential is passed. Only loopback is raised.
+7. Makes the namespace mount tree private, self-bind-mounts the exact consumer
+   root, and remounts it `ro,nosuid,nodev,noexec`. It proves the root device and
+   inode did not change, `ST_RDONLY` is set, and a create attempt fails with
+   `EROFS`. Every consumer output, scratch, request, bundle, receipt, home, and
+   temporary path is required to resolve outside that source root.
+8. Inside that namespace, requires the interface census to be exactly `lo`, the
    non-loopback route census to be empty, and a TCP connect to `1.1.1.1:443` to
    fail with an admitted network-denial errno. This proof strictly precedes the
    consumer launch.
-8. Invokes only the fixed isolated Python bootstrap and Z0 module with fixed
+9. Invokes only the fixed isolated Python bootstrap and Z0 module with fixed
    manifest, path-policy, bundle-binary, digest, scratch, result/report, and
    ten-second startup-timeout arguments.
-9. Places the consumer in a new process group; sets core, CPU, file-size,
+10. Places the consumer in a new process group; sets core, CPU, file-size,
    open-file, process-count, log-byte, and 900-second wall-clock bounds; hashes
    stdout/stderr instead of persisting them; and records PID/process group,
    return code, CPU time, maximum RSS, byte counts, and truncation state.
-10. Recomputes source, binary, bundle, and manifest identities after launch;
+11. Recomputes source, binary, bundle, and manifest identities after launch;
     removes shard/log scratch; proves the process group is dead and residue is
-    absent; and records the optional result/report names, sizes, and digests.
+    absent; and records result/report names, sizes, and digests. A zero return
+    code is accepted only when both bounded regular files decode as strict
+    UTF-8, contain no secrets or private paths, and exactly satisfy the pinned
+    Z0 result schema, manifest/path/tool/binary identities, production-inert
+    observations, repository status, non-acceptance decision, and byte-exact
+    rendered report. A known nonzero return remains an `APPLIED` experiment
+    outcome and is not misreported as a successful Z0 result.
 
 If the sealed child ends without a durable receipt, the outer boundary records
 `RECONCILIATION_REQUIRED / EFFECT_UNKNOWN` and fails. It never substitutes a
@@ -334,11 +348,11 @@ or an unknown prior effect fails closed.
 The fixed receipt artifact is
 `codeintel-z0-operation-9aae1af9ef430044fbba77ae0f87cf12d4425c75f577b4427c09ae66cec11bf4`.
 Its archive must contain exactly one regular `semantic-receipt.json`. The
-optional bounded `z0-result.json` and `z0-report.md` files are uploaded under a
+bounded `z0-result.json` and `z0-report.md` files are uploaded under a
 separate `codeintel-z0-result-<bundle-sha256>` artifact so they cannot widen the
 receipt artifact's replay census. That separate artifact is uploaded only after
-a successful sealed step and only after both files have passed the byte ceiling
-and secret/private-path scan. The receipt has one of only three
+a successful sealed step and only after both files have passed the full strict
+semantic validator described above. The receipt has one of only three
 status/effect pairs:
 
 - `COMPLETED / APPLIED`: the fixed consumer launched and the exact normalized

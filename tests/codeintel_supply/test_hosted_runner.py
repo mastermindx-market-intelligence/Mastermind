@@ -422,6 +422,41 @@ def test_selected_source_digest_allows_duplicate_basenames_and_binds_git_blob(
         )
 
 
+def test_selected_source_digest_hashes_the_same_bytes_it_verified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+    runner.run_checked(["git", "init", "-q", "-b", "fixture"], cwd=repo)
+    selected = repo / "experiments/code_discovery/z0_runner.py"
+    selected.parent.mkdir(parents=True)
+    original = b"print('verified')\n"
+    selected.write_bytes(original)
+    runner.run_checked(["git", "add", "."], cwd=repo)
+
+    original_read_bytes = Path.read_bytes
+    reads = 0
+
+    def drifting_read_bytes(path: Path) -> bytes:
+        nonlocal reads
+        if path == selected:
+            reads += 1
+            if reads > 1:
+                return b"print('post-verification drift')\n"
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", drifting_read_bytes)
+    observed = runner.selected_source_digest(
+        repo, includes=("experiments/code_discovery/*",), excludes=()
+    )
+    expected = hashlib.sha256()
+    expected.update(b"experiments/code_discovery/z0_runner.py\0")
+    expected.update(hashlib.sha256(original).digest())
+    expected.update(b"\0")
+    assert observed == expected.hexdigest()
+    assert reads == 1
+
+
 def test_git_bytes_uses_exact_closed_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -465,16 +500,22 @@ def test_workflow_action_pins_match_lock_and_hostile_mutation_fails(
     workflow = repository_root / runner.FIXED_WORKFLOW_PATH
     runner._validate_workflow_action_pins(workflow, lock)  # type: ignore[attr-defined]  # noqa: SLF001
 
-    hostile = tmp_path / "workflow.yml"
-    hostile.write_text(
-        workflow.read_text(encoding="utf-8").replace(
+    source = workflow.read_text(encoding="utf-8")
+    mutations = (
+        (
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             "actions/checkout@" + "f" * 40,
         ),
-        encoding="utf-8",
+        ("ref: ${{ inputs.consumer_sha }}", "ref: refs/pull/407/head"),
+        ("ref: ${{ inputs.consumer_sha }}", "ref: master"),
+        ("ref: ${{ inputs.consumer_sha }}", "ref: v1.0.0"),
     )
-    with pytest.raises(runner.HostedRunnerError, match="ACTION_PIN_MISMATCH"):
-        runner._validate_workflow_action_pins(hostile, lock)  # type: ignore[attr-defined]  # noqa: SLF001
+    for index, (needle, replacement) in enumerate(mutations):
+        assert source.count(needle) >= 1
+        hostile = tmp_path / f"workflow-{index}.yml"
+        hostile.write_text(source.replace(needle, replacement), encoding="utf-8")
+        with pytest.raises(runner.HostedRunnerError, match="ACTION_PIN_MISMATCH"):
+            runner._validate_workflow_action_pins(hostile, lock)  # type: ignore[attr-defined]  # noqa: SLF001
 
 
 def test_consumer_effective_diff_rejects_changed_symlink(tmp_path: Path) -> None:
@@ -1956,6 +1997,7 @@ def test_phase_e_hosted_namespace_argv_is_fixed_and_secret_free(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_hostile_secret_value_123456789")
+    (tmp_path / "consumer").mkdir()
     argv = runner._phase_e_namespace_command(  # noqa: SLF001 - exact boundary law
         forge_root=tmp_path / "forge",
         consumer_root=tmp_path / "consumer",
@@ -2011,6 +2053,55 @@ def test_phase_e_refuses_writable_paths_beneath_consumer_root(tmp_path: Path) ->
             result_directory=tmp_path / "result",
             receipt_path=tmp_path / "receipt.json",
         )
+
+
+def test_phase_e_live_mount_seal_is_read_only_and_namespace_local(
+    tmp_path: Path,
+    github_hosted_userns_policy: runner.HostUsernsPolicyEvidence,
+) -> None:
+    del github_hosted_userns_policy
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    tracked = consumer / "tracked.py"
+    tracked.write_text("sealed\n", encoding="utf-8")
+    argv = runner._phase_e_namespace_command(  # noqa: SLF001 - exact boundary law
+        forge_root=tmp_path / "forge",
+        consumer_root=consumer,
+        request_path=tmp_path / "request.json",
+        bundle_path=tmp_path / "bundle.tar.gz",
+        bundle_sha256=SHA_A,
+        sealed_home=tmp_path / "home",
+        scratch_root=tmp_path / "scratch",
+        result_directory=tmp_path / "result",
+        receipt_path=tmp_path / "receipt.json",
+    )
+    seal_prefix, separator, _consumer_exec = argv[-1].partition(
+        'exec /usr/bin/python3 "$FORGE_ROOT'
+    )
+    assert separator
+    argv[-1] = seal_prefix + 'printf "CONSUMER_MOUNT_SEALED\\n"\n'
+
+    completed = runner._invoke_phase_p_boundary(  # noqa: SLF001 - live boundary
+        argv,
+        cwd=os.fspath(tmp_path),
+        env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+        check=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+        close_fds=True,
+        pass_fds=(),
+        start_new_session=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "CONSUMER_MOUNT_SEALED\n"
+    assert tracked.read_text(encoding="utf-8") == "sealed\n"
+    after = consumer / "host-write-after-namespace"
+    after.write_text("restored\n", encoding="utf-8")
+    assert after.read_text(encoding="utf-8") == "restored\n"
 
 
 def test_phase_p_process_refuses_when_kernel_boundary_receipt_is_absent(
@@ -2944,9 +3035,39 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
         outbound_probe="DENIED",
         denial_errno=errno.ENETUNREACH,
     )
-    monkeypatch.setattr(
-        runner, "_launch_fixed_consumer", lambda *args, **kwargs: launch
-    )
+    def launch_consumer(*args: object, **kwargs: object) -> runner.LaunchEvidence:
+        del args, kwargs
+        consumer_policy = lock.payload["consumer"]
+        manifest_payload: dict[str, object] = {
+            "schema_version": "mastermind.codeintel_index_manifest.v1",
+            "repositories": [
+                {
+                    "repository_id": "mastermind",
+                    "repository_name": runner.FIXED_REPOSITORY,
+                    "source_snapshot_root": os.fspath(consumer.resolve()),
+                    "ref_label": runner.FIXED_CONSUMER_BRANCH,
+                    "commit_sha": request.consumer_sha,
+                    "included_prefixes": list(consumer_policy["index_includes"]),
+                    "excluded_globs": list(consumer_policy["index_excludes"]),
+                    "source_tree_digest": "7" * 64,
+                }
+            ],
+        }
+        _write_valid_success_artifacts(
+            tmp_path / "result",
+            request=request,
+            manifest_payload=manifest_payload,
+            path_policy=policy,
+            source_digest="7" * 64,
+            binary_digests={
+                "zoekt-git-index": hashlib.sha256(indexer_body).hexdigest(),
+                "zoekt-webserver": hashlib.sha256(webserver_body).hexdigest(),
+            },
+            tool_schema_digest=str(consumer_policy["tool_schema_digest"]),
+        )
+        return launch
+
+    monkeypatch.setattr(runner, "_launch_fixed_consumer", launch_consumer)
     monkeypatch.setattr(
         runner,
         "prove_then_launch",

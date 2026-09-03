@@ -55,7 +55,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         name: Check out exact forge source
         with:
           ref: ${{ github.sha }}
@@ -153,7 +153,7 @@ jobs:
               --github-output "$GITHUB_OUTPUT" \
               --receipt "$RUNNER_TEMP/codeintel-phase-p-receipt/semantic-receipt.json"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         name: Upload content-addressed bundle
         if: steps.replay.outputs.disposition == 'PROCEED'
         with:
@@ -165,7 +165,7 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         name: Preserve Phase P refusal receipt
         if: failure() && (steps.replay.outcome == 'failure' || steps.prepare.outcome == 'failure')
         with:
@@ -175,7 +175,7 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         name: Preserve identical prior semantic receipt
         if: steps.replay.outputs.disposition == 'RETURN_PRIOR'
         with:
@@ -207,7 +207,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         name: Check out exact forge source
         with:
           ref: ${{ github.sha }}
@@ -215,22 +215,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         name: Check out the fixed Z0 carrier
         with:
           repository: mastermindx-market-intelligence/Mastermind
-          ref: refs/pull/407/head
+          ref: ${{ inputs.consumer_sha }}
           path: consumer
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Bind fixed local consumer branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          readonly CONSUMER_ROOT="$GITHUB_WORKSPACE/consumer"
-          /usr/bin/git -C "$CONSUMER_ROOT" switch -C codeintel-z0-consumer HEAD
-          /usr/bin/git -C "$CONSUMER_ROOT" status --porcelain=v1 --untracked-files=all
 
       - name: Rederive closed normalized request
         shell: bash
@@ -249,7 +241,7 @@ jobs:
             --consumer-tree-sha "$INPUT_CONSUMER_TREE_SHA" \
             --output "$RUNNER_TEMP/codeintel-request.json"
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         name: Download exact content-addressed bundle
         with:
           name: codeintel-z0-${{ needs.phase-p.outputs.bundle_sha256 }}
@@ -310,7 +302,7 @@ jobs:
               --result-directory "$RUNNER_TEMP/codeintel-phase-e-result" \
               --receipt "$RECEIPT_PATH"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         name: Upload semantic receipt and bounded Z0 result
         if: always()
         with:
@@ -320,7 +312,7 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         name: Upload bounded Z0 result files
         if: steps.sealed.outcome == 'success'
         with:

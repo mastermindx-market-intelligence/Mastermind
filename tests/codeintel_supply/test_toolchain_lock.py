@@ -108,6 +108,25 @@ def test_committed_lock_is_closed_and_schema_bound() -> None:
     assert schema["properties"]["mode"]["const"] == "Z0"
 
 
+def test_consumer_lock_rejects_reintroduced_mutable_carrier_field(
+    tmp_path: Path,
+) -> None:
+    payload = _payload()
+    consumer = payload["consumer"]
+    assert isinstance(consumer, dict)
+    consumer["carrier_ref"] = "refs/pull/407/head"
+    hostile = tmp_path / "lock.json"
+    hostile.write_text(
+        json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(locks.ToolchainLockError) as raised:
+        locks.load_toolchain_lock(hostile, schema_path=SCHEMA_PATH)
+
+    assert raised.value.code == "PIN_MISMATCH"
+    assert raised.value.detail == "consumer differs"
+
+
 @pytest.mark.parametrize(
     ("target", "needle", "replacement", "expected_code", "expected_detail"),
     [
