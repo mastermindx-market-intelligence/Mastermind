@@ -1,0 +1,126 @@
+{
+  "canonical_internal_sources": [
+    {
+      "blob_sha": "264d494f194676c01dc3529c282248b9ae365c05",
+      "owner": "Project Workroom architecture",
+      "path": "docs/superpowers/specs/2026-08-29-project-workroom-fabric-design.md",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "revision": "e7d91bfe0f6ef176878a6a281afd459c0905e5aa",
+      "state": "SPEC_ONLY / PROTECTED"
+    },
+    {
+      "blob_sha": "b6c74d5e2c68a4c64f7133a82fc502437d728b6b",
+      "live_ruler": {
+        "exceptions": 2,
+        "initiatives": 7,
+        "memberships": 62,
+        "multi_parent_projects": 0,
+        "projects": 64
+      },
+      "owner": "Linear portfolio source",
+      "path": "docs/superpowers/specs/2026-09-02-linear-initiative-portfolio-v1-current-epoch-source-consolidation.md",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "revision": "e7d91bfe0f6ef176878a6a281afd459c0905e5aa",
+      "state": "PROVEN_LIVE"
+    },
+    {
+      "owner": "Chairman Control Room implementation",
+      "paths": [
+        "control_plane/chairman_control_room.py",
+        "scripts/chairman_control_room.py",
+        "control_plane/static/control_room.js",
+        "control_plane/static/control_room.css"
+      ],
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "revision": "e7d91bfe0f6ef176878a6a281afd459c0905e5aa",
+      "state": "existing owner; exact Hub extension seam requires H0"
+    },
+    {
+      "owner": "Organizational workstream",
+      "path": "agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "16aac3be6a7e8790af0aee75ab1d44ac43eecfab",
+      "state": "active / PARTIAL overall; P0A/H0 and X1 independently accepted, later waves separately gated"
+    }
+  ],
+  "collision_census": {
+    "exact_branch": "sol/ai-operating-hub-f0-architecture-freeze-20260902",
+    "exact_branch_present_before_start": false,
+    "exact_operation_pr_present_before_start": false,
+    "owned_paths": [
+      "research/MASTERMIND_AI_OPERATING_HUB_F0_ARCHITECTURE_2026-09-02.md",
+      "docs/superpowers/plans/2026-09-02-ai-operating-hub-h0-h4-rollout.md",
+      "research/evidence/ai_operating_hub_f0_archaeology_2026-09-02.json",
+      "tests/test_ai_operating_hub_f0_source_law.py"
+    ],
+    "owned_paths_present_on_protected_master_before_start": []
+  },
+  "dialogue_reconciliation": {
+    "current_source_carrier": "C0BSBM78V1N/1788422678.812859",
+    "current_start": "1788422733.803969",
+    "prior_review_carrier": "C0BSBM78V1N/1788341210.101979",
+    "prior_review_operation": "ai-operating-hub-f0-independent-review-20260902-sol-001",
+    "sol_terminal_edge": "1788422588.766839 / SOL CLOSED / STOP",
+    "worker_return": "1788341580.485129 / BLOCKED SOURCE_NOT_FOUND / effect=NONE"
+  },
+  "h1_delivery_gate": {
+    "canonical_branch_or_pr_observed": false,
+    "canonical_pickup_observed": false,
+    "canonical_start_observed": false,
+    "chairman_statement": "operator pack handed to Codex",
+    "required_disposition_until_f0_h0_protected": "BLOCKED SOURCE_PREDECESSOR_UNPROTECTED effect=NONE"
+  },
+  "macro_main": "16aac3be6a7e8790af0aee75ab1d44ac43eecfab",
+  "non_effects": [
+    "no H1 source",
+    "no Control Room implementation",
+    "no Agent OS write",
+    "no Linear write",
+    "no Executive lifecycle or runtime effect",
+    "no provider effect",
+    "no deployment or production effect"
+  ],
+  "observed_at": "2026-09-03T08:05:33Z",
+  "official_source_benchmark": [
+    {
+      "boundary": "portfolio projection, not runtime truth",
+      "lesson": "leadership orientation and intentional Project grouping",
+      "product": "Linear Initiatives/Projects",
+      "url": "https://linear.app/docs/initiatives"
+    },
+    {
+      "boundary": "display freshness and disagreement",
+      "lesson": "status is manually communicated and not auto-completed from issue closure",
+      "product": "Linear Project Status",
+      "url": "https://linear.app/docs/project-status"
+    },
+    {
+      "boundary": "session or PR is not company lifecycle or production acceptance",
+      "lesson": "research/plan/branch/PR/review is a visible evidence path",
+      "product": "GitHub Copilot coding agent",
+      "url": "https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/research-plan-iterate"
+    },
+    {
+      "boundary": "green source does not imply live capability",
+      "lesson": "build, test/evaluate, publish, and monitor remain distinct",
+      "product": "Microsoft Copilot Studio",
+      "url": "https://learn.microsoft.com/en-us/microsoft-copilot-studio/agents-experience/overview"
+    },
+    {
+      "boundary": "no model attention/priority/escalation authority without promotion evidence",
+      "lesson": "agent triage can inform a future bounded experiment",
+      "product": "Atlassian Rovo Request Router",
+      "url": "https://support.atlassian.com/rovo/docs/work-with-service-triage-agent/"
+    }
+  ],
+  "operation_key": "mastermind-ai-operating-hub-f0-architecture-freeze-20260902-sol-001",
+  "protected_master": "e7d91bfe0f6ef176878a6a281afd459c0905e5aa",
+  "protected_master_tree": "5ee4bdb27c24a98c92a3d1e8fe6104f4b10ecb83",
+  "ruling": "No canonical AI Hub source carrier existed. Create exactly one F0 records-only carrier as an UMBRELLA_EXTENSION; admit H0 only after independent review and protected merge. H1 remains held.",
+  "schema": "mastermind.ai_operating_hub_f0_archaeology.v2",
+  "skillpack": {
+    "minimum_bootstrap_major": 1,
+    "schema": "mastermind.sol_skillpack.v1",
+    "version": "1.0.1"
+  }
+}
