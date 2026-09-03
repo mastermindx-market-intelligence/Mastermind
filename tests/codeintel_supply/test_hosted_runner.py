@@ -487,6 +487,69 @@ def test_git_bytes_uses_exact_closed_environment(
     }
 
 
+def _git_repository(path: Path) -> str:
+    path.mkdir()
+    runner.run_checked(["git", "init", "-q", "-b", "fixture"], cwd=path)
+    (path / "tracked.py").write_text("sealed\n", encoding="utf-8")
+    runner.run_checked(["git", "add", "."], cwd=path)
+    runner.run_checked(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=path,
+    )
+    return runner.git_stdout(path, "rev-parse", "HEAD")
+
+
+def test_consumer_git_seal_layout_normal_checkout_deduplicates_common_dir(
+    tmp_path: Path,
+) -> None:
+    consumer = tmp_path / "consumer"
+    _git_repository(consumer)
+
+    layout = runner._consumer_git_seal_layout(consumer)  # noqa: SLF001
+    roles = {row.role: row for row in layout.roots}
+
+    assert set(roles) == {"consumer_source", "git_worktree_dir", "git_common_dir"}
+    assert roles["consumer_source"].path == consumer.resolve()
+    assert roles["git_worktree_dir"].path == (consumer / ".git").resolve()
+    assert roles["git_common_dir"].path == (consumer / ".git").resolve()
+    assert roles["git_worktree_dir"].seal_id == roles["git_common_dir"].seal_id
+    assert roles["consumer_source"].seal_id != roles["git_worktree_dir"].seal_id
+    assert len(layout.unique_roots) == 2
+
+
+def test_consumer_git_seal_layout_tracks_linked_worktree_common_dir(
+    tmp_path: Path,
+) -> None:
+    primary = tmp_path / "primary"
+    head = _git_repository(primary)
+    consumer = tmp_path / "consumer"
+    runner.run_checked(
+        ["git", "worktree", "add", "--detach", os.fspath(consumer), head],
+        cwd=primary,
+    )
+
+    layout = runner._consumer_git_seal_layout(consumer)  # noqa: SLF001
+    roles = {row.role: row for row in layout.roots}
+
+    assert roles["consumer_source"].path == consumer.resolve()
+    assert roles["git_common_dir"].path == (primary / ".git").resolve()
+    assert roles["git_worktree_dir"].path.parent == (
+        primary / ".git/worktrees"
+    ).resolve()
+    assert len({row.seal_id for row in layout.roots}) == 3
+    assert len(layout.unique_roots) == 3
+    assert all(len(row.path_sha256) == 64 for row in layout.roots)
+
+
 def test_workflow_action_pins_match_lock_and_hostile_mutation_fails(
     tmp_path: Path,
 ) -> None:
@@ -1997,7 +2060,7 @@ def test_phase_e_hosted_namespace_argv_is_fixed_and_secret_free(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_hostile_secret_value_123456789")
-    (tmp_path / "consumer").mkdir()
+    _git_repository(tmp_path / "consumer")
     argv = runner._phase_e_namespace_command(  # noqa: SLF001 - exact boundary law
         forge_root=tmp_path / "forge",
         consumer_root=tmp_path / "consumer",
@@ -2033,6 +2096,14 @@ def test_phase_e_hosted_namespace_argv_is_fixed_and_secret_free(
     assert "remount,bind,ro,nosuid,nodev,noexec" in argv[-1]
     assert "ST_RDONLY" in argv[-1]
     assert "errno.EROFS" in argv[-1]
+    assert "CONSUMER_GIT_DIR=" in argv
+    assert "CONSUMER_GIT_COMMON_DIR=" in argv
+    assert "record-phase-e-seal-refusal" in argv[-1]
+    assert argv[-1].index("trap record_seal_refusal ERR") < argv[-1].index(
+        "/bin/mount --make-rprivate /"
+    )
+    assert argv[-1].count('seal_root "$CONSUMER_GIT_COMMON_DIR"') == 1
+    assert argv[-1].count('seal_root "$CONSUMER_GIT_DIR"') == 1
     assert argv[-1].index("remount,bind,ro,nosuid,nodev,noexec") < argv[-1].index(
         "run-phase-e"
     )
@@ -2040,7 +2111,7 @@ def test_phase_e_hosted_namespace_argv_is_fixed_and_secret_free(
 
 def test_phase_e_refuses_writable_paths_beneath_consumer_root(tmp_path: Path) -> None:
     consumer = tmp_path / "consumer"
-    consumer.mkdir()
+    _git_repository(consumer)
     with pytest.raises(runner.HostedRunnerError, match="CONSUMER_MOUNT_SEAL_UNSAFE"):
         runner._phase_e_namespace_command(  # noqa: SLF001 - exact boundary law
             forge_root=tmp_path / "forge",
@@ -2055,15 +2126,44 @@ def test_phase_e_refuses_writable_paths_beneath_consumer_root(tmp_path: Path) ->
         )
 
 
+def test_phase_e_refuses_writable_path_beneath_linked_git_common_dir(
+    tmp_path: Path,
+) -> None:
+    primary = tmp_path / "primary"
+    head = _git_repository(primary)
+    consumer = tmp_path / "consumer"
+    runner.run_checked(
+        ["git", "worktree", "add", "--detach", os.fspath(consumer), head],
+        cwd=primary,
+    )
+
+    with pytest.raises(runner.HostedRunnerError, match="CONSUMER_MOUNT_SEAL_UNSAFE"):
+        runner._phase_e_namespace_command(  # noqa: SLF001 - exact boundary law
+            forge_root=tmp_path / "forge",
+            consumer_root=consumer,
+            request_path=tmp_path / "request.json",
+            bundle_path=tmp_path / "bundle.tar.gz",
+            bundle_sha256=SHA_A,
+            sealed_home=tmp_path / "home",
+            scratch_root=tmp_path / "scratch",
+            result_directory=primary / ".git/result",
+            receipt_path=tmp_path / "receipt.json",
+        )
+
+
 def test_phase_e_live_mount_seal_is_read_only_and_namespace_local(
     tmp_path: Path,
     github_hosted_userns_policy: runner.HostUsernsPolicyEvidence,
 ) -> None:
     del github_hosted_userns_policy
+    primary = tmp_path / "primary"
+    head = _git_repository(primary)
     consumer = tmp_path / "consumer"
-    consumer.mkdir()
+    runner.run_checked(
+        ["git", "worktree", "add", "--detach", os.fspath(consumer), head],
+        cwd=primary,
+    )
     tracked = consumer / "tracked.py"
-    tracked.write_text("sealed\n", encoding="utf-8")
     argv = runner._phase_e_namespace_command(  # noqa: SLF001 - exact boundary law
         forge_root=tmp_path / "forge",
         consumer_root=consumer,
@@ -2099,6 +2199,7 @@ def test_phase_e_live_mount_seal_is_read_only_and_namespace_local(
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout == "CONSUMER_MOUNT_SEALED\n"
     assert tracked.read_text(encoding="utf-8") == "sealed\n"
+    assert (primary / ".git/HEAD").is_file()
     after = consumer / "host-write-after-namespace"
     after.write_text("restored\n", encoding="utf-8")
     assert after.read_text(encoding="utf-8") == "restored\n"
