@@ -315,22 +315,38 @@ def _is_nonnegative_int(value: object) -> bool:
 
 
 def _is_safe_ref(value: object) -> bool:
-    if not isinstance(value, str) or _REF_RE.fullmatch(value) is None:
+    if (
+        not isinstance(value, str)
+        or _REF_RE.fullmatch(value) is None
+        or value in {"HEAD", "@"}
+    ):
         return False
+    components = value.split("/")
     return not (
         value.startswith("/")
         or value.endswith("/")
-        or value.endswith(".")
-        or value.endswith(".lock")
         or ".." in value
         or "//" in value
         or "@{" in value
         or any(token in value for token in ("~", "^", ":", "?", "*", "[", "\\"))
+        or any(
+            not component
+            or component.startswith(".")
+            or component.endswith(".")
+            or component.endswith(".lock")
+            for component in components
+        )
     )
 
 
 def _is_safe_relative_path(value: object) -> bool:
-    if not isinstance(value, str) or not value or len(value.encode("utf-8")) > 4096:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    if len(encoded) > 4096:
         return False
     if value.startswith("/") or "\\" in value or "//" in value or "\x00" in value:
         return False
@@ -398,6 +414,17 @@ def _local_facts_are_valid(local: LocalGitFacts) -> bool:
         and _is_nonnegative_int(local.uncommitted_out_of_scope_count)
         and _is_nonnegative_int(local.untracked_out_of_scope_count)
     )
+
+
+def _checkpoint_local_facts_are_consistent(
+    local: LocalGitFacts, remote: RemoteGitFacts
+) -> bool:
+    if local.head_sha == remote.head_sha:
+        return (
+            local.tree_sha == remote.tree_sha
+            and local.unpushed_commit_count == 0
+        )
+    return local.unpushed_commit_count > 0
 
 
 def _external_facts_are_valid(external: ExternalEffectEvidence) -> bool:
@@ -577,6 +604,11 @@ def verify_source_continuity(
         return _refusal(RefusalCode.REMOTE_HEAD_NOT_ANCESTOR, exit_code=1)
     if local.uncommitted_out_of_scope_count or local.untracked_out_of_scope_count:
         return _refusal(RefusalCode.OUT_OF_SCOPE_DIRT, exit_code=1)
+    if (
+        request.receipt_kind is ReceiptKind.CHECKPOINT_VERIFIED
+        and not _checkpoint_local_facts_are_consistent(local, remote)
+    ):
+        return _refusal(RefusalCode.LOCAL_FACTS_INVALID, exit_code=2)
 
     if not _external_facts_are_valid(external):
         return _refusal(RefusalCode.EXTERNAL_EFFECT_INVALID, exit_code=2)

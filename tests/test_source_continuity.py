@@ -661,3 +661,156 @@ def test_receipt_digest_changes_after_remote_path_or_effect_identity_moves() -> 
     )
     assert isinstance(moved_effect, module.SourceContinuityReceipt)
     assert moved_effect.receipt_digest != first.receipt_digest
+
+
+@pytest.mark.parametrize("invalid_ref", ["HEAD", "foo/.bar", "foo.lock/bar"])
+def test_aligned_invalid_branch_refs_cannot_mint_receipts(invalid_ref: str) -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        request=_request(module, branch=invalid_ref),
+        remote=_remote(module, branch=invalid_ref),
+        local=_checkpoint_local(module, branch=invalid_ref),
+    )
+    _assert_refusal(module, result, "INVALID_REQUEST", exit_code=2)
+
+
+@pytest.mark.parametrize("valid_ref", ["head", "foo/bar", BRANCH])
+def test_canonical_branch_refs_remain_valid(valid_ref: str) -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        request=_request(module, branch=valid_ref),
+        remote=_remote(module, branch=valid_ref),
+        local=_checkpoint_local(module, branch=valid_ref),
+    )
+    assert isinstance(result, module.SourceContinuityReceipt)
+
+
+@pytest.mark.parametrize("invalid_ref", ["HEAD", "foo/.bar", "foo.lock/bar"])
+def test_invalid_base_refs_use_the_same_complete_ref_grammar(invalid_ref: str) -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        request=_request(module, base_ref=invalid_ref),
+        remote=_remote(module, base_ref=invalid_ref),
+    )
+    _assert_refusal(module, result, "INVALID_REQUEST", exit_code=2)
+
+
+def test_request_lone_surrogate_path_stays_inside_invalid_request_envelope() -> None:
+    module = _contract()
+    unsafe_path = "docs/\ud800.py"
+    result = _verify(
+        module,
+        request=_request(module, owned_paths=(unsafe_path,)),
+        remote=_remote(
+            module,
+            changed_paths=(unsafe_path,),
+            path_entries=(
+                module.RemotePathEntry(
+                    path=unsafe_path,
+                    mode="100644",
+                    object_type="blob",
+                    object_sha=BLOB_A,
+                    size=1,
+                ),
+            ),
+        ),
+    )
+    _assert_refusal(module, result, "INVALID_REQUEST", exit_code=2)
+
+
+def test_remote_changed_path_lone_surrogate_stays_inside_remote_refusal_envelope() -> None:
+    module = _contract()
+    unsafe_path = "docs/\ud800.py"
+    result = _verify(
+        module,
+        remote=_remote(
+            module,
+            changed_paths=(unsafe_path,),
+            path_entries=(
+                module.RemotePathEntry(
+                    path=unsafe_path,
+                    mode="100644",
+                    object_type="blob",
+                    object_sha=BLOB_A,
+                    size=1,
+                ),
+            ),
+        ),
+    )
+    _assert_refusal(module, result, "REMOTE_FACTS_INVALID", exit_code=2)
+
+
+def test_remote_entry_path_lone_surrogate_stays_inside_remote_refusal_envelope() -> None:
+    module = _contract()
+    unsafe_path = "docs/\ud800.py"
+    entries = (
+        replace(_entries(module)[0], path=unsafe_path),
+        _entries(module)[1],
+    )
+    result = _verify(module, remote=_remote(module, path_entries=entries))
+    _assert_refusal(module, result, "REMOTE_FACTS_INVALID", exit_code=2)
+
+
+@pytest.mark.parametrize(
+    "local_changes",
+    [
+        {
+            "head_sha": HEAD_SHA,
+            "tree_sha": LOCAL_TREE_SHA,
+            "unpushed_commit_count": 0,
+        },
+        {
+            "head_sha": HEAD_SHA,
+            "tree_sha": TREE_SHA,
+            "unpushed_commit_count": 1,
+        },
+        {
+            "head_sha": LOCAL_HEAD_SHA,
+            "tree_sha": LOCAL_TREE_SHA,
+            "unpushed_commit_count": 0,
+        },
+    ],
+)
+def test_checkpoint_refuses_mutually_impossible_local_remote_facts(
+    local_changes: dict[str, Any],
+) -> None:
+    module = _contract()
+    result = _verify(module, local=_checkpoint_local(module, **local_changes))
+    _assert_refusal(module, result, "LOCAL_FACTS_INVALID", exit_code=2)
+
+
+def test_checkpoint_same_remote_head_allows_only_same_tree_and_zero_unpushed() -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        local=_checkpoint_local(
+            module,
+            head_sha=HEAD_SHA,
+            tree_sha=TREE_SHA,
+            unpushed_commit_count=0,
+        ),
+    )
+    assert isinstance(result, module.SourceContinuityReceipt)
+    assert result.local_equals_remote is True
+    assert result.uncommitted_in_scope_count == 1
+    assert result.untracked_in_scope_count == 1
+
+
+def test_checkpoint_empty_descendant_commit_is_valid_with_positive_unpushed_count() -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        local=_checkpoint_local(
+            module,
+            head_sha=LOCAL_HEAD_SHA,
+            tree_sha=TREE_SHA,
+            unpushed_commit_count=1,
+        ),
+    )
+    assert isinstance(result, module.SourceContinuityReceipt)
+    assert result.local_equals_remote is False
+    assert result.local_tree_sha == result.remote_tree_sha
+    assert result.unpushed_commit_count == 1
