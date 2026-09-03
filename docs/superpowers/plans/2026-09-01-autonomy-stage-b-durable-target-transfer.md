@@ -155,7 +155,7 @@ tests/test_autonomy_stage_b_initial_assignment.py
 tests/test_autonomy_stage_b_durable_target_transfer_source_law.py
 ```
 
-No seventh path without a finite decision request. Do not modify `config/wake_session_targets.json`, `control_plane/sol_action_target.py`, common provider identity, Wake ledger, Slack, Agent OS, Linear, deployment, credentials or production arming.
+No seventh path without a finite decision request. Do not modify `control_plane/sol_action_target.py`. Do not modify `config/wake_session_targets.json`, common provider identity, Wake ledger, Slack, Agent OS, Linear, deployment, credentials or production arming.
 
 ## Complete implementation journey
 
