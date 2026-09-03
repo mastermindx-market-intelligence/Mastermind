@@ -635,7 +635,12 @@ Modify:
   tests/test_executive_operator_broker.py
   tests/test_executive_operator_supervisor.py
   tests/test_ohf_p1b_runtime_orchestrator.py   # only if needed for the exact loss seam
+  tests/test_autonomy_session_materialization_source_law.py
 ```
+
+The implementation PR must transition the MAT-F0 source-law test from the protected
+`NOT_BUILT` characterization to exact implementation proof. Leaving the absence assertion unchanged
+would intentionally keep repository CI red once `ohf-materialization-status` exists.
 
 Protected/no-edit absent a new Sol ruling:
 
@@ -706,7 +711,9 @@ MAT-C1 must include mutation-discriminating tests for:
 9. partial stream capture remains marked partial;
 10. Runtime bind response loss reconciles by command and never restarts provider;
 11. receipt cannot mutate Runtime or grant target/authority;
-12. Stage-B/session-target files remain unchanged.
+12. Stage-B/session-target files remain unchanged;
+13. the MAT-F0 source-law test is updated in the same implementation carrier so it validates the
+    built receipt/status/import seam rather than preserving the pre-implementation absence claim.
 
 ## 19. Production proof packet
 
