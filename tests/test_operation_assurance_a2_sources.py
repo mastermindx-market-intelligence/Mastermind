@@ -654,3 +654,270 @@ def test_b2_revision_binding_round_trips_through_the_closed_wire() -> None:
     facts = _gather("hostile")
     restored = SourceFacts.from_dict(json.loads(json.dumps(facts.to_dict())))
     assert restored.revision_binding == facts.revision_binding == "CALLER_ASSERTED_UNVERIFIED"
+
+
+# ---------------------------------------------------------------------------
+# REPAIR R1 (Sol CONTINUE): a REALISTIC linked-worktree layout — HEAD lives
+# in the PRIVATE per-worktree gitdir, the branch ref exists ONLY in the
+# COMMON gitdir (found via the private gitdir's own `commondir` file) — the
+# exact shape real git worktrees produce (including this very repo's own
+# session worktrees). Sol's binding test law: three falsifiers.
+# ---------------------------------------------------------------------------
+
+
+def _build_linked_worktree(tmp_path, *, branch_sha: str | None, break_commondir: bool = False):
+    """Constructs: <tmp_path>/main/.git/{refs/heads/feature, worktrees/wt/{HEAD, commondir}}
+    and <tmp_path>/checkout/.git (a FILE pointing at the private gitdir).
+    Returns the checkout dir."""
+    main_gitdir = tmp_path / "main" / ".git"
+    private_gitdir = main_gitdir / "worktrees" / "wt"
+    (main_gitdir / "refs" / "heads").mkdir(parents=True)
+    private_gitdir.mkdir(parents=True)
+
+    private_gitdir_head = "ref: refs/heads/feature\n"
+    (private_gitdir / "HEAD").write_text(private_gitdir_head, encoding="utf-8")
+    if not break_commondir:
+        (private_gitdir / "commondir").write_text("../..\n", encoding="utf-8")
+    # else: no commondir file at all -> unreadable step -> must degrade
+
+    if branch_sha is not None:
+        (main_gitdir / "refs" / "heads" / "feature").write_text(branch_sha + "\n", encoding="utf-8")
+    # else: the branch ref is deliberately absent from the common gitdir too
+
+    checkout = tmp_path / "checkout"
+    import shutil as _sh
+
+    _sh.copytree(FIXTURES / "hostile", checkout)
+    (checkout / ".git").write_text(f"gitdir: {private_gitdir}\n", encoding="utf-8")
+    return checkout
+
+
+def test_r1_falsifier_1_linked_worktree_matching_revision_verifies(tmp_path) -> None:
+    sha = "4" * 40
+    checkout = _build_linked_worktree(tmp_path, branch_sha=sha)
+    # sanity: the branch ref lives ONLY in the common gitdir, never the
+    # private one — this is the realistic shape Sol's test law requires.
+    assert not (checkout.resolve().parent / "main" / ".git" / "worktrees" / "wt" / "refs").exists()
+
+    facts = gather_agent_os_source_facts(checkout, repo="r", revision=sha, observed_at="2026-09-02T00:00:00Z")
+    assert facts.revision_binding == "GIT_HEAD_VERIFIED"
+
+
+def test_r1_falsifier_2_linked_worktree_asserted_mismatch_refuses(tmp_path) -> None:
+    real_sha = "5" * 40
+    asserted = "6" * 40
+    checkout = _build_linked_worktree(tmp_path, branch_sha=real_sha)
+
+    with pytest.raises(SourceGatherError) as exc:
+        gather_agent_os_source_facts(checkout, repo="r", revision=asserted, observed_at="2026-09-02T00:00:00Z")
+    assert exc.value.reason_code == "REVISION_MISMATCH"
+    assert real_sha in str(exc.value)
+    assert asserted in str(exc.value)
+
+
+def test_r1_falsifier_3_linked_worktree_broken_commondir_degrades_unverified(tmp_path) -> None:
+    checkout = _build_linked_worktree(tmp_path, branch_sha="7" * 40, break_commondir=True)
+
+    facts = gather_agent_os_source_facts(checkout, repo="r", revision="8" * 40, observed_at="2026-09-02T00:00:00Z")
+    assert facts.revision_binding == "CALLER_ASSERTED_UNVERIFIED"
+
+
+def test_r1_falsifier_3b_linked_worktree_branch_ref_missing_everywhere_degrades_unverified(tmp_path) -> None:
+    checkout = _build_linked_worktree(tmp_path, branch_sha=None)
+
+    facts = gather_agent_os_source_facts(checkout, repo="r", revision="9" * 40, observed_at="2026-09-02T00:00:00Z")
+    assert facts.revision_binding == "CALLER_ASSERTED_UNVERIFIED"
+
+
+def test_r1_linked_worktree_packed_refs_in_common_gitdir_verifies(tmp_path) -> None:
+    """The branch ref may also be packed in the COMMON gitdir (never the
+    private one) — must still resolve."""
+    sha = "a1" + "0" * 38
+    checkout = _build_linked_worktree(tmp_path, branch_sha=None)
+    main_gitdir = tmp_path / "main" / ".git"
+    (main_gitdir / "packed-refs").write_text(
+        f"# pack-refs with: peeled fully-peeled sorted\n{sha} refs/heads/feature\n", encoding="utf-8"
+    )
+
+    facts = gather_agent_os_source_facts(checkout, repo="r", revision=sha, observed_at="2026-09-02T00:00:00Z")
+    assert facts.revision_binding == "GIT_HEAD_VERIFIED"  # end of R1 packed-refs-in-common-gitdir test
+
+
+# ---------------------------------------------------------------------------
+# REPAIR R2 (Sol CONTINUE): a serialized GIT_HEAD_VERIFIED is NEVER trusted
+# on --from-facts ingest. reestablish_revision_binding() is the ONLY lawful
+# upgrade path, and only given a LIVE, matching repo_root in the SAME
+# invocation.
+# ---------------------------------------------------------------------------
+
+
+def test_r2_forged_git_head_verified_is_downgraded_on_from_dict_ingest() -> None:
+    facts = _gather("hostile")
+    doc = facts.to_dict()
+    assert doc["revision_binding"] == "CALLER_ASSERTED_UNVERIFIED"
+    doc["revision_binding"] = "GIT_HEAD_VERIFIED"  # forged
+    restored = SourceFacts.from_dict(doc)
+    assert restored.revision_binding == "CALLER_ASSERTED_UNVERIFIED"
+
+
+def test_r2_forged_git_head_verified_is_downgraded_on_from_json_bytes_ingest() -> None:
+    import json
+
+    facts = _gather("hostile")
+    doc = facts.to_dict()
+    doc["revision_binding"] = "GIT_HEAD_VERIFIED"
+    restored = SourceFacts.from_json_bytes(json.dumps(doc).encode("utf-8"))
+    assert restored.revision_binding == "CALLER_ASSERTED_UNVERIFIED"
+
+
+def test_r2_reestablish_with_live_matching_root_upgrades(tmp_path) -> None:
+    from control_plane.operation_assurance_sources import reestablish_revision_binding
+
+    dest = _copy_hostile(tmp_path)
+    sha = "b3" + "0" * 38
+    (dest / ".git").mkdir()
+    (dest / ".git" / "HEAD").write_text(sha + "\n", encoding="utf-8")
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision=sha, observed_at="2026-09-02T00:00:00Z")
+    doc = facts.to_dict()
+    doc["revision_binding"] = "GIT_HEAD_VERIFIED"  # forged in the serialized document
+    ingested = SourceFacts.from_dict(doc)
+    assert ingested.revision_binding == "CALLER_ASSERTED_UNVERIFIED"  # downgraded on ingest
+
+    reestablished = reestablish_revision_binding(ingested, dest)
+    assert reestablished.revision_binding == "GIT_HEAD_VERIFIED"  # legitimately re-derived
+
+
+def test_r2_reestablish_with_live_mismatched_root_refuses(tmp_path) -> None:
+    from control_plane.operation_assurance_sources import reestablish_revision_binding
+
+    dest = _copy_hostile(tmp_path)
+    real_sha = "c4" + "0" * 38
+    asserted_sha = "d5" + "0" * 38
+    (dest / ".git").mkdir()
+    (dest / ".git" / "HEAD").write_text(real_sha + "\n", encoding="utf-8")
+
+    facts = gather_agent_os_source_facts(
+        FIXTURES / "hostile", repo="r", revision=asserted_sha, observed_at="2026-09-02T00:00:00Z"
+    )
+    doc = facts.to_dict()
+    doc["revision_binding"] = "GIT_HEAD_VERIFIED"
+    ingested = SourceFacts.from_dict(doc)
+
+    with pytest.raises(SourceGatherError) as exc:
+        reestablish_revision_binding(ingested, dest)
+    assert exc.value.reason_code == "REVISION_MISMATCH"
+
+
+def test_r2_reestablish_with_unresolvable_root_leaves_unverified(tmp_path) -> None:
+    from control_plane.operation_assurance_sources import reestablish_revision_binding
+
+    facts = _gather("hostile")
+    reestablished = reestablish_revision_binding(facts, tmp_path)  # tmp_path has no .git at all
+    assert reestablished.revision_binding == "CALLER_ASSERTED_UNVERIFIED"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda doc: doc.__setitem__("source_owner", doc["source_owner"]),  # no-op control
+        lambda doc: doc["coverage"][0].__setitem__("glob", doc["coverage"][0]["glob"]),  # no-op control
+    ],
+)
+def test_r2_no_root_case_never_loses_the_downgrade_under_serialized_mutation(mutate) -> None:
+    # a lawful, otherwise-harmless mutation to the serialized document must
+    # never smuggle GIT_HEAD_VERIFIED back in when no live root is supplied.
+    facts = _gather("hostile")
+    doc = facts.to_dict()
+    doc["revision_binding"] = "GIT_HEAD_VERIFIED"
+    mutate(doc)
+    restored = SourceFacts.from_dict(doc)
+    assert restored.revision_binding == "CALLER_ASSERTED_UNVERIFIED"
+
+
+# ---------------------------------------------------------------------------
+# REPAIR R3 (Sol CONTINUE): the closed path/glob shape applies on BOTH
+# sides — gather discovery and serialized ingest. Hostile --from-facts
+# mutations for each refusal class, plus real gather cases with an
+# escaping symlink and a nested directory.
+# ---------------------------------------------------------------------------
+
+
+def _assert_ingest_refused(doc: dict) -> None:
+    with pytest.raises(SourceGatherError):
+        SourceFacts.from_dict(doc)
+
+
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        "/agentos/workstreams/WS-OPERATION-ASSURANCE.md",  # absolute
+        "agentos\\workstreams\\WS-OPERATION-ASSURANCE.md",  # backslash
+        "agentos/workstreams/./WS-OPERATION-ASSURANCE.md",  # '.' segment
+        "agentos/workstreams/../workstreams/WS-OPERATION-ASSURANCE.md",  # '..' segment
+        "agentos/workstreams/nested/WS-OPERATION-ASSURANCE.md",  # nested descendant
+        "agentos/handoffs/WS-OPERATION-ASSURANCE.md",  # family/schema mismatch (workstream schema, handoffs path)
+        "agentos/workstreams/WS-OPERATION-ASSURANCE.txt",  # wrong extension
+        "not-even-under-agentos/WS-OPERATION-ASSURANCE.md",  # wrong root entirely
+    ],
+)
+def test_r3_ingest_path_mutation_refused_for_each_class(bad_path: str) -> None:
+    doc = _baseline_doc()
+    _ws_fact(doc)["path"] = bad_path
+    _assert_ingest_refused(doc)
+
+
+def test_r3_ingest_coverage_glob_mismatch_refused() -> None:
+    doc = _baseline_doc()
+    ws_cov = next(c for c in doc["coverage"] if c["record_schema"] == "agentos.workstream.v1")
+    ws_cov["glob"] = "agentos/workstreams/**/*.md"  # not the canonical glob
+    _assert_ingest_refused(doc)
+
+
+def test_r3_ingest_swapped_family_glob_refused() -> None:
+    # the handoff family's coverage entry claiming the workstream glob
+    doc = _baseline_doc()
+    ws_cov = next(c for c in doc["coverage"] if c["record_schema"] == "agentos.workstream.v1")
+    ho_cov = next(c for c in doc["coverage"] if c["record_schema"] == "agentos.handoff.v1")
+    ws_cov["glob"], ho_cov["glob"] = ho_cov["glob"], ws_cov["glob"]
+    _assert_ingest_refused(doc)
+
+
+def test_r3_gather_real_case_escaping_symlink_becomes_source_partial(tmp_path) -> None:
+    dest = _copy_hostile(tmp_path)
+    outside = tmp_path / "outside_secret.md"
+    outside.write_text("secret content outside repo root", encoding="utf-8")
+    evil = dest / "agentos" / "workstreams" / "WS-EVIL.md"
+    evil.symlink_to(outside)
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision=REV, observed_at="2026-09-02T00:00:00Z")
+    evil_fact = next(f for f in facts.facts if f.path.endswith("WS-EVIL.md"))
+    assert evil_fact.status == STATUS_SOURCE_PARTIAL
+    assert "escapes repo_root" in evil_fact.reason
+    assert evil_fact.payload is None
+    # the legitimate target record is unaffected
+    ws_fact = next(f for f in facts.facts if f.path.endswith("WS-OPERATION-ASSURANCE.md"))
+    assert ws_fact.status == STATUS_OK
+
+
+def test_r3_gather_real_case_nested_directory_entry_becomes_source_partial(tmp_path) -> None:
+    dest = _copy_hostile(tmp_path)
+    (dest / "agentos" / "workstreams" / "WS-A-DIRECTORY.md").mkdir()
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision=REV, observed_at="2026-09-02T00:00:00Z")
+    dir_fact = next(f for f in facts.facts if f.path.endswith("WS-A-DIRECTORY.md"))
+    assert dir_fact.status == STATUS_SOURCE_PARTIAL
+    assert "not a regular file" in dir_fact.reason
+
+
+def test_r3_gather_real_case_a_true_nested_subdirectory_is_simply_never_matched(tmp_path) -> None:
+    # a genuinely nested subdirectory under workstreams/ is excluded by the
+    # glob pattern itself (its '*' never crosses '/') -- confirms the
+    # one-level closure holds even without needing a refusal path for it.
+    dest = _copy_hostile(tmp_path)
+    nested_dir = dest / "agentos" / "workstreams" / "nested"
+    nested_dir.mkdir()
+    (nested_dir / "WS-NESTED.md").write_text("---\nschema: agentos.workstream.v1\n---\n", encoding="utf-8")
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision=REV, observed_at="2026-09-02T00:00:00Z")
+    assert not any("nested" in f.path for f in facts.facts)

@@ -13,7 +13,17 @@ Two modes:
     operation-assurance-compile --from-facts FACTS.json|- [--pretty]
         Reads an already-gathered mastermind.operation_assurance_source_facts.v1
         document (from a file or stdin) and compiles it, without touching a
-        filesystem checkout.
+        filesystem checkout. REPAIR R2: a serialized revision_binding of
+        GIT_HEAD_VERIFIED is NEVER trusted from this document alone — it is
+        always downgraded to CALLER_ASSERTED_UNVERIFIED on ingest.
+
+    operation-assurance-compile --from-facts FACTS.json|- --repo-root DIR [--pretty]
+        Same ingest, PLUS an independent re-verification pass: DIR's own
+        git HEAD (pure file reads, no subprocess) is resolved and compared
+        against the ingested facts.revision. A match legitimately
+        re-establishes revision_binding=GIT_HEAD_VERIFIED; a disagreement
+        refuses (REVISION_MISMATCH); an unresolvable DIR leaves the
+        downgraded, honest CALLER_ASSERTED_UNVERIFIED marker in place.
 
 This CLI performs no write other than stdout/stderr, has no trusted-source
 flag, and is not an implicit admission gate: a valid but structurally unsafe
@@ -47,6 +57,7 @@ from control_plane.operation_assurance_sources import (
     SourceFacts,
     SourceGatherError,
     gather_agent_os_source_facts,
+    reestablish_revision_binding,
 )
 
 MAX_STDIN_BYTES = 8_388_608 + 1
@@ -73,12 +84,20 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)  # argparse exits 2 on bad args, 0 on --help
 
-    gather_mode = any([args.repo_root, args.repo, args.revision, args.observed_at])
     facts_mode = args.from_facts is not None
+    other_gather_args_given = any([args.repo, args.revision, args.observed_at])
 
-    if gather_mode == facts_mode:
+    if facts_mode and other_gather_args_given:
         print(
-            "usage: exactly one of (--repo-root --repo --revision --observed-at) or --from-facts is required",
+            "usage: --repo/--revision/--observed-at are not used with --from-facts "
+            "(--repo-root alone is accepted, as an independent revision_binding re-verification pass)",
+            file=sys.stderr,
+        )
+        return 2
+    if not facts_mode and not (args.repo_root and args.repo and args.revision and args.observed_at):
+        print(
+            "usage: exactly one of (--repo-root --repo --revision --observed-at) or "
+            "--from-facts [--repo-root] is required",
             file=sys.stderr,
         )
         return 2
@@ -97,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
             # REPAIR B1: the ONE canonical, closed-wire ingest entry point —
             # never a bare json.loads()+from_dict() passthrough.
             facts = SourceFacts.from_json_bytes(raw)
+            if args.repo_root is not None:
+                # REPAIR R2: the ONLY lawful way an ingested document may
+                # carry GIT_HEAD_VERIFIED — independent re-resolution
+                # against a LIVE checkout in this SAME invocation, never a
+                # trusted claim from the document itself.
+                facts = reestablish_revision_binding(facts, args.repo_root)
         except SourceGatherError as exc:
             print(f"{exc.reason_code}: {exc}", file=sys.stderr)
             return 2

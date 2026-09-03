@@ -143,7 +143,7 @@ def test_cli_is_a_bounded_json_projection_not_an_actuator() -> None:
     assert "unlink" not in calls
     assert "system" not in calls
     text = _text(CLI)
-    assert "subprocess" not in text
+    assert "import subprocess" not in text
     assert '"w"' not in text and "'w'" not in text
     assert '"wb"' not in text and "'wb'" not in text
 

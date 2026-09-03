@@ -207,3 +207,83 @@ def test_gather_mode_output_is_deterministic_across_two_runs(capsys, target_key)
     code2, out2, _ = _run(args, capsys)
     assert code1 == code2 == 0
     assert out1 == out2
+
+
+# ---------------------------------------------------------------------------
+# REPAIR R2 (Sol CONTINUE): --from-facts + --repo-root re-verification mode.
+# ---------------------------------------------------------------------------
+
+
+def test_r2_from_facts_alone_forged_git_head_verified_downgrades_and_carries_the_gap(capsys, tmp_path):
+    import json
+
+    from control_plane.operation_assurance_sources import gather_agent_os_source_facts
+
+    facts = gather_agent_os_source_facts(
+        FIXTURES / "hostile", repo="mastermindx-market-intelligence/macro", revision=REV, observed_at="2026-09-02T00:00:00Z"
+    )
+    doc = facts.to_dict()
+    doc["revision_binding"] = "GIT_HEAD_VERIFIED"  # forged
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(doc))
+
+    code, out, err = _run(["--from-facts", str(facts_path)], capsys)
+    assert code == 0, err
+    model_doc = json.loads(out)
+    gap_ids = {g["gap_id"] for g in model_doc["known_model_gaps"] if g["load_bearing"]}
+    assert "source_attestation_unavailable" in gap_ids
+
+
+def test_r2_from_facts_with_matching_repo_root_reestablishes_and_drops_the_gap(capsys, tmp_path):
+    import json
+    import shutil
+
+    from control_plane.operation_assurance_sources import gather_agent_os_source_facts
+
+    dest = tmp_path / "checkout"
+    shutil.copytree(FIXTURES / "hostile", dest)
+    sha = "f7" + "0" * 38
+    (dest / ".git").mkdir()
+    (dest / ".git" / "HEAD").write_text(sha + "\n", encoding="utf-8")
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision=sha, observed_at="2026-09-02T00:00:00Z")
+    doc = facts.to_dict()
+    doc["revision_binding"] = "CALLER_ASSERTED_UNVERIFIED"  # honest serialization
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(doc))
+
+    code, out, err = _run(["--from-facts", str(facts_path), "--repo-root", str(dest)], capsys)
+    assert code == 0, err
+    model_doc = json.loads(out)
+    gap_ids = {g["gap_id"] for g in model_doc["known_model_gaps"] if g["load_bearing"]}
+    assert "source_attestation_unavailable" not in gap_ids
+
+
+def test_r2_from_facts_with_mismatched_repo_root_refuses(capsys, tmp_path):
+    import json
+
+    from control_plane.operation_assurance_sources import gather_agent_os_source_facts
+
+    facts = gather_agent_os_source_facts(
+        FIXTURES / "hostile", repo="r", revision="1" + "1" * 39, observed_at="2026-09-02T00:00:00Z"
+    )
+    doc = facts.to_dict()
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(doc))
+
+    real_checkout = tmp_path / "checkout"
+    real_checkout.mkdir()
+    (real_checkout / ".git").mkdir()
+    (real_checkout / ".git" / "HEAD").write_text(("2" * 40) + "\n", encoding="utf-8")
+
+    code, out, err = _run(["--from-facts", str(facts_path), "--repo-root", str(real_checkout)], capsys)
+    assert code == 2
+    assert "REVISION_MISMATCH" in err
+
+
+def test_r2_repo_root_with_other_gather_flags_and_from_facts_is_usage_error(capsys, tmp_path):
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text("{}")
+    code, out, err = _run(["--from-facts", str(facts_path), "--repo", "r"], capsys)
+    assert code == 2
+    assert "usage" in err.lower()

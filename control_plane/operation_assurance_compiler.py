@@ -50,6 +50,7 @@ from control_plane.operation_assurance_model import (
 from control_plane.operation_assurance_sources import (
     FIRST_TARGET_WORKSTREAM_KEY,
     HANDOFF_SCHEMA,
+    REVISION_BINDING_GIT_HEAD_VERIFIED,
     STATUS_OK,
     STATUS_SOURCE_MISSING,
     STATUS_SOURCE_PARTIAL,
@@ -90,6 +91,16 @@ _STATUS_CLASS_TERMINAL = frozenset({"done", "killed"})
 _STATUS_CLASS_ONGOING = frozenset({"proposed", "active", "blocked", "awaiting_ci", "awaiting_review", "parked"})
 STATUS_WAVE_CONFLICT_PROPERTY_ID = "WORKSTREAM_STATUS_WAVE_MARKING_CONFLICT"
 STATUS_WAVE_CONFLICT_GAP_ID = "workstream_status_wave_marking_conflict"
+
+# REPAIR R2 (Sol CONTINUE): machine-readable, ALWAYS-COMPILER-COMPUTED
+# disclosure that the design Section 7 trust ceiling
+# (PROVENANCE_CLOSED_UNATTESTED / AUTHOR_DECLARED_ONLY) has NOT been
+# independently established for this compile. Because known_model_gaps is
+# entirely compiler-authored (never read from the caller-supplied wire),
+# this gap can never be suppressed or forged by a crafted
+# --from-facts document — the compiler recomputes it fresh, every time,
+# from facts.revision_binding alone.
+SOURCE_ATTESTATION_UNAVAILABLE_GAP_ID = "source_attestation_unavailable"
 
 
 class CompilerError(ValueError):
@@ -447,6 +458,38 @@ def _unsupported_scope_gaps(transition_ids: list[str]) -> list[dict]:
     return gaps
 
 
+def _attestation_unavailable_gap(facts: SourceFacts) -> dict | None:
+    """REPAIR R2: None only when this exact invocation independently
+    established GIT_HEAD_VERIFIED (design Section 4/7's own ceiling —
+    gathering with correct receipts still never mints CURRENT_SOURCE_ATTESTED
+    on its own, but a live, matching git HEAD is at least the honest
+    non-forgeable floor this vertical can establish). Every other case —
+    including a forged/serialized claim of GIT_HEAD_VERIFIED, which
+    from_dict/from_json_bytes already downgrade before this function ever
+    sees it — gets the load-bearing gap. affects_property_ids names
+    OPTION_TO_COMPLETE, a GENERIC_MANDATORY property present in every
+    compiled model, so the gap always resolves to >=1 real identity
+    regardless of how many transitions this specific compile produced.
+    """
+    if facts.revision_binding == REVISION_BINDING_GIT_HEAD_VERIFIED:
+        return None
+    return {
+        "gap_id": SOURCE_ATTESTATION_UNAVAILABLE_GAP_ID,
+        "reason": (
+            f"design Section 7 trust ceiling: revision_binding={facts.revision_binding!r} — no accepted "
+            "attestation capability establishes CURRENT_SOURCE_ATTESTED for this compile; it stays "
+            "PROVENANCE_CLOSED_UNATTESTED / AUTHOR_DECLARED_ONLY. A serialized claim of "
+            "GIT_HEAD_VERIFIED on --from-facts ingest is never trusted on its own and cannot suppress "
+            "or forge past this gap."
+        ),
+        "load_bearing": True,
+        "affects_property_ids": ["OPTION_TO_COMPLETE"],
+        "affects_transition_ids": [],
+        "affects_variable_ids": [],
+        "source_refs": [],
+    }
+
+
 def _status_wave_agreement_conflict(
     status: str, initial_state: dict[str, str], ws_source_ref: str
 ) -> tuple[dict | None, dict | None]:
@@ -652,6 +695,12 @@ def compile_operation_assurance_model(
     safety_properties = [status_conflict_property] if status_conflict_property else []
     if status_conflict_gap:
         known_model_gaps.append(status_conflict_gap)
+
+    # REPAIR R2: always compiler-computed from facts.revision_binding alone
+    # — never from anything the caller-supplied wire could set directly.
+    attestation_gap = _attestation_unavailable_gap(facts)
+    if attestation_gap:
+        known_model_gaps.append(attestation_gap)
 
     relevant_facts = _relevant_facts(facts, fact, ref)
 

@@ -676,3 +676,89 @@ def test_b4_alias_is_deterministic_and_never_drops_the_revision() -> None:
     model_b = _compile("hostile")
     assert model_a.transitions[0].source_refs == model_b.transitions[0].source_refs
     assert any(REV in note for note in model_a.abstraction_contract.notes)
+
+
+# ---------------------------------------------------------------------------
+# REPAIR R2 (Sol CONTINUE): the compiled model must carry a machine-readable
+# LOAD-BEARING SOURCE_ATTESTATION_UNAVAILABLE-class gap through the
+# EXISTING known_model_gaps contract whenever the invocation could not
+# establish GIT_HEAD_VERIFIED — including when a forged/serialized JSON
+# claims it — such that forged JSON can never suppress the gap or mint
+# verification.
+# ---------------------------------------------------------------------------
+
+
+def _has_attestation_gap(model) -> bool:
+    from control_plane.operation_assurance_compiler import SOURCE_ATTESTATION_UNAVAILABLE_GAP_ID
+
+    return any(g.gap_id == SOURCE_ATTESTATION_UNAVAILABLE_GAP_ID and g.load_bearing for g in model.known_model_gaps)
+
+
+def test_r2_ordinary_gather_no_git_carries_the_load_bearing_attestation_gap() -> None:
+    # every existing fixture gathers from a bare directory (no .git) -> the
+    # gap must be present on all of them, always.
+    for name in ("hostile", "corrected", "black_hole", "wait_gate"):
+        model = _compile(name)
+        assert _has_attestation_gap(model), name
+
+
+def test_r2_forged_from_facts_without_a_root_still_carries_the_gap() -> None:
+    import json
+
+    from control_plane.operation_assurance_sources import SourceFacts
+
+    facts = _facts("hostile")
+    doc = json.loads(json.dumps(facts.to_dict()))
+    doc["revision_binding"] = "GIT_HEAD_VERIFIED"  # forged
+    ingested = SourceFacts.from_dict(doc)  # downgraded on ingest (R2 sources-level)
+    model = compile_operation_assurance_model(ingested)
+    assert _has_attestation_gap(model)
+
+
+def test_r2_live_matching_root_reestablishment_removes_the_gap(tmp_path) -> None:
+    import dataclasses
+    import shutil
+
+    from control_plane.operation_assurance_sources import gather_agent_os_source_facts, reestablish_revision_binding
+
+    dest = tmp_path / "checkout"
+    shutil.copytree(FIXTURES / "hostile", dest)
+    sha = "e6" + "0" * 38
+    (dest / ".git").mkdir()
+    (dest / ".git" / "HEAD").write_text(sha + "\n", encoding="utf-8")
+
+    facts = gather_agent_os_source_facts(dest, repo="r", revision=sha, observed_at="2026-09-02T00:00:00Z")
+    assert facts.revision_binding == "GIT_HEAD_VERIFIED"
+    model = compile_operation_assurance_model(facts)
+    assert not _has_attestation_gap(model)
+
+    # and the round trip through a forged-then-reestablished document also
+    # ends up gap-free, proving reestablishment is the one lawful path back.
+    doc = facts.to_dict()
+    doc["revision_binding"] = "CALLER_ASSERTED_UNVERIFIED"  # simulate a caller who serialized honestly
+    ingested = dataclasses.replace(facts, revision_binding="CALLER_ASSERTED_UNVERIFIED")
+    reestablished = reestablish_revision_binding(ingested, dest)
+    model2 = compile_operation_assurance_model(reestablished)
+    assert not _has_attestation_gap(model2)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda doc: doc["facts"].sort(key=lambda f: f["path"]),  # reordering facts
+        lambda doc: doc["coverage"].reverse(),  # reordering coverage entries
+        lambda doc: doc["facts"][0].update({"reason": doc["facts"][0]["reason"]}),  # no-op field touch
+    ],
+)
+def test_r2_gap_survives_arbitrary_serialized_mutation_when_no_root_supplied(mutate) -> None:
+    import json
+
+    from control_plane.operation_assurance_sources import SourceFacts
+
+    facts = _facts("hostile")
+    doc = json.loads(json.dumps(facts.to_dict()))
+    doc["revision_binding"] = "GIT_HEAD_VERIFIED"
+    mutate(doc)
+    ingested = SourceFacts.from_dict(doc)
+    model = compile_operation_assurance_model(ingested)
+    assert _has_attestation_gap(model)

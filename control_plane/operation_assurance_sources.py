@@ -49,6 +49,17 @@ FIRST_TARGET_WORKSTREAM_KEY = "OPERATION-ASSURANCE"
 _WORKSTREAM_GLOB = "agentos/workstreams/*.md"
 _HANDOFF_GLOB = "agentos/handoffs/*.md"
 
+# REPAIR R3 (Sol CONTINUE): the exact, closed schema<->glob<->path-prefix
+# pairing enforced on BOTH sides — gather discovery and serialized ingest.
+_FAMILY_GLOBS = {
+    WORKSTREAM_SCHEMA: _WORKSTREAM_GLOB,
+    HANDOFF_SCHEMA: _HANDOFF_GLOB,
+}
+_FAMILY_PATH_PREFIXES = {
+    WORKSTREAM_SCHEMA: "agentos/workstreams/",
+    HANDOFF_SCHEMA: "agentos/handoffs/",
+}
+
 MAX_FILE_BYTES = 262_144  # 256 KiB per record; generous for authored prose+frontmatter
 MAX_TOTAL_BYTES = 8_388_608  # 8 MiB across one gather call
 MAX_FILES_PER_FAMILY = 2048
@@ -260,6 +271,16 @@ class SourceFacts:
             revision_binding = doc["revision_binding"]
             if revision_binding not in _REVISION_BINDING_VALUES:
                 raise SourceGatherError("INVALID_SOURCE_BUNDLE", f"revision_binding must be one of {sorted(_REVISION_BINDING_VALUES)}")
+            # REPAIR R2 (Sol CONTINUE): a serialized GIT_HEAD_VERIFIED is
+            # NEVER trusted on ingest — plain JSON data has no independent
+            # way to prove it. Pure parsing ALWAYS downgrades it; only
+            # reestablish_revision_binding() (below), given a LIVE
+            # repo_root in the SAME invocation, may legitimately re-derive
+            # GIT_HEAD_VERIFIED by independently re-resolving HEAD. This
+            # keeps the guarantee airtight regardless of caller — not just
+            # the CLI — since from_dict/from_json_bytes are the only ingest
+            # entry points and neither ever receives filesystem access.
+            revision_binding = REVISION_BINDING_CALLER_ASSERTED_UNVERIFIED
 
             coverage_raw = doc["coverage"]
             if not isinstance(coverage_raw, list):
@@ -281,6 +302,12 @@ class SourceFacts:
                 if rs in seen_families:
                     raise SourceGatherError("INVALID_SOURCE_BUNDLE", f"duplicate coverage entry for {rs!r}")
                 seen_families.add(rs)
+                # REPAIR R3: the schema<->glob pairing is CLOSED and exact —
+                # never a caller-suppliable free-form glob string.
+                if c["glob"] != _FAMILY_GLOBS[rs]:
+                    raise SourceGatherError(
+                        "INVALID_SOURCE_BUNDLE", f"coverage.glob {c['glob']!r} does not match the canonical glob for {rs!r}"
+                    )
                 attempted, ok = c["attempted"], c["ok"]
                 truncated = c["truncated"]
                 if type(attempted) is not int or attempted < 0:
@@ -350,9 +377,14 @@ class SourceFacts:
         if record_schema not in cls._RECORD_SCHEMA_VALUES:
             raise SourceGatherError("INVALID_SOURCE_BUNDLE", f"fact.record_schema {record_schema!r} is not recognized")
         path = f["path"]
-        expected_prefix = "agentos/workstreams/" if record_schema == WORKSTREAM_SCHEMA else "agentos/handoffs/"
-        if not isinstance(path, str) or not path.startswith(expected_prefix) or not path.endswith(".md"):
-            raise SourceGatherError("INVALID_SOURCE_BUNDLE", f"fact.path {path!r} does not match its record_schema family")
+        try:
+            # REPAIR R3: the closed path/glob shape applies on ingest
+            # exactly as it applies to real gather results — absolute
+            # paths, backslashes, '.'/'..' segments, nested descendants,
+            # and a family/schema mismatch are all refused here.
+            _validate_canonical_record_path(path, record_schema)
+        except ValueError as exc:
+            raise SourceGatherError("INVALID_SOURCE_BUNDLE", f"fact.path {path!r}: {exc}") from exc
 
         status = f["status"]
         if status not in cls._FACT_STATUS_VALUES:
@@ -1014,6 +1046,35 @@ def derive_seat_token(owner_field: str) -> str | None:
     return matches[0].upper()
 
 
+def _validate_canonical_record_path(path: object, record_schema: str) -> str:
+    """REPAIR R3 (Sol CONTINUE): the closed path/glob shape, applied
+    IDENTICALLY on both sides — real gather results and serialized ingest.
+    Refuses (raises ``ValueError``, the caller translates into its own
+    typed refusal): a non-string/empty path, an absolute path, a
+    backslash, a ``.``/``..`` segment, a nested descendant (more than one
+    level under the family directory), and a family/schema mismatch (a
+    workstream-schema fact with a handoffs path or vice versa).
+    """
+    if not isinstance(path, str) or not path:
+        raise ValueError("path must be a non-empty string")
+    if path.startswith("/"):
+        raise ValueError("path must not be absolute")
+    if "\\" in path:
+        raise ValueError("path must not contain a backslash")
+    segments = path.split("/")
+    if any(seg in (".", "..") for seg in segments):
+        raise ValueError("path must not contain '.' or '..' segments")
+    prefix = _FAMILY_PATH_PREFIXES.get(record_schema)
+    if prefix is None or not path.startswith(prefix):
+        raise ValueError("path does not match its record_schema family")
+    remainder = path[len(prefix) :]
+    if not remainder or "/" in remainder:
+        raise ValueError("path must be exactly one direct child of its family directory (no nested descendants)")
+    if not remainder.endswith(".md"):
+        raise ValueError("path must end with .md")
+    return path
+
+
 def _read_bounded(path: Path) -> tuple[bytes, bool]:
     with path.open("rb") as fh:
         raw = fh.read(MAX_FILE_BYTES + 1)
@@ -1055,11 +1116,52 @@ def _gather_family(
     matches = sorted(repo_root.glob(glob))
     if len(matches) > MAX_FILES_PER_FAMILY:
         raise SourceGatherError("INPUT_TOO_LARGE", f"{glob} exceeds the per-family file ceiling")
+    repo_root_resolved = repo_root.resolve()
     facts: list[SourceFact] = []
     ok = 0
     truncated_any = False
     for file_path in matches:
         rel_path = file_path.relative_to(repo_root).as_posix()
+
+        # REPAIR R3 (Sol CONTINUE): the closed path/glob shape and a
+        # containment check apply to REAL gather results too, not just
+        # ingest — a directory node matching the glob pattern, or a
+        # symlink whose target escapes repo_root, becomes an explicit
+        # SOURCE_PARTIAL fact rather than crashing the gather or silently
+        # reading bytes from outside the sandbox.
+        path_violation: str | None = None
+        try:
+            _validate_canonical_record_path(rel_path, record_schema)
+        except ValueError as exc:
+            path_violation = f"UNSUPPORTED_SEMANTICS: {exc}"
+        if path_violation is None and not file_path.is_file():
+            path_violation = "UNSUPPORTED_SEMANTICS: path is not a regular file"
+        if path_violation is None:
+            try:
+                resolved = file_path.resolve(strict=True)
+            except OSError:
+                path_violation = "UNSUPPORTED_SEMANTICS: path could not be resolved"
+            else:
+                if not resolved.is_relative_to(repo_root_resolved):
+                    path_violation = "UNSUPPORTED_SEMANTICS: path escapes repo_root (symlink or unsafe path)"
+        if path_violation is not None:
+            facts.append(
+                SourceFact(
+                    source_owner=SOURCE_OWNER,
+                    repo=repo,
+                    revision=revision,
+                    path=rel_path,
+                    record_schema=record_schema,
+                    content_digest=EMPTY_CONTENT_DIGEST,
+                    observed_at=observed_at,
+                    status=STATUS_SOURCE_PARTIAL,
+                    reason=path_violation,
+                    payload=None,
+                    conflict=CONFLICT_NONE,
+                )
+            )
+            continue
+
         raw, truncated = _read_bounded(file_path)
         total_bytes[0] += len(raw)
         if total_bytes[0] > MAX_TOTAL_BYTES:
@@ -1153,19 +1255,40 @@ def _read_ref_text(path: Path) -> str | None:
         return None
 
 
-def _resolve_git_dir(repo_root: Path) -> Path | None:
+def _resolve_git_dirs(repo_root: Path) -> tuple[Path, Path] | None:
+    """REPAIR R1 (Sol CONTINUE): returns (private_gitdir, common_gitdir).
+
+    For a plain (non-worktree) checkout these are the SAME directory — its
+    own HEAD and its own refs/packed-refs. For a LINKED WORKTREE, `.git` is
+    a FILE (`gitdir: <path>`) pointing at a PRIVATE per-worktree gitdir
+    (typically ``<main>/.git/worktrees/<name>``) that holds THIS worktree's
+    own ``HEAD`` — but a worktree's branch refs are NOT private: they live
+    in the shared COMMON gitdir, whose location the private gitdir names in
+    its own ``commondir`` file (a relative-or-absolute path, conventionally
+    ``../..``). Any unreadable/malformed step returns None (never raises),
+    which the caller treats as CALLER_ASSERTED_UNVERIFIED, never a refusal.
+    """
     dotgit = repo_root / ".git"
     if dotgit.is_dir():
-        return dotgit
-    if dotgit.is_file():
-        content = _read_ref_text(dotgit)
-        if content is None or not content.startswith("gitdir:"):
-            return None
-        target = content[len("gitdir:") :].strip()
-        target_path = Path(target)
-        resolved = target_path if target_path.is_absolute() else (repo_root / target_path)
-        return resolved if resolved.is_dir() else None
-    return None
+        return dotgit, dotgit
+    if not dotgit.is_file():
+        return None
+    content = _read_ref_text(dotgit)
+    if content is None or not content.startswith("gitdir:"):
+        return None
+    target = content[len("gitdir:") :].strip()
+    target_path = Path(target)
+    private = target_path if target_path.is_absolute() else (repo_root / target_path)
+    if not private.is_dir():
+        return None
+    commondir_text = _read_ref_text(private / "commondir")
+    if commondir_text is None:
+        # not a worktree-shaped private gitdir (or unreadable commondir) —
+        # treat it as self-contained, same as a plain checkout.
+        return private, private
+    common_path = Path(commondir_text)
+    common = common_path if common_path.is_absolute() else (private / common_path)
+    return (private, common) if common.is_dir() else None
 
 
 def _resolve_ref_from_packed(git_dir: Path, ref_name: str) -> str | None:
@@ -1183,19 +1306,20 @@ def _resolve_ref_from_packed(git_dir: Path, ref_name: str) -> str | None:
 
 
 def _resolve_git_head(repo_root: Path) -> str | None:
-    """REPAIR B2 (Sol pre-review): pure-file-read resolution of a checkout's
-    current HEAD commit — no subprocess, no network, no clock. Returns None
-    (never raises) when repo_root carries no readable git identity, which
-    the caller treats as CALLER_ASSERTED_UNVERIFIED rather than a refusal.
-    Handles a plain `.git` directory, a worktree `.git` FILE
-    (`gitdir: <path>`), a detached HEAD, a loose branch ref, and a packed
-    ref (`packed-refs`) — the shapes real git checkouts and worktrees
-    actually produce.
+    """Pure-file-read resolution of a checkout's current HEAD commit — no
+    subprocess, no network, no clock. Returns None (never raises) when
+    repo_root carries no readable git identity, which the caller treats as
+    CALLER_ASSERTED_UNVERIFIED rather than a refusal. Handles a plain
+    ``.git`` directory, a linked-worktree ``.git`` FILE (private gitdir +
+    common gitdir via ``commondir``, REPAIR R1), a detached HEAD, a loose
+    branch ref, and a packed ref (``packed-refs``) — the shapes real git
+    checkouts and worktrees actually produce.
     """
-    git_dir = _resolve_git_dir(repo_root)
-    if git_dir is None:
+    dirs = _resolve_git_dirs(repo_root)
+    if dirs is None:
         return None
-    head_text = _read_ref_text(git_dir / "HEAD")
+    private_gitdir, common_gitdir = dirs
+    head_text = _read_ref_text(private_gitdir / "HEAD")
     if head_text is None:
         return None
     if _FULL_SHA_RE.match(head_text):
@@ -1203,10 +1327,10 @@ def _resolve_git_head(repo_root: Path) -> str | None:
     if not head_text.startswith("ref:"):
         return None
     ref_name = head_text[len("ref:") :].strip()
-    loose = _read_ref_text(git_dir / ref_name)
+    loose = _read_ref_text(common_gitdir / ref_name)
     if loose is not None and _FULL_SHA_RE.match(loose):
         return loose
-    return _resolve_ref_from_packed(git_dir, ref_name)
+    return _resolve_ref_from_packed(common_gitdir, ref_name)
 
 
 def _mark_workstream_conflicts(facts: list[SourceFact]) -> list[SourceFact]:
@@ -1313,3 +1437,33 @@ def gather_agent_os_source_facts(
         coverage=(ws_coverage, ho_coverage),
         facts=tuple(all_facts),
     )
+
+
+def reestablish_revision_binding(facts: SourceFacts, repo_root: str | Path) -> SourceFacts:
+    """REPAIR R2 (Sol CONTINUE): the ONE lawful way to upgrade an ingested
+    ``SourceFacts`` value's ``revision_binding`` back to
+    ``GIT_HEAD_VERIFIED`` — never trust a serialized claim; independently
+    RE-RESOLVE it from a caller-supplied LIVE checkout in this SAME
+    invocation, reusing the exact R1 resolver gather uses.
+
+    Returns ``facts`` unchanged (still whatever ``from_dict`` downgraded it
+    to) when ``repo_root`` carries no readable git identity — an
+    unresolvable root is disclosure, not a refusal. Raises
+    ``SourceGatherError("REVISION_MISMATCH", ...)`` when the live root's
+    HEAD genuinely disagrees with ``facts.revision`` — exactly the same
+    fail-closed behavior ``gather_agent_os_source_facts`` uses.
+    """
+    if not isinstance(facts, SourceFacts):
+        raise SourceGatherError("INVALID_SOURCE_BUNDLE", "facts must be a SourceFacts value")
+    root = Path(repo_root)
+    if not root.is_dir():
+        raise SourceGatherError("INVALID_SOURCE_BUNDLE", f"repo_root is not a directory: {root}")
+    resolved_head = _resolve_git_head(root)
+    if resolved_head is None:
+        return facts
+    if resolved_head != facts.revision:
+        raise SourceGatherError(
+            "REVISION_MISMATCH",
+            f"repo_root HEAD resolves to {resolved_head}, not the ingested facts.revision {facts.revision}",
+        )
+    return dataclasses.replace(facts, revision_binding=REVISION_BINDING_GIT_HEAD_VERIFIED)
