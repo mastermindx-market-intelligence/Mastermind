@@ -19,7 +19,7 @@ import inspect
 import os
 import stat
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -64,6 +64,13 @@ from integrations.slack_agent_dialogue.turn_routing_facts import (
     TurnRoutingFactsError,
     resolve_turn_routing_facts,
 )
+from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+    AsyncCandidateCollector,
+    CandidateCollectionBusy,
+    CandidateCollectionOverflow,
+    CandidateCollectionTimeout,
+    CandidateCollectionUnavailable,
+)
 from integrations.slack_agent_dialogue.wake_projection import (
     compose_persisted_turn_observer,
 )
@@ -73,6 +80,7 @@ AGENT_RELAY_SOCKET_PATH = Path("/var/run/mastermind-agent-relay/agent-relay.sock
 EXECUTIVE_CLIENT_UID = 450
 DEFAULT_MAX_TURN_CANDIDATES_PER_PASS = 32
 MAX_TURN_CANDIDATES_PER_PASS = 256
+DEFAULT_TURN_CANDIDATE_COLLECTION_TIMEOUT_SECONDS = 10.0
 _RUNTIME_ERROR_CODES = frozenset(
     {
         "RUNTIME_INVALID",
@@ -195,6 +203,64 @@ class RelayTurnCandidate:
     actor: WorkerDialogueCaller
 
 
+class _FrozenCandidateIterator:
+    """Async view over one constructor-time immutable compatibility snapshot."""
+
+    def __init__(self, values: tuple[RelayTurnCandidate, ...]) -> None:
+        self._values = values
+        self._index = 0
+
+    def __aiter__(self) -> "_FrozenCandidateIterator":
+        return self
+
+    async def __anext__(self) -> RelayTurnCandidate:
+        if self._index >= len(self._values):
+            raise StopAsyncIteration
+        value = self._values[self._index]
+        self._index += 1
+        return value
+
+    async def aclose(self) -> None:
+        self._index = len(self._values)
+
+
+def _normalize_candidate_source(
+    source: object,
+) -> Callable[[], Awaitable[AsyncIterator[RelayTurnCandidate]]]:
+    """Require an async live source or freeze one legacy tuple before serving.
+
+    The compatibility branch exists only for callers that already materialize
+    an exact immutable tuple during composition. It is evaluated once before
+    the long-running Relay tasks start; no synchronous callback executes in a
+    collection pass. Every dynamic/live source must be an async callable and
+    is acquired under :class:`AsyncCandidateCollector`'s one absolute timeout.
+    """
+
+    if inspect.iscoroutinefunction(source) or inspect.iscoroutinefunction(
+        getattr(source, "__call__", None)
+    ):
+        return source  # type: ignore[return-value]
+    if not callable(source):
+        raise TypeError("candidate_source must be an async callable")
+    try:
+        snapshot = source()
+    except Exception as exc:
+        captured = exc
+
+        async def unavailable_source() -> AsyncIterator[RelayTurnCandidate]:
+            raise captured
+
+        return unavailable_source
+    if type(snapshot) is not tuple:
+        raise TypeError("candidate_source must be an async callable")
+    frozen = tuple(snapshot)
+
+    async def frozen_source() -> AsyncIterator[RelayTurnCandidate]:
+        return _FrozenCandidateIterator(frozen)
+
+    return frozen_source
+
+
 class AgentRelayTurnRuntime:
     """Recompute trusted routing and invoke the existing observer in-process."""
 
@@ -204,9 +270,14 @@ class AgentRelayTurnRuntime:
         observer: DialogueTurnObserver,
         registry: SessionTargetRegistry,
         current_binding_for: Callable[[str], RuntimeBinding | None],
-        candidate_source: Callable[[], Iterable[RelayTurnCandidate]],
+        candidate_source: Callable[
+            [], Awaitable[AsyncIterator[RelayTurnCandidate]]
+        ],
         poll_interval_seconds: float = 1.0,
         max_candidates_per_pass: int = DEFAULT_MAX_TURN_CANDIDATES_PER_PASS,
+        candidate_collection_timeout_seconds: float = (
+            DEFAULT_TURN_CANDIDATE_COLLECTION_TIMEOUT_SECONDS
+        ),
     ) -> None:
         if not hasattr(observer, "reconcile_once"):
             raise TypeError("observer must expose reconcile_once")
@@ -237,9 +308,12 @@ class AgentRelayTurnRuntime:
         self.observer = observer
         self.registry = registry
         self._current_binding_for = current_binding_for
-        self._candidate_source = candidate_source
+        self._candidate_collector = AsyncCandidateCollector(
+            source=_normalize_candidate_source(candidate_source),
+            max_candidates=max_candidates_per_pass,
+            timeout_seconds=candidate_collection_timeout_seconds,
+        )
         self._poll_interval_seconds = float(poll_interval_seconds)
-        self._max_candidates_per_pass = max_candidates_per_pass
 
     @staticmethod
     def _receipt(
@@ -270,36 +344,6 @@ class AgentRelayTurnRuntime:
             )
         except (AttributeError, TypeError, ValueError):
             raise TurnRoutingFactsError("DIALOGUE_BINDING_MISMATCH") from None
-
-    def _collect_candidates(self) -> tuple[object, ...] | ObservationReceipt:
-        """Consume at most max+1 synchronous items before any candidate effect."""
-
-        try:
-            iterator = iter(self._candidate_source())
-        except Exception:
-            return self._receipt(
-                ObservationOutcome.REFUSED,
-                "TURN_CANDIDATE_SOURCE_UNAVAILABLE",
-            )
-
-        candidates: list[object] = []
-        for _index in range(self._max_candidates_per_pass + 1):
-            try:
-                candidates.append(next(iterator))
-            except StopIteration:
-                break
-            except Exception:
-                return self._receipt(
-                    ObservationOutcome.REFUSED,
-                    "TURN_CANDIDATE_SOURCE_UNAVAILABLE",
-                )
-
-        if len(candidates) > self._max_candidates_per_pass:
-            return self._receipt(
-                ObservationOutcome.REFUSED,
-                "TURN_CANDIDATE_LIMIT_EXCEEDED",
-            )
-        return tuple(candidates)
 
     async def _reconcile_candidate_inner(
         self,
@@ -389,9 +433,36 @@ class AgentRelayTurnRuntime:
             )
 
     async def reconcile_once(self) -> tuple[ObservationReceipt, ...]:
-        collected = self._collect_candidates()
-        if isinstance(collected, ObservationReceipt):
-            return (collected,)
+        try:
+            collected = await self._candidate_collector.collect()
+        except CandidateCollectionUnavailable:
+            return (
+                self._receipt(
+                    ObservationOutcome.REFUSED,
+                    "TURN_CANDIDATE_SOURCE_UNAVAILABLE",
+                ),
+            )
+        except CandidateCollectionTimeout:
+            return (
+                self._receipt(
+                    ObservationOutcome.REFUSED,
+                    "TURN_CANDIDATE_COLLECTION_TIMEOUT",
+                ),
+            )
+        except CandidateCollectionOverflow:
+            return (
+                self._receipt(
+                    ObservationOutcome.REFUSED,
+                    "TURN_CANDIDATE_LIMIT_EXCEEDED",
+                ),
+            )
+        except CandidateCollectionBusy:
+            return (
+                self._receipt(
+                    ObservationOutcome.REFUSED,
+                    "TURN_CANDIDATE_COLLECTION_INFLIGHT",
+                ),
+            )
 
         receipts: list[ObservationReceipt] = []
         for candidate in collected:
@@ -505,11 +576,16 @@ def build_turn_runtime(
     dispatchers: WakeDispatcherRegistry,
     current_binding_for: Callable[[str], RuntimeBinding | None],
     retry_policy: WakeRetryPolicy,
-    candidate_source: Callable[[], Iterable[RelayTurnCandidate]],
+    candidate_source: Callable[
+        [], Awaitable[AsyncIterator[RelayTurnCandidate]]
+    ],
     has_active_waiter: Callable[[str, str], bool] | None = None,
     emitted_at: Callable[[], str] = utc_now_iso,
     poll_interval_seconds: float = 1.0,
     max_candidates_per_pass: int = DEFAULT_MAX_TURN_CANDIDATES_PER_PASS,
+    candidate_collection_timeout_seconds: float = (
+        DEFAULT_TURN_CANDIDATE_COLLECTION_TIMEOUT_SECONDS
+    ),
 ) -> AgentRelayTurnRuntime:
     """Compose the disarmed W3C loop around the already-built relay service."""
 
@@ -553,6 +629,7 @@ def build_turn_runtime(
         candidate_source=candidate_source,
         poll_interval_seconds=poll_interval_seconds,
         max_candidates_per_pass=max_candidates_per_pass,
+        candidate_collection_timeout_seconds=candidate_collection_timeout_seconds,
     )
 
 
@@ -641,6 +718,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 __all__ = [
     "AGENT_RELAY_SOCKET_PATH",
     "DEFAULT_MAX_TURN_CANDIDATES_PER_PASS",
+    "DEFAULT_TURN_CANDIDATE_COLLECTION_TIMEOUT_SECONDS",
     "EXECUTIVE_CLIENT_UID",
     "MAX_TURN_CANDIDATES_PER_PASS",
     "ActiveWaiterStateUnavailable",
