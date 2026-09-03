@@ -403,6 +403,50 @@ def test_source_failure_after_partial_iteration_has_zero_candidate_effect() -> N
     assert "private source failure" not in repr(receipts)
 
 
+def test_async_generator_callable_object_is_collected() -> None:
+    runtime = _runtime_module()
+    candidate = _w3c_candidate(runtime)
+
+    class CandidateSource:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def __call__(self):
+            self.calls += 1
+            yield candidate
+
+    source = CandidateSource()
+    observer = _no_action_observer(runtime)
+    turn_runtime = runtime.AgentRelayTurnRuntime(
+        observer=observer,
+        registry=_runtime_registry(),
+        current_binding_for=_runtime_binding_for,
+        candidate_source=source,
+    )
+
+    receipts = _run(turn_runtime.reconcile_once())
+
+    assert source.calls == 1
+    assert observer.calls == 1
+    assert len(receipts) == 1
+    assert receipts[0].reason == "TEST"
+
+
+def test_synchronous_generator_candidate_source_remains_refused() -> None:
+    runtime = _runtime_module()
+
+    def source():
+        yield _w3c_candidate(runtime)
+
+    with pytest.raises(TypeError, match="candidate_source must be an async callable"):
+        runtime.AgentRelayTurnRuntime(
+            observer=_no_action_observer(runtime),
+            registry=_runtime_registry(),
+            current_binding_for=_runtime_binding_for,
+            candidate_source=source,
+        )
+
+
 def test_malformed_candidate_is_isolated_and_later_candidate_still_runs() -> None:
     runtime = _runtime_module()
 

@@ -22,7 +22,7 @@ import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, Union
 
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
 from control_plane.executive_runtime import AttemptStatus
@@ -203,6 +203,16 @@ class RelayTurnCandidate:
     actor: WorkerDialogueCaller
 
 
+_CandidateSource = Callable[
+    [],
+    Union[
+        Awaitable[AsyncIterator[RelayTurnCandidate]],
+        AsyncIterator[RelayTurnCandidate],
+        tuple[RelayTurnCandidate, ...],
+    ],
+]
+
+
 class _FrozenCandidateIterator:
     """Async view over one constructor-time immutable compatibility snapshot."""
 
@@ -236,10 +246,19 @@ def _normalize_candidate_source(
     is acquired under :class:`AsyncCandidateCollector`'s one absolute timeout.
     """
 
+    source_call = getattr(source, "__call__", None)
     if inspect.iscoroutinefunction(source) or inspect.iscoroutinefunction(
-        getattr(source, "__call__", None)
+        source_call
     ):
         return source  # type: ignore[return-value]
+    if inspect.isasyncgenfunction(source) or inspect.isasyncgenfunction(
+        source_call
+    ):
+
+        async def async_generator_source() -> AsyncIterator[RelayTurnCandidate]:
+            return source()  # type: ignore[operator, no-any-return]
+
+        return async_generator_source
     if not callable(source):
         raise TypeError("candidate_source must be an async callable")
     try:
@@ -270,9 +289,7 @@ class AgentRelayTurnRuntime:
         observer: DialogueTurnObserver,
         registry: SessionTargetRegistry,
         current_binding_for: Callable[[str], RuntimeBinding | None],
-        candidate_source: Callable[
-            [], Awaitable[AsyncIterator[RelayTurnCandidate]]
-        ],
+        candidate_source: _CandidateSource,
         poll_interval_seconds: float = 1.0,
         max_candidates_per_pass: int = DEFAULT_MAX_TURN_CANDIDATES_PER_PASS,
         candidate_collection_timeout_seconds: float = (
@@ -576,9 +593,7 @@ def build_turn_runtime(
     dispatchers: WakeDispatcherRegistry,
     current_binding_for: Callable[[str], RuntimeBinding | None],
     retry_policy: WakeRetryPolicy,
-    candidate_source: Callable[
-        [], Awaitable[AsyncIterator[RelayTurnCandidate]]
-    ],
+    candidate_source: _CandidateSource,
     has_active_waiter: Callable[[str, str], bool] | None = None,
     emitted_at: Callable[[], str] = utc_now_iso,
     poll_interval_seconds: float = 1.0,
