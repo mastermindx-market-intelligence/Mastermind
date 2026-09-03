@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 
@@ -828,6 +829,9 @@ CLI_PATH = ROOT / "scripts" / "source_continuity.py"
 COMMISSION_WAVE_PATH = ROOT / "docs" / "sol_skills" / "COMMISSION_WAVE.md"
 REVIEW_RETURN_PATH = ROOT / "docs" / "sol_skills" / "REVIEW_RETURN.md"
 SESSION_CLOSE_PATH = ROOT / "docs" / "AGENT_DIALOGUE_SESSION_CLOSE_LAW.md"
+WORKSPACE = "/repo"
+TOKEN = "test-token"
+API_ROOT = "https://api.github.com"
 
 
 def _cli_module():
@@ -841,12 +845,15 @@ def _cli_module():
     return module
 
 
-def _cli_argv(kind: str = "CHECKPOINT_VERIFIED") -> list[str]:
+def _cli_argv(kind: str = "checkpoint") -> list[str]:
     args = [
-        "--receipt-kind",
+        "verify",
+        "--kind",
         kind,
         "--operation-key",
         OPERATION,
+        "--workspace",
+        WORKSPACE,
         "--repository",
         REPOSITORY,
         "--pr-number",
@@ -870,16 +877,9 @@ def _cli_argv(kind: str = "CHECKPOINT_VERIFIED") -> list[str]:
 
 
 class _ProbeRunner:
-    def __init__(
-        self,
-        *,
-        auth_ok: bool = True,
-        move_remote_head_on_second_read: bool = False,
-    ) -> None:
-        self.auth_ok = auth_ok
-        self.move_remote_head_on_second_read = move_remote_head_on_second_read
+    def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
-        self.pr_reads = 0
+        self.kwargs: list[dict[str, Any]] = []
 
     @staticmethod
     def _done(returncode: int = 0, stdout: str = "", stderr: str = ""):
@@ -887,36 +887,76 @@ class _ProbeRunner:
 
         return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
 
-    def __call__(self, command, **_kwargs):
+    def __call__(self, command, **kwargs):
         call = tuple(str(part) for part in command)
         self.calls.append(call)
+        self.kwargs.append(dict(kwargs))
 
-        if call == ("gh", "auth", "status", "--hostname", "github.com"):
-            return self._done(0 if self.auth_ok else 1, stderr="sensitive auth failure")
-        if call == ("git", "rev-parse", "--show-toplevel"):
-            return self._done(stdout="/repo\n")
-        if call == ("git", "symbolic-ref", "--quiet", "--short", "HEAD"):
+        if call == ("/usr/bin/git", "rev-parse", "--show-toplevel"):
+            return self._done(stdout=f"{WORKSPACE}\n")
+        if call == ("/usr/bin/git", "symbolic-ref", "--short", "HEAD"):
             return self._done(stdout=f"{BRANCH}\n")
-        if call == ("git", "rev-parse", "HEAD"):
+        if call == ("/usr/bin/git", "rev-parse", "HEAD^{commit}"):
             return self._done(stdout=f"{HEAD_SHA}\n")
-        if call == ("git", "rev-parse", "HEAD^{tree}"):
+        if call == ("/usr/bin/git", "rev-parse", "HEAD^{tree}"):
             return self._done(stdout=f"{TREE_SHA}\n")
-        if call == ("git", "cat-file", "-e", f"{HEAD_SHA}^{{commit}}"):
+        if call in {
+            ("/usr/bin/git", "cat-file", "-e", f"{HEAD_SHA}^{{commit}}"),
+            ("/usr/bin/git", "cat-file", "-e", f"{BASE_SHA}^{{commit}}"),
+        }:
             return self._done()
-        if call == ("git", "merge-base", "--is-ancestor", HEAD_SHA, "HEAD"):
+        if call == ("/usr/bin/git", "merge-base", "--is-ancestor", HEAD_SHA, "HEAD"):
             return self._done()
-        if call == ("git", "rev-list", "--count", f"{HEAD_SHA}..HEAD"):
+        if call == ("/usr/bin/git", "rev-list", "--count", f"{HEAD_SHA}..HEAD"):
             return self._done(stdout="0\n")
-        if call == ("git", "diff", "--name-only", "-z", "HEAD"):
+        if call == ("/usr/bin/git", "diff", "--name-only", "-z", "HEAD"):
             return self._done()
-        if call == ("git", "diff", "--cached", "--name-only", "-z"):
+        if call == ("/usr/bin/git", "diff", "--cached", "--name-only", "-z"):
             return self._done()
-        if call == ("git", "ls-files", "--others", "--exclude-standard", "-z"):
+        if call == ("/usr/bin/git", "ls-files", "--others", "--exclude-standard", "-z"):
             return self._done()
+        if call == (
+            "/usr/bin/git",
+            "diff",
+            "--name-only",
+            "-z",
+            f"{BASE_SHA}..{HEAD_SHA}",
+        ):
+            return self._done(stdout="\0".join(FINAL_OWNED_PATHS) + "\0")
+        if call == (
+            "/usr/bin/git",
+            "ls-tree",
+            "-z",
+            "-l",
+            HEAD_SHA,
+            "--",
+            *FINAL_OWNED_PATHS,
+        ):
+            rows = []
+            for index, path in enumerate(FINAL_OWNED_PATHS):
+                rows.append(
+                    f"100644 blob {index + 7:x}" * 0
+                )
+            payload = "".join(
+                f"100644 blob {str(index + 7) * 40} {100 + index}\t{path}\0"
+                for index, path in enumerate(FINAL_OWNED_PATHS)
+            )
+            return self._done(stdout=payload)
+        raise AssertionError(f"unexpected git probe command: {call!r}")
 
-        if call[:2] != ("gh", "api") or len(call) != 3:
-            raise AssertionError(f"unexpected probe command: {call!r}")
-        endpoint = call[2]
+
+class _ProbeHTTP:
+    def __init__(self, *, move_remote_head_on_second_read: bool = False) -> None:
+        self.move_remote_head_on_second_read = move_remote_head_on_second_read
+        self.calls: list[tuple[str, str, float]] = []
+        self.pr_reads = 0
+
+    def __call__(self, url: str, *, token: str, timeout: float):
+        self.calls.append((url, token, timeout))
+        assert url.startswith(API_ROOT + "/")
+        assert token == TOKEN
+        assert TOKEN not in url
+        endpoint = url.removeprefix(API_ROOT + "/")
         pr_endpoint = f"repos/{REPOSITORY}/pulls/{PR_NUMBER}"
         if endpoint == pr_endpoint:
             self.pr_reads += 1
@@ -925,66 +965,63 @@ class _ProbeRunner:
                 if self.move_remote_head_on_second_read and self.pr_reads > 1
                 else HEAD_SHA
             )
-            return self._done(
-                stdout=json.dumps(
-                    {
-                        "state": "open",
-                        "draft": True,
-                        "labels": [],
-                        "head": {
-                            "ref": BRANCH,
-                            "sha": head,
-                            "repo": {"full_name": REPOSITORY},
-                        },
-                        "base": {"ref": "master"},
-                    }
-                )
-            )
-        if endpoint == f"repos/{REPOSITORY}/branches/sol%2Fsource-continuity-v1-20260903":
-            return self._done(stdout=json.dumps({"commit": {"sha": HEAD_SHA}}))
+            return {
+                "state": "open",
+                "draft": True,
+                "labels": [],
+                "head": {
+                    "ref": BRANCH,
+                    "sha": head,
+                    "repo": {"full_name": REPOSITORY},
+                },
+                "base": {"ref": "master"},
+            }
+        if endpoint == f"repos/{REPOSITORY}/branches/{quote(BRANCH, safe='')}":
+            return {"commit": {"sha": HEAD_SHA}}
         if endpoint == f"repos/{REPOSITORY}/git/commits/{HEAD_SHA}":
-            return self._done(stdout=json.dumps({"tree": {"sha": TREE_SHA}}))
+            return {"tree": {"sha": TREE_SHA}}
         if endpoint == f"repos/{REPOSITORY}/branches/master":
-            return self._done(stdout=json.dumps({"commit": {"sha": CURRENT_BASE_SHA}}))
+            return {"commit": {"sha": CURRENT_BASE_SHA}}
         if endpoint == f"repos/{REPOSITORY}/compare/{CURRENT_BASE_SHA}...{HEAD_SHA}":
-            return self._done(stdout=json.dumps({"merge_base_commit": {"sha": BASE_SHA}}))
+            return {"merge_base_commit": {"sha": BASE_SHA}}
         if endpoint == f"repos/{REPOSITORY}/pulls/{PR_NUMBER}/files?per_page=100&page=1":
-            return self._done(
-                stdout=json.dumps([{"filename": path} for path in FINAL_OWNED_PATHS])
-            )
-        if endpoint == f"repos/{REPOSITORY}/git/trees/{TREE_SHA}?recursive=1":
-            entries = []
-            for index, path in enumerate(FINAL_OWNED_PATHS):
-                entries.append(
-                    {
-                        "path": path,
-                        "mode": "100644",
-                        "type": "blob",
-                        "sha": f"{index + 7:x}" * 40,
-                        "size": 100 + index,
-                    }
-                )
-            return self._done(stdout=json.dumps({"truncated": False, "tree": entries}))
+            return [{"filename": path} for path in FINAL_OWNED_PATHS]
         if endpoint == f"repos/{REPOSITORY}/pulls?state=open&per_page=100&page=1":
-            return self._done(stdout=json.dumps([{"number": PR_NUMBER}]))
-        raise AssertionError(f"unexpected gh endpoint: {endpoint}")
+            return [{"number": PR_NUMBER}]
+        raise AssertionError(f"unexpected HTTP probe endpoint: {endpoint}")
 
 
-@pytest.mark.parametrize("kind", ["CHECKPOINT_VERIFIED", "REMOTE_COMPLETE_VERIFIED"])
-def test_cli_collects_facts_with_read_only_commands_and_prints_one_canonical_receipt(
-    kind: str, capsys: pytest.CaptureFixture[str]
+def _run_cli(module, argv: list[str], *, runner=None, http=None, environ=None):
+    return module.main(
+        argv,
+        runner=runner or _ProbeRunner(),
+        http_get=http or _ProbeHTTP(),
+        environ=environ if environ is not None else {"GITHUB_TOKEN": TOKEN},
+        clock=lambda: VERIFIED_AT,
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "receipt_kind"),
+    [("checkpoint", "CHECKPOINT_VERIFIED"), ("remote-complete", "REMOTE_COMPLETE_VERIFIED")],
+)
+def test_cli_collects_facts_with_canonical_read_only_probes_and_prints_one_receipt(
+    kind: str,
+    receipt_kind: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = _cli_module()
     runner = _ProbeRunner()
+    http = _ProbeHTTP()
 
-    exit_code = module.main(_cli_argv(kind), runner=runner, clock=lambda: VERIFIED_AT)
+    exit_code = _run_cli(module, _cli_argv(kind), runner=runner, http=http)
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.err == ""
     assert captured.out.count("\n") == 1
     payload = json.loads(captured.out)
     assert payload["schema"] == "mastermind.source_continuity_receipt/v1"
-    assert payload["receipt_kind"] == kind
+    assert payload["receipt_kind"] == receipt_kind
     assert payload["changed_paths"] == sorted(FINAL_OWNED_PATHS)
     assert payload["local_equals_remote"] is True
     assert payload["authority_effect"] == "NONE"
@@ -992,15 +1029,6 @@ def test_cli_collects_facts_with_read_only_commands_and_prints_one_canonical_rec
     assert payload["merge_authorized"] is False
     assert payload["receiver_transfer_authorized"] is False
 
-    allowed_git = {
-        "rev-parse",
-        "symbolic-ref",
-        "cat-file",
-        "merge-base",
-        "rev-list",
-        "diff",
-        "ls-files",
-    }
     forbidden = {
         "fetch",
         "checkout",
@@ -1014,61 +1042,95 @@ def test_cli_collects_facts_with_read_only_commands_and_prints_one_canonical_rec
         "switch",
         "clean",
     }
-    for call in runner.calls:
-        if call[0] == "git":
-            assert call[1] in allowed_git
-            assert call[1] not in forbidden
-        elif call[0] == "gh":
-            assert call[1] in {"auth", "api"}
+    assert runner.calls
+    for call, kwargs in zip(runner.calls, runner.kwargs, strict=True):
+        assert call[0] == "/usr/bin/git"
+        assert call[1] not in forbidden
+        assert kwargs.get("cwd") == WORKSPACE
+        assert kwargs.get("env", {}).get("GIT_OPTIONAL_LOCKS") == "0"
+        assert "GITHUB_TOKEN" not in kwargs.get("env", {})
+    assert any(call[1] == "ls-tree" for call in runner.calls)
+    assert any(call[1:4] == ("diff", "--name-only", "-z") and call[-1] == f"{BASE_SHA}..{HEAD_SHA}" for call in runner.calls)
+    assert http.calls
+    assert all(call[0].startswith(API_ROOT + "/") for call in http.calls)
 
 
-def test_cli_rejects_invalid_request_before_any_git_or_github_probe(
+def test_cli_rejects_invalid_request_before_any_probe(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = _cli_module()
     runner = _ProbeRunner()
+    http = _ProbeHTTP()
     args = _cli_argv()
     args[args.index("--repository") + 1] = "not-a-repository"
 
-    exit_code = module.main(args, runner=runner, clock=lambda: VERIFIED_AT)
+    exit_code = _run_cli(module, args, runner=runner, http=http)
     captured = capsys.readouterr()
     assert exit_code == 2
     assert runner.calls == []
+    assert http.calls == []
     payload = json.loads(captured.out)
     assert payload["code"] == "INVALID_REQUEST"
     assert OPERATION not in captured.out
     assert BRANCH not in captured.out
+    assert WORKSPACE not in captured.out
 
 
-def test_cli_auth_failure_is_fixed_value_free_and_stops_before_local_probe(
+def test_cli_requires_absolute_workspace_before_any_probe(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = _cli_module()
-    runner = _ProbeRunner(auth_ok=False)
+    runner = _ProbeRunner()
+    http = _ProbeHTTP()
+    args = _cli_argv()
+    args[args.index("--workspace") + 1] = "relative/worktree"
 
-    exit_code = module.main(_cli_argv(), runner=runner, clock=lambda: VERIFIED_AT)
+    exit_code = _run_cli(module, args, runner=runner, http=http)
     captured = capsys.readouterr()
     assert exit_code == 2
-    assert runner.calls == [("gh", "auth", "status", "--hostname", "github.com")]
-    assert captured.err == ""
-    payload = json.loads(captured.out)
-    assert payload["code"] == "AUTH_UNAVAILABLE"
-    assert "sensitive auth failure" not in captured.out
-    assert REPOSITORY not in captured.out
+    assert runner.calls == []
+    assert http.calls == []
+    assert json.loads(captured.out)["code"] == "INVALID_REQUEST"
+    assert "relative/worktree" not in captured.out
 
 
-def test_cli_refuses_if_remote_head_moves_during_the_same_proof(
+def test_cli_missing_token_is_fixed_value_free_and_stops_before_probes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = _cli_module()
-    runner = _ProbeRunner(move_remote_head_on_second_read=True)
+    runner = _ProbeRunner()
+    http = _ProbeHTTP()
 
-    exit_code = module.main(_cli_argv(), runner=runner, clock=lambda: VERIFIED_AT)
+    exit_code = _run_cli(
+        module,
+        _cli_argv(),
+        runner=runner,
+        http=http,
+        environ={},
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert runner.calls == []
+    assert http.calls == []
+    payload = json.loads(captured.out)
+    assert payload["code"] == "AUTH_UNAVAILABLE"
+    assert REPOSITORY not in captured.out
+    assert WORKSPACE not in captured.out
+
+
+def test_cli_refuses_if_remote_head_moves_during_same_proof(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _cli_module()
+    runner = _ProbeRunner()
+    http = _ProbeHTTP(move_remote_head_on_second_read=True)
+
+    exit_code = _run_cli(module, _cli_argv(), runner=runner, http=http)
     captured = capsys.readouterr()
     assert exit_code == 1
     payload = json.loads(captured.out)
     assert payload["code"] == "REMOTE_PROOF_CHANGED"
-    assert runner.pr_reads == 2
+    assert http.pr_reads == 2
     assert "9" * 40 not in captured.out
 
 
