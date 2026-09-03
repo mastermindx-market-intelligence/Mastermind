@@ -4,10 +4,13 @@ These tests are deliberately *discriminating*: they parse the real Control Room
 source with :mod:`ast` and assert the frozen H0 evidence still describes it.  If
 the compositor's closed output contract changes, if the remote release closure
 gains or loses a runtime path, if the local and remote contracts are collapsed
-into one schema, or if the three H0 records drift apart, these fail.
+into one schema, or if the four H0 records drift apart, these fail.
 
 No repository module is imported.  Everything is read as text and parsed, so the
-battery stays hermetic and cannot be satisfied by import side effects.
+battery stays hermetic and cannot be satisfied by import side effects.  Nothing
+here fetches from GitHub or Macro at test time either: the accepted-capability
+citations and PR archaeology are dated observations (see CONTRACT_LAW in the
+evidence file) verified for *internal* consistency, not against a live refetch.
 """
 
 from __future__ import annotations
@@ -54,7 +57,23 @@ CAPABILITY_VOCABULARY = frozenset(
     }
 )
 
+H1_NINE_PATHS = frozenset(
+    {
+        "control_plane/ai_operating_hub_workroom.py",
+        "app/static/chairman_control/hub_workroom.js",
+        "app/static/chairman_control/hub_workroom.css",
+        "tests/test_ai_operating_hub_workroom.py",
+        "tests/test_chairman_control_room_ai_hub.py",
+        "tests/test_chairman_control_room_ui_ai_hub.py",
+        "docs/superpowers/plans/2026-09-03-ai-operating-hub-h1-implementation-receipt.md",
+        "scripts/chairman_control_room.py",
+        "app/static/chairman_control/index.html",
+    }
+)
+
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_PLACEHOLDER_DATE_RE = re.compile(r"\d{4}-\d{2}-XX")
+_URL_RE = re.compile(r"^https://[^\s]+$")
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +173,22 @@ def _frontmatter(path: pathlib.Path) -> dict[str, str]:
             key, _, value = line.partition(":")
             out[key.strip()] = value.strip()
     return out
+
+
+def _collapsed(text: str) -> str:
+    """Whitespace-collapsed text for prose substring checks that must survive
+    hand-authored markdown line wraps without caring about exact line breaks."""
+    return re.sub(r"\s+", " ", text)
+
+
+def _string_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for v in value.values() for s in _string_values(v)]
+    if isinstance(value, list):
+        return [s for v in value for s in _string_values(v)]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -280,19 +315,22 @@ def test_required_runtime_paths_all_exist() -> None:
         assert (ROOT / relative).exists(), f"REQUIRED_RUNTIME_PATHS names {relative}"
 
 
+def test_h1_misclassification_guards_are_recorded() -> None:
+    guards = _evidence()["owner_boundaries"]["h1_misclassification_guards"]
+    joined = " | ".join(guards).lower()
+    for phrase in ("terminal attempt", "nonblank watcher", "causally after"):
+        assert phrase in joined, f"missing H1 misclassification guard: {phrase}"
+
+
+def test_dialogue_boundary_owner_matches_pr_357() -> None:
+    boundaries = _evidence()["owner_boundaries"]
+    assert "PR #357" in boundaries["dialogue_boundary_owner"]
+    assert "b28023f92458ba186937afa1e619f3b4464e149f" in boundaries["dialogue_boundary_owner"]
+
+
 # ---------------------------------------------------------------------------
 # organizational ownership
 # ---------------------------------------------------------------------------
-
-
-def _string_values(value: object) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, dict):
-        return [s for v in value.values() for s in _string_values(v)]
-    if isinstance(value, list):
-        return [s for v in value for s in _string_values(v)]
-    return []
 
 
 def test_binds_the_existing_workstream_and_creates_no_new_one() -> None:
@@ -326,16 +364,72 @@ def test_capability_ledger_uses_only_the_closed_vocabulary() -> None:
     assert ledger["parallel_hub_control_plane"] == "REJECTED_BY_DESIGN"
 
 
-def test_no_unproven_capability_is_promoted_to_proven_live() -> None:
-    """H0 observed source only; nothing in this freeze may claim production proof."""
+# ---------------------------------------------------------------------------
+# accepted capability truth vs. this carrier's observation ceiling
+# ---------------------------------------------------------------------------
+
+
+_MACRO_SOURCE_RE = re.compile(
+    r"^mastermindx-market-intelligence/macro@[0-9a-f]{40}:"
+    r"agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM\.md$"
+)
+
+
+def test_accepted_capabilities_are_backed_by_a_real_citation() -> None:
+    """Every PROVEN_LIVE row must cite real accepted owner evidence, not this
+    carrier's own say-so — and every citation must name a real Agent OS source,
+    not a fabricated one."""
+    evidence = _evidence()
+    ledger = evidence["capability_ledger"]
+    citations = evidence["capability_ledger_citations"]
+    proven_live_keys = {k for k, v in ledger.items() if v == "PROVEN_LIVE"}
+    assert proven_live_keys, "expected at least one accepted PROVEN_LIVE capability"
+    for key in proven_live_keys:
+        assert key in citations, f"PROVEN_LIVE key {key!r} has no capability_ledger_citations entry"
+        row = citations[key]
+        assert row["claim"].strip()
+        assert row["observed_at"]
+        assert _MACRO_SOURCE_RE.match(row["source"]), f"{key}: not a real Agent OS source: {row['source']!r}"
+        assert row["receipts"], f"{key}: no receipt PRs cited"
+
+
+def test_accepted_capability_cannot_be_cosmetically_downgraded() -> None:
+    """Discriminator: local P0A+H0 and X1-local acceptance must not regress."""
     ledger = _evidence()["capability_ledger"]
-    assert "PROVEN_LIVE" not in set(ledger.values()), (
-        "H0 observed no production readback; no sub-capability may claim PROVEN_LIVE"
-    )
+    assert ledger["local_p0a_accepted_path"] == "PROVEN_LIVE"
+    assert ledger["remote_x1_accepted_local_proof"] == "PROVEN_LIVE"
+
+
+def test_local_x1_proof_cannot_be_promoted_to_remote_production() -> None:
+    """Discriminator: local acceptance of X1's code/contract must never bleed
+    into a claim that a remote-socket production instance is deployed."""
+    ledger = _evidence()["capability_ledger"]
+    assert ledger["remote_x1_accepted_local_proof"] == "PROVEN_LIVE"
+    assert ledger["remote_x1_deployed_production"] != "PROVEN_LIVE"
+    citation = _evidence()["capability_ledger_citations"]["remote_x1_accepted_local_proof"]
+    assert "loopback" in citation["scope"].lower()
+    assert "not a deployed remote-socket production instance" in citation["scope"]
+
+
+def test_overall_workstream_partial_does_not_conflict_with_sub_capability_rows() -> None:
+    ledger = _evidence()["capability_ledger"]
+    assert ledger["chairman_control_room_workstream_overall"] == "PARTIAL"
+    assert ledger["local_p0a_accepted_path"] == "PROVEN_LIVE"
+    assert ledger["remote_x1_accepted_local_proof"] == "PROVEN_LIVE"
+    discriminators = " ".join(_evidence()["capability_ledger_discriminators"]).lower()
+    assert "demoting" in discriminators and "promoting" in discriminators
+
+
+def test_unaccepted_pr_326_projection_stays_unpromoted() -> None:
+    """This carrier's own observation ceiling: PR #326's dispatch projection is
+    not independently accepted, so it must stay BUILT_NOT_PROVEN, never PROVEN_LIVE."""
+    ledger = _evidence()["capability_ledger"]
+    assert ledger["autonomy_responsibility_projection"] == "BUILT_NOT_PROVEN"
+    assert not (ROOT / "control_plane" / "autonomy_control_room_projection.py").exists()
 
 
 # ---------------------------------------------------------------------------
-# the three records agree with each other
+# the four records agree with each other
 # ---------------------------------------------------------------------------
 
 
@@ -344,7 +438,6 @@ def test_records_pin_the_same_protected_master() -> None:
     protected = evidence["protected_master"]
     assert _SHA_RE.fullmatch(protected)
     assert _SHA_RE.fullmatch(evidence["protected_master_tree"])
-    assert evidence["current_protected_at_delivery"] == protected
     assert _frontmatter(RECORD)["protected_master"] == protected
     assert _frontmatter(PLAN)["protected_master_at_freeze"] == protected
 
@@ -358,22 +451,30 @@ def test_records_agree_on_the_selected_consumer() -> None:
     assert _frontmatter(RECORD)["selected_first_consumer"] == selected["selected"]
 
 
-def test_h1_ceiling_agrees_between_evidence_and_plan() -> None:
+# ---------------------------------------------------------------------------
+# H1 nine-path ceiling and dual-protection gate
+# ---------------------------------------------------------------------------
+
+
+def test_h1_ceiling_is_exactly_nine_paths_and_agrees_with_the_plan() -> None:
     ceiling = _evidence()["h1_path_ceiling"]
-    plan = _text(PLAN)
-    for relative in ceiling["may_create"]:
-        assert relative in plan, f"H1 plan omits permitted path {relative}"
-    for relative in ceiling["may_modify_only_after_pr_326_merges"]:
-        assert relative in plan, f"H1 plan omits gated path {relative}"
+    may_create = set(ceiling["may_create"])
+    may_modify = set(ceiling["may_modify_only_after_h0_and_pr_326_protect"])
+    all_paths = may_create | may_modify
+    assert all_paths == H1_NINE_PATHS, f"H1 ceiling drifted from the frozen nine paths: {all_paths}"
+    assert len(may_create) == 7
+    assert len(may_modify) == 2
+    plan = _collapsed(_text(PLAN))
+    for relative in all_paths:
+        assert relative in plan, f"H1 plan omits ceiling path {relative}"
     for relative in ceiling["forbidden_paths"]:
         assert relative in plan, f"H1 plan omits forbidden path {relative}"
-    assert ceiling["fifth_path_disposition"].startswith("DECISION_REQUEST")
 
 
 def test_h1_ceiling_never_permits_a_forbidden_owner_path() -> None:
     ceiling = _evidence()["h1_path_ceiling"]
     permitted = set(ceiling["may_create"]) | set(
-        ceiling["may_modify_only_after_pr_326_merges"]
+        ceiling["may_modify_only_after_h0_and_pr_326_protect"]
     )
     forbidden = set(ceiling["forbidden_paths"])
     assert not (permitted & forbidden), "H1 ceiling permits a forbidden owner path"
@@ -383,15 +484,177 @@ def test_h1_ceiling_never_permits_a_forbidden_owner_path() -> None:
         "scripts/chairman_control_room_remote.py",
         "app/static/chairman_control/remote.html",
         "ops/control_room_remote/install.sh",
+        "control_plane/autonomy_control_room_projection.py",
+        "integrations/slack_agent_dialogue/engine_v2.py",
+        "integrations/slack_agent_dialogue/wake_projection.py",
     ):
         assert critical in forbidden, f"H1 ceiling fails to protect {critical}"
 
 
-def test_h1_remains_held_and_gated_on_pr_326() -> None:
-    assert _frontmatter(PLAN)["authorization_state"] == "HELD"
+def test_h1_receipt_path_has_no_placeholder_date() -> None:
+    """Discriminator: a 2026-09-XX placeholder path fails; the receipt path
+    must be one exact, dated path."""
     ceiling = _evidence()["h1_path_ceiling"]
-    assert "326" in ceiling["blocking_precondition"]
-    assert "BLOCKED UI_PATHS_CONTENDED_BY_PR_326" in ceiling["blocking_precondition"]
+    receipt_paths = [p for p in ceiling["may_create"] if "implementation-receipt" in p]
+    assert len(receipt_paths) == 1, "expected exactly one H1 receipt path"
+    receipt = receipt_paths[0]
+    assert not _PLACEHOLDER_DATE_RE.search(receipt), f"H1 receipt path is a placeholder: {receipt}"
+    assert re.search(r"2026-09-\d{2}-ai-operating-hub-h1-implementation-receipt\.md$", receipt)
+    assert receipt in _text(PLAN)
+    assert "2026-09-XX" not in _text(PLAN), "H1 plan still contains a placeholder receipt date"
+    assert "2026-09-XX" not in _text(RECORD), "H0 record still contains a placeholder receipt date"
+
+
+def test_h1_start_is_gated_on_both_h0_and_pr_326_not_ui_paths_alone() -> None:
+    """Discriminator: H1 pre-#326 (or pre-H0) START permission must fail — the
+    gate covers all nine paths, not merely the two that touch PR #326's files."""
+    ceiling = _evidence()["h1_path_ceiling"]
+    gate = ceiling["gate"].lower()
+    assert "all nine paths" in gate
+    assert "not authorized" in gate
+    plan = _collapsed(_text(PLAN)).lower()
+    assert "held until both this h0 record and pr #326 are protected" in plan
+    assert "not authorized" in plan
+    # The old framing ("may create paths 1-4 early") must not survive the repair.
+    assert "may begin with paths" not in plan
+    assert "limited to paths 1" not in plan
+
+
+def test_h1_remains_held() -> None:
+    assert _frontmatter(PLAN)["authorization_state"] == "HELD"
+
+
+# ---------------------------------------------------------------------------
+# exact local route / security / cache / threat-boundary law
+# ---------------------------------------------------------------------------
+
+
+def test_h1_route_security_contract_is_frozen_and_honest() -> None:
+    contract = _evidence()["h1_route_security_contract"]
+    assert contract["route"] == "/api/hub/workstream/chairman-control-room"
+    assert contract["http_method"] == "GET"
+    assert contract["resolves_to_literal_workstream"] == "WS:CHAIRMAN-CONTROL-ROOM"
+    for forbidden in (
+        "network call",
+        "subprocess",
+        "arbitrary workstream query parameter",
+        "fuzzy match",
+        "second compositor",
+    ):
+        assert forbidden in contract["forbidden"]
+    for preserved in ("Host header check", "Origin header check", "X-CCR-Token gate", "CSP"):
+        assert preserved in contract["preserved_from_api_state"]
+    honesty = contract["token_honesty_law"]
+    assert "not authentication against another same-user local process" in honesty
+    assert "must not claim a verified user identity" in honesty
+    plan = _collapsed(_text(PLAN))
+    assert "/api/hub/workstream/chairman-control-room" in plan
+    assert "X-CCR-Token" in plan
+    assert "not authentication against another same-user local process" in plan
+
+
+def test_h1_route_contract_missing_any_law_element_would_be_caught() -> None:
+    """Discriminator: a route/token/cache/threat-boundary law with a missing
+    required element fails — verified here by asserting the full required set
+    is present, not a subset."""
+    contract = _evidence()["h1_route_security_contract"]
+    required_forbidden = {
+        "request-time re-gather",
+        "network call",
+        "subprocess",
+        "file discovery",
+        "arbitrary workstream query parameter",
+        "fuzzy match",
+        "second compositor",
+    }
+    assert required_forbidden.issubset(set(contract["forbidden"]))
+    required_preserved = {
+        "loopback-only binding",
+        "Host header check",
+        "Origin header check",
+        "CSP",
+        "request body bound",
+        "response body bound",
+        "X-CCR-Token gate",
+    }
+    assert required_preserved.issubset(set(contract["preserved_from_api_state"]))
+
+
+# ---------------------------------------------------------------------------
+# evidence-link typing law
+# ---------------------------------------------------------------------------
+
+
+def test_evidence_link_law_defines_typed_absence_and_real_examples() -> None:
+    law = _evidence()["evidence_link_law"]
+    assert law["not_available_meaning"].strip()
+    assert law["not_applicable_meaning"].strip()
+    assert law["example_real_deep_links"], "no real deep-link examples cited"
+    for url in law["example_real_deep_links"]:
+        assert _URL_RE.match(url), f"not a real URL: {url}"
+        assert url.startswith("https://github.com/mastermindx-market-intelligence/Mastermind/pull/")
+
+
+def test_no_fabricated_deep_link_present_in_evidence() -> None:
+    """Discriminator: a fabricated deep link fails.  Every URL claimed in the
+    github.com/.../pull/N deep-link convention this record uses must be one of
+    the cited real deep links.  A loopback address quoted as literal evidence
+    provenance (e.g. inside an accepted-capability citation's scope) is not a
+    claimed deep link and is out of scope for this check."""
+    evidence = _evidence()
+    allowed = set(evidence["evidence_link_law"]["example_real_deep_links"])
+    deep_link_pattern = re.compile(r"https://github\.com/\S+/pull/\d+")
+    for text in _string_values(evidence):
+        for url in deep_link_pattern.findall(text):
+            url = url.rstrip(".,)")
+            assert url in allowed, f"unrecognized/fabricated deep link in evidence: {url}"
+
+
+# ---------------------------------------------------------------------------
+# immutable contract vs. dated observation
+# ---------------------------------------------------------------------------
+
+
+def test_contract_law_separates_immutable_from_dated_fields() -> None:
+    law = _evidence()["contract_law"]
+    assert set(law["dated_observation_fields"]) & set(_evidence().keys()) == set(
+        law["dated_observation_fields"]
+    ), "a declared dated_observation_field is not a real top-level evidence key"
+    assert "immutable_contract_fields" in law
+    assert "rule" in law and law["rule"].strip()
+    rule = law["rule"].lower()
+    assert "does not compare against a live-fetched" in rule
+    assert "does not itself turn this record red" in rule
+
+
+def test_dated_fields_carry_observed_at_receipts() -> None:
+    evidence = _evidence()
+    assert evidence["observed_at"]
+    for row in evidence["pr_archaeology"]:
+        if row["state"] == "OPEN_DRAFT" and "reviews" in row:
+            assert row.get("observed_at"), f"PR #{row['number']} missing observed_at receipt"
+    assert evidence["linear_portfolio"]["observed_at"]
+    for citation in evidence["capability_ledger_citations"].values():
+        assert citation["observed_at"]
+
+
+def test_source_law_does_not_compare_against_a_live_fetch() -> None:
+    """This test file itself must stay hermetic: no real import of a
+    subprocess/network module.  Checked via ast so that merely *documenting*
+    a forbidden word (e.g. inside the route-contract discriminator test's own
+    string literals) does not trip this check."""
+    banned_modules = {"subprocess", "urllib", "requests", "socket", "http.client"}
+    tree = ast.parse(_text(pathlib.Path(__file__)))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert alias.name not in banned_modules, (
+                    f"source law test file is not hermetic: imports {alias.name}"
+                )
+        elif isinstance(node, ast.ImportFrom):
+            assert node.module not in banned_modules, (
+                f"source law test file is not hermetic: imports from {node.module}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -401,24 +664,106 @@ def test_h1_remains_held_and_gated_on_pr_326() -> None:
 
 def test_pr_archaeology_records_exact_immutable_identities() -> None:
     rows = {row["number"]: row for row in _evidence()["pr_archaeology"]}
-    assert set(rows) == {326, 350, 416}
+    assert set(rows) == {326, 350, 357, 416, 421}
     for row in rows.values():
         assert _SHA_RE.fullmatch(row["head"]), f"PR #{row['number']} head is not a SHA"
     assert rows[416]["state"] == "MERGED"
     assert _SHA_RE.fullmatch(rows[416]["merge_commit"])
-    assert rows[326]["state"] == "OPEN_DRAFT"
+    assert rows[357]["state"] == "MERGED"
+    assert _SHA_RE.fullmatch(rows[357]["merge_commit"])
+    assert rows[421]["state"] == "MERGED"
+    assert _SHA_RE.fullmatch(rows[421]["merge_commit"])
     assert rows[350]["state"] == "OPEN_DRAFT"
+
+
+def test_pr_326_is_recorded_as_unresolved_at_its_current_head() -> None:
+    rows = {row["number"]: row for row in _evidence()["pr_archaeology"]}
+    row = rows[326]
+    assert row["head"] == "b59753a4deab4b7748b2896a518d9532762d8a74"
+    assert row["state"] == "OPEN_DRAFT"
+    assert row["unresolved"] is True
+    assert row["review_classification"] == "FULL_REREVIEW_REQUIRED"
+    assert row["effective_delta_paths"] == 10
+    review_states = {r["state"] for r in row["reviews"]}
+    assert review_states == {"CHANGES_REQUESTED"}
+    assert len(row["reviews"]) == 2
+    latest = max(row["reviews"], key=lambda r: r["submitted_at"])
+    assert latest["id"] == 5103135217
     assert (
-        "control_plane/autonomy_control_room_projection.py" in rows[326]["owns"]
+        "control_plane/autonomy_control_room_projection.py" in row["owns"]
     ), "PR #326 archaeology must record the derived-status owner"
-    assert rows[350]["shared_paths_with_326"], "PR #350 downstream overlap not recorded"
+
+
+def test_stale_326_head_would_be_caught() -> None:
+    """Discriminator: a stale #326 pin fails.  This asserts the record does not
+    contain the superseded head from before the dispatch projection was added."""
+    stale_head = "2eb9d23b2f1fc116cd4071c1f4651da9e87366f2"
+    rows = {row["number"]: row for row in _evidence()["pr_archaeology"]}
+    assert rows[326]["head"] != stale_head
+    for path in (RECORD, PLAN, EVIDENCE):
+        assert stale_head not in _text(path), f"{path} still pins the stale PR #326 head"
+
+
+def test_pr_357_agent_dialogue_boundary_is_disjoint_from_h0_and_owner_paths() -> None:
+    rows = {row["number"]: row for row in _evidence()["pr_archaeology"]}
+    row = rows[357]
+    owned = set(_evidence()["collision_census"]["owned_paths"])
+    forbidden_or_owner = set(_evidence()["h1_path_ceiling"]["forbidden_paths"]) | {
+        p for surface in ("local_p0a", "remote_x1") for p in _string_values(
+            _evidence()["owner_boundaries"][surface]
+        )
+    }
+    for path in row["owns"]:
+        assert path not in owned, f"PR #357 path collides with an H0 owned path: {path}"
+        assert path.startswith("integrations/slack_agent_dialogue/")
+    # #357's dialogue modules must themselves be in the H1 forbidden list.
+    for path in row["owns"]:
+        assert path in _evidence()["h1_path_ceiling"]["forbidden_paths"], (
+            f"H1 ceiling fails to forbid Agent Dialogue path {path}"
+        )
+
+
+def test_pr_421_linear_epoch_is_disjoint_from_h0_owned_paths() -> None:
+    rows = {row["number"]: row for row in _evidence()["pr_archaeology"]}
+    row = rows[421]
+    owned = set(_evidence()["collision_census"]["owned_paths"])
+    for path in row["owns"]:
+        assert path not in owned, f"PR #421 path collides with an H0 owned path: {path}"
 
 
 def test_derived_status_owner_is_not_on_protected_master() -> None:
-    """PR #326's projection is BUILT_NOT_PROVEN precisely because it has not landed."""
+    """PR #326's projection is BUILT_NOT_PROVEN precisely because it is unresolved."""
     ledger = _evidence()["capability_ledger"]
     assert ledger["autonomy_responsibility_projection"] == "BUILT_NOT_PROVEN"
     assert not (ROOT / "control_plane" / "autonomy_control_room_projection.py").exists()
+
+
+# ---------------------------------------------------------------------------
+# Linear portfolio — current epoch and the obsolete-epoch discriminator
+# ---------------------------------------------------------------------------
+
+
+def test_linear_portfolio_reports_the_current_epoch() -> None:
+    portfolio = _evidence()["linear_portfolio"]
+    assert portfolio["initiatives"] == 7
+    assert portfolio["projects"] == 65
+    assert portfolio["projects_with_one_primary_initiative"] == 63
+    assert portfolio["unassigned_exceptions"] == 2
+    assert sum(portfolio["group_membership_counts"]) == 63
+    assert portfolio["group_membership_counts"] == [10, 17, 11, 6, 4, 8, 7]
+    assert "WS:TEMPORAL-GRAIN-INTELLIGENCE" in portfolio["new_membership"]
+    assert "runtime, completion, or Hub truth authority" in portfolio["ruling"]
+
+
+def test_obsolete_linear_epoch_would_be_caught() -> None:
+    """Discriminator: an obsolete 64/62 epoch presented as current fails."""
+    portfolio = _evidence()["linear_portfolio"]
+    assert (portfolio["projects"], portfolio["projects_with_one_primary_initiative"]) != (64, 62)
+    for path in (RECORD, EVIDENCE):
+        text = _text(path)
+        assert "7 Initiatives / 64 Projects / 62 memberships / 2 exceptions" not in text or (
+            "prior" in text.lower() or "stale" in text.lower() or "became stale" in text.lower()
+        ), f"{path} presents the obsolete 64/62 epoch without marking it superseded"
 
 
 def test_non_effects_are_declared() -> None:
@@ -430,6 +775,7 @@ def test_non_effects_are_declared() -> None:
         "no ws:ai-hub created",
         "no agent os write",
         "no linear write",
+        "pr #357",
     ):
         assert claim in joined, f"non-effect not declared: {claim}"
     assert _frontmatter(RECORD)["production_effect"] == "NONE"
