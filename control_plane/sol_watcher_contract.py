@@ -688,9 +688,17 @@ def _extract_title(raw: Mapping[str, Any]) -> tuple[str, list[ContractFinding]]:
     value = raw.get("title")
     if value is None:
         return "", []
+    if not isinstance(value, str):
+        return "", [
+            _finding(
+                FindingCode.INVALID_TASK,
+                "title must be a string or null",
+                field="title",
+            )
+        ]
     if _text_exceeds_byte_limit(value, MAX_TASK_TITLE_BYTES):
         return "", [_field_too_large("title")]
-    return str(value), []
+    return value, []
 
 
 def _prompt_uses_exact_discriminator(prompt: Any) -> bool:
