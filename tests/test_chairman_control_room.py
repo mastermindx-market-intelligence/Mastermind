@@ -3027,7 +3027,21 @@ def test_review_liveness_never_drifts_from_the_runtimes_own_terminal_vocabulary(
         "a status the Runtime calls terminal is being treated as live"
     )
     assert "RATE_LIMITED" in runtime_terminal  # the case that actually drifted
-    assert ccr._LIVE_JOB_STATUSES, "the allowlist must not be empty"
+
+    # Bidirectional, not just disjoint.  Disjointness alone catches a status
+    # the Runtime starts calling terminal, but NOT a future live status the
+    # allowlist simply lacks -- an independent review proved that adding
+    # "PAUSED" to the allowlist, or shrinking it to {"RUNNING"}, left this
+    # test green. Requiring the two sets to PARTITION JobStatus exactly means
+    # neither vocabulary can gain or lose a member unnoticed.
+    all_statuses = {
+        getattr(status, "value", status)
+        for status in ccr.executive_runtime.JobStatus
+    }
+    assert ccr._LIVE_JOB_STATUSES | runtime_terminal == all_statuses, (
+        "the live and terminal sets must exactly partition JobStatus"
+    )
+    assert ccr._LIVE_JOB_STATUSES <= all_statuses, "a non-JobStatus string leaked in"
 
 
 def test_review_a_rate_limited_child_does_not_evict_a_running_root():
