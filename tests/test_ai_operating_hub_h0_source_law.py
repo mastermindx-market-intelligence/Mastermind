@@ -244,6 +244,13 @@ def test_remote_contract_and_release_closure_match_frozen_evidence() -> None:
 
 
 def test_local_p0a_transport_and_routes_match_frozen_evidence() -> None:
+    """The route assertion is the forward-compatible closure, not bare
+    equality to the baseline: real source must be exactly the frozen
+    baseline, or the baseline plus exactly the one lawful H1 route, and
+    nothing else.  A prior draft asserted strict baseline-only equality here,
+    which a lawful future H1 route would itself turn red (Sol review
+    5105847510, blocker 2) -- this is the actual fix, not a parallel test
+    that never replaced it."""
     frozen = _evidence()["frozen_contract_values"]
     tree = _module(P0A_SERVER)
     assert ast.literal_eval(_assigned(tree, "DEFAULT_PORT")) == frozen["p0a_default_port"]
@@ -251,7 +258,14 @@ def test_local_p0a_transport_and_routes_match_frozen_evidence() -> None:
     assert list(ast.literal_eval(_assigned(tree, "_ALLOWED_HOSTNAMES"))) == list(
         frozen["p0a_allowed_hostnames"]
     )
-    assert _path_equality_routes(tree) == set(frozen["p0a_path_equality_routes"])
+    baseline = set(frozen["p0a_path_equality_routes"])
+    permitted = _evidence()["h1_route_forward_compatible_closure"][
+        "permitted_future_api_route_additions"
+    ]
+    assert _closed_set_permitted(_path_equality_routes(tree), baseline, set(permitted)), (
+        "real P0A routes are neither the frozen baseline nor baseline plus only the "
+        "permitted H1 addition"
+    )
 
 
 def test_remote_x1_route_allowlist_matches_frozen_evidence() -> None:
@@ -715,6 +729,99 @@ def _route_set_permitted(observed: set, baseline: set, permitted_addition: str) 
     return observed == baseline or observed == baseline | {permitted_addition}
 
 
+def _closed_set_permitted(observed: set, baseline: set, permitted_additions: set) -> bool:
+    """General closure logic: baseline is always required and every element
+    beyond it must come from permitted_additions -- any non-empty subset of
+    the permitted additions is allowed (so a partial lawful rollout, e.g.
+    landing hub_workroom.js before hub_workroom.css, does not itself fail),
+    but nothing outside baseline | permitted_additions is ever accepted."""
+    if not baseline.issubset(observed):
+        return False
+    return (observed - baseline).issubset(permitted_additions)
+
+
+def _route_literal_scoped_to_get_only(
+    tree: ast.Module, route: str, get_fn_name: str, post_fn_name: str
+) -> bool:
+    """True iff the exact route literal never appears as a `path == route`
+    equality inside the named POST function; if it appears anywhere in the
+    module at all, it must appear inside the named GET function.  Absence
+    from the whole module (today's real source, before H1 exists) passes --
+    this discriminator forbids POST placement and enforces GET-only
+    placement once the route exists, it does not require it to exist yet."""
+
+    def _contains_route_equality(fn: ast.FunctionDef) -> bool:
+        for node in ast.walk(fn):
+            if not (isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) and node.left.id == "path"):
+                continue
+            for op, comparator in zip(node.ops, node.comparators):
+                if isinstance(op, ast.Eq) and isinstance(comparator, ast.Constant) and comparator.value == route:
+                    return True
+        return False
+
+    functions = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    if post_fn_name in functions and _contains_route_equality(functions[post_fn_name]):
+        return False
+    appears_anywhere = any(
+        isinstance(node, ast.Compare)
+        and isinstance(node.left, ast.Name)
+        and node.left.id == "path"
+        and any(
+            isinstance(op, ast.Eq) and isinstance(comparator, ast.Constant) and comparator.value == route
+            for op, comparator in zip(node.ops, node.comparators)
+        )
+        for node in ast.walk(tree)
+    )
+    if not appears_anywhere:
+        return True
+    return get_fn_name in functions and _contains_route_equality(functions[get_fn_name])
+
+
+def test_h1_route_is_not_present_in_do_post_today() -> None:
+    """Real current source: the H1 route does not exist yet (H1 is not
+    built), so it correctly appears in neither do_GET nor do_POST -- this
+    discriminator must pass on that absence, not merely on future presence
+    in do_GET."""
+    tree = _module(P0A_SERVER)
+    route = _evidence()["h1_route_security_contract"]["route"]
+    assert _route_literal_scoped_to_get_only(tree, route, "do_GET", "do_POST")
+
+
+def test_h1_route_get_only_discriminator_catches_a_post_placement() -> None:
+    """Mutation proof: the discriminator above must actually discriminate,
+    not merely pass by construction.  A synthetic module that wires the
+    exact H1 route into do_POST must be rejected."""
+    route = _evidence()["h1_route_security_contract"]["route"]
+    hostile_source = (
+        "def do_GET(self):\n"
+        "    pass\n"
+        "\n"
+        "def do_POST(self):\n"
+        "    path = self.path\n"
+        f'    if path == "{route}":\n'
+        "        return\n"
+    )
+    tree = ast.parse(hostile_source)
+    assert not _route_literal_scoped_to_get_only(tree, route, "do_GET", "do_POST")
+
+
+def test_h1_route_get_only_discriminator_accepts_a_get_placement() -> None:
+    """Mutation proof, positive case: the same route correctly wired into
+    do_GET only must pass."""
+    route = _evidence()["h1_route_security_contract"]["route"]
+    accepted_source = (
+        "def do_GET(self):\n"
+        "    path = self.path\n"
+        f'    if path == "{route}":\n'
+        "        return\n"
+        "\n"
+        "def do_POST(self):\n"
+        "    pass\n"
+    )
+    tree = ast.parse(accepted_source)
+    assert _route_literal_scoped_to_get_only(tree, route, "do_GET", "do_POST")
+
+
 def test_forward_compatible_closure_is_frozen() -> None:
     closure = _evidence()["h1_route_forward_compatible_closure"]
     frozen = _evidence()["frozen_contract_values"]
@@ -757,20 +864,35 @@ def test_forward_compatible_closure_rejects_arbitrary_routes() -> None:
 
 
 def test_forward_compatible_closure_rejects_an_open_static_directory() -> None:
+    """Exercises the actual discriminator (`_closed_set_permitted`), not a
+    tautology about set membership.  This validates the closure law's own
+    logic in isolation; `test_current_p0a_static_map_matches_the_frozen_baseline`
+    is the companion check against real repository source."""
     closure = _evidence()["h1_route_forward_compatible_closure"]
     baseline = set(closure["baseline_static_assets"])
     permitted = set(closure["permitted_future_static_asset_additions"])
+    assert _closed_set_permitted(baseline, baseline, permitted)
+    assert _closed_set_permitted(baseline | permitted, baseline, permitted)
+    assert _closed_set_permitted(baseline | {next(iter(permitted))}, baseline, permitted)
     for arbitrary in ("evil.js", "arbitrary.css", "second_workroom.js"):
-        observed = baseline | permitted | {arbitrary}
-        assert observed != baseline
-        assert observed != (baseline | permitted)  # the arbitrary name is not in the closed set
+        assert not _closed_set_permitted(baseline | permitted | {arbitrary}, baseline, permitted)
+        assert not _closed_set_permitted(baseline | {arbitrary}, baseline, permitted)
 
 
 def test_current_p0a_static_map_matches_the_frozen_baseline() -> None:
+    """Same fix as the route test above, for the static-asset map: real
+    source must be the baseline, or baseline plus only the two named H1
+    assets -- bare equality-to-baseline would itself redden on H1's own
+    lawful future addition (Sol review 5105847510, blocker 2)."""
     tree = _module(P0A_SERVER)
     static_map = ast.literal_eval(_assigned(tree, "_STATIC_NAME_BY_PATH"))
     closure = _evidence()["h1_route_forward_compatible_closure"]
-    assert set(static_map.values()) == set(closure["baseline_static_assets"])
+    baseline = set(closure["baseline_static_assets"])
+    permitted = set(closure["permitted_future_static_asset_additions"])
+    assert _closed_set_permitted(set(static_map.values()), baseline, permitted), (
+        "real P0A static assets are neither the frozen baseline nor baseline plus only "
+        "the two permitted H1 assets"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -925,16 +1047,16 @@ def test_pr_archaeology_records_exact_immutable_identities() -> None:
 def test_pr_326_is_recorded_as_unresolved_at_its_current_head() -> None:
     rows = {row["number"]: row for row in _evidence()["pr_archaeology"]}
     row = rows[326]
-    assert row["head"] == "8639d7a3f06277ea84c1e071b9d298d39695d91c"
+    assert row["head"] == "cb67f9fa4f73fce49aaf5d1267c3f4a98ab05d60"
     assert row["state"] == "OPEN_DRAFT"
     assert row["unresolved"] is True
     assert row["review_classification"] == "FULL_REREVIEW_REQUIRED"
     assert row["effective_delta_paths"] == 10
     review_states = {r["state"] for r in row["reviews"]}
     assert review_states == {"CHANGES_REQUESTED"}
-    assert len(row["reviews"]) == 3
+    assert len(row["reviews"]) == 4
     latest = max(row["reviews"], key=lambda r: r["submitted_at"])
-    assert latest["id"] == 5105026300
+    assert latest["id"] == 5106453403
     assert (
         "control_plane/autonomy_control_room_projection.py" in row["owns"]
     ), "PR #326 archaeology must record the derived-status owner"

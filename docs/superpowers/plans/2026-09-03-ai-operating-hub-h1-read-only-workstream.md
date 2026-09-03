@@ -3,7 +3,7 @@ schema: mastermind.ai_operating_hub_h1_handoff.v1
 operation_key: mastermind-ai-operating-hub-h0-current-estate-freeze-20260903-sol-001
 h0_source: research/MASTERMIND_AI_OPERATING_HUB_H0_CURRENT_ESTATE_2026-09-03.md
 h0_evidence: research/evidence/ai_operating_hub_h0_archaeology_2026-09-03.json
-protected_master_at_freeze: 771a95586c7a31933ee612eafaa4d1471f57527b
+protected_master_at_freeze: e4bae07b15d8685bd8850c3cd73ed7b6a088acdc
 workstream: WS:CHAIRMAN-CONTROL-ROOM
 authorization_state: HELD
 production_effect: NONE
@@ -84,14 +84,16 @@ A tenth path requires `DECISION_REQUEST / PATH_BOUNDARY_REQUIRED effect=NONE` be
 
 ## Blocking precondition — dual protection, not a UI-only gate
 
-PR #326 is `OPEN / DRAFT` at head `8639d7a3f06277ea84c1e071b9d298d39695d91c`, with **three
-unresolved `CHANGES_REQUESTED` reviews** (latest: `5105026300`, 2026-09-03T17:43:56Z). It is under
-active concurrent development and each successive review has found deeper incompleteness: an
-unreachable Agent-OS-to-Runtime-root join, wrong Attempt/Wake correlation for responsibility roots
-with child work, an unconsumed terminal-RESULT owner, a dark/disconnected dispatch producer,
-unvalidated caller-controlled mapping input, terminal-Attempt misclassified as a return, and
-forgeable/non-causal watcher and decision proof. Until independently re-reviewed and merged, its
-dispatch/status output is an **unaccepted candidate**, not protected or live capability.
+PR #326 is `OPEN / DRAFT` at head `cb67f9fa4f73fce49aaf5d1267c3f4a98ab05d60`, with **four
+unresolved `CHANGES_REQUESTED` reviews** (latest: `5106453403`, 2026-09-03T20:21:57Z). It is under
+active concurrent development; the latest review confirms three intervening commits hardened
+input handling but explicitly rules that "not the critical path" — the same four connectivity
+defects survive: an unreachable Agent-OS-to-Runtime-root join, wrong Attempt/Wake correlation for
+responsibility roots with child work, an unconsumed terminal-RESULT owner, plus the earlier
+dark/disconnected dispatch producer, unvalidated caller-controlled mapping input, terminal-Attempt
+misclassified as a return, and forgeable/non-causal watcher and decision proof. Until independently
+re-reviewed and merged, its dispatch/status output is an **unaccepted candidate**, not protected or
+live capability.
 
 Consequences for H1, all mandatory:
 

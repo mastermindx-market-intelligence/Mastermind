@@ -2,8 +2,8 @@
 schema: mastermind.ai_operating_hub_h0_current_estate.v1
 operation_key: mastermind-ai-operating-hub-h0-current-estate-freeze-20260903-sol-001
 parent_program: mastermind-ai-operating-hub-f0-architecture-freeze-20260902-sol-001
-protected_master: 771a95586c7a31933ee612eafaa4d1471f57527b
-protected_master_tree: 4d132e3202598791f292853937c4bf9ce4c508f7
+protected_master: e4bae07b15d8685bd8850c3cd73ed7b6a088acdc
+protected_master_tree: 4405c496502b848bc471cbe945917412aabae5dd
 protected_skillpack: mastermind.sol_skillpack.v1 / 1.0.1 / bootstrap-major 1
 f0_source: PR #416 MERGED
 capability_state: SPEC_ONLY
@@ -14,8 +14,8 @@ organizational_owner: WS:CHAIRMAN-CONTROL-ROOM
 
 # Mastermind AI Operating Hub — H0 Current-Estate Freeze
 
-**Frozen at:** `771a95586c7a31933ee612eafaa4d1471f57527b`
-**Tree:** `4d132e3202598791f292853937c4bf9ce4c508f7`
+**Frozen at:** `e4bae07b15d8685bd8850c3cd73ed7b6a088acdc`
+**Tree:** `4405c496502b848bc471cbe945917412aabae5dd`
 **Program state after this record:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`
 **Mission:** identify the real implementation seam for the first useful AI Hub vertical and prove
 every required source/authority boundary — **without building it**.
@@ -73,7 +73,7 @@ promoting the overall workstream past `PARTIAL`.
 | Sub-capability | State | Evidence and meaning |
 |---|---|---|
 | Pure Control Room compositor `mastermind.chairman_control_room.v1` | `BUILT_NOT_PROVEN` | `control_plane/chairman_control_room.py` on protected master. This carrier observed source and its own contract test only; §1a's P0A/H0 acceptance is the owner's evidence for the *presentation* capability built on this compositor, not a claim that this carrier itself reran that proof. |
-| Autonomy responsibility projection `mastermind.autonomy_control_room.v1` | `BUILT_NOT_PROVEN` | Open Draft PR #326 at head `8639d7a3f06277ea84c1e071b9d298d39695d91c`, **unresolved, three `CHANGES_REQUESTED` reviews** (§5). **Absent from protected master.** Treated strictly as an unaccepted open-PR candidate, never protected or live capability — see §5's blocker summary before assuming any of its dispatch/status output is trustworthy. |
+| Autonomy responsibility projection `mastermind.autonomy_control_room.v1` | `BUILT_NOT_PROVEN` | Open Draft PR #326 at head `cb67f9fa4f73fce49aaf5d1267c3f4a98ab05d60`, **unresolved, four `CHANGES_REQUESTED` reviews** (§5). **Absent from protected master.** Treated strictly as an unaccepted open-PR candidate, never protected or live capability — see §5's blocker summary before assuming any of its dispatch/status output is trustworthy. |
 | Protected Agent Dialogue Wake runtime (PR #357) | `BUILT_NOT_PROVEN` | Merged as `b28023f92458ba186937afa1e619f3b4464e149f` (§5). A protected *source* movement H1 may later read from once wired by an accepting owner; not itself a Hub capability. |
 | AI Hub F0 architecture | `SPEC_ONLY` | PR #416 merged; `research/MASTERMIND_AI_OPERATING_HUB_F0_ARCHITECTURE_2026-09-02.md` protected. |
 | AI Hub H0 current-estate freeze | `SPEC_ONLY` | This record. |
@@ -224,12 +224,15 @@ landed after that census and before this record's final integration; it touches
 `scripts/mas115_setup.py`, and two test files — entirely disjoint from H0's owned paths, every
 Control Room/dialogue/portfolio owner path, and the Skillpack, and it changes neither PR #326's
 nor PR #350's head. Classified path-disjoint and non-material; folded in by ordinary non-force
-integration under §12's law without a further semantic repair round.
+integration under §12's law without a further semantic repair round. A further disjoint movement,
+PR #428 ("remove content-probe timing race," merge `e4bae07b15d8685bd8850c3cd73ed7b6a088acdc`,
+touching only `tests/test_web_sol_extension_reconstitution.py`), landed before this repair's
+integration and is classified the same way.
 
 | PR | State | Head | Relevance |
 |---|---|---|---|
 | #416 | `MERGED` (merge commit `812be940cec5db025a5ef8f99f71a0e30a92bb8e`) | `e2e8543b3a3bcd4edd33e5f95a611e3c945bbbe5` | F0 architecture protected. This H0 record is its successor; no stale F0-release step is executed. |
-| #326 | `OPEN / DRAFT`, **UNRESOLVED — three `CHANGES_REQUESTED` reviews** | `8639d7a3f06277ea84c1e071b9d298d39695d91c` | **Blocking for all nine H1 paths, not only the UI subset.** Effective delta remains 10 paths (adds `control_plane/autonomy_control_room_projection.py`, `tests/test_autonomy_control_room_projection.py`, modifies `control_room.js`/`.css`/`index.html`, the compositor, `chairman_control_room_remote.py`, and three more Control Room test files). Three reviews, all `CHANGES_REQUESTED`: `5100408653` (09:51), `5103135217` (14:24), `5105026300` (17:43, latest). This PR is under active concurrent development by another party — its head has moved repeatedly during this H0 operation — and each successive review has surfaced *deeper* incompleteness, not less: the latest finds the real Agent-OS-to-Runtime-root join unreachable (every card falls back to `UNKNOWN`), Attempt/Wake correlation wrong for responsibility roots with child work, and the protected terminal-RESULT owner still unconsumed, on top of the earlier dark dispatch producer, unvalidated input mappings, terminal-Attempt misclassification, forgeable watcher/decision proof, and de-historicized unknown evidence. **Its dispatch-consumption output is therefore treated strictly as an unaccepted open-PR candidate — never a protected or live capability — until independently re-reviewed and merged.** |
+| #326 | `OPEN / DRAFT`, **UNRESOLVED — four `CHANGES_REQUESTED` reviews** | `cb67f9fa4f73fce49aaf5d1267c3f4a98ab05d60` | **Blocking for all nine H1 paths, not only the UI subset.** Effective delta remains 10 paths (adds `control_plane/autonomy_control_room_projection.py`, `tests/test_autonomy_control_room_projection.py`, modifies `control_room.js`/`.css`/`index.html`, the compositor, `chairman_control_room_remote.py`, and three more Control Room test files). Four reviews, all `CHANGES_REQUESTED`: `5100408653` (09:51), `5103135217` (14:24), `5105026300` (17:43), `5106453403` (20:21, latest). This PR is under active concurrent development by another party — its head has moved repeatedly during this H0 operation. The latest review confirms three intervening commits materially hardened hostile-input refusal and timestamp handling, but explicitly rules that work "not the critical path": the same four connectivity defects survive unchanged — the real Agent-OS-to-Runtime-root join unreachable (every card falls back to `UNKNOWN`), root-only Attempt selection missing child/carrier work, Wake lookup conflating source Job with responsibility root, and the protected terminal-RESULT owner still unconsumed — on top of the earlier dark dispatch producer, unvalidated input mappings, terminal-Attempt misclassification, forgeable watcher/decision proof, and de-historicized unknown evidence. Green CI "certifies the current tests, not the Chairman outcome." **Its dispatch-consumption output is therefore treated strictly as an unaccepted open-PR candidate — never a protected or live capability — until independently re-reviewed and merged.** |
 | #350 | `OPEN / DRAFT` | `f0e681bf797522e09f2224fbc866f5aab2f62bb1` | Downstream of #326 on the shared packaging paths `control_plane/chairman_control_room_remote.py` and `ops/control_room_remote/install.sh`. |
 | #357 | `MERGED` (merge commit `b28023f92458ba186937afa1e619f3b4464e149f`) | `58c884c418ff6dc2603d7e0db153c20825499d4f` | "[W3C] Trusted Agent Dialogue Wake runtime." Protects `integrations/slack_agent_dialogue/{engine_v2,runtime,turn_routing_facts,turn_runtime_primitives,wake_projection}.py` plus tests. **Disjoint from H0's four owned paths and from every Control Room owner path.** Recorded here as current Agent Dialogue source movement; Slack remains transport evidence, Executive OS remains lifecycle owner, and the Hub remains a read-only consumer of this boundary once an accepting owner wires it in — H1 may not independently derive dialogue/dispatch lifecycle from these modules. |
 | #421 | `MERGED` (merge commit `6c5c2a6225a3fa2c2ec3e3398dcc8b8629b3a988`) | `7a34f6c43e76c8a6cac565e11bde7f3eee703108` | "[LINEAR] Advance Initiative portfolio to current 7/65/63/2 epoch." Adds `docs/superpowers/specs/2026-09-03-linear-initiative-portfolio-v1-temporal-grain-current-epoch-amendment.md`. **Disjoint from H0's four owned paths.** Portfolio/source movement only — see §11. |
