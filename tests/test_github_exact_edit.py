@@ -506,3 +506,41 @@ def test_module_is_pure_and_does_not_import_effectful_surfaces() -> None:
         elif isinstance(node.func, ast.Attribute):
             called_names.add(node.func.attr)
     assert called_names.isdisjoint(forbidden_calls)
+
+
+def test_large_repeated_file_uses_local_replacement_preview_not_full_file_diff() -> None:
+    line = b"x = 1\n"
+    target = b"unique_target = 1\n"
+    count = (MAX_FILE_BYTES - len(target)) // len(line)
+    source = line * (count // 2) + target + line * (count - count // 2)
+    request = _request(
+        replacements=(
+            ExactTextReplacement("unique_target = 1\n", "unique_target = 2\n"),
+        )
+    )
+    result = _compile(request=request, snapshots=(_snapshot(source),))
+    assert result.post_images()[PATH_A].count(b"unique_target = 2") == 1
+    assert len(result.files[0].preview_patch.encode("utf-8")) < 1024
+    assert "x = 1" not in result.files[0].preview_patch
+    assert result.files[0].additions == 1
+    assert result.files[0].deletions == 1
+
+
+def test_context_rich_exact_block_counts_only_changed_middle_lines() -> None:
+    source = b"before\nvalue = 1\nafter\n"
+    request = _request(
+        replacements=(
+            ExactTextReplacement(
+                "before\nvalue = 1\nafter\n",
+                "before\nvalue = 2\nafter\n",
+            ),
+        )
+    )
+    result = _compile(request=request, snapshots=(_snapshot(source),))
+    preview = result.files[0].preview_patch
+    assert " before\n" in preview
+    assert "-value = 1\n" in preview
+    assert "+value = 2\n" in preview
+    assert " after\n" in preview
+    assert result.files[0].additions == 1
+    assert result.files[0].deletions == 1

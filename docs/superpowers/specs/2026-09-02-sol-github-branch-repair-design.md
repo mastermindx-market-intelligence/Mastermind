@@ -246,7 +246,7 @@ files[]:
   before blob/content digest and byte count
   after content digest and byte count
   canonical replacement ranges and digests
-  bounded unified preview
+  bounded exact-replacement preview generated only from changed blocks
   internal complete post-image
 canonical_digest
 ```
@@ -551,6 +551,7 @@ post-images, and private host paths never enter model-visible failures.
 | constitutional self-amendment | hard protected path floor |
 | token or key appears in patch/preview | secret-shaped input/preview refusal; credentials never model-visible |
 | large payload denial | strict file/edit/preview bounds |
+| repetitive-file diff amplification | preview is linear in bounded old/new blocks and never diffs the whole file |
 | binary/symlink/submodule corruption | V1 regular 100644 UTF-8 only |
 | duplicate network delivery | one token-bound mutation; expected head; effect reconciliation |
 | app update silently widens tools | immutable app/schema/policy generation and workspace re-review |

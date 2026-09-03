@@ -15,7 +15,6 @@ compilation digest into a prepared token and perform at most one native branch c
 from __future__ import annotations
 
 import dataclasses
-import difflib
 import hashlib
 import json
 import re
@@ -574,18 +573,77 @@ def _apply(source: bytes, located: tuple[_LocatedReplacement, ...]) -> bytes:
     return result
 
 
-def _preview(path: str, before: bytes, after: bytes) -> tuple[str, int, int]:
-    before_text = before.decode("utf-8", errors="strict")
-    after_text = after.decode("utf-8", errors="strict")
-    patch = "".join(
-        difflib.unified_diff(
-            before_text.splitlines(keepends=True),
-            after_text.splitlines(keepends=True),
-            fromfile=f"a/{path}",
-            tofile=f"b/{path}",
-            n=3,
+def _render_preview_line(prefix: str, line: str) -> str:
+    rendered = prefix + line
+    if not line.endswith(("\n", "\r")):
+        rendered += "\n\\ No newline at end of replacement\n"
+    return rendered
+
+
+def _replacement_preview(item: _LocatedReplacement, *, ordinal: int) -> tuple[str, int, int]:
+    old_lines = item.old.decode("utf-8", errors="strict").splitlines(keepends=True)
+    new_lines = item.new.decode("utf-8", errors="strict").splitlines(keepends=True)
+
+    prefix_count = 0
+    while (
+        prefix_count < len(old_lines)
+        and prefix_count < len(new_lines)
+        and old_lines[prefix_count] == new_lines[prefix_count]
+    ):
+        prefix_count += 1
+
+    suffix_count = 0
+    while (
+        suffix_count < len(old_lines) - prefix_count
+        and suffix_count < len(new_lines) - prefix_count
+        and old_lines[len(old_lines) - suffix_count - 1]
+        == new_lines[len(new_lines) - suffix_count - 1]
+    ):
+        suffix_count += 1
+
+    old_change_end = len(old_lines) - suffix_count
+    new_change_end = len(new_lines) - suffix_count
+    old_changed = old_lines[prefix_count:old_change_end]
+    new_changed = new_lines[prefix_count:new_change_end]
+    context_before = old_lines[max(0, prefix_count - 3) : prefix_count]
+    context_after = old_lines[old_change_end : min(len(old_lines), old_change_end + 3)]
+
+    lines = [
+        (
+            f"@@ exact-replacement {ordinal} bytes {item.start}:{item.end} "
+            f"old_sha256={_sha256(item.old)} new_sha256={_sha256(item.new)} @@\n"
         )
+    ]
+    lines.extend(_render_preview_line(" ", line) for line in context_before)
+    lines.extend(_render_preview_line("-", line) for line in old_changed)
+    lines.extend(_render_preview_line("+", line) for line in new_changed)
+    lines.extend(_render_preview_line(" ", line) for line in context_after)
+    return "".join(lines), len(new_changed), len(old_changed)
+
+
+def _preview(path: str, located: tuple[_LocatedReplacement, ...]) -> tuple[str, int, int]:
+    parts = [f"--- a/{path}\n", f"+++ b/{path}\n"]
+    additions = 0
+    deletions = 0
+    canonical = sorted(
+        located,
+        key=lambda value: (
+            value.start,
+            value.end,
+            _sha256(value.old),
+            _sha256(value.new),
+        ),
     )
+    for ordinal, item in enumerate(canonical):
+        rendered, item_additions, item_deletions = _replacement_preview(
+            item,
+            ordinal=ordinal,
+        )
+        parts.append(rendered)
+        additions += item_additions
+        deletions += item_deletions
+
+    patch = "".join(parts)
     encoded = patch.encode("utf-8")
     if len(encoded) > MAX_PREVIEW_BYTES:
         _fail(ExactEditIssue.PREVIEW_TOO_LARGE, f"path {path!r} preview exceeds the bound")
@@ -594,15 +652,6 @@ def _preview(path: str, before: bytes, after: bytes) -> tuple[str, int, int]:
             ExactEditIssue.SECRET_SHAPED_CONTENT,
             f"path {path!r} preview contains secret-shaped content",
         )
-    additions = 0
-    deletions = 0
-    for line in patch.splitlines():
-        if line.startswith("+++") or line.startswith("---"):
-            continue
-        if line.startswith("+"):
-            additions += 1
-        elif line.startswith("-"):
-            deletions += 1
     return patch, additions, deletions
 
 
@@ -700,7 +749,7 @@ def compile_exact_edit(
                 ExactEditIssue.INVALID_UTF8,
                 f"path {path!r} post-image is not valid UTF-8",
             ) from exc
-        preview_patch, additions, deletions = _preview(path, source, post_image)
+        preview_patch, additions, deletions = _preview(path, located)
         compiled.append(
             CompiledFileEdit(
                 path=path,
