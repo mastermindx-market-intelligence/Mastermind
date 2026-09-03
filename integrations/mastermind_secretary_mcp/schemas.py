@@ -588,7 +588,7 @@ def _validate_tool_required_predicates(
 def _validate_expected_subject_ref(
     normalized: Mapping[str, Any], expected_subject_ref: str | None
 ) -> None:
-    if expected_subject_ref is None or normalized['state'] != 'FACTS':
+    if expected_subject_ref is None:
         return
     if any(
         fact['subject_ref'] != expected_subject_ref

@@ -302,6 +302,76 @@ def test_scoped_tools_refuse_facts_for_a_different_requested_responsibility(tool
 
 
 @pytest.mark.parametrize(
+    ("tool_name", "predicate", "value", "owner", "source_ref"),
+    [
+        (
+            "get_responsibility",
+            "responsibility.title",
+            "Beta responsibility",
+            "agent_os",
+            "WS:BETA",
+        ),
+        (
+            "get_current_runtime",
+            "runtime.capacity_state",
+            "DEGRADED",
+            "capacity",
+            "CAPACITY:beta",
+        ),
+        (
+            "explain_blocker",
+            "blocker.kind",
+            "dependency_unavailable",
+            "agent_os",
+            "WS:BETA",
+        ),
+        (
+            "resolve_surface",
+            "surface.repair_required",
+            True,
+            "surface_bindings",
+            "surface-binding:22222222-2222-4222-8222-222222222222",
+        ),
+    ],
+)
+def test_scoped_tools_refuse_degraded_facts_for_a_different_responsibility(
+    tool_name, predicate, value, owner, source_ref
+):
+    """A partial stale result remains bound to the requested responsibility."""
+
+    fact = GroundingFact(
+        subject_ref="responsibility:beta",
+        predicate=predicate,
+        value=value,
+        freshness="STALE",
+        sources=(
+            GroundingSource(
+                owner=owner,
+                source_ref=source_ref,
+                observed_at="2026-08-29T05:00:00Z",
+            ),
+        ),
+    )
+    steward = FakeSteward(
+        StewardGrounding(
+            state="DEGRADED",
+            facts=(fact,),
+            reason_codes=("STALE_SOURCE",),
+        )
+    )
+
+    envelope = _run(
+        SecretaryGroundingGateway(steward).call(
+            tool_name, {"responsibility_ref": "responsibility:alpha"}
+        )
+    )
+
+    assert steward.calls == [(tool_name, "responsibility:alpha")]
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "RESPONSE_REFUSED"
+
+
+@pytest.mark.parametrize(
     "tool_name",
     [
         "get_responsibility",
