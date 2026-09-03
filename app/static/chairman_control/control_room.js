@@ -1275,11 +1275,20 @@
   // Dispatch-consumption groundwork (AD-CR1A commissioning packet,
   // 2026-09-03). Mirrors control_plane.autonomy_control_room_projection.
   // DISPATCH_STATES exactly, one entry per closed-vocabulary token —
-  // read-only, additive. `card.dispatch` does not exist on any card yet
-  // (project_dispatch_consumption is not wired through the compositor in
-  // this packet — chairman_control_room.py is out of scope here), so
-  // every function below is undefined-safe and renders nothing until a
-  // future PR threads it through.
+  // read-only, additive. `card.dispatch` IS populated: the compositor calls
+  // attach_dispatch_consumption, so every card carries a dispatch row. (An
+  // earlier revision of this comment said the opposite; it was written while
+  // the compositor was out of scope and was left standing after the wiring
+  // landed, which is exactly the kind of stale comment that tells a reviewer
+  // a live behaviour cannot happen.)
+  //
+  // Consequence worth stating plainly: with no Dialogue return-receipt owner
+  // in the codebase the gather supplies no watch/return/decision fields, so
+  // every real card currently reads UNKNOWN — an unsafe state — and the
+  // owed-action Open control is therefore suppressed everywhere. That is the
+  // conservative reading (do not offer an action whose dispatch state we
+  // cannot establish), not an accident. Detail stays reachable throughout.
+  // Every function below remains undefined-safe.
   var AU_DISPATCH = {
     WAITING_CAPACITY: "Waiting for capacity",
     RECEIVER_SELECTED: "Receiver selected",
@@ -1379,8 +1388,8 @@
     // placement, extended to the dispatch read — "No owed-action Open
     // control may render for a stale, unacknowledged, watch-unproven,
     // binding-reconciliation or effect-unknown state." A no-op today
-    // (card.dispatch is undefined until a future PR wires the projection
-    // through the compositor); see auDispatchUnsafe.
+    // (dispatch is populated by the compositor; an UNKNOWN state is
+    // unsafe and suppresses the control by design)
     if (auDispatchUnsafe(card)) return null;
     // Repair B (Sol addendum 2, 2026-09-03): this suppressed only the
     // EFFECT_UNKNOWN hold, so a stale/history card still offered

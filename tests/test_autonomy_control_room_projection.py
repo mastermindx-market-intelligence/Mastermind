@@ -3588,3 +3588,117 @@ def test_dispatch_purity_same_input_twice_is_byte_identical():
         [_dcard()], generated_at=_DISPATCH_GENERATED_AT, dispatch_evidence=dispatch_evidence,
     )
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+
+# ---------------------------------------------------------------------------
+# Non-author review follow-up (2026-09-03): three findings on the dispatch
+# projection, each pinned here.
+# ---------------------------------------------------------------------------
+
+_RV_W = {
+    "watch_child_ref": "c1", "watch_operation": "op1", "watch_carrier_ref": "carr1",
+    "watch_mechanism": "cron", "watch_baseline_receipt": "b1",
+}
+_RV_R = {
+    "return_kind": "RESULT", "return_child_ref": "c1", "return_operation": "op1",
+    "return_carrier_ref": "carr1", "return_edge_ref": "e1",
+    "return_observed_at": "2026-09-03T10:00:00Z",
+}
+_RV_BASE = {
+    "responsibility_ref": "WS:X", "root_job_id": "JOB-1",
+    "observed_at": "2026-09-03T11:30:00Z",
+}
+_RV_G = "2026-09-03T12:00:00Z"
+
+
+def _rv_card(row):
+    doc = proj.project_dispatch_consumption(
+        [{"responsibility_ref": "WS:X", "root_job_id": "JOB-1"}],
+        generated_at=_RV_G, dispatch_evidence=[row],
+    )
+    return doc["cards"][0]
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "sk-live-QQLEAKQQ11111111",
+        "sk-ant-QQLEAKQQ11111111",
+        "xoxb-1234567890-QQLEAKQQ",
+        "ghp_QQLEAKQQ1234567890AB",
+        "glpat-QQLEAKQQ1234567890",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJRUUxFQUtRUSJ9",
+    ],
+)
+def test_review_secret_shaped_tokens_are_refused_and_never_echoed(token):
+    """The earlier refusal matched credential NAMES (`api_key=`) but not bare
+    live tokens, so a leak test using a named key passed while `sk-live-...`
+    was accepted and rendered verbatim into `evidence.watch_mechanism`."""
+    card = _rv_card({**_RV_BASE, "watch_mechanism": token})
+
+    assert card["actionable"] is False
+    assert "QQLEAKQQ" not in json.dumps(card), "secret-shaped value reached the document"
+
+
+def test_review_absent_binding_evidence_cannot_yield_attempt_progress():
+    """Declaring UNKNOWN was demoted while OMITTING the same two fields was
+    trusted as a resolved, current binding — so a row that said nothing was
+    believed more than one that admitted ignorance.  The gather omits exactly
+    these fields in the degraded release, so the degraded reader was strictly
+    more optimistic than the complete one."""
+    running = _rv_card({**_RV_BASE, **_RV_W, **_RV_R, "attempt_state": "RUNNING"})
+    terminal = _rv_card({**_RV_BASE, **_RV_W, **_RV_R, "attempt_state": "FAILED"})
+
+    assert running["dispatch_state"] == "RUNTIME_BINDING_RECONCILIATION_REQUIRED"
+    assert terminal["dispatch_state"] == "RUNTIME_BINDING_RECONCILIATION_REQUIRED"
+    assert running["reason"] == "runtime_binding_evidence_absent"
+
+
+def test_review_resolved_binding_still_reaches_started_and_returned():
+    """Positive control: the gate above must not be inert.  A guard that
+    refuses everything passes every adversarial test for the wrong reason."""
+    resolved = {"action_target_state": "RESOLVED", "binding_evidence_state": "CURRENT"}
+    running = _rv_card({**_RV_BASE, **_RV_W, **_RV_R, **resolved, "attempt_state": "RUNNING"})
+    terminal = _rv_card({**_RV_BASE, **_RV_W, **_RV_R, **resolved, "attempt_state": "FAILED"})
+
+    assert running["dispatch_state"] == "STARTED"
+    assert terminal["dispatch_state"] == "RETURNED"
+
+
+def test_review_absent_binding_does_not_overwrite_delivery_derived_states():
+    """Absence is deliberately narrower than a declared problem: a delivery is
+    observed through the wake ledger and is true whether or not a
+    RuntimeBinding was ever resolved, so demoting "delivered, never picked up"
+    to a binding problem would trade an honest adverse state for a vaguer one."""
+    unconsumed = _rv_card({**_RV_BASE, "obligation_status": "DELIVERED_UNACKNOWLEDGED"})
+    acked = _rv_card({**_RV_BASE, "obligation_status": "TARGET_ACKNOWLEDGED"})
+
+    assert unconsumed["dispatch_state"] == "DELIVERY_UNCONSUMED"
+    assert acked["dispatch_state"] == "PICKUP_ACKNOWLEDGED"
+
+
+def test_review_return_receipt_from_the_future_is_not_a_return():
+    """`return_observed_at` was only required to PARSE, so a receipt stamped
+    2999 read as a genuine return and permanently foreclosed CONTINUED/STOPPED
+    for that row, since no real decision can ever postdate it."""
+    resolved = {"action_target_state": "RESOLVED", "binding_evidence_state": "CURRENT"}
+    card = _rv_card({
+        **_RV_BASE, **_RV_W, **resolved, "attempt_state": "FAILED",
+        **{**_RV_R, "return_observed_at": "2999-01-01T00:00:00Z"},
+    })
+
+    assert card["dispatch_state"] != "RETURNED"
+    assert card["actionable"] is False
+
+
+def test_review_validator_never_raises_on_a_hostile_mapping():
+    """`_validate_dispatch_row` documents "never raises" but called
+    `raw.keys()` on caller-supplied data; a mapping whose keys() raises took
+    the whole document down, and unlike placement_selection the autonomy
+    block is not wrapped."""
+    class _Hostile(dict):
+        def keys(self):
+            raise RuntimeError("hostile mapping")
+
+    card = _rv_card(_Hostile(responsibility_ref="WS:X", root_job_id="JOB-1"))
+    assert card["actionable"] is False

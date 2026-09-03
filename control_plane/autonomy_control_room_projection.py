@@ -2183,7 +2183,7 @@ def _watch_proven(row: Mapping[str, Any]) -> bool:
     return all(_dispatch_nonblank(row.get(field)) for field in _WATCH_PROOF_FIELDS)
 
 
-def _return_receipt_proven(row: Mapping[str, Any]) -> bool:
+def _return_receipt_proven(row: Mapping[str, Any], generated_at: str) -> bool:
     """Blocker 3: "one validated exact-child Observer return receipt
     carrying a closed return kind (BLOCKED / DECISION_REQUEST / RESULT),
     exact operation + carrier/root identity, the observed edge/reference,
@@ -2214,7 +2214,16 @@ def _return_receipt_proven(row: Mapping[str, Any]) -> bool:
         return False
     if row.get("return_carrier_ref") != row.get("watch_carrier_ref"):
         return False
-    if _parse_iso8601(row.get("return_observed_at")) is None:
+    receipt_at = _parse_iso8601(row.get("return_observed_at"))
+    if receipt_at is None:
+        return False
+    # Forward-bound it exactly as `_freshness_for` bounds `observed_at`
+    # (review follow-up, 2026-09-03).  Parseability alone let a receipt
+    # stamped 2999 read as a genuine return AND permanently foreclose
+    # CONTINUED/STOPPED for that row, since no real decision can ever
+    # postdate it.  Evidence from the future is not evidence.
+    reference_at = _parse_iso8601(generated_at)
+    if reference_at is not None and (receipt_at - reference_at) > FUTURE_SKEW_TOLERANCE:
         return False
     return True
 
@@ -2244,6 +2253,31 @@ def _dispatch_binding_unresolved(action_target_state: Any, binding_evidence_stat
     if action_target_state == "UNKNOWN":
         return True, "runtime_binding_state_unknown"
     return False, None
+
+
+def _dispatch_binding_absent(action_target_state: Any, binding_evidence_state: Any) -> bool:
+    """True when the row carries NO binding evidence either way.
+
+    Distinct from the declared problems above, and deliberately weaker.
+    Declaring ``UNKNOWN`` was demoted while OMITTING the same two fields
+    sailed through as a resolved, current binding — so a row that said
+    nothing was trusted more than one that honestly said it did not know.
+    That mattered in production: the gather omits exactly these fields when
+    ``session_targets``/``sol_action_target`` are unavailable, which is the
+    degraded release the optional-import machinery exists for, so the
+    degraded reader rendered STARTED/RETURNED where the complete reader
+    rendered RUNTIME_BINDING_RECONCILIATION_REQUIRED.  A degraded reader
+    must never be more optimistic than a complete one.
+
+    Scope is narrower than a declared problem, on purpose.  Absence blocks
+    only ATTEMPT-derived progress (STARTED and everything past it), because
+    those states claim a live runtime binding.  It does NOT overwrite
+    delivery-derived states: a delivery is observed through the wake ledger
+    and is true whether or not a RuntimeBinding was ever resolved, so
+    demoting "delivered, never picked up" to a binding problem would
+    replace one honest adverse state with a less informative one.
+    """
+    return action_target_state is None or binding_evidence_state is None
 
 
 def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[str, str, bool]:
@@ -2298,6 +2332,17 @@ def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[s
         # evidence yet is just "not dispatched", handled below.
         return "RUNTIME_BINDING_RECONCILIATION_REQUIRED", binding_reason, historical
 
+    if has_attempt_progress and _dispatch_binding_absent(
+        action_target_state, binding_evidence_state
+    ):
+        # Attempt evidence claims a live runtime binding, so it may not be
+        # believed when the row carries no binding evidence at all.
+        return (
+            "RUNTIME_BINDING_RECONCILIATION_REQUIRED",
+            "runtime_binding_evidence_absent",
+            historical,
+        )
+
     if has_attempt_progress:
         # Law 4: STARTED requires separate current start/Attempt evidence —
         # reached here only with a resolved, current binding (the gate
@@ -2305,7 +2350,7 @@ def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[s
         if attempt_state in _ATTEMPT_IN_PROGRESS:
             return "STARTED", f"attempt_in_progress:{attempt_state}", historical
         if attempt_state in _ATTEMPT_TERMINAL:
-            if not _return_receipt_proven(row):
+            if not _return_receipt_proven(row, generated_at):
                 # Blocker 3: "Attempt terminality ALONE is never a worker
                 # return" — a terminal Attempt with no validated exact-child
                 # Observer return receipt (closed return_kind + exact
@@ -2442,7 +2487,15 @@ _DISPATCH_EVIDENCE_REJECTED = "dispatch_evidence_rejected"
 _DISPATCH_SECRET_OR_PATH_RE = re.compile(
     r"(?i)(^/|^~|\\|/etc/|/private/|/Users/|/home/|\.ssh|password|passwd"
     r"|secret|api[_-]?key|access[_-]?token|bearer\s|authorization\s*:"
-    r"|-----BEGIN|AKIA[0-9A-Z]{16})"
+    r"|-----BEGIN|AKIA[0-9A-Z]{16}"
+    # Live-token prefixes an independent review proved were accepted and then
+    # echoed verbatim into the rendered document (`sk-live-...` reached
+    # `evidence.watch_mechanism` and the UI).  The earlier set matched only
+    # `api_key`-style NAMES, so a leak test using a named key passed while a
+    # bare token walked straight through.
+    r"|sk-[A-Za-z0-9_-]{8,}|xox[abprs]-[A-Za-z0-9-]{8,}"
+    r"|ghp_[A-Za-z0-9]{16,}|gho_[A-Za-z0-9]{16,}|glpat-[A-Za-z0-9_-]{16,}"
+    r"|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})"
 )
 
 
@@ -2483,6 +2536,21 @@ def _dispatch_safe_str(
     return True
 
 
+def _dispatch_safe_keys(raw: Any) -> tuple[Any, ...]:
+    """``raw.keys()`` without trusting caller-supplied ``Mapping`` code.
+
+    ``_validate_dispatch_row`` documents "never raises", but a ``dict``
+    subclass whose ``keys()`` raises would propagate straight out of the
+    projection and take the whole document down — and unlike the
+    ``placement_selection`` block beside it, the autonomy block is not
+    wrapped.  An unreadable key set is simply an invalid row.
+    """
+    try:
+        return tuple(raw.keys())
+    except Exception:  # noqa: BLE001 - caller-supplied object, fail closed
+        return ()
+
+
 def _validate_dispatch_row(
     raw: Any,
 ) -> tuple[Any, Any, dict[str, Any] | None]:
@@ -2511,7 +2579,7 @@ def _validate_dispatch_row(
     if not isinstance(raw, Mapping):
         return None, None, None
 
-    unknown_keys = set(raw.keys()) - _DISPATCH_ALL_FIELDS
+    unknown_keys = set(_dispatch_safe_keys(raw)) - _DISPATCH_ALL_FIELDS
     ref = raw.get("responsibility_ref")
     root_job_id = raw.get("root_job_id")
     if not _dispatch_safe_join_value(ref):
