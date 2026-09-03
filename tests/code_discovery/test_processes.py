@@ -404,6 +404,7 @@ def test_indexer_environment_is_hermetic_and_can_resolve_pinned_git(
         "GIT_ASKPASS": "/bin/false",
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_TERMINAL_PROMPT": "0",
         "LANG": "C",
@@ -581,6 +582,145 @@ def test_index_build_rechecks_the_source_seal_after_restored_during_run_mutation
         processes.build_indexes(manifest)
 
     assert marker.read_text() == "restored"
+    assert processes._statuses == ()
+    processes.close()
+
+
+def test_indexer_cannot_read_a_replacement_object_through_its_closed_git_env(
+    tmp_path: Path,
+) -> None:
+    """Pinned Zoekt's internal git cat-file must see canonical, not replacement, bytes."""
+
+    manifest = _manifest(tmp_path)
+    source = manifest.repositories[0].source_snapshot_root
+    original_blob = _git(source, "rev-parse", "HEAD:engine/core.py")
+    original_bytes = (source / "engine" / "core.py").read_bytes()
+    replacement_bytes = b"VALUE = 'replacement object'\n"
+    replacement = subprocess.run(
+        ["/usr/bin/git", "-C", str(source), "hash-object", "-w", "--stdin"],
+        check=True,
+        input=replacement_bytes,
+        capture_output=True,
+    ).stdout.decode().strip()
+    _git(source, "replace", original_blob, replacement)
+    trace = tmp_path / "indexer-read-bytes"
+    indexer = _script(
+        tmp_path / "replacement-reading-indexer",
+        "import os, subprocess\n"
+        "from pathlib import Path\n"
+        f"result = subprocess.run(['/usr/bin/git', 'cat-file', 'blob', {original_blob!r}], "
+        "check=True, capture_output=True, env=dict(os.environ))\n"
+        f"Path({str(trace)!r}).write_bytes(result.stdout)\n",
+    )
+    processes = _process_set(
+        tmp_path,
+        indexer,
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+
+    processes.build_indexes(manifest)
+
+    assert trace.read_bytes() == original_bytes
+    processes.close()
+
+
+def _linked_worktree_manifest(tmp_path: Path) -> tuple[IndexManifest, Path, Path, Path]:
+    """Build a real linked checkout whose Git dir differs from the common dir."""
+
+    owner = tmp_path / "owner"
+    owner.mkdir()
+    _git(owner, "init", "-q", "-b", "master")
+    _git(owner, "config", "user.name", "CodeIntel test")
+    _git(owner, "config", "user.email", "codeintel@example.invalid")
+    _git(owner, "remote", "add", "origin", "git@github.com:mastermindx-market-intelligence/Mastermind.git")
+    (owner / "engine").mkdir()
+    (owner / "engine" / "core.py").write_text("VALUE = 'linked source'\n")
+    _git(owner, "add", ".")
+    _git(owner, "commit", "-qm", "linked source snapshot")
+    _git(owner, "branch", "snapshot")
+    source = tmp_path / "linked-source"
+    _git(owner, "worktree", "add", "-q", str(source), "snapshot")
+    includes = ("engine/**",)
+    manifest_path = tmp_path / "linked-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "mastermind.codeintel_index_manifest.v1",
+                "repositories": [
+                    {
+                        "repository_id": "mastermind",
+                        "repository_name": "mastermindx-market-intelligence/Mastermind",
+                        "source_snapshot_root": str(source),
+                        "ref_label": "snapshot",
+                        "commit_sha": _git(source, "rev-parse", "HEAD"),
+                        "included_prefixes": includes,
+                        "excluded_globs": [],
+                        "source_tree_digest": source_tree_digest(source, includes, ()),
+                    }
+                ],
+            }
+        )
+    )
+    manifest = load_index_manifest(manifest_path)
+    git_dir_text = _git(source, "rev-parse", "--git-dir")
+    git_dir = Path(git_dir_text)
+    if not git_dir.is_absolute():
+        git_dir = source / git_dir
+    common_dir_text = _git(source, "rev-parse", "--git-common-dir")
+    common_dir = Path(common_dir_text)
+    if not common_dir.is_absolute():
+        common_dir = source / common_dir
+    return manifest, source, git_dir.resolve(), common_dir.resolve()
+
+
+def test_linked_worktree_writable_git_dir_refuses_before_indexer_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read-only root/common pair is insufficient if per-worktree metadata is writable."""
+
+    manifest, source, git_dir, common_dir = _linked_worktree_manifest(tmp_path)
+    assert git_dir != common_dir
+    monkeypatch.setattr(
+        index_manifest_module,
+        "_filesystem_is_read_only",
+        lambda path: Path(path).resolve() != git_dir,
+    )
+    trace = tmp_path / "indexer-argv.txt"
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+
+    with pytest.raises(ZoektProcessError, match="source snapshot seal"):
+        processes.build_indexes(manifest)
+
+    assert not trace.exists()
+    assert processes._statuses == ()
+    processes.close()
+
+
+def test_linked_worktree_replaced_git_dir_refuses_before_indexer_launch(
+    tmp_path: Path,
+) -> None:
+    """Byte-identical replacement of worktree-local Git metadata changes its seal."""
+
+    manifest, _source, git_dir, common_dir = _linked_worktree_manifest(tmp_path)
+    assert git_dir != common_dir
+    moved_git_dir = tmp_path / "moved-worktree-git-dir"
+    git_dir.rename(moved_git_dir)
+    shutil.copytree(moved_git_dir, git_dir)
+    trace = tmp_path / "indexer-argv.txt"
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+
+    with pytest.raises(ZoektProcessError, match="source snapshot seal"):
+        processes.build_indexes(manifest)
+
+    assert not trace.exists()
     assert processes._statuses == ()
     processes.close()
 

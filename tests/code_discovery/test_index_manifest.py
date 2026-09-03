@@ -408,6 +408,7 @@ def test_git_inspection_uses_only_closed_read_only_plumbing(
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_ASKPASS": "/bin/false",
         "LANG": "C",
