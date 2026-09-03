@@ -374,6 +374,7 @@ def test_existing_provider_chain_records_uncertainty_and_remains_single_owner() 
     broker = text(BROKER)
     remote = definition(REMOTE, "RemoteCodexOperatorAdapter.describe_capabilities")
     restart = definition(SUPERVISOR, "ExecutiveOperatorSupervisor.reconcile_restart")
+    binding_facts = definition(BINDING, "active_operator_binding_facts")
     projection = definition(BINDING, "project_runtime_binding")
 
     assert "_mark_effect_unknown" in start
@@ -388,7 +389,10 @@ def test_existing_provider_chain_records_uncertainty_and_remains_single_owner() 
     assert "ohf-materialization-status" not in broker
     assert "supports_provider_native_idempotency=False" in remote
     assert "Generic automatic requeue is intentionally not" in restart
-    assert "current_harness_binding_source" in projection
+    assert "runtime.current_harness_binding_source" in binding_facts
+    assert "connection=connection" in binding_facts
+    assert "active_operator_binding_facts" in projection
+    assert "connection=connection" in projection
     assert "RuntimeBinding(" in projection
 
 
