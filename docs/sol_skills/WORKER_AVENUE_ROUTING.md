@@ -40,6 +40,61 @@ quota state, model preference or convenience does not make the Chairman the allo
 
 `PRECOMMISSION` is not a canonical worker lifecycle state or required ceremony.
 
+### 1.1 Chat web reasoning-mode barrier for every manual handoff turn
+
+Every Chairman-mediated/manual Slack handoff turn defaults to the included web surface and non-Pro
+reasoning, including the turn that drafts, sends, acknowledges, continues, stops, monitors, or
+reports on the handoff:
+
+```text
+EXECUTION_SURFACE: WEB
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: NON_PRO_DEFAULT
+```
+
+Personal-Pro subscription/account, the Chat web surface, and turn-billed Pro reasoning mode are
+separate. The legacy `CHAT_PRO_DEFAULT` is surface-only in historical packets; it is deprecated and
+ambiguous and grants no Pro-mode authorization.
+
+The following work is never Pro-eligible: `handoff / ACK / PICKUP_ACK / START / CONTINUE / STOP`;
+`status / routing / placement / watcher / monitoring / polling / foregrounding`; message relay;
+`mechanical edits / tests / simple review`; and any other short bounded work. The size or importance
+of the parent program does not upgrade one of those turns.
+
+Only a genuinely long-horizon frontier-reasoning turn may request Pro mode, and only with the
+complete receipt:
+
+```text
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
+WHY_PRO_MODE: <specific frontier-reasoning advantage required by this turn>
+WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
+PRO_MODE_TASK_CLASS: <one allowed class below>
+EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+STOP_CONDITION: <observable completion or abort condition>
+```
+
+The closed task classes are:
+
+```text
+LONG_HORIZON_FRONTIER_REASONING
+CROSS_SYSTEM_ARCHITECTURE
+HARD_DEBUGGING
+ADVERSARIAL_JUDGMENT
+```
+
+Every field is required. `EXPECTED_DURATION_MINUTES` must be an integer between 80 and 1440 minutes,
+inclusive, and therefore at least 80 minutes. Missing, stale, under-duration, over-duration, or
+ineligible receipts fail closed:
+
+```text
+PRO_MODE_REFUSED / USE_NON_PRO_MODE
+```
+
+This is a reasoning-mode gate only. It does not change avenue selection, placement, receiver
+binding, carrier, `ACK`, `START`, watcher, lifecycle, authority, or effect law. Pro mode is separate
+from `METERED_EXCEPTION`; neither receipt implies or satisfies the other.
+
 ## 2. Closed preferred-avenue vocabulary for manual Slack handoffs
 
 When Sol recommends a manual/Slack execution lane, state exactly one of:
