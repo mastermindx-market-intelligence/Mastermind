@@ -1,10 +1,10 @@
-"""Bounded prepare/commit/reconcile gateway for exact GitHub branch repairs.
+"""Prepare, commit, and reconcile exact GitHub branch repairs.
 
 The gateway owns no lifecycle, branch registry, retry queue, prepared-action
-store, credential, or GitHub truth. It consumes exact owner ports and the sole
-GHP1 exact-replacement compiler. All external failures collapse to stable issue
-codes without reflecting source, tokens, credentials, provider payloads, or
-tracebacks.
+store, credential, or GitHub truth.  It consumes exact owner ports and the pure
+GHP1 compiler.  Reconciliation is deliberately token-bound and read-only: once
+a prepared action may have crossed the effect boundary, a later authority or
+writer change cannot prevent canonical GitHub effect observation.
 """
 from __future__ import annotations
 
@@ -48,12 +48,8 @@ from integrations.mastermind_github_app.models import (
     ToolEnvelope,
     ToolStatus,
 )
-from integrations.mastermind_github_app.prepared_token import (
-    HmacPreparedTokenCodec,
-    PreparedTokenError,
-)
+from integrations.mastermind_github_app.prepared_token import HmacPreparedTokenCodec, PreparedTokenError
 from integrations.mastermind_github_app.schemas import SCHEMA_DIGEST, TOOL_BY_NAME
-
 
 PREPARE_TOOL = "prepare_exact_branch_repair"
 COMMIT_TOOL = "commit_exact_branch_repair"
@@ -64,6 +60,9 @@ MAX_MODEL_EDIT_BYTES = 48 * 1024
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$")
+_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
+_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$")
+_PATH_RE = re.compile(r"^[A-Za-z0-9._/-]{1,512}$")
 
 _TOKEN_KEYS = frozenset(
     {
@@ -75,6 +74,7 @@ _TOKEN_KEYS = frozenset(
         "principal_digest",
         "operation_key",
         "repository",
+        "default_branch",
         "branch",
         "pull_request_number",
         "protected_branches",
@@ -113,6 +113,7 @@ _EXACT_ERROR_MAP: dict[ExactEditIssue, IssueCode] = {
     ExactEditIssue.PATH_PROTECTED: IssueCode.PATCH_TARGET_NOT_OWNED,
     ExactEditIssue.PATH_NOT_ALLOWED: IssueCode.PATCH_TARGET_NOT_OWNED,
     ExactEditIssue.BLOB_MOVED: IssueCode.BLOB_OID_MOVED,
+    ExactEditIssue.SOURCE_BLOB_CONTENT_MISMATCH: IssueCode.SOURCE_BLOB_CONTENT_MISMATCH,
     ExactEditIssue.FILE_MODE_REFUSED: IssueCode.SOURCE_KIND_REFUSED,
     ExactEditIssue.INVALID_UTF8: IssueCode.SOURCE_KIND_REFUSED,
     ExactEditIssue.BINARY_REFUSED: IssueCode.SOURCE_KIND_REFUSED,
@@ -149,7 +150,7 @@ class _Claims:
 
 
 class GithubPatchGateway:
-    """Exact three-tool adapter over owner-resolved authority and GitHub ports."""
+    """Exact three-tool owner adapter."""
 
     def __init__(
         self,
@@ -187,13 +188,7 @@ class GithubPatchGateway:
                 (IssueCode.CAPABILITY_UNAVAILABLE,),
             )
         if not isinstance(arguments, Mapping):
-            return self._envelope(
-                name,
-                ToolStatus.REFUSED,
-                now,
-                {},
-                (IssueCode.PATCH_SCHEMA_INVALID,),
-            )
+            return self._refusal(name, now, IssueCode.PATCH_SCHEMA_INVALID)
         if name == PREPARE_TOOL:
             return await self._prepare(dict(arguments), now)
         if name == COMMIT_TOOL:
@@ -216,25 +211,19 @@ class GithubPatchGateway:
         if refusal is not None:
             return refusal
         assert principal is not None
-        target, refusal = await self._target(PREPARE_TOOL, now, operation_key, principal)
-        if refusal is not None:
-            return refusal
-        assert target is not None
+        target, issue, status = await self._resolve_write_target(operation_key, principal)
+        if target is None:
+            return self._envelope(PREPARE_TOOL, status, now, {}, (issue,))
 
-        try:
-            current_head = await self._github.read_branch_head(target)
-        except Exception:
-            return self._unknown(
-                PREPARE_TOOL,
-                now,
-                IssueCode.SOURCE_TRUNCATED_OR_UNAVAILABLE,
-            )
-        if current_head != expected_head_oid:
+        head = await self._read_head(target)
+        if head is None:
+            return self._unknown(PREPARE_TOOL, now, IssueCode.SOURCE_TRUNCATED_OR_UNAVAILABLE)
+        if head != expected_head_oid:
             return self._envelope(
                 PREPARE_TOOL,
                 ToolStatus.BLOCKED,
                 now,
-                {"current_head_oid": current_head},
+                {"current_head_oid": head},
                 (IssueCode.BRANCH_HEAD_MOVED,),
             )
 
@@ -244,16 +233,26 @@ class GithubPatchGateway:
             intents=intents,
         )
         if issue is not None:
-            status = (
-                ToolStatus.UNKNOWN
-                if issue in {
-                    IssueCode.SOURCE_TRUNCATED_OR_UNAVAILABLE,
-                    IssueCode.ACTION_TARGET_UNRESOLVED,
-                }
-                else ToolStatus.REFUSED
-            )
+            status = ToolStatus.UNKNOWN if issue in {
+                IssueCode.SOURCE_TRUNCATED_OR_UNAVAILABLE,
+                IssueCode.ACTION_TARGET_UNRESOLVED,
+            } else ToolStatus.REFUSED
             return self._envelope(PREPARE_TOOL, status, now, {}, (issue,))
         assert compilation is not None
+
+        # Preparation is useful only while its preview still describes the exact
+        # current branch head. A second head read closes the read/compile race.
+        head_after = await self._read_head(target)
+        if head_after is None:
+            return self._unknown(PREPARE_TOOL, now, IssueCode.SOURCE_TRUNCATED_OR_UNAVAILABLE)
+        if head_after != expected_head_oid:
+            return self._envelope(
+                PREPARE_TOOL,
+                ToolStatus.BLOCKED,
+                now,
+                {"current_head_oid": head_after},
+                (IssueCode.BRANCH_HEAD_MOVED,),
+            )
 
         expires_at = now + self._config.token_ttl_seconds
         data = compilation.to_public_dict()
@@ -284,10 +283,9 @@ class GithubPatchGateway:
             compilation=compilation,
         )
         try:
-            token = self._token_codec.encode(claims)
+            data["prepared_token"] = self._token_codec.encode(claims)
         except PreparedTokenError:
             return self._unknown(PREPARE_TOOL, now, IssueCode.INTERNAL_CONTRACT_ERROR)
-        data["prepared_token"] = token
         return self._envelope(PREPARE_TOOL, ToolStatus.OK, now, data, ())
 
     async def _commit(self, arguments: dict[str, Any], now: int) -> dict[str, object]:
@@ -300,7 +298,6 @@ class GithubPatchGateway:
         if issue is not None:
             return self._refusal(COMMIT_TOOL, now, issue)
         assert claims is not None
-
         principal, refusal = await self._principal(COMMIT_TOOL, now)
         if refusal is not None:
             return refusal
@@ -308,106 +305,129 @@ class GithubPatchGateway:
         if claims.raw["principal_digest"] != principal.principal_digest:
             return self._refusal(COMMIT_TOOL, now, IssueCode.AUTHENTICATION_REFUSED)
 
-        target, refusal = await self._target(
-            COMMIT_TOOL,
-            now,
-            claims.operation_key,
-            principal,
-        )
-        if refusal is not None:
-            return refusal
-        assert target is not None
-        if not self._target_matches_claims(target, claims.raw):
-            return self._refusal(COMMIT_TOOL, now, IssueCode.PRECONDITION_CHANGED)
+        token_target = self._token_target(claims.raw)
 
-        observation = await self._observe(target, claims)
-        if observation.state is EffectState.APPLIED:
-            return self._receipt(
-                COMMIT_TOOL,
-                now,
-                claims,
-                observation,
-                native_request_attempts=0,
-            )
-        if observation.state is EffectState.EFFECT_UNKNOWN or not observation.complete:
-            return self._receipt(
-                COMMIT_TOOL,
-                now,
-                claims,
-                EffectObservation(
-                    state=EffectState.EFFECT_UNKNOWN,
-                    commit_oid=observation.commit_oid,
-                    branch_head_oid=observation.branch_head_oid,
-                    complete=False,
-                ),
-                native_request_attempts=0,
-                issues=(IssueCode.PRIOR_EFFECT_UNKNOWN,),
-            )
-
-        try:
-            current_head = await self._github.read_branch_head(target)
-        except Exception:
+        # Idempotency and ambiguity are resolved before asking whether another
+        # write is currently authorized. Current authority may legitimately
+        # change after the original request crossed the effect boundary.
+        prior = await self._observe(token_target, claims)
+        if prior.state is EffectState.APPLIED and prior.complete:
+            return self._receipt(COMMIT_TOOL, now, claims, prior, native_request_attempts=0)
+        if prior.state is EffectState.EFFECT_UNKNOWN or not prior.complete:
             return self._effect_unknown_receipt(
                 COMMIT_TOOL,
                 now,
                 claims,
                 native_request_attempts=0,
+                observation=prior,
+                issues=(IssueCode.PRIOR_EFFECT_UNKNOWN,),
             )
-        if current_head != claims.expected_head_oid:
+
+        target, target_issue, target_status = await self._resolve_write_target(
+            claims.operation_key,
+            principal,
+        )
+        if target is None:
             return self._receipt(
                 COMMIT_TOOL,
                 now,
                 claims,
-                EffectObservation(
-                    state=EffectState.NOT_APPLIED,
-                    commit_oid=None,
-                    branch_head_oid=current_head,
-                    complete=True,
-                ),
+                prior,
+                native_request_attempts=0,
+                issues=(target_issue,),
+                status=target_status,
+            )
+        if not self._target_matches_claims(target, claims.raw):
+            return self._receipt(
+                COMMIT_TOOL,
+                now,
+                claims,
+                prior,
+                native_request_attempts=0,
+                issues=(IssueCode.PRECONDITION_CHANGED,),
+                status=ToolStatus.REFUSED,
+            )
+
+        head = await self._read_head(target)
+        if head is None:
+            return self._receipt(
+                COMMIT_TOOL,
+                now,
+                claims,
+                prior,
+                native_request_attempts=0,
+                issues=(IssueCode.SOURCE_TRUNCATED_OR_UNAVAILABLE,),
+                status=ToolStatus.UNKNOWN,
+            )
+        if head != claims.expected_head_oid:
+            return self._receipt(
+                COMMIT_TOOL,
+                now,
+                claims,
+                EffectObservation(EffectState.NOT_APPLIED, None, head, True),
                 native_request_attempts=0,
                 issues=(IssueCode.BRANCH_HEAD_MOVED,),
                 status=ToolStatus.BLOCKED,
             )
 
-        intents = self._claims_intents(claims.raw)
-        compilation, issue = await self._materialize(
+        compilation, compile_issue = await self._materialize(
             target=target,
             expected_head_oid=claims.expected_head_oid,
-            intents=intents,
+            intents=self._claims_intents(claims.raw),
         )
-        if issue is not None:
+        if compile_issue is not None or compilation is None:
+            issue = compile_issue or IssueCode.PRECONDITION_CHANGED
+            status = (
+                ToolStatus.UNKNOWN
+                if issue in {
+                    IssueCode.SOURCE_TRUNCATED_OR_UNAVAILABLE,
+                    IssueCode.ACTION_TARGET_UNRESOLVED,
+                }
+                else ToolStatus.REFUSED
+            )
             return self._receipt(
                 COMMIT_TOOL,
                 now,
                 claims,
-                EffectObservation(
-                    state=EffectState.NOT_APPLIED,
-                    commit_oid=None,
-                    branch_head_oid=current_head,
-                    complete=True,
-                ),
+                EffectObservation(EffectState.NOT_APPLIED, None, head, True),
                 native_request_attempts=0,
-                issues=(IssueCode.PRECONDITION_CHANGED,),
-                status=ToolStatus.REFUSED,
+                issues=(issue,),
+                status=status,
             )
-        assert compilation is not None
         if not self._compilation_matches_claims(compilation, claims.raw):
             return self._receipt(
                 COMMIT_TOOL,
                 now,
                 claims,
-                EffectObservation(
-                    state=EffectState.NOT_APPLIED,
-                    commit_oid=None,
-                    branch_head_oid=current_head,
-                    complete=True,
-                ),
+                EffectObservation(EffectState.NOT_APPLIED, None, head, True),
                 native_request_attempts=0,
                 issues=(IssueCode.PRECONDITION_CHANGED,),
                 status=ToolStatus.REFUSED,
             )
 
-        commit_files = tuple(
+        head_after = await self._read_head(target)
+        if head_after is None:
+            return self._receipt(
+                COMMIT_TOOL,
+                now,
+                claims,
+                EffectObservation(EffectState.NOT_APPLIED, None, head, True),
+                native_request_attempts=0,
+                issues=(IssueCode.SOURCE_TRUNCATED_OR_UNAVAILABLE,),
+                status=ToolStatus.UNKNOWN,
+            )
+        if head_after != claims.expected_head_oid:
+            return self._receipt(
+                COMMIT_TOOL,
+                now,
+                claims,
+                EffectObservation(EffectState.NOT_APPLIED, None, head_after, True),
+                native_request_attempts=0,
+                issues=(IssueCode.BRANCH_HEAD_MOVED,),
+                status=ToolStatus.BLOCKED,
+            )
+
+        files = tuple(
             CommitFile(
                 path=item.path,
                 expected_blob_oid=item.before_blob_oid,
@@ -416,37 +436,30 @@ class GithubPatchGateway:
             )
             for item in compilation.files
         )
-        effect_possible = True
+        attempts = 1
         try:
-            native_result = await self._github.commit_branch_patch(
+            await self._github.commit_branch_patch(
                 target,
                 claims.expected_head_oid,
                 claims.operation_key,
                 claims.normalized_effect_digest,
-                commit_files,
+                files,
             )
-            effect_possible = native_result.request_sent and not native_result.definite_no_effect
-        except NativeCommitError as exc:
-            effect_possible = exc.effect_possible
+        except NativeCommitError:
+            pass
         except Exception:
-            effect_possible = True
+            pass
 
-        post = await self._observe(target, claims)
-        if post.state is EffectState.APPLIED:
+        post = await self._observe(token_target, claims)
+        if post.state is EffectState.APPLIED and post.complete:
+            return self._receipt(COMMIT_TOOL, now, claims, post, native_request_attempts=attempts)
+        if post.state is EffectState.NOT_APPLIED and post.complete:
             return self._receipt(
                 COMMIT_TOOL,
                 now,
                 claims,
                 post,
-                native_request_attempts=1,
-            )
-        if post.state is EffectState.NOT_APPLIED and post.complete and not effect_possible:
-            return self._receipt(
-                COMMIT_TOOL,
-                now,
-                claims,
-                post,
-                native_request_attempts=1,
+                native_request_attempts=attempts,
                 issues=(IssueCode.NATIVE_REQUEST_REFUSED,),
                 status=ToolStatus.REFUSED,
             )
@@ -454,23 +467,18 @@ class GithubPatchGateway:
             COMMIT_TOOL,
             now,
             claims,
-            native_request_attempts=1,
+            native_request_attempts=attempts,
             observation=post,
         )
 
     async def _reconcile(self, arguments: dict[str, Any], now: int) -> dict[str, object]:
-        if set(arguments) != {
-            "operation_key",
-            "normalized_effect_digest",
-            "prepared_token",
-        }:
+        if set(arguments) != {"operation_key", "normalized_effect_digest", "prepared_token"}:
             return self._refusal(RECONCILE_TOOL, now, IssueCode.PATCH_SCHEMA_INVALID)
         try:
             operation_key = self._operation(arguments["operation_key"])
             effect_digest = self._sha256(arguments["normalized_effect_digest"])
         except ValueError:
             return self._refusal(RECONCILE_TOOL, now, IssueCode.PATCH_SCHEMA_INVALID)
-
         claims, issue = self._decode_claims(
             arguments.get("prepared_token"),
             now,
@@ -481,7 +489,6 @@ class GithubPatchGateway:
         assert claims is not None
         if claims.operation_key != operation_key or claims.normalized_effect_digest != effect_digest:
             return self._refusal(RECONCILE_TOOL, now, IssueCode.PREPARED_TOKEN_INVALID)
-
         principal, refusal = await self._principal(RECONCILE_TOOL, now)
         if refusal is not None:
             return refusal
@@ -489,25 +496,9 @@ class GithubPatchGateway:
         if claims.raw["principal_digest"] != principal.principal_digest:
             return self._refusal(RECONCILE_TOOL, now, IssueCode.AUTHENTICATION_REFUSED)
 
-        target, refusal = await self._target(
-            RECONCILE_TOOL,
-            now,
-            claims.operation_key,
-            principal,
-        )
-        if refusal is not None:
-            return refusal
-        assert target is not None
-        if not self._target_matches_claims(target, claims.raw):
-            return self._effect_unknown_receipt(
-                RECONCILE_TOOL,
-                now,
-                claims,
-                native_request_attempts=0,
-                issues=(IssueCode.PRECONDITION_CHANGED,),
-            )
-
-        observation = await self._observe(target, claims)
+        # No current write-authority resolution occurs here. The HMAC token
+        # binds the exact server-resolved target that may already have changed.
+        observation = await self._observe(self._token_target(claims.raw), claims)
         return self._receipt(
             RECONCILE_TOOL,
             now,
@@ -537,33 +528,46 @@ class GithubPatchGateway:
             return None, self._refusal(tool, now, IssueCode.SCOPE_REFUSED)
         return principal, None
 
-    async def _target(
+    async def _resolve_write_target(
         self,
-        tool: str,
-        now: int,
         operation_key: str,
         principal: AuthenticatedPrincipal,
-    ) -> tuple[ResolvedPatchTarget | None, dict[str, object] | None]:
+    ) -> tuple[ResolvedPatchTarget | None, IssueCode, ToolStatus]:
         try:
             target = await self._authority_resolver.resolve_patch_target(
                 operation_key,
                 principal.principal_digest,
             )
         except Exception:
-            return None, self._unknown(tool, now, IssueCode.ACTION_TARGET_UNRESOLVED)
+            return None, IssueCode.ACTION_TARGET_UNRESOLVED, ToolStatus.UNKNOWN
         if not isinstance(target, ResolvedPatchTarget) or target.operation_key != operation_key:
-            return None, self._unknown(tool, now, IssueCode.ACTION_TARGET_UNRESOLVED)
+            return None, IssueCode.ACTION_TARGET_UNRESOLVED, ToolStatus.UNKNOWN
         if target.patch_eligibility is PatchEligibility.UNKNOWN:
-            issues = target.issues or (IssueCode.ACTION_TARGET_UNRESOLVED,)
-            return None, self._envelope(tool, ToolStatus.UNKNOWN, now, {}, issues)
+            return (
+                None,
+                target.issues[0] if target.issues else IssueCode.ACTION_TARGET_UNRESOLVED,
+                ToolStatus.UNKNOWN,
+            )
         if target.patch_eligibility is PatchEligibility.REFUSED:
-            issues = target.issues or (IssueCode.ORGANIZATIONAL_AUTHORITY_REFUSED,)
-            return None, self._envelope(tool, ToolStatus.REFUSED, now, {}, issues)
+            return (
+                None,
+                target.issues[0] if target.issues else IssueCode.ORGANIZATIONAL_AUTHORITY_REFUSED,
+                ToolStatus.REFUSED,
+            )
         if not self._eligible_target_shape(target):
-            return None, self._unknown(tool, now, IssueCode.ACTION_TARGET_UNRESOLVED)
-        if target.branch in set(target.protected_branches):
-            return None, self._refusal(tool, now, IssueCode.PROTECTED_BRANCH_REFUSED)
-        return target, None
+            return None, IssueCode.ACTION_TARGET_UNRESOLVED, ToolStatus.UNKNOWN
+        if target.branch == target.default_branch or target.branch in set(target.protected_branches):
+            return None, IssueCode.PROTECTED_BRANCH_REFUSED, ToolStatus.REFUSED
+        return target, IssueCode.INTERNAL_CONTRACT_ERROR, ToolStatus.OK
+
+    async def _read_head(self, target: ResolvedPatchTarget) -> str | None:
+        try:
+            value = await self._github.read_branch_head(target)
+        except Exception:
+            return None
+        if not isinstance(value, str) or _OID_RE.fullmatch(value) is None:
+            return None
+        return value
 
     async def _materialize(
         self,
@@ -590,14 +594,13 @@ class GithubPatchGateway:
                     content=blob.content.encode("utf-8"),
                 )
             )
-
         assert target.pull_request_number is not None
         authority = ExactEditAuthority(
             operation_key=target.operation_key,
             carrier_ref=f"github:carrier:{target.carrier_digest}",
             source_ref=f"github:source:{target.source_digest}",
             repository=target.repository,
-            default_branch=self._default_branch(target),
+            default_branch=target.default_branch,
             branch=target.branch,
             pull_request_number=target.pull_request_number,
             pull_request_state=PullRequestState.OPEN,
@@ -632,25 +635,12 @@ class GithubPatchGateway:
                 claims.expected_head_oid,
                 claims.operation_key,
                 claims.normalized_effect_digest,
-                {
-                    str(row["path"]): str(row["after_sha256"])
-                    for row in claims.raw["files"]
-                },
+                {str(row["path"]): str(row["after_sha256"]) for row in claims.raw["files"]},
             )
         except Exception:
-            return EffectObservation(
-                state=EffectState.EFFECT_UNKNOWN,
-                commit_oid=None,
-                branch_head_oid=None,
-                complete=False,
-            )
+            return EffectObservation(EffectState.EFFECT_UNKNOWN, None, None, False)
         if not isinstance(observation, EffectObservation):
-            return EffectObservation(
-                state=EffectState.EFFECT_UNKNOWN,
-                commit_oid=None,
-                branch_head_oid=None,
-                complete=False,
-            )
+            return EffectObservation(EffectState.EFFECT_UNKNOWN, None, None, False)
         return observation
 
     def _decode_claims(
@@ -674,7 +664,7 @@ class GithubPatchGateway:
             return None, IssueCode.APP_GENERATION_MISMATCH
         if now < claims.issued_at:
             return None, IssueCode.PREPARED_TOKEN_INVALID
-        if enforce_expiry and now > claims.expires_at:
+        if enforce_expiry and now >= claims.expires_at:
             return None, IssueCode.PREPARED_ACTION_EXPIRED
         return claims, None
 
@@ -687,8 +677,6 @@ class GithubPatchGateway:
             "schema_digest",
             "policy_id",
             "principal_digest",
-            "repository",
-            "branch",
             "carrier_digest",
             "writer_digest",
             "authority_digest",
@@ -696,16 +684,21 @@ class GithubPatchGateway:
         ):
             if not isinstance(raw[key], str) or not raw[key]:
                 raise ValueError("invalid claims")
+        if _HEX64_RE.fullmatch(raw["principal_digest"]) is None:
+            raise ValueError("invalid principal")
+        for key in ("carrier_digest", "writer_digest", "authority_digest", "source_digest"):
+            self._sha256(raw[key])
+        if raw["schema_digest"] != SCHEMA_DIGEST:
+            raise ValueError("invalid schema digest")
+        self._repository(raw["repository"])
+        default_branch = self._branch(raw["default_branch"])
+        branch = self._branch(raw["branch"])
         operation_key = self._operation(raw["operation_key"])
         expected_head_oid = self._oid(raw["expected_head_oid"])
         effect_digest = self._sha256(raw["normalized_effect_digest"])
-        if _HEX64_RE.fullmatch(raw["principal_digest"]) is None:
-            raise ValueError("invalid claims")
-        if raw["schema_digest"] != SCHEMA_DIGEST:
-            raise ValueError("invalid claims")
         pr_number = raw["pull_request_number"]
         if isinstance(pr_number, bool) or not isinstance(pr_number, int) or pr_number <= 0:
-            raise ValueError("invalid claims")
+            raise ValueError("invalid PR")
         for key in ("protected_branches", "allowed_paths"):
             value = raw[key]
             if (
@@ -714,25 +707,35 @@ class GithubPatchGateway:
                 or any(not isinstance(item, str) or not item for item in value)
                 or value != sorted(set(value))
             ):
-                raise ValueError("invalid claims")
+                raise ValueError("invalid list")
+        if len(raw["protected_branches"]) > 32 or len(raw["allowed_paths"]) > 256:
+            raise ValueError("list exceeds bound")
+        protected = [self._branch(item) for item in raw["protected_branches"]]
+        paths = [self._path(item) for item in raw["allowed_paths"]]
+        if protected != raw["protected_branches"] or paths != raw["allowed_paths"]:
+            raise ValueError("noncanonical list")
+        if branch == default_branch or branch in protected:
+            raise ValueError("protected target")
         files = raw["files"]
         if not isinstance(files, list) or not 1 <= len(files) <= 3:
-            raise ValueError("invalid claims")
-        paths: list[str] = []
+            raise ValueError("invalid files")
+        file_paths: list[str] = []
         edit_bytes = 0
         for row in files:
             if not isinstance(row, dict) or set(row) != _TOKEN_FILE_KEYS:
-                raise ValueError("invalid claims")
-            for key in ("path", "expected_blob_oid", "before_sha256", "after_sha256", "preview_sha256"):
-                if not isinstance(row[key], str) or not row[key]:
-                    raise ValueError("invalid claims")
+                raise ValueError("invalid file")
+            path = self._path(row["path"])
             self._oid(row["expected_blob_oid"])
             for key in ("before_sha256", "after_sha256", "preview_sha256"):
                 self._sha256(row[key])
             edit_bytes += self._validate_replacements(row["replacements"])
-            paths.append(row["path"])
-        if paths != sorted(set(paths)) or edit_bytes > MAX_MODEL_EDIT_BYTES:
-            raise ValueError("invalid claims")
+            file_paths.append(path)
+        if (
+            file_paths != sorted(set(file_paths))
+            or not set(file_paths).issubset(set(paths))
+            or edit_bytes > MAX_MODEL_EDIT_BYTES
+        ):
+            raise ValueError("invalid files")
         issued_at = raw["issued_at"]
         expires_at = raw["expires_at"]
         if (
@@ -744,15 +747,8 @@ class GithubPatchGateway:
             or expires_at <= issued_at
             or expires_at - issued_at != self._config.token_ttl_seconds
         ):
-            raise ValueError("invalid claims")
-        return _Claims(
-            raw=raw,
-            operation_key=operation_key,
-            expected_head_oid=expected_head_oid,
-            normalized_effect_digest=effect_digest,
-            issued_at=issued_at,
-            expires_at=expires_at,
-        )
+            raise ValueError("invalid time")
+        return _Claims(raw, operation_key, expected_head_oid, effect_digest, issued_at, expires_at)
 
     def _claims_payload(
         self,
@@ -775,6 +771,7 @@ class GithubPatchGateway:
             "principal_digest": principal.principal_digest,
             "operation_key": target.operation_key,
             "repository": target.repository,
+            "default_branch": target.default_branch,
             "branch": target.branch,
             "pull_request_number": target.pull_request_number,
             "protected_branches": sorted(set(target.protected_branches)),
@@ -789,17 +786,12 @@ class GithubPatchGateway:
                     "path": item.path,
                     "expected_blob_oid": item.before_blob_oid,
                     "replacements": [
-                        {
-                            "old_text": replacement.old_text,
-                            "new_text": replacement.new_text,
-                        }
+                        {"old_text": replacement.old_text, "new_text": replacement.new_text}
                         for replacement in by_path[item.path].replacements
                     ],
                     "before_sha256": item.before_sha256,
                     "after_sha256": item.after_sha256,
-                    "preview_sha256": hashlib.sha256(
-                        item.preview_patch.encode("utf-8")
-                    ).hexdigest(),
+                    "preview_sha256": hashlib.sha256(item.preview_patch.encode("utf-8")).hexdigest(),
                 }
                 for item in compilation.files
             ],
@@ -808,14 +800,27 @@ class GithubPatchGateway:
             "expires_at": expires_at,
         }
 
-    def _target_matches_claims(
-        self,
-        target: ResolvedPatchTarget,
-        raw: Mapping[str, Any],
-    ) -> bool:
+    def _token_target(self, raw: Mapping[str, Any]) -> ResolvedPatchTarget:
+        return ResolvedPatchTarget(
+            operation_key=str(raw["operation_key"]),
+            repository=str(raw["repository"]),
+            default_branch=str(raw["default_branch"]),
+            branch=str(raw["branch"]),
+            pull_request_number=int(raw["pull_request_number"]),
+            protected_branches=tuple(str(item) for item in raw["protected_branches"]),
+            allowed_paths=tuple(str(item) for item in raw["allowed_paths"]),
+            carrier_digest=str(raw["carrier_digest"]),
+            writer_digest=str(raw["writer_digest"]),
+            authority_digest=str(raw["authority_digest"]),
+            source_digest=str(raw["source_digest"]),
+            patch_eligibility=PatchEligibility.ELIGIBLE,
+        )
+
+    def _target_matches_claims(self, target: ResolvedPatchTarget, raw: Mapping[str, Any]) -> bool:
         return (
             target.operation_key == raw["operation_key"]
             and target.repository == raw["repository"]
+            and target.default_branch == raw["default_branch"]
             and target.branch == raw["branch"]
             and target.pull_request_number == raw["pull_request_number"]
             and sorted(set(target.protected_branches)) == raw["protected_branches"]
@@ -878,22 +883,18 @@ class GithubPatchGateway:
         rows: list[ExactFileEditRequest] = []
         edit_bytes = 0
         for raw in value:
-            if not isinstance(raw, Mapping) or set(raw) != {
-                "path",
-                "expected_blob_oid",
-                "replacements",
-            }:
+            if not isinstance(raw, Mapping) or set(raw) != {"path", "expected_blob_oid", "replacements"}:
                 raise ValueError("invalid file")
-            if not isinstance(raw["path"], str) or not isinstance(raw["expected_blob_oid"], str):
-                raise ValueError("invalid file")
+            path = self._path(raw["path"])
+            blob = self._oid(raw["expected_blob_oid"])
             replacements_raw = raw["replacements"]
             edit_bytes += self._validate_replacements(replacements_raw)
             if edit_bytes > MAX_MODEL_EDIT_BYTES:
                 raise _InputLimitError("edit payload too large")
             rows.append(
                 ExactFileEditRequest(
-                    path=raw["path"],
-                    expected_blob_oid=raw["expected_blob_oid"],
+                    path=path,
+                    expected_blob_oid=blob,
                     replacements=tuple(
                         ExactTextReplacement(
                             old_text=replacement["old_text"],
@@ -903,7 +904,9 @@ class GithubPatchGateway:
                     ),
                 )
             )
-        return tuple(rows)
+        if len({row.path for row in rows}) != len(rows):
+            raise ValueError("file paths must be unique")
+        return tuple(sorted(rows, key=lambda row: row.path))
 
     def _validate_replacements(self, value: object) -> int:
         if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
@@ -935,18 +938,19 @@ class GithubPatchGateway:
     def _eligible_target_shape(self, target: ResolvedPatchTarget) -> bool:
         return (
             isinstance(target.repository, str)
-            and bool(target.repository)
-            and isinstance(target.branch, str)
-            and bool(target.branch)
+            and _REPOSITORY_RE.fullmatch(target.repository) is not None
+            and self._safe_branch(target.default_branch)
+            and self._safe_branch(target.branch)
             and isinstance(target.pull_request_number, int)
             and not isinstance(target.pull_request_number, bool)
             and target.pull_request_number > 0
             and isinstance(target.protected_branches, tuple)
             and bool(target.protected_branches)
-            and all(isinstance(item, str) and item for item in target.protected_branches)
+            and all(self._safe_branch(item) for item in target.protected_branches)
             and isinstance(target.allowed_paths, tuple)
             and bool(target.allowed_paths)
-            and all(isinstance(item, str) and item for item in target.allowed_paths)
+            and all(self._safe_path(item) for item in target.allowed_paths)
+            and len(set(target.allowed_paths)) == len(target.allowed_paths)
             and all(
                 isinstance(value, str) and _HEX64_RE.fullmatch(value) is not None
                 for value in (
@@ -958,13 +962,47 @@ class GithubPatchGateway:
             )
         )
 
+    def _repository(self, value: object) -> str:
+        if not isinstance(value, str) or _REPOSITORY_RE.fullmatch(value) is None:
+            raise ValueError("invalid repository")
+        return value
+
+    def _branch(self, value: object) -> str:
+        if not isinstance(value, str) or not self._safe_branch(value):
+            raise ValueError("invalid branch")
+        return value
+
     @staticmethod
-    def _default_branch(target: ResolvedPatchTarget) -> str:
-        protected = tuple(sorted(set(target.protected_branches)))
-        for candidate in ("master", "main"):
-            if candidate in protected:
-                return candidate
-        return protected[0]
+    def _safe_branch(value: object) -> bool:
+        return (
+            isinstance(value, str)
+            and _REF_RE.fullmatch(value) is not None
+            and value != "HEAD"
+            and not value.startswith("refs/")
+            and not value.startswith("-")
+            and not value.endswith(".")
+            and not value.endswith(".lock")
+            and ".." not in value
+            and "//" not in value
+            and "@{" not in value
+        )
+
+    def _path(self, value: object) -> str:
+        if not isinstance(value, str) or not self._safe_path(value):
+            raise ValueError("invalid path")
+        return value
+
+    @staticmethod
+    def _safe_path(value: object) -> bool:
+        return (
+            isinstance(value, str)
+            and _PATH_RE.fullmatch(value) is not None
+            and not value.startswith("/")
+            and not value.endswith("/")
+            and "//" not in value
+            and "\\" not in value
+            and all(part not in {"", ".", "..", ".git"} for part in value.split("/"))
+        )
 
     def _operation(self, value: object) -> str:
         if not isinstance(value, str) or _OPERATION_RE.fullmatch(value) is None:
@@ -1026,18 +1064,13 @@ class GithubPatchGateway:
         observation: EffectObservation | None = None,
         issues: tuple[IssueCode, ...] = (IssueCode.EFFECT_UNKNOWN,),
     ) -> dict[str, object]:
-        observation = observation or EffectObservation(
-            state=EffectState.EFFECT_UNKNOWN,
-            commit_oid=None,
-            branch_head_oid=None,
-            complete=False,
-        )
+        observation = observation or EffectObservation(EffectState.EFFECT_UNKNOWN, None, None, False)
         if observation.state is not EffectState.EFFECT_UNKNOWN or observation.complete:
             observation = EffectObservation(
-                state=EffectState.EFFECT_UNKNOWN,
-                commit_oid=observation.commit_oid,
-                branch_head_oid=observation.branch_head_oid,
-                complete=False,
+                EffectState.EFFECT_UNKNOWN,
+                observation.commit_oid,
+                observation.branch_head_oid,
+                False,
             )
         return self._receipt(
             tool,
@@ -1063,14 +1096,14 @@ class GithubPatchGateway:
         data: Mapping[str, object],
         issues: Sequence[IssueCode],
     ) -> dict[str, object]:
-        unique_issues = tuple(sorted(set(issues), key=lambda item: item.value))
+        unique = tuple(sorted(set(issues), key=lambda item: item.value))
         return ToolEnvelope(
             tool=tool,
             status=status,
             observed_at=now,
             capability_generation=self._config.app_generation,
             data=data,
-            issues=unique_issues,
+            issues=unique,
         ).public_dict()
 
 
