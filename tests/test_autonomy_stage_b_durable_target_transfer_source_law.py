@@ -291,7 +291,7 @@ def validate_contract(contract: dict[str, Any]) -> None:
         "changes_quota_or_lease": False,
         "appends_one_root_commitment": True,
     }
-    assert "expected_source_root_revision" in c2["optimistic_preconditions"]
+    assert c2["optimistic_preconditions"] == ["expected_source_root_revision"]
     assert c2["stable_command_fields"] == [
         "source_root_job_id",
         "responsibility_ref",
@@ -603,6 +603,11 @@ def test_source_law_is_mutation_discriminating() -> None:
         append(("capacity_c2_commitment", "event_required"), "slack_channel_id"),
         append(("capacity_c2_commitment", "event_required"), "runtime_binding_id"),
         add(("capacity_c2_commitment", "provider_evidence"), {"provider": "codex"}),
+        append(("capacity_c2_commitment", "optimistic_preconditions"), "provider"),
+        append(("capacity_c2_commitment", "optimistic_preconditions"), "process_id"),
+        append(("capacity_c2_commitment", "optimistic_preconditions"), "model"),
+        append(("capacity_c2_commitment", "optimistic_preconditions"), "slack_channel_id"),
+        append(("capacity_c2_commitment", "optimistic_preconditions"), "runtime_binding_id"),
         mutate(("implementation_dag", "STAGE-B1_INITIAL_ASSIGNMENT"), ["C2-R1B_EXISTING_CARRIER_REUSE"]),
         mutate(("capacity_c2_commitment", "implementation_waves", "existing_session_reuse", "wave"), "C2-R1A_INITIAL_CARRIER_COMMITMENT"),
         mutate(("capacity_c2_commitment", "r1a_constraints", "forbidden"), []),
