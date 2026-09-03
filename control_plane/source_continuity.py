@@ -539,26 +539,33 @@ def _owned_path_digest(entries: tuple[RemotePathEntry, ...]) -> str:
 
 
 def _validate_effect(
+    receipt_kind: ReceiptKind,
     external: ExternalEffectEvidence,
 ) -> SourceContinuityRefusal | None:
     if external.state is ExternalEffectState.EFFECT_UNKNOWN:
         return _refusal(RefusalCode.EXTERNAL_EFFECT_UNKNOWN, exit_code=1)
-    if external.branch_dependency is BranchEffectDependency.REQUIRED:
-        return _refusal(RefusalCode.BRANCH_EFFECT_REQUIRED, exit_code=1)
     if external.branch_dependency is BranchEffectDependency.UNKNOWN:
         return _refusal(RefusalCode.BRANCH_EFFECT_UNKNOWN, exit_code=1)
-    if (
-        external.state is ExternalEffectState.OPEN_KNOWN_EFFECT
-        and external.branch_dependency is not BranchEffectDependency.SEPARABLE
-    ):
-        return _refusal(RefusalCode.BRANCH_EFFECT_REQUIRED, exit_code=1)
-    if (
-        external.state
-        in {ExternalEffectState.NONE, ExternalEffectState.RECONCILED_NO_OPEN_EFFECT}
-        and external.branch_dependency is BranchEffectDependency.SEPARABLE
-    ):
-        return _refusal(RefusalCode.EXTERNAL_EFFECT_INVALID, exit_code=2)
-    return None
+
+    if external.state in {
+        ExternalEffectState.NONE,
+        ExternalEffectState.RECONCILED_NO_OPEN_EFFECT,
+    }:
+        if external.branch_dependency is not BranchEffectDependency.NONE:
+            return _refusal(RefusalCode.EXTERNAL_EFFECT_INVALID, exit_code=2)
+        return None
+
+    if external.state is ExternalEffectState.OPEN_KNOWN_EFFECT:
+        if external.branch_dependency is BranchEffectDependency.NONE:
+            return _refusal(RefusalCode.EXTERNAL_EFFECT_INVALID, exit_code=2)
+        if (
+            external.branch_dependency is BranchEffectDependency.REQUIRED
+            and receipt_kind is ReceiptKind.REMOTE_COMPLETE_VERIFIED
+        ):
+            return _refusal(RefusalCode.BRANCH_EFFECT_REQUIRED, exit_code=1)
+        return None
+
+    return _refusal(RefusalCode.EXTERNAL_EFFECT_INVALID, exit_code=2)
 
 
 def verify_source_continuity(
@@ -612,7 +619,7 @@ def verify_source_continuity(
 
     if not _external_facts_are_valid(external):
         return _refusal(RefusalCode.EXTERNAL_EFFECT_INVALID, exit_code=2)
-    effect_refusal = _validate_effect(external)
+    effect_refusal = _validate_effect(request.receipt_kind, external)
     if effect_refusal is not None:
         return effect_refusal
 
