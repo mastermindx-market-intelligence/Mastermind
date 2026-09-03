@@ -1362,6 +1362,32 @@ def _dispatch_evidence_newer(current: str | None, candidate: Any) -> str | None:
     return current
 
 
+def _executable_attempt_candidates(tree_jobs: Sequence[Any]) -> list[Any]:
+    """Jobs holding a live attempt, minus any that merely aggregate one.
+
+    A job is dropped when another candidate is its strict descendant, so an
+    aggregation root never competes with the carrier beneath it.  Ancestry is
+    read from ``parent_job_id`` only — no depth arithmetic, no recency, no
+    attempt-number comparison, and no title or provider inference.
+    """
+    candidates = [j for j in tree_jobs if getattr(j, "current_attempt_id", None)]
+    if len(candidates) < 2:
+        return candidates
+    by_id = {getattr(j, "job_id", None): j for j in tree_jobs}
+    candidate_ids = {getattr(j, "job_id", None) for j in candidates}
+    aggregating: set[Any] = set()
+    for job in candidates:
+        seen: set[Any] = set()
+        parent = getattr(job, "parent_job_id", None)
+        while parent and parent not in seen:
+            seen.add(parent)
+            if parent in candidate_ids:
+                aggregating.add(parent)
+            parent_job = by_id.get(parent)
+            parent = getattr(parent_job, "parent_job_id", None) if parent_job else None
+    return [j for j in candidates if getattr(j, "job_id", None) not in aggregating]
+
+
 def _gather_dispatch_evidence(
     root: Path,
     cards: Sequence[Mapping[str, Any]],
@@ -1455,7 +1481,22 @@ def _gather_dispatch_evidence(
             # viable executable child/carrier Job in this root's tree —
             # never `max(attempt_number)`, never the aggregation root
             # itself unless IT is the (only) job carrying a live attempt.
-            attempt_candidates = [j for j in tree_jobs if j.current_attempt_id]
+            # `current_attempt_id` is STICKY in the Runtime schema: a CHECK
+            # constraint keeps it non-null for every non-QUEUED state once a
+            # job has been claimed.  So an aggregation root that is itself
+            # RUNNING or COMPLETED — the normal COO shape — retains its own
+            # attempt alongside a live child carrier, which made the count
+            # two and dropped the whole attempt dimension: neither the root
+            # nor the carrier won (review, real-Runtime probe S1/S2).  The
+            # head's own test only passed because it requeued the root first,
+            # an artificial step that removes the blocking condition.
+            #
+            # Resolve it STRUCTURALLY, never by recency, number or title: an
+            # ancestor that merely aggregates is not the executable job, so a
+            # candidate that is a strict ancestor of another candidate is
+            # dropped.  What survives is the deepest executable frontier —
+            # exactly one carrier, or a genuine multi-carrier ambiguity.
+            attempt_candidates = _executable_attempt_candidates(tree_jobs)
             if len(attempt_candidates) == 1:
                 candidate_job = attempt_candidates[0]
                 try:
@@ -1514,8 +1555,10 @@ def _gather_dispatch_evidence(
             if wake_repo is not None and wake_persist is not None:
                 obligation_ids: set[str] = set()
                 seen_event_count = 0
+                scan_truncated = False
                 for job in sorted(tree_jobs, key=lambda j: j.job_id):
                     if seen_event_count >= _DISPATCH_EVIDENCE_MAX_WAKE_REQUESTED:
+                        scan_truncated = True
                         break
                     try:
                         wake_requested_events = runtime.events.list_events(
@@ -1526,6 +1569,7 @@ def _gather_dispatch_evidence(
                         wake_requested_events = []
                     for event in wake_requested_events:
                         if seen_event_count >= _DISPATCH_EVIDENCE_MAX_WAKE_REQUESTED:
+                            scan_truncated = True
                             break
                         seen_event_count += 1
                         if event.event_type != "WAKE_REQUESTED" or not event.aggregate_id:
@@ -1542,7 +1586,15 @@ def _gather_dispatch_evidence(
                 # recency/title rule in this codebase for that choice), so
                 # it leaves obligation_status unset rather than picking —
                 # conservative, never a fabricated single answer.
-                if len(obligation_ids) == 1:
+                # A truncated scan cannot prove a second obligation is
+                # absent, so it must read as ambiguity rather than as the
+                # first one found.  The budget is spent across the whole tree
+                # and counts rejected envelopes too, so exhausting it on an
+                # early child previously hid a genuine obligation on a later
+                # one and the row asserted a definite status picked by scan
+                # order (review, real-Runtime probe: 19 foreign envelopes +
+                # two genuine obligations reported one of them).
+                if len(obligation_ids) == 1 and not scan_truncated:
                     oid = next(iter(obligation_ids))
                     try:
                         persisted = wake_repo.list_wake_events(aggregate_id=oid)

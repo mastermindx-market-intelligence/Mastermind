@@ -2776,3 +2776,115 @@ def test_gather_dispatch_evidence_ignores_a_terminal_return_applied_receipt_with
     assert len(rows) == 1
     assert "terminal_return_state" not in rows[0]
     assert rows[0]["attempt_state"] == "COMPLETED"
+
+
+# ---------------------------------------------------------------------------
+# Non-author review of 4ec8c2b1: two blocking connectivity defects
+# ---------------------------------------------------------------------------
+
+
+class _FakeJob:
+    """Only the fields the candidate resolver reads."""
+
+    def __init__(self, job_id, parent_job_id, root_job_id, current_attempt_id):
+        self.job_id = job_id
+        self.parent_job_id = parent_job_id
+        self.root_job_id = root_job_id
+        self.current_attempt_id = current_attempt_id
+
+
+def _cand_ids(jobs):
+    return sorted(j.job_id for j in ccr._executable_attempt_candidates(jobs))
+
+
+def test_review_aggregation_root_retaining_its_attempt_does_not_beat_the_carrier():
+    """`current_attempt_id` is STICKY: a Runtime CHECK keeps it non-null for
+    every non-QUEUED state once a job has been claimed.  So the normal COO
+    shape — an aggregation root that is itself RUNNING or COMPLETED plus a
+    live child carrier — produced TWO candidates and the whole attempt
+    dimension was dropped: neither the root nor the carrier won.
+
+    The prior test for this only passed because it requeued the root first,
+    which clears `current_attempt_id` and removes the very condition that
+    breaks.  This one uses the real topology.
+    """
+    root = _FakeJob("JOB-001", None, "JOB-001", "ATT-root-stale")
+    carrier = _FakeJob("JOB-002", "JOB-001", "JOB-001", "ATT-carrier")
+
+    assert _cand_ids([root, carrier]) == ["JOB-002"]
+    # and through a 3-deep chain the deepest executable job still wins
+    deep = _FakeJob("JOB-003", "JOB-002", "JOB-001", "ATT-deep")
+    assert _cand_ids([root, carrier, deep]) == ["JOB-003"]
+
+
+def test_review_two_sibling_carriers_remain_a_genuine_ambiguity():
+    """Dropping ancestors must not collapse a real multi-carrier ambiguity."""
+    root = _FakeJob("JOB-001", None, "JOB-001", "ATT-root")
+    a = _FakeJob("JOB-002", "JOB-001", "JOB-001", "ATT-a")
+    b = _FakeJob("JOB-004", "JOB-001", "JOB-001", "ATT-b")
+
+    assert _cand_ids([root, a, b]) == ["JOB-002", "JOB-004"]
+
+
+def test_review_a_lone_root_with_a_live_attempt_still_wins():
+    """Positive control: the ancestor rule must not refuse everything.
+
+    A guard that drops every candidate would pass both tests above for the
+    wrong reason.
+    """
+    root = _FakeJob("JOB-001", None, "JOB-001", "ATT-root")
+
+    assert _cand_ids([root]) == ["JOB-001"]
+    assert _cand_ids([_FakeJob("JOB-009", None, "JOB-009", None)]) == []
+
+
+def test_review_a_truncated_wake_scan_reports_ambiguity_not_the_first_found(tmp_path):
+    """Blocker 3 follow-up: the 20-event budget is spent across the WHOLE
+    tree and counts rejected envelopes too, so exhausting it on an early
+    child hid a genuine obligation on a later one and the row asserted a
+    definite `obligation_status` picked by scan order.
+
+    Truncation cannot prove a second obligation is absent, so it must read as
+    ambiguity. Constructed as the review did: enough foreign-envelope events
+    to exhaust the budget, plus two genuine obligations on different children.
+    """
+    from control_plane import wake_events, wake_ledger as wl
+
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    root = runtime.jobs.create_job("aggregation root")
+    early = runtime.jobs.create_job("early child", parent_job_id=root.job_id)
+    late = runtime.jobs.create_job("late child", parent_job_id=root.job_id)
+    repo = ccr.wake_persist.WakeLedgerRepository(runtime)
+
+    def _mint(job_id, root_job_id, n):
+        ob = wake_events.mint_obligation(
+            wake_kind="review_required",
+            source_kind="executive_runtime_event",
+            source_ref=f"runtime:job:{job_id}:{n}",
+            declared_target_seat="ceo",
+            job_id=job_id,
+            root_job_id=root_job_id,
+        )
+        repo.append_record(wl.requested_record(ob), obligation=ob)
+
+    # Foreign envelopes on the EARLY child: rejected by the root filter, but
+    # they still consume the shared budget.  The foreign root must itself be
+    # a canonical JOB-* identity or the obligation minter refuses it.
+    other_root = runtime.jobs.create_job("unrelated root")
+    # Exactly 19, so genuine A becomes the 20th event seen and IS admitted,
+    # while the budget dies before the later child's genuine B is reached.
+    # (A larger count exhausts the budget before A too, leaving the set empty
+    # and the test passing for a reason unrelated to the guard.)
+    for n in range(1, 20):
+        _mint(early.job_id, other_root.job_id, n)
+    _mint(early.job_id, root.job_id, 100)   # genuine A
+    _mint(late.job_id, root.job_id, 101)    # genuine B
+
+    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+
+    # Either no row, or a row that refuses to assert a single obligation.
+    for row in rows:
+        assert "obligation_status" not in row, (
+            "a truncated scan asserted a definite obligation status"
+        )
