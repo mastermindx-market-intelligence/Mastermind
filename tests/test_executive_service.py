@@ -865,6 +865,7 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
 
     bridge = ExecutiveDialogueWakeBridge(
         target_provider=target_provider,
+        carrier_factory=service_cli._build_executive_dialogue_wake_carrier,
         retry_policy=WakeRetryPolicy(
             max_delivery_attempts=1,
             retry_cooldown_s=1,
@@ -956,6 +957,7 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     production_bridge = ExecutiveDialogueWakeBridge(
         target_provider=None,
         operator_adapter=operator,
+        carrier_factory=service_cli._build_executive_dialogue_wake_carrier,
         retry_policy=bridge._retry_policy,
     )
     production_result = asyncio.run(
@@ -980,6 +982,7 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
                 binding_generation=binding.binding_generation + 1,
             ),
         ),
+        carrier_factory=service_cli._build_executive_dialogue_wake_carrier,
         retry_policy=bridge._retry_policy,
     )
     stale = asyncio.run(stale_binding_bridge(runtime, request))

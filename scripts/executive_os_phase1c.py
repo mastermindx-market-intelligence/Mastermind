@@ -40,6 +40,51 @@ from control_plane.executive_service import (
 from control_plane.wake_ledger import WakeRetryPolicy
 
 
+def _build_executive_dialogue_wake_carrier(
+    *,
+    runtime,
+    resolved,
+    target,
+    current_binding,
+    retry_policy,
+    generation,
+):
+    """Compose existing Wake owners outside the control-plane dependency layer."""
+
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.wake_persist import WakeLedgerRepository
+    from integrations.executive_wake.codex_app_server import (
+        CodexAppServerWakeDispatcher,
+    )
+    from integrations.executive_wake.codex_app_server_rpc import (
+        CodexCurrentWriterWakeClient,
+    )
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        PersistedWakeCarrier,
+    )
+
+    wake_client = CodexCurrentWriterWakeClient(
+        operator_adapter=resolved.operator_adapter,
+        generation=generation,
+        attempt_id=resolved.target_attempt_id,
+        runtime_binding=current_binding,
+    )
+    return PersistedWakeCarrier(
+        repository=WakeLedgerRepository(runtime),
+        dispatchers=WakeDispatcherRegistry(
+            {"codex-app-server": CodexAppServerWakeDispatcher(wake_client)}
+        ),
+        current_binding_for=lambda _route: project_runtime_binding(
+            runtime,
+            resolved.target_attempt_id,
+            target,
+        ),
+        retry_policy=retry_policy,
+        target_registry=resolved.registry,
+    )
+
+
 CONTROL_CONFIG_SCHEMA_VERSION = "mastermind.executive_control_config/v1"
 AUTONOMY_RECEIPT = Path(
     "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
@@ -1008,6 +1053,7 @@ def _service_from_config(
                     client,
                     turn_input_loader=dialogue_wake_turn_input_loader,
                 ),
+                carrier_factory=_build_executive_dialogue_wake_carrier,
             ),
             "dialogue_observation_activated_socket": observation_listener,
         }

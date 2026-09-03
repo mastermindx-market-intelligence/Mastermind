@@ -358,6 +358,7 @@ class ExecutiveDialogueWakeBridge:
         target_provider: DialogueWakeTargetProvider | None,
         retry_policy: Any,
         operator_adapter: Any = None,
+        carrier_factory: Callable[..., Any] | None = None,
     ) -> None:
         from control_plane.wake_ledger import WakeRetryPolicy
 
@@ -369,9 +370,12 @@ class ExecutiveDialogueWakeBridge:
             getattr(operator_adapter, "deliver_attention", None)
         ):
             raise TypeError("operator_adapter must support deliver_attention")
+        if not callable(carrier_factory):
+            raise TypeError("carrier_factory must be callable")
         self._target_provider = target_provider
         self._retry_policy = retry_policy
         self._operator_adapter = operator_adapter
+        self._carrier_factory = carrier_factory
 
     def _resolve_current_target(
         self,
@@ -477,17 +481,6 @@ class ExecutiveDialogueWakeBridge:
             WakeEffectUnknownError,
             WakePreSubmitError,
         )
-        from control_plane.wake_persist import WakeLedgerRepository
-        from integrations.executive_wake.codex_app_server import (
-            CodexAppServerWakeDispatcher,
-        )
-        from integrations.executive_wake.codex_app_server_rpc import (
-            CodexCurrentWriterWakeClient,
-        )
-        from integrations.executive_wake.registry import WakeDispatcherRegistry
-        from integrations.slack_agent_dialogue.persisted_wake_carrier import (
-            PersistedWakeCarrier,
-        )
 
         if not isinstance(runtime, Runtime) or not isinstance(
             request, DialogueWakeRequest
@@ -544,28 +537,13 @@ class ExecutiveDialogueWakeBridge:
                 != generation
             ):
                 return DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
-            wake_client = CodexCurrentWriterWakeClient(
-                operator_adapter=resolved.operator_adapter,
-                generation=generation,
-                attempt_id=resolved.target_attempt_id,
-                runtime_binding=current_binding,
-            )
-            carrier = PersistedWakeCarrier(
-                repository=WakeLedgerRepository(runtime),
-                dispatchers=WakeDispatcherRegistry(
-                    {
-                        "codex-app-server": CodexAppServerWakeDispatcher(
-                            wake_client
-                        )
-                    }
-                ),
-                current_binding_for=lambda _route: project_runtime_binding(
-                    runtime,
-                    resolved.target_attempt_id,
-                    target,
-                ),
+            carrier = self._carrier_factory(
+                runtime=runtime,
+                resolved=resolved,
+                target=target,
+                current_binding=current_binding,
                 retry_policy=self._retry_policy,
-                target_registry=resolved.registry,
+                generation=generation,
             )
         except Exception:
             return DialogueWakeResult("MISSING", "WAKE_TARGET_UNAVAILABLE")

@@ -1003,6 +1003,11 @@ class AgentRelayTurnRuntime:
                 )
             )
         except Exception:
+            if not getattr(self, "_executive_observation_source", False):
+                return self._receipt(
+                    ObservationOutcome.REFUSED,
+                    "TURN_CANDIDATE_PROCESSING_FAILED",
+                )
             return self._receipt(
                 ObservationOutcome.RECONCILIATION_INCOMPLETE,
                 "ACTIVE_WAITER_STATE_UNAVAILABLE",
@@ -1030,7 +1035,7 @@ class AgentRelayTurnRuntime:
         except CandidateCollectionUnavailable as exc:
             cause = exc.__cause__
             if (
-                self._executive_observation_source
+                getattr(self, "_executive_observation_source", False)
                 and isinstance(cause, ExecutiveObservationClientError)
             ):
                 outcome = (
