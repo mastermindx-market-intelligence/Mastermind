@@ -6,6 +6,8 @@ import dataclasses
 import importlib
 import json
 import os
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +17,9 @@ from control_plane.session_targets import RuntimeBinding, load_session_targets
 from control_plane.wake_ledger import LedgerPhase
 from control_plane.wake_persist import WakeLedgerRepository
 from integrations.executive_wake.registry import WakeDispatcherRegistry
+from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
+    RuntimeTerminalReturnBindingResolver,
+)
 from integrations.slack_agent_dialogue.service import CONTROL_VERSION, call_service
 from integrations.slack_agent_dialogue.turn_observer import ObservationOutcome
 from integrations.slack_agent_dialogue.wake_projection import (
@@ -40,6 +45,12 @@ from tests.test_slack_agent_dialogue_turn_routing_facts import (
 
 def _run(awaitable):
     return asyncio.run(awaitable)
+
+
+@pytest.fixture
+def relay_socket_root():
+    with tempfile.TemporaryDirectory(prefix="mmx-w3c-", dir="/tmp") as raw:
+        yield Path(raw).resolve()
 
 
 def _armed_ceo_registry():
@@ -86,8 +97,24 @@ def _compose(
         current_binding_for=lambda _route: binding,
         retry_policy=_POLICY,
         binding_for=binding_for,
+        has_active_waiter=lambda _source_ref, _seat: False,
         emitted_at=emitted_at,
     )
+
+
+def test_persisted_observer_composition_refuses_missing_waiter_owner(tmp_path) -> None:
+    parent = _parent()
+    with pytest.raises(TypeError, match="has_active_waiter"):
+        compose_persisted_turn_observer(
+            policy=_policy(),
+            client=_client_with_result(parent),
+            registry=_armed_ceo_registry(),
+            repository=_repo(tmp_path),
+            dispatchers=WakeDispatcherRegistry(),
+            current_binding_for=lambda _route: _binding(),
+            retry_policy=_POLICY,
+            has_active_waiter=None,
+        )
 
 
 def _phases(repo, obligation_id):
@@ -219,6 +246,7 @@ def test_unbound_target_refuses_without_persistence(tmp_path) -> None:
         dispatchers=WakeDispatcherRegistry({"codex-app-server": dispatcher}),
         current_binding_for=lambda _route: _binding(),
         retry_policy=_POLICY,
+        has_active_waiter=lambda _source_ref, _seat: False,
     )
 
     receipt = _run(
@@ -299,11 +327,14 @@ def test_completed_terminal_result_is_held_for_a_post_time_binding_owner(
     )
     observer = _no_action_observer(runtime)
     binding_calls: list[str] = []
+    from tests.test_slack_agent_dialogue_runtime import _w3c_dependencies
+
     turn_runtime = runtime.AgentRelayTurnRuntime(
         observer=observer,
         registry=_runtime_registry(),
         current_binding_for=lambda seat: binding_calls.append(seat),
         candidate_source=lambda: (candidate,),
+        **_w3c_dependencies(runtime),
     )
 
     receipts = _run(turn_runtime.reconcile_once())
@@ -333,12 +364,15 @@ def test_candidate_pass_is_bounded_before_any_observer_effect(
     runtime = _runtime_module()
     observer = _no_action_observer(runtime)
     candidates = tuple(_w3c_candidate(runtime) for _ in range(count))
+    from tests.test_slack_agent_dialogue_runtime import _w3c_dependencies
+
     turn_runtime = runtime.AgentRelayTurnRuntime(
         observer=observer,
         registry=_runtime_registry(),
         current_binding_for=_runtime_binding_for,
         candidate_source=lambda: candidates,
         max_candidates_per_pass=3,
+        **_w3c_dependencies(runtime),
     )
 
     receipts = _run(turn_runtime.reconcile_once())
@@ -364,12 +398,15 @@ def test_infinite_yielding_source_is_cut_off_at_max_plus_one() -> None:
             yield _w3c_candidate(runtime)
 
     observer = _no_action_observer(runtime)
+    from tests.test_slack_agent_dialogue_runtime import _w3c_dependencies
+
     turn_runtime = runtime.AgentRelayTurnRuntime(
         observer=observer,
         registry=_runtime_registry(),
         current_binding_for=_runtime_binding_for,
         candidate_source=source,
         max_candidates_per_pass=2,
+        **_w3c_dependencies(runtime),
     )
 
     receipts = _run(turn_runtime.reconcile_once())
@@ -388,11 +425,14 @@ def test_source_failure_after_partial_iteration_has_zero_candidate_effect() -> N
         raise RuntimeError("private source failure")
 
     observer = _no_action_observer(runtime)
+    from tests.test_slack_agent_dialogue_runtime import _w3c_dependencies
+
     turn_runtime = runtime.AgentRelayTurnRuntime(
         observer=observer,
         registry=_runtime_registry(),
         current_binding_for=_runtime_binding_for,
         candidate_source=source,
+        **_w3c_dependencies(runtime),
     )
 
     receipts = _run(turn_runtime.reconcile_once())
@@ -417,11 +457,14 @@ def test_async_generator_callable_object_is_collected() -> None:
 
     source = CandidateSource()
     observer = _no_action_observer(runtime)
+    from tests.test_slack_agent_dialogue_runtime import _w3c_dependencies
+
     turn_runtime = runtime.AgentRelayTurnRuntime(
         observer=observer,
         registry=_runtime_registry(),
         current_binding_for=_runtime_binding_for,
         candidate_source=source,
+        **_w3c_dependencies(runtime),
     )
 
     receipts = _run(turn_runtime.reconcile_once())
@@ -438,12 +481,15 @@ def test_synchronous_generator_candidate_source_remains_refused() -> None:
     def source():
         yield _w3c_candidate(runtime)
 
+    from tests.test_slack_agent_dialogue_runtime import _w3c_dependencies
+
     with pytest.raises(TypeError, match="candidate_source must be an async callable"):
         runtime.AgentRelayTurnRuntime(
             observer=_no_action_observer(runtime),
             registry=_runtime_registry(),
             current_binding_for=_runtime_binding_for,
             candidate_source=source,
+            **_w3c_dependencies(runtime),
         )
 
 
@@ -457,11 +503,14 @@ def test_malformed_candidate_is_isolated_and_later_candidate_still_runs() -> Non
     valid = _w3c_candidate(runtime)
     malformed = dataclasses.replace(valid, dialogue_parent=ExplodingParent())
     observer = _no_action_observer(runtime)
+    from tests.test_slack_agent_dialogue_runtime import _w3c_dependencies
+
     turn_runtime = runtime.AgentRelayTurnRuntime(
         observer=observer,
         registry=_runtime_registry(),
         current_binding_for=_runtime_binding_for,
         candidate_source=lambda: (malformed, valid),
+        **_w3c_dependencies(runtime),
     )
 
     receipts = _run(turn_runtime.reconcile_once())
@@ -477,12 +526,15 @@ def test_malformed_candidate_is_isolated_and_later_candidate_still_runs() -> Non
 def test_turn_loop_recovers_after_an_unexpected_pass_failure() -> None:
     runtime = _runtime_module()
     observer = _no_action_observer(runtime)
+    from tests.test_slack_agent_dialogue_runtime import _w3c_dependencies
+
     turn_runtime = runtime.AgentRelayTurnRuntime(
         observer=observer,
         registry=_runtime_registry(),
         current_binding_for=_runtime_binding_for,
         candidate_source=lambda: (),
         poll_interval_seconds=0.001,
+        **_w3c_dependencies(runtime),
     )
     calls = 0
     recovered = asyncio.Event()
@@ -510,41 +562,17 @@ def test_turn_loop_recovers_after_an_unexpected_pass_failure() -> None:
 
 
 @pytest.mark.parametrize(
-    ("owner", "expected_outcome", "expected_reason"),
+    ("register_exact", "expected_outcome", "expected_reason"),
     [
-        (
-            None,
-            "RECONCILIATION_INCOMPLETE",
-            "ACTIVE_WAITER_STATE_UNAVAILABLE",
-        ),
-        (
-            lambda _source_ref, _seat: (_ for _ in ()).throw(
-                RuntimeError("private lookup failure")
-            ),
-            "RECONCILIATION_INCOMPLETE",
-            "ACTIVE_WAITER_STATE_UNAVAILABLE",
-        ),
-        (
-            lambda _source_ref, _seat: "unknown",
-            "RECONCILIATION_INCOMPLETE",
-            "ACTIVE_WAITER_STATE_UNAVAILABLE",
-        ),
-        (
-            lambda _source_ref, _seat: False,
-            "NO_ACTION",
-            "NO_WAITER",
-        ),
-        (
-            lambda _source_ref, _seat: True,
-            "ACTIVE_WAITER_SUPPRESSED",
-            "EXACT_ACTIVE_WAITER",
-        ),
+        (False, "NO_ACTION", "NO_WAITER"),
+        (True, "ACTIVE_WAITER_SUPPRESSED", "EXACT_ACTIVE_WAITER"),
     ],
 )
-def test_active_waiter_evidence_never_defaults_missing_or_ambiguous_to_false(
+def test_active_waiter_lookup_uses_the_shared_exact_registry(
     monkeypatch,
     tmp_path,
-    owner,
+    relay_socket_root,
+    register_exact: bool,
     expected_outcome: str,
     expected_reason: str,
 ) -> None:
@@ -553,7 +581,7 @@ def test_active_waiter_evidence_never_defaults_missing_or_ambiguous_to_false(
 
     class Observer:
         async def reconcile_once(self, *, context, routing):
-            has_waiter = captured["has_active_waiter"]("source-ref", "ceo")
+            has_waiter = captured["has_active_waiter"]("source-ref", "coo")
             if has_waiter:
                 outcome = runtime.ObservationOutcome.ACTIVE_WAITER_SUPPRESSED
                 reason = "EXACT_ACTIVE_WAITER"
@@ -573,11 +601,21 @@ def test_active_waiter_evidence_never_defaults_missing_or_ambiguous_to_false(
         return Observer()
 
     monkeypatch.setattr(runtime, "compose_persisted_turn_observer", fake_compose)
-    socket_path = tmp_path / "agent-relay.sock"
+    socket_root = relay_socket_root
+    socket_path = socket_root / "agent-relay.sock"
     monkeypatch.setattr(runtime, "AGENT_RELAY_SOCKET_PATH", socket_path)
     service = runtime.build_service(
-        _config(runtime, tmp_path, _token_file(tmp_path / "token"))
+        _config(runtime, socket_root, _token_file(tmp_path / "token"))
     )
+    candidate = _w3c_candidate(runtime)
+    registration = None
+    if register_exact:
+        registration = service.engine_v2.active_waiter_registry.register(
+            runtime.ActiveWaiterKey.from_parent(
+                candidate.dialogue_parent,
+                target_seat="coo",
+            )
+        )
     turn_runtime = runtime.build_turn_runtime(
         service,
         registry=_runtime_registry(),
@@ -585,25 +623,255 @@ def test_active_waiter_evidence_never_defaults_missing_or_ambiguous_to_false(
         dispatchers=WakeDispatcherRegistry(),
         current_binding_for=_runtime_binding_for,
         retry_policy=_POLICY,
-        candidate_source=lambda: (_w3c_candidate(runtime),),
-        has_active_waiter=owner,
+        candidate_source=lambda: (candidate,),
+        terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
     )
+
+    with pytest.raises(runtime.ActiveWaiterStateUnavailable):
+        captured["has_active_waiter"]("source-ref", "coo")
 
     receipts = _run(turn_runtime.reconcile_once())
 
     assert len(receipts) == 1
     assert receipts[0].outcome.value == expected_outcome
     assert receipts[0].reason == expected_reason
-    assert "private lookup failure" not in repr(receipts)
+    if registration is not None:
+        assert service.engine_v2.active_waiter_registry.unregister(registration)
+
+
+def test_failing_shared_waiter_registry_holds_without_observer_escape(
+    monkeypatch,
+    tmp_path,
+    relay_socket_root,
+) -> None:
+    runtime = _runtime_module()
+    captured = {}
+
+    class Observer:
+        async def reconcile_once(self, *, context, routing):
+            captured["has_active_waiter"]("source-ref", "coo")
+            raise AssertionError("failing waiter lookup must interrupt observation")
+
+    def fake_compose(**kwargs):
+        captured["has_active_waiter"] = kwargs["has_active_waiter"]
+        return Observer()
+
+    monkeypatch.setattr(runtime, "compose_persisted_turn_observer", fake_compose)
+    socket_root = relay_socket_root
+    monkeypatch.setattr(
+        runtime,
+        "AGENT_RELAY_SOCKET_PATH",
+        socket_root / "relay.sock",
+    )
+    service = runtime.build_service(
+        _config(runtime, socket_root, _token_file(tmp_path / "token-failing"))
+    )
+    monkeypatch.setattr(
+        service.engine_v2.active_waiter_registry,
+        "is_active",
+        lambda _key: (_ for _ in ()).throw(RuntimeError("private failure")),
+    )
+    turn_runtime = runtime.build_turn_runtime(
+        service,
+        registry=_runtime_registry(),
+        repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger-failing")),
+        dispatchers=WakeDispatcherRegistry(),
+        current_binding_for=_runtime_binding_for,
+        retry_policy=_POLICY,
+        candidate_source=lambda: (_w3c_candidate(runtime),),
+        terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
+    )
+
+    receipt = _run(turn_runtime.reconcile_once())[0]
+
+    assert receipt.outcome.value == "RECONCILIATION_INCOMPLETE"
+    assert receipt.reason == "ACTIVE_WAITER_STATE_UNAVAILABLE"
+    assert "private failure" not in repr(receipt)
+
+
+def test_concurrent_candidate_tasks_keep_waiter_lookup_context_isolated(
+    monkeypatch,
+    tmp_path,
+    relay_socket_root,
+) -> None:
+    runtime = _runtime_module()
+    from tests.test_company_dialogue_runtime_binding import parent
+
+    captured = {}
+    ready = 0
+    both_ready: asyncio.Event | None = None
+
+    class Observer:
+        async def reconcile_once(self, *, context, routing):
+            nonlocal ready
+            ready += 1
+            assert both_ready is not None
+            if ready == 2:
+                both_ready.set()
+            await both_ready.wait()
+            active = captured["has_active_waiter"]("source-ref", "coo")
+            return runtime.ObservationReceipt(
+                outcome=(
+                    runtime.ObservationOutcome.ACTIVE_WAITER_SUPPRESSED
+                    if active
+                    else runtime.ObservationOutcome.NO_ACTION
+                ),
+                reason="EXACT_ACTIVE_WAITER" if active else "NO_WAITER",
+                decision=None,
+                obligation=None,
+                route=None,
+            )
+
+    def fake_compose(**kwargs):
+        captured["has_active_waiter"] = kwargs["has_active_waiter"]
+        return Observer()
+
+    monkeypatch.setattr(runtime, "compose_persisted_turn_observer", fake_compose)
+    monkeypatch.setattr(
+        runtime,
+        "AGENT_RELAY_SOCKET_PATH",
+        relay_socket_root / "relay.sock",
+    )
+    service = runtime.build_service(
+        _config(runtime, relay_socket_root, _token_file(tmp_path / "concurrent-token"))
+    )
+    candidate_a = _w3c_candidate(runtime)
+    parent_b = parent(
+        operation_key="exec-job-200-alt",
+        session_ref="asd-session-exec-job-201",
+    )
+    candidate_b = dataclasses.replace(
+        candidate_a,
+        delegation_identity=dataclasses.replace(
+            candidate_a.delegation_identity,
+            operation_key=parent_b["operation_key"],
+            session_ref=parent_b["session_ref"],
+        ),
+        dialogue_parent=parent_b,
+        current_worker=dataclasses.replace(
+            candidate_a.current_worker,
+            parent_fingerprint=parent_b["fingerprint"],
+        ),
+    )
+    registration = service.engine_v2.active_waiter_registry.register(
+        runtime.ActiveWaiterKey.from_parent(
+            candidate_a.dialogue_parent,
+            target_seat="coo",
+        )
+    )
+    turn_runtime = runtime.build_turn_runtime(
+        service,
+        registry=_runtime_registry(),
+        repository=WakeLedgerRepository(Runtime.at(tmp_path / "concurrent-ledger")),
+        dispatchers=WakeDispatcherRegistry(),
+        current_binding_for=_runtime_binding_for,
+        retry_policy=_POLICY,
+        candidate_source=lambda: (),
+        terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
+    )
+
+    async def scenario():
+        nonlocal both_ready
+        both_ready = asyncio.Event()
+        return await asyncio.gather(
+            turn_runtime._reconcile_candidate(candidate_a),
+            turn_runtime._reconcile_candidate(candidate_b),
+        )
+
+    first, second = _run(scenario())
+
+    assert first.outcome is ObservationOutcome.ACTIVE_WAITER_SUPPRESSED
+    assert second.outcome is ObservationOutcome.NO_ACTION
+    assert service.engine_v2.active_waiter_registry.unregister(registration)
+
+
+def test_terminal_r2_result_submits_once_and_restart_reuses_persisted_carrier(
+    tmp_path,
+) -> None:
+    runtime = _runtime_module()
+    from tests.test_company_dialogue_runtime_binding import runtime_binding
+    from tests.test_slack_agent_dialogue_runtime import _terminal_w3c_material
+    from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _registry as terminal_registry,
+    )
+
+    candidate, resolved, engine = _terminal_w3c_material(runtime)
+    registry = terminal_registry()
+    ceo = dataclasses.replace(
+        registry.targets["EXECUTIVE-CEO-A"],
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        target_enabled=True,
+    )
+    registry = dataclasses.replace(
+        registry,
+        production_armed=True,
+        targets={**registry.targets, "EXECUTIVE-CEO-A": ceo},
+    )
+    ceo_binding = _binding()
+
+    def current_binding_for(seat: str):
+        if seat == "ceo":
+            return ceo_binding
+        if seat == "coo":
+            return runtime_binding()
+        return None
+
+    class Resolver:
+        def resolve(self, actual):
+            assert actual == candidate.terminal_candidate
+            return resolved
+
+    repository = WakeLedgerRepository(Runtime.at(tmp_path / "terminal-ledger"))
+    dispatcher = _Dispatcher()
+
+    def build_runtime():
+        observer = compose_persisted_turn_observer(
+            policy=engine.policy,
+            client=engine.client,
+            registry=registry,
+            repository=repository,
+            dispatchers=WakeDispatcherRegistry(
+                {"codex-app-server": dispatcher}
+            ),
+            current_binding_for=lambda route: current_binding_for(
+                route.target_seat
+            ),
+            retry_policy=_POLICY,
+            binding_for=current_binding_for,
+            has_active_waiter=lambda _source_ref, _seat: False,
+            emitted_at=lambda: "2026-09-03T08:30:00Z",
+        )
+        from tests.test_slack_agent_dialogue_runtime import _w3c_dependencies
+
+        return runtime.AgentRelayTurnRuntime(
+            observer=observer,
+            registry=registry,
+            current_binding_for=current_binding_for,
+            candidate_source=lambda: (candidate,),
+            **_w3c_dependencies(
+                runtime,
+                engine=engine,
+                terminal_binding_resolver=Resolver(),
+            ),
+        )
+
+    first = _run(build_runtime().reconcile_once())[0]
+    second = _run(build_runtime().reconcile_once())[0]
+
+    assert first.outcome is ObservationOutcome.WAKE_SUBMITTED
+    assert second.outcome is ObservationOutcome.DUPLICATE_SUPPRESSED
+    assert dispatcher.nudge_calls == 1
 
 
 def test_turn_overlay_failure_does_not_cancel_the_af_unix_service(
     monkeypatch,
     tmp_path,
+    relay_socket_root,
 ) -> None:
     runtime = _runtime_module()
-    socket_root = tmp_path / "socket-root"
-    socket_root.mkdir()
+    socket_root = relay_socket_root
     os.chown(socket_root, os.geteuid(), os.getegid())
     socket_root.chmod(0o710)
     socket_path = socket_root / "agent-relay.sock"
@@ -659,11 +927,12 @@ def test_turn_overlay_failure_does_not_cancel_the_af_unix_service(
 def test_non_awaitable_overlay_is_refused_before_service_task_creation(
     monkeypatch,
     tmp_path,
+    relay_socket_root,
 ) -> None:
     runtime = _runtime_module()
-    socket_path = tmp_path / "agent-relay.sock"
+    socket_path = relay_socket_root / "agent-relay.sock"
     monkeypatch.setattr(runtime, "AGENT_RELAY_SOCKET_PATH", socket_path)
-    config = _config(runtime, tmp_path, _token_file(tmp_path / "token"))
+    config = _config(runtime, relay_socket_root, _token_file(tmp_path / "token"))
     service = runtime.build_service(config)
     monkeypatch.setattr(runtime, "build_service", lambda _config: service)
 

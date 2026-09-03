@@ -36,11 +36,14 @@ def compose_persisted_turn_observer(
     dispatchers: WakeDispatcherRegistry,
     current_binding_for: Callable[[WakeRoute], RuntimeBinding | None],
     retry_policy: WakeRetryPolicy,
+    has_active_waiter: Callable[[str, str], bool],
     binding_for: Callable[[str], RuntimeBinding | None] | None = None,
-    has_active_waiter: Callable[[str, str], bool] | None = None,
     emitted_at: Callable[[], str] = utc_now_iso,
 ) -> DialogueTurnObserver:
     """Compose one observer over the canonical persisted Wake carrier."""
+
+    if not callable(has_active_waiter):
+        raise TypeError("has_active_waiter must be callable")
 
     carrier = PersistedWakeCarrier(
         repository=repository,

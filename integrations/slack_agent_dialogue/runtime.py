@@ -20,12 +20,14 @@ import os
 import stat
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, Union
 
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
 from control_plane.executive_runtime import AttemptStatus
+from control_plane.executive_terminal_return import TerminalReturnCandidate
 from control_plane.session_targets import (
     RuntimeBinding,
     SessionTargetRegistry,
@@ -41,10 +43,21 @@ from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
     WorkerDialogueCaller,
     resolve_company_dialogue_binding,
 )
-from integrations.slack_agent_dialogue.engine import DialogueEngine, DialoguePolicy
+from integrations.slack_agent_dialogue.engine import (
+    DialogueEngine,
+    DialogueEngineError,
+    DialoguePolicy,
+)
 from integrations.slack_agent_dialogue.engine_v2 import (
     DialogueContextV2,
     DialogueEngineV2,
+)
+from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
+    ResolvedTerminalReturnBinding,
+    RuntimeTerminalReturnBindingResolver,
+    TerminalReturnBindingResolver,
+    TerminalReturnProjectionReceipt,
+    _build_message as build_terminal_result_message,
 )
 from integrations.slack_agent_dialogue.service import (
     AgentDialogueService,
@@ -62,9 +75,12 @@ from integrations.slack_agent_dialogue.turn_observer import (
 )
 from integrations.slack_agent_dialogue.turn_routing_facts import (
     TurnRoutingFactsError,
+    resolve_terminal_turn_routing_facts,
     resolve_turn_routing_facts,
 )
 from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+    ActiveWaiterKey,
+    ActiveWaiterRegistry,
     AsyncCandidateCollector,
     CandidateCollectionBusy,
     CandidateCollectionOverflow,
@@ -107,6 +123,13 @@ class ActiveWaiterStateUnavailable(RuntimeError):
     def __init__(self) -> None:
         super().__init__("ACTIVE_WAITER_STATE_UNAVAILABLE")
         self.code = "ACTIVE_WAITER_STATE_UNAVAILABLE"
+
+
+@dataclass(frozen=True, slots=True)
+class _ActiveWaiterLookupContext:
+    parent_fingerprint: str
+    operation_key: str
+    session_ref: str
 
 
 class PrivateRelayAuthorityPolicy:
@@ -191,9 +214,9 @@ class RelayTurnCandidate:
     :class:`AgentRelayTurnRuntime`; callers cannot author parallel identity
     or routing facts.
 
-    A completed Attempt is not silently treated as a current worker. Terminal
-    read-time observation requires a separate accepted post-time binding owner,
-    which is not present in this production-disarmed source slice.
+    A completed Attempt is never silently treated as a current BUSY worker.
+    Its optional evidence group must contain both protected R2 objects and is
+    independently revalidated by a trusted Runtime resolver before observation.
     """
 
     delegation_identity: ExecutiveDelegationIdentity
@@ -201,6 +224,8 @@ class RelayTurnCandidate:
     thread_ts: str
     current_worker: CurrentWorkerDialogueSnapshot | None
     actor: WorkerDialogueCaller
+    terminal_candidate: TerminalReturnCandidate | None = None
+    terminal_projection_receipt: TerminalReturnProjectionReceipt | None = None
 
 
 _CandidateSource = Callable[
@@ -295,6 +320,12 @@ class AgentRelayTurnRuntime:
         candidate_collection_timeout_seconds: float = (
             DEFAULT_TURN_CANDIDATE_COLLECTION_TIMEOUT_SECONDS
         ),
+        active_waiter_registry: ActiveWaiterRegistry | None = None,
+        active_waiter_context: ContextVar[
+            _ActiveWaiterLookupContext | None
+        ] | None = None,
+        dialogue_engine_v2: DialogueEngineV2 | None = None,
+        terminal_binding_resolver: TerminalReturnBindingResolver | None = None,
     ) -> None:
         if not hasattr(observer, "reconcile_once"):
             raise TypeError("observer must expose reconcile_once")
@@ -331,6 +362,23 @@ class AgentRelayTurnRuntime:
             timeout_seconds=candidate_collection_timeout_seconds,
         )
         self._poll_interval_seconds = float(poll_interval_seconds)
+        if (
+            not isinstance(active_waiter_registry, ActiveWaiterRegistry)
+            or not isinstance(active_waiter_context, ContextVar)
+            or not isinstance(dialogue_engine_v2, DialogueEngineV2)
+            or dialogue_engine_v2.active_waiter_registry
+            is not active_waiter_registry
+            or not callable(getattr(terminal_binding_resolver, "resolve", None))
+        ):
+            # AgentRelayTurnRuntime *is* the enabled W3C overlay.  Unlike an
+            # ordinary standalone DialogueEngineV2 it has no compatibility
+            # mode without the exact process-local waiter owner and terminal
+            # authority seam.
+            raise RelayRuntimeError("RUNTIME_INVALID")
+        self.active_waiter_registry = active_waiter_registry
+        self._active_waiter_context = active_waiter_context
+        self._dialogue_engine_v2 = dialogue_engine_v2
+        self._terminal_binding_resolver = terminal_binding_resolver
 
     @staticmethod
     def _receipt(
@@ -344,6 +392,46 @@ class AgentRelayTurnRuntime:
             obligation=None,
             route=None,
         )
+
+    async def _observe(
+        self,
+        *,
+        context: DialogueContextV2,
+        routing: object,
+    ) -> ObservationReceipt:
+        scope = self._active_waiter_context
+        engine = self._dialogue_engine_v2
+        active_waiters = self.active_waiter_registry
+        if (
+            not isinstance(scope, ContextVar)
+            or not isinstance(engine, DialogueEngineV2)
+            or not isinstance(active_waiters, ActiveWaiterRegistry)
+            or engine.active_waiter_registry is not active_waiters
+        ):
+            raise ActiveWaiterStateUnavailable()
+        try:
+            parent_fingerprint = routing.bound_commission_fingerprint
+        except AttributeError:
+            raise ActiveWaiterStateUnavailable() from None
+        if not isinstance(parent_fingerprint, str) or not parent_fingerprint:
+            raise ActiveWaiterStateUnavailable()
+        token = scope.set(
+            _ActiveWaiterLookupContext(
+                # Routing is the immutable accepted owner projection.  The
+                # candidate mapping remains untrusted and may be mutable while
+                # terminal Slack verification awaits transport reads.
+                parent_fingerprint=parent_fingerprint,
+                operation_key=context.operation_key,
+                session_ref=context.session_ref,
+            )
+        )
+        try:
+            return await self.observer.reconcile_once(
+                context=context,
+                routing=routing,
+            )
+        finally:
+            scope.reset(token)
 
     @staticmethod
     def _context_from_binding(binding: object) -> DialogueContextV2:
@@ -362,6 +450,144 @@ class AgentRelayTurnRuntime:
         except (AttributeError, TypeError, ValueError):
             raise TurnRoutingFactsError("DIALOGUE_BINDING_MISMATCH") from None
 
+    async def _reconcile_terminal_candidate(
+        self,
+        candidate: RelayTurnCandidate,
+    ) -> ObservationReceipt:
+        current_worker = candidate.current_worker
+        terminal = candidate.terminal_candidate
+        receipt = candidate.terminal_projection_receipt
+        resolver = self._terminal_binding_resolver
+        engine = self._dialogue_engine_v2
+        if (
+            type(current_worker) is not CurrentWorkerDialogueSnapshot
+            or type(terminal) is not TerminalReturnCandidate
+            or type(receipt) is not TerminalReturnProjectionReceipt
+            or resolver is None
+            or engine is None
+        ):
+            return self._receipt(
+                ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
+            )
+        try:
+            resolved = resolver.resolve(terminal)
+        except Exception:
+            return self._receipt(
+                ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
+            )
+        if type(resolved) is not ResolvedTerminalReturnBinding:
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TERMINAL_RESULT_BINDING_MISMATCH",
+            )
+
+        try:
+            context = self._context_from_binding(resolved)
+            expected_message = build_terminal_result_message(
+                terminal,
+                context.normalized(),
+            )
+            if (
+                receipt.message_key != expected_message["message_key"]
+                or receipt.fingerprint != expected_message["fingerprint"]
+                or receipt.parent_author_user_id
+                != engine.policy.relay_bot_user_id
+            ):
+                raise TurnRoutingFactsError(
+                    "TERMINAL_RESULT_RECEIPT_MISMATCH"
+                )
+            routing = resolve_terminal_turn_routing_facts(
+                delegation_identity=candidate.delegation_identity,
+                dialogue_parent=candidate.dialogue_parent,
+                thread_ts=candidate.thread_ts,
+                current_worker=current_worker,
+                terminal_candidate=terminal,
+                projection_receipt=receipt,
+                resolved_binding=resolved,
+                registry=self.registry,
+                current_binding_for=self._current_binding_for,
+            )
+        except TurnRoutingFactsError as exc:
+            return self._receipt(ObservationOutcome.REFUSED, exc.code)
+        except Exception:
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TERMINAL_RESULT_BINDING_MISMATCH",
+            )
+
+        try:
+            bound = await engine.bind_or_verify_relay_parent_thread(context)
+            if (
+                bound.thread_ts != candidate.thread_ts
+                or bound.thread_ts != receipt.thread_ts
+                or bound.parent_fingerprint != receipt.parent_fingerprint
+                or bound.parent_fingerprint
+                != candidate.dialogue_parent["fingerprint"]
+                or bound.parent_author_user_id != receipt.parent_author_user_id
+                or bound.parent_author_user_id != engine.policy.relay_bot_user_id
+            ):
+                raise ValueError("receipt does not bind canonical parent")
+            physical = await engine.read_thread(
+                thread_ts=candidate.thread_ts,
+                context=context,
+            )
+            matches = [
+                item
+                for item in physical.messages
+                if item.message["message_key"] == receipt.message_key
+            ]
+            if len(matches) != 1:
+                raise ValueError("terminal result is absent or ambiguous")
+            observed = matches[0]
+            if (
+                dict(observed.message) != expected_message
+                or observed.primary_ts != receipt.message_ts
+                or observed.duplicate_timestamps != receipt.duplicate_timestamps
+            ):
+                raise ValueError("physical terminal result drifted")
+        except DialogueEngineError as exc:
+            if exc.code in {
+                "TRANSPORT_UNAVAILABLE",
+                "THREAD_HISTORY_INCOMPLETE",
+                "THREAD_RECONCILIATION_INCOMPLETE",
+            }:
+                return self._receipt(
+                    ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                    "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
+                )
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TERMINAL_RESULT_RECEIPT_MISMATCH",
+            )
+        except (KeyError, TypeError, ValueError):
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TERMINAL_RESULT_RECEIPT_MISMATCH",
+            )
+        except Exception:
+            return self._receipt(
+                ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
+            )
+
+        try:
+            return await self._observe(
+                context=context,
+                routing=routing,
+            )
+        except ActiveWaiterStateUnavailable:
+            return self._receipt(
+                ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                "ACTIVE_WAITER_STATE_UNAVAILABLE",
+            )
+        except Exception:
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TURN_OBSERVER_UNAVAILABLE",
+            )
+
     async def _reconcile_candidate_inner(
         self,
         candidate: object,
@@ -373,13 +599,32 @@ class AgentRelayTurnRuntime:
             )
 
         current_worker = candidate.current_worker
+        terminal_evidence_count = sum(
+            value is not None
+            for value in (
+                candidate.terminal_candidate,
+                candidate.terminal_projection_receipt,
+            )
+        )
+        if terminal_evidence_count == 1:
+            return self._receipt(
+                ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
+            )
         if (
             isinstance(current_worker, CurrentWorkerDialogueSnapshot)
             and current_worker.attempt_status is AttemptStatus.COMPLETED
         ):
+            if terminal_evidence_count == 2:
+                return await self._reconcile_terminal_candidate(candidate)
             return self._receipt(
                 ObservationOutcome.RECONCILIATION_INCOMPLETE,
                 "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
+            )
+        if terminal_evidence_count:
+            return self._receipt(
+                ObservationOutcome.REFUSED,
+                "TURN_CANDIDATE_MODE_CONFLICT",
             )
 
         resolution = resolve_company_dialogue_binding(
@@ -415,7 +660,7 @@ class AgentRelayTurnRuntime:
             )
 
         try:
-            return await self.observer.reconcile_once(
+            return await self._observe(
                 context=context,
                 routing=routing,
             )
@@ -572,6 +817,7 @@ def build_service(
         allowed_parent_user_ids=config.allowed_parent_user_ids,
     )
     authority = PrivateRelayAuthorityPolicy()
+    active_waiters = ActiveWaiterRegistry()
     return AgentDialogueService(
         ServiceConfig(
             socket_path=config.socket_path,
@@ -581,7 +827,12 @@ def build_service(
             socket_group_gid=os.getegid(),
         ),
         DialogueEngine(policy, client, authority_policy=authority),
-        engine_v2=DialogueEngineV2(policy, client, authority_policy=authority),
+        engine_v2=DialogueEngineV2(
+            policy,
+            client,
+            authority_policy=authority,
+            active_waiter_registry=active_waiters,
+        ),
     )
 
 
@@ -594,7 +845,7 @@ def build_turn_runtime(
     current_binding_for: Callable[[str], RuntimeBinding | None],
     retry_policy: WakeRetryPolicy,
     candidate_source: _CandidateSource,
-    has_active_waiter: Callable[[str, str], bool] | None = None,
+    terminal_binding_resolver: RuntimeTerminalReturnBindingResolver,
     emitted_at: Callable[[], str] = utc_now_iso,
     poll_interval_seconds: float = 1.0,
     max_candidates_per_pass: int = DEFAULT_MAX_TURN_CANDIDATES_PER_PASS,
@@ -608,17 +859,36 @@ def build_turn_runtime(
         raise TypeError("service must be AgentDialogueService")
     if service.engine_v2 is None or service.engine.client is not service.engine_v2.client:
         raise RelayRuntimeError("RUNTIME_INVALID")
-    if has_active_waiter is not None and not callable(has_active_waiter):
+    active_waiters = service.engine_v2.active_waiter_registry
+    if not isinstance(active_waiters, ActiveWaiterRegistry):
         raise RelayRuntimeError("RUNTIME_INVALID")
+    if not isinstance(
+        terminal_binding_resolver,
+        RuntimeTerminalReturnBindingResolver,
+    ):
+        raise RelayRuntimeError("RUNTIME_INVALID")
+    waiter_context: ContextVar[_ActiveWaiterLookupContext | None] = ContextVar(
+        f"agent_relay_waiter_context_{id(service):x}",
+        default=None,
+    )
 
     def current_for_route(route: WakeRoute) -> RuntimeBinding | None:
         return current_binding_for(route.target_seat)
 
     def exact_active_waiter(source_ref: str, target_seat: str) -> bool:
-        if has_active_waiter is None:
+        if not isinstance(source_ref, str) or not source_ref:
             raise ActiveWaiterStateUnavailable()
         try:
-            observed = has_active_waiter(source_ref, target_seat)
+            scope = waiter_context.get()
+            if scope is None:
+                raise ActiveWaiterStateUnavailable()
+            key = ActiveWaiterKey(
+                parent_fingerprint=scope.parent_fingerprint,
+                operation_key=scope.operation_key,
+                session_ref_canonical=scope.session_ref,
+                target_seat=target_seat,
+            )
+            observed = active_waiters.is_active(key)
         except Exception:
             raise ActiveWaiterStateUnavailable() from None
         if type(observed) is not bool:
@@ -645,6 +915,10 @@ def build_turn_runtime(
         poll_interval_seconds=poll_interval_seconds,
         max_candidates_per_pass=max_candidates_per_pass,
         candidate_collection_timeout_seconds=candidate_collection_timeout_seconds,
+        active_waiter_registry=active_waiters,
+        active_waiter_context=waiter_context,
+        dialogue_engine_v2=service.engine_v2,
+        terminal_binding_resolver=terminal_binding_resolver,
     )
 
 

@@ -23,6 +23,7 @@ from integrations.slack_agent_dialogue.contract import (
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_DISCRIMINATOR_V2,
     PARENT_DISCRIMINATOR_V2,
+    _MESSAGE_KEY_RE as MESSAGE_KEY_RE_V2,
     build_parent_v2,
     parse_message_frame_v2,
     parse_parent_frame_v2,
@@ -45,6 +46,10 @@ from integrations.slack_agent_dialogue.engine import (
     SlackMessage,
     SlackTransportUnavailable,
     ThreadRead,
+)
+from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+    ActiveWaiterKey,
+    ActiveWaiterRegistry,
 )
 
 _CONTEXT_PROBE_SOL = "U00000000"
@@ -318,6 +323,21 @@ def _reply_direction_is_valid(
     return False
 
 
+def _waiter_target_seat(actor_ref: Mapping[str, Any]) -> str:
+    """Derive the post-reply Wake recipient from one validated request actor."""
+
+    if actor_ref["kind"] == "worker_attempt":
+        return "coo"
+    if actor_ref["kind"] == "executive_surface":
+        if actor_ref["seat"] == "coo":
+            return "coo"
+        if actor_ref["seat"] == "ceo":
+            # A CEO request has only the accepted CEO -> Chairman reply
+            # direction, so the corresponding blocked requester is the CEO.
+            return "ceo"
+    raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+
+
 def _adjudicate_ruling_v2(
     request: Mapping[str, Any],
     reply: Mapping[str, Any],
@@ -480,17 +500,29 @@ class DialogueEngineV2:
         *,
         authority_policy: TrustedAuthorityPolicy,
         sleep: Any = asyncio.sleep,
+        active_waiter_registry: ActiveWaiterRegistry | None = None,
     ) -> None:
+        if active_waiter_registry is not None and not isinstance(
+            active_waiter_registry, ActiveWaiterRegistry
+        ):
+            raise TypeError("active_waiter_registry must be ActiveWaiterRegistry")
         self.policy = policy
         self.client = client
         self.authority_policy = authority_policy
         self._sleep = sleep
+        self._active_waiter_registry = active_waiter_registry
         self._ensure_registry_lock = asyncio.Lock()
         self._ensure_write_lock = asyncio.Lock()
         self._ensure_barrier_generation = 0
         self._ensure_inflight: dict[tuple[str | None, ...], _EnsureFlight] = {}
         self._send_registry_lock = asyncio.Lock()
         self._send_inflight: dict[tuple[str, str], _SendFlight] = {}
+
+    @property
+    def active_waiter_registry(self) -> ActiveWaiterRegistry | None:
+        """Return the injected process-local owner without creating a fallback."""
+
+        return self._active_waiter_registry
 
     async def _parent_history(self) -> HistoryPage:
         try:
@@ -1154,7 +1186,9 @@ class DialogueEngineV2:
     ) -> dict[str, Any]:
         expected = tuple(expected_types)
         if (
-            not expected
+            not isinstance(request_message_key, str)
+            or MESSAGE_KEY_RE_V2.fullmatch(request_message_key) is None
+            or not expected
             or len(expected) != len(set(expected))
             or any(message_type not in SOL_MESSAGE_TYPES for message_type in expected)
         ):
@@ -1164,46 +1198,65 @@ class DialogueEngineV2:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
 
         normalized = context.normalized()
-        for index in range(attempts):
-            read = await self._history(thread_ts=thread_ts, context=context)
-            request_matches = [
-                item
-                for item in read.messages
-                if item.message["message_key"] == request_message_key
-                and item.message["message_type"] in FABLE_MESSAGE_TYPES
-                and item.message["actor_ref"] == normalized["actor_ref"]
-            ]
-            if len(request_matches) != 1:
-                raise DialogueEngineError("REPLY_NOT_FOUND")
-            request = request_matches[0].message
-            request_ts = _ts_order(request_matches[0].primary_ts)
-            replies = [
-                item
-                for item in read.messages
-                if item.message["reply_to_message_key"] == request_message_key
-                and item.message["message_type"] in expected
-                and _ts_order(item.primary_ts) > request_ts
-            ]
-            if len(replies) > 1:
-                raise DialogueEngineError("REPLY_AMBIGUOUS")
-            if len(replies) == 1:
-                reply = replies[0]
-                authority = _adjudicate_reply_v2(
-                    request,
-                    reply.message,
-                    authority_policy=self.authority_policy,
-                )
-                return {
-                    "reply": dict(reply.message),
-                    "transport": {
-                        "primary_ts": reply.primary_ts,
-                        "duplicate_timestamps": list(reply.duplicate_timestamps),
-                    },
-                    "authority": authority,
-                }
-            if index + 1 < attempts:
-                await self._sleep(self.policy.poll_interval_seconds)
-        raise DialogueEngineError("WAIT_TIMEOUT")
+
+        async def poll() -> dict[str, Any]:
+            for index in range(attempts):
+                read = await self._history(thread_ts=thread_ts, context=context)
+                request_matches = [
+                    item
+                    for item in read.messages
+                    if item.message["message_key"] == request_message_key
+                    and item.message["message_type"] in FABLE_MESSAGE_TYPES
+                    and item.message["actor_ref"] == normalized["actor_ref"]
+                ]
+                if len(request_matches) != 1:
+                    raise DialogueEngineError("REPLY_NOT_FOUND")
+                request = request_matches[0].message
+                request_ts = _ts_order(request_matches[0].primary_ts)
+                replies = [
+                    item
+                    for item in read.messages
+                    if item.message["reply_to_message_key"] == request_message_key
+                    and item.message["message_type"] in expected
+                    and _ts_order(item.primary_ts) > request_ts
+                ]
+                if len(replies) > 1:
+                    raise DialogueEngineError("REPLY_AMBIGUOUS")
+                if len(replies) == 1:
+                    reply = replies[0]
+                    authority = _adjudicate_reply_v2(
+                        request,
+                        reply.message,
+                        authority_policy=self.authority_policy,
+                    )
+                    return {
+                        "reply": dict(reply.message),
+                        "transport": {
+                            "primary_ts": reply.primary_ts,
+                            "duplicate_timestamps": list(reply.duplicate_timestamps),
+                        },
+                        "authority": authority,
+                    }
+                if index + 1 < attempts:
+                    await self._sleep(self.policy.poll_interval_seconds)
+            raise DialogueEngineError("WAIT_TIMEOUT")
+
+        registry = self._active_waiter_registry
+        if registry is None:
+            return await poll()
+
+        target_seat = _waiter_target_seat(normalized["actor_ref"])
+        bound = await self.bind_or_verify_thread(context)
+        if bound.thread_ts != thread_ts:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        key = ActiveWaiterKey(
+            parent_fingerprint=bound.parent_fingerprint,
+            operation_key=normalized["operation_key"],
+            session_ref_canonical=normalized["session_ref"],
+            target_seat=target_seat,
+        )
+        async with registry.hold(key):
+            return await poll()
 
     def status(self) -> dict[str, Any]:
         return {

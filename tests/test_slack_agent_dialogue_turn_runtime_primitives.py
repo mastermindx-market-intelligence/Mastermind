@@ -21,7 +21,7 @@ def _key(*, fingerprint: str = "a" * 64, operation_key: str = "w3c-op"):
     return primitives.ActiveWaiterKey(
         parent_fingerprint=fingerprint,
         operation_key=operation_key,
-        session_ref_canonical='{"kind":"codex","session_id":"session-1"}',
+        session_ref_canonical="asd-session-exec-job-200",
         target_seat="ceo",
     )
 
@@ -72,19 +72,79 @@ def test_waiter_registry_restart_is_empty_and_hold_cleans_up() -> None:
     asyncio.run(scenario())
 
 
+def test_waiter_registry_never_reissues_a_process_lifetime_token() -> None:
+    registry = primitives.ActiveWaiterRegistry(token_factory=lambda: "u" * 24)
+    key = _key(operation_key="token-reuse-op")
+    first = registry.register(key)
+    assert registry.unregister(first) is True
+
+    second = registry.register(key)
+    assert second.token != first.token
+    assert registry.unregister(first) is False
+    assert registry.is_active(key) is True
+    assert registry.unregister(second) is True
+    assert registry.active_count == 0
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"parent_fingerprint": "b" * 64},
+        {"operation_key": "w3c-other-op"},
+        {"session_ref_canonical": "asd-session-exec-job-201"},
+        {"target_seat": "coo"},
+    ],
+)
+def test_waiter_registry_identity_includes_every_frozen_key_component(changed) -> None:
+    exact = _key()
+    different = primitives.ActiveWaiterKey(
+        parent_fingerprint=changed.get(
+            "parent_fingerprint", exact.parent_fingerprint
+        ),
+        operation_key=changed.get("operation_key", exact.operation_key),
+        session_ref_canonical=changed.get(
+            "session_ref_canonical", exact.session_ref_canonical
+        ),
+        target_seat=changed.get("target_seat", exact.target_seat),
+    )
+    registry = primitives.ActiveWaiterRegistry(token_factory=lambda: "e" * 24)
+    registration = registry.register(exact)
+
+    assert registry.is_active(exact) is True
+    assert registry.is_active(different) is False
+    assert registry.unregister(registration) is True
+
+
+def test_waiter_key_accepts_actual_v2_session_ref_from_validated_parent() -> None:
+    from tests.test_company_dialogue_runtime_binding import parent
+
+    exact_parent = parent()
+    key = primitives.ActiveWaiterKey.from_parent(
+        exact_parent,
+        target_seat="ceo",
+    )
+
+    assert key == primitives.ActiveWaiterKey(
+        parent_fingerprint=exact_parent["fingerprint"],
+        operation_key=exact_parent["operation_key"],
+        session_ref_canonical=exact_parent["session_ref"],
+        target_seat="ceo",
+    )
+
+
 def test_waiter_key_rejects_noncanonical_or_incomplete_identity() -> None:
     with pytest.raises(primitives.TurnRuntimePrimitiveError, match="WAITER_KEY_INVALID"):
         primitives.ActiveWaiterKey(
             parent_fingerprint="not-a-fingerprint",
             operation_key="w3c-op",
-            session_ref_canonical='{"kind":"codex"}',
+            session_ref_canonical="asd-session-exec-job-200",
             target_seat="ceo",
         )
     with pytest.raises(primitives.TurnRuntimePrimitiveError, match="WAITER_KEY_INVALID"):
         primitives.ActiveWaiterKey(
             parent_fingerprint="a" * 64,
             operation_key="w3c-op",
-            session_ref_canonical='{"session_id":"session-1", "kind":"codex"}',
+            session_ref_canonical="not a session ref",
             target_seat="ceo",
         )
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import math
 import re
 import secrets
@@ -22,6 +21,7 @@ _T = TypeVar("_T")
 _FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{1,255}$")
 _WAITER_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,256}$")
+_SESSION_REF_RE = re.compile(r"\Aasd-session-[a-z0-9][a-z0-9-]{7,63}\Z")
 
 
 class TurnRuntimePrimitiveError(RuntimeError):
@@ -57,22 +57,6 @@ class CandidateCollectionOverflow(TurnRuntimePrimitiveError):
         super().__init__("CANDIDATE_COLLECTION_OVERFLOW")
 
 
-def _canonical_json(value: Any) -> str:
-    try:
-        encoded = json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-    except (TypeError, ValueError, UnicodeError) as exc:
-        raise TurnRuntimePrimitiveError("WAITER_KEY_INVALID") from exc
-    if not encoded or len(encoded.encode("utf-8")) > 16_384:
-        raise TurnRuntimePrimitiveError("WAITER_KEY_INVALID")
-    return encoded
-
-
 def _token(value: Any, *, code: str) -> str:
     if not isinstance(value, str) or _TOKEN_RE.fullmatch(value) is None:
         raise TurnRuntimePrimitiveError(code)
@@ -96,13 +80,10 @@ class ActiveWaiterKey:
             raise TurnRuntimePrimitiveError("WAITER_KEY_INVALID")
         _token(self.operation_key, code="WAITER_KEY_INVALID")
         _token(self.target_seat, code="WAITER_KEY_INVALID")
-        try:
-            decoded = json.loads(self.session_ref_canonical)
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise TurnRuntimePrimitiveError("WAITER_KEY_INVALID") from exc
-        if not isinstance(decoded, Mapping):
-            raise TurnRuntimePrimitiveError("WAITER_KEY_INVALID")
-        if _canonical_json(decoded) != self.session_ref_canonical:
+        if (
+            not isinstance(self.session_ref_canonical, str)
+            or _SESSION_REF_RE.fullmatch(self.session_ref_canonical) is None
+        ):
             raise TurnRuntimePrimitiveError("WAITER_KEY_INVALID")
 
     @classmethod
@@ -117,7 +98,7 @@ class ActiveWaiterKey:
         return cls(
             parent_fingerprint=parent.get("fingerprint"),
             operation_key=parent.get("operation_key"),
-            session_ref_canonical=_canonical_json(parent.get("session_ref")),
+            session_ref_canonical=parent.get("session_ref"),
             target_seat=target_seat,
         )
 
@@ -143,6 +124,7 @@ class ActiveWaiterRegistry:
     def __init__(self, *, token_factory: Callable[[], str] | None = None) -> None:
         self._tokens: dict[ActiveWaiterKey, str] = {}
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(24))
+        self._generation = 0
 
     def register(self, key: ActiveWaiterKey) -> ActiveWaiterRegistration:
         if not isinstance(key, ActiveWaiterKey):
@@ -150,12 +132,27 @@ class ActiveWaiterRegistry:
         if key in self._tokens:
             raise ActiveWaiterConflict()
         try:
-            token = self._token_factory()
-        except Exception as exc:
-            raise TurnRuntimePrimitiveError("WAITER_TOKEN_UNAVAILABLE") from exc
+            material = self._token_factory()
+        except Exception:
+            raise TurnRuntimePrimitiveError("WAITER_TOKEN_UNAVAILABLE") from None
+        if (
+            type(material) is not str
+            or _WAITER_TOKEN_RE.fullmatch(material) is None
+        ):
+            raise TurnRuntimePrimitiveError("WAITER_REGISTRATION_INVALID")
+        generation = self._generation + 1
+        suffix = f"-{generation:x}"
+        if len(suffix) >= 256:
+            raise TurnRuntimePrimitiveError("WAITER_TOKEN_UNAVAILABLE")
+        # The monotonic suffix makes each process-lifetime registration unique
+        # even under a deterministic or colliding entropy source.  It avoids
+        # retaining an unbounded graveyard of old tokens while making stale
+        # compare-delete registrations permanently inert.
+        token = f"{material[: 256 - len(suffix)]}{suffix}"
         registration = ActiveWaiterRegistration(key=key, token=token)
         if token in self._tokens.values():
             raise TurnRuntimePrimitiveError("WAITER_TOKEN_CONFLICT")
+        self._generation = generation
         self._tokens[key] = token
         return registration
 
