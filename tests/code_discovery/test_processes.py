@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import hashlib
 import json
 import os
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import pytest
 
+from experiments.code_discovery import processes as processes_module
 from experiments.code_discovery.index_manifest import (
     load_index_manifest,
     source_tree_digest,
@@ -86,7 +89,8 @@ def _manifest(tmp_path: Path) -> object:
 def _script(
     path: Path, body: str, *, role: str = "zoekt-git-index"
 ) -> ExecutableSpec:
-    path.write_text("#!/usr/bin/env python3\n" + body)
+    interpreter = Path(sys.executable).resolve()
+    path.write_text(f"#!{interpreter}\n" + body)
     path.chmod(0o700)
     return ExecutableSpec(
         path=path,
@@ -144,6 +148,13 @@ def _process_set(
         log_root=tmp_path / f"disposable-logs{suffix}",
         startup_timeout_seconds=2.0,
     )
+
+
+def test_test_executables_bind_the_exact_interpreter(tmp_path: Path) -> None:
+    executable = _script(tmp_path / "exact-python", "pass\n")
+    first_line = executable.path.read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == f"#!{Path(sys.executable).resolve()}"
+    assert "/usr/bin/env" not in first_line
 
 
 def test_executable_spec_refuses_path_lookup_symlinks_and_mutable_binaries(
@@ -338,6 +349,147 @@ def test_tampered_logical_shard_receipt_refuses_serving(tmp_path: Path) -> None:
     processes.close()
 
 
+def test_first_bind_collision_is_cleaned_and_second_attempt_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-argv.txt"
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+    processes.build_indexes(manifest)
+
+    occupant = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    occupant.bind(("127.0.0.1", 0))
+    occupant.listen()
+    occupied_port = int(occupant.getsockname()[1])
+    real_reserve = processes_module._reserve_loopback_port
+    ports = iter((occupied_port, real_reserve()))
+    reservations = 0
+
+    def selected_port() -> int:
+        nonlocal reservations
+        reservations += 1
+        return next(ports)
+
+    monkeypatch.setattr(processes_module, "_reserve_loopback_port", selected_port)
+    try:
+        endpoint = processes.start_search()
+        assert endpoint.port != occupied_port
+        assert reservations == 2
+        receipts = processes.startup_attempt_receipts
+        assert [receipt.category for receipt in receipts] == [
+            "BIND_COLLISION",
+            "STARTED",
+        ]
+        failed = receipts[0]
+        assert failed.attempt == 1
+        assert failed.return_code not in (None, 0)
+        assert failed.endpoint_disposition == "EXTERNAL_OCCUPIED"
+        assert failed.cleanup_complete is True
+        assert failed.diagnostics_truncated is False
+        assert len(failed.diagnostics_sha256) == 64
+        assert not (tmp_path / "disposable-logs" / "startup-1").exists()
+        assert (tmp_path / "disposable-logs" / "startup-2").is_dir()
+    finally:
+        occupant.close()
+        processes.close()
+
+
+def test_non_bind_exit_is_not_retried_and_public_diagnostics_do_not_echo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-argv.txt"
+    message = b"token=never-echo /Users/private/secret\n"
+    server = _script(
+        tmp_path / "failing-webserver",
+        "import sys\n"
+        f"sys.stderr.buffer.write({message!r})\n"
+        "sys.stderr.flush()\n"
+        "raise SystemExit(7)\n",
+        role="zoekt-webserver",
+    )
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        server,
+    )
+    processes.build_indexes(manifest)
+    reservations = 0
+    real_reserve = processes_module._reserve_loopback_port
+
+    def counted_port() -> int:
+        nonlocal reservations
+        reservations += 1
+        return real_reserve()
+
+    monkeypatch.setattr(processes_module, "_reserve_loopback_port", counted_port)
+    with pytest.raises(ZoektProcessExited, match="ZOEKT_PROCESS_EXITED"):
+        processes.start_search()
+
+    assert reservations == 1
+    receipt = processes.startup_attempt_receipts[0]
+    assert receipt.category == "PROCESS_EXITED"
+    assert receipt.return_code == 7
+    assert receipt.stdout_bytes == 0
+    assert receipt.stderr_bytes == len(message)
+    assert receipt.diagnostics_truncated is False
+    expected_digest = hashlib.sha256(
+        b"stdout\0\0stderr\0" + message
+    ).hexdigest()
+    assert receipt.diagnostics_sha256 == expected_digest
+    assert receipt.endpoint_disposition == "RELEASED"
+    assert receipt.cleanup_complete is True
+    rendered = json.dumps(asdict(receipt), sort_keys=True)
+    assert "never-echo" not in rendered
+    assert "/Users/" not in rendered
+    assert "token" not in rendered.lower()
+    assert not (tmp_path / "disposable-shards").exists()
+    assert not (tmp_path / "disposable-logs").exists()
+
+
+def test_output_overflow_is_terminal_and_dominates_bind_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-argv.txt"
+    server = _script(
+        tmp_path / "overflow-webserver",
+        "import sys, time\n"
+        "sys.stderr.write('address already in use ' + ('x' * (65 * 1024)))\n"
+        "sys.stderr.flush()\n"
+        "time.sleep(2)\n",
+        role="zoekt-webserver",
+    )
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        server,
+    )
+    processes.build_indexes(manifest)
+    reservations = 0
+    real_reserve = processes_module._reserve_loopback_port
+
+    def counted_port() -> int:
+        nonlocal reservations
+        reservations += 1
+        return real_reserve()
+
+    monkeypatch.setattr(processes_module, "_reserve_loopback_port", counted_port)
+    with pytest.raises(ProcessOutputOverflow):
+        processes.start_search()
+
+    assert reservations == 1
+    receipt = processes.startup_attempt_receipts[0]
+    assert receipt.category == "OUTPUT_OVERFLOW"
+    assert receipt.diagnostics_truncated is True
+    assert receipt.cleanup_complete is True
+    assert receipt.endpoint_disposition == "RELEASED"
+
+
 def test_bounded_output_and_search_process_exit_are_typed_and_cleanup_is_idempotent(
     tmp_path: Path,
 ) -> None:
@@ -372,6 +524,7 @@ def test_bounded_output_and_search_process_exit_are_typed_and_cleanup_is_idempot
     noisy_server_processes.build_indexes(manifest)
     with pytest.raises(ProcessOutputOverflow):
         noisy_server_processes.start_search()
+    assert noisy_server_processes.startup_attempt_receipts[0].category == "OUTPUT_OVERFLOW"
     noisy_server_processes.close()
 
     processes = _process_set(
@@ -386,7 +539,7 @@ def test_bounded_output_and_search_process_exit_are_typed_and_cleanup_is_idempot
     assert webserver_argv == [
         f"--listen={endpoint.authority}",
         f"--index={tmp_path / 'disposable-shards'}",
-        f"--log_dir={tmp_path / 'disposable-logs'}",
+        f"--log_dir={tmp_path / 'disposable-logs' / 'startup-1'}",
         "--html=true",
         "--rpc=false",
         "--indexserver_proxy=false",
