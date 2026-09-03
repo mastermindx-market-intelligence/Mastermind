@@ -24,6 +24,7 @@ RELEASE_TRACKED_PATHS=(
   app/static/chairman_control/control_room.js
   app/static/chairman_control/remote.html
   common/__init__.py
+  common/commission_ref.py
   common/redaction.py
   config/strategic_state.yml
   control_plane/__init__.py

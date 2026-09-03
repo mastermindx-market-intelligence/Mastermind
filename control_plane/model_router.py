@@ -1,7 +1,7 @@
 """Deterministic frontier-lead / economical-worker routing policy.
 
-This module selects a *logical execution shape*.  It never creates, claims, or
-completes a Job and it stores no state.  Executive OS remains the sole lifecycle
+This module selects a *logical execution shape*. It never creates, claims, or
+completes a Job and it stores no state. Executive OS remains the sole lifecycle
 authority; worker/account selection still happens atomically in its existing
 lease path.
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import re
 from enum import Enum
 from pathlib import Path
@@ -33,6 +34,11 @@ _WORKER_TASKS = frozenset(
 )
 _RISKS = frozenset({"routine", "elevated", "critical"})
 _AMBIGUITIES = frozenset({"low", "medium", "high"})
+_METERED_TEXT_MAX = 2048
+_PRO_MODE_MIN_DURATION_MINUTES = 80
+_PRO_MODE_MAX_DURATION_MINUTES = 1440
+_PRO_MODE_REFUSAL = "PRO_MODE_REFUSED / USE_NON_PRO_MODE"
+_METERED_ROUTE_REFUSAL = "METERED_ROUTE_REFUSED / WAITING_FOR_LAWFUL_ROUTE"
 
 
 class RoutingPolicyError(RuntimeError):
@@ -44,11 +50,144 @@ class RouteMode(str, Enum):
     FRONTIER_LEAD = "frontier_lead"
 
 
+class CognitionRoute(str, Enum):
+    """Economic route for Sol-class cognition; never lifecycle authority."""
+
+    CHAT_INCLUDED_DEFAULT = "CHAT_INCLUDED_DEFAULT"
+    METERED_EXCEPTION = "METERED_EXCEPTION"
+
+
+class ChatReasoningMode(str, Enum):
+    """Reasoning mode within the included Chat web surface."""
+
+    NON_PRO_DEFAULT = "NON_PRO_DEFAULT"
+    PRO_MODE_EXCEPTION = "PRO_MODE_EXCEPTION"
+
+
+class ProModeTaskClass(str, Enum):
+    """Narrow classes that can justify billed Chat Pro reasoning."""
+
+    LONG_HORIZON_FRONTIER_REASONING = "LONG_HORIZON_FRONTIER_REASONING"
+    CROSS_SYSTEM_ARCHITECTURE = "CROSS_SYSTEM_ARCHITECTURE"
+    HARD_DEBUGGING = "HARD_DEBUGGING"
+    ADVERSARIAL_JUDGMENT = "ADVERSARIAL_JUDGMENT"
+
+
+_PRO_MODE_TASK_CLASSES_BY_KIND = {
+    "planning": frozenset(
+        {
+            ProModeTaskClass.LONG_HORIZON_FRONTIER_REASONING,
+            ProModeTaskClass.CROSS_SYSTEM_ARCHITECTURE,
+        }
+    ),
+    "judgment": frozenset(
+        {
+            ProModeTaskClass.LONG_HORIZON_FRONTIER_REASONING,
+            ProModeTaskClass.CROSS_SYSTEM_ARCHITECTURE,
+            ProModeTaskClass.ADVERSARIAL_JUDGMENT,
+        }
+    ),
+    "escalation": frozenset(
+        {
+            ProModeTaskClass.CROSS_SYSTEM_ARCHITECTURE,
+            ProModeTaskClass.HARD_DEBUGGING,
+            ProModeTaskClass.ADVERSARIAL_JUDGMENT,
+        }
+    ),
+    "implementation": frozenset(
+        {
+            ProModeTaskClass.CROSS_SYSTEM_ARCHITECTURE,
+            ProModeTaskClass.HARD_DEBUGGING,
+        }
+    ),
+    "research": frozenset(
+        {ProModeTaskClass.LONG_HORIZON_FRONTIER_REASONING}
+    ),
+    "review": frozenset({ProModeTaskClass.ADVERSARIAL_JUDGMENT}),
+}
+
+
 def _bounded_id(value: Any, *, field: str) -> str:
     resolved = str(value or "").strip().lower()
     if _ALIAS_RE.fullmatch(resolved) is None:
         raise RoutingPolicyError(f"{field} must be a bounded lowercase identifier")
     return resolved
+
+
+def _bounded_text(value: Any, *, field: str) -> str:
+    if not isinstance(value, str):
+        raise RoutingPolicyError(
+            f"{field} must be a non-empty string no longer than "
+            f"{_METERED_TEXT_MAX} characters"
+        )
+    resolved = value.strip()
+    if not resolved or len(resolved) > _METERED_TEXT_MAX:
+        raise RoutingPolicyError(
+            f"{field} must be a non-empty string no longer than {_METERED_TEXT_MAX} characters"
+        )
+    return resolved
+
+
+def _bounded_cost(value: Any, *, field: str, strictly_positive: bool) -> float:
+    if isinstance(value, bool):
+        raise RoutingPolicyError(f"{field} must be a finite number")
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError) as exc:
+        raise RoutingPolicyError(f"{field} must be a finite number") from exc
+    if not math.isfinite(resolved):
+        raise RoutingPolicyError(f"{field} must be a finite number")
+    if strictly_positive:
+        if resolved <= 0:
+            raise RoutingPolicyError(f"{field} must be greater than zero")
+    elif resolved < 0:
+        raise RoutingPolicyError(f"{field} cannot be negative")
+    return resolved
+
+
+def _coerce_cognition_route(value: CognitionRoute | str) -> CognitionRoute:
+    if isinstance(value, CognitionRoute):
+        return value
+    rendered = str(value or "").strip().upper()
+    try:
+        return CognitionRoute(rendered)
+    except ValueError as exc:
+        raise RoutingPolicyError(f"unsupported cognition_route {rendered!r}") from exc
+
+
+def _coerce_chat_reasoning_mode(
+    value: ChatReasoningMode | str,
+) -> ChatReasoningMode:
+    if isinstance(value, ChatReasoningMode):
+        return value
+    rendered = str(value or "").strip().upper()
+    try:
+        return ChatReasoningMode(rendered)
+    except ValueError as exc:
+        raise RoutingPolicyError(
+            f"unsupported chat_reasoning_mode {rendered!r}"
+        ) from exc
+
+
+def _coerce_pro_mode_task_class(
+    value: ProModeTaskClass | str,
+) -> ProModeTaskClass:
+    if isinstance(value, ProModeTaskClass):
+        return value
+    rendered = str(value or "").strip().upper()
+    try:
+        return ProModeTaskClass(rendered)
+    except ValueError as exc:
+        raise RoutingPolicyError(
+            f"{_PRO_MODE_REFUSAL}: unsupported task_class {rendered!r}"
+        ) from exc
+
+
+def _bounded_pro_mode_text(value: Any, *, field: str) -> str:
+    try:
+        return _bounded_text(value, field=field)
+    except RoutingPolicyError as exc:
+        raise RoutingPolicyError(f"{_PRO_MODE_REFUSAL}: {exc}") from exc
 
 
 def _string_list(
@@ -93,6 +232,108 @@ class ModelAlias:
 
 
 @dataclasses.dataclass(frozen=True)
+class MeteredCognitionReceipt:
+    """Bounded evidence required before a paid Sol-cognition exception."""
+
+    why_metered: str
+    why_pro_chat_insufficient: str
+    expected_max_cost: float
+    hard_budget_cap: float
+    stop_condition: str
+    budget_authority: str
+
+    def __post_init__(self) -> None:
+        why_metered = _bounded_text(self.why_metered, field="why_metered")
+        why_pro_chat_insufficient = _bounded_text(
+            self.why_pro_chat_insufficient,
+            field="why_pro_chat_insufficient",
+        )
+        stop_condition = _bounded_text(self.stop_condition, field="stop_condition")
+        budget_authority = _bounded_text(
+            self.budget_authority, field="budget_authority"
+        )
+        expected_max_cost = _bounded_cost(
+            self.expected_max_cost,
+            field="expected_max_cost",
+            strictly_positive=False,
+        )
+        hard_budget_cap = _bounded_cost(
+            self.hard_budget_cap,
+            field="hard_budget_cap",
+            strictly_positive=True,
+        )
+        if expected_max_cost > hard_budget_cap:
+            raise RoutingPolicyError(
+                "expected_max_cost cannot exceed hard_budget_cap"
+            )
+        object.__setattr__(self, "why_metered", why_metered)
+        object.__setattr__(
+            self, "why_pro_chat_insufficient", why_pro_chat_insufficient
+        )
+        object.__setattr__(self, "expected_max_cost", expected_max_cost)
+        object.__setattr__(self, "hard_budget_cap", hard_budget_cap)
+        object.__setattr__(self, "stop_condition", stop_condition)
+        object.__setattr__(self, "budget_authority", budget_authority)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+
+@dataclasses.dataclass(frozen=True)
+class ProModeReceipt:
+    """Bounded evidence required before billed Chat Pro reasoning."""
+
+    task_class: ProModeTaskClass | str
+    why_pro_mode: str
+    why_non_pro_insufficient: str
+    expected_duration_minutes: int
+    stop_condition: str
+
+    def __post_init__(self) -> None:
+        task_class = _coerce_pro_mode_task_class(self.task_class)
+        why_pro_mode = _bounded_pro_mode_text(
+            self.why_pro_mode,
+            field="why_pro_mode",
+        )
+        why_non_pro_insufficient = _bounded_pro_mode_text(
+            self.why_non_pro_insufficient,
+            field="why_non_pro_insufficient",
+        )
+        stop_condition = _bounded_pro_mode_text(
+            self.stop_condition,
+            field="stop_condition",
+        )
+        duration = self.expected_duration_minutes
+        if isinstance(duration, bool) or not isinstance(duration, int):
+            raise RoutingPolicyError(
+                f"{_PRO_MODE_REFUSAL}: expected_duration_minutes must be an integer"
+            )
+        if not (
+            _PRO_MODE_MIN_DURATION_MINUTES
+            <= duration
+            <= _PRO_MODE_MAX_DURATION_MINUTES
+        ):
+            raise RoutingPolicyError(
+                f"{_PRO_MODE_REFUSAL}: expected_duration_minutes must be between "
+                f"{_PRO_MODE_MIN_DURATION_MINUTES} and "
+                f"{_PRO_MODE_MAX_DURATION_MINUTES}"
+            )
+        object.__setattr__(self, "task_class", task_class)
+        object.__setattr__(self, "why_pro_mode", why_pro_mode)
+        object.__setattr__(
+            self,
+            "why_non_pro_insufficient",
+            why_non_pro_insufficient,
+        )
+        object.__setattr__(self, "stop_condition", stop_condition)
+
+    def to_dict(self) -> dict[str, Any]:
+        value = dataclasses.asdict(self)
+        value["task_class"] = self.task_class.value
+        return value
+
+
+@dataclasses.dataclass(frozen=True)
 class WorkRequest:
     task_kind: str
     risk: str = "routine"
@@ -122,7 +363,9 @@ class WorkRequest:
         for raw in self.excluded_worker_ids:
             worker_id = str(raw).strip()
             if _WORKER_ID_RE.fullmatch(worker_id) is None:
-                raise RoutingPolicyError("excluded_worker_ids contains an invalid worker id")
+                raise RoutingPolicyError(
+                    "excluded_worker_ids contains an invalid worker id"
+                )
             if worker_id not in excluded:
                 excluded.append(worker_id)
         object.__setattr__(self, "task_kind", task_kind)
@@ -147,6 +390,10 @@ class RoutingDecision:
     required_capabilities: tuple[str, ...]
     excluded_worker_ids: tuple[str, ...]
     reason_codes: tuple[str, ...]
+    cognition_route: CognitionRoute | None = None
+    chat_reasoning_mode: ChatReasoningMode | None = None
+    metered_cognition_receipt: MeteredCognitionReceipt | None = None
+    pro_mode_receipt: ProModeReceipt | None = None
 
     @property
     def worker_eligible(self) -> bool:
@@ -156,6 +403,24 @@ class RoutingDecision:
         value = dataclasses.asdict(self)
         value["mode"] = self.mode.value
         value["worker_eligible"] = self.worker_eligible
+        value["cognition_route"] = (
+            self.cognition_route.value if self.cognition_route is not None else None
+        )
+        value["chat_reasoning_mode"] = (
+            self.chat_reasoning_mode.value
+            if self.chat_reasoning_mode is not None
+            else None
+        )
+        value["metered_cognition_receipt"] = (
+            self.metered_cognition_receipt.to_dict()
+            if self.metered_cognition_receipt is not None
+            else None
+        )
+        value["pro_mode_receipt"] = (
+            self.pro_mode_receipt.to_dict()
+            if self.pro_mode_receipt is not None
+            else None
+        )
         for key in (
             "preferred_model_aliases",
             "required_capabilities",
@@ -219,13 +484,17 @@ class ModelRouter:
         try:
             raw = json.loads(source.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RoutingPolicyError(f"routing policy is unreadable: {type(exc).__name__}") from exc
+            raise RoutingPolicyError(
+                f"routing policy is unreadable: {type(exc).__name__}"
+            ) from exc
         if not isinstance(raw, dict):
             raise RoutingPolicyError("routing policy root must be an object")
         if raw.get("schema_version") != ROUTER_SCHEMA_VERSION:
             raise RoutingPolicyError("routing policy schema_version is unsupported")
         if raw.get("lifecycle_authority") != "executive_os":
-            raise RoutingPolicyError("routing policy must preserve Executive OS lifecycle authority")
+            raise RoutingPolicyError(
+                "routing policy must preserve Executive OS lifecycle authority"
+            )
         if raw.get("production_armed") is not False:
             raise RoutingPolicyError("routing policy must remain production_armed=false")
         policy_version = _bounded_id(raw.get("policy_version"), field="policy_version")
@@ -288,12 +557,17 @@ class ModelRouter:
             effort = _bounded_id(value.get("effort"), field="effort")
             cost_class = _bounded_id(value.get("cost_class"), field="cost_class")
             capabilities = _string_list(
-                value.get("capabilities"), field=f"model_aliases.{alias}.capabilities"
+                value.get("capabilities"),
+                field=f"model_aliases.{alias}.capabilities",
             )
             worker_eligible = value.get("worker_eligible") is True
             if not model or len(model) > 128:
-                raise RoutingPolicyError(f"model alias {alias!r} has an invalid model")
-            if worker_eligible and not (provider.enabled and provider.autonomous_allowed):
+                raise RoutingPolicyError(
+                    f"model alias {alias!r} has an invalid model"
+                )
+            if worker_eligible and not (
+                provider.enabled and provider.autonomous_allowed
+            ):
                 raise RoutingPolicyError(
                     f"worker alias {alias!r} requires an enabled autonomous provider"
                 )
@@ -337,7 +611,9 @@ class ModelRouter:
                     route.get(risk), field=f"routes.{task_kind}.{risk}"
                 )
                 if not aliases:
-                    raise RoutingPolicyError(f"routes.{task_kind}.{risk} cannot be empty")
+                    raise RoutingPolicyError(
+                        f"routes.{task_kind}.{risk} cannot be empty"
+                    )
                 for alias in aliases:
                     profile = model_aliases.get(alias)
                     if profile is None or not profile.worker_eligible:
@@ -380,7 +656,15 @@ class ModelRouter:
             raise RoutingPolicyError(f"model alias {alias!r} is not worker eligible")
         return profile
 
-    def route(self, request: WorkRequest) -> RoutingDecision:
+    def route(
+        self,
+        request: WorkRequest,
+        *,
+        cognition_route: CognitionRoute | str | None = None,
+        chat_reasoning_mode: ChatReasoningMode | str | None = None,
+        metered_cognition_receipt: MeteredCognitionReceipt | None = None,
+        pro_mode_receipt: ProModeReceipt | None = None,
+    ) -> RoutingDecision:
         reasons: list[str] = []
         lead_required = False
         if request.task_kind in _LEAD_TASKS:
@@ -392,7 +676,71 @@ class ModelRouter:
         if request.ambiguity == "high":
             lead_required = True
             reasons.append("high_ambiguity")
+
         if lead_required:
+            resolved_cognition_route = (
+                CognitionRoute.CHAT_INCLUDED_DEFAULT
+                if cognition_route is None
+                else _coerce_cognition_route(cognition_route)
+            )
+            resolved_chat_reasoning_mode: ChatReasoningMode | None = None
+            if resolved_cognition_route is CognitionRoute.METERED_EXCEPTION:
+                if chat_reasoning_mode is not None or pro_mode_receipt is not None:
+                    raise RoutingPolicyError(
+                        f"{_METERED_ROUTE_REFUSAL}: metered cognition cannot carry "
+                        "Chat reasoning mode or Pro receipt fields"
+                    )
+                if not isinstance(
+                    metered_cognition_receipt, MeteredCognitionReceipt
+                ):
+                    raise RoutingPolicyError(
+                        f"{_METERED_ROUTE_REFUSAL}: "
+                        "a complete metered cognition receipt is required"
+                    )
+                reasons.append("metered_exception_receipt_complete")
+            else:
+                if metered_cognition_receipt is not None:
+                    raise RoutingPolicyError(
+                        "CHAT_INCLUDED_DEFAULT cannot carry a metered receipt"
+                    )
+                resolved_chat_reasoning_mode = (
+                    ChatReasoningMode.NON_PRO_DEFAULT
+                    if chat_reasoning_mode is None
+                    else _coerce_chat_reasoning_mode(chat_reasoning_mode)
+                )
+                reasons.append("chat_included_default")
+                if (
+                    resolved_chat_reasoning_mode
+                    is ChatReasoningMode.PRO_MODE_EXCEPTION
+                ):
+                    if request.task_kind in {"mechanical", "tests"}:
+                        raise RoutingPolicyError(
+                            f"{_PRO_MODE_REFUSAL}: {request.task_kind} work is never "
+                            "eligible for Pro mode"
+                        )
+                    if not isinstance(pro_mode_receipt, ProModeReceipt):
+                        raise RoutingPolicyError(
+                            f"{_PRO_MODE_REFUSAL}: a complete Pro mode receipt is required"
+                        )
+                    allowed_classes = _PRO_MODE_TASK_CLASSES_BY_KIND.get(
+                        request.task_kind,
+                        frozenset(),
+                    )
+                    if pro_mode_receipt.task_class not in allowed_classes:
+                        raise RoutingPolicyError(
+                            f"{_PRO_MODE_REFUSAL}: task_class "
+                            f"{pro_mode_receipt.task_class.value!r} is not coherent "
+                            f"with task_kind {request.task_kind!r}"
+                        )
+                    reasons.append("pro_mode_exception_receipt_complete")
+                else:
+                    if pro_mode_receipt is not None:
+                        raise RoutingPolicyError(
+                            f"{_PRO_MODE_REFUSAL}: NON_PRO_DEFAULT cannot carry a "
+                            "Pro mode receipt"
+                        )
+                    reasons.append("non_pro_default")
+
             lead_profile = self.model_aliases["frontier.orchestrator"]
             return RoutingDecision(
                 mode=RouteMode.FRONTIER_LEAD,
@@ -408,13 +756,42 @@ class ModelRouter:
                 required_capabilities=request.required_capabilities,
                 excluded_worker_ids=request.excluded_worker_ids,
                 reason_codes=tuple(reasons),
+                cognition_route=resolved_cognition_route,
+                chat_reasoning_mode=resolved_chat_reasoning_mode,
+                metered_cognition_receipt=metered_cognition_receipt,
+                pro_mode_receipt=pro_mode_receipt,
+            )
+
+        if pro_mode_receipt is not None:
+            raise RoutingPolicyError(
+                f"{_PRO_MODE_REFUSAL}: a Pro receipt cannot be attached to worker work"
+            )
+        if chat_reasoning_mode is not None:
+            resolved_worker_chat_mode = _coerce_chat_reasoning_mode(
+                chat_reasoning_mode
+            )
+            if resolved_worker_chat_mode is ChatReasoningMode.PRO_MODE_EXCEPTION:
+                raise RoutingPolicyError(
+                    f"{_PRO_MODE_REFUSAL}: worker work is not eligible for Pro mode"
+                )
+        if (
+            cognition_route is not None
+            or chat_reasoning_mode is not None
+            or metered_cognition_receipt is not None
+        ):
+            raise RoutingPolicyError(
+                "worker work does not accept Sol cognition route, Chat reasoning mode, "
+                "or receipt fields"
             )
 
         route = self.routes[request.task_kind]
         aliases = tuple(route[request.risk])
         first_profile = self.model_aliases[aliases[0]]
         capabilities = tuple(
-            sorted(set(route["required_capabilities"]) | set(request.required_capabilities))
+            sorted(
+                set(route["required_capabilities"])
+                | set(request.required_capabilities)
+            )
         )
         for alias in aliases:
             profile = self.model_aliases[alias]
@@ -455,6 +832,10 @@ def route_work(
     ambiguity: str = "low",
     required_capabilities: Sequence[str] = (),
     excluded_worker_ids: Sequence[str] = (),
+    cognition_route: CognitionRoute | str | None = None,
+    chat_reasoning_mode: ChatReasoningMode | str | None = None,
+    metered_cognition_receipt: MeteredCognitionReceipt | None = None,
+    pro_mode_receipt: ProModeReceipt | None = None,
     policy_path: str | Path | None = None,
     capability_policy_path: str | Path | None = None,
 ) -> RoutingDecision:
@@ -469,14 +850,23 @@ def route_work(
             ambiguity=ambiguity,
             required_capabilities=tuple(required_capabilities),
             excluded_worker_ids=tuple(excluded_worker_ids),
-        )
+        ),
+        cognition_route=cognition_route,
+        chat_reasoning_mode=chat_reasoning_mode,
+        metered_cognition_receipt=metered_cognition_receipt,
+        pro_mode_receipt=pro_mode_receipt,
     )
 
 
 __all__ = [
+    "ChatReasoningMode",
+    "CognitionRoute",
     "DEFAULT_POLICY_PATH",
+    "MeteredCognitionReceipt",
     "ModelAlias",
     "ModelRouter",
+    "ProModeReceipt",
+    "ProModeTaskClass",
     "ProviderAlias",
     "ROUTER_SCHEMA_VERSION",
     "RouteMode",
