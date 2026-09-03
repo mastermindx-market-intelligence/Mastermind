@@ -1362,6 +1362,11 @@ def _dispatch_evidence_newer(current: str | None, candidate: Any) -> str | None:
     return current
 
 
+#: Job statuses that mean the job is finished; a finished descendant must
+#: not evict a live ancestor from the executable frontier.
+_TERMINAL_JOB_STATUSES = frozenset({"FAILED", "LOST", "COMPLETED", "CANCELLED"})
+
+
 def _executable_attempt_candidates(tree_jobs: Sequence[Any]) -> list[Any]:
     """Jobs holding a live attempt, minus any that merely aggregate one.
 
@@ -1373,6 +1378,27 @@ def _executable_attempt_candidates(tree_jobs: Sequence[Any]) -> list[Any]:
     candidates = [j for j in tree_jobs if getattr(j, "current_attempt_id", None)]
     if len(candidates) < 2:
         return candidates
+    # Only a LIVE descendant may evict an ancestor.  `current_attempt_id` is
+    # sticky on both sides: a FAILED/LOST/COMPLETED/CANCELLED child keeps it,
+    # and the first version of this rule let such a dead child evict a
+    # genuinely RUNNING root — turning a live responsibility into a terminal
+    # one on the Chairman's surface, which is worse than the silence it
+    # replaced (review follow-up, 2026-09-03).  A finished child does not
+    # make its still-working parent finished.
+    def _is_live(job: Any) -> bool:
+        status = getattr(job, "status", None)
+        return str(getattr(status, "value", status)) not in _TERMINAL_JOB_STATUSES
+
+    live = [j for j in candidates if _is_live(j)]
+    if live:
+        # A finished child beside a still-running parent is an ordinary state,
+        # not an ambiguity: the live job IS the answer.  Restricting to live
+        # candidates first means a dead descendant neither evicts its live
+        # ancestor nor drags the row into a false "cannot tell".
+        candidates = live
+        if len(candidates) < 2:
+            return candidates
+    live_ids = {getattr(j, "job_id", None) for j in candidates}
     by_id = {getattr(j, "job_id", None): j for j in tree_jobs}
     candidate_ids = {getattr(j, "job_id", None) for j in candidates}
     aggregating: set[Any] = set()
@@ -1381,7 +1407,8 @@ def _executable_attempt_candidates(tree_jobs: Sequence[Any]) -> list[Any]:
         parent = getattr(job, "parent_job_id", None)
         while parent and parent not in seen:
             seen.add(parent)
-            if parent in candidate_ids:
+            if parent in candidate_ids and getattr(job, "job_id", None) in live_ids:
+                # a dead descendant never evicts its ancestor
                 aggregating.add(parent)
             parent_job = by_id.get(parent)
             parent = getattr(parent_job, "parent_job_id", None) if parent_job else None

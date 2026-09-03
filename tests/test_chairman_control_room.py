@@ -2883,7 +2883,9 @@ def test_review_a_truncated_wake_scan_reports_ambiguity_not_the_first_found(tmp_
     cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
     rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
 
-    # Either no row, or a row that refuses to assert a single obligation.
+    # Pin that a row EXISTS before asserting about its contents — the loop
+    # alone would pass trivially if the row were ever dropped.
+    assert len(rows) == 1
     for row in rows:
         assert "obligation_status" not in row, (
             "a truncated scan asserted a definite obligation status"
@@ -2910,5 +2912,56 @@ def test_review_ancestor_rule_is_bounded_on_corrupt_parent_chains():
     assert _cand_ids([
         job("JOB-001", "JOB-003"), job("JOB-002", "JOB-001"), job("JOB-003", "JOB-002"),
     ]) == []
-    # a parent outside the tree is ordinary, not corrupt
-    assert _cand_ids([job("JOB-001", "JOB-OUTSIDE")]) == ["JOB-001"]
+    # A parent outside the tree is ordinary, not corrupt.  TWO candidates,
+    # deliberately: a single candidate returns at the `len < 2` short-circuit
+    # and never reaches the walk this test claims to pin.
+    assert _cand_ids([
+        job("JOB-010", "JOB-999"), job("JOB-011", "JOB-998"),
+    ]) == ["JOB-010", "JOB-011"]
+
+
+def test_review_a_dead_descendant_never_evicts_a_live_ancestor():
+    """`current_attempt_id` is sticky on BOTH sides.
+
+    The first ancestor rule let a FAILED/COMPLETED child evict a genuinely
+    RUNNING root, so a live responsibility rendered as terminal — worse than
+    the silence it replaced, because it substituted a confident wrong answer
+    for "cannot tell". Live candidates are preferred outright: a finished
+    child beside a running parent is an ordinary state, not an ambiguity.
+    """
+    class _J(_FakeJob):
+        def __init__(self, job_id, parent, attempt, status):
+            super().__init__(job_id, parent, "JOB-001", attempt)
+            self.status = status
+
+    root_live = _J("JOB-001", None, "ATT-root", "RUNNING")
+    child_dead = _J("JOB-002", "JOB-001", "ATT-dead", "FAILED")
+    assert _cand_ids([root_live, child_dead]) == ["JOB-001"]
+
+    for terminal in ("FAILED", "LOST", "COMPLETED", "CANCELLED"):
+        dead = _J("JOB-002", "JOB-001", "ATT-dead", terminal)
+        assert _cand_ids([root_live, dead]) == ["JOB-001"], terminal
+
+    # a LIVE child still evicts the root — the original repair must survive
+    child_live = _J("JOB-002", "JOB-001", "ATT-live", "RUNNING")
+    assert _cand_ids([root_live, child_live]) == ["JOB-002"]
+
+    # all-terminal tree: no live candidate, so the ancestor rule still applies
+    root_dead = _J("JOB-001", None, "ATT-a", "COMPLETED")
+    assert _cand_ids([root_dead, child_dead]) == ["JOB-002"]
+
+
+def test_review_the_ancestor_walk_is_transitive_not_direct_parent_only():
+    """A QUEUED intermediate holds no attempt, so the grandchild's ancestor
+    link to the root is only visible by walking the chain. A direct-parent-only
+    implementation passes every other test in this file."""
+    class _J(_FakeJob):
+        def __init__(self, job_id, parent, attempt):
+            super().__init__(job_id, parent, "JOB-001", attempt)
+            self.status = "RUNNING"
+
+    root = _J("JOB-001", None, "ATT-root")
+    middle = _FakeJob("JOB-002", "JOB-001", "JOB-001", None)  # QUEUED, no attempt
+    grandchild = _J("JOB-003", "JOB-002", "ATT-gk")
+
+    assert _cand_ids([root, middle, grandchild]) == ["JOB-003"]
