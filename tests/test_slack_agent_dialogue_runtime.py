@@ -289,19 +289,24 @@ def _w3c_candidate(runtime, *, stale_parent: bool = False):
 
     return runtime.RelayTurnCandidate(
         delegation_identity=identity(),
-        dialogue_parent=dialogue_parent,
+        dialogue_parent=runtime._ExecutiveDialogueParent(
+            dialogue_parent,
+            candidate_reference=DialogueCandidateReference(
+                mode=ACTIVE_CURRENT_WORKER,
+                root_job_id=current.root_job_id,
+                job_id=current.job_id,
+                attempt_id=current.attempt_id,
+                worker_id=current.worker_id,
+                evidence_digest="e" * 64,
+            ),
+            target_bindings={
+                "coo": _binding_for("coo"),
+                "ceo": _binding_for("ceo"),
+            },
+        ),
         thread_ts=THREAD_TS,
         current_worker=current,
         actor=caller(),
-        candidate=DialogueCandidateReference(
-            mode=ACTIVE_CURRENT_WORKER,
-            root_job_id=current.root_job_id,
-            job_id=current.job_id,
-            attempt_id=current.attempt_id,
-            worker_id=current.worker_id,
-            evidence_digest="e" * 64,
-        ),
-        target_bindings={"coo": _binding_for("coo"), "ceo": _binding_for("ceo")},
     )
 
 
@@ -384,21 +389,26 @@ def _terminal_w3c_material(runtime):
     )
     relay_candidate = runtime.RelayTurnCandidate(
         delegation_identity=identity(),
-        dialogue_parent=dialogue_parent,
+        dialogue_parent=runtime._ExecutiveDialogueParent(
+            dialogue_parent,
+            candidate_reference=DialogueCandidateReference(
+                mode=TERMINAL_RESULT,
+                root_job_id=terminal.root_job_id,
+                job_id=terminal.job_id,
+                attempt_id=terminal.attempt_id,
+                worker_id=terminal.worker_id,
+                evidence_digest="f" * 64,
+            ),
+            target_bindings={
+                "coo": _binding_for("coo"),
+                "ceo": _binding_for("ceo"),
+            },
+        ),
         thread_ts=THREAD_TS,
         current_worker=_terminal_snapshot(),
         actor=caller(),
         terminal_candidate=terminal,
         terminal_projection_receipt=receipt,
-        candidate=DialogueCandidateReference(
-            mode=TERMINAL_RESULT,
-            root_job_id=terminal.root_job_id,
-            job_id=terminal.job_id,
-            attempt_id=terminal.attempt_id,
-            worker_id=terminal.worker_id,
-            evidence_digest="f" * 64,
-        ),
-        target_bindings={"coo": _binding_for("coo"), "ceo": _binding_for("ceo")},
     )
     return relay_candidate, binding, engine
 
@@ -1173,8 +1183,8 @@ def test_real_observation_source_discovers_parents_through_shared_v2_engine() ->
                 dialogue_parent=dict(parent),
                 thread_ts=thread_ts,
                 delegation_identity=active.delegation_identity,
-                candidate=active.candidate,
-                target_bindings=active.target_bindings,
+                candidate=active.dialogue_parent._candidate_reference,
+                target_bindings=active.dialogue_parent._target_bindings,
                 current_worker=active.current_worker,
                 actor=active.actor,
             )

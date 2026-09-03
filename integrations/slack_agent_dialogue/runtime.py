@@ -23,7 +23,7 @@ import stat
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, Union
 
@@ -271,10 +271,27 @@ class RelayTurnCandidate:
     terminal_projection_receipt: (
         TerminalReturnProjectionReceipt | TerminalProjectionReceiptReference | None
     ) = None
-    candidate: DialogueCandidateReference | None = None
-    target_bindings: Mapping[str, RuntimeBinding | None] = field(
-        default_factory=dict
-    )
+
+
+class _ExecutiveDialogueParent(dict[str, Any]):
+    """Private parent carrier for Executive-only, source-derived read facts.
+
+    Keeping this context on the already-existing parent field preserves the
+    protected public ``RelayTurnCandidate`` dataclass shape.  It also preserves
+    ordinary ``dataclasses.replace`` compatibility because the parent object is
+    carried forward with the public fields.
+    """
+
+    def __init__(
+        self,
+        value: Mapping[str, Any],
+        *,
+        candidate_reference: DialogueCandidateReference,
+        target_bindings: Mapping[str, RuntimeBinding | None],
+    ) -> None:
+        super().__init__(value)
+        self._candidate_reference = candidate_reference
+        self._target_bindings = dict(target_bindings)
 
 
 _CandidateSource = Callable[
@@ -352,7 +369,11 @@ def build_executive_observation_candidate_source(
                     raise ExecutiveObservationClientError("RESPONSE_REFUSED")
                 yield RelayTurnCandidate(
                     delegation_identity=resolved.delegation_identity,
-                    dialogue_parent=discovered.parent,
+                    dialogue_parent=_ExecutiveDialogueParent(
+                        discovered.parent,
+                        candidate_reference=resolved.candidate,
+                        target_bindings=resolved.target_bindings,
+                    ),
                     thread_ts=discovered.thread_ts,
                     current_worker=resolved.current_worker,
                     actor=resolved.actor,
@@ -360,8 +381,6 @@ def build_executive_observation_candidate_source(
                     terminal_projection_receipt=(
                         resolved.terminal_projection_receipt
                     ),
-                    candidate=resolved.candidate,
-                    target_bindings=dict(resolved.target_bindings),
                 )
 
         return observations()
@@ -952,13 +971,23 @@ class AgentRelayTurnRuntime:
             parent_fingerprint = str(candidate.dialogue_parent["fingerprint"])
             operation_key = str(candidate.dialogue_parent["operation_key"])
             session_ref = str(candidate.dialogue_parent["session_ref"])
+            candidate_reference = getattr(
+                candidate.dialogue_parent,
+                "_candidate_reference",
+                None,
+            )
+            target_bindings = getattr(
+                candidate.dialogue_parent,
+                "_target_bindings",
+                None,
+            )
             if self._executive_observation_source and (
-                not isinstance(candidate.candidate, DialogueCandidateReference)
-                or not isinstance(candidate.target_bindings, Mapping)
-                or set(candidate.target_bindings) != {"coo", "ceo"}
+                not isinstance(candidate_reference, DialogueCandidateReference)
+                or not isinstance(target_bindings, Mapping)
+                or set(target_bindings) != {"coo", "ceo"}
                 or any(
                     value is not None and not isinstance(value, RuntimeBinding)
-                    for value in candidate.target_bindings.values()
+                    for value in target_bindings.values()
                 )
             ):
                 raise ActiveWaiterStateUnavailable()
@@ -969,8 +998,8 @@ class AgentRelayTurnRuntime:
                     session_ref=session_ref,
                     dialogue_parent=dict(candidate.dialogue_parent),
                     thread_ts=candidate.thread_ts,
-                    candidate=candidate.candidate,
-                    target_bindings=dict(candidate.target_bindings),
+                    candidate=candidate_reference,
+                    target_bindings=dict(target_bindings or {}),
                 )
             )
         except Exception:
