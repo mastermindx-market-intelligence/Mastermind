@@ -152,6 +152,94 @@ def _payload_tree(root: Path) -> None:
     (root / "meta/toolchain-lock.json").write_text("{}\n", encoding="utf-8")
 
 
+def _write_valid_success_artifacts(
+    output: Path,
+    *,
+    request: runner.ExperimentRequest,
+    manifest_payload: Mapping[str, object],
+    path_policy: Path,
+    source_digest: str,
+    binary_digests: Mapping[str, str],
+    tool_schema_digest: str,
+) -> None:
+    output.mkdir(parents=True, exist_ok=True)
+    repository = manifest_payload["repositories"]
+    assert isinstance(repository, list) and len(repository) == 1
+    row = repository[0]
+    assert isinstance(row, Mapping)
+    material_row = {
+        key: value for key, value in row.items() if key != "source_snapshot_root"
+    }
+    material = {
+        "schema_version": manifest_payload["schema_version"],
+        "repositories": [material_row],
+    }
+    manifest_digest = hashlib.sha256(
+        runner.locks.canonical_json_bytes(material)
+    ).hexdigest()
+    generated_at = "2026-09-03T22:30:00+00:00"
+    shard_material = "\0".join(
+        (
+            "mastermind",
+            runner.FIXED_REPOSITORY,
+            runner.FIXED_CONSUMER_BRANCH,
+            request.consumer_sha,
+            source_digest,
+        )
+    ).encode("utf-8")
+    payload: dict[str, object] = {
+        "schema_version": "mastermind.codeintel_z0_result.v1",
+        "decision": "ZOEKT_REQUIRES_ARCHITECTURE_REVISION",
+        "generated_at": generated_at,
+        "manifest_digest": manifest_digest,
+        "path_policy_digest": hashlib.sha256(path_policy.read_bytes()).hexdigest(),
+        "tool_schema_digest": tool_schema_digest,
+        "zoekt_source_commit": runner.locks.ZOEKT_COMMIT,
+        "binary_digests": {
+            "zoekt_git_index": binary_digests["zoekt-git-index"],
+            "zoekt_webserver": binary_digests["zoekt-webserver"],
+        },
+        "repository_statuses": [
+            {
+                "repository_id": "mastermind",
+                "ref_label": runner.FIXED_CONSUMER_BRANCH,
+                "indexed_commit_sha": request.consumer_sha,
+                "source_tree_digest": source_digest,
+                "shard_namespace": (
+                    "z0-" + hashlib.sha256(shard_material).hexdigest()[:24]
+                ),
+                "health": "healthy",
+                "coverage": "covered",
+                "generated_at": generated_at,
+                "observed_at": generated_at,
+                "freshness_seconds": 0.0,
+            }
+        ],
+        "resource_observations": {
+            "benchmarks_complete": False,
+            "benchmark_gate": "separate evidenced ingestion required",
+            "production_inert": True,
+            "endpoint_scope": "loopback_disposable_only",
+        },
+    }
+    (output / "z0-result.json").write_text(
+        json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+    (output / "z0-report.md").write_text(
+        "# Z0 Global Discovery Falsifier Result\n\n"
+        "Decision: ZOEKT_REQUIRES_ARCHITECTURE_REVISION\n\n"
+        f"Generated at: {generated_at}\n\n"
+        "## Repository/ref status\n\n"
+        f"- mastermind/{runner.FIXED_CONSUMER_BRANCH}: health=healthy; "
+        f"coverage=covered; indexed_sha={request.consumer_sha}\n\n"
+        "This is a disposable production-inert experiment result. It does not "
+        "provision a persistent service, capability profile, credential, MCP "
+        "endpoint, CI3 grant, or deployment.\n",
+        encoding="utf-8",
+    )
+
+
 def test_request_identity_is_closed_canonical_and_content_addressed() -> None:
     request = _request()
     assert request.mode == "Z0"
@@ -248,10 +336,9 @@ def test_consumer_git_identity_requires_exact_head_tree_and_same_repo(
 
     with pytest.raises(runner.HostedRunnerError, match="CONSUMER_MISMATCH"):
         runner.verify_consumer_checkout(repo, "0" * 40, tree)
-    runner.run_checked(["git", "switch", "-q", "-c", "wrong-consumer-role"], cwd=repo)
-    with pytest.raises(runner.HostedRunnerError, match="CONSUMER_BRANCH_MISMATCH"):
-        runner.verify_consumer_checkout(repo, head, tree)
-    runner.run_checked(["git", "switch", "-q", "codeintel-z0-consumer"], cwd=repo)
+    runner.run_checked(["git", "switch", "-q", "--detach", head], cwd=repo)
+    detached = runner.verify_consumer_checkout(repo, head, tree)
+    assert detached.branch == "DETACHED"
     runner.run_checked(
         ["git", "remote", "set-url", "origin", "https://github.com/evil/fork.git"],
         cwd=repo,
@@ -310,6 +397,84 @@ def test_consumer_ignores_unselected_legacy_link_but_rejects_selected_link(
         runner.selected_source_digest(
             repo, includes=("experiments/code_discovery/*",), excludes=()
         )
+
+
+def test_selected_source_digest_allows_duplicate_basenames_and_binds_git_blob(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+    runner.run_checked(["git", "init", "-q", "-b", "fixture"], cwd=repo)
+    for directory, body in (("one", "alpha\n"), ("two", "beta\n")):
+        path = repo / "experiments" / directory / "shared.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    runner.run_checked(["git", "add", "."], cwd=repo)
+    digest = runner.selected_source_digest(
+        repo, includes=("experiments/*/*.py",), excludes=()
+    )
+    assert len(digest) == 64
+
+    (repo / "experiments/one/shared.py").write_text("hostile drift\n", encoding="utf-8")
+    with pytest.raises(runner.HostedRunnerError, match="CONSUMER_FILE_UNSAFE"):
+        runner.selected_source_digest(
+            repo, includes=("experiments/*/*.py",), excludes=()
+        )
+
+
+def test_git_bytes_uses_exact_closed_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        captured["argv"] = argv
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, stdout=b"ok", stderr=b"")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    monkeypatch.setenv("HOME", "/hostile/home")
+    monkeypatch.setenv("HTTPS_PROXY", "http://hostile.invalid")
+    monkeypatch.setenv("GIT_SSH_COMMAND", "hostile-ssh")
+
+    assert runner._git_bytes(tmp_path, "status") == b"ok"  # noqa: SLF001
+    assert captured["argv"] == ["/usr/bin/git", "-C", os.fspath(tmp_path), "status"]
+    assert captured["env"] == {
+        "PATH": "/usr/bin:/bin",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/false",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "TZ": "UTC",
+    }
+
+
+def test_workflow_action_pins_match_lock_and_hostile_mutation_fails(
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(runner.__file__).resolve().parents[2]
+    lock = runner.locks.load_toolchain_lock(
+        repository_root
+        / "research/code_intelligence_fabric/codeintel-experiment-toolchain-lock.v1.json",
+        schema_path=repository_root
+        / "research/code_intelligence_fabric/codeintel-experiment-toolchain-lock.schema.json",
+    )
+    workflow = repository_root / runner.FIXED_WORKFLOW_PATH
+    runner._validate_workflow_action_pins(workflow, lock)  # type: ignore[attr-defined]  # noqa: SLF001
+
+    hostile = tmp_path / "workflow.yml"
+    hostile.write_text(
+        workflow.read_text(encoding="utf-8").replace(
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/checkout@" + "f" * 40,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(runner.HostedRunnerError, match="ACTION_PIN_MISMATCH"):
+        runner._validate_workflow_action_pins(hostile, lock)  # type: ignore[attr-defined]  # noqa: SLF001
 
 
 def test_consumer_effective_diff_rejects_changed_symlink(tmp_path: Path) -> None:
@@ -1803,10 +1968,11 @@ def test_phase_e_hosted_namespace_argv_is_fixed_and_secret_free(
         receipt_path=tmp_path / "receipt.json",
     )
 
-    assert argv[:8] == [
+    assert argv[:9] == [
         "/usr/bin/unshare",
         "--user",
         "--map-root-user",
+        "--mount",
         "--net",
         "--",
         "/usr/bin/env",
@@ -1820,6 +1986,31 @@ def test_phase_e_hosted_namespace_argv_is_fixed_and_secret_free(
     assert "GITHUB_TOKEN" not in repr(argv)
     assert "ghp_hostile_secret_value" not in repr(argv)
     assert "--module" not in argv[-1]
+    assert "/bin/mount --make-rprivate /" in argv[-1]
+    assert '/bin/mount --bind "$CONSUMER_ROOT" "$CONSUMER_ROOT"' in argv[-1]
+    assert "remount,bind,ro,nosuid,nodev,noexec" in argv[-1]
+    assert "ST_RDONLY" in argv[-1]
+    assert "errno.EROFS" in argv[-1]
+    assert argv[-1].index("remount,bind,ro,nosuid,nodev,noexec") < argv[-1].index(
+        "run-phase-e"
+    )
+
+
+def test_phase_e_refuses_writable_paths_beneath_consumer_root(tmp_path: Path) -> None:
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    with pytest.raises(runner.HostedRunnerError, match="CONSUMER_MOUNT_SEAL_UNSAFE"):
+        runner._phase_e_namespace_command(  # noqa: SLF001 - exact boundary law
+            forge_root=tmp_path / "forge",
+            consumer_root=consumer,
+            request_path=tmp_path / "request.json",
+            bundle_path=tmp_path / "bundle.tar.gz",
+            bundle_sha256=SHA_A,
+            sealed_home=consumer / "hostile-home",
+            scratch_root=tmp_path / "scratch",
+            result_directory=tmp_path / "result",
+            receipt_path=tmp_path / "receipt.json",
+        )
 
 
 def test_phase_p_process_refuses_when_kernel_boundary_receipt_is_absent(
@@ -2502,6 +2693,134 @@ def test_result_artifact_census_rejects_secret_bearing_bytes(tmp_path: Path) -> 
 
     with pytest.raises(runner.HostedRunnerError, match="SECRET_BEARING_OUTPUT"):
         runner._result_artifact_census(output)  # noqa: SLF001
+
+
+def _success_artifact_contract(tmp_path: Path) -> dict[str, object]:
+    request = _request()
+    source_digest = "7" * 64
+    tool_schema_digest = "8" * 64
+    binary_digests = {
+        "zoekt-git-index": "9" * 64,
+        "zoekt-webserver": "0" * 64,
+    }
+    path_policy = tmp_path / "z0-path-policy.json"
+    path_policy.write_text('{"schema_version":"fixture"}\n', encoding="utf-8")
+    manifest_payload: dict[str, object] = {
+        "schema_version": "mastermind.codeintel_index_manifest.v1",
+        "repositories": [
+            {
+                "repository_id": "mastermind",
+                "repository_name": runner.FIXED_REPOSITORY,
+                "source_snapshot_root": os.fspath(tmp_path / "consumer"),
+                "ref_label": runner.FIXED_CONSUMER_BRANCH,
+                "commit_sha": request.consumer_sha,
+                "included_prefixes": ["experiments/code_discovery/*"],
+                "excluded_globs": [],
+                "source_tree_digest": source_digest,
+            }
+        ],
+    }
+    output = tmp_path / "result"
+    _write_valid_success_artifacts(
+        output,
+        request=request,
+        manifest_payload=manifest_payload,
+        path_policy=path_policy,
+        source_digest=source_digest,
+        binary_digests=binary_digests,
+        tool_schema_digest=tool_schema_digest,
+    )
+    return {
+        "output": output,
+        "request": request,
+        "manifest_payload": manifest_payload,
+        "path_policy": path_policy,
+        "source_digest": source_digest,
+        "binary_digests": binary_digests,
+        "expected_tool_schema_digest": tool_schema_digest,
+    }
+
+
+def test_success_artifacts_require_exact_result_and_report_identity(
+    tmp_path: Path,
+) -> None:
+    contract = _success_artifact_contract(tmp_path)
+    evidence = runner._validate_success_artifacts(**contract)  # type: ignore[attr-defined]  # noqa: SLF001
+    assert set(evidence) == {"z0-result.json", "z0-report.md"}
+    assert all(row.get("state") != "ABSENT" for row in evidence.values())
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_result",
+        "missing_report",
+        "symlink_report",
+        "oversized_report",
+        "malformed_result",
+        "duplicate_key",
+        "non_finite",
+        "wrong_schema",
+        "wrong_decision",
+        "wrong_source",
+        "wrong_binary",
+        "report_mismatch",
+    ],
+)
+def test_success_artifacts_reject_every_false_zero_exit(
+    tmp_path: Path, mutation: str
+) -> None:
+    contract = _success_artifact_contract(tmp_path)
+    output = contract["output"]
+    assert isinstance(output, Path)
+    result = output / "z0-result.json"
+    report = output / "z0-report.md"
+    if mutation == "missing_result":
+        result.unlink()
+    elif mutation == "missing_report":
+        report.unlink()
+    elif mutation == "symlink_report":
+        external = tmp_path / "external.md"
+        external.write_text("hostile\n", encoding="utf-8")
+        report.unlink()
+        report.symlink_to(external)
+    elif mutation == "oversized_report":
+        report.write_bytes(b"x" * (1_048_576 + 1))
+    elif mutation == "malformed_result":
+        result.write_text("{", encoding="utf-8")
+    elif mutation == "duplicate_key":
+        body = result.read_text(encoding="utf-8")
+        result.write_text(
+            '{"schema_version":"duplicate",' + body.lstrip()[1:],
+            encoding="utf-8",
+        )
+    elif mutation == "non_finite":
+        payload = json.loads(result.read_text(encoding="utf-8"))
+        payload["repository_statuses"][0]["freshness_seconds"] = float("nan")
+        result.write_text(json.dumps(payload), encoding="utf-8")
+    elif mutation in {
+        "wrong_schema",
+        "wrong_decision",
+        "wrong_source",
+        "wrong_binary",
+    }:
+        payload = json.loads(result.read_text(encoding="utf-8"))
+        if mutation == "wrong_schema":
+            payload["schema_version"] = "mastermind.codeintel_z0_result.v2"
+        elif mutation == "wrong_decision":
+            payload["decision"] = "ZOEKT_FACADE_ACCEPTED_FOR_CI3"
+        elif mutation == "wrong_source":
+            payload["repository_statuses"][0]["source_tree_digest"] = "1" * 64
+        else:
+            payload["binary_digests"]["zoekt_git_index"] = "2" * 64
+        result.write_text(json.dumps(payload), encoding="utf-8")
+    elif mutation == "report_mismatch":
+        report.write_text(report.read_text(encoding="utf-8") + "hostile\n")
+    else:  # pragma: no cover - exhaustive fixture guard
+        raise AssertionError(mutation)
+
+    with pytest.raises(runner.HostedRunnerError, match="RESULT_"):
+        runner._validate_success_artifacts(**contract)  # type: ignore[attr-defined]  # noqa: SLF001
 
 
 def test_dataclass_evidence_is_json_safe_and_has_no_raw_environment() -> None:

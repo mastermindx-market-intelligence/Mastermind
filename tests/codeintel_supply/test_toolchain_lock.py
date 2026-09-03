@@ -98,6 +98,9 @@ def test_committed_lock_is_closed_and_schema_bound() -> None:
     assert tuple(lock.payload["host_utility_confounds"]) == locks.HOST_UTILITY_CONFOUNDS
     assert "/usr/bin/sudo" in locks.HOST_UTILITY_CONFOUNDS
     assert "/usr/sbin/sysctl" in locks.HOST_UTILITY_CONFOUNDS
+    assert "/bin/mount" in locks.HOST_UTILITY_CONFOUNDS
+    assert "pull_request" not in lock.payload["consumer"]
+    assert "carrier_ref" not in lock.payload["consumer"]
 
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
@@ -306,15 +309,15 @@ def test_actions_are_full_immutable_commits() -> None:
     assert lock.payload["actions"] == {
         "checkout": {
             "repository": "actions/checkout",
-            "commit": "11bd71901bbe5b1630ceea73d27597364c9af683",
+            "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1",
         },
         "download_artifact": {
             "repository": "actions/download-artifact",
-            "commit": "d3f86a106a0bac45b974a628896c90dbdf5c8093",
+            "commit": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         },
         "upload_artifact": {
             "repository": "actions/upload-artifact",
-            "commit": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+            "commit": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         },
     }
 

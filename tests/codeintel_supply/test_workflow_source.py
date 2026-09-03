@@ -71,9 +71,9 @@ def test_workflow_pins_actions_and_runner_and_uses_no_cache() -> None:
     uses = re.findall(r"(?m)^\s+- uses: ([^\s#]+)", source)
     assert uses
     assert set(uses) == {
-        "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
-        "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
-        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     }
     assert all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", value) for value in uses)
     assert "runs-on: ubuntu-24.04" in source
@@ -148,7 +148,9 @@ def test_phase_e_mechanically_seals_network_before_fixed_consumer() -> None:
     consumer = source.index("run-phase-e-hosted")
     assert probe < consumer
     assert "NETWORK_SEAL_UNAVAILABLE" in source
-    assert "refs/pull/407/head" in source
+    assert "ref: ${{ inputs.consumer_sha }}" in source
+    assert "refs/pull/" not in source
+    assert "switch -C" not in source
     assert "serena" not in source.lower()
     assert "pyright" not in source.lower()
     assert "typescript" not in source.lower()
