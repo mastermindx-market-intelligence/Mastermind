@@ -10,6 +10,7 @@
     "run_kind",
     "generation_receipts",
     "failure_injection_receipts",
+    "query_receipt_failure_receipts",
     "publication_receipts",
     "query_receipts",
     "trial_receipts"
@@ -21,6 +22,7 @@
     "run_kind": {"enum": ["real", "synthetic"]},
     "generation_receipts": {"type": "array", "items": {"$ref": "#/$defs/generation"}},
     "failure_injection_receipts": {"type": "array", "items": {"$ref": "#/$defs/failure_injection"}},
+    "query_receipt_failure_receipts": {"type": "array", "items": {"$ref": "#/$defs/query_receipt_failure"}},
     "publication_receipts": {"type": "array", "items": {"$ref": "#/$defs/publication"}},
     "query_receipts": {"type": "array", "items": {"$ref": "#/$defs/query"}},
     "trial_receipts": {"type": "array", "items": {"$ref": "#/$defs/trial"}}
@@ -73,6 +75,18 @@
           }
         },
         "correction_of": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "query_receipt_failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "trial_id", "stage", "failure_code", "evidence_digest"],
+      "properties": {
+        "schema_version": {"const": "mastermind.codeintel_query_receipt_failure.v1"},
+        "trial_id": {"type": "string", "pattern": "^(E1|X3|R3|A1):(baseline|zoekt)$"},
+        "stage": {"enum": ["FACTORY", "VALIDATION"]},
+        "failure_code": {"const": "RESULT_SCHEMA_INVALID"},
         "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },

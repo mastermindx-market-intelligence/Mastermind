@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Final
+
+from .evaluation_manifest import EvaluationManifest
 
 
 REQUIRED_BENCHMARK_CASES: Final = frozenset({"E1", "X3", "R3", "A1"})
 PATH_POLICY_IDS: Final = frozenset({"P0", "P1", "P2"})
 TOPOLOGY_IDS: Final = frozenset({"T0", "T1"})
 NO_SAFE_TOPOLOGY: Final = "NO_SAFE_TOPOLOGY"
+_SHA256_RE: Final = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class PathPolicyError(ValueError):
@@ -38,6 +42,31 @@ class PathPolicyMeasurement:
 
 
 @dataclass(frozen=True)
+class P0Justification:
+    """The manifest-bound preregistered authority required for a P0 winner."""
+
+    manifest_digest: str
+    tie_break_rule_digest: str
+
+    def __post_init__(self) -> None:
+        for label, digest in (
+            ("manifest_digest", self.manifest_digest),
+            ("tie_break_rule_digest", self.tie_break_rule_digest),
+        ):
+            if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
+                raise PathPolicyError(f"{label} must be a lowercase SHA-256")
+
+    @classmethod
+    def from_manifest(cls, manifest: EvaluationManifest) -> P0Justification:
+        if not isinstance(manifest, EvaluationManifest):
+            raise PathPolicyError("P0 justification requires an EvaluationManifest")
+        return cls(
+            manifest_digest=manifest.digest,
+            tie_break_rule_digest=manifest.tie_break_rule_digest,
+        )
+
+
+@dataclass(frozen=True)
 class TopologyEnvelope:
     """One fixed host resource envelope allowed for a disposable Z0 topology."""
 
@@ -61,7 +90,8 @@ class TopologyMeasurement:
 def select_path_policy(
     measurements: tuple[PathPolicyMeasurement, ...],
     *,
-    p0_non_recall_justification: bool = False,
+    evaluation_manifest: EvaluationManifest | None = None,
+    p0_justification: P0Justification | None = None,
 ) -> str:
     """Choose only from complete evidence; P0 cannot win on recall alone."""
 
@@ -99,9 +129,13 @@ def select_path_policy(
         raise PathPolicyError("no policy reaches full answer-key recall")
     candidates.sort(key=lambda policy_id: _policy_cost(by_policy[policy_id]))
     winner = candidates[0]
-    if winner == "P0" and not p0_non_recall_justification:
+    if winner == "P0" and not _has_manifest_bound_p0_justification(
+        evaluation_manifest,
+        p0_justification,
+    ):
         raise PathPolicyError(
-            "P0 cannot win on recall alone without preregistered non-recall justification"
+            "P0 cannot win on recall alone without a manifest-bound preregistered "
+            "non-recall justification"
         )
     if winner == "P0" and len(candidates) > 1:
         p0 = _policy_cost(by_policy["P0"])
@@ -116,6 +150,21 @@ def select_path_policy(
                 "has lower false-positive or resource burden"
             )
     return winner
+
+
+def _has_manifest_bound_p0_justification(
+    evaluation_manifest: EvaluationManifest | None,
+    p0_justification: P0Justification | None,
+) -> bool:
+    return (
+        isinstance(evaluation_manifest, EvaluationManifest)
+        and isinstance(p0_justification, P0Justification)
+        and p0_justification.manifest_digest == evaluation_manifest.digest
+        and (
+            p0_justification.tie_break_rule_digest
+            == evaluation_manifest.tie_break_rule_digest
+        )
+    )
 
 
 def select_topology(

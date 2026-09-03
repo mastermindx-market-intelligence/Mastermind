@@ -30,6 +30,9 @@ QUERY_TRIAL_RECEIPT_SCHEMA_VERSION: Final = "mastermind.codeintel_query_trial.v1
 GRADER_RECEIPT_SCHEMA_VERSION: Final = "mastermind.codeintel_grader.v1"
 CLEANUP_RECEIPT_SCHEMA_VERSION: Final = "mastermind.codeintel_cleanup.v1"
 CORRECTION_RECEIPT_SCHEMA_VERSION: Final = "mastermind.codeintel_correction.v1"
+QUERY_RECEIPT_FAILURE_SCHEMA_VERSION: Final = (
+    "mastermind.codeintel_query_receipt_failure.v1"
+)
 ZOEKT_FACADE_ACCEPTED_FOR_CI3: Final = "ZOEKT_FACADE_ACCEPTED_FOR_CI3"
 ZOEKT_REQUIRES_ARCHITECTURE_REVISION: Final = "ZOEKT_REQUIRES_ARCHITECTURE_REVISION"
 NO_SAFE_GLOBAL_INDEX: Final = "NO_SAFE_GLOBAL_INDEX"
@@ -109,6 +112,8 @@ _ZERO_RESULT_AUTHORITY_VALUES: Final = frozenset(
         "NOT_APPLICABLE_MATCHES_RETURNED",
     }
 )
+_QUERY_RECEIPT_FAILURE_STAGES: Final = frozenset({"FACTORY", "VALIDATION"})
+_QUERY_RECEIPT_FAILURE_CODES: Final = frozenset({"RESULT_SCHEMA_INVALID"})
 _QUERY_RECEIPT_FIELDS: Final = frozenset(
     {
         "schema_version",
@@ -168,6 +173,7 @@ _FAILURE_CODES: Final = frozenset(
         "QUERY_CANCELLED",
         "INCOMPLETE_DESIRED_SET",
         "GENERATION_RACE",
+        "RESULT_SCHEMA_INVALID",
     }
 )
 REQUIRED_FAILURE_INJECTIONS: Final = (
@@ -410,6 +416,16 @@ class FailureInjectionReceipt:
 
 
 @dataclass(frozen=True)
+class QueryReceiptFailureReceipt:
+    """One receipt-normalization failure retained for its preregistered trial."""
+
+    trial_id: str
+    stage: str
+    failure_code: str
+    evidence_digest: str
+
+
+@dataclass(frozen=True)
 class TrialReceipt:
     """One trial from the preregistered alternating candidate order."""
 
@@ -477,7 +493,7 @@ class EvaluationEvidence:
 
     @property
     def is_real_complete(self) -> bool:
-        return self.state == "ELIGIBLE_REAL_EMPIRICAL_EVIDENCE"
+        return _evidence_is_acceptance_eligible(self)
 
     def to_result_payload(self) -> dict[str, object]:
         return {
@@ -511,9 +527,221 @@ def build_decision_from_evidence(
         raise EvidenceError("repositories_safe must be a boolean")
     if not repositories_safe:
         return NO_SAFE_GLOBAL_INDEX
-    if evidence.is_real_complete:
+    if _evidence_is_acceptance_eligible(evidence):
         return ZOEKT_FACADE_ACCEPTED_FOR_CI3
     return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
+
+
+def _evidence_is_acceptance_eligible(evidence: EvaluationEvidence) -> bool:
+    """Revalidate public summary fields before they can select the acceptance enum."""
+
+    if (
+        evidence.state != "ELIGIBLE_REAL_EMPIRICAL_EVIDENCE"
+        or evidence.run_kind != "real"
+        or not isinstance(evidence.active_generation_id, str)
+        or not evidence.active_generation_id
+        or len(evidence.active_generation_id.encode("utf-8")) > 256
+        or type(evidence.required_trial_count) is not int
+        or evidence.required_trial_count < 1
+        or type(evidence.recorded_trial_count) is not int
+        or evidence.recorded_trial_count < 1
+        or evidence.recorded_trial_count != evidence.required_trial_count
+        or type(evidence.failed_trial_count) is not int
+        or evidence.failed_trial_count != 0
+        or type(evidence.required_failure_injection_count) is not int
+        or evidence.required_failure_injection_count < 1
+        or type(evidence.recorded_failure_injection_count) is not int
+        or evidence.recorded_failure_injection_count < 1
+        or (
+            evidence.recorded_failure_injection_count
+            != evidence.required_failure_injection_count
+        )
+        or type(evidence.all_resources_known) is not bool
+        or not evidence.all_resources_known
+        or type(evidence.all_identity_bound) is not bool
+        or not evidence.all_identity_bound
+        or type(evidence.reasons) is not tuple
+        or evidence.reasons
+        or any(
+            not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None
+            for digest in (
+                evidence.manifest_digest,
+                evidence.source_census_digest,
+                evidence.ledger_digest,
+            )
+        )
+    ):
+        return False
+    return _evidence_canonical_payload_binds(evidence)
+
+
+def _evidence_canonical_payload_binds(evidence: EvaluationEvidence) -> bool:
+    """Bind the summary to its canonical ledger bytes before accepting it."""
+
+    canonical = evidence.canonical_bytes
+    if type(canonical) is not bytes:
+        return False
+    if hashlib.sha256(canonical).hexdigest() != evidence.ledger_digest:
+        return False
+    try:
+        payload = json.loads(
+            canonical.decode("utf-8"),
+            object_pairs_hook=_receipt_no_duplicates,
+            parse_constant=_receipt_reject_nonfinite,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, QueryReceiptError, TypeError, ValueError):
+        return False
+    if not isinstance(payload, dict) or _canonical_json(payload) != canonical:
+        return False
+    expected_fields = {
+        "schema_version",
+        "manifest_digest",
+        "source_census_digest",
+        "run_kind",
+        "generation_receipts",
+        "publication_receipts",
+        "failure_injection_receipts",
+        "query_receipt_failure_receipts",
+        "query_receipts",
+        "trial_receipts",
+    }
+    if set(payload) != expected_fields:
+        return False
+    if (
+        payload["schema_version"] != LEDGER_SCHEMA_VERSION
+        or payload["manifest_digest"] != evidence.manifest_digest
+        or payload["source_census_digest"] != evidence.source_census_digest
+        or payload["run_kind"] != "real"
+    ):
+        return False
+    generations = payload["generation_receipts"]
+    publications = payload["publication_receipts"]
+    injections = payload["failure_injection_receipts"]
+    receipt_failures = payload["query_receipt_failure_receipts"]
+    query_receipts = payload["query_receipts"]
+    trials = payload["trial_receipts"]
+    if not all(
+        isinstance(value, list)
+        for value in (
+            generations,
+            publications,
+            injections,
+            receipt_failures,
+            query_receipts,
+            trials,
+        )
+    ):
+        return False
+    if (
+        len(trials) != evidence.recorded_trial_count
+        or len(query_receipts) != evidence.required_trial_count
+        or len(injections) != evidence.recorded_failure_injection_count
+        or receipt_failures
+        or not publications
+    ):
+        return False
+    last_publication = publications[-1]
+    if (
+        not isinstance(last_publication, Mapping)
+        or last_publication.get("active_generation_id") != evidence.active_generation_id
+    ):
+        return False
+    if not any(
+        isinstance(generation, Mapping)
+        and generation.get("generation_id") == evidence.active_generation_id
+        and generation.get("status") == "succeeded"
+        for generation in generations
+    ):
+        return False
+    injection_codes: set[str] = set()
+    for injection in injections:
+        if not isinstance(injection, Mapping):
+            return False
+        failure_code = injection.get("failure_code")
+        cleanup = injection.get("cleanup")
+        if (
+            not isinstance(failure_code, str)
+            or injection.get("outcome") != "REJECTED"
+            or not isinstance(cleanup, Mapping)
+            or cleanup.get("state") != "SUCCEEDED"
+        ):
+            return False
+        injection_codes.add(failure_code)
+    if injection_codes != set(REQUIRED_FAILURE_INJECTIONS):
+        return False
+    trial_ids: set[str] = set()
+    for trial in trials:
+        if not isinstance(trial, Mapping):
+            return False
+        trial_id = trial.get("trial_id")
+        resource = trial.get("resource")
+        if (
+            not isinstance(trial_id, str)
+            or not trial_id
+            or trial_id in trial_ids
+            or trial.get("generation_id") != evidence.active_generation_id
+            or trial.get("source_census_digest") != evidence.source_census_digest
+            or trial.get("outcome") != "completed"
+            or trial.get("query_completed") is not True
+            or trial.get("truncated") is not False
+            or trial.get("failure_code") is not None
+            or not isinstance(resource, Mapping)
+            or not resource
+            or any(value == UNKNOWN_RESOURCE for value in resource.values())
+        ):
+            return False
+        trial_ids.add(trial_id)
+    query_trial_ids: set[str] = set()
+    for receipt in query_receipts:
+        if not _query_payload_is_decision_eligible(receipt):
+            return False
+        assert isinstance(receipt, Mapping)
+        trial_id = receipt.get("trial_id")
+        if not isinstance(trial_id, str) or trial_id in query_trial_ids:
+            return False
+        query_trial_ids.add(trial_id)
+    return query_trial_ids == trial_ids
+
+
+def _query_payload_is_decision_eligible(payload: object) -> bool:
+    """Evaluate the raw canonical receipt shape used by the public result gate."""
+
+    if not isinstance(payload, Mapping):
+        return False
+    try:
+        limits = payload["limits"]
+        resources = payload["resource_observation"]
+        security = payload["security_observation"]
+        cleanup = payload["cleanup_observation"]
+    except KeyError:
+        return False
+    if not all(
+        isinstance(value, Mapping) for value in (limits, resources, security, cleanup)
+    ):
+        return False
+    if (
+        payload.get("status") not in {"SUCCESS", "ZERO_RESULTS"}
+        or payload.get("query_completeness") != "COMPLETE"
+        or limits.get("truncated") is not False
+        or payload.get("coverage") != ["FULLY_COVERED"]
+        or payload.get("health") != ["HEALTHY"]
+        or payload.get("freshness") != ["EXACT_SHA_CURRENT"]
+        or not resources
+        or any(value == UNKNOWN_RESOURCE for value in resources.values())
+        or not security
+        or any(value == UNKNOWN_RESOURCE or value != 0 for value in security.values())
+        or cleanup.get("state") != "SUCCEEDED"
+        or cleanup.get("receipt_digest") == UNKNOWN_RESOURCE
+        or payload.get("raw_response_digest") == UNKNOWN_RESOURCE
+        or payload.get("normalized_response_digest") == UNKNOWN_RESOURCE
+    ):
+        return False
+    if payload["status"] == "ZERO_RESULTS":
+        return (
+            payload.get("zero_result_authority")
+            == "AUTHORITATIVE_NOT_FOUND_ON_HEALTHY_COVERED_EXACT_REF"
+        )
+    return payload.get("zero_result_authority") == "NOT_APPLICABLE_MATCHES_RETURNED"
 
 
 class EvaluationLedger:
@@ -537,6 +765,7 @@ class EvaluationLedger:
         self._generation_receipts: list[GenerationReceipt] = []
         self._publication_receipts: list[PublicationReceipt] = []
         self._failure_injection_receipts: list[FailureInjectionReceipt] = []
+        self._query_receipt_failure_receipts: list[QueryReceiptFailureReceipt] = []
         self._query_receipts: list[NormalizedQueryReceipt] = []
         self._trial_receipts: list[TrialReceipt] = []
         self._active_generation_id: str | None = None
@@ -556,6 +785,10 @@ class EvaluationLedger:
     @property
     def query_receipts(self) -> tuple[NormalizedQueryReceipt, ...]:
         return tuple(self._query_receipts)
+
+    @property
+    def query_receipt_failure_receipts(self) -> tuple[QueryReceiptFailureReceipt, ...]:
+        return tuple(self._query_receipt_failure_receipts)
 
     @property
     def failure_injection_receipts(self) -> tuple[FailureInjectionReceipt, ...]:
@@ -652,6 +885,11 @@ class EvaluationLedger:
             raise EvidenceError("query receipt trial_id is not preregistered")
         if any(item.trial_id == receipt.trial_id for item in self._query_receipts):
             raise EvidenceError("query receipt duplicate trial_id")
+        if any(
+            item.trial_id == receipt.trial_id
+            for item in self._query_receipt_failure_receipts
+        ):
+            raise EvidenceError("query receipt cannot replace a retained failure")
         if self._active_generation_id is None:
             raise EvidenceError("query receipt requires a published full generation")
         case_id, candidate = receipt.trial_id.split(":", 1)
@@ -697,6 +935,29 @@ class EvaluationLedger:
         if requested_ids != set(corpus_by_id):
             raise EvidenceError("query receipt requested source set is incomplete")
         self._query_receipts.append(receipt)
+
+    def record_query_receipt_failure(self, receipt: QueryReceiptFailureReceipt) -> None:
+        """Append one terminal receipt-normalization failure without a hidden retry."""
+
+        if not isinstance(receipt, QueryReceiptFailureReceipt):
+            raise EvidenceError("query receipt failure must have the closed receipt shape")
+        if receipt.trial_id not in self._manifest.trial_order:
+            raise EvidenceError("query receipt failure trial_id is not preregistered")
+        if receipt.stage not in _QUERY_RECEIPT_FAILURE_STAGES:
+            raise EvidenceError("query receipt failure stage is not in the closed vocabulary")
+        if receipt.failure_code not in _QUERY_RECEIPT_FAILURE_CODES:
+            raise EvidenceError("query receipt failure code is not in the closed vocabulary")
+        _require_sha256(receipt.evidence_digest, "query receipt failure evidence_digest")
+        if self._active_generation_id is None:
+            raise EvidenceError("query receipt failure requires a published full generation")
+        if any(item.trial_id == receipt.trial_id for item in self._query_receipts):
+            raise EvidenceError("query receipt failure cannot replace a valid receipt")
+        if any(
+            item.trial_id == receipt.trial_id
+            for item in self._query_receipt_failure_receipts
+        ):
+            raise EvidenceError("query receipt failure cannot be overwritten or duplicated")
+        self._query_receipt_failure_receipts.append(receipt)
 
     def record_failure_injection(self, receipt: FailureInjectionReceipt) -> None:
         """Append one preregistered adversarial proof without rewriting its result."""
@@ -820,6 +1081,8 @@ class EvaluationLedger:
             reasons.append("MISSING_OR_UNEXPECTED_TRIALS")
         if not all_query_receipts_eligible:
             reasons.append("MISSING_OR_INELIGIBLE_QUERY_RECEIPT")
+        if self._query_receipt_failure_receipts:
+            reasons.append("QUERY_RECEIPT_NORMALIZATION_FAILURE")
         if not all_failure_injections_recorded:
             reasons.append("MISSING_FAILURE_INJECTIONS")
         if transport_failed:
@@ -871,6 +1134,10 @@ class EvaluationLedger:
             "failure_injection_receipts": [
                 _failure_injection_payload(item)
                 for item in self._failure_injection_receipts
+            ],
+            "query_receipt_failure_receipts": [
+                _query_receipt_failure_payload(item)
+                for item in self._query_receipt_failure_receipts
             ],
             "query_receipts": [
                 _query_receipt_payload(item) for item in self._query_receipts
@@ -928,15 +1195,24 @@ def run_paired_trials(
             observation = _callback_failure("timeout", "TIMEOUT")
         except Exception:
             observation = _callback_failure("error", "PROCESS_CRASH")
-        query_receipt = query_receipt_factory(
-            query,
-            trial_id,
-            query_index,
-            observation,
-        )
-        if not isinstance(query_receipt, NormalizedQueryReceipt):
-            raise EvidenceError("query receipt factory returned an invalid receipt")
-        ledger.record_query_receipt(query_receipt)
+        try:
+            query_receipt = query_receipt_factory(
+                query,
+                trial_id,
+                query_index,
+                observation,
+            )
+        except Exception as error:
+            _retain_query_receipt_failure(ledger, trial_id, "FACTORY", error)
+            observation = _callback_failure("error", "RESULT_SCHEMA_INVALID")
+        else:
+            try:
+                if not isinstance(query_receipt, NormalizedQueryReceipt):
+                    raise EvidenceError("query receipt factory returned an invalid receipt")
+                ledger.record_query_receipt(query_receipt)
+            except Exception as error:
+                _retain_query_receipt_failure(ledger, trial_id, "VALIDATION", error)
+                observation = _callback_failure("error", "RESULT_SCHEMA_INVALID")
         grade = grade_candidate_result(answer_keys[case_id], observation.returned_identities)
         receipt = TrialReceipt(
             trial_id=trial_id,
@@ -970,6 +1246,31 @@ def _callback_failure(outcome: str, failure_code: str) -> CandidateTrialObservat
             disk_bytes=UNKNOWN_RESOURCE,
         ),
         failure_code=failure_code,
+    )
+
+
+def _retain_query_receipt_failure(
+    ledger: EvaluationLedger,
+    trial_id: str,
+    stage: str,
+    error: Exception,
+) -> None:
+    """Record a bounded failure identity without retaining raw callback output."""
+
+    evidence = _canonical_json(
+        {
+            "trial_id": trial_id,
+            "stage": stage,
+            "exception_type": type(error).__name__,
+        }
+    )
+    ledger.record_query_receipt_failure(
+        QueryReceiptFailureReceipt(
+            trial_id=trial_id,
+            stage=stage,
+            failure_code="RESULT_SCHEMA_INVALID",
+            evidence_digest=hashlib.sha256(evidence).hexdigest(),
+        )
     )
 
 
@@ -1437,6 +1738,18 @@ def _failure_injection_payload(receipt: FailureInjectionReceipt) -> dict[str, ob
             "state": receipt.cleanup_state,
         },
         "correction_of": receipt.correction_of,
+        "evidence_digest": receipt.evidence_digest,
+    }
+
+
+def _query_receipt_failure_payload(
+    receipt: QueryReceiptFailureReceipt,
+) -> dict[str, object]:
+    return {
+        "schema_version": QUERY_RECEIPT_FAILURE_SCHEMA_VERSION,
+        "trial_id": receipt.trial_id,
+        "stage": receipt.stage,
+        "failure_code": receipt.failure_code,
         "evidence_digest": receipt.evidence_digest,
     }
 

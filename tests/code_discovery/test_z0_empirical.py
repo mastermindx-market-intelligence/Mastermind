@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import jsonschema
@@ -323,6 +324,43 @@ def test_deterministic_decision_builder_never_accepts_incomplete_or_unsafe_evide
     )
 
 
+def test_decision_builder_revalidates_every_public_completion_predicate() -> None:
+    """A forged summary cannot promote an incomplete ledger to CI3 eligibility."""
+
+    ledger = _ledger()
+    _publish_healthy_generation(ledger)
+    _record_query_receipts(ledger)
+    _record_failure_injections(ledger)
+    for trial_id in ledger.manifest.trial_order:
+        ledger.record_trial(_trial(ledger, trial_id))
+    complete = ledger.freeze()
+
+    forged_evidence = (
+        replace(complete, run_kind="synthetic"),
+        replace(complete, active_generation_id=None),
+        replace(complete, recorded_trial_count=complete.recorded_trial_count - 1),
+        replace(complete, failed_trial_count=1),
+        replace(
+            complete,
+            recorded_failure_injection_count=(
+                complete.recorded_failure_injection_count - 1
+            ),
+        ),
+        replace(complete, all_resources_known=False),
+        replace(complete, all_identity_bound=False),
+        replace(complete, reasons=("FORGED_COMPLETION",)),
+        replace(complete, canonical_bytes=b"{}"),
+    )
+
+    for forged in forged_evidence:
+        assert build_decision_from_evidence(forged, repositories_safe=True) == (
+            "ZOEKT_REQUIRES_ARCHITECTURE_REVISION"
+        )
+        assert build_decision_from_evidence(forged, repositories_safe=False) == (
+            "NO_SAFE_GLOBAL_INDEX"
+        )
+
+
 def test_omitted_index_sha_duplicate_repository_and_moved_source_fail_closed() -> None:
     """Identity mutations cannot collapse corpus coverage or bless stale source bytes."""
 
@@ -484,6 +522,81 @@ def test_paired_harness_uses_the_frozen_alternating_order_and_retains_callback_t
     assert ledger.freeze().state == "NON_DECISION_INCOMPLETE_EVIDENCE"
 
 
+def test_paired_runner_records_query_receipt_failures_and_continues() -> None:
+    """Factory, shape, and ledger-validation faults remain visible trial evidence."""
+
+    ledger = _ledger()
+    _publish_healthy_generation(ledger)
+    seen: list[str] = []
+
+    def executor(query: object) -> CandidateTrialObservation:
+        seen.append(getattr(query, "case_id"))
+        return CandidateTrialObservation(
+            outcome="completed",
+            query_completed=True,
+            truncated=False,
+            returned_identities=(),
+            resource=ResourceObservation(cpu_ms=1, rss_bytes=2, disk_bytes=3),
+            failure_code=None,
+        )
+
+    def receipt_factory(
+        query: object,
+        trial_id: str,
+        query_index: int,
+        observation: CandidateTrialObservation,
+    ) -> object:
+        del query, observation
+        if trial_id == "X3:zoekt":
+            raise RuntimeError("synthetic receipt factory failure")
+        if trial_id == "R3:baseline":
+            return object()
+        payload = _query_payload(ledger, trial_id, query_index=query_index)
+        if trial_id == "A1:zoekt":
+            sources = payload["requested_sources"]
+            assert isinstance(sources, list)
+            assert isinstance(sources[0], dict)
+            sources[0]["requested_tree"] = "f" * 40
+        return parse_normalized_query_receipt(payload)
+
+    receipts = run_paired_trials(
+        ledger,
+        baseline_executor=executor,
+        zoekt_executor=executor,
+        answer_keys=_answer_keys(ledger),
+        query_receipt_factory=receipt_factory,
+    )
+
+    assert tuple(item.trial_id for item in receipts) == ledger.manifest.trial_order
+    assert len(seen) == len(ledger.manifest.trial_order)
+    failures = ledger.query_receipt_failure_receipts
+    assert tuple(item.trial_id for item in failures) == (
+        "X3:zoekt",
+        "R3:baseline",
+        "A1:zoekt",
+    )
+    assert failures[0].stage == "FACTORY"
+    assert all(item.failure_code == "RESULT_SCHEMA_INVALID" for item in failures)
+    failed_trials = tuple(item for item in receipts if item.failure_code is not None)
+    assert tuple(item.trial_id for item in failed_trials) == tuple(
+        item.trial_id for item in failures
+    )
+    assert all(item.outcome == "error" for item in failed_trials)
+    assert all(item.resource.cpu_ms == UNKNOWN_RESOURCE for item in failed_trials)
+    frozen = ledger.freeze()
+    assert frozen.state == "NON_DECISION_INCOMPLETE_EVIDENCE"
+    assert "QUERY_RECEIPT_NORMALIZATION_FAILURE" in frozen.reasons
+    ledger_schema_path = (
+        Path(__file__).parent.parent.parent
+        / "research"
+        / "code_intelligence_fabric"
+        / "Z0_EVALUATION_LEDGER.schema.json"
+    )
+    ledger_schema = json.loads(ledger_schema_path.read_text(encoding="utf-8"))
+    validator = jsonschema.Draft202012Validator(ledger_schema)
+    assert list(validator.iter_errors(ledger.to_payload())) == []
+
+
 def test_independent_grader_derives_recall_and_false_positives_from_answer_keys() -> None:
     """A candidate's own score is ignored in favor of source-derived identities."""
 
@@ -611,4 +724,11 @@ def test_result_schema_allows_acceptance_only_with_complete_real_empirical_evide
     synthetic["state"] = "NON_DECISION_SYNTHETIC_ONLY"
     synthetic["run_kind"] = "synthetic"
     payload["evaluation_evidence"] = synthetic
+    assert list(validator.iter_errors(payload))
+
+    incomplete = dict(real)
+    incomplete["recorded_trial_count"] = 0
+    incomplete["failed_trial_count"] = 1
+    incomplete["reasons"] = ["FORGED_COMPLETION"]
+    payload["evaluation_evidence"] = incomplete
     assert list(validator.iter_errors(payload))

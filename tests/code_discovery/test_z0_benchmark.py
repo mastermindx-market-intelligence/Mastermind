@@ -2,16 +2,28 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from experiments.code_discovery.evaluation_manifest import load_evaluation_manifest
 from experiments.code_discovery.z0_benchmark import (
     NO_SAFE_TOPOLOGY,
+    P0Justification,
     PathPolicyError,
     PathPolicyMeasurement,
     TopologyEnvelope,
     TopologyMeasurement,
     select_path_policy,
     select_topology,
+)
+
+
+_MANIFEST = (
+    Path(__file__).parent.parent
+    / "fixtures"
+    / "code_discovery"
+    / "evaluation-manifest.v1.json"
 )
 
 
@@ -109,7 +121,43 @@ def test_p0_cannot_win_on_recall_alone_and_constitutional_failure_dominates_cost
         hard_failure_code="SOURCE_MOVED",
     )
     with pytest.raises(PathPolicyError, match="constitutional failure"):
-        select_path_policy(tuple(failed), p0_non_recall_justification=True)
+        select_path_policy(tuple(failed))
+
+
+def test_p0_requires_a_manifest_bound_preregistered_justification() -> None:
+    """A truthy caller flag cannot stand in for the frozen tie-break authority."""
+
+    measurements = list(_complete())
+    for index, measurement in enumerate(measurements):
+        if measurement.policy_id in {"P1", "P2"}:
+            measurements[index] = _measurement(
+                measurement.policy_id,
+                measurement.case_id,
+                relevant_path_recall=0.9,
+            )
+    manifest = load_evaluation_manifest(_MANIFEST)
+
+    with pytest.raises(PathPolicyError, match="manifest-bound"):
+        select_path_policy(
+            tuple(measurements),
+            evaluation_manifest=manifest,
+            p0_justification=True,
+        )
+    with pytest.raises(PathPolicyError, match="manifest-bound"):
+        select_path_policy(
+            tuple(measurements),
+            evaluation_manifest=manifest,
+            p0_justification=P0Justification(
+                manifest_digest=manifest.digest,
+                tie_break_rule_digest="f" * 64,
+            ),
+        )
+
+    assert select_path_policy(
+        tuple(measurements),
+        evaluation_manifest=manifest,
+        p0_justification=P0Justification.from_manifest(manifest),
+    ) == "P0"
 
 
 def test_topology_is_selected_only_inside_t0_t1_resource_envelopes() -> None:

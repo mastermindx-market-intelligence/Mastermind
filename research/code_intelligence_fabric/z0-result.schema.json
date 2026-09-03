@@ -98,14 +98,28 @@
             "required": [
               "state",
               "run_kind",
+              "active_generation_id",
+              "required_trial_count",
+              "recorded_trial_count",
+              "failed_trial_count",
+              "required_failure_injection_count",
+              "recorded_failure_injection_count",
               "all_resources_known",
-              "all_identity_bound"
+              "all_identity_bound",
+              "reasons"
             ],
             "properties": {
               "state": {"const": "ELIGIBLE_REAL_EMPIRICAL_EVIDENCE"},
               "run_kind": {"const": "real"},
+              "active_generation_id": {"type": "string", "minLength": 1},
+              "required_trial_count": {"minimum": 1},
+              "recorded_trial_count": {"minimum": 1},
+              "failed_trial_count": {"const": 0},
+              "required_failure_injection_count": {"minimum": 1},
+              "recorded_failure_injection_count": {"minimum": 1},
               "all_resources_known": {"const": true},
-              "all_identity_bound": {"const": true}
+              "all_identity_bound": {"const": true},
+              "reasons": {"maxItems": 0}
             }
           }
         }
