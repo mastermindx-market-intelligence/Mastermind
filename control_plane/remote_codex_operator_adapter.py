@@ -57,6 +57,11 @@ from control_plane.operator_harness_wire import (
     to_wire,
     turn_start_observation,
 )
+from control_plane.operator_materialization_receipt import (
+    OperatorMaterializationReceiptError,
+    OperatorMaterializationStatusObservation,
+    operator_materialization_status,
+)
 from control_plane.worker_browser_b1 import (
     BrowserReviewError,
     BrowserReviewReceipt,
@@ -200,6 +205,35 @@ class RemoteCodexOperatorAdapter:
             generation=generation,
             provider_session=provider_session,
         )
+
+    def materialization_status(
+        self,
+        *,
+        operation_id: OperationId,
+        requested: RequestedExecutionProfile,
+        epoch: SessionEpochRef,
+        generation: ProcessGenerationRef,
+        provider_session: ProviderSessionHandoff | None = None,
+    ) -> OperatorMaterializationStatusObservation:
+        """Read one exact receipt status without invoking or mutating a provider."""
+
+        payload = {
+            "operation_id": to_wire(operation_id),
+            "requested": to_wire(requested),
+            "epoch": to_wire(epoch),
+            "generation": to_wire(generation),
+        }
+        if provider_session is not None:
+            payload["provider_session"] = to_wire(provider_session)
+        result = self.client.request_sync(
+            "ohf-materialization-status", payload, timeout_seconds=30
+        )
+        try:
+            return operator_materialization_status(result)
+        except OperatorMaterializationReceiptError as exc:
+            raise BrokerProtocolError(
+                "remote OHF materialization status is invalid"
+            ) from exc
 
     def _receipt(self, generation: ProcessGenerationRef) -> dict[str, Any]:
         try:
