@@ -582,7 +582,10 @@ def _remote_still_matches(
     first_identity: tuple[object, ...],
     remote_head: str,
     current_base_head: str,
-) -> bool:
+    first_collision_state: CollisionState,
+    first_colliding_pr_numbers: tuple[int, ...],
+    first_collisions_complete: bool,
+) -> SourceContinuityRefusal | None:
     pr_endpoint = f"repos/{request.repository}/pulls/{request.pr_number}"
     second_pr = _api(http_get, token, pr_endpoint)
     second_identity = _pr_identity(second_pr)
@@ -606,11 +609,37 @@ def _remote_still_matches(
     base_commit = second_base.get("commit")
     if not isinstance(branch_commit, dict) or not isinstance(base_commit, dict):
         raise _RemoteProbeError()
-    return (
-        second_identity == first_identity
-        and branch_commit.get("sha") == remote_head
-        and base_commit.get("sha") == current_base_head
+    if (
+        second_identity != first_identity
+        or branch_commit.get("sha") != remote_head
+        or base_commit.get("sha") != current_base_head
+    ):
+        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+
+    (
+        second_collision_state,
+        second_colliding_pr_numbers,
+        second_collisions_complete,
+    ) = _collision_census(
+        http_get,
+        token,
+        request.repository,
+        request.pr_number,
+        request.owned_paths,
     )
+    if (
+        not first_collisions_complete
+        or first_collision_state is CollisionState.INCOMPLETE
+        or not second_collisions_complete
+        or second_collision_state is CollisionState.INCOMPLETE
+    ):
+        return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+    if (
+        second_collision_state is not first_collision_state
+        or second_colliding_pr_numbers != first_colliding_pr_numbers
+    ):
+        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+    return None
 
 
 def _build_parser() -> _SafeArgumentParser:
@@ -710,15 +739,19 @@ def main(
             return _emit(local_probe)
         local_facts, path_entries = local_probe
 
-        if not _remote_still_matches(
+        remote_refusal = _remote_still_matches(
             http_get,
             token,
             request,
             first_identity,
             remote_head,
             current_base_head,
-        ):
-            return _emit(_refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1))
+            collision_state,
+            colliding_pr_numbers,
+            collisions_complete,
+        )
+        if remote_refusal is not None:
+            return _emit(remote_refusal)
 
         remote_facts = RemoteGitFacts(
             repository=remote_repo,
