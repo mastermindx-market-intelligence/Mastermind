@@ -7,7 +7,6 @@ the forge.  The only network-capable caller is Phase P in the manual workflow.
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import os
@@ -26,6 +25,7 @@ LOCK_SCHEMA_VERSION: Final = "mastermind.codeintel_experiment_toolchain_lock.v1"
 SCHEMA_FILENAME: Final = "codeintel-experiment-toolchain-lock.schema.json"
 SUPPORTED_MODE: Final = "Z0"
 SUPPORTED_PLATFORM: Final = "linux-x86_64"
+STRICT_JSON_MAX_BYTES: Final = 1_048_576
 
 ZOEKT_REPOSITORY: Final = "sourcegraph/zoekt"
 ZOEKT_SOURCE_URL: Final = "https://github.com/sourcegraph/zoekt.git"
@@ -130,6 +130,10 @@ class ToolchainLockError(ValueError):
         self.detail = detail
 
 
+class _StrictJsonViolation(ValueError):
+    """A syntax extension that Python's default JSON decoder would accept."""
+
+
 @dataclass(frozen=True)
 class ToolchainLock:
     """One validated immutable Z0 lock."""
@@ -172,11 +176,107 @@ def canonical_json_bytes(value: object) -> bytes:
             separators=(",", ":"),
             ensure_ascii=True,
             allow_nan=False,
+            default=_canonical_json_default,
         ).encode("ascii")
     except (TypeError, ValueError, UnicodeEncodeError) as error:
         raise ToolchainLockError(
             "INVALID_JSON", "value is not canonical JSON"
         ) from error
+
+
+def _canonical_json_default(value: object) -> object:
+    """Expose immutable mappings to the JSON encoder without thawing the lock."""
+
+    if isinstance(value, Mapping):
+        return dict(value)
+    raise TypeError(f"unsupported canonical JSON value: {type(value).__name__}")
+
+
+def _strict_json_file(
+    path: Path, *, invalid_code: str, unsafe_code: str
+) -> tuple[object, bytes]:
+    """Read one bounded regular file and reject non-standard JSON semantics."""
+
+    candidate = Path(path)
+    _regular_file_metadata(candidate, unsafe_code)
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            candidate,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ToolchainLockError(
+                unsafe_code, f"{candidate.name} must be a regular file"
+            )
+        if metadata.st_size > STRICT_JSON_MAX_BYTES:
+            raise ToolchainLockError(
+                invalid_code,
+                f"{candidate.name} exceeds the {STRICT_JSON_MAX_BYTES}-byte size ceiling",
+            )
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1
+            raw = source.read(STRICT_JSON_MAX_BYTES + 1)
+    except ToolchainLockError:
+        raise
+    except OSError as error:
+        raise ToolchainLockError(
+            invalid_code, f"{candidate.name} is unreadable"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+    if len(raw) > STRICT_JSON_MAX_BYTES:
+        raise ToolchainLockError(
+            invalid_code,
+            f"{candidate.name} exceeds the {STRICT_JSON_MAX_BYTES}-byte size ceiling",
+        )
+    if len(raw) != metadata.st_size:
+        raise ToolchainLockError(
+            invalid_code, f"{candidate.name} changed while it was read"
+        )
+
+    try:
+        text = raw.decode("utf-8", errors="strict")
+        value = json.loads(
+            text,
+            object_pairs_hook=_strict_object_pairs,
+            parse_constant=_reject_nonfinite_json_number,
+        )
+    except _StrictJsonViolation as error:
+        raise ToolchainLockError(invalid_code, str(error)) from error
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ToolchainLockError(
+            invalid_code, f"{candidate.name} must be UTF-8 JSON"
+        ) from error
+    return value, raw
+
+
+def _strict_object_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _StrictJsonViolation(f"duplicate object key: {key!r}")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_json_number(token: str) -> object:
+    raise _StrictJsonViolation(f"non-finite number: {token}")
+
+
+def _freeze_json(value: object) -> object:
+    """Return a detached, recursively immutable representation of JSON data."""
+
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {key: _freeze_json(member) for key, member in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(member) for member in value)
+    return value
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -215,12 +315,9 @@ def load_toolchain_lock(
     """Load and independently validate the committed closed lock and schema."""
 
     lock_path = Path(path)
-    _regular_file_metadata(lock_path, "LOCK_UNSAFE")
-    try:
-        raw = lock_path.read_bytes()
-        payload = json.loads(raw)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ToolchainLockError("LOCK_INVALID", "lock must be UTF-8 JSON") from error
+    payload, raw = _strict_json_file(
+        lock_path, invalid_code="LOCK_INVALID", unsafe_code="LOCK_UNSAFE"
+    )
     lock = validate_lock_payload(payload, raw_bytes=raw)
     if schema_path is not None:
         _validate_schema_file(Path(schema_path))
@@ -415,8 +512,10 @@ def validate_lock_payload(
     )
 
     _validate_urls(payload)
-    material = copy.deepcopy(dict(payload))
-    encoded = raw_bytes if raw_bytes is not None else canonical_json_bytes(material)
+    encoded = raw_bytes if raw_bytes is not None else canonical_json_bytes(payload)
+    material = _freeze_json(payload)
+    if not isinstance(material, Mapping):  # pragma: no cover - guarded above
+        raise ToolchainLockError("LOCK_INVALID", "lock must be an object")
     return ToolchainLock(
         payload=material,
         sha256=sha256_bytes(encoded),
@@ -665,13 +764,9 @@ def safe_extract_tar(
 
 
 def _validate_schema_file(path: Path) -> None:
-    _regular_file_metadata(path, "SCHEMA_UNSAFE")
-    try:
-        schema = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ToolchainLockError(
-            "SCHEMA_INVALID", "schema must be UTF-8 JSON"
-        ) from error
+    schema, _ = _strict_json_file(
+        path, invalid_code="SCHEMA_INVALID", unsafe_code="SCHEMA_UNSAFE"
+    )
     if not isinstance(schema, Mapping):
         raise ToolchainLockError("SCHEMA_INVALID", "schema must be an object")
     expected = {

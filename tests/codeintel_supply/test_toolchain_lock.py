@@ -73,6 +73,93 @@ def test_committed_lock_is_closed_and_schema_bound() -> None:
     assert schema["properties"]["mode"]["const"] == "Z0"
 
 
+@pytest.mark.parametrize(
+    ("target", "needle", "replacement", "expected_code", "expected_detail"),
+    [
+        (
+            "lock",
+            '  "mode": "Z0",',
+            '  "mode": "Z0",\n  "mode": "Z0",',
+            "LOCK_INVALID",
+            "duplicate object key",
+        ),
+        (
+            "lock",
+            '  "mode": "Z0",',
+            '  "mode": NaN,',
+            "LOCK_INVALID",
+            "non-finite number",
+        ),
+        (
+            "schema",
+            '  "type": "object",',
+            '  "type": "object",\n  "type": "object",',
+            "SCHEMA_INVALID",
+            "duplicate object key",
+        ),
+        (
+            "schema",
+            '  "type": "object",',
+            '  "type": "object",\n  "hostile": Infinity,',
+            "SCHEMA_INVALID",
+            "non-finite number",
+        ),
+    ],
+)
+def test_lock_and_schema_use_the_same_strict_json_decoder(
+    tmp_path: Path,
+    target: str,
+    needle: str,
+    replacement: str,
+    expected_code: str,
+    expected_detail: str,
+) -> None:
+    hostile = tmp_path / f"hostile-{target}.json"
+    source = LOCK_PATH if target == "lock" else SCHEMA_PATH
+    body = source.read_text(encoding="utf-8")
+    assert body.count(needle) == 1
+    hostile.write_text(body.replace(needle, replacement), encoding="utf-8")
+
+    lock_path = hostile if target == "lock" else LOCK_PATH
+    schema_path = hostile if target == "schema" else SCHEMA_PATH
+    with pytest.raises(locks.ToolchainLockError) as raised:
+        locks.load_toolchain_lock(lock_path, schema_path=schema_path)
+
+    assert raised.value.code == expected_code
+    assert expected_detail in raised.value.detail
+
+
+@pytest.mark.parametrize("target", ["lock", "schema"])
+def test_lock_and_schema_decoder_is_size_bounded(tmp_path: Path, target: str) -> None:
+    oversized = tmp_path / f"oversized-{target}.json"
+    oversized.write_bytes(b" " * (locks.STRICT_JSON_MAX_BYTES + 1))
+
+    lock_path = oversized if target == "lock" else LOCK_PATH
+    schema_path = oversized if target == "schema" else SCHEMA_PATH
+    with pytest.raises(locks.ToolchainLockError) as raised:
+        locks.load_toolchain_lock(lock_path, schema_path=schema_path)
+
+    assert raised.value.code == (
+        "LOCK_INVALID" if target == "lock" else "SCHEMA_INVALID"
+    )
+    assert "size ceiling" in raised.value.detail
+
+
+def test_validated_lock_payload_is_recursively_immutable() -> None:
+    lock = locks.load_toolchain_lock(LOCK_PATH, schema_path=SCHEMA_PATH)
+    expected = locks.canonical_json_bytes(_payload())
+
+    with pytest.raises(TypeError):
+        lock.payload["zoekt"]["go_mod"]["git_blob_sha1"] = "0" * 40  # type: ignore[index]
+    with pytest.raises(TypeError):
+        lock.payload["acquisition"]["allowed_hosts"][0] = "hostile.invalid"  # type: ignore[index]
+
+    assert lock.payload["zoekt"]["go_mod"]["git_blob_sha1"] == (
+        "db33117af57ea746dff8064e70ce56e3721e44ba"
+    )
+    assert locks.canonical_json_bytes(lock.payload) == expected
+
+
 def test_authorized_zoekt_and_go_pins_match_primary_objects() -> None:
     lock = locks.load_toolchain_lock(LOCK_PATH, schema_path=SCHEMA_PATH)
     zoekt = lock.payload["zoekt"]
@@ -164,7 +251,7 @@ def test_actions_are_full_immutable_commits() -> None:
         },
     }
 
-    payload = copy.deepcopy(lock.payload)
+    payload = copy.deepcopy(_payload())
     payload["actions"]["checkout"]["commit"] = "v4"  # type: ignore[index]
     with pytest.raises(locks.ToolchainLockError, match="PIN_MISMATCH"):
         locks.validate_lock_payload(payload)
