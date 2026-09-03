@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from integrations.slack_agent_dialogue import runtime as relay_runtime
 from integrations.slack_agent_dialogue import turn_runtime_primitives as primitives
 
 
@@ -280,3 +281,115 @@ def test_collector_has_no_thread_or_executor_escape() -> None:
     assert "concurrent.futures" not in source
     assert "import threading" not in source
     assert inspect.iscoroutinefunction(primitives.AsyncCandidateCollector.collect)
+
+
+class _CollectorProbe:
+    def __init__(self, *, result=(), error: Exception | None = None, gate=None):
+        self.result = tuple(result)
+        self.error = error
+        self.gate = gate
+        self.calls = 0
+        self.started = asyncio.Event()
+
+    async def collect(self):
+        self.calls += 1
+        self.started.set()
+        if self.gate is not None:
+            await self.gate.wait()
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+def _runtime_with_collector(collector: _CollectorProbe):
+    runtime = object.__new__(relay_runtime.AgentRelayTurnRuntime)
+    runtime._candidate_collector = collector
+    return runtime
+
+
+def test_agent_relay_runtime_source_consumes_the_accepted_collector() -> None:
+    source = Path(relay_runtime.__file__).read_text(encoding="utf-8")
+    assert "from collections.abc import AsyncIterator, Awaitable, Callable" in source
+    assert "from integrations.slack_agent_dialogue.turn_runtime_primitives import (" in source
+    assert "self._candidate_collector = AsyncCandidateCollector(" in source
+    assert "collected = await self._candidate_collector.collect()" in source
+    assert "iter(self._candidate_source())" not in source
+    assert "Callable[[], Iterable[RelayTurnCandidate]]" not in source
+
+
+def test_agent_relay_runtime_awaits_collector_without_blocking_event_loop() -> None:
+    async def scenario() -> None:
+        gate = asyncio.Event()
+        collector = _CollectorProbe(gate=gate)
+        runtime = _runtime_with_collector(collector)
+
+        task = asyncio.create_task(runtime.reconcile_once())
+        await asyncio.wait_for(collector.started.wait(), timeout=0.1)
+        await asyncio.sleep(0)
+        assert task.done() is False
+
+        gate.set()
+        assert await task == ()
+        assert collector.calls == 1
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    (
+        (
+            primitives.CandidateCollectionUnavailable(),
+            "TURN_CANDIDATE_SOURCE_UNAVAILABLE",
+        ),
+        (
+            primitives.CandidateCollectionTimeout(),
+            "TURN_CANDIDATE_COLLECTION_TIMEOUT",
+        ),
+        (
+            primitives.CandidateCollectionOverflow(),
+            "TURN_CANDIDATE_LIMIT_EXCEEDED",
+        ),
+        (
+            primitives.CandidateCollectionBusy(),
+            "TURN_CANDIDATE_COLLECTION_INFLIGHT",
+        ),
+    ),
+)
+def test_agent_relay_runtime_maps_collector_refusals_payload_free(error, reason) -> None:
+    async def scenario() -> None:
+        collector = _CollectorProbe(error=error)
+        runtime = _runtime_with_collector(collector)
+        receipts = await runtime.reconcile_once()
+        assert collector.calls == 1
+        assert len(receipts) == 1
+        assert receipts[0].outcome is relay_runtime.ObservationOutcome.REFUSED
+        assert receipts[0].reason == reason
+
+    asyncio.run(scenario())
+
+
+def test_agent_relay_runtime_processes_only_the_collector_immutable_result() -> None:
+    async def scenario() -> None:
+        candidates = (object(), object())
+        collector = _CollectorProbe(result=candidates)
+        runtime = _runtime_with_collector(collector)
+        seen = []
+
+        async def reconcile(candidate):
+            seen.append(candidate)
+            return relay_runtime.AgentRelayTurnRuntime._receipt(
+                relay_runtime.ObservationOutcome.NO_ACTION,
+                "TEST_ONLY",
+            )
+
+        runtime._reconcile_candidate = reconcile
+        receipts = await runtime.reconcile_once()
+        assert collector.calls == 1
+        assert tuple(seen) == candidates
+        assert tuple(receipt.reason for receipt in receipts) == (
+            "TEST_ONLY",
+            "TEST_ONLY",
+        )
+
+    asyncio.run(scenario())
