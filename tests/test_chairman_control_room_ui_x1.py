@@ -1053,3 +1053,119 @@ def test_addendum_turn_reason_token_matches_the_backend() -> None:
     # on the code, not on the word appearing anywhere in the file.
     assert "worker_runtime_active:" not in js
     assert '"worker_runtime_active"' not in projection
+
+
+# ---------------------------------------------------------------------------
+# BEHAVIOURAL cover for the addendum repairs (independent review, 2026-09-03)
+#
+# The three addendum tests above assert on control_room.js's SOURCE TEXT, and
+# that method cannot see a mutation that keeps the text and removes the
+# effect.  Measured: rewriting Repair B's guard as
+#     if (card.is_actionable !== true) { void 0; }
+# fully restores the stale-card owed-action jump while all three still pass,
+# because the substring is present and its index still precedes
+# auOwedSeat(card).  These tests EXECUTE the real extracted functions under
+# node against fixtures instead, so a neutered guard changes the answer and
+# reddens the suite.  The source assertions are retained as the node-less
+# fallback; this is the gate that actually discriminates.
+# ---------------------------------------------------------------------------
+
+
+def _extract_fn(name: str) -> str:
+    """The real source of one top-level `function <name>(` in control_room.js."""
+    js = JS.read_text(encoding="utf-8")
+    start = js.index("  function %s(" % name)
+    end = js.index("\n  }", start) + len("\n  }")
+    return js[start:end]
+
+
+def _run_node(script: str):
+    node = shutil.which("node")
+    if node is None:  # pragma: no cover - host-dependent
+        pytest.skip("node is not installed on this host")
+    proc = subprocess.run(
+        [node, "-e", script], capture_output=True, text=True, timeout=60
+    )
+    assert proc.returncode == 0, proc.stderr
+    import json
+
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_addendum_behavioural_owed_binding_is_withheld_from_stale_cards() -> None:
+    """Repair B, executed: a non-actionable card yields NO destination."""
+    harness = """
+    var REMOTE_READ_ONLY = false;
+    function auIsHold(card) { return card.__hold === true; }
+    function auOwedSeat(card) { return card.owed_turn.seat; }
+    var STATE = { workByRef: { "WS:X": { work_ref: "WS:X" } } };
+    function uniqueBinding(work, seat) { return { seat: seat, target: "dest" }; }
+    function bindingConfidence(b) { return { openable: true }; }
+    %s
+    var stale = { responsibility_ref: "WS:X", is_actionable: false,
+                  owed_turn: { seat: "sol" } };
+    var live  = { responsibility_ref: "WS:X", is_actionable: true,
+                  owed_turn: { seat: "sol" } };
+    var hold  = { responsibility_ref: "WS:X", is_actionable: true, __hold: true,
+                  owed_turn: { seat: "sol" } };
+    console.log(JSON.stringify({
+      stale: auOwedBinding(stale),
+      live: auOwedBinding(live) ? auOwedBinding(live).seat : null,
+      hold: auOwedBinding(hold)
+    }));
+    """ % _extract_fn("auOwedBinding")
+    out = _run_node(harness)
+
+    assert out["stale"] is None, "a stale/non-actionable card must offer no owed-action jump"
+    assert out["live"] == "sol", "a currently actionable card must still route"
+    assert out["hold"] is None, "the pre-existing EFFECT_UNKNOWN hold suppression survives"
+
+
+def test_addendum_behavioural_ledger_counts_only_actionable_turns() -> None:
+    """Repair C, executed: an all-stale packet shows zero live turns."""
+    harness = """
+    var AU_SEAT_ORDER = ["chairman", "ceo", "coo", "worker", "unknown"];
+    var AU_SEAT_SHORT = { chairman: "You", ceo: "Sol", coo: "Fable", worker: "Worker" };
+    function el(tag, opts) {
+      opts = opts || {};
+      var node = { tag: tag, className: opts.className || "", text: opts.text || "",
+                   children: [] };
+      node.appendChild = function (c) { node.children.push(c); return c; };
+      return node;
+    }
+    %s
+    function cells(ledger) {
+      var track = ledger.children[0], out = {};
+      track.children.forEach(function (c) {
+        out[c.children[1].text] = { n: c.children[0].text, yours: /is-yours/.test(c.className) };
+      });
+      return out;
+    }
+    var allStale = { counts: { actionable: 0, stale: 2, total: 2 },
+      owed_by_seat: { chairman: 1, coo: 1, unknown: 0 },
+      responsibilities: [
+        { is_actionable: false, owed_turn: { seat: "chairman" } },
+        { is_actionable: false, owed_turn: { seat: "coo" } }] };
+    var mixed = { counts: { actionable: 2, stale: 1, total: 3 },
+      owed_by_seat: { chairman: 5, coo: 5, unknown: 5 },
+      responsibilities: [
+        { is_actionable: true,  owed_turn: { seat: "chairman" } },
+        { is_actionable: true,  owed_turn: { seat: "worker" } },
+        { is_actionable: false, owed_turn: { seat: "coo" } }] };
+    console.log(JSON.stringify({ allStale: cells(auLedger(allStale)),
+                                 mixed: cells(auLedger(mixed)) }));
+    """ % _extract_fn("auLedger")
+    out = _run_node(harness)
+
+    # an all-stale packet: nobody owes a LIVE turn, and "You" is not urgent —
+    # even though owed_by_seat records a chairman turn in history.
+    stale_cells = out["allStale"]
+    assert stale_cells["You"] == {"n": "0", "yours": False}
+    assert all(cell["n"] == "0" for cell in stale_cells.values())
+
+    # a mixed packet: only the actionable cards are counted, and the stale
+    # coo card does NOT become a live turn.
+    mixed_cells = out["mixed"]
+    assert mixed_cells["You"] == {"n": "1", "yours": True}
+    assert mixed_cells["Worker"]["n"] == "1"
+    assert mixed_cells["Fable"]["n"] == "0", "a stale card must not count as a live turn"

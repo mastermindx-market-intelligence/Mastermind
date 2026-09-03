@@ -2762,9 +2762,14 @@ def test_final_fix3_one_microsecond_past_budget_boundary_is_stale():
 # On the real all-stale evidence packet the product could still raise
 # "YOUR CALL / Only you can decide" on a card simultaneously labelled
 # HISTORY / not actionable.  Urgency is a claim about NOW, so it requires
-# CURRENT evidence.  These are mutation-killing: each fails if its repair is
-# reverted.  Nothing is erased — every case below re-asserts that the
-# historical owed turn, attribution and receipts survive on the card.
+# CURRENT evidence.  Two of the four below are mutation-killing against the
+# freshness gate (the stale BlockerFact and stale declared-blocker cases);
+# the EFFECT_UNKNOWN case is a POSITIVE control that must survive the revert,
+# and the stale-attention case is defended by the pre-existing owed-turn
+# classifier rather than by this repair — its docstring says so.  Recorded
+# precisely because "each of these kills the mutation" was the claim an
+# independent review corrected.  Nothing is erased — every case below
+# re-asserts that the historical owed turn, attribution and receipts survive.
 # ---------------------------------------------------------------------------
 
 
