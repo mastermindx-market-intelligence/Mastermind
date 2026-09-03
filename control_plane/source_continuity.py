@@ -74,6 +74,7 @@ class RefusalCode(str, Enum):
     UNSAFE_REMOTE_OBJECT = "UNSAFE_REMOTE_OBJECT"
     REMOTE_BLOB_TOO_LARGE = "REMOTE_BLOB_TOO_LARGE"
     LOCAL_FACTS_INVALID = "LOCAL_FACTS_INVALID"
+    LOCAL_BRANCH_MISMATCH = "LOCAL_BRANCH_MISMATCH"
     REMOTE_HEAD_OBJECT_MISSING = "REMOTE_HEAD_OBJECT_MISSING"
     REMOTE_HEAD_NOT_ANCESTOR = "REMOTE_HEAD_NOT_ANCESTOR"
     OUT_OF_SCOPE_DIRT = "OUT_OF_SCOPE_DIRT"
@@ -104,6 +105,7 @@ REFUSAL_MESSAGES: Mapping[RefusalCode, str] = {
     RefusalCode.UNSAFE_REMOTE_OBJECT: "remote path object is unsafe",
     RefusalCode.REMOTE_BLOB_TOO_LARGE: "remote blob exceeds the fixed size limit",
     RefusalCode.LOCAL_FACTS_INVALID: "local proof facts are invalid",
+    RefusalCode.LOCAL_BRANCH_MISMATCH: "local branch does not match the request",
     RefusalCode.REMOTE_HEAD_OBJECT_MISSING: "remote head object is absent locally",
     RefusalCode.REMOTE_HEAD_NOT_ANCESTOR: "remote head is not an ancestor of local head",
     RefusalCode.OUT_OF_SCOPE_DIRT: "local source contains out-of-scope dirt",
@@ -137,6 +139,7 @@ class SourceContinuityRequest:
 
 @dataclass(frozen=True)
 class LocalGitFacts:
+    branch: str
     head_sha: str
     tree_sha: str
     remote_head_object_exists: bool
@@ -211,6 +214,7 @@ class SourceContinuityReceipt:
     current_base_head_sha: str
     changed_paths: tuple[str, ...]
     owned_path_digest: str
+    local_branch: str
     local_head_sha: str
     local_tree_sha: str
     remote_head_is_ancestor_of_local: bool
@@ -260,6 +264,7 @@ class SourceContinuityReceipt:
             "current_base_head_sha": self.current_base_head_sha,
             "changed_paths": list(self.changed_paths),
             "owned_path_digest": self.owned_path_digest,
+            "local_branch": self.local_branch,
             "local_head_sha": self.local_head_sha,
             "local_tree_sha": self.local_tree_sha,
             "remote_head_is_ancestor_of_local": self.remote_head_is_ancestor_of_local,
@@ -556,6 +561,14 @@ def verify_source_continuity(
     if path_refusal is not None:
         return _refusal(path_refusal, exit_code=2)
 
+    if not isinstance(local, LocalGitFacts):
+        return _refusal(RefusalCode.LOCAL_FACTS_INVALID, exit_code=2)
+    if (
+        not isinstance(local.branch, str)
+        or not _is_safe_ref(local.branch)
+        or local.branch != request.branch
+    ):
+        return _refusal(RefusalCode.LOCAL_BRANCH_MISMATCH, exit_code=1)
     if not _local_facts_are_valid(local):
         return _refusal(RefusalCode.LOCAL_FACTS_INVALID, exit_code=2)
     if not local.remote_head_object_exists:
@@ -597,6 +610,7 @@ def verify_source_continuity(
         current_base_head_sha=remote.current_base_head_sha,
         changed_paths=tuple(sorted(remote.changed_paths)),
         owned_path_digest=_owned_path_digest(ordered_entries),
+        local_branch=local.branch,
         local_head_sha=local.head_sha,
         local_tree_sha=local.tree_sha,
         remote_head_is_ancestor_of_local=local.remote_head_is_ancestor_of_local,

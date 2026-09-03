@@ -18,12 +18,14 @@ HEAD_SHA = "2" * 40
 TREE_SHA = "3" * 40
 LOCAL_HEAD_SHA = "4" * 40
 LOCAL_TREE_SHA = "5" * 40
+CURRENT_BASE_SHA = "6" * 40
 BLOB_A = "a" * 40
 BLOB_B = "b" * 40
 EFFECT_FINGERPRINT = "c" * 64
 VERIFIED_AT = "2026-09-03T05:00:00Z"
 OPERATION = "agent-dialogue-source-continuity-rchp0-rch1-20260903-sol-001"
 REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+PR_NUMBER = 410
 BRANCH = "sol/source-continuity-v1-20260903"
 OWNED_PATHS = (
     "control_plane/source_continuity.py",
@@ -42,21 +44,23 @@ def _contract():
     return module
 
 
-def _request(module, *, kind=None, owned_paths=OWNED_PATHS):
-    return module.SourceContinuityRequest(
+def _request(module, *, kind=None, owned_paths=OWNED_PATHS, **overrides):
+    values = dict(
         receipt_kind=kind or module.ReceiptKind.CHECKPOINT_VERIFIED,
         operation_key=OPERATION,
         repository=REPOSITORY,
-        pr_number=346,
+        pr_number=PR_NUMBER,
         branch=BRANCH,
         base_ref="master",
         pinned_base_sha=BASE_SHA,
-        owned_paths=tuple(owned_paths),
+        owned_paths=owned_paths,
         verified_at=VERIFIED_AT,
     )
+    values.update(overrides)
+    return module.SourceContinuityRequest(**values)
 
 
-def _entries(module, *, first_mode="100644", first_size=123):
+def _entries(module, *, first_mode="100644", first_size=123, first_type="blob"):
     return (
         module.RemotePathEntry(
             path=OWNED_PATHS[1],
@@ -68,7 +72,7 @@ def _entries(module, *, first_mode="100644", first_size=123):
         module.RemotePathEntry(
             path=OWNED_PATHS[0],
             mode=first_mode,
-            object_type="blob",
+            object_type=first_type,
             object_sha=BLOB_A,
             size=first_size,
         ),
@@ -78,7 +82,7 @@ def _entries(module, *, first_mode="100644", first_size=123):
 def _remote(module, **overrides):
     values = dict(
         repository=REPOSITORY,
-        pr_number=346,
+        pr_number=PR_NUMBER,
         branch=BRANCH,
         base_ref="master",
         pr_open=True,
@@ -86,7 +90,7 @@ def _remote(module, **overrides):
         head_sha=HEAD_SHA,
         tree_sha=TREE_SHA,
         merge_base_sha=BASE_SHA,
-        current_base_head_sha=BASE_SHA,
+        current_base_head_sha=CURRENT_BASE_SHA,
         changed_paths=(OWNED_PATHS[1], OWNED_PATHS[0]),
         path_entries=_entries(module),
         collision_state=module.CollisionState.NONE,
@@ -99,6 +103,7 @@ def _remote(module, **overrides):
 
 def _checkpoint_local(module, **overrides):
     values = dict(
+        branch=BRANCH,
         head_sha=LOCAL_HEAD_SHA,
         tree_sha=LOCAL_TREE_SHA,
         remote_head_object_exists=True,
@@ -115,6 +120,7 @@ def _checkpoint_local(module, **overrides):
 
 def _complete_local(module, **overrides):
     values = dict(
+        branch=BRANCH,
         head_sha=HEAD_SHA,
         tree_sha=TREE_SHA,
         remote_head_object_exists=True,
@@ -164,26 +170,52 @@ def _assert_refusal(module, result, code: str, *, exit_code: int):
     assert BRANCH not in encoded
 
 
-def test_checkpoint_binds_source_evidence_without_granting_authority() -> None:
+def test_checkpoint_receipt_binds_complete_identity_without_authority() -> None:
     module = _contract()
     result = _verify(module)
 
     assert isinstance(result, module.SourceContinuityReceipt)
     payload = result.to_dict()
-    assert payload["schema"] == "mastermind.source_continuity_receipt/v1"
-    assert payload["receipt_version"] == "v1"
-    assert payload["receipt_kind"] == "CHECKPOINT_VERIFIED"
-    assert payload["changed_paths"] == sorted(OWNED_PATHS)
-    assert payload["authority_effect"] == "NONE"
-    assert payload["writer_release_authorized"] is False
-    assert payload["merge_authorized"] is False
-    assert payload["receiver_transfer_authorized"] is False
-    assert payload["local_equals_remote"] is False
-    assert payload["unpushed_commit_count"] == 1
-    assert payload["uncommitted_in_scope_count"] == 1
-    assert payload["untracked_in_scope_count"] == 1
-    assert len(payload["owned_path_digest"]) == 64
-    assert len(payload["receipt_digest"]) == 64
+    assert payload == {
+        "schema": "mastermind.source_continuity_receipt/v1",
+        "operation_key": OPERATION,
+        "repository": REPOSITORY,
+        "pr_number": PR_NUMBER,
+        "branch": BRANCH,
+        "base_ref": "master",
+        "pinned_base_sha": BASE_SHA,
+        "remote_head_sha": HEAD_SHA,
+        "remote_tree_sha": TREE_SHA,
+        "remote_merge_base_sha": BASE_SHA,
+        "current_base_head_sha": CURRENT_BASE_SHA,
+        "changed_paths": sorted(OWNED_PATHS),
+        "owned_path_digest": result.owned_path_digest,
+        "local_branch": BRANCH,
+        "local_head_sha": LOCAL_HEAD_SHA,
+        "local_tree_sha": LOCAL_TREE_SHA,
+        "remote_head_is_ancestor_of_local": True,
+        "local_equals_remote": False,
+        "unpushed_commit_count": 1,
+        "uncommitted_in_scope_count": 1,
+        "untracked_in_scope_count": 1,
+        "uncommitted_out_of_scope_count": 0,
+        "untracked_out_of_scope_count": 0,
+        "external_effect_state": "NONE",
+        "branch_effect_dependency": "NONE",
+        "external_effect_evidence_fingerprint": EFFECT_FINGERPRINT,
+        "collision_state": "NONE",
+        "colliding_pr_numbers": [],
+        "receipt_kind": "CHECKPOINT_VERIFIED",
+        "receipt_version": "v1",
+        "verified_at": VERIFIED_AT,
+        "authority_effect": "NONE",
+        "writer_release_authorized": False,
+        "merge_authorized": False,
+        "receiver_transfer_authorized": False,
+        "receipt_digest": result.receipt_digest,
+    }
+    assert len(result.owned_path_digest) == 64
+    assert len(result.receipt_digest) == 64
 
 
 def test_receipt_is_canonical_and_order_independent() -> None:
@@ -206,11 +238,51 @@ def test_receipt_is_canonical_and_order_independent() -> None:
     )
 
 
+def test_local_branch_is_bound_into_receipt_digest() -> None:
+    module = _contract()
+    result = _verify(module)
+    assert isinstance(result, module.SourceContinuityReceipt)
+    tampered = replace(result, local_branch="sol/tampered", receipt_digest="")
+    assert module._digest(tampered._payload_without_digest()) != result.receipt_digest
+
+
+@pytest.mark.parametrize("branch", [None, "", "HEAD", "wrong-branch", "/detached"])
+def test_wrong_detached_or_missing_local_branch_uses_one_value_free_refusal(
+    branch: object,
+) -> None:
+    module = _contract()
+    result = _verify(module, local=_checkpoint_local(module, branch=branch))
+    _assert_refusal(module, result, "LOCAL_BRANCH_MISMATCH", exit_code=1)
+
+
+def test_current_base_and_merge_base_movement_refresh_identity_without_refusal() -> None:
+    module = _contract()
+    initial = _verify(module)
+    moved_current_base = _verify(
+        module, remote=_remote(module, current_base_head_sha="7" * 40)
+    )
+    moved_merge_base = _verify(
+        module, remote=_remote(module, merge_base_sha="8" * 40)
+    )
+
+    for result in (initial, moved_current_base, moved_merge_base):
+        assert isinstance(result, module.SourceContinuityReceipt)
+    assert moved_current_base.current_base_head_sha == "7" * 40
+    assert moved_merge_base.remote_merge_base_sha == "8" * 40
+    assert len(
+        {
+            initial.receipt_digest,
+            moved_current_base.receipt_digest,
+            moved_merge_base.receipt_digest,
+        }
+    ) == 3
+
+
 @pytest.mark.parametrize(
     ("remote_changes", "code"),
     [
         ({"repository": "wrong/repo"}, "REMOTE_IDENTITY_MISMATCH"),
-        ({"pr_number": 347}, "REMOTE_IDENTITY_MISMATCH"),
+        ({"pr_number": 411}, "REMOTE_IDENTITY_MISMATCH"),
         ({"branch": "wrong-branch"}, "REMOTE_IDENTITY_MISMATCH"),
         ({"base_ref": "other"}, "REMOTE_IDENTITY_MISMATCH"),
         ({"pr_open": False}, "PR_NOT_OPEN"),
@@ -232,20 +304,47 @@ def test_remote_identity_and_census_fail_closed(
 
 
 @pytest.mark.parametrize(
-    ("local_changes", "code"),
+    ("changed_paths", "entry_case", "code"),
     [
-        ({"remote_head_object_exists": False}, "REMOTE_HEAD_OBJECT_MISSING"),
-        ({"remote_head_is_ancestor_of_local": False}, "REMOTE_HEAD_NOT_ANCESTOR"),
-        ({"uncommitted_out_of_scope_count": 1}, "OUT_OF_SCOPE_DIRT"),
-        ({"untracked_out_of_scope_count": 1}, "OUT_OF_SCOPE_DIRT"),
+        (
+            (OWNED_PATHS[0], OWNED_PATHS[0]),
+            "valid",
+            "REMOTE_FACTS_INVALID",
+        ),
+        (OWNED_PATHS, "missing", "PATH_ENTRY_MISMATCH"),
+        ((OWNED_PATHS[0],), "extra", "PATH_ENTRY_MISMATCH"),
+        (OWNED_PATHS, "duplicate", "PATH_ENTRY_MISMATCH"),
     ],
 )
-def test_checkpoint_refuses_unrecoverable_or_unowned_local_state(
-    local_changes: dict[str, Any], code: str
+def test_changed_paths_and_path_entries_are_an_exact_duplicate_free_bijection(
+    changed_paths: tuple[str, ...], entry_case: str, code: str
 ) -> None:
     module = _contract()
-    result = _verify(module, local=_checkpoint_local(module, **local_changes))
-    _assert_refusal(module, result, code, exit_code=1)
+    entries = _entries(module)
+    selected = {
+        "valid": entries,
+        "missing": (entries[0],),
+        "extra": entries,
+        "duplicate": (entries[0], entries[0], entries[1]),
+    }[entry_case]
+    result = _verify(
+        module,
+        remote=_remote(
+            module,
+            changed_paths=changed_paths,
+            path_entries=selected,
+        ),
+    )
+    _assert_refusal(module, result, code, exit_code=2)
+
+
+def test_non_blob_path_entry_refuses() -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        remote=_remote(module, path_entries=_entries(module, first_type="tree")),
+    )
+    _assert_refusal(module, result, "UNSAFE_REMOTE_OBJECT", exit_code=2)
 
 
 @pytest.mark.parametrize(
@@ -253,10 +352,11 @@ def test_checkpoint_refuses_unrecoverable_or_unowned_local_state(
     [
         ({"first_mode": "120000"}, "UNSAFE_REMOTE_OBJECT"),
         ({"first_mode": "160000"}, "UNSAFE_REMOTE_OBJECT"),
+        ({"first_size": -1}, "REMOTE_FACTS_INVALID"),
         ({"first_size": 10_000_001}, "REMOTE_BLOB_TOO_LARGE"),
     ],
 )
-def test_remote_path_policy_rejects_symlink_submodule_and_large_blob(
+def test_remote_path_policy_rejects_unsafe_modes_and_sizes(
     entries: dict[str, Any], code: str
 ) -> None:
     module = _contract()
@@ -293,6 +393,124 @@ def test_owned_paths_reject_unsafe_relative_paths(unsafe_path: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "request_changes",
+    [
+        {"receipt_kind": "CHECKPOINT_VERIFIED"},
+        {"operation_key": ""},
+        {"operation_key": 7},
+        {"repository": "invalid"},
+        {"pr_number": True},
+        {"pr_number": 0},
+        {"pr_number": 2_147_483_648},
+        {"branch": "bad..branch"},
+        {"base_ref": None},
+        {"pinned_base_sha": "A" * 40},
+        {"owned_paths": ()},
+        {"owned_paths": [OWNED_PATHS[0]]},
+        {"owned_paths": (OWNED_PATHS[0], OWNED_PATHS[0])},
+        {"verified_at": "2026-13-03T05:00:00Z"},
+        {"verified_at": "2026-09-03T05:00:00+00:00"},
+    ],
+)
+def test_hostile_request_scalar_range_hash_time_and_enum_shapes_refuse(
+    request_changes: dict[str, Any],
+) -> None:
+    module = _contract()
+    result = _verify(module, request=_request(module, **request_changes))
+    _assert_refusal(module, result, "INVALID_REQUEST", exit_code=2)
+
+
+@pytest.mark.parametrize(
+    "remote_changes",
+    [
+        {"pr_number": True},
+        {"pr_number": -1},
+        {"pr_number": 2_147_483_648},
+        {"pr_open": 1},
+        {"head_sha": "g" * 40},
+        {"tree_sha": "2" * 39},
+        {"merge_base_sha": None},
+        {"current_base_head_sha": "A" * 40},
+        {"changed_paths": list(OWNED_PATHS)},
+        {"collision_state": "NONE"},
+        {"colliding_pr_numbers": (True,)},
+        {"pagination_complete": 1},
+    ],
+)
+def test_hostile_remote_scalar_range_hash_and_enum_shapes_refuse(
+    remote_changes: dict[str, Any],
+) -> None:
+    module = _contract()
+    result = _verify(module, remote=_remote(module, **remote_changes))
+    _assert_refusal(module, result, "REMOTE_FACTS_INVALID", exit_code=2)
+
+
+def test_remote_path_entries_requires_an_immutable_tuple() -> None:
+    module = _contract()
+    result = _verify(
+        module, remote=_remote(module, path_entries=list(_entries(module)))
+    )
+    _assert_refusal(module, result, "REMOTE_FACTS_INVALID", exit_code=2)
+
+
+@pytest.mark.parametrize(
+    "local_changes",
+    [
+        {"head_sha": "A" * 40},
+        {"tree_sha": None},
+        {"remote_head_object_exists": 1},
+        {"remote_head_is_ancestor_of_local": "yes"},
+        {"unpushed_commit_count": -1},
+        {"uncommitted_in_scope_count": True},
+        {"untracked_in_scope_count": "0"},
+        {"uncommitted_out_of_scope_count": -1},
+        {"untracked_out_of_scope_count": True},
+    ],
+)
+def test_hostile_local_scalar_range_and_hash_shapes_refuse(
+    local_changes: dict[str, Any],
+) -> None:
+    module = _contract()
+    result = _verify(module, local=_checkpoint_local(module, **local_changes))
+    _assert_refusal(module, result, "LOCAL_FACTS_INVALID", exit_code=2)
+
+
+@pytest.mark.parametrize(
+    "external_changes",
+    [
+        {"state": "NONE"},
+        {"branch_dependency": "NONE"},
+        {"evidence_fingerprint": "c" * 63},
+        {"evidence_fingerprint": "G" * 64},
+        {"evidence_fingerprint": None},
+    ],
+)
+def test_hostile_external_enum_and_hash_shapes_refuse(
+    external_changes: dict[str, Any],
+) -> None:
+    module = _contract()
+    result = _verify(module, external=_external(module, **external_changes))
+    _assert_refusal(module, result, "EXTERNAL_EFFECT_INVALID", exit_code=2)
+
+
+@pytest.mark.parametrize(
+    ("local_changes", "code"),
+    [
+        ({"remote_head_object_exists": False}, "REMOTE_HEAD_OBJECT_MISSING"),
+        ({"remote_head_is_ancestor_of_local": False}, "REMOTE_HEAD_NOT_ANCESTOR"),
+        ({"uncommitted_out_of_scope_count": 1}, "OUT_OF_SCOPE_DIRT"),
+        ({"untracked_out_of_scope_count": 1}, "OUT_OF_SCOPE_DIRT"),
+    ],
+)
+def test_checkpoint_refuses_unrecoverable_or_unowned_local_state(
+    local_changes: dict[str, Any], code: str
+) -> None:
+    module = _contract()
+    result = _verify(module, local=_checkpoint_local(module, **local_changes))
+    _assert_refusal(module, result, code, exit_code=1)
+
+
+@pytest.mark.parametrize(
     ("local_changes", "code"),
     [
         ({"head_sha": LOCAL_HEAD_SHA}, "LOCAL_REMOTE_IDENTITY_MISMATCH"),
@@ -316,7 +534,30 @@ def test_remote_complete_requires_exact_clean_local_remote_identity(
     _assert_refusal(module, result, code, exit_code=1)
 
 
-def test_effect_and_collision_rules_preserve_external_and_sol_authority() -> None:
+@pytest.mark.parametrize(
+    "kind_name", ["CHECKPOINT_VERIFIED", "REMOTE_COMPLETE_VERIFIED"]
+)
+def test_effect_unknown_refuses_both_receipt_kinds(kind_name: str) -> None:
+    module = _contract()
+    kind = module.ReceiptKind(kind_name)
+    result = _verify(
+        module,
+        request=_request(module, kind=kind),
+        local=(
+            _complete_local(module)
+            if kind is module.ReceiptKind.REMOTE_COMPLETE_VERIFIED
+            else _checkpoint_local(module)
+        ),
+        external=_external(
+            module,
+            state=module.ExternalEffectState.EFFECT_UNKNOWN,
+            branch_dependency=module.BranchEffectDependency.UNKNOWN,
+        ),
+    )
+    _assert_refusal(module, result, "EXTERNAL_EFFECT_UNKNOWN", exit_code=1)
+
+
+def test_effect_and_overlap_remain_evidence_only() -> None:
     module = _contract()
     complete = _request(module, kind=module.ReceiptKind.REMOTE_COMPLETE_VERIFIED)
 
@@ -332,17 +573,31 @@ def test_effect_and_collision_rules_preserve_external_and_sol_authority() -> Non
     )
     assert isinstance(separable, module.SourceContinuityReceipt)
     assert separable.external_effect_state is module.ExternalEffectState.OPEN_KNOWN_EFFECT
-    assert separable.writer_release_authorized is False
 
-    for external, code in (
-        (
-            _external(
-                module,
-                state=module.ExternalEffectState.EFFECT_UNKNOWN,
-                branch_dependency=module.BranchEffectDependency.UNKNOWN,
-            ),
-            "EXTERNAL_EFFECT_UNKNOWN",
+    overlap = _verify(
+        module,
+        remote=_remote(
+            module,
+            collision_state=module.CollisionState.OVERLAP,
+            colliding_pr_numbers=(404, 147, 404),
         ),
+    )
+    assert isinstance(overlap, module.SourceContinuityReceipt)
+    assert overlap.collision_state is module.CollisionState.OVERLAP
+    assert overlap.colliding_pr_numbers == (147, 404)
+
+    for receipt in (separable, overlap):
+        payload = receipt.to_dict()
+        assert payload["authority_effect"] == "NONE"
+        assert payload["writer_release_authorized"] is False
+        assert payload["merge_authorized"] is False
+        assert payload["receiver_transfer_authorized"] is False
+
+
+def test_required_or_unknown_branch_effect_refuses() -> None:
+    module = _contract()
+    complete = _request(module, kind=module.ReceiptKind.REMOTE_COMPLETE_VERIFIED)
+    for external, code in (
         (
             _external(
                 module,
@@ -350,6 +605,14 @@ def test_effect_and_collision_rules_preserve_external_and_sol_authority() -> Non
                 branch_dependency=module.BranchEffectDependency.REQUIRED,
             ),
             "BRANCH_EFFECT_REQUIRED",
+        ),
+        (
+            _external(
+                module,
+                state=module.ExternalEffectState.OPEN_KNOWN_EFFECT,
+                branch_dependency=module.BranchEffectDependency.UNKNOWN,
+            ),
+            "BRANCH_EFFECT_UNKNOWN",
         ),
     ):
         _assert_refusal(
@@ -364,29 +627,8 @@ def test_effect_and_collision_rules_preserve_external_and_sol_authority() -> Non
             exit_code=1,
         )
 
-    _assert_refusal(
-        module,
-        _verify(
-            module,
-            remote=_remote(module, collision_state=module.CollisionState.INCOMPLETE),
-        ),
-        "REMOTE_CENSUS_INCOMPLETE",
-        exit_code=2,
-    )
-    overlap = _verify(
-        module,
-        remote=_remote(
-            module,
-            collision_state=module.CollisionState.OVERLAP,
-            colliding_pr_numbers=(404, 147, 404),
-        ),
-    )
-    assert isinstance(overlap, module.SourceContinuityReceipt)
-    assert overlap.colliding_pr_numbers == (147, 404)
-    assert overlap.writer_release_authorized is False
 
-
-def test_receipt_digest_changes_after_remote_or_effect_identity_moves() -> None:
+def test_receipt_digest_changes_after_remote_path_or_effect_identity_moves() -> None:
     module = _contract()
     first = _verify(module)
     assert isinstance(first, module.SourceContinuityReceipt)
