@@ -12,7 +12,7 @@
 
 **Integration carrier:** Mastermind issue #386, `mastermind-worker-dispatch-consumption-assurance-20260902-sol-001`
 
-**Protected source basis at amendment refresh:** `mastermindx-market-intelligence/Mastermind@351402f4f5d5e55e8c0f0b7f973f01c19aa98d97`, including protected watcher hardening `8a985de8`, W3C observation-authority law `793e7563`, and inert placement selection `351402f4`; `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1. Action-time protected source always wins over this snapshot.
+**Protected source basis at amendment refresh:** `mastermindx-market-intelligence/Mastermind@84d74cf9c7b81ba70169ab7df1f71835da2d297b`, including protected watcher hardening `8a985de8`, W3C observation-authority law `793e7563`, inert placement selection `351402f4`, and the latest records-only Linear portfolio source from PR #366; `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1. Action-time protected source always wins over this snapshot.
 **Capability state:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`. This amendment itself changes no automation cadence, Slack subscription, watcher resource, Job, Attempt, Worker, RuntimeBinding, provider session, credential, deployment, or production behavior.
 
 ---
