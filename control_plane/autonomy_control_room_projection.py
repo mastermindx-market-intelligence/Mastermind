@@ -2228,6 +2228,14 @@ def _return_receipt_proven(row: Mapping[str, Any], generated_at: str) -> bool:
     return True
 
 
+def _dispatch_decision_within_skew(decision_dt: Any, generated_at: str) -> bool:
+    """A decision timestamped beyond the forward skew tolerance is not evidence."""
+    reference_at = _parse_iso8601(generated_at)
+    if reference_at is None or decision_dt is None:
+        return False
+    return (decision_dt - reference_at) <= FUTURE_SKEW_TOLERANCE
+
+
 def _dispatch_binding_unresolved(action_target_state: Any, binding_evidence_state: Any) -> tuple[bool, str | None]:
     """Law 7: "Missing/ambiguous/stale RuntimeBinding becomes RUNTIME_BINDING_
     RECONCILIATION_REQUIRED, not receiver selection by recency."  Returns
@@ -2385,6 +2393,16 @@ def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[s
                 and decision_dt is not None
                 and return_dt is not None
                 and decision_dt > return_dt
+                # Forward-bounded exactly like `return_observed_at`
+                # (review follow-up, 2026-09-03).  The earlier repair bounded
+                # only the receipt, leaving this half of the same symmetric
+                # hole open — and this is the WORSE half: `decision_dt >
+                # return_dt` is the edge that moves a row OFF the only
+                # actionable state, so a decision stamped in the future
+                # silently discharged an owed Chairman decision. Fixing one
+                # timestamp and not its sibling is how a closed finding stays
+                # open.
+                and _dispatch_decision_within_skew(decision_dt, generated_at)
             )
             if valid_decision and decision == "CONTINUE":
                 return "CONTINUED", "sol_continue_same_carrier", historical
@@ -2485,7 +2503,7 @@ _DISPATCH_EVIDENCE_REJECTED = "dispatch_evidence_rejected"
 #: filesystem path or an obvious credential, not to be a general-purpose
 #: secrets linter.
 _DISPATCH_SECRET_OR_PATH_RE = re.compile(
-    r"(?i)(^/|^~|\\|/etc/|/private/|/Users/|/home/|\.ssh|password|passwd"
+    r"(?i)(^/|~/|\\|/etc/|/private/|/Users/|/home/|\.ssh|password|passwd"
     r"|secret|api[_-]?key|access[_-]?token|bearer\s|authorization\s*:"
     r"|-----BEGIN|AKIA[0-9A-Z]{16}"
     # Live-token prefixes an independent review proved were accepted and then
@@ -2546,7 +2564,7 @@ def _dispatch_safe_str(
     return True
 
 
-def _dispatch_safe_keys(raw: Any) -> tuple[Any, ...]:
+def _dispatch_safe_keys(raw: Any) -> tuple[Any, ...] | None:
     """``raw.keys()`` without trusting caller-supplied ``Mapping`` code.
 
     ``_validate_dispatch_row`` documents "never raises", but a ``dict``
@@ -2558,10 +2576,33 @@ def _dispatch_safe_keys(raw: Any) -> tuple[Any, ...]:
     try:
         return tuple(raw.keys())
     except Exception:  # noqa: BLE001 - caller-supplied object, fail closed
-        return ()
+        # None, NOT () — an unreadable key set is not an empty one.  Returning
+        # () made the row look like it carried no unknown keys, so a mapping
+        # whose keys() raised was ACCEPTED as a valid empty row and rendered
+        # WAITING_CAPACITY.  A validator that cannot read the input cannot
+        # attest to it.
+        return None
 
 
 def _validate_dispatch_row(
+    raw: Any,
+) -> tuple[Any, Any, dict[str, Any] | None]:
+    """Never raises — enforced here, not merely documented.
+
+    The previous revision said "never raises" while calling ``raw.keys()``,
+    ``raw[field]``, ``field not in raw`` and ``raw.get(...)`` on
+    caller-supplied objects; a mapping that raised in any of those took the
+    whole document down, because unlike ``placement_selection`` the autonomy
+    block is not wrapped.  Guarding one of the four was not enough: a
+    docstring promise is only worth the boundary that enforces it.
+    """
+    try:
+        return _validate_dispatch_row_inner(raw)
+    except Exception:  # noqa: BLE001 - caller-supplied object, fail closed
+        return None, None, None
+
+
+def _validate_dispatch_row_inner(
     raw: Any,
 ) -> tuple[Any, Any, dict[str, Any] | None]:
     """Validate one caller-supplied evidence row.  Never raises.
@@ -2589,7 +2630,13 @@ def _validate_dispatch_row(
     if not isinstance(raw, Mapping):
         return None, None, None
 
-    unknown_keys = set(_dispatch_safe_keys(raw)) - _DISPATCH_ALL_FIELDS
+    keys = _dispatch_safe_keys(raw)
+    if keys is None:
+        # Explicit, not incidental: without this the `set(None)` below still
+        # fails closed via the outer wrapper, but by accident of an exception
+        # rather than by intent. A fail-closed path should say so.
+        return None, None, None
+    unknown_keys = set(keys) - _DISPATCH_ALL_FIELDS
     ref = raw.get("responsibility_ref")
     root_job_id = raw.get("root_job_id")
     if not _dispatch_safe_join_value(ref):
@@ -2690,7 +2737,12 @@ def project_dispatch_consumption(
     whether a missing key means "zero" or "not computed".
     """
     try:
-        evidence_rows = tuple(dispatch_evidence) if dispatch_evidence else ()
+        # A caller-supplied iterable whose __iter__ raises must fail closed
+        # like every other hostile input, not abort the document.
+        try:
+            evidence_rows = tuple(dispatch_evidence) if dispatch_evidence else ()
+        except Exception:  # noqa: BLE001 - caller-supplied iterable, fail closed
+            evidence_rows = ()
     except TypeError:
         evidence_rows = ()
 

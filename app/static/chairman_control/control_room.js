@@ -1282,12 +1282,22 @@
   // landed, which is exactly the kind of stale comment that tells a reviewer
   // a live behaviour cannot happen.)
   //
-  // Consequence worth stating plainly: with no Dialogue return-receipt owner
-  // in the codebase the gather supplies no watch/return/decision fields, so
-  // every real card currently reads UNKNOWN — an unsafe state — and the
-  // owed-action Open control is therefore suppressed everywhere. That is the
-  // conservative reading (do not offer an action whose dispatch state we
-  // cannot establish), not an accident. Detail stays reachable throughout.
+  // What the states mean in practice, stated without over-claiming — an
+  // earlier version of this note said "every real card reads UNKNOWN because
+  // there is no Dialogue receipt owner", which was an absolute claim about a
+  // contingent fact, i.e. the same defect it replaced.
+  //
+  // The gather DOES supply attempt/obligation/binding evidence for any card
+  // with a real root_job_id, so such a card reads STARTED,
+  // RUNTIME_BINDING_RECONCILIATION_REQUIRED, DELIVERY_UNCONSUMED and so on.
+  // On today's Agent-OS artifact every card's root_job_id is null, so the
+  // gather has nothing to join on and each card reads UNKNOWN with reason
+  // dispatch_evidence_not_supplied — an artifact property, not a law.
+  //
+  // Separately: no Dialogue return-receipt owner exists yet, so RETURNED /
+  // CONTINUED / STOPPED are unreachable from gathered evidence regardless.
+  // Any unsafe state suppresses the owed-action Open control by design;
+  // Detail stays reachable throughout.
   // Every function below remains undefined-safe.
   var AU_DISPATCH = {
     WAITING_CAPACITY: "Waiting for capacity",

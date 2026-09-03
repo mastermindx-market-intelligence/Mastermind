@@ -3634,8 +3634,18 @@ def test_review_secret_shaped_tokens_are_refused_and_never_echoed(token):
     """The earlier refusal matched credential NAMES (`api_key=`) but not bare
     live tokens, so a leak test using a named key passed while `sk-live-...`
     was accepted and rendered verbatim into `evidence.watch_mechanism`."""
-    card = _rv_card({**_RV_BASE, "watch_mechanism": token})
+    # Carry real progress evidence so the row COULD reach an actionable state
+    # if the refusal failed — the earlier version asserted `actionable is
+    # False` on a row that could never be actionable anyway, so that half of
+    # the test was satisfied by a fully broken refusal (an independent review
+    # produced leaking rows that were non-actionable for exactly this reason).
+    card = _rv_card({
+        **_RV_BASE, **_RV_W, **_RV_R, "attempt_state": "COMPLETED",
+        "action_target_state": "RESOLVED", "binding_evidence_state": "CURRENT",
+        "watch_mechanism": token,
+    })
 
+    assert card["reason"] == "dispatch_evidence_rejected", "row was accepted"
     assert card["actionable"] is False
     assert "QQLEAKQQ" not in json.dumps(card), "secret-shaped value reached the document"
 
@@ -3701,6 +3711,9 @@ def test_review_validator_never_raises_on_a_hostile_mapping():
             raise RuntimeError("hostile mapping")
 
     card = _rv_card(_Hostile(responsibility_ref="WS:X", root_job_id="JOB-1"))
+    # The property this test names is "did not raise" — reaching this line at
+    # all is the assertion. The state must also be the fail-closed one.
+    assert card["dispatch_state"] == "UNKNOWN"
     assert card["actionable"] is False
 
 
