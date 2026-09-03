@@ -114,7 +114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except TaskExportLimitError:
         _print_error("task count exceeds maximum allowed size")
         return 2
-    except (json.JSONDecodeError, ValueError, UnicodeError, OSError):
+    except (json.JSONDecodeError, RecursionError, ValueError, UnicodeError, OSError):
         _print_error("input is invalid")
         return 2
 
