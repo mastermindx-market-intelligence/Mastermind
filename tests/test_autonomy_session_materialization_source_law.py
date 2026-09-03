@@ -229,6 +229,10 @@ def test_mat_c1_gate_is_records_only_and_orders_protection_first() -> None:
     assert gate["canonical_start_command"] == "ohf-op:start:<attempt_id>"
     assert gate["provider_native_idempotency"] is False
     assert gate["stage_b"] == "SEPARATE_AND_HELD"
+    assert (
+        "tests/test_autonomy_session_materialization_source_law.py"
+        in gate["candidate_paths"]
+    )
     assert "MAT-F0 protected" in gate["implementation_predecessors"]
     assert "accepted complete teardown lifecycle" in gate[
         "production_canary_predecessors"
