@@ -116,7 +116,9 @@ def test_unbound_root_still_refuses_instead_of_falling_back_to_catalog_or_defaul
     assert raised.value.refusal.reason == f"root_job_id {_ROOT} has no binding for seat ceo"
 
 
-def test_policy_digest_is_order_invariant_and_binds_the_target_definition(tmp_path) -> None:
+def test_policy_digest_is_order_invariant_and_binds_catalog_membership(tmp_path) -> None:
+    """Full Stage-B target fingerprints remain a separate assignment-law concern."""
+
     registry = load_session_targets()
     document = json.loads(DEFAULT_TARGETS_PATH.read_text(encoding="utf-8"))
 
