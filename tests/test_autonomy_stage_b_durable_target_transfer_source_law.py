@@ -22,7 +22,7 @@ END = "<!-- STAGE_B_F0_CORRECTION_CONTRACT_END -->"
 GATE_BEGIN = "<!-- STAGE_B1_CORRECTION_GATE_BEGIN -->"
 GATE_END = "<!-- STAGE_B1_CORRECTION_GATE_END -->"
 SHA = "0d5c80bba8c69b5d1ed86aa3d32c9003a4252c73"
-REVISION = "v5.1-trusted-replay-production-call-path"
+REVISION = "v5.2-claim-then-materialize-binding"
 RECORD_PATHS = [
     "docs/superpowers/specs/2026-09-01-autonomy-stage-b-durable-target-transfer-design.md",
     "docs/superpowers/plans/2026-09-01-autonomy-stage-b-durable-target-transfer.md",
@@ -64,6 +64,7 @@ def validate_contract(contract: dict[str, Any]) -> None:
         "mastermind.autonomy_stage_b_f0_contract.v2",
         "mastermind.autonomy_stage_b_f0_contract.v3",
         "mastermind.autonomy_stage_b_f0_contract.v4",
+        "mastermind.autonomy_stage_b_f0_contract.v5.1",
     ]
 
     current = contract["current_state"]
@@ -81,8 +82,9 @@ def validate_contract(contract: dict[str, Any]) -> None:
         "reasoning_surface": "codex",
         "held_until": [
             "CAPACITY_C1_PROTECTED",
-            "CAPACITY_C2_ROOT_BOUND_COMMITMENT_PROTECTED",
+            "CAPACITY_C2_ROOT_BOUND_CLAIM_COMMITMENT_PROTECTED",
             "EXECUTIVE_CEO_CODEX_A_TARGET_PROTECTED",
+            "EXACT_CURRENT_OHF_WRITER_MATERIALIZED",
         ],
     }
 
@@ -109,13 +111,25 @@ def validate_contract(contract: dict[str, Any]) -> None:
     for fact in (
         "exact root_job_id",
         "selection_document_digest",
+        "selection_evidence_digest",
         "selected_worker_id",
+        "selected_quota_class",
         "committed_attempt_id",
-        "committed_runtime_binding_id",
-        "committed_runtime_binding_generation",
+        "committed_placement_snapshot_digest",
+        "commitment_command_id",
+        "commitment_evidence_digest",
         "canonical Worker and Attempt claim already committed",
     ):
         assert fact in commitment["required"]
+    for forbidden in (
+        "committed_runtime_binding_id",
+        "committed_runtime_binding_generation",
+        "provider_session_id",
+        "native_handle",
+    ):
+        assert forbidden in commitment["forbidden"]
+        assert forbidden not in commitment["required"]
+    assert commitment["binding_timing"] == "RUNTIME_BINDING_DOES_NOT_EXIST_UNTIL_OHF_WRITER_MATERIALIZATION"
     assert "BEGIN IMMEDIATE in existing Executive Runtime" in commitment["transaction_law"]
     assert "do not select a second candidate inside the same modifying operation" in commitment["transaction_law"]
     assert commitment["c1_selection_is_authority"] is False
@@ -137,6 +151,14 @@ def validate_contract(contract: dict[str, Any]) -> None:
         "caller_selectable": False,
     }
 
+    materialization = contract["writer_materialization_owner"]
+    assert materialization["owner"] == "EXISTING_OPERATOR_HARNESS_AND_RUNTIME_BINDING_PROJECTION"
+    assert materialization["starts_provider_work"] is False
+    assert materialization["consumes_existing_current_writer_only"] is True
+    assert materialization["requires_attempt_id_from_c2"] is True
+    assert materialization["not_ready"] == "TARGET_RUNTIME_NOT_MATERIALIZED"
+    assert materialization["effect_unknown"] == "EFFECT_UNKNOWN_RECONCILE_FIRST"
+
     assignment = contract["assignment_owner"]
     assert assignment["owner"] == "Executive Runtime Event plane"
     assert assignment["event_type"] == "SOL_ACTION_TARGET_ASSIGNED"
@@ -147,7 +169,7 @@ def validate_contract(contract: dict[str, Any]) -> None:
 
     caller = contract["production_call_path"]
     assert caller["owner"] == "ExecutiveControlService"
-    assert caller["entry"] == "successful or identically replayed Capacity C2 commitment completion"
+    assert caller["entry"] == "successful or identically replayed exact current-writer materialization after C2 commitment"
     assert caller["assignment_function"] == "sol_action_target_assignment.assign_initial_target"
     assert caller["caller_exposed_destination_fields"] == []
     assert caller["caller_may_invoke_assignment_directly"] is False
@@ -155,13 +177,15 @@ def validate_contract(contract: dict[str, Any]) -> None:
     assert caller["caller_may_supply_actor_binding"] is False
     assert caller["caller_may_supply_worker_attempt_or_runtime_binding"] is False
     assert caller["new_daemon_or_scheduler"] is False
-    assert "exact protected C2 root-bound commitment Event" in caller["authority"]
+    assert "exact protected C2 root-bound claim commitment Event" in caller["authority"]
+    assert "exact current RuntimeBinding projected after OHF materialization" in caller["authority"]
 
     command = contract["command"]
     assert command["caller_may_supply_command_id"] is False
     assert command["caller_may_supply_target_carrier_job_id"] is False
     assert command["caller_may_supply_worker_id"] is False
     assert command["caller_may_supply_attempt_id"] is False
+    assert command["caller_may_supply_runtime_binding"] is False
     assert command["caller_may_supply_provider_account_or_native_handle"] is False
     assert "target_carrier_job_id" not in command["fields"]
     assert "worker_id" not in command["fields"]
@@ -178,10 +202,10 @@ def validate_contract(contract: dict[str, Any]) -> None:
     for fact in (
         "canonical existing assignment Event shape and command fingerprint",
         "active admitted CEO v2 root and immutable authority provenance",
-        "exact root-bound C2 commitment Event and digest",
+        "exact root-bound C2 claim commitment Event and digest",
         "canonical current Worker and Attempt identities from the commitment",
         "exact target definition fingerprint",
-        "current RuntimeBinding id generation and reasoning surface",
+        "current RuntimeBinding id generation and reasoning surface projected from the committed Attempt",
     ):
         assert fact in replay["must_revalidate"]
     assert replay["stale_or_moved_binding"] == "STALE_ASSIGNED_BINDING"
@@ -208,7 +232,8 @@ def validate_contract(contract: dict[str, Any]) -> None:
 
     projection = contract["projection_and_stage_a"]
     assert projection["stage_a_signature_changed"] is False
-    assert "reread and validate the exact C2 commitment" in projection["action_time"]
+    assert "reread and validate the exact C2 claim commitment" in projection["action_time"]
+    assert "project current RuntimeBinding from the committed Attempt after OHF materialization" in projection["action_time"]
     assert "copy complete root_job_bindings and replace only selected root ceo" in projection["action_time"]
     assert "call unchanged require_sol_action_authority with the actual actor RuntimeBinding" in projection["action_time"]
     assert "exact RuntimeBinding identity" in projection["stage_a_actor_rule"]
@@ -218,6 +243,7 @@ def validate_contract(contract: dict[str, Any]) -> None:
         "PLACEMENT_COMMITMENT_CONFLICT",
         "PLACEMENT_COMMITMENT_EFFECT_UNKNOWN",
         "TARGET_CATALOG_ENTRY_MISSING",
+        "TARGET_RUNTIME_NOT_MATERIALIZED",
         "TARGET_ALIAS_ALREADY_BINDS_DIFFERENT_RUNTIME",
         "EXPECTED_REVISION_MISMATCH",
         "COMMAND_REPLAY_CONFLICT",
@@ -252,7 +278,7 @@ def validate_contract(contract: dict[str, Any]) -> None:
     assert no_rebuild["production_armed"] is False
 
 
-def test_v5_1_contract_and_false_support_mutations() -> None:
+def test_v5_2_contract_and_false_support_mutations() -> None:
     contract, raw = json_block(DESIGN, BEGIN, END)
     validate_contract(contract)
     assert "chatgpt-web" not in raw
@@ -270,15 +296,18 @@ def test_v5_1_contract_and_false_support_mutations() -> None:
 
     mutations: dict[str, Mutation] = {
         "authorize_now": lambda item: item["current_state"]["authorized_modes_now"].append("INITIAL_ASSIGNMENT"),
-        "drop_c2_predecessor": lambda item: item["future_supported_mode"]["held_until"].remove("CAPACITY_C2_ROOT_BOUND_COMMITMENT_PROTECTED"),
+        "drop_c2_predecessor": lambda item: item["future_supported_mode"]["held_until"].remove("CAPACITY_C2_ROOT_BOUND_CLAIM_COMMITMENT_PROTECTED"),
+        "drop_materialization_predecessor": lambda item: item["future_supported_mode"]["held_until"].remove("EXACT_CURRENT_OHF_WRITER_MATERIALIZED"),
         "c1_is_commitment": set_path(("placement_commitment_owner", "c1_selection_is_authority"), True),
         "binding_is_authority": set_path(("placement_commitment_owner", "runtime_binding_alone_is_authority"), True),
         "caller_destination": set_path(("placement_commitment_owner", "caller_destination_is_authority"), True),
+        "binding_in_c2": lambda item: item["placement_commitment_owner"]["required"].append("committed_runtime_binding_id"),
+        "provider_start_in_projection": set_path(("writer_materialization_owner", "starts_provider_work"), True),
         "public_assign": set_path(("production_call_path", "caller_may_invoke_assignment_directly"), True),
         "caller_actor": set_path(("production_call_path", "caller_may_supply_actor_binding"), True),
         "caller_carrier": set_path(("command", "caller_may_supply_target_carrier_job_id"), True),
         "historical_replay": set_path(("trusted_replay", "historical_success_is_reusable_authority"), True),
-        "drop_binding_revalidation": lambda item: item["trusted_replay"]["must_revalidate"].remove("current RuntimeBinding id generation and reasoning surface"),
+        "drop_binding_revalidation": lambda item: item["trusted_replay"]["must_revalidate"].remove("current RuntimeBinding id generation and reasoning surface projected from the committed Attempt"),
         "implicit_generation": set_path(("assignment_owner", "implicit_generation_advance"), True),
         "change_stage_a": set_path(("projection_and_stage_a", "stage_a_signature_changed"), True),
         "destructive_map": set_path(("projection_and_stage_a", "action_time"), ["replace selected root only"]),
@@ -328,6 +357,8 @@ def test_current_production_root_and_stage_a_owners_are_real() -> None:
     assert "runtime.current_harness_binding_source(" in projection
     assert "connection=connection" in projection
     assert "this function persists nothing" in projection
+    assert "provider_session_id=str(row[\"epoch_provider_session\"])" in runtime
+    assert "session_epoch_id=str(row[\"session_epoch_id\"])" in runtime
 
     assert "Storeless Stage-A resolution" in stage_a
     assert "The registry's root binding wins" in stage_a
@@ -337,7 +368,7 @@ def test_current_production_root_and_stage_a_owners_are_real() -> None:
     assert "is evidence, not a reusable authority" in stage_a
 
 
-def test_plan_gate_is_records_only_and_orders_c2_before_stage_b1() -> None:
+def test_plan_gate_orders_claim_then_materialization_then_assignment() -> None:
     gate, raw = json_block(PLAN, GATE_BEGIN, GATE_END)
     assert gate["schema"] == "mastermind.autonomy_stage_b1_correction_gate.v5"
     assert gate["architecture_revision"] == REVISION
@@ -348,12 +379,14 @@ def test_plan_gate_is_records_only_and_orders_c2_before_stage_b1() -> None:
     assert gate["stage_b1_state"] == "HELD_PREDECESSORS"
     assert gate["predecessors"] == [
         "CAPACITY_C1_PROTECTED",
-        "CAPACITY_C2_ROOT_BOUND_COMMITMENT_PROTECTED",
+        "CAPACITY_C2_ROOT_BOUND_CLAIM_COMMITMENT_PROTECTED",
         "EXECUTIVE_CEO_CODEX_A_TARGET_PROTECTED",
+        "EXACT_CURRENT_OHF_WRITER_MATERIALIZED",
     ]
-    assert gate["next_program_wave"] == "CAPACITY_C2_TRANSACTIONAL_COMMITMENT_VERTICAL"
+    assert gate["next_program_wave"] == "CAPACITY_C2_TRANSACTIONAL_CLAIM_COMMITMENT_VERTICAL"
     assert gate["stage_b1_after_predecessors"] == "STAGE_B1_CEO_CODEX_INITIAL_ASSIGNMENT_VERTICAL"
-    assert gate["production_assignment_caller"] == "ExecutiveControlService successful or identically replayed Capacity C2 completion path"
+    assert gate["production_assignment_caller"] == "ExecutiveControlService exact current-writer materialization/replay path after C2 commitment"
+    assert gate["c2_contains_runtime_binding"] is False
     assert gate["destination_session_self_authority"] is False
     assert gate["caller_destination_authority"] is False
     assert gate["trusted_replay_revalidates_current_truth"] is True
@@ -369,11 +402,12 @@ def test_plan_gate_is_records_only_and_orders_c2_before_stage_b1() -> None:
     for path in RECORD_PATHS + SOURCE_PATHS:
         assert path in plan
     order = [
-        "1. PROTECT_STAGE_B0_V5_1_ARCHITECTURE",
+        "1. PROTECT_STAGE_B0_V5_2_ARCHITECTURE",
         "2. PROTECT_CAPACITY_C1_SELECTION",
-        "3. BUILD_CAPACITY_C2_ROOT_BOUND_COMMITMENT",
+        "3. BUILD_CAPACITY_C2_ROOT_BOUND_CLAIM_COMMITMENT",
         "4. ADD_DISABLED_EXECUTIVE_CEO_CODEX_A_TARGET",
-        "5. RED_STAGE_B1_PRODUCTION_ROOT_AND_COMMITMENT_CHAIN",
+        "5. MATERIALIZE_EXACT_CURRENT_OHF_WRITER",
+        "6. RED_STAGE_B1_PRODUCTION_ROOT_COMMITMENT_AND_BINDING_CHAIN",
     ]
     indexes = [plan.index(item) for item in order]
     assert indexes == sorted(indexes)
