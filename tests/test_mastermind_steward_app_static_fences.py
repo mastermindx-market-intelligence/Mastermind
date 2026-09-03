@@ -153,6 +153,7 @@ def test_transport_and_auth_gates_share_one_optional_raw_path_normalizer():
     assert text.count("_canonical_raw_path(scope)") == 2
     assert 'scope.get("raw_path") != self.resource' not in text
 
+
 def _load_canonical_raw_path():
     text = (PACKAGE / "app.py").read_text(encoding="utf-8")
     tree = ast.parse(text, filename=str(PACKAGE / "app.py"))
@@ -163,7 +164,14 @@ def _load_canonical_raw_path():
     )
     module = ast.Module(body=[function], type_ignores=[])
     namespace = {"Scope": dict}
-    exec(compile(ast.fix_missing_locations(module), str(PACKAGE / "app.py"), "exec"), namespace)
+    exec(
+        compile(
+            ast.fix_missing_locations(module),
+            str(PACKAGE / "app.py"),
+            "exec",
+        ),
+        namespace,
+    )
     return namespace["_canonical_raw_path"]
 
 
@@ -177,3 +185,30 @@ def test_canonical_path_requires_exact_decoded_and_raw_asgi_paths():
     assert normalize({"path": canonical, "raw_path": b"/mcp%2Fsteward%2Fv1"}) == b""
     assert normalize({"path": canonical + "/", "raw_path": raw}) == b""
 
+
+def test_ui_consumes_only_grouped_v2_subjects_with_one_global_fact_bound():
+    ui = (PACKAGE / "ui.py").read_text(encoding="utf-8")
+
+    assert 'UI_RESOURCE_URI = "ui://mastermind/steward/control-room-v2.html"' in ui
+    assert "control-room-v1.html" not in ui
+    assert "const MAX_FACTS = 64" in ui
+    assert "data && data.subjects" in ui
+    assert "data && data.facts" not in ui
+    assert "fact && fact.subject_ref" not in ui
+    assert 'Object.keys(subject).length !== 2' in ui
+    assert 'Object.prototype.hasOwnProperty.call(fact, "subject_ref")' in ui
+    assert "rows.length >= MAX_FACTS" in ui
+    assert "return [];" in ui
+
+
+def test_steward_server_generation_is_explicit_v2_without_new_authority_plane():
+    server = (PACKAGE / "server.py").read_text(encoding="utf-8")
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+
+    assert 'SERVER_VERSION = "2.0.0"' in server
+    assert "mastermind.secretary_grounding_mcp_result.v2" in runbook
+    assert "data.subjects[]" in runbook
+    assert "data.facts" not in runbook
+    assert "control-room-v2.html" in runbook
+    assert "flat internal" in runbook.lower()
+    assert "production proof" in runbook.lower()
