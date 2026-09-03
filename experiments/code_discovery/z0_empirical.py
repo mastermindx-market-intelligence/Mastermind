@@ -491,10 +491,6 @@ class EvaluationEvidence:
     reasons: tuple[str, ...]
     canonical_bytes: bytes
 
-    @property
-    def is_real_complete(self) -> bool:
-        return _evidence_is_acceptance_eligible(self)
-
     def to_result_payload(self) -> dict[str, object]:
         return {
             "state": self.state,
@@ -518,8 +514,11 @@ def build_decision_from_evidence(
     evidence: EvaluationEvidence,
     *,
     repositories_safe: bool,
+    ledger: EvaluationLedger,
+    evaluation_manifest: EvaluationManifest,
+    answer_keys: Mapping[str, AnswerKey],
 ) -> str:
-    """Return the sole production-inert Z0 decision permitted by frozen evidence."""
+    """Return a production-inert decision only from its bound ledger inputs."""
 
     if not isinstance(evidence, EvaluationEvidence):
         raise EvidenceError("decision builder requires EvaluationEvidence")
@@ -527,13 +526,28 @@ def build_decision_from_evidence(
         raise EvidenceError("repositories_safe must be a boolean")
     if not repositories_safe:
         return NO_SAFE_GLOBAL_INDEX
-    if _evidence_is_acceptance_eligible(evidence):
+    if not isinstance(ledger, EvaluationLedger):
+        raise EvidenceError("decision builder requires an EvaluationLedger")
+    if not isinstance(evaluation_manifest, EvaluationManifest):
+        raise EvidenceError("decision builder requires an EvaluationManifest")
+    if not _manifest_binds_ledger(evaluation_manifest, ledger):
+        return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
+    if not _answer_keys_bind_manifest(evaluation_manifest, answer_keys):
+        return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
+    frozen = ledger.freeze()
+    if evidence != frozen:
+        return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
+    if not _trial_grades_bind_answer_keys(ledger, answer_keys):
+        return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
+    if _bound_evidence_summary_is_acceptance_eligible(frozen):
         return ZOEKT_FACADE_ACCEPTED_FOR_CI3
     return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
 
 
-def _evidence_is_acceptance_eligible(evidence: EvaluationEvidence) -> bool:
-    """Revalidate public summary fields before they can select the acceptance enum."""
+def _bound_evidence_summary_is_acceptance_eligible(
+    evidence: EvaluationEvidence,
+) -> bool:
+    """Check the summary only after the builder bound it to its source ledger."""
 
     if (
         evidence.state != "ELIGIBLE_REAL_EMPIRICAL_EVIDENCE"
@@ -572,176 +586,66 @@ def _evidence_is_acceptance_eligible(evidence: EvaluationEvidence) -> bool:
         )
     ):
         return False
-    return _evidence_canonical_payload_binds(evidence)
+    return True
 
 
-def _evidence_canonical_payload_binds(evidence: EvaluationEvidence) -> bool:
-    """Bind the summary to its canonical ledger bytes before accepting it."""
-
-    canonical = evidence.canonical_bytes
-    if type(canonical) is not bytes:
-        return False
-    if hashlib.sha256(canonical).hexdigest() != evidence.ledger_digest:
-        return False
-    try:
-        payload = json.loads(
-            canonical.decode("utf-8"),
-            object_pairs_hook=_receipt_no_duplicates,
-            parse_constant=_receipt_reject_nonfinite,
+def _manifest_binds_ledger(
+    evaluation_manifest: EvaluationManifest,
+    ledger: EvaluationLedger,
+) -> bool:
+    ledger_manifest = ledger.manifest
+    return (
+        ledger_manifest.digest == evaluation_manifest.digest
+        and ledger_manifest.canonical_bytes == evaluation_manifest.canonical_bytes
+        and (
+            ledger_manifest.digest
+            == hashlib.sha256(ledger_manifest.canonical_bytes).hexdigest()
         )
-    except (UnicodeDecodeError, json.JSONDecodeError, QueryReceiptError, TypeError, ValueError):
+    )
+
+
+def _answer_keys_bind_manifest(
+    evaluation_manifest: EvaluationManifest,
+    answer_keys: Mapping[str, AnswerKey],
+) -> bool:
+    if not isinstance(answer_keys, Mapping):
         return False
-    if not isinstance(payload, dict) or _canonical_json(payload) != canonical:
-        return False
-    expected_fields = {
-        "schema_version",
-        "manifest_digest",
-        "source_census_digest",
-        "run_kind",
-        "generation_receipts",
-        "publication_receipts",
-        "failure_injection_receipts",
-        "query_receipt_failure_receipts",
-        "query_receipts",
-        "trial_receipts",
+    expected_by_case = {
+        query.case_id: query.answer_key_digest for query in evaluation_manifest.queries
     }
-    if set(payload) != expected_fields:
+    if set(answer_keys) != set(expected_by_case):
         return False
-    if (
-        payload["schema_version"] != LEDGER_SCHEMA_VERSION
-        or payload["manifest_digest"] != evidence.manifest_digest
-        or payload["source_census_digest"] != evidence.source_census_digest
-        or payload["run_kind"] != "real"
-    ):
-        return False
-    generations = payload["generation_receipts"]
-    publications = payload["publication_receipts"]
-    injections = payload["failure_injection_receipts"]
-    receipt_failures = payload["query_receipt_failure_receipts"]
-    query_receipts = payload["query_receipts"]
-    trials = payload["trial_receipts"]
-    if not all(
-        isinstance(value, list)
-        for value in (
-            generations,
-            publications,
-            injections,
-            receipt_failures,
-            query_receipts,
-            trials,
-        )
-    ):
-        return False
-    if (
-        len(trials) != evidence.recorded_trial_count
-        or len(query_receipts) != evidence.required_trial_count
-        or len(injections) != evidence.recorded_failure_injection_count
-        or receipt_failures
-        or not publications
-    ):
-        return False
-    last_publication = publications[-1]
-    if (
-        not isinstance(last_publication, Mapping)
-        or last_publication.get("active_generation_id") != evidence.active_generation_id
-    ):
-        return False
-    if not any(
-        isinstance(generation, Mapping)
-        and generation.get("generation_id") == evidence.active_generation_id
-        and generation.get("status") == "succeeded"
-        for generation in generations
-    ):
-        return False
-    injection_codes: set[str] = set()
-    for injection in injections:
-        if not isinstance(injection, Mapping):
-            return False
-        failure_code = injection.get("failure_code")
-        cleanup = injection.get("cleanup")
+    for case_id, expected_digest in expected_by_case.items():
+        answer_key = answer_keys[case_id]
         if (
-            not isinstance(failure_code, str)
-            or injection.get("outcome") != "REJECTED"
-            or not isinstance(cleanup, Mapping)
-            or cleanup.get("state") != "SUCCEEDED"
+            not isinstance(answer_key, AnswerKey)
+            or answer_key.case_id != case_id
+            or answer_key.digest != expected_digest
         ):
             return False
-        injection_codes.add(failure_code)
-    if injection_codes != set(REQUIRED_FAILURE_INJECTIONS):
+    return True
+
+
+def _trial_grades_bind_answer_keys(
+    ledger: EvaluationLedger,
+    answer_keys: Mapping[str, AnswerKey],
+) -> bool:
+    if tuple(item.trial_id for item in ledger.trial_receipts) != ledger.manifest.trial_order:
         return False
-    trial_ids: set[str] = set()
-    for trial in trials:
-        if not isinstance(trial, Mapping):
+    for receipt in ledger.trial_receipts:
+        case_id, _candidate = receipt.trial_id.split(":", 1)
+        try:
+            grade = grade_candidate_result(
+                answer_keys[case_id], receipt.returned_identities
+            )
+        except (EvidenceError, KeyError):
             return False
-        trial_id = trial.get("trial_id")
-        resource = trial.get("resource")
         if (
-            not isinstance(trial_id, str)
-            or not trial_id
-            or trial_id in trial_ids
-            or trial.get("generation_id") != evidence.active_generation_id
-            or trial.get("source_census_digest") != evidence.source_census_digest
-            or trial.get("outcome") != "completed"
-            or trial.get("query_completed") is not True
-            or trial.get("truncated") is not False
-            or trial.get("failure_code") is not None
-            or not isinstance(resource, Mapping)
-            or not resource
-            or any(value == UNKNOWN_RESOURCE for value in resource.values())
+            grade.recall != receipt.recall
+            or grade.false_positive_count != receipt.false_positive_count
         ):
             return False
-        trial_ids.add(trial_id)
-    query_trial_ids: set[str] = set()
-    for receipt in query_receipts:
-        if not _query_payload_is_decision_eligible(receipt):
-            return False
-        assert isinstance(receipt, Mapping)
-        trial_id = receipt.get("trial_id")
-        if not isinstance(trial_id, str) or trial_id in query_trial_ids:
-            return False
-        query_trial_ids.add(trial_id)
-    return query_trial_ids == trial_ids
-
-
-def _query_payload_is_decision_eligible(payload: object) -> bool:
-    """Evaluate the raw canonical receipt shape used by the public result gate."""
-
-    if not isinstance(payload, Mapping):
-        return False
-    try:
-        limits = payload["limits"]
-        resources = payload["resource_observation"]
-        security = payload["security_observation"]
-        cleanup = payload["cleanup_observation"]
-    except KeyError:
-        return False
-    if not all(
-        isinstance(value, Mapping) for value in (limits, resources, security, cleanup)
-    ):
-        return False
-    if (
-        payload.get("status") not in {"SUCCESS", "ZERO_RESULTS"}
-        or payload.get("query_completeness") != "COMPLETE"
-        or limits.get("truncated") is not False
-        or payload.get("coverage") != ["FULLY_COVERED"]
-        or payload.get("health") != ["HEALTHY"]
-        or payload.get("freshness") != ["EXACT_SHA_CURRENT"]
-        or not resources
-        or any(value == UNKNOWN_RESOURCE for value in resources.values())
-        or not security
-        or any(value == UNKNOWN_RESOURCE or value != 0 for value in security.values())
-        or cleanup.get("state") != "SUCCEEDED"
-        or cleanup.get("receipt_digest") == UNKNOWN_RESOURCE
-        or payload.get("raw_response_digest") == UNKNOWN_RESOURCE
-        or payload.get("normalized_response_digest") == UNKNOWN_RESOURCE
-    ):
-        return False
-    if payload["status"] == "ZERO_RESULTS":
-        return (
-            payload.get("zero_result_authority")
-            == "AUTHORITATIVE_NOT_FOUND_ON_HEALTHY_COVERED_EXACT_REF"
-        )
-    return payload.get("zero_result_authority") == "NOT_APPLICABLE_MATCHES_RETURNED"
+    return True
 
 
 class EvaluationLedger:

@@ -309,17 +309,36 @@ def test_deterministic_decision_builder_never_accepts_incomplete_or_unsafe_evide
     for trial_id in ledger.manifest.trial_order:
         ledger.record_trial(_trial(ledger, trial_id))
     complete = ledger.freeze()
+    answer_keys = _answer_keys(ledger)
 
-    assert build_decision_from_evidence(complete, repositories_safe=True) == (
+    assert build_decision_from_evidence(
+        complete,
+        repositories_safe=True,
+        ledger=ledger,
+        evaluation_manifest=ledger.manifest,
+        answer_keys=answer_keys,
+    ) == (
         "ZOEKT_FACADE_ACCEPTED_FOR_CI3"
     )
-    assert build_decision_from_evidence(complete, repositories_safe=False) == (
+    assert build_decision_from_evidence(
+        complete,
+        repositories_safe=False,
+        ledger=ledger,
+        evaluation_manifest=ledger.manifest,
+        answer_keys=answer_keys,
+    ) == (
         "NO_SAFE_GLOBAL_INDEX"
     )
 
     synthetic = _ledger(run_kind="synthetic")
     _publish_healthy_generation(synthetic)
-    assert build_decision_from_evidence(synthetic.freeze(), repositories_safe=True) == (
+    assert build_decision_from_evidence(
+        synthetic.freeze(),
+        repositories_safe=True,
+        ledger=synthetic,
+        evaluation_manifest=synthetic.manifest,
+        answer_keys=_answer_keys(synthetic),
+    ) == (
         "ZOEKT_REQUIRES_ARCHITECTURE_REVISION"
     )
 
@@ -334,6 +353,7 @@ def test_decision_builder_revalidates_every_public_completion_predicate() -> Non
     for trial_id in ledger.manifest.trial_order:
         ledger.record_trial(_trial(ledger, trial_id))
     complete = ledger.freeze()
+    answer_keys = _answer_keys(ledger)
 
     forged_evidence = (
         replace(complete, run_kind="synthetic"),
@@ -353,12 +373,67 @@ def test_decision_builder_revalidates_every_public_completion_predicate() -> Non
     )
 
     for forged in forged_evidence:
-        assert build_decision_from_evidence(forged, repositories_safe=True) == (
+        assert build_decision_from_evidence(
+            forged,
+            repositories_safe=True,
+            ledger=ledger,
+            evaluation_manifest=ledger.manifest,
+            answer_keys=answer_keys,
+        ) == (
             "ZOEKT_REQUIRES_ARCHITECTURE_REVISION"
         )
-        assert build_decision_from_evidence(forged, repositories_safe=False) == (
+        assert build_decision_from_evidence(
+            forged,
+            repositories_safe=False,
+            ledger=ledger,
+            evaluation_manifest=ledger.manifest,
+            answer_keys=answer_keys,
+        ) == (
             "NO_SAFE_GLOBAL_INDEX"
         )
+
+    self_hashed_payload = json.loads(complete.canonical_bytes)
+    query_sources = self_hashed_payload["query_receipts"][0]["requested_sources"]
+    assert isinstance(query_sources, list)
+    assert isinstance(query_sources[0], dict)
+    query_sources[0]["requested_tree"] = "f" * 40
+    self_hashed_canonical = json.dumps(
+        self_hashed_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    self_hashed_forgery = replace(
+        complete,
+        canonical_bytes=self_hashed_canonical,
+        ledger_digest=hashlib.sha256(self_hashed_canonical).hexdigest(),
+    )
+    assert build_decision_from_evidence(
+        self_hashed_forgery,
+        repositories_safe=True,
+        ledger=ledger,
+        evaluation_manifest=ledger.manifest,
+        answer_keys=answer_keys,
+    ) == "ZOEKT_REQUIRES_ARCHITECTURE_REVISION"
+
+    unbound_answer_keys = dict(answer_keys)
+    unbound_answer_keys["E1"] = AnswerKey(
+        case_id="E1",
+        expected_identities=(
+            ("alpha", "synthetic-org/alpha", "main", "engine/core.py", 1, 1),
+        ),
+        forbidden_identities=(),
+        canonical_bytes=b"unbound-answer-key",
+        digest=ledger.manifest.queries[0].answer_key_digest,
+    )
+    assert build_decision_from_evidence(
+        complete,
+        repositories_safe=True,
+        ledger=ledger,
+        evaluation_manifest=ledger.manifest,
+        answer_keys=unbound_answer_keys,
+    ) == "ZOEKT_REQUIRES_ARCHITECTURE_REVISION"
 
 
 def test_omitted_index_sha_duplicate_repository_and_moved_source_fail_closed() -> None:
@@ -727,8 +802,9 @@ def test_result_schema_allows_acceptance_only_with_complete_real_empirical_evide
     assert list(validator.iter_errors(payload))
 
     incomplete = dict(real)
-    incomplete["recorded_trial_count"] = 0
-    incomplete["failed_trial_count"] = 1
-    incomplete["reasons"] = ["FORGED_COMPLETION"]
+    incomplete["recorded_trial_count"] = real["recorded_trial_count"] - 1
+    incomplete["recorded_failure_injection_count"] = (
+        real["recorded_failure_injection_count"] - 1
+    )
     payload["evaluation_evidence"] = incomplete
     assert list(validator.iter_errors(payload))
