@@ -159,6 +159,8 @@ def make_engine(
     client: InMemorySlackClient,
     *,
     authority_policy=None,
+    active_waiter_registry=None,
+    sleep=asyncio.sleep,
 ):
     from integrations.slack_agent_dialogue.engine_v2 import DialogueEngineV2
 
@@ -168,6 +170,8 @@ def make_engine(
         authority_policy=(
             ExactV2AuthorityPolicy() if authority_policy is None else authority_policy
         ),
+        active_waiter_registry=active_waiter_registry,
+        sleep=sleep,
     )
 
 
@@ -1437,6 +1441,328 @@ def test_v2_wait_for_reply_uses_injected_authority_policy() -> None:
         "selected_option": "opt-continue",
         "canonical_ref": None,
     }
+
+
+def test_v2_wait_registers_exact_waiter_after_parent_bind_before_first_poll() -> None:
+    from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+        ActiveWaiterRegistry,
+    )
+
+    events: list[str] = []
+    keys = []
+
+    class RecordingRegistry(ActiveWaiterRegistry):
+        def register(self, key):
+            events.append("registered")
+            keys.append(key)
+            return super().register(key)
+
+        def unregister(self, registration):
+            events.append("released")
+            return super().unregister(registration)
+
+    registry = RecordingRegistry(token_factory=lambda: "w" * 24)
+    client = setup_client()
+    request, reply = _decision_and_ruling()
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000160")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000161")
+    original_fetch_thread = client.fetch_thread
+
+    async def observed_fetch_thread(**kwargs):
+        events.append("thread_poll")
+        assert registry.active_count == 1
+        return await original_fetch_thread(**kwargs)
+
+    client.fetch_thread = observed_fetch_thread
+    engine = make_engine(client, active_waiter_registry=registry)
+
+    result = run(
+        engine.wait_for_reply(
+            thread_ts=THREAD_TS,
+            context=context(),
+            request_message_key=request["message_key"],
+            expected_types=("RULING",),
+            max_attempts=1,
+        )
+    )
+
+    assert result["reply"] == reply
+    assert events == ["registered", "thread_poll", "released"]
+    assert keys[0].target_seat == "coo"
+    assert registry.active_count == 0
+
+
+@pytest.mark.parametrize(
+    "request_message_key",
+    [None, "", "not-a-valid-message-key", "asd-short"],
+)
+def test_v2_wait_refuses_malformed_request_key_before_bind_or_registration(
+    request_message_key,
+) -> None:
+    from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+        ActiveWaiterRegistry,
+    )
+
+    registry = ActiveWaiterRegistry(token_factory=lambda: "k" * 24)
+    client = setup_client()
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client, active_waiter_registry=registry).wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request_message_key,
+                expected_types=("RULING",),
+                max_attempts=1,
+            )
+        )
+
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+    assert registry.active_count == 0
+    assert client.channel_history_call_count == 0
+    assert client.thread_history_call_count == 0
+
+
+def test_v2_wait_registers_ceo_to_chairman_direction_for_the_ceo_target() -> None:
+    from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+        ActiveWaiterRegistry,
+    )
+
+    registry = ActiveWaiterRegistry(token_factory=lambda: "a" * 24)
+    client = setup_client()
+    chairman_actor = {
+        "kind": "executive_surface",
+        "seat": "chairman",
+        "reasoning_surface": "human",
+    }
+    request = v2_message(
+        "DECISION_REQUEST",
+        message_key="asd-request-v2-ceo-chairman-wait",
+        actor_ref=ceo_actor(),
+    )
+    reply = v2_message(
+        "RULING",
+        message_key="asd-ruling-v2-chairman-ceo-wait",
+        actor_ref=chairman_actor,
+        reply_to_message_key=request["message_key"],
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000169")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000170")
+    observed_keys = []
+    original_register = registry.register
+
+    def recording_register(key):
+        observed_keys.append(key)
+        return original_register(key)
+
+    registry.register = recording_register
+
+    result = run(
+        make_engine(client, active_waiter_registry=registry).wait_for_reply(
+            thread_ts=THREAD_TS,
+            context=context(actor_ref=ceo_actor()),
+            request_message_key=request["message_key"],
+            expected_types=("RULING",),
+            max_attempts=1,
+        )
+    )
+
+    assert result["reply"] == reply
+    assert observed_keys[0].target_seat == "ceo"
+    assert registry.active_count == 0
+
+
+def test_v2_wait_timeout_releases_exact_waiter_registration() -> None:
+    from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+        ActiveWaiterRegistry,
+    )
+
+    registry = ActiveWaiterRegistry(token_factory=lambda: "t" * 24)
+    client = setup_client()
+    request = v2_message(
+        "DECISION_REQUEST",
+        message_key="asd-request-v2-waiter-timeout",
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000162")
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client, active_waiter_registry=registry).wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("RULING",),
+                max_attempts=1,
+            )
+        )
+
+    assert code(exc) == "WAIT_TIMEOUT"
+    assert registry.active_count == 0
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        ("request_missing", "REPLY_NOT_FOUND"),
+        ("reply_ambiguous", "REPLY_AMBIGUOUS"),
+        ("history_incomplete", "THREAD_HISTORY_INCOMPLETE"),
+        ("transport_unavailable", "TRANSPORT_UNAVAILABLE"),
+        ("authority_refused", "THREAD_CONTEXT_MISMATCH"),
+    ],
+)
+def test_v2_wait_error_paths_release_exact_waiter_registration(
+    failure: str,
+    expected_code: str,
+) -> None:
+    from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+        ActiveWaiterRegistry,
+    )
+
+    registry = ActiveWaiterRegistry(token_factory=lambda: "e" * 24)
+    client = setup_client()
+    request, reply = _decision_and_ruling()
+    if failure != "request_missing":
+        add_v2_reply(client, request, author=BOT, ts="1787471000.000166")
+    if failure in {"reply_ambiguous", "authority_refused"}:
+        add_v2_reply(client, reply, author=SOL1, ts="1787471000.000167")
+    if failure == "reply_ambiguous":
+        second = v2_message(
+            "RULING",
+            message_key="asd-ruling-v2-waiter-error-second",
+            actor_ref=ceo_actor(),
+            reply_to_message_key=request["message_key"],
+        )
+        add_v2_reply(client, second, author=SOL1, ts="1787471000.000168")
+    if failure == "history_incomplete":
+        client.thread_history_complete = False
+    if failure == "transport_unavailable":
+
+        async def unavailable_thread(**_kwargs):
+            raise RuntimeError("private transport failure")
+
+        client.fetch_thread = unavailable_thread
+
+    engine = make_engine(
+        client,
+        active_waiter_registry=registry,
+        authority_policy=(
+            ChairmanFloorPolicy()
+            if failure == "authority_refused"
+            else ExactV2AuthorityPolicy()
+        ),
+    )
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            engine.wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("RULING",),
+                max_attempts=1,
+            )
+        )
+
+    assert code(exc) == expected_code
+    assert registry.active_count == 0
+
+
+def test_v2_wait_parent_bind_refusal_never_registers() -> None:
+    from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+        ActiveWaiterRegistry,
+    )
+
+    registry = ActiveWaiterRegistry(token_factory=lambda: "b" * 24)
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    request, _reply = _decision_and_ruling()
+
+    with pytest.raises(DialogueEngineError):
+        run(
+            make_engine(client, active_waiter_registry=registry).wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("RULING",),
+                max_attempts=1,
+            )
+        )
+
+    assert registry.active_count == 0
+    assert client.thread_history_call_count == 0
+
+
+def test_v2_wait_cancellation_and_duplicate_conflict_preserve_exact_owner() -> None:
+    from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+        ActiveWaiterConflict,
+        ActiveWaiterRegistry,
+    )
+
+    async def scenario() -> None:
+        registry = ActiveWaiterRegistry(token_factory=lambda: "c" * 24)
+        client = setup_client()
+        request = v2_message(
+            "DECISION_REQUEST",
+            message_key="asd-request-v2-waiter-cancel",
+        )
+        add_v2_reply(client, request, author=BOT, ts="1787471000.000163")
+        sleeping = asyncio.Event()
+        release_sleep = asyncio.Event()
+
+        async def blocked_sleep(_seconds):
+            sleeping.set()
+            await release_sleep.wait()
+
+        engine = make_engine(
+            client,
+            active_waiter_registry=registry,
+            sleep=blocked_sleep,
+        )
+        first = asyncio.create_task(
+            engine.wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("RULING",),
+                max_attempts=2,
+            )
+        )
+        await asyncio.wait_for(sleeping.wait(), timeout=1)
+        assert registry.active_count == 1
+
+        with pytest.raises(ActiveWaiterConflict):
+            await engine.wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("RULING",),
+                max_attempts=1,
+            )
+        assert registry.active_count == 1
+
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert registry.active_count == 0
+
+    run(scenario())
+
+
+def test_v2_without_waiter_registry_remains_ordinary_standalone_engine() -> None:
+    client = setup_client()
+    request, reply = _decision_and_ruling()
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000164")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000165")
+
+    result = run(
+        make_engine(client).wait_for_reply(
+            thread_ts=THREAD_TS,
+            context=context(),
+            request_message_key=request["message_key"],
+            expected_types=("RULING",),
+            max_attempts=1,
+        )
+    )
+
+    assert result["reply"] == reply
 
 
 def test_v2_executive_actor_is_not_sufficient_ruling_authority() -> None:
