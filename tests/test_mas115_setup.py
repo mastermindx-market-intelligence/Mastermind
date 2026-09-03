@@ -60,6 +60,14 @@ def _selections() -> dict:
     }
 
 
+def _local_census(*additional_rows: dict) -> dict:
+    """Exact live shape: three running seats plus any explicit candidates."""
+    return {
+        "gologin": [],
+        "multilogin": [*(_mlx(index) for index in range(1, 4)), *additional_rows],
+    }
+
+
 def test_build_enrollment_document_is_exact_three_distinct_seats_and_preserves_unrelated():
     unrelated = sb.new_binding(
         work_ref="WS:OTHER", role="worker", provider="codex",
@@ -557,7 +565,7 @@ def _bootstrap_coordinator_state(monkeypatch, *, running=False):
     monkeypatch.setattr(
         setup.chatgpt,
         "list_local_environments",
-        lambda: {"multilogin": [row], "gologin": []},
+        lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
     monkeypatch.setattr(
@@ -632,8 +640,8 @@ def test_peer_setup_bootstrap_refuses_failed_post_confirmation_evidence_mint(mon
     """A changed post-phrase census never releases bootstrap authority."""
     _row, _provision = _bootstrap_coordinator_state(monkeypatch)
     censuses = iter((
-        {"multilogin": [_mlx(4, running=False)], "gologin": []},
-        {"multilogin": [_mlx(4, running=True)], "gologin": []},
+        _local_census(_mlx(4, running=False)),
+        _local_census(_mlx(4, running=True)),
     ))
     monkeypatch.setattr(setup.chatgpt, "list_local_environments", lambda: next(censuses))
     monkeypatch.setattr(
@@ -975,3 +983,57 @@ def test_atomic_private_json_has_exactly_one_implementation(tmp_path):
     setup.vendors.atomic_private_json(doc, path)
     assert path.stat().st_mode & 0o777 == 0o600
     assert json.loads(path.read_text(encoding="utf-8")) == doc
+
+
+def test_realm1_matching_local_row_seals_once_bypasses_reducer_and_threads_same_snapshot(monkeypatch):
+    """The anchor check must not resample or pass through permissive candidate filtering."""
+    row = _mlx(4, running=False)
+    provision = _peer_anchor_provision(row)
+    bindings = setup.build_enrollment_document(
+        None, _selections(), observed_at="2026-08-01T00:00:00Z",
+    )
+    raw = _local_census(row)
+    raw_before = json.loads(json.dumps(raw))
+    bindings_before = json.loads(json.dumps(bindings))
+    calls = []
+
+    def _inventory():
+        calls.append(("inventory", None))
+        return raw
+
+    def _load(**kwargs):
+        snapshot = kwargs.get("current_environment_snapshot")
+        assert canary._is_current_environment_snapshot(snapshot) is True  # noqa: SLF001
+        calls.append(("load", snapshot))
+        return provision, None
+
+    def _assert_nonseat(_bindings, _row, **kwargs):
+        snapshot = kwargs.get("current_environment_snapshot")
+        assert canary._is_current_environment_snapshot(snapshot) is True  # noqa: SLF001
+        calls.append(("nonseat", snapshot))
+
+    monkeypatch.setattr(setup.chatgpt, "list_local_environments", _inventory)
+    monkeypatch.setattr(setup, "_load_current_provision", _load)
+    monkeypatch.setattr(setup, "assert_current_nonseat", _assert_nonseat)
+    monkeypatch.setattr(
+        setup,
+        "_candidate_rows",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("strict snapshot rows must bypass the permissive reducer"),
+        ),
+    )
+    monkeypatch.setattr(
+        setup.sb,
+        "save_bindings",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("a live census must never persist or refresh navigation bindings"),
+        ),
+    )
+
+    matched = setup._matching_local_row(bindings)  # noqa: SLF001
+    assert dict(matched) == row
+    assert [name for name, _value in calls] == ["inventory", "load", "nonseat"]
+    snapshots = [value for name, value in calls if name in ("load", "nonseat")]
+    assert len(snapshots) == 2 and snapshots[0] is snapshots[1]
+    assert raw == raw_before
+    assert bindings == bindings_before
