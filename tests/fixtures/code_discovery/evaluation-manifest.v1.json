@@ -1,0 +1,134 @@
+{
+  "authority_blobs": {
+    "f0": "987156c256a4a8252db3903b6b8cd9fca101e281",
+    "language_amendment": "32e0b610434bb8a575f4300e24041acfb03cd1c3",
+    "z0_plan": "1f57a30e43172036d23ef87b75bfc42c9ecab46f"
+  },
+  "corpus": [
+    {
+      "blob_census_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "canonical_repository": "synthetic-org/alpha-mirror",
+      "commit": "1111111111111111111111111111111111111111",
+      "include_exclude_policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "logical_repo_id": "alpha-mirror",
+      "ref": "main",
+      "submodule_lfs_generated_vendor_oversize_disposition_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+      "tree": "4444444444444444444444444444444444444444"
+    },
+    {
+      "blob_census_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+      "canonical_repository": "synthetic-org/beta-mirror",
+      "commit": "6666666666666666666666666666666666666666",
+      "include_exclude_policy_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+      "logical_repo_id": "beta-mirror",
+      "ref": "main",
+      "submodule_lfs_generated_vendor_oversize_disposition_digest": "8888888888888888888888888888888888888888888888888888888888888888",
+      "tree": "9999999999999999999999999999999999999999"
+    }
+  ],
+  "freshness_targets": {
+    "max_source_update_to_queryable_seconds": 900,
+    "median_source_update_to_queryable_seconds": 300
+  },
+  "hard_failure_rules_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "materiality_bands": {
+    "minimum_recall_delta": 0.0,
+    "minimum_useful_latency_delta_ms": 0
+  },
+  "operation_key": "mastermind-codeintel-z0-empirical-evidence-source-20260903-sol-001",
+  "path_policy_candidates": ["P0", "P1", "P2"],
+  "protected_source": {
+    "commit": "771a95586c7a31933ee612eafaa4d1471f57527b",
+    "repository": "mastermindx-market-intelligence/Mastermind",
+    "skillpack_index_blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "tree": "cccccccccccccccccccccccccccccccccccccccc"
+  },
+  "queries": [
+    {
+      "answer_key_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "case_id": "E1",
+      "completeness_threshold": 1.0,
+      "deterministic_grader_id": "source-census-v1",
+      "family": "owner",
+      "false_positive_ceiling": 0,
+      "filters_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "forbidden_answer_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "logical_repo_ids": ["alpha-mirror"],
+      "max_context_lines": 1,
+      "max_results": 10,
+      "query_digest": "0101010101010101010101010101010101010101010101010101010101010101",
+      "recall_threshold": 1.0,
+      "refs": ["main"],
+      "repetition_index": 0,
+      "timeout_ms": 1000,
+      "warm_or_cold": "cold"
+    },
+    {
+      "answer_key_digest": "0202020202020202020202020202020202020202020202020202020202020202",
+      "case_id": "X3",
+      "completeness_threshold": 1.0,
+      "deterministic_grader_id": "source-census-v1",
+      "family": "consumer",
+      "false_positive_ceiling": 0,
+      "filters_digest": "0303030303030303030303030303030303030303030303030303030303030303",
+      "forbidden_answer_digest": "0404040404040404040404040404040404040404040404040404040404040404",
+      "logical_repo_ids": ["alpha-mirror", "beta-mirror"],
+      "max_context_lines": 1,
+      "max_results": 10,
+      "query_digest": "0505050505050505050505050505050505050505050505050505050505050505",
+      "recall_threshold": 1.0,
+      "refs": ["main"],
+      "repetition_index": 0,
+      "timeout_ms": 1000,
+      "warm_or_cold": "warm"
+    },
+    {
+      "answer_key_digest": "0606060606060606060606060606060606060606060606060606060606060606",
+      "case_id": "R3",
+      "completeness_threshold": 1.0,
+      "deterministic_grader_id": "source-census-v1",
+      "family": "refinement",
+      "false_positive_ceiling": 0,
+      "filters_digest": "0707070707070707070707070707070707070707070707070707070707070707",
+      "forbidden_answer_digest": "0808080808080808080808080808080808080808080808080808080808080808",
+      "logical_repo_ids": ["beta-mirror"],
+      "max_context_lines": 1,
+      "max_results": 10,
+      "query_digest": "0909090909090909090909090909090909090909090909090909090909090909",
+      "recall_threshold": 1.0,
+      "refs": ["main"],
+      "repetition_index": 1,
+      "timeout_ms": 1000,
+      "warm_or_cold": "cold"
+    },
+    {
+      "answer_key_digest": "1010101010101010101010101010101010101010101010101010101010101010",
+      "case_id": "A1",
+      "completeness_threshold": 1.0,
+      "deterministic_grader_id": "source-census-v1",
+      "family": "absence",
+      "false_positive_ceiling": 0,
+      "filters_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "forbidden_answer_digest": "1212121212121212121212121212121212121212121212121212121212121212",
+      "logical_repo_ids": ["alpha-mirror", "beta-mirror"],
+      "max_context_lines": 1,
+      "max_results": 10,
+      "query_digest": "1313131313131313131313131313131313131313131313131313131313131313",
+      "recall_threshold": 1.0,
+      "refs": ["main"],
+      "repetition_index": 1,
+      "timeout_ms": 1000,
+      "warm_or_cold": "warm"
+    }
+  ],
+  "resource_envelopes": {
+    "T0": {"max_cpu_ms": 1000, "max_disk_bytes": 1000000, "max_rss_bytes": 1000000},
+    "T1": {"max_cpu_ms": 1000, "max_disk_bytes": 1000000, "max_rss_bytes": 1000000}
+  },
+  "schema_version": "mastermind.codeintel_evaluation_manifest.v1",
+  "tie_break_rule_digest": "1414141414141414141414141414141414141414141414141414141414141414",
+  "trial_order": [
+    "E1:baseline", "E1:zoekt", "X3:zoekt", "X3:baseline",
+    "R3:baseline", "R3:zoekt", "A1:zoekt", "A1:baseline"
+  ]
+}

@@ -8,10 +8,16 @@ from typing import Final
 
 REQUIRED_BENCHMARK_CASES: Final = frozenset({"E1", "X3", "R3", "A1"})
 PATH_POLICY_IDS: Final = frozenset({"P0", "P1", "P2"})
+TOPOLOGY_IDS: Final = frozenset({"T0", "T1"})
+NO_SAFE_TOPOLOGY: Final = "NO_SAFE_TOPOLOGY"
 
 
 class PathPolicyError(ValueError):
     """The evidence is insufficient to select a path policy."""
+
+
+class TopologyError(ValueError):
+    """The topology evidence is malformed rather than safely rejectable."""
 
 
 @dataclass(frozen=True)
@@ -28,9 +34,35 @@ class PathPolicyMeasurement:
     build_seconds: float
     refresh_seconds: float
     query_latency_ms: float
+    hard_failure_code: str | None = None
 
 
-def select_path_policy(measurements: tuple[PathPolicyMeasurement, ...]) -> str:
+@dataclass(frozen=True)
+class TopologyEnvelope:
+    """One fixed host resource envelope allowed for a disposable Z0 topology."""
+
+    topology_id: str
+    max_cpu_ms: int
+    max_rss_bytes: int
+    max_disk_bytes: int
+
+
+@dataclass(frozen=True)
+class TopologyMeasurement:
+    """One observed topology footprint; None means unknown, not zero."""
+
+    topology_id: str
+    cpu_ms: int | None
+    rss_bytes: int | None
+    disk_bytes: int | None
+    hard_failure_code: str | None = None
+
+
+def select_path_policy(
+    measurements: tuple[PathPolicyMeasurement, ...],
+    *,
+    p0_non_recall_justification: bool = False,
+) -> str:
     """Choose only from complete evidence; P0 cannot win on recall alone."""
 
     by_policy: dict[str, dict[str, PathPolicyMeasurement]] = {}
@@ -42,6 +74,17 @@ def select_path_policy(measurements: tuple[PathPolicyMeasurement, ...]) -> str:
                 f"duplicate measurement: {measurement.policy_id}/{measurement.case_id}"
             )
         policy[measurement.case_id] = measurement
+    failures = tuple(
+        measurement.hard_failure_code
+        for cases in by_policy.values()
+        for measurement in cases.values()
+        if measurement.hard_failure_code is not None
+    )
+    if failures:
+        raise PathPolicyError(
+            "constitutional failure dominates path-policy performance: "
+            + ",".join(sorted(failures))
+        )
     if set(by_policy) != PATH_POLICY_IDS:
         raise PathPolicyError("P0, P1 and P2 each require complete measured evidence")
     if any(set(cases) != REQUIRED_BENCHMARK_CASES for cases in by_policy.values()):
@@ -56,6 +99,10 @@ def select_path_policy(measurements: tuple[PathPolicyMeasurement, ...]) -> str:
         raise PathPolicyError("no policy reaches full answer-key recall")
     candidates.sort(key=lambda policy_id: _policy_cost(by_policy[policy_id]))
     winner = candidates[0]
+    if winner == "P0" and not p0_non_recall_justification:
+        raise PathPolicyError(
+            "P0 cannot win on recall alone without preregistered non-recall justification"
+        )
     if winner == "P0" and len(candidates) > 1:
         p0 = _policy_cost(by_policy["P0"])
         best_narrow = min(
@@ -69,6 +116,81 @@ def select_path_policy(measurements: tuple[PathPolicyMeasurement, ...]) -> str:
                 "has lower false-positive or resource burden"
             )
     return winner
+
+
+def select_topology(
+    measurements: tuple[TopologyMeasurement, ...],
+    envelopes: tuple[TopologyEnvelope, ...],
+) -> str:
+    """Select T0/T1 only with complete, known observations inside fixed budgets.
+
+    A resource unknown, an overage, or a constitutional failure yields the
+    typed NO_SAFE_TOPOLOGY result. Malformed evidence raises separately so a
+    caller cannot mislabel a parser defect as a capacity result.
+    """
+
+    if not isinstance(measurements, tuple) or not isinstance(envelopes, tuple):
+        raise TopologyError("topology measurements and envelopes must be tuples")
+    by_topology: dict[str, TopologyMeasurement] = {}
+    for measurement in measurements:
+        if not isinstance(measurement, TopologyMeasurement):
+            raise TopologyError("topology measurements must have closed shape")
+        if measurement.topology_id not in TOPOLOGY_IDS:
+            raise TopologyError("unknown topology")
+        if measurement.topology_id in by_topology:
+            raise TopologyError("duplicate topology measurement")
+        by_topology[measurement.topology_id] = measurement
+    by_envelope: dict[str, TopologyEnvelope] = {}
+    for envelope in envelopes:
+        if not isinstance(envelope, TopologyEnvelope):
+            raise TopologyError("topology envelopes must have closed shape")
+        if envelope.topology_id not in TOPOLOGY_IDS:
+            raise TopologyError("unknown topology")
+        if envelope.topology_id in by_envelope:
+            raise TopologyError("duplicate topology envelope")
+        if any(
+            type(value) is not int or value < 0
+            for value in (
+                envelope.max_cpu_ms,
+                envelope.max_rss_bytes,
+                envelope.max_disk_bytes,
+            )
+        ):
+            raise TopologyError("topology envelope values must be non-negative integers")
+        by_envelope[envelope.topology_id] = envelope
+    if set(by_topology) != TOPOLOGY_IDS or set(by_envelope) != TOPOLOGY_IDS:
+        raise TopologyError("T0 and T1 both require measured envelopes")
+
+    candidates: list[TopologyMeasurement] = []
+    for topology_id in sorted(TOPOLOGY_IDS):
+        measurement = by_topology[topology_id]
+        envelope = by_envelope[topology_id]
+        values = (measurement.cpu_ms, measurement.rss_bytes, measurement.disk_bytes)
+        if measurement.hard_failure_code is not None:
+            continue
+        if any(type(value) is not int or value < 0 for value in values):
+            continue
+        assert isinstance(measurement.cpu_ms, int)
+        assert isinstance(measurement.rss_bytes, int)
+        assert isinstance(measurement.disk_bytes, int)
+        if (
+            measurement.cpu_ms > envelope.max_cpu_ms
+            or measurement.rss_bytes > envelope.max_rss_bytes
+            or measurement.disk_bytes > envelope.max_disk_bytes
+        ):
+            continue
+        candidates.append(measurement)
+    if not candidates:
+        return NO_SAFE_TOPOLOGY
+    candidates.sort(
+        key=lambda item: (
+            item.cpu_ms,
+            item.rss_bytes,
+            item.disk_bytes,
+            item.topology_id,
+        )
+    )
+    return candidates[0].topology_id
 
 
 def _validate_measurement(measurement: PathPolicyMeasurement) -> None:
@@ -89,6 +211,11 @@ def _validate_measurement(measurement: PathPolicyMeasurement) -> None:
     )
     if any(value < 0 for value in numeric_values):
         raise PathPolicyError("measurements must be non-negative")
+    if measurement.hard_failure_code is not None and (
+        not isinstance(measurement.hard_failure_code, str)
+        or not measurement.hard_failure_code
+    ):
+        raise PathPolicyError("hard_failure_code must be non-empty text or None")
 
 
 def _policy_cost(

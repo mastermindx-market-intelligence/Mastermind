@@ -5,9 +5,13 @@ from __future__ import annotations
 import pytest
 
 from experiments.code_discovery.z0_benchmark import (
+    NO_SAFE_TOPOLOGY,
     PathPolicyError,
     PathPolicyMeasurement,
+    TopologyEnvelope,
+    TopologyMeasurement,
     select_path_policy,
+    select_topology,
 )
 
 
@@ -76,3 +80,53 @@ def test_refuses_incomplete_evidence_and_p0_recall_only_selection() -> None:
                 query_latency_ms=99,
             )
     assert select_path_policy(tuple(measurements)) == "P1"
+
+
+def test_p0_cannot_win_on_recall_alone_and_constitutional_failure_dominates_cost() -> None:
+    """A broad policy needs a non-recall justification; a hard failure ends ranking."""
+
+    measurements = list(_complete())
+    for index, measurement in enumerate(measurements):
+        if measurement.policy_id in {"P1", "P2"}:
+            measurements[index] = _measurement(
+                measurement.policy_id,
+                measurement.case_id,
+                relevant_path_recall=0.9,
+                false_positive_count=1,
+                indexed_bytes=1,
+                shard_bytes=1,
+                build_seconds=1,
+                refresh_seconds=1,
+                query_latency_ms=1,
+            )
+    with pytest.raises(PathPolicyError, match="P0 cannot win on recall alone"):
+        select_path_policy(tuple(measurements))
+
+    failed = list(_complete())
+    failed[0] = _measurement(
+        "P0",
+        "E1",
+        hard_failure_code="SOURCE_MOVED",
+    )
+    with pytest.raises(PathPolicyError, match="constitutional failure"):
+        select_path_policy(tuple(failed), p0_non_recall_justification=True)
+
+
+def test_topology_is_selected_only_inside_t0_t1_resource_envelopes() -> None:
+    """Unknown/over-budget topology is a typed no-safe result, never a default zero."""
+
+    envelopes = (
+        TopologyEnvelope("T0", max_cpu_ms=10, max_rss_bytes=20, max_disk_bytes=30),
+        TopologyEnvelope("T1", max_cpu_ms=20, max_rss_bytes=30, max_disk_bytes=40),
+    )
+    observations = (
+        TopologyMeasurement("T0", cpu_ms=9, rss_bytes=19, disk_bytes=29),
+        TopologyMeasurement("T1", cpu_ms=12, rss_bytes=20, disk_bytes=25),
+    )
+    assert select_topology(observations, envelopes) == "T0"
+
+    unsafe = (
+        TopologyMeasurement("T0", cpu_ms=None, rss_bytes=1, disk_bytes=1),
+        TopologyMeasurement("T1", cpu_ms=21, rss_bytes=1, disk_bytes=1),
+    )
+    assert select_topology(unsafe, envelopes) == NO_SAFE_TOPOLOGY

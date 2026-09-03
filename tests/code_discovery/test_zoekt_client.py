@@ -192,6 +192,43 @@ def test_engine_match_count_beyond_the_caller_bound_is_explicitly_truncated() ->
     assert result.truncated is True
 
 
+def test_null_filematches_is_a_safe_empty_result_only_when_matchcount_is_zero() -> None:
+    """Current Zoekt may serialize an empty result as null; that is not parser drift."""
+
+    payload = json.loads(_fixture_payload())
+    payload["result"]["Stats"]["MatchCount"] = 0
+    payload["result"]["FileMatches"] = None
+    with _server(json.dumps(payload).encode("utf-8")) as (endpoint, _):
+        result = ZoektClient(endpoint, timeout_seconds=1).search(
+            "SENTINEL", limit=3, context_lines=1, case_sensitive=False, regex=False
+        )
+
+    assert result.matches == ()
+    assert result.total_match_count == 0
+    assert result.query_completed is True
+    assert result.truncated is False
+
+
+@pytest.mark.parametrize("file_matches", [None, []])
+def test_declared_matches_without_file_rows_remain_explicitly_truncated(
+    file_matches: object,
+) -> None:
+    """A nonzero engine count cannot become a decision-authoritative absence."""
+
+    payload = json.loads(_fixture_payload())
+    payload["result"]["Stats"]["MatchCount"] = 1
+    payload["result"]["FileMatches"] = file_matches
+    with _server(json.dumps(payload).encode("utf-8")) as (endpoint, _):
+        result = ZoektClient(endpoint, timeout_seconds=1).search(
+            "SENTINEL", limit=3, context_lines=1, case_sensitive=False, regex=False
+        )
+
+    assert result.matches == ()
+    assert result.total_match_count == 1
+    assert result.query_completed is True
+    assert result.truncated is True
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [

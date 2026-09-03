@@ -39,6 +39,73 @@
       }
     },
     "repository_statuses": {"type": "array"},
-    "resource_observations": {"type": "object"}
-  }
+    "resource_observations": {"type": "object"},
+    "evaluation_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "manifest_digest",
+        "source_census_digest",
+        "ledger_digest",
+        "run_kind",
+        "active_generation_id",
+        "required_trial_count",
+        "recorded_trial_count",
+        "failed_trial_count",
+        "all_resources_known",
+        "all_identity_bound",
+        "reasons"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "ELIGIBLE_REAL_EMPIRICAL_EVIDENCE",
+            "NON_DECISION_INCOMPLETE_EVIDENCE",
+            "NON_DECISION_SYNTHETIC_ONLY"
+          ]
+        },
+        "manifest_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_census_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "ledger_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "run_kind": {"enum": ["real", "synthetic"]},
+        "active_generation_id": {"type": ["string", "null"]},
+        "required_trial_count": {"type": "integer", "minimum": 0},
+        "recorded_trial_count": {"type": "integer", "minimum": 0},
+        "failed_trial_count": {"type": "integer", "minimum": 0},
+        "all_resources_known": {"type": "boolean"},
+        "all_identity_bound": {"type": "boolean"},
+        "reasons": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["decision"],
+        "properties": {
+          "decision": {"const": "ZOEKT_FACADE_ACCEPTED_FOR_CI3"}
+        }
+      },
+      "then": {
+        "required": ["evaluation_evidence"],
+        "properties": {
+          "evaluation_evidence": {
+            "required": [
+              "state",
+              "run_kind",
+              "all_resources_known",
+              "all_identity_bound"
+            ],
+            "properties": {
+              "state": {"const": "ELIGIBLE_REAL_EMPIRICAL_EVIDENCE"},
+              "run_kind": {"const": "real"},
+              "all_resources_known": {"const": true},
+              "all_identity_bound": {"const": true}
+            }
+          }
+        }
+      }
+    }
+  ]
 }

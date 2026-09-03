@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mastermind CodeIntel Z0 Evaluation Ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_digest",
+    "source_census_digest",
+    "run_kind",
+    "generation_receipts",
+    "publication_receipts",
+    "trial_receipts"
+  ],
+  "properties": {
+    "schema_version": {"const": "mastermind.codeintel_z0_evaluation_ledger.v1"},
+    "manifest_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_census_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "run_kind": {"enum": ["real", "synthetic"]},
+    "generation_receipts": {"type": "array", "items": {"$ref": "#/$defs/generation"}},
+    "publication_receipts": {"type": "array", "items": {"$ref": "#/$defs/publication"}},
+    "trial_receipts": {"type": "array", "items": {"$ref": "#/$defs/trial"}}
+  },
+  "$defs": {
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation_id", "logical_repo_id", "source_commit", "source_tree", "status", "indexed_commit_sha", "shard_digest", "failure_code"],
+      "properties": {
+        "generation_id": {"type": "string", "minLength": 1},
+        "logical_repo_id": {"type": "string", "minLength": 1},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "source_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "status": {"enum": ["succeeded", "failed", "partial"]},
+        "indexed_commit_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "shard_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "failure_code": {"type": ["string", "null"]}
+      }
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation_id", "state", "active_generation_id"],
+      "properties": {
+        "generation_id": {"type": "string", "minLength": 1},
+        "state": {"enum": ["PUBLISHED", "PUBLISH_REFUSED"]},
+        "active_generation_id": {"type": ["string", "null"]}
+      }
+    },
+    "trial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trial_id", "attempt_index", "outcome", "answer_key_digest", "source_census_digest", "generation_id", "query_completed", "truncated", "returned_identities", "recall", "false_positive_count", "resource", "failure_code"],
+      "properties": {
+        "trial_id": {"type": "string", "pattern": "^(E1|X3|R3|A1):(baseline|zoekt)$"},
+        "attempt_index": {"const": 1},
+        "outcome": {"enum": ["completed", "timeout", "error", "cancelled"]},
+        "answer_key_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_census_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "generation_id": {"type": "string", "minLength": 1},
+        "query_completed": {"type": "boolean"},
+        "truncated": {"type": "boolean"},
+        "returned_identities": {"type": "array"},
+        "recall": {"type": "number", "minimum": 0, "maximum": 1},
+        "false_positive_count": {"type": "integer", "minimum": 0},
+        "resource": {"type": "object"},
+        "failure_code": {"type": ["string", "null"]}
+      }
+    }
+  }
+}
