@@ -46,6 +46,7 @@ class IssueCode(str, Enum):
     BLOB_OID_MOVED = "BLOB_OID_MOVED"
     SOURCE_TRUNCATED_OR_UNAVAILABLE = "SOURCE_TRUNCATED_OR_UNAVAILABLE"
     SOURCE_KIND_REFUSED = "SOURCE_KIND_REFUSED"
+    SOURCE_BLOB_CONTENT_MISMATCH = "SOURCE_BLOB_CONTENT_MISMATCH"
     PATCH_SCHEMA_INVALID = "PATCH_SCHEMA_INVALID"
     PATCH_LIMIT_EXCEEDED = "PATCH_LIMIT_EXCEEDED"
     PATCH_CONTEXT_MISMATCH = "PATCH_CONTEXT_MISMATCH"
@@ -70,15 +71,11 @@ class AuthenticatedPrincipal:
 
 @dataclasses.dataclass(frozen=True)
 class ResolvedPatchTarget:
-    """Server-owned exact operation/carrier/writer target facts.
-
-    The model never supplies this object. An accepted semantic owner resolves it
-    from the stable operation key and authenticated principal immediately before
-    preparation/commit/reconciliation.
-    """
+    """Server-owned operation, carrier, writer, and repository target facts."""
 
     operation_key: str
     repository: str
+    default_branch: str
     branch: str
     pull_request_number: int | None
     protected_branches: tuple[str, ...]
@@ -157,8 +154,7 @@ class ToolEnvelope:
 
 
 class PrincipalProvider(Protocol):
-    async def current_principal(self) -> AuthenticatedPrincipal:
-        """Return the already-authenticated resource principal."""
+    async def current_principal(self) -> AuthenticatedPrincipal: ...
 
 
 class PatchAuthorityResolver(Protocol):
@@ -166,21 +162,18 @@ class PatchAuthorityResolver(Protocol):
         self,
         operation_key: str,
         principal_digest: str,
-    ) -> ResolvedPatchTarget:
-        """Resolve the exact current operation/carrier/writer-owned target."""
+    ) -> ResolvedPatchTarget: ...
 
 
 class GithubPatchPort(Protocol):
-    async def read_branch_head(self, target: ResolvedPatchTarget) -> str:
-        """Read the exact current branch head OID."""
+    async def read_branch_head(self, target: ResolvedPatchTarget) -> str: ...
 
     async def read_blob(
         self,
         target: ResolvedPatchTarget,
         head_oid: str,
         path: str,
-    ) -> GithubBlob:
-        """Read one complete exact regular-file blob at the supplied head."""
+    ) -> GithubBlob: ...
 
     async def commit_branch_patch(
         self,
@@ -189,8 +182,7 @@ class GithubPatchPort(Protocol):
         operation_key: str,
         effect_digest: str,
         files: Sequence[CommitFile],
-    ) -> NativeCommitResult:
-        """Issue at most one expected-head native branch commit."""
+    ) -> NativeCommitResult: ...
 
     async def reconcile_branch_patch(
         self,
@@ -199,13 +191,11 @@ class GithubPatchPort(Protocol):
         operation_key: str,
         effect_digest: str,
         expected_after_sha256: Mapping[str, str],
-    ) -> EffectObservation:
-        """Read canonical GitHub evidence without resubmitting."""
+    ) -> EffectObservation: ...
 
 
 class Clock(Protocol):
-    def now(self) -> int:
-        """Return integer UTC epoch seconds from the owner process."""
+    def now(self) -> int: ...
 
 
 class NativeCommitError(RuntimeError):
