@@ -135,14 +135,65 @@ def test_mapping_order_does_not_change_commitment_identity() -> None:
     assert _plan(selection=selection) == _plan(selection=reordered)
 
 
-def test_selection_content_and_expected_revision_are_bound_into_command() -> None:
+def test_plan_recomputes_through_the_protected_selector_exactly_once(
+    monkeypatch,
+) -> None:
+    selection = _selection()
+    calls = 0
+    protected_selector = c1.select_placement
+
+    def observed_selector(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return protected_selector(*args, **kwargs)
+
+    monkeypatch.setattr(c1, "select_placement", observed_selector)
+
+    assert _plan(selection=selection).selected_worker_id == "worker-1"
+    assert calls == 1
+
+
+def test_selection_content_is_bound_into_commitment_identity() -> None:
     original = _plan()
     changed_worker = _plan(selection=_selection(worker_id="worker-2"))
-    changed_revision = _plan(revision=1)
 
     assert original.commitment_command_id != changed_worker.commitment_command_id
     assert original.command_fingerprint != changed_worker.command_fingerprint
-    assert original.commitment_command_id != changed_revision.commitment_command_id
+
+
+def test_expected_revision_is_a_precondition_not_a_new_commitment_identity() -> None:
+    original = _plan(revision=0)
+    moved_revision = _plan(revision=1)
+
+    assert moved_revision.expected_job_revision == 1
+    assert moved_revision.commitment_command_id == original.commitment_command_id
+    assert moved_revision.command_fingerprint == original.command_fingerprint
+
+
+def test_plan_owns_the_exact_canonical_snapshot_for_future_persistence() -> None:
+    selection = _selection()
+    plan = _plan(selection=selection)
+    expected_snapshot = {
+        "schema_version": "mastermind.executive_placement_snapshot/v1",
+        "worker_id": "worker-1",
+        "quota_class": "standard",
+        "provider": "codex",
+        "account_label": "codex-ceo-a",
+        "observed_at_ms": 1_788_400_000_000,
+    }
+
+    selection["selected"]["worker_id"] = "worker-mutated-after-build"
+
+    assert dict(plan.committed_placement_snapshot) == expected_snapshot
+    assert plan.committed_placement_snapshot_digest == digest(expected_snapshot)
+    with pytest.raises(TypeError):
+        plan.committed_placement_snapshot["worker_id"] = (  # type: ignore[index]
+            "worker-2"
+        )
+
+
+def test_frozen_plan_remains_hashable_with_its_snapshot_owned_by_digest() -> None:
+    assert hash(_plan()) == hash(_plan())
 
 
 def test_non_selected_c1_outcome_is_refused_before_a_commitment_plan() -> None:
@@ -174,12 +225,43 @@ def test_event_payload_is_closed_secret_safe_and_contains_no_runtime_binding() -
 
     assert payload["schema_version"] == c2.COMMITMENT_SCHEMA
     assert payload["root_job_id"] == "job-root-1"
+    assert payload["expected_job_revision"] == 0
     assert payload["selected_worker_id"] == "worker-1"
     assert payload["selected_quota_class"] == "standard"
     assert payload["committed_attempt_id"] == "attempt-1"
     assert not (set(payload) & c2.FORBIDDEN_EVENT_KEYS)
     assert "codex-ceo-a" not in json.dumps(payload, sort_keys=True)
     assert "provider_session" not in json.dumps(payload, sort_keys=True)
+
+
+def test_changed_revision_replay_conflicts_against_retained_precondition() -> None:
+    accepted_plan = _plan(revision=0)
+    moved_revision_plan = _plan(revision=1)
+    payload = _event(accepted_plan)
+
+    assert (
+        moved_revision_plan.commitment_command_id
+        == accepted_plan.commitment_command_id
+    )
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(payload, plan=moved_revision_plan)
+    assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
+
+
+def test_event_revision_cannot_self_authenticate_after_digest_rewrite() -> None:
+    plan = _plan(revision=0)
+    forged = _event(plan)
+    forged["expected_job_revision"] = 1
+    evidence = {
+        key: forged[key]
+        for key in forged
+        if key not in {"schema_version", "commitment_evidence_digest"}
+    }
+    forged["commitment_evidence_digest"] = digest(evidence)
+
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(forged, plan=plan)
+    assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
 
 
 def test_event_replay_revalidates_current_plan_attempt_and_root_authority() -> None:

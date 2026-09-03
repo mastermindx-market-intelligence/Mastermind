@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import re
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
 from control_plane.executive_orchestration_principal import (
@@ -48,6 +49,7 @@ _EVENT_KEYS = frozenset(
     {
         "schema_version",
         "root_job_id",
+        "expected_job_revision",
         "responsibility_ref",
         "responsibility_job_created_command_id",
         "responsibility_authority_fingerprint",
@@ -117,7 +119,13 @@ def _canonical_selection(value: Any) -> dict[str, Any]:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class PlacementCommitmentPlan:
-    """Immutable C2 facts passed to the existing Runtime mutation owner."""
+    """Immutable C2 facts passed to the existing Runtime mutation owner.
+
+    ``expected_job_revision`` is an optimistic-concurrency precondition, not
+    part of the stable command identity.  The exact selected snapshot is held
+    as a private in-memory value for the future claim transaction; command and
+    Event wires expose only its canonical digest.
+    """
 
     root_job_id: str
     expected_job_revision: int
@@ -126,6 +134,11 @@ class PlacementCommitmentPlan:
     selection_evidence_digest: str
     selected_worker_id: str
     selected_quota_class: str
+    committed_placement_snapshot: Mapping[str, Any] = dataclasses.field(
+        repr=False,
+        compare=False,
+        hash=False,
+    )
     committed_placement_snapshot_digest: str
     commitment_command_id: str
     command_fingerprint: str
@@ -146,9 +159,26 @@ class PlacementCommitmentPlan:
         )
         _token(self.selected_worker_id, code="SELECTED_WORKER_ID_INVALID")
         _token(self.selected_quota_class, code="SELECTED_QUOTA_CLASS_INVALID")
+        try:
+            snapshot = validate_placement_snapshot(
+                self.committed_placement_snapshot
+            )
+        except (TypeError, ValueError, OrchestrationPrincipalError) as exc:
+            raise PlacementCommitmentError("PLACEMENT_SNAPSHOT_INVALID") from exc
         _digest_token(
             self.committed_placement_snapshot_digest,
             code="PLACEMENT_SNAPSHOT_DIGEST_INVALID",
+        )
+        if (
+            snapshot["worker_id"] != self.selected_worker_id
+            or snapshot["quota_class"] != self.selected_quota_class
+            or digest(snapshot) != self.committed_placement_snapshot_digest
+        ):
+            raise PlacementCommitmentError("PLACEMENT_SNAPSHOT_MISMATCH")
+        object.__setattr__(
+            self,
+            "committed_placement_snapshot",
+            MappingProxyType(snapshot),
         )
         if _COMMAND_ID_RE.fullmatch(self.commitment_command_id) is None:
             raise PlacementCommitmentError("COMMITMENT_COMMAND_ID_INVALID")
@@ -166,7 +196,6 @@ class PlacementCommitmentPlan:
         return {
             "schema_version": self.schema_version,
             "root_job_id": self.root_job_id,
-            "expected_job_revision": self.expected_job_revision,
             "responsibility_ref": self.responsibility_ref,
             "selection_document_digest": self.selection_document_digest,
             "selection_evidence_digest": self.selection_evidence_digest,
@@ -179,6 +208,7 @@ class PlacementCommitmentPlan:
 
     def to_dict(self) -> dict[str, Any]:
         value = dict(self.command_semantics())
+        value["expected_job_revision"] = self.expected_job_revision
         value["commitment_command_id"] = self.commitment_command_id
         value["command_fingerprint"] = self.command_fingerprint
         if set(value) != _PLAN_KEYS:
@@ -192,7 +222,7 @@ def build_commitment_plan(
     expected_job_revision: int,
     placement_selection: Any,
 ) -> PlacementCommitmentPlan:
-    """Validate one C1 wire document and derive its sole C2 command identity."""
+    """Validate one C1 wire and derive stable root-plus-selection identity."""
 
     root = _token(root_job_id, code="ROOT_JOB_ID_INVALID")
     if type(expected_job_revision) is not int or expected_job_revision < 0:
@@ -205,7 +235,6 @@ def build_commitment_plan(
     semantics = {
         "schema_version": COMMAND_SCHEMA,
         "root_job_id": root,
-        "expected_job_revision": expected_job_revision,
         "responsibility_ref": responsibility_ref,
         "selection_document_digest": digest(selection),
         "selection_evidence_digest": digest(selection["evidence"]),
@@ -222,6 +251,7 @@ def build_commitment_plan(
         selection_evidence_digest=semantics["selection_evidence_digest"],
         selected_worker_id=semantics["selected_worker_id"],
         selected_quota_class=semantics["selected_quota_class"],
+        committed_placement_snapshot=selected,
         committed_placement_snapshot_digest=semantics[
             "committed_placement_snapshot_digest"
         ],
@@ -237,7 +267,11 @@ def build_commitment_event_payload(
     responsibility_job_created_command_id: str,
     responsibility_authority_fingerprint: str,
 ) -> dict[str, Any]:
-    """Build the closed Event payload after the Runtime claim has succeeded."""
+    """Build the closed Event payload after the Runtime claim has succeeded.
+
+    The Event retains the accepted pre-claim Job revision so a changed-revision
+    call reaches the stable command but conflicts with the immutable receipt.
+    """
 
     attempt_id = _token(committed_attempt_id, code="COMMITTED_ATTEMPT_ID_INVALID")
     created_command_id = _token(
@@ -250,6 +284,7 @@ def build_commitment_event_payload(
     )
     evidence = {
         "root_job_id": plan.root_job_id,
+        "expected_job_revision": plan.expected_job_revision,
         "responsibility_ref": plan.responsibility_ref,
         "responsibility_job_created_command_id": created_command_id,
         "responsibility_authority_fingerprint": authority_fingerprint,
