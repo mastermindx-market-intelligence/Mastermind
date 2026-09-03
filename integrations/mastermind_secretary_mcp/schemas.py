@@ -16,8 +16,10 @@ from types import MappingProxyType
 from typing import Any
 SERVER_NAME = 'mastermind-secretary-grounding'
 SERVER_IDENTITY = 'mastermind-secretary-grounding-mcp'
-SERVER_VERSION = '1.0.0'
-RESULT_SCHEMA = 'mastermind.secretary_grounding_mcp_result.v1'
+SERVER_VERSION = '2.0.0'
+SERVER_GENERATION = 2
+RESULT_SCHEMA = 'mastermind.secretary_grounding_mcp_result.v2'
+RESULT_SCHEMA_GENERATION = 2
 MAX_REQUEST_BYTES = 8 * 1024
 MAX_RESPONSE_BYTES = 64 * 1024
 MAX_RESPONSIBILITY_REF_CHARS = 160
@@ -217,9 +219,24 @@ _OBSERVED_AT_SCHEMA = {'oneOf': [{'type': 'null'}, _string(max_length=20, patter
 _SOURCE_SCHEMA = _object({'owner': {'type': 'string', 'enum': sorted(SOURCE_OWNERS)}, 'source_ref': _string(max_length=256, pattern=rf'^[^\x00-\x20\x7f]{{1,256}}{_ABSOLUTE_END}'), 'observed_at': _OBSERVED_AT_SCHEMA}, required=('owner', 'source_ref', 'observed_at'))
 _SOURCE_SCHEMA['allOf'] = [{'oneOf': [{'properties': {'owner': {'const': owner}, 'source_ref': _string(max_length=256, pattern=pattern)}} for owner, pattern in _SOURCE_REF_PATTERN_BY_OWNER.items()]}]
 _FACT_SCHEMA = _object({'subject_ref': _RESPONSIBILITY_REF_SCHEMA, 'predicate': {'type': 'string', 'enum': list(PUBLIC_FACT_CONTRACTS)}, 'value': {'anyOf': [{'type': 'boolean'}, {'type': 'integer', 'minimum': 0, 'maximum': 31536000}, {'type': 'string'}]}, 'freshness': {'type': 'string', 'enum': sorted(FRESHNESS_STATES)}, 'sources': {'type': 'array', 'minItems': 1, 'maxItems': MAX_SOURCES_PER_FACT, 'items': _SOURCE_SCHEMA}}, required=('subject_ref', 'predicate', 'value', 'freshness', 'sources'))
-_FACT_SCHEMA['allOf'] = [{'oneOf': [{'properties': {'predicate': {'const': contract.predicate}, 'value': contract.value_schema, 'sources': {'contains': {'properties': {'owner': {'enum': list(contract.corroborating_owners)}}}, 'minContains': 1}}} for contract in _FACT_CONTRACT_ROWS]}]
-_RESULT_DATA_SCHEMA = _object({'state': {'type': 'string', 'enum': sorted(GROUNDING_STATES)}, 'facts': {'type': 'array', 'maxItems': MAX_FACTS, 'items': _FACT_SCHEMA}, 'reason_codes': {'type': 'array', 'maxItems': MAX_REASON_CODES, 'uniqueItems': True, 'items': {'type': 'string', 'enum': sorted(GROUNDING_REASON_CODES)}}}, required=('state', 'facts', 'reason_codes'))
-_RESULT_DATA_SCHEMA['allOf'] = [{'oneOf': [{'properties': {'state': {'const': 'FACTS'}, 'facts': {'type': 'array', 'minItems': 1, 'maxItems': MAX_FACTS, 'items': {'type': 'object', 'properties': {'freshness': {'const': 'FRESH'}}, 'required': ['freshness']}}, 'reason_codes': {'type': 'array', 'maxItems': 0}}}, {'properties': {'state': {'const': 'UNKNOWN'}, 'facts': {'type': 'array', 'maxItems': 0}, 'reason_codes': {'type': 'array', 'minItems': 1, 'maxItems': MAX_REASON_CODES}}}, {'properties': {'state': {'const': 'DEGRADED'}, 'reason_codes': {'type': 'array', 'minItems': 1, 'maxItems': MAX_REASON_CODES}}}, {'properties': {'state': {'const': 'REFUSED'}, 'facts': {'type': 'array', 'maxItems': 0}, 'reason_codes': {'type': 'array', 'minItems': 1, 'maxItems': MAX_REASON_CODES}}}]}]
+_FACT_SCHEMA['allOf'] = [{'oneOf': [{'properties': {'predicate': {'const': contract.predicate}, 'value': contract.value_schema, 'sources': {'contains': {'properties': {'owner': {'enum': list(contract.corroborating_owners)}}}}}} for contract in _FACT_CONTRACT_ROWS]}]
+_NESTED_FACT_SCHEMA = copy.deepcopy(_FACT_SCHEMA)
+_NESTED_FACT_SCHEMA['properties'].pop('subject_ref')
+_NESTED_FACT_SCHEMA['required'].remove('subject_ref')
+_SUBJECT_SCHEMA = _object(
+    {
+        'subject_ref': _RESPONSIBILITY_REF_SCHEMA,
+        'facts': {
+            'type': 'array',
+            'minItems': 1,
+            'maxItems': MAX_FACTS,
+            'items': _NESTED_FACT_SCHEMA,
+        },
+    },
+    required=('subject_ref', 'facts'),
+)
+_RESULT_DATA_SCHEMA = _object({'state': {'type': 'string', 'enum': sorted(GROUNDING_STATES)}, 'subjects': {'type': 'array', 'maxItems': MAX_FACTS, 'items': _SUBJECT_SCHEMA}, 'reason_codes': {'type': 'array', 'maxItems': MAX_REASON_CODES, 'uniqueItems': True, 'items': {'type': 'string', 'enum': sorted(GROUNDING_REASON_CODES)}}}, required=('state', 'subjects', 'reason_codes'))
+_RESULT_DATA_SCHEMA['allOf'] = [{'oneOf': [{'properties': {'state': {'const': 'FACTS'}, 'subjects': {'type': 'array', 'minItems': 1, 'maxItems': MAX_FACTS, 'items': {'type': 'object', 'properties': {'facts': {'type': 'array', 'minItems': 1, 'items': {'type': 'object', 'properties': {'freshness': {'const': 'FRESH'}}, 'required': ['freshness']}}}, 'required': ['facts']}}, 'reason_codes': {'type': 'array', 'maxItems': 0}}}, {'properties': {'state': {'const': 'UNKNOWN'}, 'subjects': {'type': 'array', 'maxItems': 0}, 'reason_codes': {'type': 'array', 'minItems': 1, 'maxItems': MAX_REASON_CODES}}}, {'properties': {'state': {'const': 'DEGRADED'}, 'reason_codes': {'type': 'array', 'minItems': 1, 'maxItems': MAX_REASON_CODES}}}, {'properties': {'state': {'const': 'REFUSED'}, 'subjects': {'type': 'array', 'maxItems': 0}, 'reason_codes': {'type': 'array', 'minItems': 1, 'maxItems': MAX_REASON_CODES}}}]}]
 _ERROR_DETAIL_SCHEMA = {'oneOf': [_object({'code': {'const': code}, 'message': {'const': code}}, required=('code', 'message')) for code in sorted(ERROR_CODES)]}
 
 def _tool_result_data_schema(tool_name: str) -> dict[str, Any]:
@@ -227,17 +244,17 @@ def _tool_result_data_schema(tool_name: str) -> dict[str, Any]:
     required = sorted(TOOL_REQUIRED_PREDICATES[tool_name])
     value['allOf'].append({
         'if': {'properties': {'state': {'const': 'FACTS'}}},
-        'then': {'properties': {'facts': {
-            'allOf': [
-                {
-                    'contains': {
-                        'properties': {'predicate': {'const': predicate}},
-                    },
-                    'minContains': 1,
-                }
-                for predicate in required
-            ],
-        }}},
+        'then': {'properties': {'subjects': {'items': {
+            'properties': {'facts': {'allOf': [
+                    {
+                        'contains': {
+                            'properties': {'predicate': {'const': predicate}},
+                        },
+                    }
+                    for predicate in required
+                ]}},
+            'required': ['facts'],
+        }}}},
     })
     return value
 
@@ -442,12 +459,16 @@ def _validate_cross_fact_law(state: str, facts: list[dict[str, Any]], reason_cod
             encoded_attempt = executive_receipt.removeprefix('executive-runtime:')
             if encoded_attempt.startswith('ATT-') and encoded_attempt != attempt['value']:
                 raise GatewayError('RESPONSE_REFUSED')
-        _one_common_receipt(
+        binding_receipt = _one_common_receipt(
             rows,
             _RUNTIME_BINDING_JOIN_PREDICATES,
             owner='runtime_binding',
             prefix='runtime-binding:',
         )
+        if binding_receipt is not None and attempt is not None:
+            encoded_attempt = binding_receipt.removeprefix('runtime-binding:')
+            if encoded_attempt.startswith('ATT-') and encoded_attempt != attempt['value']:
+                raise GatewayError('RESPONSE_REFUSED')
         surface = rows.get('surface.ref')
         if surface is None:
             continue
@@ -469,8 +490,8 @@ def _validate_cross_fact_law(state: str, facts: list[dict[str, Any]], reason_cod
         if not _surface_receipt_matches(str(surface['value']), receipt):
             raise GatewayError('RESPONSE_REFUSED')
 
-def validate_result_data(value: Any) -> dict[str, Any]:
-    """Validate the complete typed Steward return without inference or repair."""
+def _validate_steward_result_data(value: Any) -> dict[str, Any]:
+    """Validate the flat typed Steward return without inference or repair."""
     if not isinstance(value, Mapping) or set(value) != {'state', 'facts', 'reason_codes'}:
         raise GatewayError('RESPONSE_REFUSED')
     state = value['state']
@@ -493,6 +514,59 @@ def validate_result_data(value: Any) -> dict[str, Any]:
     _validate_cross_fact_law(state, normalized_facts, normalized_reasons)
     normalized_facts.sort(key=lambda fact: (fact['subject_ref'], _PREDICATE_ORDER[fact['predicate']], canonical_json(fact['value'])))
     return {'state': state, 'facts': normalized_facts, 'reason_codes': normalized_reasons}
+
+def _project_result_data(normalized: Mapping[str, Any]) -> dict[str, Any]:
+    by_subject: dict[str, list[dict[str, Any]]] = {}
+    for fact in normalized['facts']:
+        nested = dict(fact)
+        subject_ref = str(nested.pop('subject_ref'))
+        by_subject.setdefault(subject_ref, []).append(nested)
+    return {
+        'state': normalized['state'],
+        'subjects': [
+            {'subject_ref': subject_ref, 'facts': facts}
+            for subject_ref, facts in sorted(by_subject.items())
+        ],
+        'reason_codes': list(normalized['reason_codes']),
+    }
+
+def validate_result_data(value: Any) -> dict[str, Any]:
+    """Validate and canonicalize the public grouped result-data generation."""
+    if not isinstance(value, Mapping) or set(value) != {'state', 'subjects', 'reason_codes'}:
+        raise GatewayError('RESPONSE_REFUSED')
+    subjects = value['subjects']
+    if not isinstance(subjects, (list, tuple)) or len(subjects) > MAX_FACTS:
+        raise GatewayError('RESPONSE_REFUSED')
+    seen_subjects: set[str] = set()
+    flat_facts: list[dict[str, Any]] = []
+    for subject in subjects:
+        if not isinstance(subject, Mapping) or set(subject) != {'subject_ref', 'facts'}:
+            raise GatewayError('RESPONSE_REFUSED')
+        subject_ref = subject['subject_ref']
+        facts = subject['facts']
+        if (
+            not isinstance(subject_ref, str)
+            or _RESPONSIBILITY_REF_RE.fullmatch(subject_ref) is None
+            or subject_ref in seen_subjects
+            or not isinstance(facts, (list, tuple))
+            or not facts
+        ):
+            raise GatewayError('RESPONSE_REFUSED')
+        seen_subjects.add(subject_ref)
+        for fact in facts:
+            if not isinstance(fact, Mapping) or set(fact) != {'predicate', 'value', 'freshness', 'sources'}:
+                raise GatewayError('RESPONSE_REFUSED')
+            flat_facts.append({'subject_ref': subject_ref, **dict(fact)})
+            if len(flat_facts) > MAX_FACTS:
+                raise GatewayError('RESPONSE_REFUSED')
+    normalized = _validate_steward_result_data(
+        {
+            'state': value['state'],
+            'facts': flat_facts,
+            'reason_codes': value['reason_codes'],
+        }
+    )
+    return _project_result_data(normalized)
 
 def _validate_tool_required_predicates(
     tool_name: str, normalized: Mapping[str, Any]
@@ -527,10 +601,14 @@ def result_envelope(
 ) -> dict[str, Any]:
     if tool_name not in _TOOLS_BY_NAME:
         raise GatewayError('RESPONSE_REFUSED')
-    normalized = validate_result_data(data)
+    normalized = _validate_steward_result_data(data)
     _validate_tool_required_predicates(tool_name, normalized)
     _validate_expected_subject_ref(normalized, expected_subject_ref)
-    envelope = {'schema': RESULT_SCHEMA, 'tool': tool_name, 'ok': True, 'server_version': SERVER_VERSION, 'data': normalized, 'error': None}
+    candidate = _project_result_data(normalized)
+    projected = validate_result_data(candidate)
+    if canonical_json(projected) != canonical_json(candidate):
+        raise GatewayError('RESPONSE_REFUSED')
+    envelope = {'schema': RESULT_SCHEMA, 'tool': tool_name, 'ok': True, 'server_version': SERVER_VERSION, 'data': projected, 'error': None}
     try:
         if len(canonical_json(envelope)) > MAX_RESPONSE_BYTES:
             raise GatewayError('RESPONSE_REFUSED')
@@ -544,7 +622,7 @@ def error_envelope(tool_name: str, code: str) -> dict[str, Any]:
     return {'schema': RESULT_SCHEMA, 'tool': tool_name if isinstance(tool_name, str) and tool_name in _TOOLS_BY_NAME else 'unknown', 'ok': False, 'server_version': SERVER_VERSION, 'data': None, 'error': {'code': code, 'message': code}}
 
 def schema_snapshot() -> dict[str, Any]:
-    return {'server_name': SERVER_NAME, 'server_identity': SERVER_IDENTITY, 'server_version': SERVER_VERSION, 'result_schema': RESULT_SCHEMA, 'errors': sorted(ERROR_CODES), 'grounding_reason_codes': sorted(GROUNDING_REASON_CODES), 'source_namespaces': {owner: list(namespaces) for owner, namespaces in SOURCE_NAMESPACE_BY_OWNER.items()}, 'public_fact_contracts': [{'predicate': contract.predicate, 'value_kind': contract.value_kind, 'enum_values': list(contract.enum_values), 'minimum': contract.minimum, 'maximum': contract.maximum, 'max_length': contract.max_length, 'reference_namespaces': list(contract.reference_namespaces), 'corroborating_owners': list(contract.corroborating_owners), 'pattern': contract.pattern} for contract in _FACT_CONTRACT_ROWS], 'tool_required_predicates': {tool: sorted(predicates) for tool, predicates in TOOL_REQUIRED_PREDICATES.items()}, 'limits': {'request_bytes': MAX_REQUEST_BYTES, 'response_bytes': MAX_RESPONSE_BYTES, 'facts': MAX_FACTS, 'sources_per_fact': MAX_SOURCES_PER_FACT, 'reason_codes': MAX_REASON_CODES}, 'tools': [{'name': spec.name, 'description': spec.description, 'input_schema': copy.deepcopy(spec.input_schema), 'output_schema': copy.deepcopy(spec.output_schema), 'annotations': copy.deepcopy(spec.annotations), 'read_only': spec.read_only} for spec in TOOL_SPECS]}
+    return {'server_name': SERVER_NAME, 'server_identity': SERVER_IDENTITY, 'server_version': SERVER_VERSION, 'server_generation': SERVER_GENERATION, 'result_schema': RESULT_SCHEMA, 'result_schema_generation': RESULT_SCHEMA_GENERATION, 'errors': sorted(ERROR_CODES), 'grounding_reason_codes': sorted(GROUNDING_REASON_CODES), 'source_namespaces': {owner: list(namespaces) for owner, namespaces in SOURCE_NAMESPACE_BY_OWNER.items()}, 'public_fact_contracts': [{'predicate': contract.predicate, 'value_kind': contract.value_kind, 'enum_values': list(contract.enum_values), 'minimum': contract.minimum, 'maximum': contract.maximum, 'max_length': contract.max_length, 'reference_namespaces': list(contract.reference_namespaces), 'corroborating_owners': list(contract.corroborating_owners), 'pattern': contract.pattern} for contract in _FACT_CONTRACT_ROWS], 'tool_required_predicates': {tool: sorted(predicates) for tool, predicates in TOOL_REQUIRED_PREDICATES.items()}, 'limits': {'request_bytes': MAX_REQUEST_BYTES, 'response_bytes': MAX_RESPONSE_BYTES, 'facts': MAX_FACTS, 'sources_per_fact': MAX_SOURCES_PER_FACT, 'reason_codes': MAX_REASON_CODES}, 'tools': [{'name': spec.name, 'description': spec.description, 'input_schema': copy.deepcopy(spec.input_schema), 'output_schema': copy.deepcopy(spec.output_schema), 'annotations': copy.deepcopy(spec.annotations), 'read_only': spec.read_only} for spec in TOOL_SPECS]}
 
 def schema_snapshot_sha256() -> str:
     return hashlib.sha256(canonical_json(schema_snapshot())).hexdigest()
@@ -554,10 +632,10 @@ def tool_schema_snapshot() -> list[dict[str, Any]]:
 
 def tool_schema_digest() -> str:
     return hashlib.sha256(canonical_json(tool_schema_snapshot())).hexdigest()
-SCHEMA_SNAPSHOT_SHA256 = 'de00f66d75e1132f94c137344ff197cf4e425f95a66b5aceaec5b64b6b8a8030'
-TOOL_SCHEMA_DIGEST = '3c78f872e77f4939c97533967c6ad53d37afbf71a06cabb01faaa4c1ddbad1fa'
+SCHEMA_SNAPSHOT_SHA256 = '324afb44a0183987cce4ef48ff7946ca34557071f8ac5c36da96f78a382e8cb1'
+TOOL_SCHEMA_DIGEST = 'cde13b7d678427a230cfe40159be1d7aa0807df00324995a40d89b2b79c12047'
 
 def assert_contract_integrity() -> None:
     if schema_snapshot_sha256() != SCHEMA_SNAPSHOT_SHA256 or tool_schema_digest() != TOOL_SCHEMA_DIGEST:
         raise GatewayError('INTERNAL_ERROR')
-__all__ = ['ERROR_CODES', 'FRESHNESS_STATES', 'GROUNDING_REASON_CODES', 'GROUNDING_STATES', 'GatewayError', 'MAX_FACTS', 'MAX_REQUEST_BYTES', 'MAX_RESPONSE_BYTES', 'MAX_SOURCES_PER_FACT', 'PUBLIC_FACT_CONTRACTS', 'RESULT_SCHEMA', 'SCHEMA_SNAPSHOT_SHA256', 'SERVER_IDENTITY', 'SERVER_NAME', 'SERVER_VERSION', 'SOURCE_NAMESPACE_BY_OWNER', 'SOURCE_OWNERS', 'TOOL_REQUIRED_PREDICATES', 'TOOL_SCHEMA_DIGEST', 'TOOL_SPECS', 'ToolSpec', 'assert_contract_integrity', 'canonical_json', 'error_envelope', 'result_envelope', 'schema_snapshot', 'schema_snapshot_sha256', 'tool_schema_digest', 'tool_schema_snapshot', 'validate_result_data', 'validate_tool_arguments']
+__all__ = ['ERROR_CODES', 'FRESHNESS_STATES', 'GROUNDING_REASON_CODES', 'GROUNDING_STATES', 'GatewayError', 'MAX_FACTS', 'MAX_REQUEST_BYTES', 'MAX_RESPONSE_BYTES', 'MAX_SOURCES_PER_FACT', 'PUBLIC_FACT_CONTRACTS', 'RESULT_SCHEMA', 'RESULT_SCHEMA_GENERATION', 'SCHEMA_SNAPSHOT_SHA256', 'SERVER_GENERATION', 'SERVER_IDENTITY', 'SERVER_NAME', 'SERVER_VERSION', 'SOURCE_NAMESPACE_BY_OWNER', 'SOURCE_OWNERS', 'TOOL_REQUIRED_PREDICATES', 'TOOL_SCHEMA_DIGEST', 'TOOL_SPECS', 'ToolSpec', 'assert_contract_integrity', 'canonical_json', 'error_envelope', 'result_envelope', 'schema_snapshot', 'schema_snapshot_sha256', 'tool_schema_digest', 'tool_schema_snapshot', 'validate_result_data', 'validate_tool_arguments']

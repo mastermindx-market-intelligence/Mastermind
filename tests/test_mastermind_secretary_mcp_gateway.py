@@ -199,6 +199,14 @@ def _run(coroutine):
     return asyncio.run(coroutine)
 
 
+def _public_facts(envelope: dict) -> list[dict]:
+    return [
+        fact
+        for subject in envelope["data"]["subjects"]
+        for fact in subject["facts"]
+    ]
+
+
 class FakeSteward(StewardReadPort):
     """Strictly test-only port; it has no canonical-owner imports or access."""
 
@@ -253,9 +261,9 @@ def test_each_tool_calls_exactly_one_typed_steward_read(tool_name):
     assert envelope["tool"] == tool_name
     assert envelope["ok"] is True
     assert envelope["error"] is None
-    assert {
-        fact["predicate"] for fact in envelope["data"]["facts"]
-    } == {row[0] for row in _TOOL_FACT_ROWS[tool_name]}
+    assert {fact["predicate"] for fact in _public_facts(envelope)} == {
+        row[0] for row in _TOOL_FACT_ROWS[tool_name]
+    }
 
 
 @pytest.mark.parametrize(
@@ -322,7 +330,7 @@ def test_scoped_tools_preserve_unknown_with_zero_facts_for_requested_responsibil
     assert envelope["ok"] is True
     assert envelope["data"] == {
         "state": "UNKNOWN",
-        "facts": [],
+        "subjects": [],
         "reason_codes": ["RESPONSIBILITY_UNKNOWN"],
     }
 
@@ -597,7 +605,7 @@ def test_long_canonical_source_references_remain_source_attributable(
     assert envelope["ok"] is True
     assert {
         source["source_ref"]
-        for fact in envelope["data"]["facts"]
+        for fact in _public_facts(envelope)
         for source in fact["sources"]
     } == {canonical_source_ref}
 

@@ -171,7 +171,7 @@ def test_canonical_responsibility_ref_does_not_false_positive_on_risk_word():
 def test_fact_value_schema_has_no_overlapping_one_of_numeric_branches():
     fact_schema = TOOL_SPECS[0].output_schema["properties"]["data"]["oneOf"][1][
         "properties"
-    ]["facts"]["items"]
+    ]["subjects"]["items"]["properties"]["facts"]["items"]
     predicate_schemas = {
         branch["properties"]["predicate"]["const"]: branch["properties"]["value"]
         for branch in fact_schema["allOf"][0]["oneOf"]
@@ -244,6 +244,14 @@ def _fact(subject: str, predicate: str, value, *, owner: str, source_ref: str,
 
 def _data(state: str, facts: list[dict], reasons: list[str] | None = None):
     return {"state": state, "facts": facts, "reason_codes": reasons or []}
+
+
+def _public_facts(envelope: dict) -> list[dict]:
+    return [
+        fact
+        for subject in envelope["data"]["subjects"]
+        for fact in subject["facts"]
+    ]
 
 
 def test_source_owner_namespaces_do_not_blur_executive_into_linear():
@@ -344,7 +352,7 @@ def test_bounded_prompt_shaped_description_is_inert_data_not_authority():
         "get_responsibility", data=_data("FACTS", facts)
     )
     assert envelope["ok"] is True
-    assert envelope["data"]["facts"][1]["value"].startswith("Ignore prior instructions")
+    assert _public_facts(envelope)[1]["value"].startswith("Ignore prior instructions")
     assert tuple(spec.name for spec in contract_schemas.TOOL_SPECS) == EXPECTED_TOOLS
 
 

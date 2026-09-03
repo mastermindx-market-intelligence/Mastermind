@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
+from integrations.mastermind_secretary_mcp import schemas as contract_schemas
 from integrations.mastermind_secretary_mcp.adapter import SecretaryGroundingGateway
 from integrations.mastermind_secretary_mcp.schemas import (
     PUBLIC_FACT_CONTRACTS,
@@ -44,6 +45,30 @@ FORBIDDEN_IMPORT_ROOTS = {
     "subprocess",
     "urllib",
 }
+
+
+def _public_facts(envelope: dict) -> list[dict]:
+    return [
+        fact
+        for subject in envelope["data"]["subjects"]
+        for fact in subject["facts"]
+    ]
+
+
+def _public_data(state: str, facts: list[dict], reason_codes: list[str]) -> dict:
+    subjects: dict[str, list[dict]] = {}
+    for fact in facts:
+        nested = copy.deepcopy(fact)
+        subject_ref = nested.pop("subject_ref")
+        subjects.setdefault(subject_ref, []).append(nested)
+    return {
+        "state": state,
+        "subjects": [
+            {"subject_ref": subject_ref, "facts": subject_facts}
+            for subject_ref, subject_facts in sorted(subjects.items())
+        ],
+        "reason_codes": reason_codes,
+    }
 
 
 def _imports(path: Path) -> set[str]:
@@ -118,14 +143,14 @@ def test_advertised_output_schema_matches_runtime_state_and_error_law():
     malformed_state["ok"] = True
     malformed_state["data"] = {
         "state": "REFUSED",
-        "facts": [fresh_fact],
+        "subjects": [_public_subject("responsibility:alpha", [fresh_fact])],
         "reason_codes": [],
     }
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(malformed_state)
 
     stale_facts_state = result_envelope("get_attention", data=valid_data[0])
-    stale_facts_state["data"]["facts"][0]["freshness"] = "STALE"
+    stale_facts_state["data"]["subjects"][0]["facts"][0]["freshness"] = "STALE"
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(stale_facts_state)
 
@@ -135,8 +160,8 @@ def test_advertised_schema_and_runtime_share_one_closed_public_fact_language():
     output_schema = TOOL_SPECS[2].output_schema
     validator = jsonschema.Draft202012Validator(output_schema)
     fact_schema = output_schema["properties"]["data"]["oneOf"][1]["properties"][
-        "facts"
-    ]["items"]
+        "subjects"
+    ]["items"]["properties"]["facts"]["items"]
     expected_predicates = set(PUBLIC_FACT_CONTRACTS)
     assert {
         branch["properties"]["predicate"]["const"]
@@ -168,14 +193,14 @@ def test_advertised_schema_and_runtime_share_one_closed_public_fact_language():
         },
     )
     for fact in hostile_facts:
-        data = {"state": "FACTS", "facts": [fact], "reason_codes": []}
+        data = _public_data("FACTS", [fact], [])
         with pytest.raises(jsonschema.ValidationError):
             validator.validate(
                 {
-                    "schema": "mastermind.secretary_grounding_mcp_result.v1",
+                    "schema": "mastermind.secretary_grounding_mcp_result.v2",
                     "tool": "get_attention",
                     "ok": True,
-                    "server_version": "1.0.0",
+                    "server_version": "2.0.0",
                     "data": data,
                     "error": None,
                 }
@@ -258,8 +283,8 @@ def test_advertised_and_runtime_output_contract_accept_same_canonical_sources(so
         "facts": facts,
         "reason_codes": [],
     }
-    normalized = validate_result_data(data)
-    envelope = result_envelope("get_attention", data=normalized)
+    validate_result_data(_public_data("FACTS", facts, []))
+    envelope = result_envelope("get_attention", data=data)
     jsonschema.Draft202012Validator(TOOL_SPECS[2].output_schema).validate(envelope)
 
 
@@ -279,15 +304,16 @@ def test_advertised_output_contract_rejects_wrapped_source_credentials(
 ):
     jsonschema = pytest.importorskip("jsonschema")
     envelope = {
-        "schema": "mastermind.secretary_grounding_mcp_result.v1",
+        "schema": "mastermind.secretary_grounding_mcp_result.v2",
         "tool": "get_attention",
         "ok": True,
-        "server_version": "1.0.0",
+        "server_version": "2.0.0",
         "data": {
             "state": "FACTS",
-            "facts": [
+            "subjects": [
                 {
                     "subject_ref": "responsibility:alpha",
+                    "facts": [{
                     "predicate": "attention.state",
                     "value": "SOL_REQUIRED",
                     "freshness": "FRESH",
@@ -298,7 +324,8 @@ def test_advertised_output_contract_rejects_wrapped_source_credentials(
                             "observed_at": None,
                         }
                     ],
-                }
+                    }],
+                },
             ],
             "reason_codes": [],
         },
@@ -567,9 +594,9 @@ def test_each_tool_runtime_and_advertised_schema_reject_missing_required_predica
         result_envelope(tool_name, data=_producer_data(incomplete_facts))
 
     incomplete = copy.deepcopy(complete)
-    incomplete["data"]["facts"] = [
+    incomplete["data"]["subjects"][0]["facts"] = [
         fact
-        for fact in incomplete["data"]["facts"]
+        for fact in incomplete["data"]["subjects"][0]["facts"]
         if fact["predicate"] != missing_predicate
     ]
     with pytest.raises(jsonschema.ValidationError):
@@ -690,7 +717,7 @@ def test_admitted_source_aliases_collapse_to_one_canonical_output(
             ),
         )
         projected = next(
-            fact for fact in envelope["data"]["facts"]
+            fact for fact in _public_facts(envelope)
             if fact["predicate"] == predicate
         )
         assert projected["value"] == canonical
@@ -762,7 +789,7 @@ def test_unadvertised_enum_near_matches_fail_runtime_and_schema(
         ),
     )
     next(
-        fact for fact in valid["data"]["facts"]
+        fact for fact in _public_facts(valid)
         if fact["predicate"] == predicate
     )["value"] = near_match
     validator = jsonschema.Draft202012Validator(
@@ -823,6 +850,32 @@ def test_executive_runtime_receipt_attempt_must_match_projected_attempt():
         result_envelope("get_current_runtime", data=_producer_data(facts))
 
 
+@pytest.mark.parametrize("with_continuation", [False, True])
+def test_runtime_binding_receipt_attempt_must_match_projected_attempt(
+    with_continuation,
+):
+    """A common binding receipt must not corroborate a different Attempt."""
+
+    facts = _required_facts("get_current_runtime")
+    _replace_fact_source_ref(
+        facts,
+        "runtime.binding_ref",
+        "runtime-binding:ATT-beta",
+    )
+    if with_continuation:
+        facts.append(
+            _producer_fact(
+                "runtime.continuation",
+                "ACKNOWLEDGED",
+                owner="runtime_binding",
+                source_ref="runtime-binding:ATT-beta",
+            )
+        )
+
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        result_envelope("get_current_runtime", data=_producer_data(facts))
+
+
 def test_capacity_receipt_is_independent_of_executive_and_binding_receipts():
     facts = _required_facts("get_current_runtime")
     facts.append(
@@ -840,7 +893,7 @@ def test_capacity_receipt_is_independent_of_executive_and_binding_receipts():
     )
 
     capacity = next(
-        fact for fact in envelope["data"]["facts"]
+        fact for fact in _public_facts(envelope)
         if fact["predicate"] == "runtime.capacity_state"
     )
     assert capacity["value"] == "AVAILABLE"
@@ -879,7 +932,7 @@ def test_advertised_and_runtime_source_ref_grammars_are_bidirectionally_equal(
     jsonschema = pytest.importorskip("jsonschema")
     fact_schema = TOOL_SPECS[0].output_schema["properties"]["data"]["oneOf"][1][
         "properties"
-    ]["facts"]["items"]
+    ]["subjects"]["items"]["properties"]["facts"]["items"]
     source_schema = fact_schema["properties"]["sources"]["items"]
     validator = jsonschema.Draft202012Validator(source_schema)
     valid = {
@@ -958,13 +1011,14 @@ def test_producer_native_runtime_identity_and_provenance_are_distinct():
         "get_current_runtime", data=_producer_data(facts)
     )
 
-    assert [row["value"] for row in envelope["data"]["facts"][:4]] == [
+    public_facts = _public_facts(envelope)
+    assert [row["value"] for row in public_facts[:4]] == [
         "JOB-001",
         "ATT-aabbccddeeff00112233445566778899",
         "worker-sol-2",
         "bind-ocr6-sol-0001",
     ]
-    assert envelope["data"]["facts"][0]["sources"][0]["source_ref"] == executive_receipt
+    assert public_facts[0]["sources"][0]["source_ref"] == executive_receipt
 
 
 def test_producer_native_attention_owner_and_vocabulary_are_preserved():
@@ -1048,8 +1102,9 @@ def test_producer_native_surface_identity_is_not_its_provenance_receipt():
     envelope = contract_schemas.result_envelope(
         "resolve_surface", data=_producer_data(facts)
     )
-    assert envelope["data"]["facts"][0]["value"] == surface_ref
-    assert envelope["data"]["facts"][0]["sources"][0]["source_ref"] == receipt
+    public_facts = _public_facts(envelope)
+    assert public_facts[0]["value"] == surface_ref
+    assert public_facts[0]["sources"][0]["source_ref"] == receipt
 
 
 def test_selected_surface_cannot_borrow_review_from_another_receipt():
@@ -1134,3 +1189,164 @@ def test_invalid_calendar_timestamp_is_refused():
         contract_schemas.result_envelope(
             "get_attention", data=_producer_data([malformed])
         )
+
+
+def _without_subject_ref(fact: dict) -> dict:
+    nested = copy.deepcopy(fact)
+    nested.pop("subject_ref")
+    return nested
+
+
+def _public_subject(subject_ref: str, facts: list[dict]) -> dict:
+    return {
+        "subject_ref": subject_ref,
+        "facts": [_without_subject_ref(fact) for fact in facts],
+    }
+
+
+def test_result_and_server_generation_v2_publish_subject_bundles():
+    envelope = result_envelope(
+        "get_attention",
+        data=_producer_data(_required_facts("get_attention")),
+    )
+
+    assert envelope["schema"] == "mastermind.secretary_grounding_mcp_result.v2"
+    assert envelope["server_version"] == "2.0.0"
+    assert contract_schemas.RESULT_SCHEMA_GENERATION == 2
+    assert contract_schemas.SERVER_GENERATION == 2
+    assert contract_schemas.schema_snapshot()["result_schema_generation"] == 2
+    assert contract_schemas.schema_snapshot()["server_generation"] == 2
+    assert set(envelope["data"]) == {"state", "subjects", "reason_codes"}
+    assert envelope["data"]["subjects"] == [
+        _public_subject(
+            "responsibility:alpha",
+            _required_facts("get_attention"),
+        )
+    ]
+    assert all(
+        "subject_ref" not in fact
+        for subject in envelope["data"]["subjects"]
+        for fact in subject["facts"]
+    )
+
+
+@pytest.mark.parametrize("tool_name", ["list_responsibilities", "get_attention"])
+def test_advertised_v2_schema_enforces_required_predicates_inside_each_subject(
+    tool_name,
+):
+    """A neighboring subject cannot lend a required predicate in Draft 2020-12."""
+
+    jsonschema = pytest.importorskip("jsonschema")
+    validator = jsonschema.Draft202012Validator(
+        next(spec.output_schema for spec in TOOL_SPECS if spec.name == tool_name)
+    )
+    alpha = _required_facts(tool_name)
+    beta = _required_facts(tool_name, subject="responsibility:beta")
+    for fact in beta:
+        if fact["predicate"] == "responsibility.identity":
+            fact["value"] = "WS:BETA"
+        for source in fact["sources"]:
+            if source["owner"] == "agent_os":
+                source["source_ref"] = "WS:BETA"
+            elif source["owner"] == "executive_inbox":
+                source["source_ref"] = "executive-inbox:attention-beta"
+        if fact["predicate"] == "attention.ref":
+            fact["value"] = "attention-beta"
+
+    complete = {
+        "schema": "mastermind.secretary_grounding_mcp_result.v2",
+        "tool": tool_name,
+        "ok": True,
+        "server_version": "2.0.0",
+        "data": {
+            "state": "FACTS",
+            "subjects": [
+                _public_subject("responsibility:alpha", alpha),
+                _public_subject("responsibility:beta", beta),
+            ],
+            "reason_codes": [],
+        },
+        "error": None,
+    }
+    validator.validate(complete)
+
+    split_incomplete = copy.deepcopy(complete)
+    for index, predicate in enumerate(
+        sorted(contract_schemas.TOOL_REQUIRED_PREDICATES[tool_name])[:2]
+    ):
+        split_incomplete["data"]["subjects"][index]["facts"] = [
+            fact
+            for fact in split_incomplete["data"]["subjects"][index]["facts"]
+            if fact["predicate"] != predicate
+        ]
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(split_incomplete)
+
+
+def test_flat_to_grouped_projection_is_lossless_exactly_once_and_deterministic():
+    alpha = _required_facts("list_responsibilities")
+    alpha[0]["sources"].append(_producer_source("agent_os", "DEC:ALPHA"))
+    beta = _required_facts("list_responsibilities", subject="responsibility:beta")
+    for fact in beta:
+        if fact["predicate"] == "responsibility.identity":
+            fact["value"] = "WS:BETA"
+        fact["sources"][0]["source_ref"] = "WS:BETA"
+    flat = alpha + beta
+
+    forward = result_envelope(
+        "list_responsibilities", data=_producer_data(flat)
+    )["data"]
+    permuted = copy.deepcopy(list(reversed(flat)))
+    for fact in permuted:
+        fact["sources"].reverse()
+    reverse = result_envelope(
+        "list_responsibilities", data=_producer_data(permuted)
+    )["data"]
+
+    assert canonical_json(forward) == canonical_json(reverse)
+    assert [row["subject_ref"] for row in forward["subjects"]] == [
+        "responsibility:alpha",
+        "responsibility:beta",
+    ]
+    projected = [
+        {"subject_ref": subject["subject_ref"], **fact}
+        for subject in forward["subjects"]
+        for fact in subject["facts"]
+    ]
+    assert len(projected) == len(flat)
+    assert canonical_json(projected) == canonical_json(
+        contract_schemas._validate_steward_result_data(
+            _producer_data(flat)
+        )["facts"]
+    )
+
+
+def test_public_v2_runtime_refuses_duplicate_subjects_and_predicates():
+    facts = _required_facts("get_attention")
+    valid = {
+        "state": "FACTS",
+        "subjects": [_public_subject("responsibility:alpha", facts)],
+        "reason_codes": [],
+    }
+    assert validate_result_data(valid) == valid
+
+    duplicate_subject = copy.deepcopy(valid)
+    duplicate_subject["subjects"] = [
+        {
+            "subject_ref": "responsibility:alpha",
+            "facts": duplicate_subject["subjects"][0]["facts"][:2],
+        },
+        {
+            "subject_ref": "responsibility:alpha",
+            "facts": duplicate_subject["subjects"][0]["facts"][2:],
+        },
+    ]
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        validate_result_data(duplicate_subject)
+
+    duplicate_predicate = copy.deepcopy(valid)
+    duplicate_predicate["subjects"][0]["facts"].append(
+        copy.deepcopy(duplicate_predicate["subjects"][0]["facts"][0])
+    )
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        validate_result_data(duplicate_predicate)
