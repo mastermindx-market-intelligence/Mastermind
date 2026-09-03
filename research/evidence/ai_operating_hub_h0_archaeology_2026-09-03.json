@@ -1,0 +1,269 @@
+{
+  "capability_ledger": {
+    "ai_hub_f0_architecture": "SPEC_ONLY",
+    "ai_hub_h0_current_estate_freeze": "SPEC_ONLY",
+    "autonomy_responsibility_projection": "BUILT_NOT_PROVEN",
+    "control_room_pure_compositor": "BUILT_NOT_PROVEN",
+    "cross_system_operational_identity": "NOT_BUILT",
+    "executive_attention_inbox_hub_owned": "NOT_BUILT",
+    "hub_workstream_room_real_data_consumer": "NOT_BUILT",
+    "learning_and_intervention_efficacy": "NOT_BUILT",
+    "llm_operational_synthesis": "SPEC_ONLY",
+    "local_p0a_loopback_surface": "PARTIAL",
+    "parallel_hub_control_plane": "REJECTED_BY_DESIGN",
+    "remote_x1_closed_read_projection": "PARTIAL",
+    "safe_ceo_action_preflight_receipt": "NOT_BUILT"
+  },
+  "capability_vocabulary": [
+    "BROKEN",
+    "BUILT_NOT_PROVEN",
+    "DARK_OR_DISCONNECTED",
+    "NOT_BUILT",
+    "PARTIAL",
+    "PROVEN_LIVE",
+    "REJECTED_BY_DESIGN",
+    "SPEC_ONLY"
+  ],
+  "collision_census": {
+    "exact_branch": "sol/ai-operating-hub-h0-current-estate-freeze-20260903",
+    "exact_branch_present_before_start": false,
+    "exact_branch_present_on_remote_before_start": false,
+    "exact_operation_pr_present_before_start": false,
+    "owned_paths": [
+      "research/MASTERMIND_AI_OPERATING_HUB_H0_CURRENT_ESTATE_2026-09-03.md",
+      "research/evidence/ai_operating_hub_h0_archaeology_2026-09-03.json",
+      "docs/superpowers/plans/2026-09-03-ai-operating-hub-h1-read-only-workstream.md",
+      "tests/test_ai_operating_hub_h0_source_law.py"
+    ],
+    "owned_paths_present_on_protected_master_before_start": [],
+    "worktree_present_at_target_path_before_start": false,
+    "ws_ai_hub_present_on_protected_master": false
+  },
+  "current_protected_at_delivery": "642fa62540f0f2565ccc484a350f2cd0a2259015",
+  "dialogue_reconciliation": {
+    "current_source_carrier": "C0BSBM78V1N/1788439512.753739",
+    "placement_receipt": "1788439512.753739 thread / PLACED effect=PLACEMENT_ONLY / receiver=Claude8 native-session-00536892-a16e-4c4a-bbcf-c3f44a3549c5",
+    "receiver_github_identity": "chriswong6031-creator",
+    "receiver_native_session": "Claude8 / Opus 5 / 00536892-a16e-4c4a-bbcf-c3f44a3549c5",
+    "support_file_disposition": "F0C05PQJJG0 advisory only; not machine-readable through the available Slack reader (zip payload); not relied upon",
+    "worker_pickup_ack": "1788440085.758959",
+    "worker_start": "1788440235.427329"
+  },
+  "frozen_contract_values": {
+    "collector_sources": [
+      "active_builds",
+      "agent_os_brief",
+      "agent_os_state",
+      "executive_runtime"
+    ],
+    "compositor_output_keys": [
+      "attention",
+      "binding_conflicts",
+      "degraded",
+      "generated_at",
+      "placement_selection",
+      "schema",
+      "sources",
+      "unbound_surfaces",
+      "unjoined_open_prs",
+      "work"
+    ],
+    "compositor_schema": "mastermind.chairman_control_room.v1",
+    "freshness_states": [
+      "fresh",
+      "stale",
+      "unavailable"
+    ],
+    "p0a_allowed_hostnames": [
+      "127.0.0.1",
+      "localhost"
+    ],
+    "p0a_default_port": 8787,
+    "p0a_host": "127.0.0.1",
+    "p0a_path_equality_routes": [
+      "/api/bind",
+      "/api/discover",
+      "/api/open",
+      "/api/refresh-builds",
+      "/api/state",
+      "/api/unbind",
+      "/favicon.ico"
+    ],
+    "release_schema": "mastermind.control_room_build.v1",
+    "remote_schema": "mastermind.chairman_control_room_remote.v1",
+    "required_runtime_paths": [
+      "app/static/chairman_control/control_room.css",
+      "app/static/chairman_control/control_room.js",
+      "app/static/chairman_control/remote.html",
+      "common/__init__.py",
+      "common/commission_ref.py",
+      "common/redaction.py",
+      "config/strategic_state.yml",
+      "control_plane/__init__.py",
+      "control_plane/ceo_boot_packet.py",
+      "control_plane/ceo_intent.py",
+      "control_plane/chairman_control_room.py",
+      "control_plane/chairman_control_room_remote.py",
+      "control_plane/codex_worker.py",
+      "control_plane/executive_agent_capabilities.py",
+      "control_plane/executive_ambient_process.py",
+      "control_plane/executive_authority.py",
+      "control_plane/executive_coo_policy.py",
+      "control_plane/executive_inbox.py",
+      "control_plane/executive_orchestration_principal.py",
+      "control_plane/executive_orchestration_result.py",
+      "control_plane/executive_retry_safety.py",
+      "control_plane/executive_runtime.py",
+      "control_plane/executive_supervisor.py",
+      "control_plane/executive_worker_broker.py",
+      "control_plane/executive_workspace.py",
+      "control_plane/flags.py",
+      "control_plane/operator_harness_contract.py",
+      "control_plane/operator_harness_wire.py",
+      "control_plane/strategic_state.py",
+      "control_plane/surface_bindings.py",
+      "control_plane/worker_adapter.py",
+      "control_plane/worker_browser_b1.py",
+      "ops/control_room_remote/mastermind-control-room-remote.service",
+      "scripts/__init__.py",
+      "scripts/chairman_control_room_remote.py",
+      "scripts/ohf/__init__.py",
+      "scripts/ohf/redaction.py"
+    ],
+    "x1_read_routes_extra_literals": [
+      "/api/state",
+      "/healthz"
+    ],
+    "x1_static_routes": [
+      "/",
+      "/static/control_room.css",
+      "/static/control_room.js"
+    ]
+  },
+  "h1_path_ceiling": {
+    "blocking_precondition": "paths 5 and 6 are contended by open PR #326; while it is open H1 is limited to paths 1-4 and must return BLOCKED UI_PATHS_CONTENDED_BY_PR_326 effect=NONE for paths 5-6",
+    "fifth_path_disposition": "DECISION_REQUEST / PATH_BOUNDARY_REQUIRED effect=NONE before edit",
+    "forbidden_paths": [
+      "app/static/chairman_control/control_room.css",
+      "app/static/chairman_control/control_room.js",
+      "app/static/chairman_control/remote.html",
+      "control_plane/autonomy_control_room_projection.py",
+      "control_plane/chairman_control_room.py",
+      "control_plane/chairman_control_room_remote.py",
+      "ops/control_room_remote/install.sh",
+      "ops/control_room_remote/mastermind-control-room-remote.service",
+      "scripts/chairman_control_room_remote.py"
+    ],
+    "may_create": [
+      "control_plane/ai_operating_hub_workroom.py",
+      "tests/test_ai_operating_hub_workroom.py",
+      "app/static/chairman_control/hub_workroom.js",
+      "docs/superpowers/plans/2026-09-XX-ai-operating-hub-h1-implementation-receipt.md"
+    ],
+    "may_modify_only_after_pr_326_merges": [
+      "scripts/chairman_control_room.py",
+      "app/static/chairman_control/index.html"
+    ]
+  },
+  "non_effects": [
+    "no H1 source or implementation",
+    "no Control Room compositor, P0A, or X1 change",
+    "no change to PR #326 or PR #350",
+    "no WS:AI-HUB created",
+    "no Agent OS write",
+    "no Linear write",
+    "no Executive lifecycle or runtime effect",
+    "no Slack lifecycle mutation",
+    "no Mac or browser action",
+    "no deployment or production effect",
+    "no Ready, merge, or self-review"
+  ],
+  "observed_at": "2026-09-03T12:57:15Z",
+  "operation_key": "mastermind-ai-operating-hub-h0-current-estate-freeze-20260903-sol-001",
+  "owner_boundaries": {
+    "anti_collapse_law": "local P0A and remote X1 are separate accepted contracts; their contract schemas must never be equal",
+    "derived_status_owner": "control_plane/autonomy_control_room_projection.py (open Draft PR #326, absent from protected master)",
+    "join_law": "literal word-boundary WS:<KEY> token in PR title; byte-equal workstream for runtime jobs; no title-similarity matching",
+    "local_p0a": {
+      "compositor": "control_plane/chairman_control_room.py",
+      "contract_schema": "mastermind.chairman_control_room.v1",
+      "mutation": "navigation-only local binding writes",
+      "server_entrypoint": "scripts/chairman_control_room.py",
+      "shared_static_paths": [
+        "app/static/chairman_control/control_room.css",
+        "app/static/chairman_control/control_room.js"
+      ],
+      "transport": "TCP loopback 127.0.0.1:8787, allowlisted hostnames, CSP",
+      "ui_entry": "app/static/chairman_control/index.html"
+    },
+    "purity_law": "compose_control_room is pure (no file I/O, subprocess, clock, or environment read); build_control_room is the only gather layer and never raises",
+    "remote_x1": {
+      "contract_schema": "mastermind.chairman_control_room_remote.v1",
+      "mutation": "none - read-only by construction",
+      "projection": "control_plane/chairman_control_room_remote.py",
+      "release_paths": [
+        "ops/control_room_remote/install.sh",
+        "ops/control_room_remote/mastermind-control-room-remote.service"
+      ],
+      "release_schema": "mastermind.control_room_build.v1",
+      "required_runtime_paths_owner": "control_plane/chairman_control_room_remote.py:REQUIRED_RUNTIME_PATHS",
+      "server_entrypoint": "scripts/chairman_control_room_remote.py",
+      "shared_static_paths": [
+        "app/static/chairman_control/control_room.css",
+        "app/static/chairman_control/control_room.js"
+      ],
+      "transport": "Unix socket /run/mastermind-control-room/remote.sock, gid/uid gated",
+      "ui_entry": "app/static/chairman_control/remote.html"
+    }
+  },
+  "parent_program": "mastermind-ai-operating-hub-f0-architecture-freeze-20260902-sol-001",
+  "pr_archaeology": [
+    {
+      "head": "e2e8543b3a3bcd4edd33e5f95a611e3c945bbbe5",
+      "merge_commit": "812be940cec5db025a5ef8f99f71a0e30a92bb8e",
+      "number": 416,
+      "relevance": "F0 architecture protected; this H0 record is its successor",
+      "state": "MERGED"
+    },
+    {
+      "head": "2eb9d23b2f1fc116cd4071c1f4651da9e87366f2",
+      "number": 326,
+      "owns": [
+        "control_plane/autonomy_control_room_projection.py",
+        "app/static/chairman_control/control_room.js",
+        "app/static/chairman_control/control_room.css",
+        "app/static/chairman_control/index.html"
+      ],
+      "relevance": "blocking for H1 UI paths; owns mastermind.autonomy_control_room.v1 with its own OUTPUT_KEYS and query_status/is_actionable/_combine_status logic which H1 must consume and never re-derive",
+      "state": "OPEN_DRAFT"
+    },
+    {
+      "head": "f0e681bf797522e09f2224fbc866f5aab2f62bb1",
+      "number": 350,
+      "relevance": "downstream of #326 on shared packaging paths",
+      "shared_paths_with_326": [
+        "control_plane/chairman_control_room_remote.py",
+        "ops/control_room_remote/install.sh"
+      ],
+      "state": "OPEN_DRAFT"
+    }
+  ],
+  "protected_master": "642fa62540f0f2565ccc484a350f2cd0a2259015",
+  "protected_master_tree": "3017e36c42b55c9dff0f94f31ddd791e97a65508",
+  "reference_workstream": "WS:CHAIRMAN-CONTROL-ROOM",
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "ruling": "Select local P0A Chairman Control Room as the first real HUB-V1 consumer; fresh protected source proves no exact blocker. Preserve remote X1 unchanged as a separate smaller closed read-only surface with its own contract and release closure. Bind the existing WS:CHAIRMAN-CONTROL-ROOM and create no WS:AI-HUB. Freeze the H1 ceiling narrowed by the discovery that open PR #326 already owns the derived status projection and the three shared UI paths. H1 remains held pending independent review and protected merge of this H0 record.",
+  "schema": "mastermind.ai_operating_hub_h0_archaeology.v1",
+  "selected_first_consumer": {
+    "falsifier": "if protected source shows P0A cannot serve a Hub read view without adding a mutation route or a second auth layer, return DECISION_REQUEST / CONSUMER_BOUNDARY_REQUIRED effect=NONE rather than widening P0A's mutation surface",
+    "not_selected": "remote X1",
+    "not_selected_reason": "closed READ_ROUTES allowlist, mandatory redaction, and a release-attestation closure pinning 37 runtime paths plus installer and systemd unit; a Hub view there would force a release manifest change and a remote deployment, both outside the H1 read-only budget",
+    "selected": "local P0A Chairman Control Room",
+    "selected_reason": "existing live loopback server, real route surface, real static entry, shared JS/CSS, and a direct dependency on the pure compositor; loopback-private so an added read-only view carries no public exposure, no new auth layer, and no deployment step"
+  },
+  "skillpack": {
+    "minimum_bootstrap_major": 1,
+    "schema": "mastermind.sol_skillpack.v1",
+    "version": "1.0.1"
+  }
+}
