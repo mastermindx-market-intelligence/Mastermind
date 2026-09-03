@@ -355,6 +355,7 @@ const assert = require("node:assert/strict");
 const { webcrypto } = require("node:crypto");
 
 const source = fs.readFileSync(process.argv[1], "utf8");
+const digestDelayMs = Number(process.argv[2] || "0");
 let listener = null;
 let initialProbe = null;
 const chrome = {
@@ -378,15 +379,35 @@ const context = {
   },
   TextEncoder,
   Uint8Array,
-  crypto: webcrypto,
+  crypto: {
+    subtle: {
+      async digest(...args) {
+        if (digestDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, digestDelayMs));
+        }
+        return webcrypto.subtle.digest(...args);
+      },
+    },
+  },
   Promise,
   console,
 };
 vm.createContext(context);
 vm.runInContext(source, context, {filename: "content.js"});
 
+async function waitFor(condition, description, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(`Timed out waiting for ${description} after ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(10, remainingMs)));
+  }
+}
+
 (async () => {
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await waitFor(() => initialProbe !== null, "initial content probe");
   assert.equal(typeof listener, "function");
   assert.equal(initialProbe.kind, "MMX_WEB_SOL_PROBE");
 
@@ -400,7 +421,7 @@ vm.runInContext(source, context, {filename: "content.js"});
     (value) => { response = value; },
   );
   assert.equal(accepted, true);
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await waitFor(() => response !== undefined, "reprobe response");
   assert.equal(response.kind, "MMX_WEB_SOL_PROBE");
   assert.equal(response.observation.target_present, true);
   assert.equal(response.observation.exact_conversation_loaded, false);
@@ -436,6 +457,16 @@ def _run_background(scenario: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_content(*, digest_delay_ms: int = 0) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [_node(), "-e", CONTENT_HARNESS, str(CONTENT), str(digest_delay_ms)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+
 @pytest.mark.parametrize(
     "scenario",
     [
@@ -454,13 +485,12 @@ def test_mv3_worker_reconstitutes_exact_profile_state_without_replaying_actions(
 
 
 def test_content_probe_supports_nullable_expected_fingerprint_for_hydration():
-    completed = subprocess.run(
-        [_node(), "-e", CONTENT_HARNESS, str(CONTENT)],
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
+    completed = _run_content()
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_content_probe_waits_for_delayed_webcrypto_digest():
+    completed = _run_content(digest_delay_ms=100)
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
