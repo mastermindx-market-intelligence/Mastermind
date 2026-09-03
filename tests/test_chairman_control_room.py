@@ -2888,3 +2888,27 @@ def test_review_a_truncated_wake_scan_reports_ambiguity_not_the_first_found(tmp_
         assert "obligation_status" not in row, (
             "a truncated scan asserted a definite obligation status"
         )
+
+
+def test_review_ancestor_rule_is_bounded_on_corrupt_parent_chains():
+    """The ancestor walk reads caller-supplied `parent_job_id` links, so a
+    corrupt chain must not hang it or make it guess.
+
+    A cycle means no node can be identified as the executable frontier, so
+    every candidate is dropped and the attempt dimension reads unknown --
+    fail-closed, which is the same direction every other refusal here takes.
+    A parent that simply lives outside this tree is NOT corruption and must
+    not cause a drop.
+    """
+    def job(job_id, parent, attempt="ATT-x"):
+        return _FakeJob(job_id, parent, "JOB-ROOT", attempt)
+
+    # self-parent: that node aggregates itself, the other survives
+    assert _cand_ids([job("JOB-001", "JOB-001"), job("JOB-002", "JOB-001")]) == ["JOB-002"]
+    # two- and three-node cycles: no frontier is identifiable, so none is picked
+    assert _cand_ids([job("JOB-001", "JOB-002"), job("JOB-002", "JOB-001")]) == []
+    assert _cand_ids([
+        job("JOB-001", "JOB-003"), job("JOB-002", "JOB-001"), job("JOB-003", "JOB-002"),
+    ]) == []
+    # a parent outside the tree is ordinary, not corrupt
+    assert _cand_ids([job("JOB-001", "JOB-OUTSIDE")]) == ["JOB-001"]
