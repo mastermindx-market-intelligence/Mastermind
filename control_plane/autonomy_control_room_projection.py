@@ -348,6 +348,7 @@ one genuinely cross-repo question below, Macro's own
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -2134,13 +2135,39 @@ _ATTEMPT_IN_PROGRESS = frozenset({
 #: transition happened (still gated by WATCH_PROVEN, Law 6).
 _ATTEMPT_TERMINAL = frozenset({"COMPLETED", "FAILED", "LOST", "CANCELLED"})
 
-#: The four fields Law 6 names verbatim: "WATCH_PROVEN requires exact child
-#: + carrier + mechanism + baseline receipt; otherwise WATCH_UNPROVEN."  All
-#: four must be present as non-blank strings — Watcher evidence with any one
+#: Review 5103135217 BLOCKER 4: "Require validated exact child + operation +
+#: carrier + mechanism + handled-baseline evidence."  Extends the original
+#: four-field Law 6 proof with ``watch_operation`` — the fifth field the
+#: adversarial review named — so a forged/duplicated watcher receipt for the
+#: WRONG operation on the same child/carrier can no longer pass.  All five
+#: must be present as non-blank strings — Watcher evidence with any one
 #: missing "grants no authority".
 _WATCH_PROOF_FIELDS = (
-    "watch_child_ref", "watch_carrier_ref", "watch_mechanism",
-    "watch_baseline_receipt",
+    "watch_child_ref", "watch_operation", "watch_carrier_ref",
+    "watch_mechanism", "watch_baseline_receipt",
+)
+
+#: Review 5103135217 BLOCKER 3: the closed Observer/Dialogue return-kind
+#: vocabulary — the SAME three tokens ``sol_watcher_contract.py``'s
+#: ACTION_AUTHORITATIVE role contract already names verbatim ("For an
+#: in-scope BLOCKED, DECISION_REQUEST, or RESULT ...").  Reused here as a
+#: plain string set rather than importing that module (which owns prompt
+#: CONTRACT validation, not runtime dispatch evidence) — exactly the same
+#: "reuse the literal wire values, never the module" idiom this file already
+#: uses for ``obligation_status``/``WAKE_OUTCOME_TOKENS`` elsewhere.
+_RETURN_KINDS = frozenset({"BLOCKED", "DECISION_REQUEST", "RESULT"})
+
+#: Fields Blocker 3 requires on a genuine return receipt, over and above the
+#: base watch proof: a closed ``return_kind``, the observed edge/reference,
+#: and an observation time.  ``return_child_ref`` / ``return_operation`` /
+#: ``return_carrier_ref`` are validated by EQUALITY against the matching
+#: ``watch_*`` field (see :func:`_return_receipt_proven`) rather than mere
+#: non-blankness — "exact child"/"exact operation"/carrier identity means
+#: the receipt must name the SAME child/operation/carrier the watcher was
+#: actually bound to, not merely carry some non-blank string.
+_RETURN_RECEIPT_NONBLANK_FIELDS = (
+    "return_child_ref", "return_operation", "return_carrier_ref",
+    "return_edge_ref",
 )
 
 
@@ -2149,8 +2176,47 @@ def _dispatch_nonblank(value: Any) -> bool:
 
 
 def _watch_proven(row: Mapping[str, Any]) -> bool:
-    """Law 6: exact child + carrier + mechanism + baseline receipt, all four."""
+    """Law 6 + Blocker 4: exact child + operation + carrier + mechanism +
+    baseline receipt, all five, as non-blank strings.  This is necessary but
+    not sufficient for a genuine RETURNED transition — see
+    :func:`_return_receipt_proven` for the full Blocker 3 gate."""
     return all(_dispatch_nonblank(row.get(field)) for field in _WATCH_PROOF_FIELDS)
+
+
+def _return_receipt_proven(row: Mapping[str, Any]) -> bool:
+    """Blocker 3: "one validated exact-child Observer return receipt
+    carrying a closed return kind (BLOCKED / DECISION_REQUEST / RESULT),
+    exact operation + carrier/root identity, the observed edge/reference,
+    and an observation time.  Attempt terminality ALONE is never a worker
+    return."
+
+    Requires (all of):
+      - the base 5-field watch proof (:func:`_watch_proven`);
+      - ``return_kind`` in the closed :data:`_RETURN_KINDS` vocabulary;
+      - ``return_child_ref`` / ``return_operation`` / ``return_carrier_ref``
+        each present AND byte-EQUAL to the corresponding ``watch_*`` field
+        (the receipt must name the exact same child/operation/carrier the
+        watcher was actually bound to — never merely "some" non-blank
+        value, which is exactly BLOCKER 4's forgeability complaint);
+      - ``return_edge_ref`` present and non-blank (the observed edge itself);
+      - ``return_observed_at`` a parseable timestamp (the observation time).
+    """
+    if not _watch_proven(row):
+        return False
+    if row.get("return_kind") not in _RETURN_KINDS:
+        return False
+    for field in _RETURN_RECEIPT_NONBLANK_FIELDS:
+        if not _dispatch_nonblank(row.get(field)):
+            return False
+    if row.get("return_child_ref") != row.get("watch_child_ref"):
+        return False
+    if row.get("return_operation") != row.get("watch_operation"):
+        return False
+    if row.get("return_carrier_ref") != row.get("watch_carrier_ref"):
+        return False
+    if _parse_iso8601(row.get("return_observed_at")) is None:
+        return False
+    return True
 
 
 def _dispatch_binding_unresolved(action_target_state: Any, binding_evidence_state: Any) -> tuple[bool, str | None]:
@@ -2239,21 +2305,41 @@ def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[s
         if attempt_state in _ATTEMPT_IN_PROGRESS:
             return "STARTED", f"attempt_in_progress:{attempt_state}", historical
         if attempt_state in _ATTEMPT_TERMINAL:
-            if not _watch_proven(row):
-                # Law 6: "Watcher evidence grants no authority" — a terminal
-                # Attempt with no proven watch can never advance past this;
-                # RETURNED/CONTINUED/STOPPED are all unavailable.
+            if not _return_receipt_proven(row):
+                # Blocker 3: "Attempt terminality ALONE is never a worker
+                # return" — a terminal Attempt with no validated exact-child
+                # Observer return receipt (closed return_kind + exact
+                # operation/carrier identity + observed edge + observation
+                # time) can never advance past this; RETURNED/CONTINUED/
+                # STOPPED are all unavailable.
                 return "WATCH_UNPROVEN", "watch_evidence_incomplete", historical
+            return_dt = _parse_iso8601(row.get("return_observed_at"))
             decision = row.get("sol_decision")
             decision_carrier = row.get("sol_decision_carrier_ref")
+            decision_child = row.get("sol_decision_child_ref")
+            decision_operation = row.get("sol_decision_operation")
+            decision_dt = _parse_iso8601(row.get("sol_decision_at"))
             carrier = row.get("watch_carrier_ref")
-            # Law 5: "a valid SAME-CARRIER CONTINUE or STOP" — a decision
-            # attributed to a different carrier than the one that carried
-            # the return is never trusted; RETURNED stands.
+            child = row.get("watch_child_ref")
+            operation = row.get("watch_operation")
+            # Blocker 4: "CONTINUED/STOPPED must bind the SAME exact return
+            # and a decision edge causally AFTER it."  A decision is trusted
+            # only when it names the exact same child, operation and carrier
+            # the proven return receipt named (never merely "a" same-carrier
+            # decision — Law 5's original check, extended here to child +
+            # operation too) AND its own timestamp parses and sits STRICTLY
+            # after the return's own observation time.  A stale/at-or-before
+            # decision, a wrong child/operation/carrier, or an unparseable
+            # timestamp on either side all fail this and leave RETURNED
+            # standing — never silently closing the dialogue.
             valid_decision = (
                 decision in ("CONTINUE", "STOP")
-                and decision_carrier is not None
-                and decision_carrier == carrier
+                and _dispatch_nonblank(decision_carrier) and decision_carrier == carrier
+                and _dispatch_nonblank(decision_child) and decision_child == child
+                and _dispatch_nonblank(decision_operation) and decision_operation == operation
+                and decision_dt is not None
+                and return_dt is not None
+                and decision_dt > return_dt
             )
             if valid_decision and decision == "CONTINUE":
                 return "CONTINUED", "sol_continue_same_carrier", historical
@@ -2276,6 +2362,183 @@ def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[s
             return "RECEIVER_SELECTED", "action_target_resolved_no_delivery_yet", historical
         return "WAITING_CAPACITY", "no_receiver_selected", historical
     return "UNKNOWN", f"unrecognized_obligation_status:{obligation_status}", historical
+
+
+# ---------------------------------------------------------------------------
+# Blocker 2 (review 5103135217): a closed, bounded, secret-safe validator in
+# front of ``dispatch_evidence``.  ``project_dispatch_consumption`` used to
+# accept caller-controlled mappings, assume ``.get``, copy arbitrary values
+# into ``dispatch.evidence`` verbatim, and could echo unrecognized values in
+# ``reason`` strings.  Every row now passes through
+# :func:`_validate_dispatch_row` first: an exact closed key set, exact
+# string-or-absent typing, closed token vocabularies where the field has
+# one, bounded byte lengths, and a path/secret-shape refusal.  A row that
+# fails ANY of those closes to the fixed, NON-ECHOING
+# ``_DISPATCH_EVIDENCE_REJECTED`` reason — the offending key/value is never
+# placed in any output string, and the ``evidence`` a caller sees is always
+# rebuilt strictly from the validated/canonical fields, never from the raw
+# input mapping.
+# ---------------------------------------------------------------------------
+
+#: The two mandatory join fields plus every optional data field this module
+#: understands.  Anything outside this closed set fails the whole row
+#: closed (Blocker 2: "unknown key").
+_DISPATCH_JOIN_FIELDS = ("responsibility_ref", "root_job_id")
+_DISPATCH_DATA_FIELDS = (
+    "observed_at", "obligation_status", "action_target_state",
+    "action_target_reason", "binding_evidence_state", "attempt_state",
+    "effect_state", "watch_child_ref", "watch_operation", "watch_carrier_ref",
+    "watch_mechanism", "watch_baseline_receipt", "return_kind",
+    "return_child_ref", "return_operation", "return_carrier_ref",
+    "return_edge_ref", "return_observed_at", "sol_decision",
+    "sol_decision_carrier_ref", "sol_decision_child_ref",
+    "sol_decision_operation", "sol_decision_at",
+)
+_DISPATCH_ALL_FIELDS = frozenset(_DISPATCH_JOIN_FIELDS + _DISPATCH_DATA_FIELDS)
+
+#: Closed token vocabularies for fields whose value space is itself closed
+#: (an owner enum's exact wire values, reused as plain strings — the same
+#: "literal value, never the module" idiom this file already uses for
+#: ``obligation_status`` elsewhere).  A field absent from this mapping is
+#: still required to be a bounded, non-secret-shaped string, just not from a
+#: closed vocabulary.
+_DISPATCH_CLOSED_VOCAB: dict[str, frozenset[str]] = {
+    "obligation_status": frozenset({
+        "NOT_SEEN", "PENDING_RETRYABLE", "ATTEMPTED", "RECONCILIATION_REQUIRED",
+        "ACCEPTED", "DELIVERED_UNACKNOWLEDGED", "TARGET_ACKNOWLEDGED",
+        "SOURCE_RESOLVED",
+    }),
+    "action_target_state": frozenset({"RESOLVED", "UNAVAILABLE", "CONFLICT", "UNKNOWN"}),
+    "action_target_reason": frozenset({
+        "EXACT_RUNTIME_BINDING", "ACTOR_OBSERVER_ONLY", "ROOT_JOB_ID_MALFORMED",
+        "ROOT_TARGET_MISSING", "ROOT_TARGET_CONFLICT", "BINDING_EVIDENCE_UNKNOWN",
+        "TARGET_RUNTIME_UNAVAILABLE", "RUNTIME_BINDING_CONFLICT",
+        "RUNTIME_BINDING_SURFACE_UNKNOWN", "RUNTIME_BINDING_SURFACE_CONFLICT",
+    }),
+    "binding_evidence_state": frozenset({"CURRENT", "UNKNOWN"}),
+    "attempt_state": frozenset({
+        "CLAIMED", "RUNNING", "CHECKPOINTED", "CANCEL_REQUESTED", "RATE_LIMITED",
+        "FAILED", "LOST", "COMPLETED", "CANCELLED",
+    }),
+    "effect_state": frozenset({"none", "applied", "effect_unknown"}),
+    "return_kind": frozenset(_RETURN_KINDS),
+    "sol_decision": frozenset({"CONTINUE", "STOP"}),
+}
+
+#: Bounded lengths (bytes, UTF-8).  A join field is bounded tighter — it is
+#: an identity, never free text.
+_DISPATCH_JOIN_MAX_BYTES = 256
+_DISPATCH_FIELD_MAX_BYTES = 512
+
+#: Fixed, non-echoing rejection reason — Blocker 2: "No rejected input may
+#: appear in any output string."
+_DISPATCH_EVIDENCE_REJECTED = "dispatch_evidence_rejected"
+
+#: Best-effort path/secret-shape refusal.  Deliberately conservative (a
+#: handful of well-known shapes) rather than an attempted-exhaustive secret
+#: scanner — this module's job is to refuse an evidence row that carries a
+#: filesystem path or an obvious credential, not to be a general-purpose
+#: secrets linter.
+_DISPATCH_SECRET_OR_PATH_RE = re.compile(
+    r"(?i)(^/|^~|\\|/etc/|/private/|/Users/|/home/|\.ssh|password|passwd"
+    r"|secret|api[_-]?key|access[_-]?token|bearer\s|authorization\s*:"
+    r"|-----BEGIN|AKIA[0-9A-Z]{16})"
+)
+
+
+def _dispatch_looks_secret_or_path(value: str) -> bool:
+    return bool(_DISPATCH_SECRET_OR_PATH_RE.search(value))
+
+
+def _dispatch_safe_join_value(value: Any) -> bool:
+    """True when usable as a join-key component: ``None`` (a card's own
+    ``root_job_id`` is legitimately ``None`` for an unbound responsibility —
+    Law 1 reuses whatever type the join key naturally is, it does not
+    narrow it), or a bounded, non-blank, non-secret-shaped string.  A blank
+    string is never a legitimate identity and is treated the same as a
+    malformed one."""
+    if value is None:
+        return True
+    return _dispatch_safe_str(value, max_bytes=_DISPATCH_JOIN_MAX_BYTES)
+
+
+def _dispatch_safe_str(
+    value: Any, *, max_bytes: int, vocab: frozenset[str] | None = None
+) -> bool:
+    """Exact type, bounded length, non-secret-shape, and (if closed) vocabulary."""
+    if not isinstance(value, str) or isinstance(value, bool):
+        return False
+    if not value:
+        return False
+    try:
+        encoded_len = len(value.encode("utf-8"))
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return False
+    if encoded_len == 0 or encoded_len > max_bytes:
+        return False
+    if _dispatch_looks_secret_or_path(value):
+        return False
+    if vocab is not None and value not in vocab:
+        return False
+    return True
+
+
+def _validate_dispatch_row(
+    raw: Any,
+) -> tuple[Any, Any, dict[str, Any] | None]:
+    """Validate one caller-supplied evidence row.  Never raises.
+
+    Returns ``(responsibility_ref, root_job_id, canonical_row_or_None)``.
+
+    - A non-mapping row, or one whose join identity itself is unsafe/
+      malformed (wrong type, blank, oversized, secret/path-shaped), cannot
+      be attributed to any card at all: returns ``(None, None, None)`` —
+      structurally equivalent to "this row was never sent" (it still
+      cannot silently impersonate an existing card's join key).
+    - A row whose join identity validates but carries an unknown key, a
+      wrong-typed/oversized/secret-shaped/out-of-vocabulary data value
+      closes to ``(ref, root_job_id, None)`` — the caller (``project_
+      dispatch_consumption``) renders this card's dispatch state as
+      ``UNKNOWN``/``_DISPATCH_EVIDENCE_REJECTED`` rather than silently
+      treating it as absent, and the rejected value is dropped entirely
+      (never copied into ``canonical_row``, so it can never reach
+      ``evidence`` or any ``reason`` string).
+    - A fully valid row returns ``(ref, root_job_id, canonical_row)`` where
+      ``canonical_row`` contains ONLY the closed field set, each value
+      already validated — the sole source ``evidence``/classification ever
+      read from.
+    """
+    if not isinstance(raw, Mapping):
+        return None, None, None
+
+    unknown_keys = set(raw.keys()) - _DISPATCH_ALL_FIELDS
+    ref = raw.get("responsibility_ref")
+    root_job_id = raw.get("root_job_id")
+    if not _dispatch_safe_join_value(ref):
+        return None, None, None
+    if not _dispatch_safe_join_value(root_job_id):
+        return None, None, None
+
+    valid = not unknown_keys
+    canonical: dict[str, Any] = {"responsibility_ref": ref, "root_job_id": root_job_id}
+    for field in _DISPATCH_DATA_FIELDS:
+        if field not in raw:
+            continue
+        value = raw[field]
+        if value is None:
+            continue
+        if not _dispatch_safe_str(
+            value,
+            max_bytes=_DISPATCH_FIELD_MAX_BYTES,
+            vocab=_DISPATCH_CLOSED_VOCAB.get(field),
+        ):
+            valid = False
+            continue
+        canonical[field] = value
+
+    if not valid:
+        return ref, root_job_id, None
+    return ref, root_job_id, canonical
 
 
 def project_dispatch_consumption(
@@ -2301,18 +2564,26 @@ def project_dispatch_consumption(
     one per ``(responsibility_ref, root_job_id)`` pair a caller has
     resolved via the real owners (``wake_ledger.reconstruct_status``,
     ``sol_action_target.resolve_sol_action_target``, an operator-continuity
-    Attempt fact, an Agent Dialogue TurnDecision/ObservationReceipt) — never
-    fetched by this function itself.  Each row may carry: ``observed_at``,
-    ``obligation_status``, ``action_target_state``, ``action_target_reason``,
-    ``binding_evidence_state``, ``attempt_state``, ``effect_state``,
-    ``watch_child_ref``, ``watch_carrier_ref``, ``watch_mechanism``,
-    ``watch_baseline_receipt``, ``sol_decision``, ``sol_decision_carrier_ref``.
+    Attempt fact, an Agent Dialogue return receipt) — never fetched by this
+    function itself.  Each row is validated (Blocker 2, see
+    :func:`_validate_dispatch_row`) before anything else touches it and may
+    carry: ``observed_at``, ``obligation_status``, ``action_target_state``,
+    ``action_target_reason``, ``binding_evidence_state``, ``attempt_state``,
+    ``effect_state``, ``watch_child_ref``, ``watch_operation``,
+    ``watch_carrier_ref``, ``watch_mechanism``, ``watch_baseline_receipt``,
+    ``return_kind``, ``return_child_ref``, ``return_operation``,
+    ``return_carrier_ref``, ``return_edge_ref``, ``return_observed_at``,
+    ``sol_decision``, ``sol_decision_carrier_ref``, ``sol_decision_child_ref``,
+    ``sol_decision_operation``, ``sol_decision_at``.
 
-    Absent, empty, unmatched, or ambiguous (more than one row sharing the
-    same exact join key) evidence renders that card's ``dispatch_state`` as
-    ``"UNKNOWN"`` with a named ``reason`` — never a fabricated success
-    stage (mission WHY: an absent/ambiguous fact must render as ignorance,
-    never as progress).
+    Absent, empty, unmatched, ambiguous (more than one row sharing the same
+    exact join key), or REJECTED (a row that failed :func:`_validate_
+    dispatch_row`) evidence renders that card's ``dispatch_state`` as
+    ``"UNKNOWN"`` with a named, fixed, non-echoing ``reason`` — never a
+    fabricated success stage (mission WHY: an absent/ambiguous/invalid fact
+    must render as ignorance, never as progress) — AND always
+    ``historical`` (Blocker 5: unknown/unmatched/ambiguous evidence carries
+    unknown freshness, never the CURRENT-implying ``False`` default).
 
     Each output card carries:
       - ``dispatch_state``: one of :data:`DISPATCH_STATES`.
@@ -2324,23 +2595,39 @@ def project_dispatch_consumption(
         ``True`` (Law 8's "disables every actuator" + Law 9's
         "non-actionable" apply identically here).
       - ``historical``: ``True`` whenever the row's own ``observed_at`` is
-        stale or unknown relative to ``generated_at`` (Law 9) — computed
-        independently of ``dispatch_state`` itself.
-      - ``watch_proven``: Law 6's four-field proof, always computed (even
-        when irrelevant to the derived state) so a caller can inspect it.
-      - ``evidence``: the matched row's non-``None`` fields, verbatim, for
-        forensic inspection — ``None`` when no row was matched.
+        stale or unknown relative to ``generated_at`` (Law 9), OR the
+        evidence itself was absent/unmatched/ambiguous/rejected (Blocker 5)
+        — computed independently of ``dispatch_state`` itself.
+      - ``watch_proven``: Law 6/Blocker 4's five-field proof, always
+        computed (even when irrelevant to the derived state) so a caller
+        can inspect it.
+      - ``evidence``: the matched row's validated, canonical, non-``None``
+        fields — never the raw caller-supplied mapping — for forensic
+        inspection.  ``None`` when no row was matched or the matched row
+        was rejected (Blocker 2: a rejected value never reaches any
+        output).
 
     ``counts`` is a closed histogram over every :data:`DISPATCH_STATES`
     token, always present (zero-filled), so a caller never has to guess
     whether a missing key means "zero" or "not computed".
     """
-    evidence_rows = tuple(dispatch_evidence) if dispatch_evidence else ()
+    try:
+        evidence_rows = tuple(dispatch_evidence) if dispatch_evidence else ()
+    except TypeError:
+        evidence_rows = ()
 
-    lookup: dict[tuple[Any, Any], list[Mapping[str, Any]]] = {}
-    for row in evidence_rows:
-        key = (row.get("responsibility_ref"), row.get("root_job_id"))
-        lookup.setdefault(key, []).append(row)
+    #: One list of ``canonical_row_or_None`` per exact join key.  ``None``
+    #: entries mark a REJECTED row (Blocker 2) — kept in the list (rather
+    #: than dropped) so a lone rejected row for an otherwise-unseen key
+    #: still reads as "evidence was sent but refused", not silently as "no
+    #: evidence was ever sent"; a rejected row alongside others still
+    #: participates in ambiguity counting like any other row.
+    lookup: dict[tuple[Any, Any], list[dict[str, Any] | None]] = {}
+    for raw_row in evidence_rows:
+        ref, root_job_id, canonical = _validate_dispatch_row(raw_row)
+        if ref is None and root_job_id is None:
+            continue  # join identity itself unsafe/malformed -> unattributable
+        lookup.setdefault((ref, root_job_id), []).append(canonical)
 
     out_cards: list[dict[str, Any]] = []
     counts = {state: 0 for state in sorted(DISPATCH_STATES)}
@@ -2351,15 +2638,19 @@ def project_dispatch_consumption(
         matches = lookup.get((ref, root_job_id), [])
 
         if not evidence_rows:
-            state, reason, historical = "UNKNOWN", "dispatch_evidence_not_supplied", False
+            state, reason, historical = "UNKNOWN", "dispatch_evidence_not_supplied", True
             evidence: dict[str, Any] | None = None
             watch_proven = False
         elif len(matches) == 0:
-            state, reason, historical = "UNKNOWN", "no_exact_join_match", False
+            state, reason, historical = "UNKNOWN", "no_exact_join_match", True
             evidence = None
             watch_proven = False
         elif len(matches) > 1:
-            state, reason, historical = "UNKNOWN", "ambiguous_dispatch_evidence", False
+            state, reason, historical = "UNKNOWN", "ambiguous_dispatch_evidence", True
+            evidence = None
+            watch_proven = False
+        elif matches[0] is None:
+            state, reason, historical = "UNKNOWN", _DISPATCH_EVIDENCE_REJECTED, True
             evidence = None
             watch_proven = False
         else:

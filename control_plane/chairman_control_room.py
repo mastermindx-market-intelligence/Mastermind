@@ -183,6 +183,37 @@ autonomy_control_room_projection = _optional_control_plane_module(
     "autonomy_control_room_projection", requires=("executive_steward",)
 )
 
+#: Review 5103135217 BLOCKER 1: the canonical, real dispatch-evidence
+#: owners for :func:`_gather_dispatch_evidence` below, loaded through the
+#: SAME protected optional mechanism and for the SAME reason as the
+#: selector/projection above — an extracted release's audited runtime file
+#: allowlist may omit any of these, and this module must still boot and
+#: compose a complete (degraded) document rather than raise.  ``requires``
+#: is each module's own full transitive STATIC control-plane import
+#: closure, omitting only :mod:`control_plane.executive_runtime` (already
+#: an unconditional mandatory import of THIS module, at the top of the
+#: file, so it can never be the thing that is missing here).
+wake_persist = _optional_control_plane_module(
+    "wake_persist",
+    requires=("wake_events", "wake_ledger", "session_targets", "wake_transport"),
+)
+wake_ledger = _optional_control_plane_module(
+    "wake_ledger", requires=("session_targets", "wake_events", "wake_transport")
+)
+session_targets = _optional_control_plane_module(
+    "session_targets", requires=("wake_events", "wake_transport")
+)
+sol_action_target = _optional_control_plane_module(
+    "sol_action_target", requires=("session_targets", "wake_events", "wake_transport")
+)
+runtime_binding_projection = _optional_control_plane_module(
+    "runtime_binding_projection",
+    requires=(
+        "operator_harness_contract", "session_targets", "wake_events",
+        "wake_transport",
+    ),
+)
+
 #: Schema version of the document this module emits.
 SCHEMA = "mastermind.chairman_control_room.v1"
 
@@ -768,6 +799,7 @@ def compose_control_room(
     bindings: dict[str, Any] | None,
     binding_problems: Sequence[str] = (),
     placement_selection: dict[str, Any] | None = None,
+    dispatch_evidence: Sequence[Mapping[str, Any]] | None = None,
     generated_at: str,
 ) -> dict[str, Any]:
     """Pure, deterministic projection of every already-collected source.
@@ -1095,16 +1127,20 @@ def compose_control_room(
         )
         # Dispatch-consumption is a SECOND pure pass over the cards just
         # produced, joined on the same exact (responsibility_ref, root_job_id)
-        # key the projection already owns.  No dispatch evidence is gathered
-        # here: the real owners (wake_ledger, sol_action_target,
-        # operator-continuity Attempt facts, Agent Dialogue decisions) need a
-        # Runtime and a sqlite connection, which this pure path does not have
-        # and must not acquire.  With no evidence supplied every card reads
+        # key the projection already owns.  Review 5103135217 BLOCKER 1: the
+        # real evidence itself is GATHERED by the I/O layer
+        # (:func:`_gather_dispatch_evidence`, called from
+        # :func:`build_control_room`) and handed in here as the
+        # ``dispatch_evidence`` argument — this pure path only joins it, it
+        # never fetches it.  A caller with no evidence to supply (offline
+        # tests, an older gather layer) passes ``None`` and every card reads
         # UNKNOWN and non-actionable — ignorance, never a fabricated stage.
         autonomy = autonomy_control_room_projection.attach_dispatch_consumption(
             autonomy,
             autonomy_control_room_projection.project_dispatch_consumption(
-                autonomy["responsibilities"], generated_at=generated_at
+                autonomy["responsibilities"],
+                generated_at=generated_at,
+                dispatch_evidence=dispatch_evidence,
             ),
         )
 
@@ -1243,6 +1279,227 @@ def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | N
         status = getattr(job.status, "value", None) or str(job.status)
         result.append({"job_id": job.job_id, "status": status, "workstream": workstream})
     return result, None
+
+
+# ---------------------------------------------------------------------------
+# dispatch-consumption evidence gather (review 5103135217 BLOCKER 1) — the
+# ONE place this module reads real Executive Runtime / Wake ledger /
+# RuntimeBinding facts to answer "was this responsibility actually picked
+# up".  Bounded, read-only, never raises.  Builds ZERO new store, event
+# type, cursor, watcher registry, or queue: every read goes through an
+# existing owner's own public API (``runtime.attempts``/``runtime.events``,
+# :class:`control_plane.wake_persist.WakeLedgerRepository` +
+# :func:`control_plane.wake_ledger.reconstruct_status`,
+# :func:`control_plane.sol_action_target.resolve_sol_action_target`, a
+# real-if-available :func:`control_plane.runtime_binding_projection.
+# project_runtime_binding`).  A source genuinely absent (module not shipped,
+# no session-target registry file, no matching Runtime evidence) renders the
+# fixed downstream states (``WATCH_UNPROVEN`` / ``RUNTIME_BINDING_
+# RECONCILIATION_REQUIRED`` / ``DELIVERY_UNCONSUMED`` / ``UNKNOWN``) via
+# :mod:`control_plane.autonomy_control_room_projection`'s own closed
+# classification — this function never fills the gap itself.
+#
+# No canonical live Dialogue/Observer return-receipt store exists anywhere
+# in this codebase today (only ``sol_watcher_contract.py``, a prompt-
+# CONTRACT validator, names the closed BLOCKED/DECISION_REQUEST/RESULT
+# vocabulary — it owns no runtime receipt log).  This gather therefore
+# deliberately leaves every ``watch_*``/``return_*``/``sol_decision*`` field
+# unset: a terminal Attempt with no such receipt renders WATCH_UNPROVEN,
+# never a fabricated RETURNED — exactly the "admit ignorance rather than
+# invent progress" law this whole packet exists to enforce.
+# ---------------------------------------------------------------------------
+
+#: Blocker 1: "The gather must be bounded (cap the rows and the per-row
+#: work)."  A control room with an unbounded number of responsibility cards
+#: must never turn this gather into unbounded per-request Runtime work.
+_DISPATCH_EVIDENCE_MAX_CARDS = 200
+
+#: Per-card cap on how many WAKE_REQUESTED events (i.e. candidate wake
+#: obligations) this gather will even look at before giving up rather than
+#: reading further — a card with a pathological number of wake obligations
+#: degrades to "ambiguous-shaped" rather than doing unbounded work.
+_DISPATCH_EVIDENCE_MAX_WAKE_REQUESTED = 20
+
+
+def _dispatch_evidence_newer(current: str | None, candidate: Any) -> str | None:
+    """Keep the lexicographically-greatest of two Zulu ISO-8601 strings.
+
+    Every timestamp this module reads is a ``YYYY-MM-DDTHH:MM:SS(.ffffff)?Z``
+    wire string (Runtime/Event/WakeLedgerRecord convention throughout this
+    codebase), so plain string comparison is a correct, allocation-free
+    "most recent" — no parsing, no clock, no timezone arithmetic needed
+    here; the projection layer parses it for real freshness comparison.
+    """
+    if not isinstance(candidate, str) or not candidate:
+        return current
+    if current is None or candidate > current:
+        return candidate
+    return current
+
+
+def _gather_dispatch_evidence(
+    root: Path,
+    cards: Sequence[Mapping[str, Any]],
+    generated_at: str,
+) -> list[dict[str, Any]]:
+    """Bounded, read-only, never-raising gather of real dispatch evidence.
+
+    One row per ``(responsibility_ref, root_job_id)`` — the exact join key
+    :func:`control_plane.autonomy_control_room_projection.
+    project_dispatch_consumption` already owns (Law 1: reused, never
+    reinvented).  A card is skipped entirely (no row emitted — the
+    projection then reads it as absent evidence, ``UNKNOWN``) when its
+    ``root_job_id`` is missing/malformed, or when nothing genuine was found
+    for it at all — this function never emits a content-free row just to
+    claim a happy-path state.
+    """
+    try:
+        db_path = root / executive_inbox.DB_RELATIVE_PATH
+        if not db_path.is_file():
+            return []
+        try:
+            runtime = executive_runtime.Runtime.at(root, create=False)
+        except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError):
+            return []
+
+        registry = None
+        if session_targets is not None and sol_action_target is not None:
+            try:
+                registry = session_targets.load_session_targets()
+            except Exception:  # noqa: BLE001 — gather layer never raises
+                registry = None
+
+        wake_repo = None
+        if wake_persist is not None and wake_ledger is not None:
+            try:
+                wake_repo = wake_persist.WakeLedgerRepository(runtime)
+            except Exception:  # noqa: BLE001 — gather layer never raises
+                wake_repo = None
+
+        rows: list[dict[str, Any]] = []
+        seen_keys: set[tuple[Any, Any]] = set()
+
+        for card in list(cards)[:_DISPATCH_EVIDENCE_MAX_CARDS]:
+            if not isinstance(card, Mapping):
+                continue
+            ref = card.get("responsibility_ref")
+            root_job_id = card.get("root_job_id")
+            if not isinstance(ref, str) or not ref:
+                continue
+            if not isinstance(root_job_id, str) or not root_job_id:
+                continue
+            key = (ref, root_job_id)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            row: dict[str, Any] = {}
+            observed_at: str | None = None
+            attempt = None
+            found_evidence = False
+
+            # --- attempt state: executive_runtime, mandatory, no guard ---
+            try:
+                attempts = runtime.attempts.list_attempts(job_id=root_job_id)
+            except (executive_runtime.RuntimeProofError, ValueError, KeyError, OSError):
+                attempts = []
+            if attempts:
+                attempt = max(attempts, key=lambda a: a.attempt_number)
+                status_value = getattr(attempt.status, "value", None)
+                if isinstance(status_value, str) and status_value:
+                    row["attempt_state"] = status_value
+                    found_evidence = True
+                for ts in (attempt.finished_at, attempt.heartbeat_at, attempt.started_at):
+                    observed_at = _dispatch_evidence_newer(observed_at, ts)
+
+            # --- obligation status: WakeLedgerRepository + reconstruct_status ---
+            if wake_repo is not None:
+                try:
+                    wake_requested_events = runtime.events.list_events(
+                        aggregate_type=wake_ledger.WAKE_AGGREGATE_TYPE,
+                        job_id=root_job_id,
+                    )
+                except Exception:  # noqa: BLE001 — gather layer never raises
+                    wake_requested_events = []
+                obligation_ids = [
+                    event.aggregate_id
+                    for event in wake_requested_events[:_DISPATCH_EVIDENCE_MAX_WAKE_REQUESTED]
+                    if event.event_type == "WAKE_REQUESTED" and event.aggregate_id
+                ]
+                # More than one candidate obligation for this root_job_id:
+                # this ROW cannot pick one without guessing (there is no
+                # recency/title rule in this codebase for that choice), so
+                # it leaves obligation_status unset rather than picking —
+                # conservative, never a fabricated single answer.
+                if len(obligation_ids) == 1:
+                    oid = obligation_ids[0]
+                    try:
+                        persisted = wake_repo.list_wake_events(aggregate_id=oid)
+                        status = wake_ledger.reconstruct_status(
+                            oid, tuple(item.record for item in persisted)
+                        )
+                        status_value = getattr(status, "value", None)
+                        if isinstance(status_value, str) and status_value:
+                            row["obligation_status"] = status_value
+                            found_evidence = True
+                        for item in persisted:
+                            observed_at = _dispatch_evidence_newer(
+                                observed_at, item.event.created_at
+                            )
+                    except Exception:  # noqa: BLE001 — gather layer never raises
+                        pass
+
+            # --- binding resolution: sol_action_target + session_targets ---
+            if registry is not None and sol_action_target is not None:
+                try:
+                    seat_map = registry.root_job_bindings.get(root_job_id)
+                    alias = seat_map.get("ceo") if isinstance(seat_map, Mapping) else None
+                    target = registry.targets.get(alias) if isinstance(alias, str) else None
+                    binding_snapshot = sol_action_target.RuntimeBindingSnapshot.unknown()
+                    if (
+                        target is not None
+                        and attempt is not None
+                        and runtime_binding_projection is not None
+                    ):
+                        try:
+                            binding = runtime_binding_projection.project_runtime_binding(
+                                runtime, attempt.attempt_id, target
+                            )
+                            binding_snapshot = sol_action_target.RuntimeBindingSnapshot.current(
+                                [binding]
+                            )
+                        except Exception:  # noqa: BLE001 — gather layer never raises
+                            binding_snapshot = sol_action_target.RuntimeBindingSnapshot.unknown()
+                    resolution = sol_action_target.resolve_sol_action_target(
+                        root_job_id=root_job_id,
+                        registry=registry,
+                        binding_snapshot=binding_snapshot,
+                        actor_binding=None,
+                    )
+                    row["action_target_state"] = resolution.state.value
+                    row["action_target_reason"] = resolution.reason.value
+                    row["binding_evidence_state"] = binding_snapshot.state.value
+                    found_evidence = True
+                except Exception:  # noqa: BLE001 — gather layer never raises
+                    pass
+
+            if not found_evidence:
+                # Nothing genuine was found for this card at all: emit no
+                # row.  The projection then reads this card exactly like
+                # any other card with no supplied evidence — UNKNOWN,
+                # non-actionable, historical — rather than this function
+                # claiming a hollow "WAITING_CAPACITY" it has no basis for.
+                continue
+
+            row["responsibility_ref"] = ref
+            row["root_job_id"] = root_job_id
+            if observed_at is not None:
+                row["observed_at"] = observed_at
+            rows.append(row)
+
+        return rows
+    except Exception:  # noqa: BLE001 — gather layer must never raise
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -1463,6 +1720,42 @@ def build_control_room(
         placement_selection_path
     )
 
+    # Review 5103135217 BLOCKER 1: real dispatch evidence is gathered here
+    # (the I/O layer), never inside the pure `compose_control_room`.  The
+    # exact (responsibility_ref, root_job_id) join keys the gather needs to
+    # target aren't known until the Autonomy responsibility cards are
+    # projected — which `compose_control_room` itself does, purely, from
+    # the sources already collected above.  Rather than duplicate that pure
+    # join logic here, this calls the pure composer ONCE with no dispatch
+    # evidence to learn the card list (byte-identical, deterministic,
+    # zero I/O — cheap to redo), runs the bounded real gather against it,
+    # then composes the FINAL document with the real evidence attached.
+    dispatch_evidence: list[dict[str, Any]] | None = None
+    if autonomy_control_room_projection is not None:
+        try:
+            precursor = compose_control_room(
+                inbox=inbox,
+                boot_packet=packet,
+                active_builds=active_builds,
+                agent_os_state=agent_os_state,
+                runtime_jobs=runtime_jobs,
+                bindings=bindings,
+                binding_problems=binding_problems,
+                placement_selection=placement_selection,
+                generated_at=generated_at,
+            )
+            precursor_autonomy = precursor.get("autonomy")
+            if isinstance(precursor_autonomy, Mapping):
+                precursor_cards = precursor_autonomy.get("responsibilities")
+                if isinstance(precursor_cards, Sequence) and not isinstance(
+                    precursor_cards, (str, bytes)
+                ):
+                    dispatch_evidence = _gather_dispatch_evidence(
+                        root, precursor_cards, generated_at
+                    )
+        except Exception:  # noqa: BLE001 — gather layer never raises
+            dispatch_evidence = None
+
     doc = compose_control_room(
         inbox=inbox,
         boot_packet=packet,
@@ -1472,6 +1765,7 @@ def build_control_room(
         bindings=bindings,
         binding_problems=binding_problems,
         placement_selection=placement_selection,
+        dispatch_evidence=dispatch_evidence,
         generated_at=generated_at,
     )
 

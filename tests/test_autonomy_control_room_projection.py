@@ -2896,11 +2896,21 @@ def _drow(
     attempt_state=None,
     effect_state=None,
     watch_child_ref=None,
+    watch_operation=None,
     watch_carrier_ref=None,
     watch_mechanism=None,
     watch_baseline_receipt=None,
+    return_kind=None,
+    return_child_ref=None,
+    return_operation=None,
+    return_carrier_ref=None,
+    return_edge_ref=None,
+    return_observed_at=None,
     sol_decision=None,
     sol_decision_carrier_ref=None,
+    sol_decision_child_ref=None,
+    sol_decision_operation=None,
+    sol_decision_at=None,
 ):
     return {
         "responsibility_ref": ref,
@@ -2913,20 +2923,45 @@ def _drow(
         "attempt_state": attempt_state,
         "effect_state": effect_state,
         "watch_child_ref": watch_child_ref,
+        "watch_operation": watch_operation,
         "watch_carrier_ref": watch_carrier_ref,
         "watch_mechanism": watch_mechanism,
         "watch_baseline_receipt": watch_baseline_receipt,
+        "return_kind": return_kind,
+        "return_child_ref": return_child_ref,
+        "return_operation": return_operation,
+        "return_carrier_ref": return_carrier_ref,
+        "return_edge_ref": return_edge_ref,
+        "return_observed_at": return_observed_at,
         "sol_decision": sol_decision,
         "sol_decision_carrier_ref": sol_decision_carrier_ref,
+        "sol_decision_child_ref": sol_decision_child_ref,
+        "sol_decision_operation": sol_decision_operation,
+        "sol_decision_at": sol_decision_at,
     }
+
+
+#: A fully proven watch + return receipt: the base 5-field watch proof PLUS
+#: Blocker 3's return receipt (closed return_kind, exact child/operation/
+#: carrier identity matching the watch_* fields, an observed edge, and an
+#: observation time) — everything a terminal Attempt needs to legitimately
+#: reach RETURNED.
+_RETURN_OBSERVED_AT = "2026-08-31T12:00:00Z"  # before _DISPATCH_GENERATED_AT
 
 
 def _proven_watch(**overrides):
     values = {
         "watch_child_ref": "child:JOB-AD-CR1A",
+        "watch_operation": "op:AD-CR1A",
         "watch_carrier_ref": "carrier:C0123",
         "watch_mechanism": "cron",
         "watch_baseline_receipt": "receipt:abc123",
+        "return_kind": "RESULT",
+        "return_child_ref": "child:JOB-AD-CR1A",
+        "return_operation": "op:AD-CR1A",
+        "return_carrier_ref": "carrier:C0123",
+        "return_edge_ref": "edge:1",
+        "return_observed_at": _RETURN_OBSERVED_AT,
     }
     values.update(overrides)
     return values
@@ -3027,6 +3062,9 @@ def test_dispatch_continue():
             binding_evidence_state="CURRENT",
             sol_decision="CONTINUE",
             sol_decision_carrier_ref="carrier:C0123",
+            sol_decision_child_ref="child:JOB-AD-CR1A",
+            sol_decision_operation="op:AD-CR1A",
+            sol_decision_at="2026-08-31T13:00:00Z",
             **_proven_watch(),
         )],
     )
@@ -3046,6 +3084,9 @@ def test_dispatch_stop():
             binding_evidence_state="CURRENT",
             sol_decision="STOP",
             sol_decision_carrier_ref="carrier:C0123",
+            sol_decision_child_ref="child:JOB-AD-CR1A",
+            sol_decision_operation="op:AD-CR1A",
+            sol_decision_at="2026-08-31T13:00:00Z",
             **_proven_watch(),
         )],
     )
@@ -3055,7 +3096,8 @@ def test_dispatch_stop():
 
 
 def test_dispatch_continue_from_a_different_carrier_is_not_trusted():
-    """Law 5: 'valid same-carrier' — a decision from a different carrier never resolves RETURNED."""
+    """Law 5 + Blocker 4: 'valid same-carrier' — a decision from a different
+    carrier never resolves RETURNED, even with a valid child/operation/timing."""
     doc = proj.project_dispatch_consumption(
         [_dcard()],
         generated_at=_DISPATCH_GENERATED_AT,
@@ -3066,6 +3108,9 @@ def test_dispatch_continue_from_a_different_carrier_is_not_trusted():
             binding_evidence_state="CURRENT",
             sol_decision="CONTINUE",
             sol_decision_carrier_ref="carrier:SOMEONE_ELSE",
+            sol_decision_child_ref="child:JOB-AD-CR1A",
+            sol_decision_operation="op:AD-CR1A",
+            sol_decision_at="2026-08-31T13:00:00Z",
             **_proven_watch(),
         )],
     )
@@ -3073,8 +3118,96 @@ def test_dispatch_continue_from_a_different_carrier_is_not_trusted():
     assert card["dispatch_state"] == "RETURNED"
 
 
+def test_dispatch_decision_on_wrong_child_is_not_trusted():
+    """Blocker 4: a decision naming the wrong exact child never closes the dialogue."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            sol_decision="STOP",
+            sol_decision_carrier_ref="carrier:C0123",
+            sol_decision_child_ref="child:SOME-OTHER-JOB",
+            sol_decision_operation="op:AD-CR1A",
+            sol_decision_at="2026-08-31T13:00:00Z",
+            **_proven_watch(),
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "RETURNED"
+
+
+def test_dispatch_decision_on_wrong_operation_is_not_trusted():
+    """Blocker 4: a decision naming the wrong exact operation never closes the dialogue."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            sol_decision="CONTINUE",
+            sol_decision_carrier_ref="carrier:C0123",
+            sol_decision_child_ref="child:JOB-AD-CR1A",
+            sol_decision_operation="op:SOME-OTHER-OP",
+            sol_decision_at="2026-08-31T13:00:00Z",
+            **_proven_watch(),
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "RETURNED"
+
+
+def test_dispatch_stale_decision_at_or_before_the_return_is_not_trusted():
+    """Blocker 4: a decision edge must be causally AFTER the return — a
+    decision timestamped at or before the return's own observation time
+    (a stale/replayed decision) never closes the dialogue."""
+    at_or_before = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            sol_decision="CONTINUE",
+            sol_decision_carrier_ref="carrier:C0123",
+            sol_decision_child_ref="child:JOB-AD-CR1A",
+            sol_decision_operation="op:AD-CR1A",
+            sol_decision_at=_RETURN_OBSERVED_AT,  # exactly AT the return, not after
+            **_proven_watch(),
+        )],
+    )
+    card = _dcard_of(at_or_before, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "RETURNED"
+
+    before = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            sol_decision="STOP",
+            sol_decision_carrier_ref="carrier:C0123",
+            sol_decision_child_ref="child:JOB-AD-CR1A",
+            sol_decision_operation="op:AD-CR1A",
+            sol_decision_at="2026-08-30T00:00:00Z",  # before the return
+            **_proven_watch(),
+        )],
+    )
+    card2 = _dcard_of(before, "WS:AD-CR1A")
+    assert card2["dispatch_state"] == "RETURNED"
+
+
 def test_dispatch_missing_watcher_receipt():
-    """Law 6: WATCH_PROVEN requires exact child + carrier + mechanism + baseline receipt."""
+    """Law 6 + Blocker 4: WATCH_PROVEN requires exact child + operation +
+    carrier + mechanism + baseline receipt."""
     doc = proj.project_dispatch_consumption(
         [_dcard()],
         generated_at=_DISPATCH_GENERATED_AT,
@@ -3085,12 +3218,94 @@ def test_dispatch_missing_watcher_receipt():
             binding_evidence_state="CURRENT",
             watch_child_ref="child:JOB-AD-CR1A",
             watch_carrier_ref="carrier:C0123",
-            # watch_mechanism and watch_baseline_receipt are missing
+            # watch_operation, watch_mechanism and watch_baseline_receipt are missing
         )],
     )
     card = _dcard_of(doc, "WS:AD-CR1A")
     assert card["dispatch_state"] == "WATCH_UNPROVEN"
     assert card["watch_proven"] is False
+    assert card["actionable"] is False
+
+
+def test_dispatch_terminal_attempt_with_no_return_receipt_is_never_returned():
+    """Blocker 3: 'Attempt terminality ALONE is never a worker return.' A
+    FAILED/LOST/CANCELLED Attempt with the full base watch proof but NO
+    return receipt (no return_kind/child/operation/carrier/edge/observed_at)
+    must render WATCH_UNPROVEN, never RETURNED — and must never be
+    actionable."""
+    for terminal in ("FAILED", "LOST", "CANCELLED"):
+        doc = proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[_drow(
+                obligation_status="TARGET_ACKNOWLEDGED",
+                attempt_state=terminal,
+                action_target_state="RESOLVED",
+                binding_evidence_state="CURRENT",
+                watch_child_ref="child:JOB-AD-CR1A",
+                watch_operation="op:AD-CR1A",
+                watch_carrier_ref="carrier:C0123",
+                watch_mechanism="cron",
+                watch_baseline_receipt="receipt:abc123",
+                # no return_* fields at all: no genuine Observer receipt.
+            )],
+        )
+        card = _dcard_of(doc, "WS:AD-CR1A")
+        assert card["dispatch_state"] == "WATCH_UNPROVEN", (terminal, card)
+        assert card["dispatch_state"] != "RETURNED"
+        assert card["actionable"] is False
+
+
+def test_dispatch_return_receipt_wrong_child_or_operation_is_not_proven():
+    """Blocker 3: the return receipt must name the EXACT SAME child and
+    operation the watcher was actually bound to — not merely non-blank
+    strings — or the terminal Attempt stays WATCH_UNPROVEN."""
+    wrong_child = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            **_proven_watch(return_child_ref="child:SOME-OTHER-JOB"),
+        )],
+    )
+    assert _dcard_of(wrong_child, "WS:AD-CR1A")["dispatch_state"] == "WATCH_UNPROVEN"
+
+    wrong_operation = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            **_proven_watch(return_operation="op:SOME-OTHER-OP"),
+        )],
+    )
+    assert _dcard_of(wrong_operation, "WS:AD-CR1A")["dispatch_state"] == "WATCH_UNPROVEN"
+
+
+def test_dispatch_return_receipt_unrecognized_kind_is_not_proven():
+    """Blocker 3: return_kind must be from the closed BLOCKED/DECISION_REQUEST/
+    RESULT vocabulary — anything else (including a caller-invented token)
+    fails closed."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            **_proven_watch(return_kind="SUCCESS"),
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    # An out-of-vocabulary return_kind is itself rejected by the Blocker 2
+    # validator (closed vocabulary), so the whole row fails closed.
+    assert card["dispatch_state"] == "UNKNOWN"
     assert card["actionable"] is False
 
 
@@ -3149,7 +3364,9 @@ def test_dispatch_effect_unknown_outranks_optimistic_progress():
 
 
 def test_dispatch_absent_owner_input_renders_unknown_never_a_success():
-    """Absent dispatch_evidence: every card reads UNKNOWN, never a fabricated success stage."""
+    """Absent dispatch_evidence: every card reads UNKNOWN, never a fabricated
+    success stage, and Blocker 5: absent evidence is always historical too
+    (unknown freshness, never the CURRENT-implying default)."""
     doc = proj.project_dispatch_consumption(
         [_dcard(), _dcard(ref="WS:OTHER", root_job_id="JOB-OTHER")],
         generated_at=_DISPATCH_GENERATED_AT,
@@ -3158,12 +3375,14 @@ def test_dispatch_absent_owner_input_renders_unknown_never_a_success():
     for card in doc["cards"]:
         assert card["dispatch_state"] == "UNKNOWN"
         assert card["actionable"] is False
+        assert card["historical"] is True
     assert doc["counts"]["UNKNOWN"] == 2
     assert all(state == 0 for token, state in doc["counts"].items() if token != "UNKNOWN")
 
 
 def test_dispatch_no_exact_join_match_renders_unknown_not_a_fuzzy_pick():
-    """Law 1: exact join only — a mismatched root_job_id never matches by ref alone."""
+    """Law 1: exact join only — a mismatched root_job_id never matches by ref
+    alone.  Blocker 5: an unmatched card is always historical too."""
     doc = proj.project_dispatch_consumption(
         [_dcard(root_job_id="JOB-REAL")],
         generated_at=_DISPATCH_GENERATED_AT,
@@ -3171,6 +3390,145 @@ def test_dispatch_no_exact_join_match_renders_unknown_not_a_fuzzy_pick():
     )
     card = _dcard_of(doc, "WS:AD-CR1A")
     assert card["dispatch_state"] == "UNKNOWN"
+    assert card["historical"] is True
+    assert card["actionable"] is False
+
+
+def test_dispatch_ambiguous_evidence_is_unknown_and_historical():
+    """Blocker 5: two rows sharing the same exact (responsibility_ref,
+    root_job_id) join key must render UNKNOWN, non-actionable, AND
+    historical — never resolved by recency or list order."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[
+            _drow(obligation_status="ACCEPTED"),
+            _drow(obligation_status="TARGET_ACKNOWLEDGED"),
+        ],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "UNKNOWN"
+    assert card["reason"] == "ambiguous_dispatch_evidence"
+    assert card["historical"] is True
+    assert card["actionable"] is False
+
+
+def test_dispatch_pending_retryable_is_unresolved_never_progress():
+    """TESTS: 'PENDING_RETRYABLE is unresolved not progress.'  It must never
+    render as a delivered/started/returned stage."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(obligation_status="PENDING_RETRYABLE")],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] not in (
+        "DELIVERY_SENT", "PICKUP_ACKNOWLEDGED", "STARTED", "RETURNED",
+        "CONTINUED", "STOPPED",
+    )
+    assert card["dispatch_state"] in ("WAITING_CAPACITY", "RECEIVER_SELECTED")
+    assert card["actionable"] is False
+
+
+# ---------------------------------------------------------------------------
+# Blocker 2: closed, bounded, secret-safe evidence validator.
+# ---------------------------------------------------------------------------
+
+def test_dispatch_evidence_non_mapping_row_is_ignored_not_crashed():
+    """A non-mapping row (string/list/int/None) cannot be attributed to any
+    card and must never raise — it degrades exactly like absent evidence."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=["not-a-mapping", 42, ["also", "not"], None],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "UNKNOWN"
+    assert card["historical"] is True
+    assert card["actionable"] is False
+
+
+def test_dispatch_evidence_unknown_key_fails_closed():
+    """Blocker 2: an unrecognized key on an otherwise-valid row fails the
+    WHOLE row closed to the fixed rejection reason — never silently ignored,
+    never echoed."""
+    row = _drow(obligation_status="ACCEPTED")
+    row["not_a_real_field"] = "smuggled-value"
+    doc = proj.project_dispatch_consumption(
+        [_dcard()], generated_at=_DISPATCH_GENERATED_AT, dispatch_evidence=[row],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "UNKNOWN"
+    assert card["reason"] == "dispatch_evidence_rejected"
+    assert card["evidence"] is None
+    assert card["historical"] is True
+    dumped = json.dumps(doc)
+    assert "smuggled-value" not in dumped
+    assert "not_a_real_field" not in dumped
+
+
+def test_dispatch_evidence_secret_shaped_value_is_rejected_and_never_echoed():
+    """Blocker 2: a path/secret-shaped value fails closed and never appears
+    in ANY output string, including the rejection reason."""
+    row = _drow(
+        obligation_status="ACCEPTED",
+        watch_baseline_receipt="/Users/chriswong/.ssh/id_rsa",
+    )
+    doc = proj.project_dispatch_consumption(
+        [_dcard()], generated_at=_DISPATCH_GENERATED_AT, dispatch_evidence=[row],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "UNKNOWN"
+    assert card["reason"] == "dispatch_evidence_rejected"
+    assert card["evidence"] is None
+    dumped = json.dumps(doc)
+    assert "id_rsa" not in dumped
+    assert ".ssh" not in dumped
+
+
+def test_dispatch_evidence_oversized_value_is_rejected():
+    """Blocker 2: a value beyond the bounded per-field byte ceiling fails
+    closed rather than being silently truncated or accepted."""
+    row = _drow(obligation_status="ACCEPTED", watch_mechanism="x" * 10_000)
+    doc = proj.project_dispatch_consumption(
+        [_dcard()], generated_at=_DISPATCH_GENERATED_AT, dispatch_evidence=[row],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "UNKNOWN"
+    assert card["reason"] == "dispatch_evidence_rejected"
+    assert card["evidence"] is None
+
+
+def test_dispatch_evidence_non_serializable_value_is_rejected():
+    """Blocker 2: a non-string value on a string-only field (a nested
+    mapping/list/float/bool — never JSON-serializable as this schema
+    expects) fails closed rather than being copied through verbatim."""
+    for bad_value in ({"nested": "object"}, ["a", "list"], 3.14, True, 12345):
+        row = _drow(obligation_status="ACCEPTED")
+        row["watch_mechanism"] = bad_value
+        doc = proj.project_dispatch_consumption(
+            [_dcard()], generated_at=_DISPATCH_GENERATED_AT, dispatch_evidence=[row],
+        )
+        card = _dcard_of(doc, "WS:AD-CR1A")
+        assert card["dispatch_state"] == "UNKNOWN", bad_value
+        assert card["reason"] == "dispatch_evidence_rejected", bad_value
+        assert card["evidence"] is None, bad_value
+
+
+def test_dispatch_evidence_out_of_vocabulary_token_is_rejected_and_never_echoed():
+    """Blocker 2: a field with a closed vocabulary (e.g. obligation_status)
+    rejects any value outside that vocabulary, and the bad token itself
+    never reaches any output string (the reason is fixed, not built from
+    the caller's value)."""
+    row = _drow(obligation_status="NOT_A_REAL_STATUS_TOKEN__INJECTED")
+    doc = proj.project_dispatch_consumption(
+        [_dcard()], generated_at=_DISPATCH_GENERATED_AT, dispatch_evidence=[row],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "UNKNOWN"
+    assert card["reason"] == "dispatch_evidence_rejected"
+    dumped = json.dumps(doc)
+    assert "NOT_A_REAL_STATUS_TOKEN__INJECTED" not in dumped
 
 
 def test_dispatch_waiting_capacity_and_receiver_selected_happy_path():

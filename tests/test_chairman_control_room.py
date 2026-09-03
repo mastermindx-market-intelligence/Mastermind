@@ -2286,3 +2286,152 @@ def test_cr1a_compositor_attaches_dispatch_consumption_to_every_card(
 
     # Law 10: placement_selection stays selection-only and is not merged in.
     assert "dispatch" not in (doc["placement_selection"] or {})
+
+
+# ---------------------------------------------------------------------------
+# Blocker 1 (review 5103135217) — the compositor is no longer dark: real
+# dispatch evidence now flows from `build_control_room`'s I/O gather layer
+# through `compose_control_room`'s new `dispatch_evidence` parameter.
+# ---------------------------------------------------------------------------
+
+def test_compose_control_room_threads_real_dispatch_evidence_through(
+    boot_packet, inbox, active_builds, bindings,
+):
+    """`compose_control_room` now accepts and joins `dispatch_evidence` —
+    proving the parameter actually reaches `project_dispatch_consumption`,
+    not just that the hardcoded `None` path (tested above) still works."""
+    agent_os_state = {
+        "generated_at": "2026-09-01T00:00:00Z",
+        "workstreams": [
+            {
+                "key": "WS:CR1A-DISPATCH-WIRING",
+                "title": "Dispatch wiring probe",
+                "status": "active",
+                "owner": "chairman",
+            }
+        ],
+    }
+    doc = _compose(
+        boot_packet, inbox, active_builds, bindings, agent_os_state=agent_os_state,
+    )
+    cards = doc["autonomy"]["responsibilities"]
+    assert cards
+    card = cards[0]
+    evidence_row = {
+        "responsibility_ref": card["responsibility_ref"],
+        "root_job_id": card["root_job_id"],
+        "observed_at": "2026-08-21T00:10:00Z",  # == this call's generated_at
+        "obligation_status": "ACCEPTED",
+    }
+    doc2 = _compose(
+        boot_packet, inbox, active_builds, bindings, agent_os_state=agent_os_state,
+        dispatch_evidence=[evidence_row],
+    )
+    dispatch = doc2["autonomy"]["responsibilities"][0]["dispatch"]
+    assert dispatch["dispatch_state"] == "DELIVERY_SENT"
+    assert dispatch["reason"] == "obligation_status:ACCEPTED"
+    assert dispatch["historical"] is False
+
+
+def test_gather_dispatch_evidence_reads_real_attempt_state_without_raising(tmp_path):
+    """`_gather_dispatch_evidence` against a REAL Runtime: a claimed Attempt
+    for a job must surface as `attempt_state` on the matching card's row,
+    entirely via public Runtime APIs (`runtime.attempts.list_attempts`),
+    never raising, and never guessing a binding it cannot resolve."""
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-a", provider="openai-codex", account_label="account-a",
+        worker_type="fixture",
+    )
+    job = runtime.jobs.create_job("dispatch-evidence probe")
+    lease = runtime.attempts.claim_job(job.job_id)
+    assert lease is not None
+
+    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": job.job_id}]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["responsibility_ref"] == "WS:PROBE"
+    assert row["root_job_id"] == job.job_id
+    assert row["attempt_state"] == "CLAIMED"
+    # No session-target registry entry exists for this ad-hoc job: the
+    # binding read honestly degrades rather than guessing a resolved one.
+    assert row["action_target_state"] == "UNKNOWN"
+    assert row["binding_evidence_state"] == "UNKNOWN"
+    # No canonical Dialogue/Observer receipt store exists yet (Blocker 1's
+    # documented gap): no watch_*/return_* field is ever fabricated.
+    assert "watch_child_ref" not in row
+    assert "return_kind" not in row
+
+
+def test_gather_dispatch_evidence_never_raises_on_a_malformed_card(tmp_path):
+    """Bounded/defensive: a non-mapping card, or one with no/blank
+    `root_job_id`, must never raise — it is simply skipped, never emitted
+    as a hollow row."""
+    ccr.executive_runtime.Runtime.at(tmp_path)  # create the DB, unused otherwise
+    cards = [
+        {"responsibility_ref": "WS:NO-ROOT"},
+        "not-a-mapping",
+        {"responsibility_ref": "WS:BLANK-ROOT", "root_job_id": ""},
+        None,
+        42,
+    ]
+    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+    assert rows == []
+
+
+def test_gather_dispatch_evidence_absent_runtime_db_never_raises(tmp_path):
+    """No Runtime DB at all (the common case for most checkouts): the
+    gather must degrade to an empty list, never raise, never create
+    anything (mirrors `_read_runtime_jobs`'s own existence-check-before-
+    construction contract)."""
+    before = _tree_snapshot(tmp_path)
+    rows = ccr._gather_dispatch_evidence(
+        tmp_path, [{"responsibility_ref": "WS:X", "root_job_id": "JOB-001"}],
+        "2026-09-03T00:00:00Z",
+    )
+    after = _tree_snapshot(tmp_path)
+    assert rows == []
+    assert before == after
+
+
+def test_build_control_room_wires_dispatch_evidence_without_raising(
+    tmp_path, monkeypatch, boot_packet, inbox, active_builds, agent_os_state, bindings,
+):
+    """End-to-end through the real `build_control_room`: no runtime DB
+    present, so the gather must degrade cleanly and the whole call must
+    still compose a complete document — never raise, never write."""
+    macro_root = tmp_path / "macro"
+    (macro_root / "data" / "governance").mkdir(parents=True)
+    (macro_root / "data" / "governance" / "project_active_builds.json").write_text(
+        json.dumps(active_builds), encoding="utf-8"
+    )
+    (macro_root / "data" / "governance" / "agent_os_state.json").write_text(
+        json.dumps(agent_os_state), encoding="utf-8"
+    )
+    bindings_path = tmp_path / "bindings" / "surface_bindings.json"
+    sb.save_bindings(bindings, path=bindings_path)
+
+    fixture_packet = copy.deepcopy(boot_packet)
+    fixture_packet["macro"]["root"] = str(macro_root)
+    fixture_inbox = copy.deepcopy(inbox)
+    fixture_inbox["grounding"]["macro"]["root"] = str(macro_root)
+
+    monkeypatch.setattr(ccr.ceo_boot_packet, "build_packet", lambda **kwargs: fixture_packet)
+    monkeypatch.setattr(ccr.executive_inbox, "build_inbox", lambda **kwargs: fixture_inbox)
+
+    before = _tree_snapshot(tmp_path)
+    doc = ccr.build_control_room(
+        repo_root=tmp_path, now="2026-08-21T00:10:00Z", bindings_path=bindings_path,
+    )
+    after = _tree_snapshot(tmp_path)
+
+    assert doc["schema"] == ccr.SCHEMA
+    assert before == after
+    autonomy = doc["autonomy"]
+    if isinstance(autonomy, dict):
+        for card in autonomy["responsibilities"]:
+            dispatch = card["dispatch"]
+            assert dispatch["dispatch_state"] in ccr.autonomy_control_room_projection.DISPATCH_STATES
+            assert dispatch["actionable"] is False  # no runtime DB -> no live evidence
