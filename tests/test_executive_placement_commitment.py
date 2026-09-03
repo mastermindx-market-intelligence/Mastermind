@@ -22,6 +22,66 @@ from control_plane.executive_steward import (
 
 _CREATED_COMMAND = "CEO-ROOT-1"
 _AUTHORITY_FINGERPRINT = "a" * 64
+_AGGREGATION_HANDOFF_COMMAND = "coo-cycle:job-root-1:aggregation-handoff:1"
+_AGGREGATION_HANDOFF_DIGEST = "b" * 64
+_PLAN_ATTEMPT_ID = "attempt-plan-1"
+_PLAN_DIGEST = "c" * 64
+_AGGREGATION_HANDOFF_KEYS = {
+    "aggregation_handoff_command_id",
+    "aggregation_handoff_digest",
+    "plan_attempt_id",
+    "plan_digest",
+}
+_STABLE_SEMANTIC_KEYS = {
+    "schema_version",
+    "root_job_id",
+    *_AGGREGATION_HANDOFF_KEYS,
+    "responsibility_ref",
+    "selection_document_digest",
+    "selection_evidence_digest",
+    "selected_worker_id",
+    "selected_quota_class",
+    "committed_placement_snapshot_digest",
+}
+_PLAN_WIRE_KEYS = {
+    *_STABLE_SEMANTIC_KEYS,
+    "expected_job_revision",
+    "commitment_command_id",
+    "command_fingerprint",
+}
+_EVENT_EVIDENCE_KEYS = {
+    "root_job_id",
+    "expected_job_revision",
+    *_AGGREGATION_HANDOFF_KEYS,
+    "responsibility_ref",
+    "responsibility_job_created_command_id",
+    "responsibility_authority_fingerprint",
+    "selection_document_digest",
+    "selection_evidence_digest",
+    "selected_worker_id",
+    "selected_quota_class",
+    "committed_attempt_id",
+    "committed_placement_snapshot_digest",
+    "commitment_command_id",
+    "command_fingerprint",
+}
+_EVENT_KEYS = {
+    "schema_version",
+    *_EVENT_EVIDENCE_KEYS,
+    "commitment_evidence_digest",
+}
+_FORBIDDEN_EVENT_FIELDS = {
+    "runtime_binding_id",
+    "runtime_binding_generation",
+    "provider_session_id",
+    "native_handle",
+    "account_label",
+    "provider",
+    "model",
+    "actor",
+    "actor_binding",
+    "slack_principal",
+}
 
 
 def _source(owner: SourceOwner, ref: str) -> SourceRef:
@@ -75,10 +135,31 @@ def _selection(*, worker_id: str = "worker-1") -> dict:
     return decision.to_dict()
 
 
-def _plan(*, selection: dict | None = None, revision: int = 0) -> c2.PlacementCommitmentPlan:
+def _handoff(**changes: object) -> dict[str, object]:
+    value: dict[str, object] = {
+        "aggregation_handoff_command_id": _AGGREGATION_HANDOFF_COMMAND,
+        "aggregation_handoff_digest": _AGGREGATION_HANDOFF_DIGEST,
+        "plan_attempt_id": _PLAN_ATTEMPT_ID,
+        "plan_digest": _PLAN_DIGEST,
+    }
+    value.update(changes)
+    return value
+
+
+def _plan(
+    *,
+    selection: dict | None = None,
+    revision: int = 0,
+    validated_aggregation_handoff: object | None = None,
+) -> c2.PlacementCommitmentPlan:
     return c2.build_commitment_plan(
         root_job_id="job-root-1",
         expected_job_revision=revision,
+        validated_aggregation_handoff=(
+            _handoff()
+            if validated_aggregation_handoff is None
+            else validated_aggregation_handoff
+        ),
         placement_selection=selection or _selection(),
     )
 
@@ -92,13 +173,28 @@ def _event(plan: c2.PlacementCommitmentPlan | None = None) -> dict:
     )
 
 
-def _validate(payload: dict, *, plan: c2.PlacementCommitmentPlan | None = None, attempt_id: str = "attempt-1") -> dict:
+def _validate(
+    payload: dict,
+    *,
+    plan: c2.PlacementCommitmentPlan | None = None,
+    attempt_id: str = "attempt-1",
+    expected_aggregation_handoff_command_id: str = _AGGREGATION_HANDOFF_COMMAND,
+    expected_aggregation_handoff_digest: str = _AGGREGATION_HANDOFF_DIGEST,
+    expected_plan_attempt_id: str = _PLAN_ATTEMPT_ID,
+    expected_plan_digest: str = _PLAN_DIGEST,
+) -> dict:
     return c2.validate_commitment_event_payload(
         payload,
         plan=plan or _plan(),
         expected_attempt_id=attempt_id,
         expected_responsibility_job_created_command_id=_CREATED_COMMAND,
         expected_responsibility_authority_fingerprint=_AUTHORITY_FINGERPRINT,
+        expected_aggregation_handoff_command_id=(
+            expected_aggregation_handoff_command_id
+        ),
+        expected_aggregation_handoff_digest=expected_aggregation_handoff_digest,
+        expected_plan_attempt_id=expected_plan_attempt_id,
+        expected_plan_digest=expected_plan_digest,
     )
 
 
@@ -110,29 +206,28 @@ def test_selected_c1_document_derives_one_deterministic_commitment_plan() -> Non
     assert first == second
     assert first.schema_version == c2.COMMAND_SCHEMA
     assert first.root_job_id == "job-root-1"
+    assert first.aggregation_handoff_command_id == _AGGREGATION_HANDOFF_COMMAND
+    assert first.aggregation_handoff_digest == _AGGREGATION_HANDOFF_DIGEST
+    assert first.plan_attempt_id == _PLAN_ATTEMPT_ID
+    assert first.plan_digest == _PLAN_DIGEST
     assert first.responsibility_ref == "WS:CAP-C2"
     assert first.selected_worker_id == "worker-1"
     assert first.selected_quota_class == "standard"
+    assert first.command_fingerprint == digest(first.command_semantics())
     assert first.commitment_command_id == f"CAP-C2-{first.command_fingerprint[:32]}"
-    assert set(first.to_dict()) == {
-        "schema_version",
-        "root_job_id",
-        "expected_job_revision",
-        "responsibility_ref",
-        "selection_document_digest",
-        "selection_evidence_digest",
-        "selected_worker_id",
-        "selected_quota_class",
-        "committed_placement_snapshot_digest",
-        "commitment_command_id",
-        "command_fingerprint",
-    }
+    assert set(first.command_semantics()) == _STABLE_SEMANTIC_KEYS
+    assert "expected_job_revision" not in first.command_semantics()
+    assert set(first.to_dict()) == _PLAN_WIRE_KEYS
 
 
 def test_mapping_order_does_not_change_commitment_identity() -> None:
     selection = _selection()
     reordered = dict(reversed(list(selection.items())))
-    assert _plan(selection=selection) == _plan(selection=reordered)
+    reordered_handoff = dict(reversed(list(_handoff().items())))
+    assert _plan(selection=selection) == _plan(
+        selection=reordered,
+        validated_aggregation_handoff=reordered_handoff,
+    )
 
 
 def test_plan_recomputes_through_the_protected_selector_exactly_once(
@@ -168,6 +263,145 @@ def test_expected_revision_is_a_precondition_not_a_new_commitment_identity() -> 
     assert moved_revision.expected_job_revision == 1
     assert moved_revision.commitment_command_id == original.commitment_command_id
     assert moved_revision.command_fingerprint == original.command_fingerprint
+
+
+@pytest.mark.parametrize(
+    ("handoff_field", "expectation_field", "changed_value"),
+    (
+        (
+            "aggregation_handoff_digest",
+            "expected_aggregation_handoff_digest",
+            "d" * 64,
+        ),
+        ("plan_attempt_id", "expected_plan_attempt_id", "attempt-plan-2"),
+        ("plan_digest", "expected_plan_digest", "e" * 64),
+    ),
+)
+def test_changed_handoff_or_plan_fact_changes_the_command_and_replay(
+    handoff_field: str,
+    expectation_field: str,
+    changed_value: str,
+) -> None:
+    accepted_plan = _plan()
+    changed_plan = _plan(
+        validated_aggregation_handoff=_handoff(**{handoff_field: changed_value})
+    )
+
+    assert changed_plan.commitment_command_id != accepted_plan.commitment_command_id
+    assert changed_plan.command_fingerprint != accepted_plan.command_fingerprint
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(
+            _event(accepted_plan),
+            plan=changed_plan,
+            **{expectation_field: changed_value},
+        )
+    assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
+
+
+@pytest.mark.parametrize(
+    "changed_command",
+    (
+        "coo-cycle:job-root-1:aggregation-handoff:2",
+        "coo-cycle:foreign-root:aggregation-handoff:1",
+    ),
+)
+def test_handoff_command_must_be_the_exact_root_command(changed_command: str) -> None:
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _plan(
+            validated_aggregation_handoff=_handoff(
+                aggregation_handoff_command_id=changed_command
+            )
+        )
+    assert excinfo.value.code == "AGGREGATION_HANDOFF_COMMAND_ID_MISMATCH"
+
+
+@pytest.mark.parametrize("missing_field", tuple(sorted(_AGGREGATION_HANDOFF_KEYS)))
+def test_trusted_aggregation_handoff_refuses_each_missing_field(
+    missing_field: str,
+) -> None:
+    handoff = _handoff()
+    del handoff[missing_field]
+
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _plan(validated_aggregation_handoff=handoff)
+    assert excinfo.value.code == "AGGREGATION_HANDOFF_SHAPE_INVALID"
+
+
+@pytest.mark.parametrize("extra_field", ("unexpected", "runtime_binding_id"))
+def test_trusted_aggregation_handoff_refuses_extra_fields(extra_field: str) -> None:
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _plan(
+            validated_aggregation_handoff=_handoff(
+                **{extra_field: "must-not-cross-the-adapter"}
+            )
+        )
+    assert excinfo.value.code == "AGGREGATION_HANDOFF_SHAPE_INVALID"
+
+
+def test_trusted_aggregation_handoff_must_be_a_mapping() -> None:
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _plan(validated_aggregation_handoff="historical-event-is-not-an-adapter")
+    assert excinfo.value.code == "AGGREGATION_HANDOFF_SHAPE_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "code"),
+    (
+        (
+            "aggregation_handoff_command_id",
+            None,
+            "AGGREGATION_HANDOFF_COMMAND_ID_INVALID",
+        ),
+        (
+            "aggregation_handoff_digest",
+            "not-a-digest",
+            "AGGREGATION_HANDOFF_DIGEST_INVALID",
+        ),
+        ("plan_attempt_id", "../not-an-attempt", "PLAN_ATTEMPT_ID_INVALID"),
+        ("plan_digest", "not-a-digest", "PLAN_DIGEST_INVALID"),
+    ),
+)
+def test_trusted_aggregation_identity_is_shape_validated(
+    field: str,
+    value: object,
+    code: str,
+) -> None:
+    inputs: dict[str, object] = {
+        **_handoff(),
+    }
+    inputs[field] = value
+
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        c2.build_commitment_plan(
+            root_job_id="job-root-1",
+            expected_job_revision=0,
+            placement_selection=_selection(),
+            validated_aggregation_handoff=inputs,
+        )
+    assert excinfo.value.code == code
+
+
+@pytest.mark.parametrize(
+    ("field", "changed_value", "expected_code"),
+    (
+        (
+            "aggregation_handoff_command_id",
+            "coo-cycle:job-root-1:aggregation-handoff:2",
+            "AGGREGATION_HANDOFF_COMMAND_ID_MISMATCH",
+        ),
+        ("aggregation_handoff_digest", "d" * 64, "COMMAND_FINGERPRINT_MISMATCH"),
+        ("plan_attempt_id", "attempt-plan-2", "COMMAND_FINGERPRINT_MISMATCH"),
+        ("plan_digest", "e" * 64, "COMMAND_FINGERPRINT_MISMATCH"),
+    ),
+)
+def test_frozen_plan_rejects_each_unbound_aggregation_identity_mutation(
+    field: str,
+    changed_value: str,
+    expected_code: str,
+) -> None:
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        dataclasses.replace(_plan(), **{field: changed_value})
+    assert excinfo.value.code == expected_code
 
 
 def test_plan_owns_the_exact_canonical_snapshot_for_future_persistence() -> None:
@@ -223,13 +457,21 @@ def test_c1_wire_must_remain_explicitly_non_committing() -> None:
 def test_event_payload_is_closed_secret_safe_and_contains_no_runtime_binding() -> None:
     payload = _event()
 
+    assert c2.FORBIDDEN_EVENT_KEYS == _FORBIDDEN_EVENT_FIELDS
+    assert set(payload) == _EVENT_KEYS
     assert payload["schema_version"] == c2.COMMITMENT_SCHEMA
     assert payload["root_job_id"] == "job-root-1"
     assert payload["expected_job_revision"] == 0
+    assert payload["aggregation_handoff_command_id"] == _AGGREGATION_HANDOFF_COMMAND
+    assert payload["aggregation_handoff_digest"] == _AGGREGATION_HANDOFF_DIGEST
+    assert payload["plan_attempt_id"] == _PLAN_ATTEMPT_ID
+    assert payload["plan_digest"] == _PLAN_DIGEST
     assert payload["selected_worker_id"] == "worker-1"
     assert payload["selected_quota_class"] == "standard"
     assert payload["committed_attempt_id"] == "attempt-1"
-    assert not (set(payload) & c2.FORBIDDEN_EVENT_KEYS)
+    evidence = {key: payload[key] for key in _EVENT_EVIDENCE_KEYS}
+    assert payload["commitment_evidence_digest"] == digest(evidence)
+    assert not (set(payload) & _FORBIDDEN_EVENT_FIELDS)
     assert "codex-ceo-a" not in json.dumps(payload, sort_keys=True)
     assert "provider_session" not in json.dumps(payload, sort_keys=True)
 
@@ -280,6 +522,12 @@ def test_event_replay_revalidates_current_plan_attempt_and_root_authority() -> N
             expected_attempt_id="attempt-1",
             expected_responsibility_job_created_command_id="CEO-ROOT-2",
             expected_responsibility_authority_fingerprint=_AUTHORITY_FINGERPRINT,
+            expected_aggregation_handoff_command_id=(
+                _AGGREGATION_HANDOFF_COMMAND
+            ),
+            expected_aggregation_handoff_digest=_AGGREGATION_HANDOFF_DIGEST,
+            expected_plan_attempt_id=_PLAN_ATTEMPT_ID,
+            expected_plan_digest=_PLAN_DIGEST,
         )
     assert created_error.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
 
@@ -290,8 +538,114 @@ def test_event_replay_revalidates_current_plan_attempt_and_root_authority() -> N
             expected_attempt_id="attempt-1",
             expected_responsibility_job_created_command_id=_CREATED_COMMAND,
             expected_responsibility_authority_fingerprint="b" * 64,
+            expected_aggregation_handoff_command_id=(
+                _AGGREGATION_HANDOFF_COMMAND
+            ),
+            expected_aggregation_handoff_digest=_AGGREGATION_HANDOFF_DIGEST,
+            expected_plan_attempt_id=_PLAN_ATTEMPT_ID,
+            expected_plan_digest=_PLAN_DIGEST,
         )
     assert authority_error.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
+
+
+@pytest.mark.parametrize(
+    ("expectation_field", "changed_value"),
+    (
+        (
+            "expected_aggregation_handoff_command_id",
+            "coo-cycle:job-root-1:aggregation-handoff:2",
+        ),
+        ("expected_aggregation_handoff_digest", "d" * 64),
+        ("expected_plan_attempt_id", "attempt-plan-2"),
+        ("expected_plan_digest", "e" * 64),
+    ),
+)
+def test_replay_requires_each_current_runtime_aggregation_expectation(
+    expectation_field: str,
+    changed_value: str,
+) -> None:
+    payload = _event()
+
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(payload, **{expectation_field: changed_value})
+    assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
+
+
+@pytest.mark.parametrize(
+    ("expectation_field", "invalid_value", "code"),
+    (
+        (
+            "expected_aggregation_handoff_command_id",
+            None,
+            "AGGREGATION_HANDOFF_COMMAND_ID_INVALID",
+        ),
+        (
+            "expected_aggregation_handoff_digest",
+            "not-a-digest",
+            "AGGREGATION_HANDOFF_DIGEST_INVALID",
+        ),
+        ("expected_plan_attempt_id", "../invalid", "PLAN_ATTEMPT_ID_INVALID"),
+        ("expected_plan_digest", "not-a-digest", "PLAN_DIGEST_INVALID"),
+    ),
+)
+def test_replay_shape_validates_each_current_aggregation_expectation(
+    expectation_field: str,
+    invalid_value: object,
+    code: str,
+) -> None:
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(_event(), **{expectation_field: invalid_value})
+    assert excinfo.value.code == code
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "aggregation_handoff_command_id",
+        "aggregation_handoff_digest",
+        "plan_attempt_id",
+        "plan_digest",
+    ),
+)
+def test_event_refuses_each_missing_aggregation_identity_field(field: str) -> None:
+    payload = _event()
+    del payload[field]
+
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(payload)
+    assert excinfo.value.code == "COMMITMENT_EVENT_SHAPE_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("field", "changed_value"),
+    (
+        (
+            "aggregation_handoff_command_id",
+            "coo-cycle:job-root-1:aggregation-handoff:2",
+        ),
+        ("aggregation_handoff_digest", "d" * 64),
+        ("plan_attempt_id", "attempt-plan-2"),
+        ("plan_digest", "e" * 64),
+    ),
+)
+def test_event_aggregation_identity_cannot_self_authenticate_after_digest_rewrite(
+    field: str,
+    changed_value: str,
+) -> None:
+    forged = _event()
+    forged[field] = changed_value
+    semantics = {key: forged[key] for key in _STABLE_SEMANTIC_KEYS}
+    semantics["schema_version"] = c2.COMMAND_SCHEMA
+    forged["command_fingerprint"] = digest(semantics)
+    forged["commitment_command_id"] = (
+        f"CAP-C2-{forged['command_fingerprint'][:32]}"
+    )
+    evidence = {key: forged[key] for key in _EVENT_EVIDENCE_KEYS}
+    forged["commitment_evidence_digest"] = digest(evidence)
+
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(forged)
+    assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
 
 
 def test_changed_replay_payload_conflicts_instead_of_becoming_a_second_event() -> None:
@@ -327,14 +681,16 @@ def test_historical_event_cannot_self_authenticate_changed_root_authority() -> N
     assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
 
 
-def test_event_evidence_digest_binds_every_receipt_fact() -> None:
-    plan = _plan()
-    payload = _event(plan)
-    tampered = dict(payload)
-    tampered["responsibility_job_created_command_id"] = "CEO-ROOT-2"
+@pytest.mark.parametrize("field", tuple(sorted(_FORBIDDEN_EVENT_FIELDS)))
+def test_event_refuses_each_forbidden_field_before_generic_shape_failure(
+    field: str,
+) -> None:
+    payload = _event()
+    payload[field] = "must-not-enter-the-receipt"
+
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
-        _validate(tampered, plan=plan)
-    assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
+        _validate(payload)
+    assert excinfo.value.code == "COMMITMENT_EVENT_FORBIDDEN_FIELD"
 
 
 def test_plan_is_frozen_and_contains_no_original_mutable_selection() -> None:
@@ -347,11 +703,12 @@ def test_plan_is_frozen_and_contains_no_original_mutable_selection() -> None:
         plan.selected_worker_id = "worker-2"  # type: ignore[misc]
 
 
-def test_caller_cannot_supply_command_id_or_attempt_to_plan_builder() -> None:
+def test_builder_accepts_one_closed_handoff_not_loose_identity_fields() -> None:
     parameters = inspect.signature(c2.build_commitment_plan).parameters
     assert set(parameters) == {
         "root_job_id",
         "expected_job_revision",
+        "validated_aggregation_handoff",
         "placement_selection",
     }
     assert "command_id" not in parameters
@@ -367,6 +724,10 @@ def test_replay_validator_requires_current_runtime_authority_arguments() -> None
         "expected_attempt_id",
         "expected_responsibility_job_created_command_id",
         "expected_responsibility_authority_fingerprint",
+        "expected_aggregation_handoff_command_id",
+        "expected_aggregation_handoff_digest",
+        "expected_plan_attempt_id",
+        "expected_plan_digest",
     }
     for name in parameters:
         assert parameters[name].default is inspect.Parameter.empty
@@ -378,6 +739,7 @@ def test_invalid_identity_and_revision_fail_with_fixed_codes() -> None:
         c2.build_commitment_plan(
             root_job_id="../secret",
             expected_job_revision=0,
+            validated_aggregation_handoff=_handoff(),
             placement_selection=selection,
         )
     assert root_error.value.code == "ROOT_JOB_ID_INVALID"
@@ -386,6 +748,7 @@ def test_invalid_identity_and_revision_fail_with_fixed_codes() -> None:
         c2.build_commitment_plan(
             root_job_id="job-root-1",
             expected_job_revision=True,
+            validated_aggregation_handoff=_handoff(),
             placement_selection=selection,
         )
     assert revision_error.value.code == "EXPECTED_JOB_REVISION_INVALID"

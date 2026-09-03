@@ -1,10 +1,11 @@
 """Deterministic Capacity-C2 placement-commitment contract.
 
-This module is pure.  It validates one protected Capacity-C1 selection,
-derives the one root-bound commitment command, and builds/validates the
-closed Event payload that the existing Executive Runtime transaction owns.
-It performs no I/O and owns no Job, Attempt, Worker, quota, lease, Event,
-RuntimeBinding, provider session, queue, retry plane, or persistence.
+This module is pure.  It binds one Runtime-validated aggregation handoff to
+one protected Capacity-C1 selection, derives the root-bound commitment
+command, and builds/validates the closed Event payload that the existing
+Executive Runtime transaction owns.  It performs no I/O and owns no Job,
+Attempt, Worker, quota, lease, Event, RuntimeBinding, provider session, queue,
+retry plane, or persistence.
 """
 from __future__ import annotations
 
@@ -30,11 +31,23 @@ _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _COMMAND_ID_RE = re.compile(r"^CAP-C2-[0-9a-f]{32}$")
 
+_AGGREGATION_HANDOFF_KEYS = frozenset(
+    {
+        "aggregation_handoff_command_id",
+        "aggregation_handoff_digest",
+        "plan_attempt_id",
+        "plan_digest",
+    }
+)
 _PLAN_KEYS = frozenset(
     {
         "schema_version",
         "root_job_id",
         "expected_job_revision",
+        "aggregation_handoff_command_id",
+        "aggregation_handoff_digest",
+        "plan_attempt_id",
+        "plan_digest",
         "responsibility_ref",
         "selection_document_digest",
         "selection_evidence_digest",
@@ -50,6 +63,10 @@ _EVENT_KEYS = frozenset(
         "schema_version",
         "root_job_id",
         "expected_job_revision",
+        "aggregation_handoff_command_id",
+        "aggregation_handoff_digest",
+        "plan_attempt_id",
+        "plan_digest",
         "responsibility_ref",
         "responsibility_job_created_command_id",
         "responsibility_authority_fingerprint",
@@ -117,6 +134,47 @@ def _canonical_selection(value: Any) -> dict[str, Any]:
     return selection
 
 
+def _canonical_aggregation_handoff(
+    value: Any,
+    *,
+    root_job_id: str,
+) -> dict[str, str]:
+    """Accept only the closed projection of a Runtime-validated handoff.
+
+    The future Runtime/C2 adapter owns the call to
+    ``_validated_aggregation_handoff()`` and maps its returned ``command_id``
+    and ``handoff_digest`` into these C2-specific names.  This pure module
+    rejects generic Runtime or caller-owned material crossing that boundary.
+    """
+
+    if not isinstance(value, Mapping):
+        raise PlacementCommitmentError("AGGREGATION_HANDOFF_SHAPE_INVALID")
+    handoff = dict(value)
+    if set(handoff) != _AGGREGATION_HANDOFF_KEYS:
+        raise PlacementCommitmentError("AGGREGATION_HANDOFF_SHAPE_INVALID")
+    command_id = _token(
+        handoff.get("aggregation_handoff_command_id"),
+        code="AGGREGATION_HANDOFF_COMMAND_ID_INVALID",
+    )
+    if command_id != f"coo-cycle:{root_job_id}:aggregation-handoff:1":
+        raise PlacementCommitmentError(
+            "AGGREGATION_HANDOFF_COMMAND_ID_MISMATCH"
+        )
+    return {
+        "aggregation_handoff_command_id": command_id,
+        "aggregation_handoff_digest": _digest_token(
+            handoff.get("aggregation_handoff_digest"),
+            code="AGGREGATION_HANDOFF_DIGEST_INVALID",
+        ),
+        "plan_attempt_id": _token(
+            handoff.get("plan_attempt_id"), code="PLAN_ATTEMPT_ID_INVALID"
+        ),
+        "plan_digest": _digest_token(
+            handoff.get("plan_digest"), code="PLAN_DIGEST_INVALID"
+        ),
+    }
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class PlacementCommitmentPlan:
     """Immutable C2 facts passed to the existing Runtime mutation owner.
@@ -129,6 +187,10 @@ class PlacementCommitmentPlan:
 
     root_job_id: str
     expected_job_revision: int
+    aggregation_handoff_command_id: str
+    aggregation_handoff_digest: str
+    plan_attempt_id: str
+    plan_digest: str
     responsibility_ref: str
     selection_document_digest: str
     selection_evidence_digest: str
@@ -148,6 +210,23 @@ class PlacementCommitmentPlan:
         _token(self.root_job_id, code="ROOT_JOB_ID_INVALID")
         if type(self.expected_job_revision) is not int or self.expected_job_revision < 0:
             raise PlacementCommitmentError("EXPECTED_JOB_REVISION_INVALID")
+        _token(
+            self.aggregation_handoff_command_id,
+            code="AGGREGATION_HANDOFF_COMMAND_ID_INVALID",
+        )
+        if (
+            self.aggregation_handoff_command_id
+            != f"coo-cycle:{self.root_job_id}:aggregation-handoff:1"
+        ):
+            raise PlacementCommitmentError(
+                "AGGREGATION_HANDOFF_COMMAND_ID_MISMATCH"
+            )
+        _digest_token(
+            self.aggregation_handoff_digest,
+            code="AGGREGATION_HANDOFF_DIGEST_INVALID",
+        )
+        _token(self.plan_attempt_id, code="PLAN_ATTEMPT_ID_INVALID")
+        _digest_token(self.plan_digest, code="PLAN_DIGEST_INVALID")
         _token(self.responsibility_ref, code="RESPONSIBILITY_REF_INVALID")
         _digest_token(
             self.selection_document_digest,
@@ -196,6 +275,12 @@ class PlacementCommitmentPlan:
         return {
             "schema_version": self.schema_version,
             "root_job_id": self.root_job_id,
+            "aggregation_handoff_command_id": (
+                self.aggregation_handoff_command_id
+            ),
+            "aggregation_handoff_digest": self.aggregation_handoff_digest,
+            "plan_attempt_id": self.plan_attempt_id,
+            "plan_digest": self.plan_digest,
             "responsibility_ref": self.responsibility_ref,
             "selection_document_digest": self.selection_document_digest,
             "selection_evidence_digest": self.selection_evidence_digest,
@@ -220,13 +305,22 @@ def build_commitment_plan(
     *,
     root_job_id: str,
     expected_job_revision: int,
+    validated_aggregation_handoff: Any,
     placement_selection: Any,
 ) -> PlacementCommitmentPlan:
-    """Validate one C1 wire and derive stable root-plus-selection identity."""
+    """Bind a trusted handoff projection and one C1 wire into C2 identity.
+
+    ``validated_aggregation_handoff`` is supplied only by the future trusted
+    Runtime/C2 adapter after ``_validated_aggregation_handoff()`` succeeds.
+    """
 
     root = _token(root_job_id, code="ROOT_JOB_ID_INVALID")
     if type(expected_job_revision) is not int or expected_job_revision < 0:
         raise PlacementCommitmentError("EXPECTED_JOB_REVISION_INVALID")
+    handoff = _canonical_aggregation_handoff(
+        validated_aggregation_handoff,
+        root_job_id=root,
+    )
     selection = _canonical_selection(placement_selection)
     selected = validate_placement_snapshot(selection["selected"])
     responsibility_ref = _token(
@@ -235,6 +329,7 @@ def build_commitment_plan(
     semantics = {
         "schema_version": COMMAND_SCHEMA,
         "root_job_id": root,
+        **handoff,
         "responsibility_ref": responsibility_ref,
         "selection_document_digest": digest(selection),
         "selection_evidence_digest": digest(selection["evidence"]),
@@ -246,6 +341,12 @@ def build_commitment_plan(
     return PlacementCommitmentPlan(
         root_job_id=root,
         expected_job_revision=expected_job_revision,
+        aggregation_handoff_command_id=handoff[
+            "aggregation_handoff_command_id"
+        ],
+        aggregation_handoff_digest=handoff["aggregation_handoff_digest"],
+        plan_attempt_id=handoff["plan_attempt_id"],
+        plan_digest=handoff["plan_digest"],
         responsibility_ref=responsibility_ref,
         selection_document_digest=semantics["selection_document_digest"],
         selection_evidence_digest=semantics["selection_evidence_digest"],
@@ -285,6 +386,12 @@ def build_commitment_event_payload(
     evidence = {
         "root_job_id": plan.root_job_id,
         "expected_job_revision": plan.expected_job_revision,
+        "aggregation_handoff_command_id": (
+            plan.aggregation_handoff_command_id
+        ),
+        "aggregation_handoff_digest": plan.aggregation_handoff_digest,
+        "plan_attempt_id": plan.plan_attempt_id,
+        "plan_digest": plan.plan_digest,
         "responsibility_ref": plan.responsibility_ref,
         "responsibility_job_created_command_id": created_command_id,
         "responsibility_authority_fingerprint": authority_fingerprint,
@@ -316,6 +423,10 @@ def validate_commitment_event_payload(
     expected_attempt_id: str,
     expected_responsibility_job_created_command_id: str,
     expected_responsibility_authority_fingerprint: str,
+    expected_aggregation_handoff_command_id: str,
+    expected_aggregation_handoff_digest: str,
+    expected_plan_attempt_id: str,
+    expected_plan_digest: str,
 ) -> dict[str, Any]:
     """Validate replay against current Runtime-owned root and claim facts.
 
@@ -324,10 +435,12 @@ def validate_commitment_event_payload(
     themselves merely because their internal digest is coherent.
     """
 
-    if not isinstance(value, Mapping) or set(value) != _EVENT_KEYS:
+    if not isinstance(value, Mapping):
         raise PlacementCommitmentError("COMMITMENT_EVENT_SHAPE_INVALID")
     if set(value) & FORBIDDEN_EVENT_KEYS:
         raise PlacementCommitmentError("COMMITMENT_EVENT_FORBIDDEN_FIELD")
+    if set(value) != _EVENT_KEYS:
+        raise PlacementCommitmentError("COMMITMENT_EVENT_SHAPE_INVALID")
     if value.get("schema_version") != COMMITMENT_SCHEMA:
         raise PlacementCommitmentError("COMMITMENT_EVENT_SCHEMA_INVALID")
     attempt_id = _token(
@@ -346,6 +459,29 @@ def validate_commitment_event_payload(
         expected_responsibility_authority_fingerprint,
         code="RESPONSIBILITY_AUTHORITY_FINGERPRINT_INVALID",
     )
+    current_handoff_command_id = _token(
+        expected_aggregation_handoff_command_id,
+        code="AGGREGATION_HANDOFF_COMMAND_ID_INVALID",
+    )
+    current_handoff_digest = _digest_token(
+        expected_aggregation_handoff_digest,
+        code="AGGREGATION_HANDOFF_DIGEST_INVALID",
+    )
+    current_plan_attempt_id = _token(
+        expected_plan_attempt_id,
+        code="PLAN_ATTEMPT_ID_INVALID",
+    )
+    current_plan_digest = _digest_token(
+        expected_plan_digest,
+        code="PLAN_DIGEST_INVALID",
+    )
+    if (
+        current_handoff_command_id != plan.aggregation_handoff_command_id
+        or current_handoff_digest != plan.aggregation_handoff_digest
+        or current_plan_attempt_id != plan.plan_attempt_id
+        or current_plan_digest != plan.plan_digest
+    ):
+        raise PlacementCommitmentError("COMMITMENT_EVENT_REPLAY_CONFLICT")
     expected = build_commitment_event_payload(
         plan=plan,
         committed_attempt_id=current_attempt_id,
