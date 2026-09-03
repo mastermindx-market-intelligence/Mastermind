@@ -227,6 +227,18 @@ class RemoteCodexOperatorAdapter:
             if provider_session is not None
             else None
         )
+        if (
+            requested.worker_id != epoch.worker_id
+            or generation.worker_id != epoch.worker_id
+            or generation.session_epoch_id != epoch.session_epoch_id
+            or (
+                provider_session is not None
+                and provider_session.worker_id != epoch.worker_id
+            )
+        ):
+            raise BrokerProtocolError(
+                "remote OHF materialization request identity is inconsistent"
+            )
         try:
             validate_materialization_request(
                 operation_command_id=operation_id.command_id,

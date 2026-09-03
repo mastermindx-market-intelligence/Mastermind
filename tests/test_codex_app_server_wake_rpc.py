@@ -29,6 +29,7 @@ from control_plane.operator_harness_contract import (
     ProcessGenerationRef,
     ProcessIdentityObservation,
     ProcessLiveness,
+    ProviderSessionHandoff,
     ProviderWriterState,
     ReconcileObservation,
     RequestedExecutionProfile,
@@ -1562,6 +1563,64 @@ def test_remote_adapter_uses_one_bounded_materialization_status_request() -> Non
             epoch=epoch,
             generation=generation,
         )
+
+
+def test_remote_materialization_status_refuses_mixed_identities_before_transport() -> None:
+    attempt_id = "ATT-MIXED"
+    epoch = SessionEpochRef("epoch-mixed", attempt_id, "worker-123", 1)
+    generation = ProcessGenerationRef("generation-mixed", "epoch-mixed", 1, "worker-123")
+    workspace = WorkspaceIdentity("/tmp/mixed-workspace", "b" * 40, 1, 2, 3, 4)
+    requested = RequestedExecutionProfile(
+        worker_id="worker-123",
+        provider="openai-codex",
+        requested_model="gpt-5.6-sol",
+        harness_kind="codex-app-server",
+        harness_binary_digest="a" * 64,
+        harness_version="0.147.0",
+        workspace=workspace,
+        sandbox_policy="read-only",
+        approval_policy="never",
+        network_policy="disabled",
+        capabilities=CapabilityManifest(),
+        native_helper_policy=NativeHelperPolicy.DISABLED,
+        authority_policy_hash="c" * 64,
+    )
+
+    def assert_refused(**updates: Any) -> None:
+        client = FakeMaterializationStatusClient(
+            {
+                "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+                "status": "ABSENT",
+                "receipt": None,
+            }
+        )
+        remote = RemoteCodexOperatorAdapter(
+            client, turn_input_loader=lambda _turn: "unused"
+        )
+        with pytest.raises(BrokerProtocolError, match="identity"):
+            remote.materialization_status(
+                operation_id=updates.get(
+                    "operation_id", OperationId(f"ohf-op:start:{attempt_id}")
+                ),
+                requested=updates.get("requested", requested),
+                epoch=epoch,
+                generation=updates.get("generation", generation),
+                provider_session=updates.get("provider_session"),
+            )
+        assert client.calls == []
+
+    assert_refused(requested=dataclasses.replace(requested, worker_id="worker-other"))
+    assert_refused(
+        generation=dataclasses.replace(generation, worker_id="worker-other")
+    )
+    assert_refused(
+        generation=dataclasses.replace(generation, session_epoch_id="epoch-other")
+    )
+    assert_refused(
+        operation_id=OperationId(f"ohf-op:recover-resume:{attempt_id}"),
+        generation=dataclasses.replace(generation, generation_number=2),
+        provider_session=ProviderSessionHandoff(NATIVE_HANDLE, "worker-other"),
+    )
 
 
 def _real_broker_with_owned_adapter(
