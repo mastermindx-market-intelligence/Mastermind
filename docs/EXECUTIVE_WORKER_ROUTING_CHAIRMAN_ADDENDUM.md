@@ -12,11 +12,15 @@ unchanged.
 
 ## 1. Core rule
 
-**Fable is not the default worker. ChatGPT Pro Chat is the default Sol-class cognition surface.**
+**Fable is not the default worker. Included Chat web with non-Pro reasoning is the default Sol-class
+cognition surface.**
 
 Mastermind has multiple cognition surfaces, execution surfaces and worker/model tiers. CEO sessions
 must choose the **lowest-marginal-cost / least-scarce route that can reliably complete the bounded
 mission while preserving required quality, authority and independence**.
+
+Personal-Pro subscription/account, Chat web surface, and reasoning mode are separate. Access to a
+Personal-Pro account or included Chat web does not select turn-billed Pro reasoning mode.
 
 Do not send work to Fable merely because Fable is available, because the program is important,
 because the task is large, or because Fable carries the COO title. Do not move Sol-class executive
@@ -50,12 +54,50 @@ docs/EXECUTIVE_CHAT_NATIVE_SOL_HIERARCHY_LAW.md
 The default cognition receipt is:
 
 ```text
-COGNITION_ROUTE: CHAT_PRO_DEFAULT
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: NON_PRO_DEFAULT
 ```
 
 It covers the Chairman-facing `META_CEO`, `PROGRAM_CEO`, `PROJECT_SOL`, `INTEGRATOR_SOL`,
 `AUDITOR_SOL`, planning councils, architecture, synthesis, and other Sol-class reasoning while an
 approved included-plan Chat surface can reliably perform the mission.
+
+`CHAT_PRO_DEFAULT` is deprecated and ambiguous. Historical plans, research, and receipts may retain
+it as a frozen included-Chat surface label, but it grants no Pro-mode authorization. Current
+receipts must use `COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT` and an explicit reasoning-mode field.
+
+Turn-billed Pro reasoning is an exception, never the default. Its complete receipt is:
+
+```text
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
+WHY_PRO_MODE: <specific frontier-reasoning advantage required by this mission>
+WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
+PRO_MODE_TASK_CLASS: <one allowed class>
+EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+STOP_CONDITION: <observable completion or abort condition>
+```
+
+`PRO_MODE_TASK_CLASS` is closed to:
+
+```text
+LONG_HORIZON_FRONTIER_REASONING
+CROSS_SYSTEM_ARCHITECTURE
+HARD_DEBUGGING
+ADVERSARIAL_JUDGMENT
+```
+
+All fields are required. `EXPECTED_DURATION_MINUTES` must be an integer between 80 and 1440 minutes,
+inclusive, and therefore at least 80 minutes.
+Pro mode is categorically refused for handoffs; `ACK / PICKUP_ACK / START / CONTINUE / STOP`
+lifecycle or routing packets; status checks; monitoring / watchers / polling; message relay;
+routing / placement / foregrounding; mechanical edits or tests; simple reviews; and other short
+bounded work. A larger parent program does not make one short turn eligible. An incomplete,
+under-duration, over-duration, stale, or ineligible request produces:
+
+```text
+PRO_MODE_REFUSED / USE_NON_PRO_MODE
+```
 
 The default stack below is rejected:
 
@@ -90,13 +132,20 @@ context, provider novelty, ease of programmatic orchestration, nor an unavailabl
 itself sufficient. First test lawful bounded decomposition, progressive disclosure, session
 rotation, another Chat-native Sol responsibility, or an already-paid worker avenue.
 
+Pro reasoning mode is not a metered cognition surface. `PRO_MODE_EXCEPTION` and
+`METERED_EXCEPTION` are independent gates: one selects a turn-billed reasoning mode on included
+Chat web; the other selects a different incrementally billed cognition surface. Neither receipt
+satisfies or authorizes the other, and the metered receipt schema remains unchanged.
+
 Business / plugins / MCP remain optional companion surfaces for connection, read/write adaptation,
-app attestation, OAuth separation and reversible canaries. They do not replace Personal-Pro Chat as
-the default Sol cognition plane and do not make every Sol responsibility require a Business seat.
+app attestation, OAuth separation and reversible canaries. They do not replace included Chat web
+with non-Pro reasoning as the default Sol cognition plane and do not make every Sol responsibility
+require a Business seat.
 
 Current account, plan, usage-policy, model, rate, quota, session and capacity facts remain current
-platform/runtime evidence. `CHAT_PRO_DEFAULT` does not authorize account sharing, usage-limit
-evasion, transcript scraping, title-based tab selection or an unverified surface claim.
+platform/runtime evidence. Neither the current included-Chat receipt nor the legacy
+`CHAT_PRO_DEFAULT` label authorizes account sharing, Pro reasoning mode, usage-limit evasion,
+transcript scraping, title-based tab selection or an unverified surface claim.
 
 Cognition route, worker/model, execution surface, concrete receiver and organizational authority are
 separate dimensions. Selecting either route grants no Job, Attempt, Worker, RuntimeBinding,
@@ -250,7 +299,8 @@ packet.
 Keep these concepts separate:
 
 ```text
-cognition economics: CHAT_PRO_DEFAULT | METERED_EXCEPTION
+cognition economics: CHAT_INCLUDED_DEFAULT | METERED_EXCEPTION
+Chat reasoning mode: NON_PRO_DEFAULT | PRO_MODE_EXCEPTION
 execution surface: ChatGPT Chat / Cursor / Codex / Claude Code / browser / Work / Workspace Agent / API
 worker/model: Luna / Terra / Sonnet / Opus / Fable / Sol / other approved model
 organizational authority: Sol responsibility / COO responsibility / Executive OS admission / accepted role law
@@ -307,9 +357,25 @@ For every meaningful Sol-class cognition or worker commission, record the cognit
 Default included Chat form:
 
 ```text
-COGNITION_ROUTE: CHAT_PRO_DEFAULT
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: NON_PRO_DEFAULT
 ROUTE: <worker/model + execution surface>
 WHY: <why this route can reliably satisfy the mission>
+WHY NOT FABLE: <why principal capacity is unnecessary>
+```
+
+Pro-mode form, only for one of the four admitted long-horizon classes:
+
+```text
+COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
+CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
+WHY_PRO_MODE: <specific frontier-reasoning advantage required by this mission>
+WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
+PRO_MODE_TASK_CLASS: <LONG_HORIZON_FRONTIER_REASONING|CROSS_SYSTEM_ARCHITECTURE|HARD_DEBUGGING|ADVERSARIAL_JUDGMENT>
+EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+STOP_CONDITION: <observable completion or abort condition>
+ROUTE: <worker/model + execution surface>
+WHY: <mission fit>
 WHY NOT FABLE: <why principal capacity is unnecessary>
 ```
 
@@ -339,8 +405,9 @@ Executive admission/claim records when those are applicable.
 
 ## 11. Default principle
 
-> **Use included-plan ChatGPT Pro Chat for Sol-class executive cognition while it can reliably meet
-> the mission. Use the cheapest / least-scarce worker that can reliably achieve the required
+> **Use included Chat web with non-Pro reasoning for Sol-class executive cognition by default. Use
+> Pro reasoning mode only for a qualifying frontier mission between 80 and 1440 minutes under its
+> complete exception receipt. Use the cheapest / least-scarce worker that can reliably achieve the required
 > implementation or research quality. Escalate worker capability when evidence requires it. Use a
-> metered reasoning surface only under a complete bounded exception receipt. Fable and paid
-> cognition are not defaults.**
+> metered reasoning surface only under its separate complete bounded exception receipt. Fable, Pro
+> mode, and metered cognition are not defaults.**
