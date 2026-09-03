@@ -42,7 +42,8 @@ This plan is not authority to start implementation before the MAT-F0 architectur
     "tests/test_operator_materialization_receipt.py",
     "tests/test_executive_operator_broker.py",
     "tests/test_executive_operator_supervisor.py",
-    "tests/test_ohf_p1b_runtime_orchestrator.py"
+    "tests/test_ohf_p1b_runtime_orchestrator.py",
+    "tests/test_autonomy_session_materialization_source_law.py"
   ],
   "protected_paths": [
     "control_plane/executive_runtime.py",
@@ -128,7 +129,12 @@ control_plane/executive_operator_supervisor.py
 tests/test_executive_operator_broker.py
 tests/test_executive_operator_supervisor.py
 tests/test_ohf_p1b_runtime_orchestrator.py  # only for a real loss-boundary discriminator
+tests/test_autonomy_session_materialization_source_law.py
 ```
+
+The source-law test is a required transition path: replace the protected “status operation absent”
+characterization with exact receipt/status/import implementation assertions. Do not skip or delete
+the architecture invariants.
 
 ### Protected unless Sol re-rules
 
@@ -320,7 +326,14 @@ Build a real in-process control↔broker test seam that can fail after these poi
 
 Each injection must prove the expected status and provider call count.
 
-### Task 8 — Hosted proof and independent review
+### Task 8 — Transition source law, hosted proof and independent review
+
+Update `tests/test_autonomy_session_materialization_source_law.py` in this same carrier:
+
+- preserve every architecture/no-rebuild/effect-unknown/teardown invariant;
+- replace the current `materialization-status` absence characterization with exact implementation
+  owner, schema, status-state, receipt-path and replay discriminators;
+- ensure a mutation that re-enables second provider start dies.
 
 Return:
 
