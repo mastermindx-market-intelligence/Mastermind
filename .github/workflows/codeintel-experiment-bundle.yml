@@ -92,11 +92,20 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_ACTIONS: "true"
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
           set -euo pipefail
           readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
           /usr/bin/env -i \
             GH_TOKEN="$GH_TOKEN" \
+            GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}" \
+            RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT:-UNAVAILABLE}" \
+            RUNNER_OS="${RUNNER_OS:-UNAVAILABLE}" \
+            RUNNER_ARCH="${RUNNER_ARCH:-UNAVAILABLE}" \
+            RUNNER_TEMP="$RUNNER_TEMP" \
+            ImageOS="${ImageOS:-UNAVAILABLE}" \
+            ImageVersion="${ImageVersion:-UNAVAILABLE}" \
             PATH=/usr/bin:/bin \
             LANG=C \
             LC_ALL=C \
@@ -105,7 +114,8 @@ jobs:
             --request "$RUNNER_TEMP/codeintel-request.json" \
             --current-run-id "$GITHUB_RUN_ID" \
             --destination "$RUNNER_TEMP/codeintel-prior/semantic-receipt.json" \
-            --github-output "$GITHUB_OUTPUT"
+            --github-output "$GITHUB_OUTPUT" \
+            --receipt "$RUNNER_TEMP/codeintel-phase-p-receipt/semantic-receipt.json"
 
       - name: Build exact deterministic bundle
         id: prepare
@@ -113,16 +123,21 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_ACTIONS: "true"
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
           set -euo pipefail
           readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
           /usr/bin/env -i \
             GH_TOKEN="$GH_TOKEN" \
+            GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}" \
+            RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT:-UNAVAILABLE}" \
             PATH=/usr/bin:/bin \
             LANG=C \
             LC_ALL=C \
             RUNNER_OS="${RUNNER_OS:-UNAVAILABLE}" \
             RUNNER_ARCH="${RUNNER_ARCH:-UNAVAILABLE}" \
+            RUNNER_TEMP="$RUNNER_TEMP" \
             ImageOS="${ImageOS:-UNAVAILABLE}" \
             ImageVersion="${ImageVersion:-UNAVAILABLE}" \
             GOTOOLCHAIN=local \
@@ -152,7 +167,7 @@ jobs:
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         name: Preserve Phase P refusal receipt
-        if: failure() && steps.replay.outputs.disposition == 'PROCEED'
+        if: failure() && (steps.replay.outcome == 'failure' || steps.prepare.outcome == 'failure')
         with:
           name: codeintel-z0-operation-9aae1af9ef430044fbba77ae0f87cf12d4425c75f577b4427c09ae66cec11bf4
           path: ${{ runner.temp }}/codeintel-phase-p-receipt/semantic-receipt.json
@@ -246,6 +261,8 @@ jobs:
         env:
           BUNDLE_SHA256: ${{ needs.phase-p.outputs.bundle_sha256 }}
           BUNDLE_NAME: ${{ needs.phase-p.outputs.bundle_name }}
+          GITHUB_ACTIONS: "true"
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
           set -euo pipefail
           readonly FORGE_ROOT="$GITHUB_WORKSPACE/forge"
@@ -254,62 +271,44 @@ jobs:
           readonly SEALED_HOME="$RUNNER_TEMP/codeintel-phase-e-home"
           readonly REQUEST_PATH="$RUNNER_TEMP/codeintel-request.json"
           readonly RECEIPT_PATH="$RUNNER_TEMP/codeintel-phase-e-receipt/semantic-receipt.json"
-          /usr/bin/mkdir -m 700 "$SEALED_HOME"
-          if ! /usr/bin/unshare --user --map-root-user --net /usr/bin/env -i \
+          # This fixed probe records NETWORK_SEAL_UNAVAILABLE before consumer launch.
+          /usr/bin/env -i \
+            GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}" \
+            RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT:-UNAVAILABLE}" \
+            RUNNER_OS="${RUNNER_OS:-UNAVAILABLE}" \
+            RUNNER_ARCH="${RUNNER_ARCH:-UNAVAILABLE}" \
+            RUNNER_TEMP="$RUNNER_TEMP" \
+            ImageOS="${ImageOS:-UNAVAILABLE}" \
+            ImageVersion="${ImageVersion:-UNAVAILABLE}" \
             PATH=/usr/bin:/bin \
-            /bin/bash --noprofile --norc -euo pipefail -c \
-              '/usr/sbin/ip link set lo up'; then
+            LANG=C \
+            LC_ALL=C \
             /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
-              record-network-seal-refusal \
+              probe-phase-e-hosted \
               --request "$REQUEST_PATH" \
               --receipt "$RECEIPT_PATH"
-            echo "::error::NETWORK_SEAL_UNAVAILABLE: user and network namespace probe failed"
-            exit 1
-          fi
-          set +e
-          /usr/bin/unshare --user --map-root-user --net \
-            /usr/bin/env -i \
-              HOME="$SEALED_HOME" \
-              LANG=C \
-              LC_ALL=C \
-              PATH=/usr/bin:/bin \
-              PYTHONHASHSEED=0 \
-              RUNNER_OS="${RUNNER_OS:-UNAVAILABLE}" \
-              RUNNER_ARCH="${RUNNER_ARCH:-UNAVAILABLE}" \
-              ImageOS="${ImageOS:-UNAVAILABLE}" \
-              ImageVersion="${ImageVersion:-UNAVAILABLE}" \
-              FORGE_ROOT="$FORGE_ROOT" \
-              CONSUMER_ROOT="$CONSUMER_ROOT" \
-              REQUEST_PATH="$REQUEST_PATH" \
-              BUNDLE_PATH="$BUNDLE_PATH" \
-              BUNDLE_SHA256="$BUNDLE_SHA256" \
-              SCRATCH_PATH="$RUNNER_TEMP/codeintel-phase-e-scratch" \
-              RESULT_PATH="$RUNNER_TEMP/codeintel-phase-e-result" \
-              RECEIPT_PATH="$RECEIPT_PATH" \
-              FIXED_CONSUMER_MODULE=experiments.code_discovery.z0_runner \
-              /bin/bash --noprofile --norc -euo pipefail -c '
-                /usr/sbin/ip link set lo up
-                exec /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
-                  run-phase-e \
-                  --forge-root "$FORGE_ROOT" \
-                  --consumer-root "$CONSUMER_ROOT" \
-                  --request "$REQUEST_PATH" \
-                  --bundle "$BUNDLE_PATH" \
-                  --bundle-sha256 "$BUNDLE_SHA256" \
-                  --scratch "$SCRATCH_PATH" \
-                  --result-directory "$RESULT_PATH" \
-                  --receipt "$RECEIPT_PATH"
-              '
-          sealed_status=$?
-          set -e
-          if [[ ! -f "$RECEIPT_PATH" ]]; then
+          /usr/bin/env -i \
+            GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}" \
+            RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT:-UNAVAILABLE}" \
+            RUNNER_OS="${RUNNER_OS:-UNAVAILABLE}" \
+            RUNNER_ARCH="${RUNNER_ARCH:-UNAVAILABLE}" \
+            RUNNER_TEMP="$RUNNER_TEMP" \
+            ImageOS="${ImageOS:-UNAVAILABLE}" \
+            ImageVersion="${ImageVersion:-UNAVAILABLE}" \
+            PATH=/usr/bin:/bin \
+            LANG=C \
+            LC_ALL=C \
             /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
-              record-network-seal-effect-unknown \
+              run-phase-e-hosted \
+              --forge-root "$FORGE_ROOT" \
+              --consumer-root "$CONSUMER_ROOT" \
               --request "$REQUEST_PATH" \
+              --bundle "$BUNDLE_PATH" \
+              --bundle-sha256 "$BUNDLE_SHA256" \
+              --sealed-home "$SEALED_HOME" \
+              --scratch "$RUNNER_TEMP/codeintel-phase-e-scratch" \
+              --result-directory "$RUNNER_TEMP/codeintel-phase-e-result" \
               --receipt "$RECEIPT_PATH"
-            sealed_status=1
-          fi
-          exit "$sealed_status"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         name: Upload semantic receipt and bounded Z0 result

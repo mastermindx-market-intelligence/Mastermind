@@ -122,19 +122,33 @@ def test_phase_p_entrypoints_scrub_ambient_environment() -> None:
     assert "PATH=/usr/bin:/bin" in phase_p
     assert "LANG=C" in phase_p
     assert "LC_ALL=C" in phase_p
+    assert phase_p.count('RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT:-UNAVAILABLE}"') == 2
+    assert phase_p.count('GITHUB_ACTIONS="${GITHUB_ACTIONS:-false}"') == 2
+
+
+def test_host_userns_policy_window_is_exact_and_precedes_each_boundary() -> None:
+    source = _source()
+    assert source.count("RUNNER_ENVIRONMENT: ${{ runner.environment }}") == 3
+    assert source.count('GITHUB_ACTIONS: "true"') == 3
+    assert source.count('RUNNER_TEMP="$RUNNER_TEMP"') == 4
+    assert source.count('ImageOS="${ImageOS:-UNAVAILABLE}"') == 4
+    assert "probe-phase-e-hosted" in source
+    assert "run-phase-e-hosted" in source
+    assert source.index("reconcile-prior-runs") < source.index(
+        "\n              phase-p \\"
+    )
+    assert source.index("probe-phase-e-hosted") < source.index("run-phase-e-hosted")
+    assert "/usr/bin/sudo" not in source
+    assert "/usr/sbin/sysctl" not in source
 
 
 def test_phase_e_mechanically_seals_network_before_fixed_consumer() -> None:
     source = _source()
-    unshare = source.index("/usr/bin/unshare")
-    consumer = source.index("run-phase-e")
-    assert unshare < consumer
-    assert "--user" in source
-    assert "--map-root-user" in source
-    assert "--net" in source
-    assert "/usr/sbin/ip link set lo up" in source
+    probe = source.index("probe-phase-e-hosted")
+    consumer = source.index("run-phase-e-hosted")
+    assert probe < consumer
     assert "NETWORK_SEAL_UNAVAILABLE" in source
-    assert "experiments.code_discovery.z0_runner" in source
+    assert "refs/pull/407/head" in source
     assert "serena" not in source.lower()
     assert "pyright" not in source.lower()
     assert "typescript" not in source.lower()
@@ -144,7 +158,7 @@ def test_phase_e_mechanically_seals_network_before_fixed_consumer() -> None:
 def test_consumer_receives_no_actions_credentials_or_arbitrary_argv() -> None:
     source = _source()
     assert "env -i" in source
-    assert "GITHUB_TOKEN" not in source[source.index("/usr/bin/unshare") :]
+    assert "GITHUB_TOKEN" not in source[source.index("probe-phase-e-hosted") :]
     assert "ACTIONS_RUNTIME_TOKEN" not in source
     assert "--command" not in source
     assert "--module" not in source

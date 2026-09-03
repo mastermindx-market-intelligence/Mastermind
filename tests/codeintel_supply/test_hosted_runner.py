@@ -17,6 +17,8 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -30,6 +32,28 @@ HEX_C = "c" * 40
 HEX_D = "d" * 40
 SHA_A = "a" * 64
 SHA_B = "b" * 64
+
+
+def _github_hosted_environment(tmp_path: Path) -> dict[str, str]:
+    return {
+        "GITHUB_ACTIONS": "true",
+        "RUNNER_ENVIRONMENT": "github-hosted",
+        "RUNNER_OS": "Linux",
+        "RUNNER_ARCH": "X64",
+        "RUNNER_TEMP": os.fspath(tmp_path),
+        "ImageOS": "ubuntu24",
+    }
+
+
+@pytest.fixture
+def github_hosted_userns_policy() -> Iterator[runner.HostUsernsPolicyEvidence]:
+    if not runner.is_exact_github_hosted_userns_runner(os.environ):
+        pytest.skip(
+            "live user-namespace boundary requires the exact GitHub-hosted "
+            "Ubuntu 24.04 x64 runner"
+        )
+    with runner.github_hosted_userns_policy_window() as evidence:
+        yield evidence
 
 
 def _request(**changes: str) -> runner.ExperimentRequest:
@@ -1115,6 +1139,475 @@ def test_phase_p_clients_use_the_kernel_socket_boundary(
     )  # noqa: SLF001
 
 
+def test_userns_policy_window_sets_zero_and_restores_exact_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = {"value": 1}
+    writes: list[int] = []
+
+    monkeypatch.setattr(runner, "_read_host_userns_policy", lambda: state["value"])
+
+    def write(value: int, *, restoration: bool) -> None:
+        del restoration
+        writes.append(value)
+        state["value"] = value
+
+    monkeypatch.setattr(runner, "_write_host_userns_policy", write)
+
+    with runner.github_hosted_userns_policy_window(
+        _github_hosted_environment(tmp_path)
+    ) as evidence:
+        assert evidence.original_value == 1
+        assert evidence.active_value == 0
+        assert state["value"] == 0
+
+    assert state["value"] == 1
+    assert writes == [0, 1]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"GITHUB_ACTIONS": "false"},
+        {"RUNNER_ENVIRONMENT": "self-hosted"},
+        {"RUNNER_OS": "Windows"},
+        {"RUNNER_ARCH": "ARM64"},
+        {"ImageOS": "ubuntu22"},
+        {"RUNNER_TEMP": ""},
+    ],
+)
+def test_userns_policy_window_refuses_unidentified_or_self_hosted_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changes: dict[str, str],
+) -> None:
+    environment = _github_hosted_environment(tmp_path)
+    environment.update(changes)
+    writes: list[int] = []
+    monkeypatch.setattr(runner, "_read_host_userns_policy", lambda: 1)
+    monkeypatch.setattr(
+        runner,
+        "_write_host_userns_policy",
+        lambda value, *, restoration: writes.append(value),
+    )
+
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        with runner.github_hosted_userns_policy_window(environment):
+            pytest.fail("hostile runner must never enter the policy window")
+
+    assert raised.value.code == "HOST_USERNS_POLICY_UNAVAILABLE"
+    assert writes == []
+
+
+@pytest.mark.parametrize("original", [-1, 2, 10, "1", None])
+def test_userns_policy_window_rejects_malformed_original_without_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    original: object,
+) -> None:
+    writes: list[int] = []
+    monkeypatch.setattr(runner, "_read_host_userns_policy", lambda: original)
+    monkeypatch.setattr(
+        runner,
+        "_write_host_userns_policy",
+        lambda value, *, restoration: writes.append(value),
+    )
+
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        with runner.github_hosted_userns_policy_window(
+            _github_hosted_environment(tmp_path)
+        ):
+            pytest.fail("malformed policy must never enter the window")
+
+    assert raised.value.code == "HOST_USERNS_POLICY_UNAVAILABLE"
+    assert writes == []
+
+
+def test_userns_policy_window_refuses_missing_sysctl_without_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writes: list[int] = []
+
+    def missing() -> int:
+        raise runner.HostedRunnerError(
+            "HOST_USERNS_POLICY_UNAVAILABLE", "forced missing sysctl"
+        )
+
+    monkeypatch.setattr(runner, "_read_host_userns_policy", missing)
+    monkeypatch.setattr(
+        runner,
+        "_write_host_userns_policy",
+        lambda value, *, restoration: writes.append(value),
+    )
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        with runner.github_hosted_userns_policy_window(
+            _github_hosted_environment(tmp_path)
+        ):
+            pytest.fail("missing policy must never enter the window")
+
+    assert raised.value.code == "HOST_USERNS_POLICY_UNAVAILABLE"
+    assert writes == []
+
+
+def test_userns_policy_window_restores_after_body_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = {"value": 1}
+    writes: list[int] = []
+    monkeypatch.setattr(runner, "_read_host_userns_policy", lambda: state["value"])
+
+    def write(value: int, *, restoration: bool) -> None:
+        del restoration
+        writes.append(value)
+        state["value"] = value
+
+    monkeypatch.setattr(runner, "_write_host_userns_policy", write)
+
+    with pytest.raises(RuntimeError, match="forced body failure"):
+        with runner.github_hosted_userns_policy_window(
+            _github_hosted_environment(tmp_path)
+        ):
+            raise RuntimeError("forced body failure")
+
+    assert state["value"] == 1
+    assert writes == [0, 1]
+
+
+def test_userns_policy_window_activation_write_failure_still_restores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = {"value": 1}
+    writes: list[tuple[int, bool]] = []
+    monkeypatch.setattr(runner, "_read_host_userns_policy", lambda: state["value"])
+
+    def write(value: int, *, restoration: bool) -> None:
+        writes.append((value, restoration))
+        if not restoration:
+            raise runner.HostedRunnerError(
+                "HOST_USERNS_POLICY_UNAVAILABLE", "forced sudo refusal"
+            )
+        state["value"] = value
+
+    monkeypatch.setattr(runner, "_write_host_userns_policy", write)
+
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        with runner.github_hosted_userns_policy_window(
+            _github_hosted_environment(tmp_path)
+        ):
+            pytest.fail("failed activation must not enter the window")
+
+    assert raised.value.code == "HOST_USERNS_POLICY_UNAVAILABLE"
+    assert state["value"] == 1
+    assert writes == [(0, False), (1, True)]
+
+
+def test_userns_policy_window_rejects_failed_active_readback_and_restores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads = iter([1, 1, 1])
+    writes: list[tuple[int, bool]] = []
+    monkeypatch.setattr(runner, "_read_host_userns_policy", lambda: next(reads))
+    monkeypatch.setattr(
+        runner,
+        "_write_host_userns_policy",
+        lambda value, *, restoration: writes.append((value, restoration)),
+    )
+
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        with runner.github_hosted_userns_policy_window(
+            _github_hosted_environment(tmp_path)
+        ):
+            pytest.fail("failed readback must not enter the window")
+
+    assert raised.value.code == "HOST_USERNS_POLICY_UNAVAILABLE"
+    assert writes == [(0, False), (1, True)]
+
+
+@pytest.mark.parametrize("failure", ["write", "readback"])
+def test_userns_policy_window_restore_failure_overrides_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    state = {"value": 1}
+    monkeypatch.setattr(runner, "_read_host_userns_policy", lambda: state["value"])
+
+    def write(value: int, *, restoration: bool) -> None:
+        if restoration and failure == "write":
+            raise runner.HostedRunnerError(
+                "HOST_USERNS_POLICY_RESTORE_FAILED", "forced restore refusal"
+            )
+        state["value"] = 0 if restoration and failure == "readback" else value
+
+    monkeypatch.setattr(runner, "_write_host_userns_policy", write)
+
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        with runner.github_hosted_userns_policy_window(
+            _github_hosted_environment(tmp_path)
+        ):
+            assert state["value"] == 0
+
+    assert raised.value.code == "HOST_USERNS_POLICY_RESTORE_FAILED"
+
+
+def test_phase_p_hosted_restore_failure_cannot_publish_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _request()
+    receipt = tmp_path / "receipts/semantic-receipt.json"
+
+    @contextmanager
+    def failed_restore() -> Iterator[runner.HostUsernsPolicyEvidence]:
+        yield runner.HostUsernsPolicyEvidence(
+            scope=runner.HOST_USERNS_SCOPE,
+            original_value=1,
+            active_value=0,
+        )
+        raise runner.HostedRunnerError(
+            "HOST_USERNS_POLICY_RESTORE_FAILED", "forced restore failure"
+        )
+
+    monkeypatch.setattr(runner, "github_hosted_userns_policy_window", failed_restore)
+    monkeypatch.setattr(
+        runner,
+        "prepare_phase_p_or_record_refusal",
+        lambda *args, **kwargs: {"would_have_been": "success"},
+    )
+
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        runner.prepare_phase_p_hosted(
+            tmp_path,
+            request,
+            scratch_root=tmp_path / "scratch",
+            output_directory=tmp_path / "output",
+            github_output=tmp_path / "github-output",
+            receipt_path=receipt,
+        )
+
+    assert raised.value.code == "HOST_USERNS_POLICY_RESTORE_FAILED"
+    payload = runner.load_semantic_receipt(receipt)
+    assert (payload["status"], payload["effect"]) == ("REFUSED", "NOT_APPLIED")
+    assert payload["evidence"]["failure"]["code"] == (
+        "HOST_USERNS_POLICY_RESTORE_FAILED"
+    )
+
+
+def test_phase_e_hosted_restore_failure_discards_success_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _request()
+    forge = tmp_path / "forge"
+    consumer = tmp_path / "consumer"
+    forge.mkdir()
+    consumer.mkdir()
+    receipt = tmp_path / "receipts/semantic-receipt.json"
+
+    @contextmanager
+    def failed_restore() -> Iterator[runner.HostUsernsPolicyEvidence]:
+        yield runner.HostUsernsPolicyEvidence(
+            scope=runner.HOST_USERNS_SCOPE,
+            original_value=1,
+            active_value=0,
+        )
+        raise runner.HostedRunnerError(
+            "HOST_USERNS_POLICY_RESTORE_FAILED", "forced restore failure"
+        )
+
+    def fake_invoke(
+        argv: list[str], **kwargs: object
+    ) -> runner.subprocess.CompletedProcess[str]:
+        del kwargs
+        staging = Path(
+            next(value for value in argv if value.startswith("RECEIPT_PATH=")).split(
+                "=", 1
+            )[1]
+        )
+        runner.write_semantic_receipt(
+            staging,
+            request=request,
+            status="COMPLETED",
+            effect="APPLIED",
+            evidence={"would_have_been": "accepted"},
+        )
+        return runner.subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "github_hosted_userns_policy_window", failed_restore)
+    monkeypatch.setattr(runner, "_invoke_phase_p_boundary", fake_invoke)
+
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        runner.run_phase_e_hosted(
+            forge,
+            consumer,
+            request,
+            request_path=tmp_path / "request.json",
+            bundle_path=tmp_path / "bundle.tar.gz",
+            bundle_sha256=SHA_A,
+            sealed_home=tmp_path / "sealed-home",
+            scratch_root=tmp_path / "scratch",
+            result_directory=tmp_path / "result",
+            receipt_path=receipt,
+        )
+
+    assert raised.value.code == "HOST_USERNS_POLICY_RESTORE_FAILED"
+    payload = runner.load_semantic_receipt(receipt)
+    assert (payload["status"], payload["effect"]) == (
+        "RECONCILIATION_REQUIRED",
+        "EFFECT_UNKNOWN",
+    )
+    assert payload["evidence"]["failure"]["code"] == (
+        "HOST_USERNS_POLICY_RESTORE_FAILED"
+    )
+    assert payload["evidence"].get("would_have_been") is None
+
+
+def test_phase_e_hosted_publishes_staged_receipt_only_after_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _request()
+    forge = tmp_path / "forge"
+    consumer = tmp_path / "consumer"
+    forge.mkdir()
+    consumer.mkdir()
+    receipt = tmp_path / "receipts/semantic-receipt.json"
+
+    @contextmanager
+    def restored() -> Iterator[runner.HostUsernsPolicyEvidence]:
+        yield runner.HostUsernsPolicyEvidence(
+            scope=runner.HOST_USERNS_SCOPE,
+            original_value=1,
+            active_value=0,
+        )
+
+    def fake_invoke(
+        argv: list[str], **kwargs: object
+    ) -> runner.subprocess.CompletedProcess[str]:
+        del kwargs
+        staging = Path(
+            next(value for value in argv if value.startswith("RECEIPT_PATH=")).split(
+                "=", 1
+            )[1]
+        )
+        runner.write_semantic_receipt(
+            staging,
+            request=request,
+            status="COMPLETED",
+            effect="APPLIED",
+            evidence={"consumer_launched": True},
+        )
+        assert not receipt.exists()
+        return runner.subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "github_hosted_userns_policy_window", restored)
+    monkeypatch.setattr(runner, "_invoke_phase_p_boundary", fake_invoke)
+
+    runner.run_phase_e_hosted(
+        forge,
+        consumer,
+        request,
+        request_path=tmp_path / "request.json",
+        bundle_path=tmp_path / "bundle.tar.gz",
+        bundle_sha256=SHA_A,
+        sealed_home=tmp_path / "sealed-home",
+        scratch_root=tmp_path / "scratch",
+        result_directory=tmp_path / "result",
+        receipt_path=receipt,
+    )
+
+    payload = runner.load_semantic_receipt(receipt)
+    assert (payload["status"], payload["effect"]) == ("COMPLETED", "APPLIED")
+    assert payload["evidence"]["host_userns_policy"] == {
+        "scope": runner.HOST_USERNS_SCOPE,
+        "required_active_value": 0,
+        "normal_restore_verified": True,
+        "abrupt_termination_cleanup": "github_hosted_vm_decommission",
+    }
+
+
+def test_phase_e_hosted_zero_exit_without_receipt_is_effect_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _request()
+    forge = tmp_path / "forge"
+    consumer = tmp_path / "consumer"
+    forge.mkdir()
+    consumer.mkdir()
+    receipt = tmp_path / "receipts/semantic-receipt.json"
+
+    @contextmanager
+    def restored() -> Iterator[runner.HostUsernsPolicyEvidence]:
+        yield runner.HostUsernsPolicyEvidence(
+            scope=runner.HOST_USERNS_SCOPE,
+            original_value=1,
+            active_value=0,
+        )
+
+    monkeypatch.setattr(runner, "github_hosted_userns_policy_window", restored)
+    monkeypatch.setattr(
+        runner,
+        "_invoke_phase_p_boundary",
+        lambda argv, **kwargs: runner.subprocess.CompletedProcess(
+            argv, 0, stdout="", stderr=""
+        ),
+    )
+
+    with pytest.raises(runner.HostedRunnerError) as raised:
+        runner.run_phase_e_hosted(
+            forge,
+            consumer,
+            request,
+            request_path=tmp_path / "request.json",
+            bundle_path=tmp_path / "bundle.tar.gz",
+            bundle_sha256=SHA_A,
+            sealed_home=tmp_path / "sealed-home",
+            scratch_root=tmp_path / "scratch",
+            result_directory=tmp_path / "result",
+            receipt_path=receipt,
+        )
+
+    assert raised.value.code == "NETWORK_SEAL_EFFECT_UNKNOWN"
+    payload = runner.load_semantic_receipt(receipt)
+    assert (payload["status"], payload["effect"]) == (
+        "RECONCILIATION_REQUIRED",
+        "EFFECT_UNKNOWN",
+    )
+    assert payload["evidence"]["consumer_launch_state"] == "UNKNOWN"
+
+
+def test_phase_e_hosted_namespace_argv_is_fixed_and_secret_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_hostile_secret_value_123456789")
+    argv = runner._phase_e_namespace_command(  # noqa: SLF001 - exact boundary law
+        forge_root=tmp_path / "forge",
+        consumer_root=tmp_path / "consumer",
+        request_path=tmp_path / "request.json",
+        bundle_path=tmp_path / "bundle.tar.gz",
+        bundle_sha256=SHA_A,
+        sealed_home=tmp_path / "home",
+        scratch_root=tmp_path / "scratch",
+        result_directory=tmp_path / "result",
+        receipt_path=tmp_path / "receipt.json",
+    )
+
+    assert argv[:8] == [
+        "/usr/bin/unshare",
+        "--user",
+        "--map-root-user",
+        "--net",
+        "--",
+        "/usr/bin/env",
+        "-i",
+        f"HOME={tmp_path / 'home'}",
+    ]
+    assert argv[-6:-2] == ["--noprofile", "--norc", "-euo", "pipefail"]
+    assert argv[-2] == "-c"
+    assert "run-phase-e" in argv[-1]
+    assert "probe-phase-e-hosted" not in argv[-1]
+    assert "GITHUB_TOKEN" not in repr(argv)
+    assert "ghp_hostile_secret_value" not in repr(argv)
+    assert "--module" not in argv[-1]
+
+
 def test_phase_p_process_refuses_when_kernel_boundary_receipt_is_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1304,8 +1797,11 @@ def test_phase_p_boundary_timeout_kills_the_descendant_process_group(
 )
 def test_kernel_boundary_blocks_real_go_loopback_redirect_proxy_bypass(
     tmp_path: Path,
+    github_hosted_userns_policy: runner.HostUsernsPolicyEvidence,
 ) -> None:
     """Prove Go's built-in localhost proxy bypass cannot open a direct socket."""
+
+    del github_hosted_userns_policy
 
     source = tmp_path / "redirect_client.go"
     binary = tmp_path / "redirect-client"
@@ -1478,6 +1974,23 @@ func main() {
         "try: os.open(f'/proc/{os.getppid()}/mem',os.O_RDWR)\n"
         "except OSError as e: sys.exit(0 if e.errno in {errno.EACCES,errno.EPERM} else 31)\n"
         "sys.exit(30)\n",
+        "import ctypes,errno,os,signal,sys\n"
+        "status={}\n"
+        "with open('/proc/self/status',encoding='ascii') as source:\n"
+        " for line in source:\n"
+        "  if ':' in line:\n"
+        "   key,value=line.split(':',1); status[key]=value.strip()\n"
+        "if len(set(os.getresuid())) != 1 or len(set(os.getresgid())) != 1: sys.exit(32)\n"
+        "if os.getuid() == 0 or os.getgid() == 0: sys.exit(33)\n"
+        "if any(int(status[key],16) for key in ('CapInh','CapPrm','CapEff','CapBnd','CapAmb')): sys.exit(34)\n"
+        "if status.get('NoNewPrivs') != '1': sys.exit(35)\n"
+        "libc=ctypes.CDLL(None,use_errno=True)\n"
+        "checks=((272,(0x10000000|0x40000000,)),(56,(0x10000000|signal.SIGCHLD,0,0,0,0)),(308,(-1,0)),(126,(0,0)))\n"
+        "for number,args in checks:\n"
+        " ctypes.set_errno(0); result=libc.syscall(number,*args)\n"
+        " if result != -1 or ctypes.get_errno() != errno.EPERM: sys.exit(36)\n"
+        "ctypes.set_errno(0); result=libc.syscall(435,ctypes.c_void_p(),0)\n"
+        "sys.exit(0 if result == -1 and ctypes.get_errno() == errno.ENOSYS else 37)\n",
     ],
     ids=[
         "udp",
@@ -1487,11 +2000,15 @@ func main() {
         "fastopen",
         "io-uring",
         "supervisor-memory",
+        "identity-capabilities-namespace-regain",
     ],
 )
 def test_kernel_boundary_denies_alternate_socket_and_async_paths(
-    tmp_path: Path, probe: str
+    tmp_path: Path,
+    probe: str,
+    github_hosted_userns_policy: runner.HostUsernsPolicyEvidence,
 ) -> None:
+    del github_hosted_userns_policy
     with runner._phase_p_allowlist_proxy(  # noqa: SLF001 - real kernel boundary
         tmp_path / "network-home"
     ) as network_environment:
@@ -1511,7 +2028,11 @@ def test_kernel_boundary_denies_alternate_socket_and_async_paths(
     or os.geteuid() == 0,
     reason="real Phase-P descriptor boundary requires non-root Linux/amd64",
 )
-def test_kernel_boundary_exec_inherits_no_socket_descriptor(tmp_path: Path) -> None:
+def test_kernel_boundary_exec_inherits_no_socket_descriptor(
+    tmp_path: Path,
+    github_hosted_userns_policy: runner.HostUsernsPolicyEvidence,
+) -> None:
+    del github_hosted_userns_policy
     probe = (
         "import os,stat,sys\n"
         "bad=[]\n"
@@ -1542,7 +2063,11 @@ def test_kernel_boundary_exec_inherits_no_socket_descriptor(tmp_path: Path) -> N
     or os.geteuid() == 0,
     reason="real Phase-P mount boundary requires non-root Linux/amd64",
 )
-def test_kernel_boundary_client_cannot_replace_the_parent_gate(tmp_path: Path) -> None:
+def test_kernel_boundary_client_cannot_replace_the_parent_gate(
+    tmp_path: Path,
+    github_hosted_userns_policy: runner.HostUsernsPolicyEvidence,
+) -> None:
+    del github_hosted_userns_policy
     probe = (
         "import errno,os,sys\n"
         "try: os.unlink(sys.argv[1])\n"
@@ -1562,6 +2087,46 @@ def test_kernel_boundary_client_cannot_replace_the_parent_gate(tmp_path: Path) -
         )
         assert completed.returncode == 0
         assert stat.S_ISSOCK(gate_path.lstat().st_mode)
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux"
+    or platform.machine().lower() not in {"x86_64", "amd64"}
+    or os.geteuid() == 0,
+    reason="AppArmor userns discriminator requires non-root Linux/amd64",
+)
+def test_github_hosted_apparmor_policy_is_the_boundary_failure_discriminator(
+    tmp_path: Path,
+    github_hosted_userns_policy: runner.HostUsernsPolicyEvidence,
+) -> None:
+    del github_hosted_userns_policy
+    with runner._phase_p_allowlist_proxy(  # noqa: SLF001 - real hosted discriminator
+        tmp_path / "network-home"
+    ) as network_environment:
+        try:
+            runner._write_host_userns_policy(1, restoration=False)  # noqa: SLF001
+            assert runner._read_host_userns_policy() == 1  # noqa: SLF001
+            with pytest.raises(runner.HostedRunnerError) as raised:
+                runner._run_phase_p_checked(  # noqa: SLF001
+                    ["/usr/bin/true"],
+                    cwd=tmp_path,
+                    env=network_environment,
+                    network_environment=network_environment,
+                    timeout=15,
+                )
+            assert raised.value.code == "ACQUISITION_ALLOWLIST_UNAVAILABLE"
+        finally:
+            runner._write_host_userns_policy(0, restoration=False)  # noqa: SLF001
+            assert runner._read_host_userns_policy() == 0  # noqa: SLF001
+
+        completed = runner._run_phase_p_checked(  # noqa: SLF001
+            ["/usr/bin/true"],
+            cwd=tmp_path,
+            env=network_environment,
+            network_environment=network_environment,
+            timeout=15,
+        )
+        assert completed.returncode == 0
 
 
 def test_github_replay_artifact_download_uses_the_same_proxy_environment(

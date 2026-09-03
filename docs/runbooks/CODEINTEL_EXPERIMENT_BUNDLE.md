@@ -70,8 +70,41 @@ The execution platform is exactly GitHub-hosted `ubuntu-24.04`, Linux amd64.
 The runner image/version, kernel, Python version, pinned Actions, and unavoidable
 host utilities are recorded as confounds. The latter are `/bin/bash`,
 `/usr/bin/curl`, `/usr/bin/env`, `/usr/bin/git`, `/usr/bin/gh`,
-`/usr/bin/python3`, `/usr/bin/tar`, `/usr/bin/unshare`, and `/usr/sbin/ip`.
-They are not claimed to be content-addressed.
+`/usr/bin/python3`, `/usr/bin/sudo`, `/usr/bin/tar`, `/usr/bin/unshare`,
+`/usr/sbin/ip`, and `/usr/sbin/sysctl`. They are not claimed to be
+content-addressed.
+
+Ubuntu 24.04's AppArmor policy normally permits an unprivileged user namespace
+to be created while denying the namespace capabilities required to configure
+its private mount and network namespaces. Each boundary-bearing top-level
+command therefore uses one serialized privileged prelude on the single-use
+GitHub-hosted VM. It requires protected runner identity fields to say exactly
+`github-hosted`, Linux, x64, and `ubuntu24`; captures the original value of
+`kernel.apparmor_restrict_unprivileged_userns` as exactly `0` or `1`; invokes
+only `/usr/bin/sudo -n /usr/sbin/sysctl -w
+kernel.apparmor_restrict_unprivileged_userns=0`; and verifies a readback of `0`
+before the command. A self-hosted, unidentified, differently imaged, malformed,
+or noninteractive-sudo runner is refused before the boundary command.
+
+The prelude restores the exact captured value and verifies that readback before
+its command's outcome can be accepted. Restoration failure overrides success:
+Phase P records `REFUSED / NOT_APPLIED`, while a Phase E invocation that may
+have launched records `RECONCILIATION_REQUIRED / EFFECT_UNKNOWN`; neither
+successful bundle nor result artifact is accepted. If the original was already
+`0`, the prelude records that fact internally, verifies `0`, and restores `0`;
+it does not claim to have re-enabled a mitigation. The mutable original value is
+not part of deterministic bundle content.
+
+This is a temporary system-wide weakening of Ubuntu's user-namespace hardening,
+so the user-namespace kernel attack surface is exposed during each bounded
+window. Application egress enforcement comes from the fresh user/mount/network
+namespaces, permanent capability drop, read-only Unix gate mount, fixed relay,
+Landlock, seccomp, and process-group cleanup—not from AppArmor. Normal exit has
+checked restoration. `SIGKILL`, forced job cancellation, or VM loss cannot
+guarantee the trap/finalizer runs; cleanup then relies on GitHub decommissioning
+the disposable VM. This workflow is not suitable for self-hosted runners and
+does not claim wholly unprivileged execution, AppArmor confinement, no `sudo`,
+no host-policy mutation, or restoration after abrupt termination.
 
 ## Closed request and fixed consumer
 
@@ -103,9 +136,11 @@ are hashed before and after launch.
 
 ## Phase P: acquire, verify, build
 
-Phase P is the only subprocess network-enabled boundary. Each Phase P Python
-entrypoint starts with `/usr/bin/env -i`. Every subprocess invocation permitted
-to contact upstream receives a freshly constructed environment that points
+Phase P is the only subprocess network-enabled boundary. The replay
+reconciliation and the build each receive their own host-policy window; the
+window closes and exact restoration is verified before the step can succeed.
+Each Phase P Python entrypoint starts with `/usr/bin/env -i`. Every subprocess
+invocation permitted to contact upstream receives a freshly constructed environment that points
 upper- and lower-case HTTP(S)/ALL proxy variables at `127.0.0.1:47853` and
 empties both `NO_PROXY` forms.
 
@@ -120,8 +155,10 @@ that Unix socket or any other socket descriptor.
 
 The bootstrap retains the new namespace capabilities only long enough to freeze
 the gate mount and configure loopback. It then installs `no_new_privs`, clears
-ambient/effective/permitted/inheritable capability sets, and forks the client
-before starting relay threads. The client closes every descriptor except stdio
+ambient/effective/permitted/inheritable capability sets and drops the complete
+capability bounding set, verifies the real/effective/saved UID and GID remain
+the non-root runner identity, and forks the client before starting relay threads.
+The client closes every descriptor except stdio
 and the one close-on-exec receipt pipe. It requires Landlock ABI 4 or newer and
 uses its port rule as defense in depth: TCP connect is admitted only for 47853,
 while fixed-port TCP bind is not admitted. A seccomp filter admits socket
@@ -241,10 +278,13 @@ Phase E downloads only the Phase P content-addressed artifact and then:
    extraction.
 4. Rechecks exact consumer repository, commit, tree, effective path census, path
    modes, path policy, and selected source digest.
-5. Performs a separate `/usr/bin/unshare --user --map-root-user --net` probe.
-   Failure writes a durable `REFUSED / NOT_APPLIED` receipt with
-   `NETWORK_SEAL_UNAVAILABLE`; no consumer is launched.
-6. Enters a fresh user and network namespace through `/usr/bin/env -i`. No
+5. Runs the separate `/usr/bin/unshare --user --map-root-user --net` probe in
+   one host-policy window and verifies exact restoration. Failure writes a
+   durable `REFUSED / NOT_APPLIED` receipt with `NETWORK_SEAL_UNAVAILABLE` (or
+   the typed host-policy failure); no consumer is launched.
+6. Opens a second host-policy window for exactly one sealed invocation, enters a
+   fresh user and network namespace through `/usr/bin/env -i`, and verifies
+   exact restoration before accepting the staged semantic receipt. No
    GitHub or Actions credential is passed. Only loopback is raised.
 7. Inside that namespace, requires the interface census to be exactly `lo`, the
    non-loopback route census to be empty, and a TCP connect to `1.1.1.1:443` to
@@ -321,7 +361,15 @@ and Git, disallowed CONNECT authorities and proxy bypass configuration, bundle
 substitution and post-launch drift, consumer identity/path/mode/cross-boundary-rename
 widening, arbitrary module/argv widening, network exposure, secret/private-path
 leaks, result bounds, process cleanup, changed replay requests, receipt tamper,
-and unknown effects.
+unknown effects, self-hosted or malformed policy contexts, missing/malformed
+sysctl state, noninteractive-sudo/write/readback/restore failures, forced-body
+cleanup, and suppression of otherwise-successful receipts when restoration
+fails. Hosted Linux discrimination proves policy `1` blocks the private boundary
+receipt while policy `0` lets the identical boundary reach it, then verifies the
+original policy is restored. The live client also proves runner UID/GID,
+zero inheritable/permitted/effective/bounding/ambient capability sets,
+`NoNewPrivs: 1`, and denial of namespace `clone`, `clone3`, `unshare`, `setns`,
+and capability regain.
 
 For an authorized run, retain and compare these independently emitted values:
 

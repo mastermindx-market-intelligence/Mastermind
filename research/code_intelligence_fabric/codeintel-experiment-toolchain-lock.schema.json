@@ -64,6 +64,17 @@
         "client_socket_policy": "af_inet_tcp_only_no_fastopen_no_io_uring_no_socket_inheritance",
         "minimum_landlock_abi": 4,
         "boundary_receipt": "CODEINTEL_PHASE_P_BOUNDARY_V1",
+        "host_userns_policy": {
+          "scope": "single_use_github_hosted_ubuntu_24_04_x64",
+          "sysctl": "kernel.apparmor_restrict_unprivileged_userns",
+          "active_value": 0,
+          "accepted_original_values": [
+            0,
+            1
+          ],
+          "restore": "exact_original_value_verified_before_outcome_acceptance",
+          "abrupt_termination_cleanup": "github_hosted_vm_decommission"
+        },
         "fresh_empty_caches": true,
         "floating_resolution": false,
         "github_cache": false
@@ -210,9 +221,11 @@
         "/usr/bin/git",
         "/usr/bin/gh",
         "/usr/bin/python3",
+        "/usr/bin/sudo",
         "/usr/bin/tar",
         "/usr/bin/unshare",
-        "/usr/sbin/ip"
+        "/usr/sbin/ip",
+        "/usr/sbin/sysctl"
       ]
     },
     "receipt": {

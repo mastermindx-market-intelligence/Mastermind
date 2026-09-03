@@ -11,6 +11,7 @@ import argparse
 import dataclasses
 import enum
 import errno
+import fcntl
 import gzip
 import hashlib
 import io
@@ -53,6 +54,12 @@ FIXED_REPOSITORY: Final = "mastermindx-market-intelligence/Mastermind"
 FIXED_CONSUMER_MODULE: Final = "experiments.code_discovery.z0_runner"
 FIXED_CONSUMER_BRANCH: Final = "codeintel-z0-consumer"
 FIXED_WORKFLOW_PATH: Final = ".github/workflows/codeintel-experiment-bundle.yml"
+HOST_USERNS_SYSCTL_PATH: Final = Path(
+    "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+)
+HOST_USERNS_SYSCTL_KEY: Final = "kernel.apparmor_restrict_unprivileged_userns"
+HOST_USERNS_ACTIVE_VALUE: Final = 0
+HOST_USERNS_SCOPE: Final = "single_use_github_hosted_ubuntu_24_04_x64"
 
 _SHA1_RE: Final = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256_RE: Final = re.compile(r"[0-9a-f]{64}\Z")
@@ -83,6 +90,7 @@ PR_SET_NO_NEW_PRIVS = 38
 PR_SET_PDEATHSIG = 1
 PR_GET_DUMPABLE = 3
 PR_SET_DUMPABLE = 4
+PR_CAPBSET_DROP = 24
 PR_CAP_AMBIENT = 47
 PR_CAP_AMBIENT_CLEAR_ALL = 4
 SECCOMP_SET_MODE_FILTER = 1
@@ -226,21 +234,52 @@ def require_zero_capabilities(libc):
         fail_closed()
     if libc.prctl(PR_GET_DUMPABLE, 0, 0, 0, 0) != 0:
         fail_closed()
-    if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
-        fail_closed()
     if libc.prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) != 0:
         fail_closed()
+    try:
+        with open("/proc/sys/kernel/cap_last_cap", encoding="ascii") as source:
+            cap_last_cap = int(source.read().strip())
+    except (OSError, ValueError):
+        fail_closed()
+    if not 0 <= cap_last_cap <= 63:
+        fail_closed()
+    for capability in range(cap_last_cap + 1):
+        if libc.prctl(PR_CAPBSET_DROP, capability, 0, 0, 0) != 0:
+            fail_closed()
     header = CapHeader(LINUX_CAPABILITY_VERSION_3, 0)
     data = (CapData * 2)(CapData(0, 0, 0), CapData(0, 0, 0))
     if libc.syscall(NR_CAPSET, ctypes.byref(header), ctypes.byref(data)) != 0:
         fail_closed()
+    if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+        fail_closed()
     capability_fields = {}
+    identity_fields = {}
+    no_new_privs = None
     with open("/proc/self/status", encoding="ascii") as source:
         for line in source:
-            if line.startswith(("CapInh:", "CapPrm:", "CapEff:", "CapAmb:")):
+            if line.startswith(("CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:")):
                 key, value = line.split(":", 1)
                 capability_fields[key] = int(value.strip(), 16)
-    if capability_fields != {"CapInh": 0, "CapPrm": 0, "CapEff": 0, "CapAmb": 0}:
+            elif line.startswith(("Uid:", "Gid:")):
+                key, value = line.split(":", 1)
+                identity_fields[key] = tuple(int(part) for part in value.split())
+            elif line.startswith("NoNewPrivs:"):
+                no_new_privs = line.split(":", 1)[1].strip()
+    if capability_fields != {
+        "CapInh": 0,
+        "CapPrm": 0,
+        "CapEff": 0,
+        "CapBnd": 0,
+        "CapAmb": 0,
+    }:
+        fail_closed()
+    if (
+        identity_fields.get("Uid") != (os.getuid(),) * 4
+        or identity_fields.get("Gid") != (os.getgid(),) * 4
+        or len(set(os.getresuid())) != 1
+        or len(set(os.getresgid())) != 1
+        or no_new_privs != "1"
+    ):
         fail_closed()
 
 
@@ -705,6 +744,211 @@ class HostedRunnerError(RuntimeError):
         super().__init__(f"{code}: {detail}")
         self.code = code
         self.detail = detail
+
+
+@dataclass(frozen=True)
+class HostUsernsPolicyEvidence:
+    """Non-secret evidence for one bounded host-policy window."""
+
+    scope: str
+    original_value: int
+    active_value: int
+    normal_exit_requires_exact_restore: bool = True
+    abrupt_termination_cleanup: str = "github_hosted_vm_decommission"
+
+
+def is_exact_github_hosted_userns_runner(environment: Mapping[str, str]) -> bool:
+    """Admit only the disposable GitHub-hosted Ubuntu 24.04 x64 image."""
+
+    return (
+        environment.get("GITHUB_ACTIONS") == "true"
+        and environment.get("RUNNER_ENVIRONMENT") == "github-hosted"
+        and environment.get("RUNNER_OS") == "Linux"
+        and environment.get("RUNNER_ARCH") == "X64"
+        and environment.get("ImageOS") == "ubuntu24"
+        and bool(environment.get("RUNNER_TEMP"))
+    )
+
+
+@contextmanager
+def _host_userns_policy_lock(environment: Mapping[str, str]) -> Iterator[None]:
+    """Serialize the process-global sysctl transition within one runner VM."""
+
+    runner_temp = Path(environment["RUNNER_TEMP"])
+    try:
+        parent = runner_temp.resolve(strict=True)
+        parent_metadata = parent.lstat()
+    except OSError as error:
+        raise HostedRunnerError(
+            "HOST_USERNS_POLICY_UNAVAILABLE", "runner temp is unavailable"
+        ) from error
+    if (
+        stat.S_ISLNK(parent_metadata.st_mode)
+        or not stat.S_ISDIR(parent_metadata.st_mode)
+        or parent_metadata.st_uid != os.getuid()
+    ):
+        raise HostedRunnerError(
+            "HOST_USERNS_POLICY_UNAVAILABLE", "runner temp identity is unsafe"
+        )
+    lock_path = parent / "codeintel-userns-policy.v1.lock"
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = -1
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+        os.fchmod(descriptor, 0o600)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or metadata.st_mode & 0o077
+        ):
+            raise HostedRunnerError(
+                "HOST_USERNS_POLICY_UNAVAILABLE", "policy lock identity is unsafe"
+            )
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    except HostedRunnerError:
+        raise
+    except OSError as error:
+        raise HostedRunnerError(
+            "HOST_USERNS_POLICY_UNAVAILABLE", "policy lock could not be acquired"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+
+
+def _read_host_userns_policy() -> int:
+    """Read the one admitted AppArmor user-namespace sysctl without links."""
+
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            HOST_USERNS_SYSCTL_PATH,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise HostedRunnerError(
+                "HOST_USERNS_POLICY_UNAVAILABLE", "policy path is not a regular file"
+            )
+        body = os.read(descriptor, 16)
+        if os.read(descriptor, 1):
+            raise HostedRunnerError(
+                "HOST_USERNS_POLICY_UNAVAILABLE", "policy value is oversized"
+            )
+    except HostedRunnerError:
+        raise
+    except OSError as error:
+        raise HostedRunnerError(
+            "HOST_USERNS_POLICY_UNAVAILABLE", "policy value is unreadable"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if body not in {b"0\n", b"1\n", b"0", b"1"}:
+        raise HostedRunnerError(
+            "HOST_USERNS_POLICY_UNAVAILABLE", "policy value is not exactly zero or one"
+        )
+    return int(body.strip())
+
+
+def _write_host_userns_policy(value: int, *, restoration: bool) -> None:
+    """Write only the fixed sysctl key through noninteractive sudo."""
+
+    if type(value) is not int or value not in {0, 1}:
+        raise HostedRunnerError(
+            (
+                "HOST_USERNS_POLICY_RESTORE_FAILED"
+                if restoration
+                else "HOST_USERNS_POLICY_UNAVAILABLE"
+            ),
+            "policy target is not exactly zero or one",
+        )
+    code = (
+        "HOST_USERNS_POLICY_RESTORE_FAILED"
+        if restoration
+        else "HOST_USERNS_POLICY_UNAVAILABLE"
+    )
+    try:
+        completed = subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/sbin/sysctl",
+                "-w",
+                f"{HOST_USERNS_SYSCTL_KEY}={value}",
+            ],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+            close_fds=True,
+            env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise HostedRunnerError(
+            code, "fixed noninteractive sysctl write failed"
+        ) from error
+    if completed.returncode != 0:
+        raise HostedRunnerError(code, "fixed noninteractive sysctl write was refused")
+
+
+@contextmanager
+def github_hosted_userns_policy_window(
+    environment: Mapping[str, str] | None = None,
+) -> Iterator[HostUsernsPolicyEvidence]:
+    """Temporarily admit namespace capabilities, then prove exact restoration."""
+
+    candidate = dict(os.environ if environment is None else environment)
+    if not is_exact_github_hosted_userns_runner(candidate):
+        raise HostedRunnerError(
+            "HOST_USERNS_POLICY_UNAVAILABLE",
+            "only the exact disposable GitHub-hosted Ubuntu 24.04 x64 runner is admitted",
+        )
+    with _host_userns_policy_lock(candidate):
+        original = _read_host_userns_policy()
+        if type(original) is not int or original not in {0, 1}:
+            raise HostedRunnerError(
+                "HOST_USERNS_POLICY_UNAVAILABLE",
+                "policy original is not exactly zero or one",
+            )
+        activation_attempted = False
+        try:
+            activation_attempted = True
+            _write_host_userns_policy(HOST_USERNS_ACTIVE_VALUE, restoration=False)
+            if _read_host_userns_policy() != HOST_USERNS_ACTIVE_VALUE:
+                raise HostedRunnerError(
+                    "HOST_USERNS_POLICY_UNAVAILABLE",
+                    "policy active-value readback differs",
+                )
+            yield HostUsernsPolicyEvidence(
+                scope=HOST_USERNS_SCOPE,
+                original_value=original,
+                active_value=HOST_USERNS_ACTIVE_VALUE,
+            )
+        finally:
+            if activation_attempted:
+                try:
+                    _write_host_userns_policy(original, restoration=True)
+                    if _read_host_userns_policy() != original:
+                        raise HostedRunnerError(
+                            "HOST_USERNS_POLICY_RESTORE_FAILED",
+                            "policy restored-value readback differs",
+                        )
+                except HostedRunnerError as error:
+                    if error.code == "HOST_USERNS_POLICY_RESTORE_FAILED":
+                        raise
+                    raise HostedRunnerError(
+                        "HOST_USERNS_POLICY_RESTORE_FAILED",
+                        "exact original policy could not be restored",
+                    ) from error
 
 
 class _PhasePProxyServer(socketserver.ThreadingUnixStreamServer):
@@ -2616,6 +2860,7 @@ def prepare_phase_p(
             "client_socket_policy": lock.payload["acquisition"]["client_socket_policy"],
             "minimum_landlock_abi": _PHASE_P_LANDLOCK_MIN_ABI,
             "boundary_receipt": _PHASE_P_BOUNDARY_READY.decode("ascii").strip(),
+            "host_userns_policy": lock.payload["acquisition"]["host_userns_policy"],
             "landlock_role": "DEFENSE_IN_DEPTH_PORT_FILTER",
             "direct_tcp_connect_policy": (
                 "ONLY_FIXED_RELAY_LISTENER_EXISTS_IN_FRESH_NAMESPACE"
@@ -4194,6 +4439,384 @@ def _require_linux_amd64() -> None:
         )
 
 
+def _receipt_staging_path(receipt_path: Path) -> tuple[Path, Path]:
+    parent = _ensure_output_directory(Path(receipt_path).parent)
+    try:
+        directory = Path(tempfile.mkdtemp(prefix=".host-userns-", dir=parent))
+        os.chmod(directory, 0o700)
+    except OSError as error:
+        raise HostedRunnerError(
+            "RECEIPT_UNAVAILABLE", "host-policy receipt staging failed"
+        ) from error
+    return directory, directory / Path(receipt_path).name
+
+
+def _publish_staged_semantic_receipt(
+    staging_path: Path, receipt_path: Path, request: ExperimentRequest
+) -> None:
+    receipt = load_semantic_receipt(staging_path)
+    if receipt.get("request_digest") != request.digest:
+        raise HostedRunnerError("RECEIPT_INVALID", "staged request identity differs")
+    evidence = receipt.get("evidence")
+    if not isinstance(evidence, Mapping):  # pragma: no cover - receipt validator guards
+        raise HostedRunnerError("RECEIPT_INVALID", "staged evidence is malformed")
+    normalized_evidence = dict(evidence)
+    normalized_evidence["host_userns_policy"] = {
+        "scope": HOST_USERNS_SCOPE,
+        "required_active_value": HOST_USERNS_ACTIVE_VALUE,
+        "normal_restore_verified": True,
+        "abrupt_termination_cleanup": "github_hosted_vm_decommission",
+    }
+    write_semantic_receipt(
+        receipt_path,
+        request=request,
+        status=str(receipt["status"]),
+        effect=str(receipt["effect"]),
+        evidence=normalized_evidence,
+    )
+
+
+def _write_host_userns_policy_failure(
+    request: ExperimentRequest,
+    receipt_path: Path,
+    *,
+    phase: str,
+    error: HostedRunnerError,
+    effect_unknown: bool,
+) -> None:
+    write_semantic_receipt(
+        receipt_path,
+        request=request,
+        status="RECONCILIATION_REQUIRED" if effect_unknown else "REFUSED",
+        effect="EFFECT_UNKNOWN" if effect_unknown else "NOT_APPLIED",
+        evidence={
+            "failure": {
+                "code": error.code,
+                "detail": _bounded_redacted(error.detail, 512),
+            },
+            "phase": phase,
+            "consumer_launch_state": "UNKNOWN" if effect_unknown else "NOT_LAUNCHED",
+            "host_userns_policy": {
+                "scope": HOST_USERNS_SCOPE,
+                "required_active_value": HOST_USERNS_ACTIVE_VALUE,
+                "normal_restore_verified": False,
+                "abrupt_termination_cleanup": "github_hosted_vm_decommission",
+            },
+            "runner": _runner_confounds(),
+        },
+    )
+
+
+def reconcile_prior_runs_hosted(
+    request: ExperimentRequest,
+    *,
+    current_run_id: int,
+    destination: Path,
+    github_output: Path,
+    receipt_path: Path,
+) -> ReplayResolution:
+    """Reconcile through one bounded host-policy window."""
+
+    resolution: ReplayResolution | None = None
+    body_error: HostedRunnerError | locks.ToolchainLockError | None = None
+    try:
+        with github_hosted_userns_policy_window():
+            try:
+                resolution = reconcile_prior_runs(
+                    request,
+                    current_run_id=current_run_id,
+                    destination=destination,
+                    github_output=github_output,
+                )
+            except (HostedRunnerError, locks.ToolchainLockError) as error:
+                body_error = error
+    except HostedRunnerError as policy_error:
+        _write_host_userns_policy_failure(
+            request,
+            receipt_path,
+            phase="P",
+            error=policy_error,
+            effect_unknown=False,
+        )
+        raise
+    if body_error is not None:
+        _write_phase_p_refusal(
+            request,
+            receipt_path,
+            code=body_error.code,
+            detail=_bounded_redacted(body_error.detail, 512),
+        )
+        raise body_error
+    if resolution is None:  # pragma: no cover - exhaustive state guard
+        raise HostedRunnerError("REPLAY_LOOKUP_INVALID", "replay returned no result")
+    return resolution
+
+
+def prepare_phase_p_hosted(
+    forge_root: Path,
+    request: ExperimentRequest,
+    *,
+    scratch_root: Path,
+    output_directory: Path,
+    github_output: Path,
+    receipt_path: Path,
+) -> Mapping[str, Any]:
+    """Run Phase P and publish a receipt only after exact host restoration."""
+
+    staging_directory, staging_receipt = _receipt_staging_path(receipt_path)
+    result: Mapping[str, Any] | None = None
+    body_error: HostedRunnerError | locks.ToolchainLockError | None = None
+    try:
+        try:
+            with github_hosted_userns_policy_window():
+                try:
+                    result = prepare_phase_p_or_record_refusal(
+                        forge_root,
+                        request,
+                        scratch_root=scratch_root,
+                        output_directory=output_directory,
+                        github_output=github_output,
+                        receipt_path=staging_receipt,
+                    )
+                except (HostedRunnerError, locks.ToolchainLockError) as error:
+                    body_error = error
+        except HostedRunnerError as policy_error:
+            _write_host_userns_policy_failure(
+                request,
+                receipt_path,
+                phase="P",
+                error=policy_error,
+                effect_unknown=False,
+            )
+            raise
+        if staging_receipt.exists():
+            _publish_staged_semantic_receipt(staging_receipt, receipt_path, request)
+        if body_error is not None:
+            raise body_error
+        if result is None:  # pragma: no cover - exhaustive state guard
+            raise HostedRunnerError("PHASE_P_FAILED", "Phase P returned no result")
+        return result
+    finally:
+        shutil.rmtree(staging_directory, ignore_errors=True)
+
+
+def _phase_e_namespace_probe() -> subprocess.CompletedProcess[str]:
+    return _invoke_phase_p_boundary(
+        [
+            "/usr/bin/unshare",
+            "--user",
+            "--map-root-user",
+            "--net",
+            "--",
+            "/usr/bin/env",
+            "-i",
+            "PATH=/usr/bin:/bin",
+            "/usr/sbin/ip",
+            "link",
+            "set",
+            "lo",
+            "up",
+        ],
+        cwd="/",
+        env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+        check=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+        close_fds=True,
+        pass_fds=(),
+        start_new_session=True,
+    )
+
+
+def probe_phase_e_hosted(request: ExperimentRequest, *, receipt_path: Path) -> None:
+    """Prove Phase-E namespace support after a reversible host prelude."""
+
+    completed: subprocess.CompletedProcess[str] | None = None
+    invocation_error: OSError | subprocess.TimeoutExpired | None = None
+    try:
+        with github_hosted_userns_policy_window():
+            try:
+                completed = _phase_e_namespace_probe()
+            except (OSError, subprocess.TimeoutExpired) as error:
+                invocation_error = error
+    except HostedRunnerError as policy_error:
+        _write_host_userns_policy_failure(
+            request,
+            receipt_path,
+            phase="E",
+            error=policy_error,
+            effect_unknown=False,
+        )
+        raise
+    if invocation_error is not None or completed is None or completed.returncode != 0:
+        write_network_seal_boundary_receipt(request, receipt_path, effect_unknown=False)
+        raise HostedRunnerError(
+            "NETWORK_SEAL_UNAVAILABLE", "user and network namespace probe failed"
+        ) from invocation_error
+
+
+def _phase_e_namespace_command(
+    *,
+    forge_root: Path,
+    consumer_root: Path,
+    request_path: Path,
+    bundle_path: Path,
+    bundle_sha256: str,
+    sealed_home: Path,
+    scratch_root: Path,
+    result_directory: Path,
+    receipt_path: Path,
+) -> list[str]:
+    inner_environment = {
+        "HOME": os.fspath(sealed_home),
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin",
+        "PYTHONHASHSEED": "0",
+        "RUNNER_OS": os.environ.get("RUNNER_OS", "UNAVAILABLE"),
+        "RUNNER_ARCH": os.environ.get("RUNNER_ARCH", "UNAVAILABLE"),
+        "ImageOS": os.environ.get("ImageOS", "UNAVAILABLE"),
+        "ImageVersion": os.environ.get("ImageVersion", "UNAVAILABLE"),
+        "FORGE_ROOT": os.fspath(forge_root),
+        "CONSUMER_ROOT": os.fspath(consumer_root),
+        "REQUEST_PATH": os.fspath(request_path),
+        "BUNDLE_PATH": os.fspath(bundle_path),
+        "BUNDLE_SHA256": bundle_sha256,
+        "SCRATCH_PATH": os.fspath(scratch_root),
+        "RESULT_PATH": os.fspath(result_directory),
+        "RECEIPT_PATH": os.fspath(receipt_path),
+    }
+    if any(
+        "\x00" in key or "\x00" in value for key, value in inner_environment.items()
+    ):
+        raise HostedRunnerError("INVALID_ARGV", "Phase E environment is malformed")
+    environment_argv = [f"{key}={value}" for key, value in inner_environment.items()]
+    return [
+        "/usr/bin/unshare",
+        "--user",
+        "--map-root-user",
+        "--net",
+        "--",
+        "/usr/bin/env",
+        "-i",
+        *environment_argv,
+        "/bin/bash",
+        "--noprofile",
+        "--norc",
+        "-euo",
+        "pipefail",
+        "-c",
+        """
+/usr/sbin/ip link set lo up
+exec /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \\
+  run-phase-e \\
+  --forge-root "$FORGE_ROOT" \\
+  --consumer-root "$CONSUMER_ROOT" \\
+  --request "$REQUEST_PATH" \\
+  --bundle "$BUNDLE_PATH" \\
+  --bundle-sha256 "$BUNDLE_SHA256" \\
+  --scratch "$SCRATCH_PATH" \\
+  --result-directory "$RESULT_PATH" \\
+  --receipt "$RECEIPT_PATH"
+""".strip(),
+    ]
+
+
+def run_phase_e_hosted(
+    forge_root: Path,
+    consumer_root: Path,
+    request: ExperimentRequest,
+    *,
+    request_path: Path,
+    bundle_path: Path,
+    bundle_sha256: str,
+    sealed_home: Path,
+    scratch_root: Path,
+    result_directory: Path,
+    receipt_path: Path,
+) -> None:
+    """Invoke the fixed sealed child and accept its receipt only after restore."""
+
+    home = _fresh_directory(sealed_home, "SEALED_HOME_CONFLICT")
+    staging_directory, staging_receipt = _receipt_staging_path(receipt_path)
+    attempted = False
+    completed: subprocess.CompletedProcess[str] | None = None
+    invocation_error: OSError | subprocess.TimeoutExpired | None = None
+    try:
+        try:
+            with github_hosted_userns_policy_window():
+                command = _phase_e_namespace_command(
+                    forge_root=forge_root,
+                    consumer_root=consumer_root,
+                    request_path=request_path,
+                    bundle_path=bundle_path,
+                    bundle_sha256=bundle_sha256,
+                    sealed_home=home,
+                    scratch_root=scratch_root,
+                    result_directory=result_directory,
+                    receipt_path=staging_receipt,
+                )
+                attempted = True
+                try:
+                    completed = _invoke_phase_p_boundary(
+                        command,
+                        cwd=os.fspath(forge_root),
+                        env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+                        check=False,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=1_100,
+                        close_fds=True,
+                        pass_fds=(),
+                        start_new_session=True,
+                    )
+                except (OSError, subprocess.TimeoutExpired) as error:
+                    invocation_error = error
+        except HostedRunnerError as policy_error:
+            _write_host_userns_policy_failure(
+                request,
+                receipt_path,
+                phase="E",
+                error=policy_error,
+                effect_unknown=attempted,
+            )
+            raise
+
+        receipt_missing = not staging_receipt.exists()
+        if not receipt_missing:
+            _publish_staged_semantic_receipt(staging_receipt, receipt_path, request)
+        else:
+            write_network_seal_boundary_receipt(
+                request, receipt_path, effect_unknown=attempted
+            )
+        if receipt_missing:
+            raise HostedRunnerError(
+                "NETWORK_SEAL_EFFECT_UNKNOWN",
+                "sealed child exited without a durable semantic receipt",
+            )
+        if invocation_error is not None:
+            raise HostedRunnerError(
+                "NETWORK_SEAL_EFFECT_UNKNOWN",
+                "sealed child process could not be reconciled",
+            ) from invocation_error
+        if completed is None:
+            raise HostedRunnerError(
+                "NETWORK_SEAL_UNAVAILABLE", "sealed child did not start"
+            )
+        if completed.returncode != 0:
+            raise HostedRunnerError(
+                "SEALED_PHASE_E_FAILED",
+                f"sealed child returned known code {completed.returncode}",
+            )
+    finally:
+        shutil.rmtree(staging_directory, ignore_errors=True)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -4211,6 +4834,7 @@ def _parser() -> argparse.ArgumentParser:
     reconcile.add_argument("--current-run-id", type=int, required=True)
     reconcile.add_argument("--destination", type=Path, required=True)
     reconcile.add_argument("--github-output", type=Path, required=True)
+    reconcile.add_argument("--receipt", type=Path, required=True)
 
     phase_p = commands.add_parser("phase-p")
     phase_p.add_argument("--forge-root", type=Path, required=True)
@@ -4233,6 +4857,21 @@ def _parser() -> argparse.ArgumentParser:
     phase_e.add_argument("--scratch", type=Path, required=True)
     phase_e.add_argument("--result-directory", type=Path, required=True)
     phase_e.add_argument("--receipt", type=Path, required=True)
+
+    phase_e_probe = commands.add_parser("probe-phase-e-hosted")
+    phase_e_probe.add_argument("--request", type=Path, required=True)
+    phase_e_probe.add_argument("--receipt", type=Path, required=True)
+
+    phase_e_hosted = commands.add_parser("run-phase-e-hosted")
+    phase_e_hosted.add_argument("--forge-root", type=Path, required=True)
+    phase_e_hosted.add_argument("--consumer-root", type=Path, required=True)
+    phase_e_hosted.add_argument("--request", type=Path, required=True)
+    phase_e_hosted.add_argument("--bundle", type=Path, required=True)
+    phase_e_hosted.add_argument("--bundle-sha256", required=True)
+    phase_e_hosted.add_argument("--sealed-home", type=Path, required=True)
+    phase_e_hosted.add_argument("--scratch", type=Path, required=True)
+    phase_e_hosted.add_argument("--result-directory", type=Path, required=True)
+    phase_e_hosted.add_argument("--receipt", type=Path, required=True)
 
     seal_refusal = commands.add_parser("record-network-seal-refusal")
     seal_refusal.add_argument("--request", type=Path, required=True)
@@ -4267,15 +4906,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
         elif arguments.command == "reconcile-prior-runs":
             request = load_request(arguments.request)
-            reconcile_prior_runs(
+            reconcile_prior_runs_hosted(
                 request,
                 current_run_id=arguments.current_run_id,
                 destination=arguments.destination,
                 github_output=arguments.github_output,
+                receipt_path=arguments.receipt,
             )
         elif arguments.command == "phase-p":
             _require_linux_amd64()
-            prepare_phase_p_or_record_refusal(
+            prepare_phase_p_hosted(
                 arguments.forge_root,
                 load_request(arguments.request),
                 scratch_root=arguments.scratch,
@@ -4304,6 +4944,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 load_request(arguments.request),
                 bundle_path=arguments.bundle,
                 bundle_sha256=arguments.bundle_sha256,
+                scratch_root=arguments.scratch,
+                result_directory=arguments.result_directory,
+                receipt_path=arguments.receipt,
+            )
+        elif arguments.command == "probe-phase-e-hosted":
+            _require_linux_amd64()
+            probe_phase_e_hosted(
+                load_request(arguments.request), receipt_path=arguments.receipt
+            )
+        elif arguments.command == "run-phase-e-hosted":
+            _require_linux_amd64()
+            run_phase_e_hosted(
+                arguments.forge_root,
+                arguments.consumer_root,
+                load_request(arguments.request),
+                request_path=arguments.request,
+                bundle_path=arguments.bundle,
+                bundle_sha256=arguments.bundle_sha256,
+                sealed_home=arguments.sealed_home,
                 scratch_root=arguments.scratch,
                 result_directory=arguments.result_directory,
                 receipt_path=arguments.receipt,

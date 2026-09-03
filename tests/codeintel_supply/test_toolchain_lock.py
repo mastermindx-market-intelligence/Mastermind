@@ -80,6 +80,14 @@ def test_committed_lock_is_closed_and_schema_bound() -> None:
     assert lock.payload["acquisition"]["boundary_receipt"] == (
         "CODEINTEL_PHASE_P_BOUNDARY_V1"
     )
+    assert lock.payload["acquisition"]["host_userns_policy"] == {
+        "scope": "single_use_github_hosted_ubuntu_24_04_x64",
+        "sysctl": "kernel.apparmor_restrict_unprivileged_userns",
+        "active_value": 0,
+        "accepted_original_values": (0, 1),
+        "restore": "exact_original_value_verified_before_outcome_acceptance",
+        "abrupt_termination_cleanup": "github_hosted_vm_decommission",
+    }
     assert lock.payload["acquisition"]["allowed_host_suffixes"] == (
         "blob.core.windows.net",
     )
@@ -87,6 +95,9 @@ def test_committed_lock_is_closed_and_schema_bound() -> None:
         "enabled": False,
         "reason": "disabled_until_separately_content_addressed_and_admitted",
     }
+    assert tuple(lock.payload["host_utility_confounds"]) == locks.HOST_UTILITY_CONFOUNDS
+    assert "/usr/bin/sudo" in locks.HOST_UTILITY_CONFOUNDS
+    assert "/usr/sbin/sysctl" in locks.HOST_UTILITY_CONFOUNDS
 
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
@@ -258,6 +269,18 @@ def test_lock_rejects_floating_or_widened_acquisition() -> None:
             "network_namespace", "host_network"
         ),
         lambda value: value["acquisition"].__setitem__("gate_mount", "mutable"),
+        lambda value: value["acquisition"]["host_userns_policy"].__setitem__(
+            "scope", "self_hosted"
+        ),
+        lambda value: value["acquisition"]["host_userns_policy"].__setitem__(
+            "active_value", 1
+        ),
+        lambda value: value["acquisition"]["host_userns_policy"].__setitem__(
+            "accepted_original_values", [0, 1, 2]
+        ),
+        lambda value: value["acquisition"]["host_userns_policy"].__setitem__(
+            "restore", "best_effort"
+        ),
         lambda value: value["acquisition"].__setitem__(
             "relay_endpoint", "127.0.0.2:47853"
         ),

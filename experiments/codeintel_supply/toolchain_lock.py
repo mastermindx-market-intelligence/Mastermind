@@ -40,6 +40,16 @@ PHASE_P_PARENT_GATE_TRANSPORT: Final = "pathname_unix_stream"
 PHASE_P_CLIENT_SOCKET_POLICY: Final = (
     "af_inet_tcp_only_no_fastopen_no_io_uring_no_socket_inheritance"
 )
+HOST_USERNS_POLICY: Final = MappingProxyType(
+    {
+        "scope": "single_use_github_hosted_ubuntu_24_04_x64",
+        "sysctl": "kernel.apparmor_restrict_unprivileged_userns",
+        "active_value": 0,
+        "accepted_original_values": (0, 1),
+        "restore": "exact_original_value_verified_before_outcome_acceptance",
+        "abrupt_termination_cleanup": "github_hosted_vm_decommission",
+    }
+)
 
 ZOEKT_REPOSITORY: Final = "sourcegraph/zoekt"
 ZOEKT_MODULE_PATH: Final = "github.com/sourcegraph/zoekt"
@@ -111,9 +121,11 @@ HOST_UTILITY_CONFOUNDS: Final = (
     "/usr/bin/git",
     "/usr/bin/gh",
     "/usr/bin/python3",
+    "/usr/bin/sudo",
     "/usr/bin/tar",
     "/usr/bin/unshare",
     "/usr/sbin/ip",
+    "/usr/sbin/sysctl",
 )
 
 _SHA1_RE: Final = re.compile(r"[0-9a-f]{40}\Z")
@@ -386,6 +398,12 @@ def validate_lock_payload(
             "client_socket_policy": PHASE_P_CLIENT_SOCKET_POLICY,
             "minimum_landlock_abi": PHASE_P_LANDLOCK_MIN_ABI,
             "boundary_receipt": PHASE_P_BOUNDARY_RECEIPT,
+            "host_userns_policy": {
+                **HOST_USERNS_POLICY,
+                "accepted_original_values": list(
+                    HOST_USERNS_POLICY["accepted_original_values"]
+                ),
+            },
             "fresh_empty_caches": True,
             "floating_resolution": False,
             "github_cache": False,
