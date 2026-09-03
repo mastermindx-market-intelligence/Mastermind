@@ -382,6 +382,7 @@ class ZoektProcessSet:
 
         for attempt in range(1, _MAX_STARTUP_ATTEMPTS + 1):
             endpoint = LoopbackEndpoint("127.0.0.1", _reserve_loopback_port())
+            endpoint_was_open_before_spawn = _loopback_is_open(endpoint)
             attempt_log_root = self.log_root / f"startup-{attempt}"
             if attempt_log_root.exists():
                 self._terminal_start_failure()
@@ -422,6 +423,7 @@ class ZoektProcessSet:
                     capture,
                     endpoint,
                     self.startup_timeout_seconds,
+                    endpoint_was_open_before_spawn=endpoint_was_open_before_spawn,
                 )
                 self.webserver.verify()
                 capture.raise_if_overflow()
@@ -666,15 +668,23 @@ def _remove_attempt_log_root(path: Path) -> bool:
     return not path.exists()
 
 
+def _snapshot_has_bind_collision(snapshot: _CaptureSnapshot) -> bool:
+    if snapshot.truncated:
+        return False
+    diagnostics = (snapshot.stdout + b"\n" + snapshot.stderr).lower()
+    return any(marker in diagnostics for marker in _BIND_COLLISION_MARKERS)
+
+
 def _is_bind_collision(
     *, snapshot: _CaptureSnapshot, return_code: int | None, endpoint_open: bool
 ) -> bool:
     """Classify only a bounded diagnostic plus an independently occupied endpoint."""
 
-    if snapshot.truncated or return_code in (None, 0) or not endpoint_open:
-        return False
-    diagnostics = (snapshot.stdout + b"\n" + snapshot.stderr).lower()
-    return any(marker in diagnostics for marker in _BIND_COLLISION_MARKERS)
+    return (
+        return_code not in (None, 0)
+        and endpoint_open
+        and _snapshot_has_bind_collision(snapshot)
+    )
 
 
 def _indexer_argv(
@@ -800,6 +810,8 @@ def _wait_for_loopback(
     capture: _ProcessCapture,
     endpoint: LoopbackEndpoint,
     timeout_seconds: float,
+    *,
+    endpoint_was_open_before_spawn: bool,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
     stable_since: float | None = None
@@ -809,11 +821,11 @@ def _wait_for_loopback(
             raise ZoektProcessExited(
                 f"ZOEKT_PROCESS_EXITED: zoekt-webserver exited with {process.returncode}"
             )
-        reachable = _loopback_is_open(endpoint) and _process_owns_listener(
-            process.pid, endpoint
-        )
+        snapshot = capture.snapshot()
+        contested = endpoint_was_open_before_spawn or _snapshot_has_bind_collision(snapshot)
+        reachable = _loopback_is_open(endpoint)
         now = time.monotonic()
-        if reachable:
+        if reachable and not contested:
             if stable_since is None:
                 stable_since = now
             elif now - stable_since >= _STARTUP_STABILITY_SECONDS:
@@ -822,49 +834,8 @@ def _wait_for_loopback(
             stable_since = None
         time.sleep(0.02)
     raise ZoektProcessTimeout(
-        "zoekt-webserver did not bind an owned loopback listener before timeout"
+        "zoekt-webserver did not establish an uncontested loopback listener before timeout"
     )
-
-
-def _process_owns_listener(process_id: int, endpoint: LoopbackEndpoint) -> bool:
-    """Prove that one Linux process holds the exact IPv4 loopback listener."""
-
-    if endpoint.host != "127.0.0.1":
-        raise ZoektProcessError("listener ownership requires exact IPv4 loopback")
-
-    process_root = Path("/proc") / str(process_id)
-    try:
-        socket_inodes = {
-            target.removeprefix("socket:[").removesuffix("]")
-            for descriptor in (process_root / "fd").iterdir()
-            if (target := os.readlink(descriptor)).startswith("socket:[")
-            and target.endswith("]")
-        }
-        tcp_rows = (process_root / "net" / "tcp").read_text(
-            encoding="ascii"
-        ).splitlines()[1:]
-    except (OSError, UnicodeError) as error:
-        raise ZoektProcessError("listener ownership evidence is unavailable") from error
-
-    for row in tcp_rows:
-        fields = row.split()
-        if len(fields) <= 9:
-            raise ZoektProcessError("listener ownership evidence is malformed")
-        if fields[3] != "0A":
-            continue
-        try:
-            address_hex, port_hex = fields[1].split(":", maxsplit=1)
-            address = socket.inet_ntoa(bytes.fromhex(address_hex)[::-1])
-            port = int(port_hex, 16)
-        except (OSError, ValueError) as error:
-            raise ZoektProcessError("listener ownership evidence is malformed") from error
-        if (
-            address == endpoint.host
-            and port == endpoint.port
-            and fields[9] in socket_inodes
-        ):
-            return True
-    return False
 
 
 def _signal_process_group(group_id: int, sig: signal.Signals) -> None:
