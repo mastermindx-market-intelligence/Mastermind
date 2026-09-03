@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -94,6 +95,18 @@ def _write_manifest(path: Path, records: list[dict[str, object]]) -> Path:
         )
     )
     return path
+
+
+def _literal_selected_digest(root: Path, relatives: tuple[str, ...]) -> str:
+    """Build the reviewed fixture digest independently from the manifest loader."""
+
+    digest = hashlib.sha256()
+    for relative in sorted(relatives):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256((root / relative).read_bytes()).digest())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def test_loads_exact_clean_snapshots_and_uses_root_free_material_digest(
@@ -262,7 +275,7 @@ def test_rejects_symlink_roots_dirty_snapshots_and_changed_source_bytes(
         load_index_manifest(_write_manifest(tmp_path / "dirty.json", [dirty_record]))
 
 
-def test_refuses_wrong_remote_ref_and_duplicate_tracked_basename(tmp_path: Path) -> None:
+def test_refuses_wrong_remote_and_ref_identity(tmp_path: Path) -> None:
     """A matching commit alone cannot substitute for exact checkout identity and census."""
 
     root = _snapshot(tmp_path / "snapshot")
@@ -274,13 +287,56 @@ def test_refuses_wrong_remote_ref_and_duplicate_tracked_basename(tmp_path: Path)
     with pytest.raises(IndexManifestError, match="remote"):
         load_index_manifest(_write_manifest(tmp_path / "wrong-remote.json", [wrong_remote]))
 
-    duplicate = _record(root)
-    (root / "docs" / "core.py").write_text("duplicate basename\n")
+
+
+def test_accepts_distinct_repository_paths_with_the_same_basename(tmp_path: Path) -> None:
+    """Git path plus blob identity—not basename—governs the source census."""
+
+    root = _snapshot(tmp_path / "snapshot")
+    first = root / "experiments" / "code_discovery" / "__init__.py"
+    second = root / "control_plane" / "__init__.py"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir()
+    first.write_text("DISCOVERY = True\n")
+    second.write_text("CONTROL = True\n")
     _run_git(root, "add", ".")
-    _run_git(root, "commit", "-qm", "duplicate basename")
-    duplicate["commit_sha"] = _run_git(root, "rev-parse", "HEAD")
-    with pytest.raises(IndexManifestError, match="duplicate basename"):
-        load_index_manifest(_write_manifest(tmp_path / "duplicate.json", [duplicate]))
+    _run_git(root, "commit", "-qm", "add distinct package initializers")
+    selected = ("experiments/code_discovery/__init__.py", "control_plane/__init__.py")
+    record = {
+        "repository_id": "mastermind",
+        "repository_name": "mastermindx-market-intelligence/Mastermind",
+        "source_snapshot_root": str(root),
+        "ref_label": "master",
+        "commit_sha": _run_git(root, "rev-parse", "HEAD"),
+        "included_prefixes": ["experiments/code_discovery/**", "control_plane/**"],
+        "excluded_globs": [],
+        "source_tree_digest": _literal_selected_digest(root, selected),
+    }
+
+    manifest = load_index_manifest(_write_manifest(tmp_path / "manifest.json", [record]))
+
+    assert manifest.repositories[0].source_tree_digest == _literal_selected_digest(root, selected)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '{{"schema_version":"mastermind.codeintel_index_manifest.v1","schema_version":"mastermind.codeintel_index_manifest.v1","repositories":{repositories}}}',
+        '{{"schema_version":"mastermind.codeintel_index_manifest.v1","repositories":{repositories},"not_finite":NaN}}',
+    ],
+)
+def test_manifest_decoder_rejects_duplicate_keys_and_non_finite_constants(
+    tmp_path: Path, body: str
+) -> None:
+    """Malformed JSON cannot reach manifest schema validation by being silently normalized."""
+
+    root = _snapshot(tmp_path / "snapshot")
+    record = _record(root)
+    path = tmp_path / "manifest.json"
+    path.write_text(body.format(repositories=json.dumps([record], sort_keys=True)))
+
+    with pytest.raises(IndexManifestError, match="valid UTF-8 JSON"):
+        load_index_manifest(path)
 
 
 def test_seed_fixture_carries_all_three_initial_logical_entries() -> None:
