@@ -303,23 +303,32 @@ Phase E downloads only the Phase P content-addressed artifact and then:
    fresh user, mount, and network namespace through `/usr/bin/env -i`, and
    verifies exact restoration before accepting the staged semantic receipt.
    No GitHub or Actions credential is passed. Only loopback is raised.
-7. Makes the namespace mount tree private, self-bind-mounts the exact consumer
-   root, and remounts it `ro,nosuid,nodev,noexec`. It proves the root device and
-   inode did not change, `ST_RDONLY` is set, and a create attempt fails with
-   `EROFS`. Every consumer output, scratch, request, bundle, receipt, home, and
-   temporary path is required to resolve outside that source root.
-8. Inside that namespace, requires the interface census to be exactly `lo`, the
+7. Uses the same closed `/usr/bin/git` environment to resolve the exact source
+   root, per-worktree Git directory, and `--git-common-dir`. A normal checkout
+   deduplicates its identical Git/common directory; a linked worktree retains
+   the external common directory as a separate seal root. Symlink, noncanonical,
+   malformed `.git` file, or Git-dir/common-dir containment ambiguity is refused.
+   Every consumer output, scratch, request, bundle, receipt, home, and temporary
+   path must resolve outside all unique seal roots.
+8. Makes the namespace mount tree private, self-bind-mounts each unique source
+   or Git-metadata root exactly once, and remounts it
+   `ro,nosuid,nodev,noexec`. Before consumer launch it proves each device/inode
+   is unchanged, `ST_RDONLY` is set, and a create attempt fails with `EROFS`.
+   Failure writes a durable prelaunch `REFUSED / NOT_APPLIED` receipt. The
+   completed receipt binds every role to its path digest, device/inode, deduped
+   seal identity, read-only proof, mount options, and namespace-exit cleanup.
+9. Inside that namespace, requires the interface census to be exactly `lo`, the
    non-loopback route census to be empty, and a TCP connect to `1.1.1.1:443` to
    fail with an admitted network-denial errno. This proof strictly precedes the
    consumer launch.
-9. Invokes only the fixed isolated Python bootstrap and Z0 module with fixed
+10. Invokes only the fixed isolated Python bootstrap and Z0 module with fixed
    manifest, path-policy, bundle-binary, digest, scratch, result/report, and
    ten-second startup-timeout arguments.
-10. Places the consumer in a new process group; sets core, CPU, file-size,
+11. Places the consumer in a new process group; sets core, CPU, file-size,
    open-file, process-count, log-byte, and 900-second wall-clock bounds; hashes
    stdout/stderr instead of persisting them; and records PID/process group,
    return code, CPU time, maximum RSS, byte counts, and truncation state.
-11. Recomputes source, binary, bundle, and manifest identities after launch;
+12. Recomputes source, binary, bundle, and manifest identities after launch;
     removes shard/log scratch; proves the process group is dead and residue is
     absent; and records result/report names, sizes, and digests. A zero return
     code is accepted only when both bounded regular files decode as strict
@@ -406,6 +415,8 @@ For an authorized run, retain and compare these independently emitted values:
 - manifest, module-inventory, provenance, and build-recipe SHA-256 values
 - both binary SHA-256 values and repeat-build equality
 - exact consumer commit/tree, merge base, changed paths, and source digests
+- source, Git worktree-dir, and Git common-dir path digests, device/inode
+  identities, deduplicated seal IDs, and read-only verification
 - network-seal observation, fixed invocation role/contract, return code,
   resource/process/cleanup evidence, result/report digests, receipt semantic
   digest, runner image, and host-utility confounds

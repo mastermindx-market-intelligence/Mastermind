@@ -1654,6 +1654,31 @@ class ConsumerIdentity:
 
 
 @dataclass(frozen=True)
+class ConsumerSealRoot:
+    role: str
+    path: Path
+    path_sha256: str
+    device: int
+    inode: int
+    seal_id: str
+
+
+@dataclass(frozen=True)
+class ConsumerGitSealLayout:
+    roots: tuple[ConsumerSealRoot, ...]
+
+    @property
+    def unique_roots(self) -> tuple[ConsumerSealRoot, ...]:
+        observed: set[str] = set()
+        unique: list[ConsumerSealRoot] = []
+        for row in self.roots:
+            if row.seal_id not in observed:
+                observed.add(row.seal_id)
+                unique.append(row)
+        return tuple(unique)
+
+
+@dataclass(frozen=True)
 class BundleIdentity:
     path: Path
     name: str
@@ -1801,6 +1826,169 @@ def verify_consumer_checkout(
                 "CONSUMER_CENSUS_INVALID", f"consumer index row is invalid for {path}"
             )
     return ConsumerIdentity(head, tree, repository, branch)
+
+
+def _closed_git_directory(root: Path, *arguments: str) -> Path:
+    raw = _git_bytes(root, "rev-parse", *arguments)
+    if not raw.endswith(b"\n") or raw.count(b"\n") != 1 or b"\r" in raw:
+        raise HostedRunnerError(
+            "CONSUMER_GIT_METADATA_UNSAFE", "Git metadata path is ambiguous"
+        )
+    try:
+        text = raw[:-1].decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise HostedRunnerError(
+            "CONSUMER_GIT_METADATA_UNSAFE", "Git metadata path is not UTF-8"
+        ) from error
+    candidate = Path(text)
+    if not candidate.is_absolute() or "\x00" in text:
+        raise HostedRunnerError(
+            "CONSUMER_GIT_METADATA_UNSAFE", "Git metadata path is not absolute"
+        )
+    resolved = _real_directory(candidate, "CONSUMER_GIT_METADATA_UNSAFE")
+    if candidate != resolved:
+        raise HostedRunnerError(
+            "CONSUMER_GIT_METADATA_UNSAFE",
+            "Git metadata path contains a symlink or noncanonical component",
+        )
+    return resolved
+
+
+def _consumer_git_seal_layout(consumer_root: Path) -> ConsumerGitSealLayout:
+    """Resolve the source, per-worktree Git dir, and shared Git dir exactly."""
+
+    source = _real_directory(consumer_root, "CONSUMER_MOUNT_SEAL_UNSAFE")
+    git_dir = _closed_git_directory(source, "--absolute-git-dir")
+    common_dir = _closed_git_directory(
+        source, "--path-format=absolute", "--git-common-dir"
+    )
+    dot_git = source / ".git"
+    try:
+        dot_git_metadata = dot_git.lstat()
+    except OSError as error:
+        raise HostedRunnerError(
+            "CONSUMER_GIT_METADATA_UNSAFE", ".git entry is unavailable"
+        ) from error
+    if stat.S_ISLNK(dot_git_metadata.st_mode):
+        raise HostedRunnerError(
+            "CONSUMER_GIT_METADATA_UNSAFE", ".git entry must not be a symlink"
+        )
+    if stat.S_ISDIR(dot_git_metadata.st_mode):
+        if dot_git.resolve() != git_dir or common_dir != git_dir:
+            raise HostedRunnerError(
+                "CONSUMER_GIT_METADATA_UNSAFE",
+                "normal checkout Git metadata identity differs",
+            )
+    elif stat.S_ISREG(dot_git_metadata.st_mode):
+        if dot_git_metadata.st_size > 4096:
+            raise HostedRunnerError(
+                "CONSUMER_GIT_METADATA_UNSAFE", "linked-worktree .git file is oversized"
+            )
+        try:
+            body = dot_git.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise HostedRunnerError(
+                "CONSUMER_GIT_METADATA_UNSAFE",
+                "linked-worktree .git file is unreadable",
+            ) from error
+        if (
+            not body.endswith("\n")
+            or body.count("\n") != 1
+            or not body.startswith("gitdir: ")
+        ):
+            raise HostedRunnerError(
+                "CONSUMER_GIT_METADATA_UNSAFE",
+                "linked-worktree .git file is ambiguous",
+            )
+        pointer = Path(body.removeprefix("gitdir: ").removesuffix("\n"))
+        if not pointer.is_absolute():
+            pointer = source / pointer
+        if pointer.resolve() != git_dir:
+            raise HostedRunnerError(
+                "CONSUMER_GIT_METADATA_UNSAFE",
+                "linked-worktree Git directory identity differs",
+            )
+        try:
+            git_dir.relative_to(common_dir)
+        except ValueError as error:
+            raise HostedRunnerError(
+                "CONSUMER_GIT_METADATA_UNSAFE",
+                "linked-worktree Git directory escapes its common directory",
+            ) from error
+    else:
+        raise HostedRunnerError(
+            "CONSUMER_GIT_METADATA_UNSAFE", ".git entry has an unsafe type"
+        )
+
+    role_paths = (
+        ("consumer_source", source),
+        ("git_worktree_dir", git_dir),
+        ("git_common_dir", common_dir),
+    )
+    identities: dict[tuple[int, int], str] = {}
+    roots: list[ConsumerSealRoot] = []
+    for role, path in role_paths:
+        try:
+            metadata = path.lstat()
+        except OSError as error:  # pragma: no cover - closed helper already checked
+            raise HostedRunnerError(
+                "CONSUMER_GIT_METADATA_UNSAFE", f"{role} is unavailable"
+            ) from error
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise HostedRunnerError(
+                "CONSUMER_GIT_METADATA_UNSAFE", f"{role} is not a real directory"
+            )
+        object_id = (metadata.st_dev, metadata.st_ino)
+        seal_id = identities.setdefault(object_id, f"seal-{len(identities)}")
+        roots.append(
+            ConsumerSealRoot(
+                role=role,
+                path=path,
+                path_sha256=locks.sha256_bytes(os.fsencode(path)),
+                device=metadata.st_dev,
+                inode=metadata.st_ino,
+                seal_id=seal_id,
+            )
+        )
+    return ConsumerGitSealLayout(tuple(roots))
+
+
+def _verify_consumer_git_seal(consumer_root: Path) -> Mapping[str, object]:
+    """Re-derive every mounted identity and emit path-free receipt evidence."""
+
+    layout = _consumer_git_seal_layout(consumer_root)
+    for row in layout.unique_roots:
+        metadata = row.path.lstat()
+        if (metadata.st_dev, metadata.st_ino) != (row.device, row.inode):
+            raise HostedRunnerError(
+                "CONSUMER_MOUNT_SEAL_UNAVAILABLE",
+                f"{row.role} device/inode changed",
+            )
+        if not os.statvfs(row.path).f_flag & os.ST_RDONLY:
+            raise HostedRunnerError(
+                "CONSUMER_MOUNT_SEAL_UNAVAILABLE",
+                f"{row.role} is not read-only",
+            )
+    evidence: dict[str, object] = {
+        "mount_namespace_private": True,
+        "requested_mount_options": ["ro", "nosuid", "nodev", "noexec"],
+        "unique_mount_count": len(layout.unique_roots),
+        "namespace_exit_discards_mounts": True,
+        "roots": [
+            {
+                "role": row.role,
+                "seal_id": row.seal_id,
+                "path_sha256": row.path_sha256,
+                "device": row.device,
+                "inode": row.inode,
+                "device_inode_verified": True,
+                "read_only_verified": True,
+            }
+            for row in layout.roots
+        ],
+    }
+    assert_secret_free(evidence)
+    return evidence
 
 
 def validate_consumer_paths(paths: Iterable[str]) -> tuple[str, ...]:
@@ -2232,6 +2420,28 @@ def write_network_seal_boundary_receipt(
         status="RECONCILIATION_REQUIRED" if effect_unknown else "REFUSED",
         effect="EFFECT_UNKNOWN" if effect_unknown else "NOT_APPLIED",
         evidence=evidence,
+    )
+
+
+def write_phase_e_seal_refusal(
+    request: ExperimentRequest, path: Path
+) -> Mapping[str, Any]:
+    """Record a proven pre-consumer source or Git-metadata seal refusal."""
+
+    return write_semantic_receipt(
+        path,
+        request=request,
+        status="REFUSED",
+        effect="NOT_APPLIED",
+        evidence={
+            "failure": {
+                "code": "CONSUMER_MOUNT_SEAL_UNAVAILABLE",
+                "detail": "source or Git metadata read-only seal failed before launch",
+            },
+            "consumer_launched": False,
+            "phase": "E",
+            "runner": _runner_confounds(),
+        },
     )
 
 
@@ -3187,6 +3397,7 @@ def run_phase_e(
     consumer = verify_consumer_checkout(
         consumer_root, request.consumer_sha, request.consumer_tree_sha
     )
+    git_metadata_seal = _verify_consumer_git_seal(consumer_root)
     merge_base, changed_paths = consumer_effective_paths(
         consumer_root,
         consumer_sha=request.consumer_sha,
@@ -3342,6 +3553,7 @@ def run_phase_e(
                 "binary_digests_after": binary_after,
             },
             "network_seal": dataclasses.asdict(proof),
+            "git_metadata_seal": git_metadata_seal,
             "consumer_invocation": {
                 "role": "Z0_DISPOSABLE_FALSIFIER",
                 "module": FIXED_CONSUMER_MODULE,
@@ -5096,7 +5308,9 @@ def _phase_e_namespace_command(
     result_directory: Path,
     receipt_path: Path,
 ) -> list[str]:
-    consumer = _real_directory(consumer_root, "CONSUMER_MOUNT_SEAL_UNSAFE")
+    layout = _consumer_git_seal_layout(consumer_root)
+    roots = {row.role: row for row in layout.roots}
+    consumer = roots["consumer_source"].path
     for external in (
         sealed_home,
         sealed_home / "tmp",
@@ -5106,7 +5320,8 @@ def _phase_e_namespace_command(
         bundle_path.parent,
         request_path.parent,
     ):
-        _require_outside_consumer_root(external, consumer)
+        for sealed in layout.unique_roots:
+            _require_outside_consumer_root(external, sealed.path)
     inner_environment = {
         "HOME": os.fspath(sealed_home),
         "TMPDIR": os.fspath(sealed_home / "tmp"),
@@ -5119,7 +5334,21 @@ def _phase_e_namespace_command(
         "ImageOS": os.environ.get("ImageOS", "UNAVAILABLE"),
         "ImageVersion": os.environ.get("ImageVersion", "UNAVAILABLE"),
         "FORGE_ROOT": os.fspath(forge_root),
-        "CONSUMER_ROOT": os.fspath(consumer_root),
+        "CONSUMER_ROOT": os.fspath(consumer),
+        "CONSUMER_ROOT_EXPECTED": (
+            f"{roots['consumer_source'].device}:{roots['consumer_source'].inode}"
+        ),
+        "CONSUMER_ROOT_SEAL_ID": roots["consumer_source"].seal_id,
+        "CONSUMER_GIT_DIR": os.fspath(roots["git_worktree_dir"].path),
+        "CONSUMER_GIT_DIR_EXPECTED": (
+            f"{roots['git_worktree_dir'].device}:{roots['git_worktree_dir'].inode}"
+        ),
+        "CONSUMER_GIT_DIR_SEAL_ID": roots["git_worktree_dir"].seal_id,
+        "CONSUMER_GIT_COMMON_DIR": os.fspath(roots["git_common_dir"].path),
+        "CONSUMER_GIT_COMMON_DIR_EXPECTED": (
+            f"{roots['git_common_dir'].device}:{roots['git_common_dir'].inode}"
+        ),
+        "CONSUMER_GIT_COMMON_DIR_SEAL_ID": roots["git_common_dir"].seal_id,
         "REQUEST_PATH": os.fspath(request_path),
         "BUNDLE_PATH": os.fspath(bundle_path),
         "BUNDLE_SHA256": bundle_sha256,
@@ -5150,22 +5379,37 @@ def _phase_e_namespace_command(
         "-c",
         """
 /usr/sbin/ip link set lo up
+set -E
+record_seal_refusal() {
+  trap - ERR
+  /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+    record-phase-e-seal-refusal \
+    --request "$REQUEST_PATH" \
+    --receipt "$RECEIPT_PATH" || true
+  exit 1
+}
+trap record_seal_refusal ERR
 /bin/mount --make-rprivate /
-readonly CONSUMER_ID_BEFORE="$(/usr/bin/python3 -c 'import os,sys; value=os.stat(sys.argv[1]); print(f"{value.st_dev}:{value.st_ino}")' "$CONSUMER_ROOT")"
-/bin/mount --bind "$CONSUMER_ROOT" "$CONSUMER_ROOT"
-/bin/mount -o remount,bind,ro,nosuid,nodev,noexec "$CONSUMER_ROOT"
-readonly CONSUMER_ID_AFTER="$(/usr/bin/python3 -c 'import os,sys; value=os.stat(sys.argv[1]); print(f"{value.st_dev}:{value.st_ino}")' "$CONSUMER_ROOT")"
-test "$CONSUMER_ID_BEFORE" = "$CONSUMER_ID_AFTER"
-/usr/bin/python3 - "$CONSUMER_ROOT" "$TMPDIR" <<'PY'
+seal_root() {
+  local target="$1"
+  local expected="$2"
+  local before
+  local after
+  before="$(/usr/bin/python3 -c 'import os,sys; value=os.stat(sys.argv[1]); print(f"{value.st_dev}:{value.st_ino}")' "$target")"
+  test "$before" = "$expected"
+  /bin/mount --bind "$target" "$target"
+  /bin/mount -o remount,bind,ro,nosuid,nodev,noexec "$target"
+  after="$(/usr/bin/python3 -c 'import os,sys; value=os.stat(sys.argv[1]); print(f"{value.st_dev}:{value.st_ino}")' "$target")"
+  test "$after" = "$expected"
+  /usr/bin/python3 - "$target" <<'PY'
 import errno
 import os
 import sys
 
-consumer_root, tmpdir = sys.argv[1:]
-os.makedirs(tmpdir, mode=0o700, exist_ok=True)
-if not os.statvfs(consumer_root).f_flag & os.ST_RDONLY:
-    raise SystemExit("consumer root lacks ST_RDONLY")
-probe = os.path.join(consumer_root, ".codeintel-read-only-probe")
+target = sys.argv[1]
+if not os.statvfs(target).f_flag & os.ST_RDONLY:
+    raise SystemExit("sealed root lacks ST_RDONLY")
+probe = os.path.join(target, ".codeintel-read-only-probe")
 try:
     descriptor = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
 except OSError as error:
@@ -5174,17 +5418,28 @@ except OSError as error:
 else:
     os.close(descriptor)
     os.unlink(probe)
-    raise SystemExit("consumer write unexpectedly succeeded")
+    raise SystemExit("sealed-root write unexpectedly succeeded")
 PY
-exec /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \\
-  run-phase-e \\
-  --forge-root "$FORGE_ROOT" \\
-  --consumer-root "$CONSUMER_ROOT" \\
-  --request "$REQUEST_PATH" \\
-  --bundle "$BUNDLE_PATH" \\
-  --bundle-sha256 "$BUNDLE_SHA256" \\
-  --scratch "$SCRATCH_PATH" \\
-  --result-directory "$RESULT_PATH" \\
+}
+seal_root "$CONSUMER_ROOT" "$CONSUMER_ROOT_EXPECTED"
+if test "$CONSUMER_GIT_COMMON_DIR_SEAL_ID" != "$CONSUMER_ROOT_SEAL_ID"; then
+  seal_root "$CONSUMER_GIT_COMMON_DIR" "$CONSUMER_GIT_COMMON_DIR_EXPECTED"
+fi
+if test "$CONSUMER_GIT_DIR_SEAL_ID" != "$CONSUMER_ROOT_SEAL_ID" && \
+   test "$CONSUMER_GIT_DIR_SEAL_ID" != "$CONSUMER_GIT_COMMON_DIR_SEAL_ID"; then
+  seal_root "$CONSUMER_GIT_DIR" "$CONSUMER_GIT_DIR_EXPECTED"
+fi
+/usr/bin/mkdir -p -m 700 "$TMPDIR"
+trap - ERR
+exec /usr/bin/python3 "$FORGE_ROOT/experiments/codeintel_supply/hosted_runner.py" \
+  run-phase-e \
+  --forge-root "$FORGE_ROOT" \
+  --consumer-root "$CONSUMER_ROOT" \
+  --request "$REQUEST_PATH" \
+  --bundle "$BUNDLE_PATH" \
+  --bundle-sha256 "$BUNDLE_SHA256" \
+  --scratch "$SCRATCH_PATH" \
+  --result-directory "$RESULT_PATH" \
   --receipt "$RECEIPT_PATH"
 """.strip(),
     ]
@@ -5363,6 +5618,10 @@ def _parser() -> argparse.ArgumentParser:
     seal_unknown = commands.add_parser("record-network-seal-effect-unknown")
     seal_unknown.add_argument("--request", type=Path, required=True)
     seal_unknown.add_argument("--receipt", type=Path, required=True)
+
+    phase_e_seal_refusal = commands.add_parser("record-phase-e-seal-refusal")
+    phase_e_seal_refusal.add_argument("--request", type=Path, required=True)
+    phase_e_seal_refusal.add_argument("--receipt", type=Path, required=True)
     return parser
 
 
@@ -5461,6 +5720,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 load_request(arguments.request),
                 arguments.receipt,
                 effect_unknown=True,
+            )
+        elif arguments.command == "record-phase-e-seal-refusal":
+            write_phase_e_seal_refusal(
+                load_request(arguments.request), arguments.receipt
             )
         else:  # pragma: no cover - argparse is exhaustive
             raise HostedRunnerError("INVALID_COMMAND", str(arguments.command))

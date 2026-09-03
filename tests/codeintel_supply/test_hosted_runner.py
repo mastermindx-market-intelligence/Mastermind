@@ -550,6 +550,22 @@ def test_consumer_git_seal_layout_tracks_linked_worktree_common_dir(
     assert all(len(row.path_sha256) == 64 for row in layout.roots)
 
 
+def test_consumer_git_seal_refuses_unsealed_or_symlinked_source(
+    tmp_path: Path,
+) -> None:
+    consumer = tmp_path / "consumer"
+    _git_repository(consumer)
+    with pytest.raises(
+        runner.HostedRunnerError, match="CONSUMER_MOUNT_SEAL_UNAVAILABLE"
+    ):
+        runner._verify_consumer_git_seal(consumer)  # noqa: SLF001
+
+    alias = tmp_path / "consumer-alias"
+    alias.symlink_to(consumer, target_is_directory=True)
+    with pytest.raises(runner.HostedRunnerError, match="CONSUMER_MOUNT_SEAL_UNSAFE"):
+        runner._consumer_git_seal_layout(alias)  # noqa: SLF001
+
+
 def test_workflow_action_pins_match_lock_and_hostile_mutation_fails(
     tmp_path: Path,
 ) -> None:
@@ -1775,7 +1791,7 @@ def test_phase_e_restoration_failure_receipt_does_not_claim_restore_verified(
     forge = tmp_path / "forge"
     consumer = tmp_path / "consumer"
     forge.mkdir()
-    consumer.mkdir()
+    _git_repository(consumer)
     receipt = tmp_path / "receipts/semantic-receipt.json"
     environment = _github_hosted_environment(tmp_path)
     for key, value in environment.items():
@@ -1894,7 +1910,7 @@ def test_phase_e_hosted_restore_failure_discards_success_receipt(
     forge = tmp_path / "forge"
     consumer = tmp_path / "consumer"
     forge.mkdir()
-    consumer.mkdir()
+    _git_repository(consumer)
     receipt = tmp_path / "receipts/semantic-receipt.json"
 
     @contextmanager
@@ -1962,7 +1978,7 @@ def test_phase_e_hosted_publishes_staged_receipt_only_after_restore(
     forge = tmp_path / "forge"
     consumer = tmp_path / "consumer"
     forge.mkdir()
-    consumer.mkdir()
+    _git_repository(consumer)
     receipt = tmp_path / "receipts/semantic-receipt.json"
 
     @contextmanager
@@ -2016,7 +2032,7 @@ def test_phase_e_hosted_zero_exit_without_receipt_is_effect_unknown(
     forge = tmp_path / "forge"
     consumer = tmp_path / "consumer"
     forge.mkdir()
-    consumer.mkdir()
+    _git_repository(consumer)
     receipt = tmp_path / "receipts/semantic-receipt.json"
 
     @contextmanager
@@ -2092,13 +2108,16 @@ def test_phase_e_hosted_namespace_argv_is_fixed_and_secret_free(
     assert "ghp_hostile_secret_value" not in repr(argv)
     assert "--module" not in argv[-1]
     assert "/bin/mount --make-rprivate /" in argv[-1]
-    assert '/bin/mount --bind "$CONSUMER_ROOT" "$CONSUMER_ROOT"' in argv[-1]
+    assert '/bin/mount --bind "$target" "$target"' in argv[-1]
     assert "remount,bind,ro,nosuid,nodev,noexec" in argv[-1]
     assert "ST_RDONLY" in argv[-1]
     assert "errno.EROFS" in argv[-1]
-    assert "CONSUMER_GIT_DIR=" in argv
-    assert "CONSUMER_GIT_COMMON_DIR=" in argv
+    assert any(value.startswith("CONSUMER_GIT_DIR=") for value in argv)
+    assert any(value.startswith("CONSUMER_GIT_COMMON_DIR=") for value in argv)
     assert "record-phase-e-seal-refusal" in argv[-1]
+    assert argv[-1].index("set -E") < argv[-1].index(
+        "trap record_seal_refusal ERR"
+    )
     assert argv[-1].index("trap record_seal_refusal ERR") < argv[-1].index(
         "/bin/mount --make-rprivate /"
     )
@@ -2107,6 +2126,14 @@ def test_phase_e_hosted_namespace_argv_is_fixed_and_secret_free(
     assert argv[-1].index("remount,bind,ro,nosuid,nodev,noexec") < argv[-1].index(
         "run-phase-e"
     )
+    parsed = subprocess.run(
+        ["/bin/bash", "-n"],
+        input=argv[-1],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert parsed.returncode == 0, parsed.stderr
 
 
 def test_phase_e_refuses_writable_paths_beneath_consumer_root(tmp_path: Path) -> None:
@@ -2149,6 +2176,18 @@ def test_phase_e_refuses_writable_path_beneath_linked_git_common_dir(
             result_directory=primary / ".git/result",
             receipt_path=tmp_path / "receipt.json",
         )
+
+
+def test_phase_e_seal_refusal_is_durable_and_prelaunch(tmp_path: Path) -> None:
+    receipt_path = tmp_path / "receipt/semantic-receipt.json"
+    runner.write_phase_e_seal_refusal(_request(), receipt_path)
+
+    receipt = runner.load_semantic_receipt(receipt_path)
+    assert (receipt["status"], receipt["effect"]) == ("REFUSED", "NOT_APPLIED")
+    assert receipt["evidence"]["consumer_launched"] is False
+    assert receipt["evidence"]["failure"]["code"] == (
+        "CONSUMER_MOUNT_SEAL_UNAVAILABLE"
+    )
 
 
 def test_phase_e_live_mount_seal_is_read_only_and_namespace_local(
@@ -3091,6 +3130,44 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
             runner.FIXED_CONSUMER_BRANCH,
         ),
     )
+    seal_evidence = {
+        "mount_namespace_private": True,
+        "requested_mount_options": ["ro", "nosuid", "nodev", "noexec"],
+        "unique_mount_count": 2,
+        "namespace_exit_discards_mounts": True,
+        "roots": [
+            {
+                "role": "consumer_source",
+                "seal_id": "seal-0",
+                "path_sha256": "a" * 64,
+                "device": 1,
+                "inode": 2,
+                "device_inode_verified": True,
+                "read_only_verified": True,
+            },
+            {
+                "role": "git_worktree_dir",
+                "seal_id": "seal-1",
+                "path_sha256": "b" * 64,
+                "device": 1,
+                "inode": 3,
+                "device_inode_verified": True,
+                "read_only_verified": True,
+            },
+            {
+                "role": "git_common_dir",
+                "seal_id": "seal-1",
+                "path_sha256": "b" * 64,
+                "device": 1,
+                "inode": 3,
+                "device_inode_verified": True,
+                "read_only_verified": True,
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        runner, "_verify_consumer_git_seal", lambda *args: seal_evidence
+    )
     monkeypatch.setattr(
         runner,
         "consumer_effective_paths",
@@ -3194,6 +3271,7 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
 
     assert receipt["status"] == "COMPLETED"
     assert receipt["effect"] == "APPLIED"
+    assert receipt["evidence"]["git_metadata_seal"] == seal_evidence
     assert (
         receipt["evidence"]["consumer_invocation"]["sensitive_environment_inherited"]
         is False
