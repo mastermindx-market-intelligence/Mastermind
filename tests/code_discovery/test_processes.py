@@ -119,7 +119,7 @@ def _webserver(path: Path, trace: Path) -> ExecutableSpec:
     return _script(
         path,
         (
-            "import socket, sys, time\n"
+            "import json, socket, sys, time\n"
             "from pathlib import Path\n"
             "listen = next(argument.split('=', 1)[1] for argument in sys.argv "
             "if argument.startswith('--listen='))\n"
@@ -129,7 +129,26 @@ def _webserver(path: Path, trace: Path) -> ExecutableSpec:
             "listener.bind((host, int(port)))\n"
             "listener.listen()\n"
             f"Path({str(trace)!r}).write_text('\\n'.join(sys.argv[1:]))\n"
-            "while True: time.sleep(1)\n"
+            "index = Path(next(argument.split('=', 1)[1] for argument in sys.argv "
+            "if argument.startswith('--index=')))\n"
+            "metadata_path = next(index.rglob('z0-index-meta.json'))\n"
+            "metadata = json.loads(metadata_path.read_text())\n"
+            "identity = metadata['Metadata']\n"
+            "payload = json.dumps({'Repos': [{'Repository': {'Name': metadata['Name'], "
+            "'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], "
+            "'Version': identity['commit_sha']}]}}]}).encode()\n"
+            "while True:\n"
+            "    connection, _ = listener.accept()\n"
+            "    with connection:\n"
+            "        connection.settimeout(0.2)\n"
+            "        try:\n"
+            "            request = connection.recv(4096)\n"
+            "        except TimeoutError:\n"
+            "            continue\n"
+            "        if request.startswith(b'POST /api/list HTTP/'):\n"
+            "            response = (b'HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\n' "
+            "+ f'Content-Length: {len(payload)}\\r\\nConnection: close\\r\\n\\r\\n'.encode() + payload)\n"
+            "            connection.sendall(response)\n"
         ),
         role="zoekt-webserver",
     )
@@ -209,7 +228,7 @@ def test_closed_role_and_process_group_cleanup_leave_no_child_or_scratch(
     server = _script(
         tmp_path / "zoekt-webserver",
         (
-            "import socket, subprocess, sys, time\n"
+            "import json, socket, subprocess, sys, time\n"
             "from pathlib import Path\n"
             "listen = next(argument.split('=', 1)[1] for argument in sys.argv "
             "if argument.startswith('--listen='))\n"
@@ -220,7 +239,21 @@ def test_closed_role_and_process_group_cleanup_leave_no_child_or_scratch(
             "listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
             "listener.bind((host, int(port)))\n"
             "listener.listen()\n"
-            "while True: time.sleep(1)\n"
+            "index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
+            "metadata = json.loads(next(index.rglob('z0-index-meta.json')).read_text())\n"
+            "identity = metadata['Metadata']\n"
+            "payload = json.dumps({'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}}]}).encode()\n"
+            "while True:\n"
+            "    connection, _ = listener.accept()\n"
+            "    with connection:\n"
+            "        connection.settimeout(0.2)\n"
+            "        try:\n"
+            "            request = connection.recv(4096)\n"
+            "        except TimeoutError:\n"
+            "            continue\n"
+            "        if request.startswith(b'POST /api/list HTTP/'):\n"
+            "            response = (b'HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\n' + f'Content-Length: {len(payload)}\\r\\nConnection: close\\r\\n\\r\\n'.encode() + payload)\n"
+            "            connection.sendall(response)\n"
         ),
         role="zoekt-webserver",
     )
@@ -299,6 +332,26 @@ def test_build_uses_frozen_pinned_argv_closed_environment_and_exact_status(
     ]
     assert argv[-2] == str(manifest.repositories[0].source_snapshot_root)
     assert argv[-1] == "secret="
+    metadata = json.loads(
+        (
+            tmp_path
+            / "disposable-shards"
+            / status.shard_namespace
+            / "z0-index-meta.json"
+        ).read_text()
+    )
+    assert set(metadata) == {"Name", "Metadata"}
+    assert metadata["Name"] == "mastermindx-market-intelligence/Mastermind"
+    assert metadata["Metadata"] == {
+        "schema": "mastermind.codeintel_index_identity.v1",
+        "generation_id": processes._generation_id,
+        "logical_repository_id": "mastermind",
+        "canonical_repository": "mastermindx-market-intelligence/Mastermind",
+        "ref_label": "master",
+        "commit_sha": manifest.repositories[0].commit_sha,
+        "source_tree_digest": manifest.repositories[0].source_tree_digest,
+        "shard_namespace": status.shard_namespace,
+    }
     processes.close()
 
 
@@ -347,6 +400,91 @@ def test_tampered_logical_shard_receipt_refuses_serving(tmp_path: Path) -> None:
 
     with pytest.raises(ZoektProcessError, match="receipt mismatch"):
         processes.start_search()
+    processes.close()
+
+
+def test_identity_probe_rejects_missing_wrong_and_ambiguous_repositories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Readiness needs one exact pinned-Zoekt identity, never just a listening port."""
+
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-argv.txt"
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+    processes.build_indexes(manifest)
+    identity = processes._repository_identities[0]
+    endpoint = LoopbackEndpoint("127.0.0.1", 6070)
+
+    def exact_payload() -> dict[str, object]:
+        return {
+            "Repos": [
+                {
+                    "Repository": {
+                        "Name": identity.repository_name,
+                        "Metadata": identity.metadata,
+                        "Branches": [
+                            {"Name": identity.ref_label, "Version": identity.commit_sha}
+                        ],
+                    }
+                }
+            ]
+        }
+
+    for payload in (
+        {"Repos": []},
+        {"Repos": [{"Repository": {}}]},
+        {
+            "Repos": [
+                {
+                    "Repository": {
+                        "Name": "wrong/repository",
+                        "Metadata": identity.metadata,
+                        "Branches": [
+                            {"Name": identity.ref_label, "Version": identity.commit_sha}
+                        ],
+                    }
+                }
+            ]
+        },
+        {
+            "Repos": [
+                {
+                    "Repository": {
+                        "Name": identity.repository_name,
+                        "Metadata": identity.metadata,
+                        "Branches": [
+                            {"Name": identity.ref_label, "Version": identity.commit_sha},
+                            {"Name": identity.ref_label, "Version": identity.commit_sha},
+                        ],
+                    }
+                }
+            ]
+        },
+        {"Repos": [exact_payload()["Repos"][0], exact_payload()["Repos"][0]]},
+        {"not_repos": []},
+    ):
+        monkeypatch.setattr(processes_module, "_post_loopback_list", lambda _endpoint, result=payload: result)
+        assert not processes_module._loopback_has_exact_identities(
+            endpoint, processes._repository_identities
+        )
+
+    assert processes_module._loopback_has_exact_identities(endpoint, ()) is False
+    with pytest.raises(ValueError, match="duplicate"):
+        json.loads(
+            '{"Repos":[],"Repos":[]}',
+            object_pairs_hook=processes_module._reject_duplicate_json_keys,
+            parse_constant=processes_module._reject_non_finite_json_constant,
+        )
+    with pytest.raises(ValueError, match="forbidden"):
+        json.loads(
+            '{"Repos":NaN}',
+            object_pairs_hook=processes_module._reject_duplicate_json_keys,
+            parse_constant=processes_module._reject_non_finite_json_constant,
+        )
     processes.close()
 
 
@@ -421,7 +559,23 @@ def test_delayed_bind_failure_cannot_use_an_unrelated_listener_as_readiness(
             "    time.sleep(0.6)\n"
             "    raise SystemExit(98)\n"
             "listener.listen()\n"
-            "while True: time.sleep(1)\n"
+            "while True:\n"
+            "    connection, _ = listener.accept()\n"
+            "    with connection:\n"
+            "        connection.settimeout(0.2)\n"
+            "        try:\n"
+            "            request = connection.recv(4096)\n"
+            "        except TimeoutError:\n"
+            "            continue\n"
+            "        if request.startswith(b'POST /api/list HTTP/'):\n"
+            "            import json\n"
+            "            from pathlib import Path\n"
+            "            index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
+            "            metadata = json.loads(next(index.rglob('z0-index-meta.json')).read_text())\n"
+            "            identity = metadata['Metadata']\n"
+            "            payload = json.dumps({'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}}]}).encode()\n"
+            "            response = (b'HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\n' + f'Content-Length: {len(payload)}\\r\\nConnection: close\\r\\n\\r\\n'.encode() + payload)\n"
+            "            connection.sendall(response)\n"
         ),
         role="zoekt-webserver",
     )
@@ -474,7 +628,23 @@ def test_late_wrong_identity_listener_cannot_false_start_before_bind_failure(
             "    sys.stderr.flush()\n"
             "    raise SystemExit(98)\n"
             "listener.listen()\n"
-            "while True: time.sleep(1)\n"
+            "while True:\n"
+            "    connection, _ = listener.accept()\n"
+            "    with connection:\n"
+            "        connection.settimeout(0.2)\n"
+            "        try:\n"
+            "            request = connection.recv(4096)\n"
+            "        except TimeoutError:\n"
+            "            continue\n"
+            "        if request.startswith(b'POST /api/list HTTP/'):\n"
+            "            import json\n"
+            "            from pathlib import Path\n"
+            "            index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
+            "            metadata = json.loads(next(index.rglob('z0-index-meta.json')).read_text())\n"
+            "            identity = metadata['Metadata']\n"
+            "            payload = json.dumps({'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}}]}).encode()\n"
+            "            response = (b'HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\n' + f'Content-Length: {len(payload)}\\r\\nConnection: close\\r\\n\\r\\n'.encode() + payload)\n"
+            "            connection.sendall(response)\n"
         ),
         role="zoekt-webserver",
     )
@@ -679,7 +849,7 @@ def test_bounded_output_and_search_process_exit_are_typed_and_cleanup_is_idempot
         f"--index={tmp_path / 'disposable-shards'}",
         f"--log_dir={tmp_path / 'disposable-logs' / 'startup-1'}",
         "--html=true",
-        "--rpc=false",
+        "--rpc=true",
         "--indexserver_proxy=false",
         "--pprof=false",
     ]

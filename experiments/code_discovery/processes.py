@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
@@ -28,6 +29,8 @@ ZOEKT_SOURCE_COMMIT: Final = "5f833dde1bc4b1a8f99007617b4b721e44506c4f"
 _MAX_PROCESS_OUTPUT_BYTES: Final = 64 * 1024
 _MAX_STARTUP_ATTEMPTS: Final = 3
 _STARTUP_STABILITY_SECONDS: Final = 0.20
+_IDENTITY_PROBE_TIMEOUT_SECONDS: Final = 0.25
+_MAX_IDENTITY_RESPONSE_BYTES: Final = 64 * 1024
 _CLOSED_ENV: Final = {"LANG": "C", "LC_ALL": "C"}
 _HOST_ROLES: Final = frozenset({"zoekt-git-index", "zoekt-webserver"})
 _STARTUP_CATEGORIES: Final = frozenset(
@@ -192,6 +195,16 @@ class _CaptureSnapshot:
     sha256: str
 
 
+@dataclass(frozen=True)
+class _RepositoryIdentity:
+    """One exact pinned-Zoekt repository identity for this disposable generation."""
+
+    repository_name: str
+    metadata: dict[str, str]
+    ref_label: str
+    commit_sha: str
+
+
 class _ProcessCapture:
     """Retain bounded private diagnostics while stopping a noisy server."""
 
@@ -292,6 +305,7 @@ class ZoektProcessSet:
         self.log_root = _prepare_external_directory(Path(log_root), "log_root")
         self.startup_timeout_seconds = startup_timeout_seconds
         self._statuses: tuple[RepositoryIndexStatus, ...] = ()
+        self._repository_identities: tuple[_RepositoryIdentity, ...] = ()
         self._search_process: subprocess.Popen[bytes] | None = None
         self._search_capture: _ProcessCapture | None = None
         self._endpoint: LoopbackEndpoint | None = None
@@ -315,6 +329,7 @@ class ZoektProcessSet:
         self._require_open()
         _assert_external_to_sources(self.shard_root, self.log_root, manifest.repositories)
         statuses: list[RepositoryIndexStatus] = []
+        identities: list[_RepositoryIdentity] = []
         for spec in manifest.repositories:
             generation = self.shard_root / spec.shard_namespace
             if generation.exists():
@@ -323,17 +338,10 @@ class ZoektProcessSet:
                 )
             generation.mkdir(mode=0o700)
             metadata_path = generation / "z0-index-meta.json"
+            metadata = _index_identity_metadata(spec, self._generation_id)
             _write_json(
                 metadata_path,
-                {
-                    "repository_id": spec.repository_id,
-                    "repository_name": spec.repository_name,
-                    "ref_label": spec.ref_label,
-                    "commit_sha": spec.commit_sha,
-                    "source_tree_digest": spec.source_tree_digest,
-                    "shard_namespace": spec.shard_namespace,
-                    "parent_generation": self._generation_id,
-                },
+                {"Name": spec.repository_name, "Metadata": metadata},
             )
             self.indexer.verify()
             argv = _indexer_argv(self.indexer, spec, generation, metadata_path)
@@ -360,7 +368,16 @@ class ZoektProcessSet:
             _write_json(generation / "z0-index-receipt.json", _receipt_payload(status))
             _verify_receipt(generation / "z0-index-receipt.json", status)
             statuses.append(status)
+            identities.append(
+                _RepositoryIdentity(
+                    repository_name=spec.repository_name,
+                    metadata=metadata,
+                    ref_label=spec.ref_label,
+                    commit_sha=spec.commit_sha,
+                )
+            )
         self._statuses = tuple(statuses)
+        self._repository_identities = tuple(identities)
         return self._statuses
 
     def start_search(self) -> LoopbackEndpoint:
@@ -424,6 +441,7 @@ class ZoektProcessSet:
                     endpoint,
                     self.startup_timeout_seconds,
                     endpoint_was_open_before_spawn=endpoint_was_open_before_spawn,
+                    expected_identities=self._repository_identities,
                 )
                 self.webserver.verify()
                 capture.raise_if_overflow()
@@ -555,6 +573,12 @@ class ZoektProcessSet:
         if code is not None:
             raise ZoektProcessExited(
                 f"ZOEKT_PROCESS_EXITED: zoekt-webserver exited with {code}"
+            )
+        if self._endpoint is None or not _loopback_has_exact_identities(
+            self._endpoint, self._repository_identities
+        ):
+            raise ZoektProcessExited(
+                "ZOEKT_PROCESS_EXITED: zoekt-webserver identity probe failed"
             )
 
     def close(self) -> None:
@@ -721,7 +745,7 @@ def _webserver_argv(
         f"--index={shard_root}",
         f"--log_dir={log_root}",
         "--html=true",
-        "--rpc=false",
+        "--rpc=true",
         "--indexserver_proxy=false",
         "--pprof=false",
     )
@@ -812,6 +836,7 @@ def _wait_for_loopback(
     timeout_seconds: float,
     *,
     endpoint_was_open_before_spawn: bool,
+    expected_identities: Sequence[_RepositoryIdentity],
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
     stable_since: float | None = None
@@ -823,7 +848,7 @@ def _wait_for_loopback(
             )
         snapshot = capture.snapshot()
         contested = endpoint_was_open_before_spawn or _snapshot_has_bind_collision(snapshot)
-        reachable = _loopback_is_open(endpoint)
+        reachable = _loopback_has_exact_identities(endpoint, expected_identities)
         now = time.monotonic()
         if reachable and not contested:
             if stable_since is None:
@@ -887,6 +912,130 @@ def _loopback_is_open(endpoint: LoopbackEndpoint) -> bool:
             return True
     except OSError:
         return False
+
+
+def _index_identity_metadata(spec: RepositorySpec, generation_id: str) -> dict[str, str]:
+    """Return the only caller-authored metadata accepted by pinned Zoekt."""
+
+    return {
+        "schema": "mastermind.codeintel_index_identity.v1",
+        "generation_id": generation_id,
+        "logical_repository_id": spec.repository_id,
+        "canonical_repository": spec.repository_name,
+        "ref_label": spec.ref_label,
+        "commit_sha": spec.commit_sha,
+        "source_tree_digest": spec.source_tree_digest,
+        "shard_namespace": spec.shard_namespace,
+    }
+
+
+def _loopback_has_exact_identities(
+    endpoint: LoopbackEndpoint, expected: Sequence[_RepositoryIdentity]
+) -> bool:
+    """Probe pinned Zoekt's private RPC list without accepting a generic listener."""
+
+    try:
+        payload = _post_loopback_list(endpoint)
+        repositories = payload.get("Repos")
+        if not isinstance(repositories, list) or len(repositories) != len(expected):
+            return False
+        observed: list[_RepositoryIdentity] = []
+        for item in repositories:
+            if not isinstance(item, dict) or set(item) != {"Repository"}:
+                return False
+            repository = item["Repository"]
+            if not isinstance(repository, dict):
+                return False
+            name = repository.get("Name")
+            metadata = repository.get("Metadata")
+            branches = repository.get("Branches")
+            if not isinstance(name, str) or not _is_exact_string_map(metadata):
+                return False
+            if not isinstance(branches, list) or len(branches) != 1:
+                return False
+            branch = branches[0]
+            if not isinstance(branch, dict) or set(branch) != {"Name", "Version"}:
+                return False
+            ref_label, commit_sha = branch.get("Name"), branch.get("Version")
+            if not isinstance(ref_label, str) or not isinstance(commit_sha, str):
+                return False
+            observed.append(
+                _RepositoryIdentity(
+                    repository_name=name,
+                    metadata=metadata,
+                    ref_label=ref_label,
+                    commit_sha=commit_sha,
+                )
+            )
+        observed_keys = {_repository_identity_key(identity) for identity in observed}
+        expected_keys = {_repository_identity_key(identity) for identity in expected}
+        return len(observed_keys) == len(observed) and observed_keys == expected_keys
+    except (OSError, ValueError, json.JSONDecodeError, http.client.HTTPException):
+        return False
+
+
+def _post_loopback_list(endpoint: LoopbackEndpoint) -> dict[str, object]:
+    """Perform the closed, bounded, no-proxy POST probe used only by the host runner."""
+
+    connection = http.client.HTTPConnection(
+        endpoint.host, endpoint.port, timeout=_IDENTITY_PROBE_TIMEOUT_SECONDS
+    )
+    try:
+        connection.request(
+            "POST",
+            "/api/list",
+            body=b"{}",
+            headers={"Content-Type": "application/json", "Content-Length": "2"},
+        )
+        response = connection.getresponse()
+        if response.status != 200:
+            raise ValueError("identity probe did not return HTTP 200")
+        length_header = response.getheader("Content-Length")
+        if length_header is not None and (
+            not length_header.isdecimal() or int(length_header) > _MAX_IDENTITY_RESPONSE_BYTES
+        ):
+            raise ValueError("identity probe response exceeds its bound")
+        body = response.read(_MAX_IDENTITY_RESPONSE_BYTES + 1)
+        if len(body) > _MAX_IDENTITY_RESPONSE_BYTES:
+            raise ValueError("identity probe response exceeds its bound")
+    finally:
+        connection.close()
+    loaded = json.loads(
+        body.decode("utf-8"),
+        object_pairs_hook=_reject_duplicate_json_keys,
+        parse_constant=_reject_non_finite_json_constant,
+    )
+    if not isinstance(loaded, dict):
+        raise ValueError("identity probe JSON must be an object")
+    return loaded
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("identity probe JSON contains duplicate keys")
+        result[key] = value
+    return result
+
+
+def _reject_non_finite_json_constant(value: str) -> object:
+    raise ValueError(f"identity probe JSON constant is forbidden: {value}")
+
+
+def _is_exact_string_map(value: object) -> bool:
+    return isinstance(value, dict) and all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    )
+
+
+def _repository_identity_key(identity: _RepositoryIdentity) -> tuple[object, ...]:
+    return (
+        identity.repository_name,
+        tuple(sorted(identity.metadata.items())),
+        identity.ref_label,
+        identity.commit_sha,
+    )
 
 
 def _prepare_external_directory(path: Path, label: str) -> Path:
