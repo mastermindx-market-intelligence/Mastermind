@@ -10,12 +10,25 @@ from pathlib import Path
 
 import pytest
 
+from experiments.code_discovery import index_manifest as index_manifest_module
 from experiments.code_discovery.index_manifest import (
     IndexManifestError,
     load_index_manifest,
     material_source_manifest_digest,
     source_tree_digest,
 )
+
+
+@pytest.fixture(autouse=True)
+def _readonly_snapshot_mounts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit fixtures model host-provisioned read-only snapshot mounts explicitly."""
+
+    monkeypatch.setattr(
+        index_manifest_module,
+        "_filesystem_is_read_only",
+        lambda _path: True,
+        raising=False,
+    )
 
 
 def _run_git(root: Path, *args: str) -> str:
@@ -273,6 +286,64 @@ def test_rejects_symlink_roots_dirty_snapshots_and_changed_source_bytes(
     (root / "untracked.py").write_text("UNTRACKED = True\n")
     with pytest.raises(IndexManifestError, match="clean Git snapshot"):
         load_index_manifest(_write_manifest(tmp_path / "dirty.json", [dirty_record]))
+
+
+def test_closed_git_inspection_ignores_ambient_path_credentials_and_fsmonitor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Snapshot inspection may not invoke an ambient Git, config, hook, or helper."""
+
+    root = _snapshot(tmp_path / "snapshot")
+    record = _record(root)
+    manifest_path = _write_manifest(tmp_path / "manifest.json", [record])
+    hostile_bin = tmp_path / "hostile-bin"
+    hostile_bin.mkdir()
+    ambient_marker = tmp_path / "ambient-git-ran"
+    fsmonitor_marker = tmp_path / "fsmonitor-ran"
+    global_config = tmp_path / "inherited-global-config"
+    global_config.write_text("[credential]\n\thelper = !false\n")
+    (hostile_bin / "git").write_text(
+        "#!/bin/sh\n"
+        f"printf '%s' \"$HOME|$GIT_ASKPASS|$HTTPS_PROXY\" > {ambient_marker!s}\n"
+        "exec /usr/bin/git \"$@\"\n"
+    )
+    (hostile_bin / "git").chmod(0o700)
+    fsmonitor = tmp_path / "hostile-fsmonitor"
+    fsmonitor.write_text(f"#!/bin/sh\n: > {fsmonitor_marker!s}\n")
+    fsmonitor.chmod(0o700)
+    _run_git(root, "config", "core.fsmonitor", str(fsmonitor))
+    monkeypatch.setenv("PATH", str(hostile_bin))
+    monkeypatch.setenv("HOME", str(tmp_path / "inherited-home"))
+    monkeypatch.setenv("GIT_ASKPASS", str(tmp_path / "inherited-askpass"))
+    monkeypatch.setenv("HTTPS_PROXY", "http://credential-proxy.invalid")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "credential.helper")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "!false")
+
+    manifest = load_index_manifest(manifest_path)
+
+    assert manifest.repositories[0].repository_id == "mastermind"
+    assert not ambient_marker.exists()
+    assert not fsmonitor_marker.exists()
+
+
+def test_refuses_clean_but_writable_snapshot_mount_before_identity_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Permission bits and a clean Git index cannot substitute for a read-only mount."""
+
+    root = _snapshot(tmp_path / "snapshot")
+    record = _record(root)
+    monkeypatch.setattr(
+        index_manifest_module,
+        "_filesystem_is_read_only",
+        lambda _path: False,
+        raising=False,
+    )
+
+    with pytest.raises(IndexManifestError, match="read-only"):
+        load_index_manifest(_write_manifest(tmp_path / "manifest.json", [record]))
 
 
 def test_refuses_wrong_remote_and_ref_identity(tmp_path: Path) -> None:

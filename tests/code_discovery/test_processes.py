@@ -6,6 +6,7 @@ from dataclasses import asdict
 import hashlib
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -15,12 +16,25 @@ from pathlib import Path
 
 import pytest
 
+from experiments.code_discovery import index_manifest as index_manifest_module
 from experiments.code_discovery import processes as processes_module
 from experiments.code_discovery.index_manifest import (
     IndexManifest,
     load_index_manifest,
     source_tree_digest,
 )
+
+
+@pytest.fixture(autouse=True)
+def _readonly_snapshot_mounts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Process fixtures represent host-provisioned immutable snapshot mounts."""
+
+    monkeypatch.setattr(
+        index_manifest_module,
+        "_filesystem_is_read_only",
+        lambda _path: True,
+        raising=False,
+    )
 from experiments.code_discovery.processes import (
     ZOEKT_SOURCE_COMMIT,
     ExecutableSpec,
@@ -487,6 +501,55 @@ def test_refuses_stale_generation_and_detects_binary_change_after_index(
     with pytest.raises(ExecutableVerificationError, match="digest"):
         changed.build_indexes(manifest)
     changed.close()
+
+
+def test_index_build_rechecks_the_frozen_source_seal_before_indexer_launch(
+    tmp_path: Path,
+) -> None:
+    """A source change after manifest validation cannot receive a healthy receipt."""
+
+    manifest = _manifest(tmp_path)
+    source = manifest.repositories[0].source_snapshot_root
+    (source / "engine" / "core.py").write_text("VALUE = 'changed after seal'\n")
+    trace = tmp_path / "indexer-argv.txt"
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+
+    with pytest.raises(ZoektProcessError, match="source snapshot seal"):
+        processes.build_indexes(manifest)
+
+    assert not trace.exists()
+    assert processes._statuses == ()
+    processes.close()
+
+
+def test_index_build_rechecks_the_frozen_git_common_dir_identity(
+    tmp_path: Path,
+) -> None:
+    """Replacing metadata with byte-identical Git files cannot evade the source seal."""
+
+    manifest = _manifest(tmp_path)
+    source = manifest.repositories[0].source_snapshot_root
+    original_common_dir = source / ".git"
+    moved_common_dir = tmp_path / "moved-common-dir"
+    original_common_dir.rename(moved_common_dir)
+    shutil.copytree(moved_common_dir, original_common_dir)
+    trace = tmp_path / "indexer-argv.txt"
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+
+    with pytest.raises(ZoektProcessError, match="source snapshot seal"):
+        processes.build_indexes(manifest)
+
+    assert not trace.exists()
+    assert processes._statuses == ()
+    processes.close()
 
 
 def test_tampered_logical_shard_receipt_refuses_serving(tmp_path: Path) -> None:
