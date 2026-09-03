@@ -1,12 +1,12 @@
 ---
 schema: mastermind.autonomy_stage_b_f0_plan.v6
-architecture_revision: v6-alias-scoped-ceo-carrier
+architecture_revision: v6.1-split-initial-and-reuse
 operation: stage-b0-r2-alias-carrier-correction-20260903-sol-001
 capability: SPEC_ONLY
 production_effect: NONE
 ---
 
-# Stage-B0 V6 — alias-scoped CEO carrier implementation plan
+# Stage-B0 V6.1 — alias-scoped CEO carrier implementation plan
 
 ## Outcome
 
@@ -14,9 +14,11 @@ production_effect: NONE
 CEO-v2 intent
 -> root-level COO aggregation responsibility root
 -> protected C1 selection
--> C2 V2 creates or reuses one alias-scoped CEO carrier and commits root-to-carrier evidence
--> MAT-S1 materializes only the carrier Attempt through existing OHF + MAT-F0 semantics
--> Stage-B1 assigns the logical office on the source-root aggregate
+-> C2-PURE V2 retains create/reuse vocabulary
+-> C2-R1A creates and claims the initial alias-scoped CEO carrier
+-> MAT-S1 materializes that carrier Attempt and owns the canonical current-writer read
+-> first-root Stage-B1 assigns the logical office on the source-root aggregate
+-> later-root C2-R1B reuses that read only to commit a later source root
 -> unchanged Stage-A exact-actor enforcement
 ```
 
@@ -28,13 +30,32 @@ Many source roots may converge on the same `EXECUTIVE-CEO-CODEX-A` carrier. Carr
 ```json
 {
   "architecture_operation": "stage-b0-r2-alias-carrier-correction-20260903-sol-001",
-  "architecture_revision": "v6-alias-scoped-ceo-carrier",
+  "architecture_revision": "v6.1-split-initial-and-reuse",
   "carrier_scope": "one alias-scoped carrier, reusable by many source roots",
+  "implementation_dependencies": {
+    "C2-R1A": [
+      "C2-PURE"
+    ],
+    "C2-R1B": [
+      "MAT-S1"
+    ],
+    "MAT-S1": [
+      "C2-R1A"
+    ],
+    "MULTI-ROOT-REUSE-CANARY": [
+      "C2-R1B",
+      "STAGE-B1"
+    ],
+    "STAGE-B1": [
+      "MAT-S1"
+    ]
+  },
   "implementation_sequence": [
     "C2-PURE",
-    "C2-R1",
+    "C2-R1A",
     "MAT-S1",
     "STAGE-B1",
+    "C2-R1B",
     "PRODUCTION-DISARMED-CANARY"
   ],
   "predecessors": [
@@ -60,17 +81,18 @@ Many source roots may converge on the same `EXECUTIVE-CEO-CODEX-A` carrier. Carr
 ```
 <!-- STAGE_B1_CORRECTION_GATE_END -->
 
-## Ordered waves
+## Dependency DAG
 
 1. Protect this exact three-path records correction.
 2. Protect C2-PURE V2 on its existing two-path carrier.
-3. Build C2-R1 as one existing `BEGIN IMMEDIATE` Runtime transaction.
+3. Build C2-R1A as one existing `BEGIN IMMEDIATE` Runtime transaction for initial carrier creation only.
 4. Preserve protected MAT-F0 effect-certain architecture.
-5. Build MAT-S1 to materialize only the committed role-null CEO carrier Attempt.
-6. Build Stage-B1 after the exact current carrier binding exists.
-7. Run one separately authorized disposable production-disarmed canary.
+5. Build MAT-S1 to materialize only the committed role-null CEO carrier Attempt and extend one canonical current-writer read owner.
+6. After MAT-S1, first-root Stage-B1 may proceed independently of C2-R1B.
+7. After MAT-S1, build C2-R1B only for later-root reuse, consuming that owner to append a reuse commitment.
+8. Run a multi-root reuse canary only after both Stage-B1 and C2-R1B are protected, under separate authorization.
 
-Runtime effects are strictly ordered: C2 before MAT-S1, MAT-S1 before Stage-B1, and Stage-B1 before any canary.
+This is a dependency DAG, not a linear release sequence: C2-R1A precedes MAT-S1; MAT-S1 precedes both first-root Stage-B1 and later-root C2-R1B; multi-root reuse/canary requires both children. First-root Stage-B1 is never held on C2-R1B.
 
 ## C2-PURE — closed V2 contract
 
@@ -78,7 +100,7 @@ C2-PURE owns only `control_plane/executive_placement_commitment.py` and its focu
 
 Proof must show that different source roots derive different commitment commands while the same alias/fingerprint/generation derives one carrier command; mode/disposition drift and forbidden fields must fail closed.
 
-## C2-R1 — atomic carrier commitment
+## C2-R1A — initial carrier commitment
 
 For `new_session_materialization`, one existing Runtime-owned transaction must:
 
@@ -94,7 +116,7 @@ For `new_session_materialization`, one existing Runtime-owned transaction must:
 
 Any failure rolls back the carrier Job, quota reservation, Attempt, Job update, and Event.
 
-For `existing_session_reuse`, require exactly one valid alias carrier, its exact current Attempt and accepted current OHF writer, and identical Worker/quota/snapshot. Append only the new source-root commitment. Create no Job/Attempt and change no quota, lease, provider session, or RuntimeBinding.
+C2-R1A supports only `new_session_materialization / created`. `existing_session_reuse / reused` remains part of the C2-PURE V2 eventual contract but is `HELD_MAT_S1_CURRENT_WRITER_OWNER` until C2-R1B. C2-R1A must not extend `Runtime.current_harness_binding_source`, read OHF epoch/generation tables directly, or create a role-null current-writer validator.
 
 A terminal, stale, ambiguous, moved, or multiply present carrier is a typed hold. There is no second candidate, replacement carrier, succession, retry, failover, or G3. Replay rereads current source and carrier truth before returning immutable evidence.
 
@@ -116,7 +138,11 @@ Reuse MAT-F0 semantics exactly:
 - never append `APPLIED` after `EFFECT_UNKNOWN`;
 - never issue a second start, replacement Attempt/carrier, failover, or G3.
 
-The existing broker, Codex adapter, epoch, generation, receipt, and reconciliation owners remain authoritative. A dedicated Runtime read owner validates typed carrier provenance, CEO seat, role-null shape, READ-only grant, C2 commitment, current Attempt/Worker/placement, OHF attestation, CURRENT epoch/generation, and Executive-held writer. It never projects the COO source root as the CEO RuntimeBinding. MAT-S1 leaves exactly one accepted CURRENT carrier writer alive for assignment.
+The existing broker, Codex adapter, epoch, generation, receipt, and reconciliation owners remain authoritative. MAT-S1 extends one canonical Runtime read owner for typed `mastermind.sol_session_carrier/v1` provenance, CEO seat, role-null shape, READ-only grant, exact C2 commitment, current Attempt/Worker/placement, OHF attestation, CURRENT epoch/generation, and Executive-held writer. It never projects the COO source root as the CEO RuntimeBinding. MAT-S1 leaves exactly one accepted CURRENT carrier writer alive for assignment.
+
+## C2-R1B — existing carrier reuse
+
+Only after MAT-S1's canonical current-writer read owner is available may C2-R1B consume it on the same transaction. For `existing_session_reuse / reused`, require exactly one valid alias carrier, its exact current Attempt and accepted current OHF writer, and identical Worker/quota/snapshot. Append only the missing source-root commitment. C2-R1B creates no Job or Attempt and changes no carrier Job, quota, lease, fence, provider session, or RuntimeBinding.
 
 ## Stage-B1 — initial source-root assignment
 

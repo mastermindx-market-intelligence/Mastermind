@@ -1,6 +1,6 @@
 ---
 schema: mastermind.autonomy_stage_b_f0_design.v6
-architecture_revision: v6-alias-scoped-ceo-carrier
+architecture_revision: v6.1-split-initial-and-reuse
 operation: stage-b0-r2-alias-carrier-correction-20260903-sol-001
 capability: SPEC_ONLY
 production_effect: NONE
@@ -10,7 +10,7 @@ production_effect: NONE
 
 ## Status
 
-This records-only correction supersedes the protected root-claim model. The strict CEO-v2 root remains the root-level `coo` / `aggregation` responsibility aggregate and is never relabeled, cleared, or claimed as the CEO writer. Capacity C2 creates or reuses one separate alias-scoped, root-level, role-null, READ-only CEO carrier Job and commits source-root-to-carrier evidence. MAT-S1 materializes that carrier Attempt through the existing Operator Harness and MAT-F0 effect-certain semantics. Only after the exact current carrier binding exists may Stage-B1 append the first assignment on the source-root aggregate through unchanged Stage A.
+This V6.1 records-only correction supersedes the protected root-claim model. The strict CEO-v2 root remains the root-level `coo` / `aggregation` responsibility aggregate and is never relabeled, cleared, or claimed as the CEO writer. C2-PURE retains the eventual create-or-reuse vocabulary, but C2-R1A may create and claim only one separate alias-scoped, root-level, role-null, READ-only CEO carrier Job. MAT-S1 then materializes that carrier Attempt and extends the canonical current-writer read owner. From MAT-S1, first-root Stage-B1 and later-root C2-R1B are independent lawful children: Stage-B1 does not wait for multi-root reuse, while reuse and its canary remain held until C2-R1B.
 
 Current state is `SPEC_ONLY / CORRECTION_REQUIRED / SOURCE_NOT_BUILT / PRODUCTION_INERT`. No assignment mode is authorized now. The protected Codex CEO target remains disabled and the system remains globally production-disarmed.
 
@@ -20,9 +20,11 @@ Current state is `SPEC_ONLY / CORRECTION_REQUIRED / SOURCE_NOT_BUILT / PRODUCTIO
 CEO-v2 intent
 -> root-level COO aggregation responsibility root
 -> protected C1 selection
--> C2 V2 creates or reuses one alias-scoped CEO carrier and commits root-to-carrier evidence
--> MAT-S1 materializes only the carrier Attempt through existing OHF + MAT-F0 semantics
--> Stage-B1 assigns the logical office on the source-root aggregate
+-> C2-PURE V2 retains create/reuse vocabulary
+-> C2-R1A creates and claims the initial alias-scoped CEO carrier
+-> MAT-S1 materializes that carrier Attempt and owns the canonical current-writer read
+-> first-root Stage-B1 assigns the logical office on the source-root aggregate
+-> later-root C2-R1B reuses that read only to commit a later source root
 -> unchanged Stage-A exact-actor enforcement
 ```
 
@@ -67,7 +69,7 @@ Many responsibility roots converge on one logical `EXECUTIVE-CEO-CODEX-A` office
     "succession_supported_now": false
   },
   "architecture_operation": "stage-b0-r2-alias-carrier-correction-20260903-sol-001",
-  "architecture_revision": "v6-alias-scoped-ceo-carrier",
+  "architecture_revision": "v6.1-split-initial-and-reuse",
   "capacity_c2_commitment": {
     "aggregate_id": "source responsibility root_job_id",
     "caller_may_supply_carrier_identity": false,
@@ -117,6 +119,18 @@ Many responsibility roots converge on one logical `EXECUTIVE-CEO-CODEX-A` office
     },
     "historical_event_is_current_authority": false,
     "identical_replay": "lookup immutable command then revalidate current source and carrier truth",
+    "implementation_waves": {
+      "existing_session_reuse": {
+        "disposition": "reused",
+        "status": "HELD_MAT_S1_CURRENT_WRITER_OWNER",
+        "wave": "C2-R1B_EXISTING_CARRIER_REUSE"
+      },
+      "new_session_materialization": {
+        "disposition": "created",
+        "status": "C2-R1A_INITIAL_CARRIER_COMMITMENT",
+        "wave": "C2-R1A_INITIAL_CARRIER_COMMITMENT"
+      }
+    },
     "mode_disposition": {
       "existing_session_reuse": "reused",
       "new_session_materialization": "created"
@@ -138,6 +152,21 @@ Many responsibility roots converge on one logical `EXECUTIVE-CEO-CODEX-A` office
       "new_session_materialization",
       "existing_session_reuse"
     ],
+    "r1a_constraints": {
+      "forbidden": [
+        "extend Runtime.current_harness_binding_source",
+        "read OHF epoch/generation tables directly",
+        "create a role-null current-writer validator"
+      ],
+      "supported_modes": [
+        "new_session_materialization"
+      ]
+    },
+    "r1b_reuse": {
+      "consumes": "MAT-S1 canonical typed role-null carrier/current-writer read owner",
+      "mutates": "only the missing source-root commitment",
+      "mutates_carrier_job_attempt_quota_lease_or_fence": false
+    },
     "source_root_claimed": false,
     "stable_command_fields": [
       "source_root_job_id",
@@ -179,8 +208,35 @@ Many responsibility roots converge on one logical `EXECUTIVE-CEO-CODEX-A` office
     "COMMAND_REPLAY_CONFLICT",
     "EFFECT_UNKNOWN_RECONCILE_FIRST"
   ],
+  "implementation_dag": {
+    "C2-R1A_INITIAL_CARRIER_COMMITMENT": [
+      "C2-PURE"
+    ],
+    "C2-R1B_EXISTING_CARRIER_REUSE": [
+      "MAT-S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION"
+    ],
+    "MAT-S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION": [
+      "C2-R1A_INITIAL_CARRIER_COMMITMENT"
+    ],
+    "MULTI_ROOT_REUSE_CANARY": [
+      "C2-R1B_EXISTING_CARRIER_REUSE",
+      "STAGE-B1_INITIAL_ASSIGNMENT"
+    ],
+    "STAGE-B1_INITIAL_ASSIGNMENT": [
+      "MAT-S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION"
+    ]
+  },
   "mat_s1_writer_materialization": {
     "consumes_attempt": "committed_carrier_attempt_id",
+    "current_writer_read_owner": {
+      "owner": "one canonical Runtime read owner",
+      "provenance": "mastermind.sol_session_carrier/v1",
+      "required_evidence": [
+        "CEO/role-null/READ-only carrier grant",
+        "exact C2 commitment",
+        "current OHF epoch/generation/writer"
+      ]
+    },
     "effect_unknown": "quarantine unresolved identity; no retry failover replacement carrier or G3",
     "entry": "bounded role-null CEO-carrier materialization",
     "fabricates_orchestration_work_admission": false,
@@ -209,10 +265,11 @@ Many responsibility roots converge on one logical `EXECUTIVE-CEO-CODEX-A` office
   "ordered_waves": [
     "STAGE_B_R2_RECORDS_CORRECTION",
     "CAPACITY_C2_V2_PURE_CONTRACT",
-    "CAPACITY_C2_R1_ATOMIC_CARRIER_COMMITMENT",
+    "CAPACITY_C2_R1A_INITIAL_CARRIER_COMMITMENT",
     "MAT_F0_EFFECT_CERTAIN_PREREQUISITE",
     "MAT_S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION",
     "STAGE_B1_INITIAL_ASSIGNMENT",
+    "CAPACITY_C2_R1B_EXISTING_CARRIER_REUSE",
     "LIVE_PRODUCTION_DISARMED_CANARY"
   ],
   "protected_runtime_sha": "642fa62540f0f2565ccc484a350f2cd0a2259015",
@@ -309,9 +366,9 @@ Many responsibility roots converge on one logical `EXECUTIVE-CEO-CODEX-A` office
 ## Consequences
 
 1. C2 never claims or relabels the source root. Different roots derive different commitment commands while converging on the same carrier creation identity.
-2. New materialization creates and claims the first carrier; reuse requires the exact current carrier Attempt and accepted writer. The two modes and dispositions are non-interchangeable.
-3. RuntimeBinding is absent from C2. MAT-S1 obtains it only from the exact carrier Attempt after accepted OHF materialization, using MAT-F0 normal or reconciled terminal evidence.
-4. Stage-B1 derives every identity from current source, C2, target, carrier, and binding truth. Historical success never authenticates itself.
+2. C2-R1A supports only new materialization and may not widen `Runtime.current_harness_binding_source`, directly read OHF epoch/generation tables, or create a role-null current-writer validator. Reuse is held until MAT-S1's canonical owner exists.
+3. MAT-S1 obtains current-writer evidence only from the exact carrier Attempt after accepted OHF materialization, using MAT-F0 normal or reconciled terminal evidence. C2-R1B consumes that owner and appends only the missing source-root commitment.
+4. The V6.1 dependency graph has two lawful children after MAT-S1: Stage-B1 derives first-root assignment from current source, C2-R1A, target, carrier, and binding truth, while C2-R1B enables only later-root reuse. Multi-root reuse/canary requires both C2-R1B and Stage-B1. Historical success never authenticates itself.
 5. Terminal, stale, moved, ambiguous, or multiply present carrier state is unavailable. V6 has no succession, replacement, reassignment, retry, failover, implicit generation advance, or G3.
 
 ## Release boundary

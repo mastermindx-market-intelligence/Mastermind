@@ -20,7 +20,7 @@ END = "<!-- STAGE_B_F0_CORRECTION_CONTRACT_END -->"
 GATE_BEGIN = "<!-- STAGE_B1_CORRECTION_GATE_BEGIN -->"
 GATE_END = "<!-- STAGE_B1_CORRECTION_GATE_END -->"
 
-REVISION = "v6-alias-scoped-ceo-carrier"
+REVISION = "v6.1-split-initial-and-reuse"
 OPERATION = "stage-b0-r2-alias-carrier-correction-20260903-sol-001"
 PROTECTED_SHA = "642fa62540f0f2565ccc484a350f2cd0a2259015"
 RECORD_PATHS = [
@@ -91,6 +91,22 @@ def validate_contract(contract: dict[str, Any]) -> None:
     assert contract["protected_runtime_sha"] == PROTECTED_SHA
     assert contract["supersedes"][-1] == "mastermind.autonomy_stage_b_f0_contract.v5"
     assert contract["record_paths"] == RECORD_PATHS
+    assert contract["implementation_dag"] == {
+        "C2-R1A_INITIAL_CARRIER_COMMITMENT": ["C2-PURE"],
+        "C2-R1B_EXISTING_CARRIER_REUSE": [
+            "MAT-S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION"
+        ],
+        "MAT-S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION": [
+            "C2-R1A_INITIAL_CARRIER_COMMITMENT"
+        ],
+        "MULTI_ROOT_REUSE_CANARY": [
+            "C2-R1B_EXISTING_CARRIER_REUSE",
+            "STAGE-B1_INITIAL_ASSIGNMENT",
+        ],
+        "STAGE-B1_INITIAL_ASSIGNMENT": [
+            "MAT-S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION"
+        ],
+    }
 
     assert contract["current_state"] == {
         "claim": "SPEC_ONLY / CORRECTION_REQUIRED / SOURCE_NOT_BUILT / PRODUCTION_INERT",
@@ -189,6 +205,31 @@ def validate_contract(contract: dict[str, Any]) -> None:
         "new_session_materialization": "created",
         "existing_session_reuse": "reused",
     }
+    assert c2["implementation_waves"] == {
+        "existing_session_reuse": {
+            "disposition": "reused",
+            "status": "HELD_MAT_S1_CURRENT_WRITER_OWNER",
+            "wave": "C2-R1B_EXISTING_CARRIER_REUSE",
+        },
+        "new_session_materialization": {
+            "disposition": "created",
+            "status": "C2-R1A_INITIAL_CARRIER_COMMITMENT",
+            "wave": "C2-R1A_INITIAL_CARRIER_COMMITMENT",
+        },
+    }
+    assert c2["r1a_constraints"] == {
+        "forbidden": [
+            "extend Runtime.current_harness_binding_source",
+            "read OHF epoch/generation tables directly",
+            "create a role-null current-writer validator",
+        ],
+        "supported_modes": ["new_session_materialization"],
+    }
+    assert c2["r1b_reuse"] == {
+        "consumes": "MAT-S1 canonical typed role-null carrier/current-writer read owner",
+        "mutates": "only the missing source-root commitment",
+        "mutates_carrier_job_attempt_quota_lease_or_fence": False,
+    }
     assert c2["new_session_materialization"] == {
         "requires_no_existing_alias_carrier": True,
         "creates_carrier_job": True,
@@ -278,6 +319,15 @@ def validate_contract(contract: dict[str, Any]) -> None:
     assert mat["runtime_binding_source"] == (
         "exact current CEO carrier Attempt after accepted OHF materialization"
     )
+    assert mat["current_writer_read_owner"] == {
+        "owner": "one canonical Runtime read owner",
+        "provenance": "mastermind.sol_session_carrier/v1",
+        "required_evidence": [
+            "CEO/role-null/READ-only carrier grant",
+            "exact C2 commitment",
+            "current OHF epoch/generation/writer",
+        ],
+    }
     assert mat["source_root_runtime_binding_forbidden"] is True
     assert "no retry failover replacement carrier or G3" in mat["effect_unknown"]
 
@@ -347,10 +397,11 @@ def validate_contract(contract: dict[str, Any]) -> None:
     assert contract["ordered_waves"] == [
         "STAGE_B_R2_RECORDS_CORRECTION",
         "CAPACITY_C2_V2_PURE_CONTRACT",
-        "CAPACITY_C2_R1_ATOMIC_CARRIER_COMMITMENT",
+        "CAPACITY_C2_R1A_INITIAL_CARRIER_COMMITMENT",
         "MAT_F0_EFFECT_CERTAIN_PREREQUISITE",
         "MAT_S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION",
         "STAGE_B1_INITIAL_ASSIGNMENT",
+        "CAPACITY_C2_R1B_EXISTING_CARRIER_REUSE",
         "LIVE_PRODUCTION_DISARMED_CANARY",
     ]
     assert contract["release_truth"]["green_ci_is_production_proof"] is False
@@ -382,11 +433,19 @@ def test_plan_gate_matches_the_v6_owner_graph() -> None:
         ],
         "implementation_sequence": [
             "C2-PURE",
-            "C2-R1",
+            "C2-R1A",
             "MAT-S1",
             "STAGE-B1",
+            "C2-R1B",
             "PRODUCTION-DISARMED-CANARY",
         ],
+        "implementation_dependencies": {
+            "C2-R1A": ["C2-PURE"],
+            "C2-R1B": ["MAT-S1"],
+            "MAT-S1": ["C2-R1A"],
+            "MULTI-ROOT-REUSE-CANARY": ["C2-R1B", "STAGE-B1"],
+            "STAGE-B1": ["MAT-S1"],
+        },
         "source_root_claimed_by_c2": False,
         "carrier_scope": "one alias-scoped carrier, reusable by many source roots",
         "runtime_binding_source": "carrier Attempt only",
@@ -480,9 +539,14 @@ def test_source_law_is_mutation_discriminating() -> None:
         mutate(("capacity_c2_commitment", "event_schema"), "mastermind.capacity_placement_commitment/v1"),
         mutate(("capacity_c2_commitment", "placement_modes"), ["new_session_materialization"]),
         mutate(("capacity_c2_commitment", "mode_disposition", "new_session_materialization"), "reused"),
+        mutate(("implementation_dag", "STAGE-B1_INITIAL_ASSIGNMENT"), ["C2-R1B_EXISTING_CARRIER_REUSE"]),
+        mutate(("capacity_c2_commitment", "implementation_waves", "existing_session_reuse", "wave"), "C2-R1A_INITIAL_CARRIER_COMMITMENT"),
+        mutate(("capacity_c2_commitment", "r1a_constraints", "forbidden"), []),
+        mutate(("capacity_c2_commitment", "r1b_reuse", "mutates"), "the carrier and source-root commitment"),
         mutate(("capacity_c2_commitment", "existing_session_reuse", "creates_carrier_attempt"), True),
         mutate(("capacity_c2_commitment", "source_root_claimed"), True),
         mutate(("mat_s1_writer_materialization", "consumes_attempt"), "source_root_attempt_id"),
+        mutate(("mat_s1_writer_materialization", "current_writer_read_owner", "owner"), "C2 private validator"),
         mutate(("mat_s1_writer_materialization", "uses_plan_only_supervisor"), True),
         mutate(("stage_b1_assignment", "aggregate_id"), "carrier_job_id"),
         mutate(("stage_b1_assignment", "stage_a_signature_changed"), True),
