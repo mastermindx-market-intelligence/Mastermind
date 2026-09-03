@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -40,10 +41,26 @@ def _snapshots(root: Path = _ROOT) -> tuple[SourceSnapshot, ...]:
     )
 
 
-def test_source_census_is_identity_complete_and_excludes_non_source_bytes() -> None:
+def _portable_synthetic_root(tmp_path: Path) -> Path:
+    """Copy only tracked fixture content, as a clean hosted checkout would."""
+
+    root = tmp_path / "synthetic_org"
+    shutil.copytree(_ROOT, root, ignore=shutil.ignore_patterns(".git"))
+    submodule_gitfile = root / "alpha-mirror" / "submodule" / ".git"
+    submodule_gitfile.parent.mkdir(parents=True, exist_ok=True)
+    submodule_gitfile.write_text(
+        "gitdir: ../../.git/modules/synthetic-submodule\n", encoding="utf-8"
+    )
+    return root
+
+
+def test_source_census_is_identity_complete_and_excludes_non_source_bytes(
+    tmp_path: Path,
+) -> None:
     """Two same-basename repos stay distinct; excluded material is receipted."""
 
-    census = census_sources(_snapshots())
+    root = _portable_synthetic_root(tmp_path)
+    census = census_sources(_snapshots(root))
 
     identities = {(item.logical_repo_id, item.path) for item in census.records}
     assert ("alpha-mirror", "engine/core.py") in identities
@@ -56,7 +73,7 @@ def test_source_census_is_identity_complete_and_excludes_non_source_bytes() -> N
         "submodule",
         "vendor",
     }
-    assert census.digest == census_sources(_snapshots()).digest
+    assert census.digest == census_sources(_snapshots(root)).digest
 
 
 def test_baseline_applies_equivalent_filters_and_exposes_limit_truncation() -> None:
