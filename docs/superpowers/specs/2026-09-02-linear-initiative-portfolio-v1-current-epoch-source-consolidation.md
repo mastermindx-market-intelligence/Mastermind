@@ -6,7 +6,7 @@
 **Status:** `CURRENT-EPOCH SOURCE / RECORDS-ONLY / NO LINEAR EFFECT`  
 **Operation key:** `linear-initiative-v1-current-epoch-source-20260902-sol-001`  
 **Carrier:** `Mastermind:sol/linear-initiative-v1-current-epoch-source-20260902`  
-**Protected procedure used for this amendment:** `mastermindx-market-intelligence/Mastermind@793e75639911f21dae9c90a77c3a5dbf4b37cbb0`  
+**Protected procedure used for current-base release:** `mastermindx-market-intelligence/Mastermind@351402f4f5d5e55e8c0f0b7f973f01c19aa98d97`  
 **Base strategic design:** `mastermindx-market-intelligence/Mastermind@d004f5bf7953e943281dff7efd8fe17a54b0cf6c:docs/superpowers/specs/2026-08-29-linear-initiative-portfolio-architecture-design.md`  
 **Agent OS census epoch:** `mastermindx-market-intelligence/macro@931870b1feccb91b5122d92b07995e9749566aae`  
 **Current Macro tip observed after that epoch:** `dbf02455c035c458af0c7127349c56b7b0f77d05`  
@@ -161,9 +161,23 @@ Initiatives: 7
 memberships: 62
 unassigned exceptions: 2
 parent/sub-Initiative relations: 0
+Initiative scope: workspace-level
+lead_team: null
+owner: null
+target_date: null
 Initiative labels created by V1: 0
 new Project labels created by V1: 0
 ```
+
+### Workspace-level Initiative platform ruling
+
+V1 uses workspace-level Initiatives and intentionally leaves `lead_team` null. A direct first-party create with `leadTeam=MastermindX` was refused before effect because team-led Initiatives require the Business plan. Repeating the same semantic Initiative without `leadTeam` succeeded on the current plan and read back by immutable ID. Therefore:
+
+- Business is not a prerequisite for the V1 strategic portfolio;
+- the attempted monthly Business-upgrade operation was terminally canceled before ACK, START, billing, member, workspace, or credit effect;
+- the deterministic companion must treat `lead_team: null` as the exact current structural value;
+- Initiative health remains descriptive through status updates rather than a managed structural rewrite target;
+- a future team-Initiative migration requires a separate value/plan decision and may not be inferred from this source.
 
 Exact membership counts in frozen Initiative order:
 
@@ -190,54 +204,89 @@ WS:WATCHLIST-PORTFOLIO-CEO
 Linear Project 9aef6461-306a-4a3c-911b-c6a4b6635a78 (Mastermind-X Linear OS)
 ```
 
-## 5. Current Linear witness consequence
+## 5. Live Linear application and readback
 
-The latest direct Linear witness used by this program showed:
+The first bounded V1 apply was completed through the existing first-party Linear surface before this source merged, under the current Chairman directive to remove nonessential ceremony while preserving exact identity and readback.
+
+### 5.1 Created workspace-level Initiatives
 
 ```text
-visible Projects: 50
-Initiatives: 0
-Project -> Initiative memberships: 0
+Canonical Intelligence Substrate & Learning
+  4ef48d7b-59a5-445e-8ea1-a7cf737c06e9
+
+Legendary Alpha Discovery & Timing
+  e956d13d-0a7e-47e2-b575-eee63c246e3d
+
+Institutional Company & Event Intelligence
+  3e3a5cab-3d14-4cbb-819a-4868161cc7d6
+
+Global Markets, Regimes & Risk Command
+  009936bd-1644-4896-b2c0-69a75570d64f
+
+Personal Institutional Desk
+  b41d70ef-fff3-49fd-85f2-ff01f99c7534
+
+Trusted Production & Customer Platform
+  bd1abb07-b8db-4682-b1a8-01d8dba88512
+
+Autonomous AI Organization
+  6eccabee-4b72-4cd6-8c1a-877e0d41aaee
 ```
 
-If that witness remains unchanged at apply time, fourteen current strategy members are absent as Linear Projects:
+All seven are Active workspace-level Initiatives with no parent, no lead team, no owner, no target date, and the priorities defined by the protected base design.
+
+### 5.2 Project backfill
+
+The prior witness contained 50 Projects. All fourteen missing current-epoch `WS:<KEY>` Projects were created once, read back by immutable ID, and given source-grounded summaries. The parked compatibility alias `WS:TERMINAL-GITHUB-CANONICAL-DEPLOYMENT` was not recreated.
+
+Current Project count:
 
 ```text
-WS:TOP-ANATOMY
-WS:EVAL-OS-EVIDENCE-VIEW
-WS:CROSS-REPO-CONTRACT-GOVERNANCE
-WS:TECHNICAL-OPPORTUNITY-INTELLIGENCE
-WS:AGENT-EVAL-FABRIC
-WS:EXECUTIVE-OS-DISASTER-RECOVERY
-WS:OPERATION-ASSURANCE
-WS:PROPHET-CANDIDATE-ADDED-DATE
-WS:REACTIVE-PROJECTION
-WS:REPRODUCIBLE-WORKER-ENVIRONMENTS
-WS:CODE-INTELLIGENCE-FABRIC
-WS:EXECUTIVE-ATTENTION-ECONOMICS
-WS:FLOW-OBSERVATORY-V2
-WS:TERMINAL-GITHUB-CANONICALIZATION
+64
 ```
 
-Under that unchanged witness, deterministic pre-apply drift is:
+### 5.3 Membership readback
+
+Every eligible Project was assigned through replace/set semantics to exactly one immutable Initiative ID. The final Initiative readback returned exactly:
 
 ```text
-initiative_missing: 7
-membership_missing: 48
-project_create_required: 14
-hard_blockers: 0
+Canonical Intelligence Substrate & Learning:       10
+Legendary Alpha Discovery & Timing:                 16
+Institutional Company & Event Intelligence:         11
+Global Markets, Regimes & Risk Command:              6
+Personal Institutional Desk:                         4
+Trusted Production & Customer Platform:              8
+Autonomous AI Organization:                          7
 ```
 
-The corresponding post-apply structural census is:
+The two deliberate exceptions were read separately and remain unassigned:
 
 ```text
-visible Projects: 64
-Projects with exactly one Initiative: 62
-unassigned visible exceptions: 2
+WS:WATCHLIST-PORTFOLIO-CEO
+Mastermind-X Linear OS
+```
+
+Accepted live ruler:
+
+```text
 Initiatives: 7
+Projects: 64
+Projects with exactly one Initiative: 62
+unassigned exceptions: 2
+multi-parent Projects: 0
+unknown Initiatives: 0
 ```
 
-These witness-derived create and drift values are not quotas. A live-estate change requires a fresh snapshot and recompilation. A new active/review-candidate Agent OS workstream invalidates apply readiness until explicitly classified in a protected source amendment; it never inherits an Initiative by analogy.
+The strategic portfolio is therefore `PROVEN_LIVE`. This source and the Macro compiler remain necessary for durable, repeatable reconciliation; their release state must not demote the already-observed live product capability or falsely claim recurring automation is complete.
+
+The historical pre-apply witness remains useful evidence:
+
+```text
+before: 0 Initiatives / 50 Projects / 0 memberships
+conditional create requirement: 14 Projects
+conditional pre-apply drift: 7 initiative_missing / 48 membership_missing / 14 project_create_required / 0 hard blockers
+after: 7 Initiatives / 64 Projects / 62 memberships / 2 exceptions
+```
 
 ## 6. Machine-readable source and receipt contract
 
