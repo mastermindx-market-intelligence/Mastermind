@@ -10,12 +10,25 @@ from pathlib import Path
 
 import pytest
 
+from experiments.code_discovery import index_manifest as index_manifest_module
 from experiments.code_discovery.index_manifest import (
     IndexManifestError,
     load_index_manifest,
     material_source_manifest_digest,
     source_tree_digest,
 )
+
+
+@pytest.fixture(autouse=True)
+def _readonly_snapshot_mounts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit fixtures model host-provisioned read-only snapshot mounts explicitly."""
+
+    monkeypatch.setattr(
+        index_manifest_module,
+        "_filesystem_is_read_only",
+        lambda _path: True,
+        raising=False,
+    )
 
 
 def _run_git(root: Path, *args: str) -> str:
@@ -273,6 +286,143 @@ def test_rejects_symlink_roots_dirty_snapshots_and_changed_source_bytes(
     (root / "untracked.py").write_text("UNTRACKED = True\n")
     with pytest.raises(IndexManifestError, match="clean Git snapshot"):
         load_index_manifest(_write_manifest(tmp_path / "dirty.json", [dirty_record]))
+
+
+def test_rejects_tracked_symlinks_submodules_and_lfs_pointers(
+    tmp_path: Path,
+) -> None:
+    """The sealed source census has no escape through Git's non-regular entries."""
+
+    symlink_root = _snapshot(tmp_path / "symlink")
+    symlink_record = _record(symlink_root)
+    (symlink_root / "engine" / "escape.py").symlink_to(tmp_path / "outside.py")
+    _run_git(symlink_root, "add", ".")
+    _run_git(symlink_root, "commit", "-qm", "tracked symlink")
+    with pytest.raises(IndexManifestError, match="tracked symlink"):
+        load_index_manifest(_write_manifest(tmp_path / "symlink.json", [symlink_record]))
+
+    lfs_root = _snapshot(tmp_path / "lfs")
+    lfs_record = _record(lfs_root)
+    (lfs_root / "engine" / "large.bin").write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        "oid sha256:" + "a" * 64 + "\nsize 1\n"
+    )
+    _run_git(lfs_root, "add", ".")
+    _run_git(lfs_root, "commit", "-qm", "tracked lfs pointer")
+    with pytest.raises(IndexManifestError, match="LFS"):
+        load_index_manifest(_write_manifest(tmp_path / "lfs.json", [lfs_record]))
+
+    submodule_root = _snapshot(tmp_path / "submodule")
+    submodule_record = _record(submodule_root)
+    (submodule_root / "vendor").mkdir()
+    _run_git(
+        submodule_root,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        "160000," + "a" * 40 + ",vendor/nested",
+    )
+    _run_git(submodule_root, "commit", "-qm", "tracked gitlink")
+    with pytest.raises(IndexManifestError, match="submodule"):
+        load_index_manifest(_write_manifest(tmp_path / "submodule.json", [submodule_record]))
+
+
+def test_closed_git_inspection_ignores_ambient_path_credentials_and_fsmonitor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Snapshot inspection may not invoke an ambient Git, config, hook, or helper."""
+
+    root = _snapshot(tmp_path / "snapshot")
+    record = _record(root)
+    manifest_path = _write_manifest(tmp_path / "manifest.json", [record])
+    hostile_bin = tmp_path / "hostile-bin"
+    hostile_bin.mkdir()
+    ambient_marker = tmp_path / "ambient-git-ran"
+    fsmonitor_marker = tmp_path / "fsmonitor-ran"
+    global_config = tmp_path / "inherited-global-config"
+    global_config.write_text("[credential]\n\thelper = !false\n")
+    (hostile_bin / "git").write_text(
+        "#!/bin/sh\n"
+        f"printf '%s' \"$HOME|$GIT_ASKPASS|$HTTPS_PROXY\" > {ambient_marker!s}\n"
+        "exec /usr/bin/git \"$@\"\n"
+    )
+    (hostile_bin / "git").chmod(0o700)
+    fsmonitor = tmp_path / "hostile-fsmonitor"
+    fsmonitor.write_text(f"#!/bin/sh\n: > {fsmonitor_marker!s}\n")
+    fsmonitor.chmod(0o700)
+    _run_git(root, "config", "core.fsmonitor", str(fsmonitor))
+    monkeypatch.setenv("PATH", str(hostile_bin))
+    monkeypatch.setenv("HOME", str(tmp_path / "inherited-home"))
+    monkeypatch.setenv("GIT_ASKPASS", str(tmp_path / "inherited-askpass"))
+    monkeypatch.setenv("HTTPS_PROXY", "http://credential-proxy.invalid")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "credential.helper")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "!false")
+
+    manifest = load_index_manifest(manifest_path)
+
+    assert manifest.repositories[0].repository_id == "mastermind"
+    assert not ambient_marker.exists()
+    assert not fsmonitor_marker.exists()
+
+
+def test_refuses_clean_but_writable_snapshot_mount_before_identity_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Permission bits and a clean Git index cannot substitute for a read-only mount."""
+
+    root = _snapshot(tmp_path / "snapshot")
+    record = _record(root)
+    monkeypatch.setattr(
+        index_manifest_module,
+        "_filesystem_is_read_only",
+        lambda _path: False,
+        raising=False,
+    )
+
+    with pytest.raises(IndexManifestError, match="read-only"):
+        load_index_manifest(_write_manifest(tmp_path / "manifest.json", [record]))
+
+
+def test_git_inspection_uses_only_closed_read_only_plumbing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exact command line excludes status, hooks, config includes, and ambient env."""
+
+    root = _snapshot(tmp_path / "snapshot")
+    manifest_path = _write_manifest(tmp_path / "manifest.json", [_record(root)])
+    observed: list[tuple[list[str], dict[str, object]]] = []
+    original_run = index_manifest_module.subprocess.run
+
+    def traced_run(argv: list[str], *args: object, **kwargs: object) -> object:
+        observed.append((argv, kwargs))
+        return original_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(index_manifest_module.subprocess, "run", traced_run)
+
+    load_index_manifest(manifest_path)
+
+    expected_env = {
+        "PATH": "/usr/bin:/bin",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/false",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "TZ": "UTC",
+    }
+    assert observed
+    for argv, kwargs in observed:
+        assert argv[0] == "/usr/bin/git"
+        assert "status" not in argv
+        assert "core.fsmonitor=false" in argv
+        assert "core.hooksPath=/dev/null" in argv
+        assert kwargs["env"] == expected_env
+    assert any("--no-includes" in argv and "--local" in argv for argv, _kwargs in observed)
 
 
 def test_refuses_wrong_remote_and_ref_identity(tmp_path: Path) -> None:

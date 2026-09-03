@@ -27,6 +27,7 @@ class IndexManifestError(ValueError):
 _SCHEMA_VERSION: Final = "mastermind.codeintel_index_manifest.v1"
 _MAX_REPOSITORIES: Final = 32
 _MAX_PATH_RULES: Final = 32
+_MAX_WORKTREE_CENSUS_ENTRIES: Final = 250_000
 _LOGICAL_ID_RE: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
 _REPOSITORY_NAME_RE: Final = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z"
@@ -34,6 +35,27 @@ _REPOSITORY_NAME_RE: Final = re.compile(
 _SHA1_RE: Final = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256_RE: Final = re.compile(r"[0-9a-f]{64}\Z")
 _TOP_LEVEL_FIELDS: Final = frozenset({"schema_version", "repositories"})
+_GIT_EXECUTABLE: Final = "/usr/bin/git"
+_CLOSED_GIT_ENV: Final = {
+    "PATH": "/usr/bin:/bin",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_ASKPASS": "/bin/false",
+    "LANG": "C",
+    "LC_ALL": "C",
+    "TZ": "UTC",
+}
+_GIT_EXECUTION_FENCES: Final = (
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.useBuiltinFSMonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+)
 _REPOSITORY_FIELDS: Final = frozenset(
     {
         "repository_id",
@@ -49,6 +71,44 @@ _REPOSITORY_FIELDS: Final = frozenset(
 
 
 @dataclass(frozen=True)
+class _TrackedFile:
+    """One exact path in both the Git tree and the checked-out worktree."""
+
+    relative_path: str
+    mode: str
+    blob_sha: str
+    content_blob_sha: str
+    path: Path
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+
+
+@dataclass(frozen=True)
+class _SnapshotSeal:
+    """Immutable source and metadata facts frozen at manifest acceptance."""
+
+    root_device: int
+    root_inode: int
+    git_dir: Path
+    git_dir_device: int
+    git_dir_inode: int
+    common_dir: Path
+    common_dir_device: int
+    common_dir_inode: int
+    git_dir_is_common_dir: bool
+    ref_label: str
+    remote: str
+    commit_sha: str
+    tree_sha: str
+    tracked_files: tuple[_TrackedFile, ...]
+    selected_source_tree_digest: str
+    digest: str
+
+
+@dataclass(frozen=True)
 class RepositorySpec:
     """One exact repository/ref source snapshot eligible for Z0 indexing."""
 
@@ -60,6 +120,7 @@ class RepositorySpec:
     included_prefixes: tuple[str, ...]
     excluded_globs: tuple[str, ...]
     source_tree_digest: str
+    snapshot_seal: _SnapshotSeal | None = None
 
     @property
     def shard_namespace(self) -> str:
@@ -157,10 +218,10 @@ def source_tree_digest(
 ) -> str:
     """Hash the sorted, selected regular files in a clean exact Git snapshot."""
 
-    root = _validate_snapshot_root(Path(source_snapshot_root))
     includes = _path_rules(included_prefixes, field="included_prefixes", required=True)
     excludes = _path_rules(excluded_globs, field="excluded_globs", required=False)
-    return _digest_selected_files(root, includes, excludes)
+    seal = _collect_snapshot_seal(Path(source_snapshot_root), includes, excludes)
+    return seal.selected_source_tree_digest
 
 
 def _parse_repository(raw: object, *, position: int) -> RepositorySpec:
@@ -182,23 +243,22 @@ def _parse_repository(raw: object, *, position: int) -> RepositorySpec:
     root = Path(root_value)
     if not root.is_absolute():
         raise IndexManifestError("source_snapshot_root must be an absolute host path")
-    root = _validate_snapshot_root(root)
-
     includes = _path_rules(
         raw.get("included_prefixes"), field="included_prefixes", required=True
     )
     excludes = _path_rules(
         raw.get("excluded_globs"), field="excluded_globs", required=False
     )
-    _verify_snapshot_identity(root, repository_name, ref_label, commit_sha)
-    observed_commit = _git_stdout(root, "rev-parse", "--verify", "HEAD")
-    if observed_commit != commit_sha:
+    seal = _collect_snapshot_seal(root, includes, excludes)
+    if seal.ref_label != ref_label:
+        raise IndexManifestError("ref_label does not match checked-out branch")
+    if _normalize_repository_remote(seal.remote) != repository_name:
+        raise IndexManifestError("source_snapshot_root origin remote disagrees with repository_name")
+    if seal.commit_sha != commit_sha:
         raise IndexManifestError(
             f"commit_sha does not match exact snapshot HEAD for {repository_id}"
         )
-
-    observed_tree_digest = _digest_selected_files(root, includes, excludes)
-    if observed_tree_digest != expected_tree_digest:
+    if seal.selected_source_tree_digest != expected_tree_digest:
         raise IndexManifestError(
             f"source_tree_digest does not match selected source for {repository_id}"
         )
@@ -211,7 +271,8 @@ def _parse_repository(raw: object, *, position: int) -> RepositorySpec:
         commit_sha=commit_sha,
         included_prefixes=includes,
         excluded_globs=excludes,
-        source_tree_digest=observed_tree_digest,
+        source_tree_digest=seal.selected_source_tree_digest,
+        snapshot_seal=seal,
     )
 
 
@@ -258,47 +319,10 @@ def _validate_snapshot_root(root: Path) -> Path:
         raise IndexManifestError("source_snapshot_root must not be a symlink")
     if not stat.S_ISDIR(metadata.st_mode):
         raise IndexManifestError("source_snapshot_root must be a directory")
-
-    status = _git_stdout(
-        root, "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching"
-    )
-    if status:
-        raise IndexManifestError("source_snapshot_root must be a clean Git snapshot")
-    return root
-
-
-def _verify_snapshot_identity(
-    root: Path, repository_name: str, ref_label: str, commit_sha: str
-) -> None:
-    """Derive all Git identity facts instead of trusting a local directory label."""
-
-    worktree = Path(_git_stdout(root, "rev-parse", "--show-toplevel"))
-    common_dir_text = _git_stdout(root, "rev-parse", "--git-common-dir")
-    common_dir = Path(common_dir_text)
-    if not common_dir.is_absolute():
-        common_dir = root / common_dir
-    try:
-        if worktree.resolve() != root.resolve():
-            raise IndexManifestError("source_snapshot_root worktree identity disagrees")
-        common_metadata = common_dir.resolve().stat()
-    except OSError as error:
-        raise IndexManifestError("source_snapshot_root Git common-dir is unavailable") from error
-    if not stat.S_ISDIR(common_metadata.st_mode):
-        raise IndexManifestError("source_snapshot_root Git common-dir is not a directory")
-
-    observed_ref = _git_stdout_or_none(root, "symbolic-ref", "--quiet", "--short", "HEAD")
-    if observed_ref != ref_label:
-        raise IndexManifestError("ref_label does not match checked-out branch")
-    observed_remote = _git_stdout_or_none(root, "remote", "get-url", "origin")
-    if observed_remote is None or _normalize_repository_remote(observed_remote) != repository_name:
-        raise IndexManifestError("source_snapshot_root origin remote disagrees with repository_name")
-    observed_head = _git_stdout(root, "rev-parse", "--verify", "HEAD")
-    if observed_head != commit_sha:
-        raise IndexManifestError("commit_sha does not match exact snapshot HEAD")
-    observed_tree = _git_stdout(root, "rev-parse", "--verify", "HEAD^{tree}")
-    expected_tree = _git_stdout(root, "rev-parse", "--verify", f"{commit_sha}^{{tree}}")
-    if observed_tree != expected_tree:
-        raise IndexManifestError("source snapshot Git tree disagrees with expected commit")
+    canonical_root = root.resolve()
+    if not _filesystem_is_read_only(canonical_root):
+        raise IndexManifestError("source_snapshot_root must be on an OS read-only filesystem")
+    return canonical_root
 
 
 def _normalize_repository_remote(remote: str) -> str | None:
@@ -322,35 +346,38 @@ def _normalize_repository_remote(remote: str) -> str | None:
 
 
 def _git_stdout(root: Path, *arguments: str) -> str:
-    try:
-        completed = subprocess.run(
-            ["git", "-C", os.fspath(root), *arguments],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise IndexManifestError("source_snapshot_root Git inspection failed") from error
+    completed = _run_closed_git(root, *arguments)
     if completed.returncode != 0:
         raise IndexManifestError("source_snapshot_root must be a Git worktree")
-    return completed.stdout.strip()
+    try:
+        return completed.stdout.decode("utf-8").strip()
+    except UnicodeDecodeError as error:
+        raise IndexManifestError("source_snapshot_root Git output is not UTF-8") from error
 
 
 def _git_stdout_or_none(root: Path, *arguments: str) -> str | None:
+    completed = _run_closed_git(root, *arguments)
+    if completed.returncode != 0:
+        return None
     try:
-        completed = subprocess.run(
-            ["git", "-C", os.fspath(root), *arguments],
+        return completed.stdout.decode("utf-8").strip() or None
+    except UnicodeDecodeError as error:
+        raise IndexManifestError("source_snapshot_root Git output is not UTF-8") from error
+
+
+def _run_closed_git(root: Path, *arguments: str) -> subprocess.CompletedProcess[bytes]:
+    """Run only exact, local, read-only Git plumbing behind a frozen environment."""
+
+    try:
+        return subprocess.run(
+            [_GIT_EXECUTABLE, *_GIT_EXECUTION_FENCES, "-C", os.fspath(root), *arguments],
             check=False,
             capture_output=True,
-            text=True,
             timeout=15,
+            env=dict(_CLOSED_GIT_ENV),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise IndexManifestError("source_snapshot_root Git inspection failed") from error
-    if completed.returncode != 0:
-        return None
-    return completed.stdout.strip() or None
 
 
 def _path_rules(value: object, *, field: str, required: bool) -> tuple[str, ...]:
@@ -381,18 +408,17 @@ def _path_rules(value: object, *, field: str, required: bool) -> tuple[str, ...]
 
 
 def _digest_selected_files(
-    root: Path, includes: Sequence[str], excludes: Sequence[str]
+    tracked_files: Sequence[_TrackedFile], includes: Sequence[str], excludes: Sequence[str]
 ) -> str:
-    tracked_paths = _tracked_regular_files(root)
-    selected: list[tuple[str, Path]] = []
+    selected: list[_TrackedFile] = []
     overlapping: list[str] = []
-    for relative, file_path in tracked_paths:
-        included = any(_matches(relative, rule) for rule in includes)
-        excluded = any(_matches(relative, rule) for rule in excludes)
+    for tracked in tracked_files:
+        included = any(_matches(tracked.relative_path, rule) for rule in includes)
+        excluded = any(_matches(tracked.relative_path, rule) for rule in excludes)
         if included and excluded:
-            overlapping.append(relative)
+            overlapping.append(tracked.relative_path)
         elif included:
-            selected.append((relative, file_path))
+            selected.append(tracked)
     if overlapping:
         raise IndexManifestError(
             f"included/excluded overlap selects {', '.join(sorted(overlapping)[:3])}"
@@ -401,35 +427,70 @@ def _digest_selected_files(
         raise IndexManifestError("included_prefixes select no regular tracked files")
 
     digest = hashlib.sha256()
-    for relative, file_path in sorted(selected):
-        digest.update(relative.encode("utf-8"))
+    for tracked in sorted(selected, key=lambda item: item.relative_path):
+        digest.update(tracked.relative_path.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(hashlib.sha256(file_path.read_bytes()).digest())
+        digest.update(hashlib.sha256(tracked.path.read_bytes()).digest())
         digest.update(b"\0")
     return digest.hexdigest()
 
 
-def _tracked_regular_files(root: Path) -> tuple[tuple[str, Path], ...]:
-    try:
-        completed = subprocess.run(
-            ["git", "-C", os.fspath(root), "ls-files", "-s", "-z"],
-            check=False,
-            capture_output=True,
-            timeout=15,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise IndexManifestError("source snapshot file enumeration failed") from error
+def _tracked_regular_files(root: Path) -> tuple[_TrackedFile, ...]:
+    completed = _run_closed_git(root, "ls-files", "-s", "-z")
     if completed.returncode != 0:
         raise IndexManifestError("source_snapshot_root must be a Git worktree")
 
-    files: list[tuple[str, Path]] = []
-    for raw_entry in completed.stdout.split(b"\0"):
+    tree_completed = _run_closed_git(root, "ls-tree", "-r", "-z", "HEAD")
+    if tree_completed.returncode != 0:
+        raise IndexManifestError("source_snapshot_root Git tree is unavailable")
+    index_entries = _parse_index_entries(completed.stdout)
+    tree_entries = _parse_tree_entries(tree_completed.stdout)
+    if index_entries != tree_entries:
+        raise IndexManifestError("source_snapshot_root index disagrees with exact Git tree")
+
+    files: list[_TrackedFile] = []
+    for relative, mode, blob_sha in index_entries:
+        file_path = root / relative
+        try:
+            metadata = file_path.lstat()
+        except OSError as error:
+            raise IndexManifestError(f"tracked source path disappeared: {relative}") from error
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise IndexManifestError(
+                f"source snapshot must contain only regular tracked files: {relative}"
+            )
+        if _is_lfs_pointer(file_path):
+            raise IndexManifestError(f"source snapshot contains unresolved LFS pointer: {relative}")
+        content_blob_sha = _git_blob_sha1(file_path)
+        if content_blob_sha != blob_sha:
+            raise IndexManifestError(f"source snapshot worktree bytes disagree: {relative}")
+        files.append(
+            _TrackedFile(
+                relative_path=relative,
+                mode=mode,
+                blob_sha=blob_sha,
+                content_blob_sha=content_blob_sha,
+                path=file_path,
+                device=metadata.st_dev,
+                inode=metadata.st_ino,
+                size=metadata.st_size,
+                mtime_ns=metadata.st_mtime_ns,
+                ctime_ns=metadata.st_ctime_ns,
+            )
+        )
+    _reject_untracked_or_special_paths(root, files)
+    return tuple(files)
+
+
+def _parse_index_entries(payload: bytes) -> tuple[tuple[str, str, str], ...]:
+    entries: list[tuple[str, str, str]] = []
+    for raw_entry in payload.split(b"\0"):
         if not raw_entry:
             continue
         try:
             index_entry, raw_path = raw_entry.split(b"\t", 1)
             mode, blob_sha, stage = index_entry.decode("ascii").split(" ")
-            relative = raw_path.decode("utf-8")
+            relative = _repository_relative_path(raw_path)
         except UnicodeDecodeError as error:
             raise IndexManifestError("source snapshot contains a non-UTF-8 path") from error
         except ValueError as error:
@@ -442,19 +503,266 @@ def _tracked_regular_files(root: Path) -> tuple[tuple[str, Path], ...]:
             raise IndexManifestError(f"source snapshot contains submodule: {relative}")
         if mode not in {"100644", "100755"}:
             raise IndexManifestError(f"source snapshot contains special tracked path: {relative}")
-        file_path = root / relative
+        entries.append((relative, mode, blob_sha))
+    if len({relative for relative, _mode, _blob in entries}) != len(entries):
+        raise IndexManifestError("source snapshot Git index census is ambiguous")
+    return tuple(sorted(entries))
+
+
+def _parse_tree_entries(payload: bytes) -> tuple[tuple[str, str, str], ...]:
+    entries: list[tuple[str, str, str]] = []
+    for raw_entry in payload.split(b"\0"):
+        if not raw_entry:
+            continue
         try:
-            metadata = file_path.lstat()
+            tree_entry, raw_path = raw_entry.split(b"\t", 1)
+            mode, kind, blob_sha = tree_entry.decode("ascii").split(" ")
+            relative = _repository_relative_path(raw_path)
+        except UnicodeDecodeError as error:
+            raise IndexManifestError("source snapshot contains a non-UTF-8 path") from error
+        except ValueError as error:
+            raise IndexManifestError("source snapshot Git tree census is malformed") from error
+        if mode == "120000":
+            raise IndexManifestError(f"source snapshot contains tracked symlink: {relative}")
+        if mode == "160000":
+            raise IndexManifestError(f"source snapshot contains submodule: {relative}")
+        if kind != "blob" or _SHA1_RE.fullmatch(blob_sha) is None:
+            raise IndexManifestError("source snapshot Git tree census is ambiguous")
+        if mode not in {"100644", "100755"}:
+            raise IndexManifestError(f"source snapshot contains special tracked path: {relative}")
+        entries.append((relative, mode, blob_sha))
+    if len({relative for relative, _mode, _blob in entries}) != len(entries):
+        raise IndexManifestError("source snapshot Git tree census is ambiguous")
+    return tuple(sorted(entries))
+
+
+def _collect_snapshot_seal(
+    source_snapshot_root: Path,
+    includes: Sequence[str],
+    excludes: Sequence[str],
+) -> _SnapshotSeal:
+    """Read and bind every source fact that must stay unchanged through indexing."""
+
+    root = _validate_snapshot_root(source_snapshot_root)
+    try:
+        root_metadata = root.stat()
+        worktree = Path(_git_stdout(root, "rev-parse", "--show-toplevel")).resolve()
+        git_dir_text = _git_stdout(root, "rev-parse", "--git-dir")
+        git_dir = Path(git_dir_text)
+        if not git_dir.is_absolute():
+            git_dir = root / git_dir
+        git_dir = git_dir.resolve()
+        git_dir_metadata = git_dir.stat()
+        common_text = _git_stdout(root, "rev-parse", "--git-common-dir")
+        common_dir = Path(common_text)
+        if not common_dir.is_absolute():
+            common_dir = root / common_dir
+        common_dir = common_dir.resolve()
+        common_metadata = common_dir.stat()
+    except OSError as error:
+        raise IndexManifestError("source_snapshot_root Git common-dir is unavailable") from error
+    if worktree != root:
+        raise IndexManifestError("source_snapshot_root worktree identity disagrees")
+    if not stat.S_ISDIR(git_dir_metadata.st_mode):
+        raise IndexManifestError("source_snapshot_root Git dir is not a directory")
+    if not _filesystem_is_read_only(git_dir):
+        raise IndexManifestError("source_snapshot_root Git dir must be on an OS read-only filesystem")
+    if not stat.S_ISDIR(common_metadata.st_mode):
+        raise IndexManifestError("source_snapshot_root Git common-dir is not a directory")
+    if not _filesystem_is_read_only(common_dir):
+        raise IndexManifestError("source_snapshot_root Git common-dir must be on an OS read-only filesystem")
+
+    ref_label = _git_stdout_or_none(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if ref_label is None:
+        raise IndexManifestError("source_snapshot_root must have a checked-out branch")
+    remote = _git_stdout_or_none(
+        root, "config", "--no-includes", "--local", "--get", "remote.origin.url"
+    )
+    if remote is None:
+        raise IndexManifestError("source_snapshot_root origin remote is unavailable")
+    commit_sha = _git_stdout(root, "rev-parse", "--verify", "HEAD")
+    tree_sha = _git_stdout(root, "rev-parse", "--verify", "HEAD^{tree}")
+    if _SHA1_RE.fullmatch(commit_sha) is None or _SHA1_RE.fullmatch(tree_sha) is None:
+        raise IndexManifestError("source_snapshot_root Git identity is malformed")
+    tracked_files = _tracked_regular_files(root)
+    selected_source_tree_digest = _digest_selected_files(tracked_files, includes, excludes)
+    digest = _snapshot_seal_digest(
+        root_metadata=root_metadata,
+        git_dir_metadata=git_dir_metadata,
+        common_metadata=common_metadata,
+        git_dir_is_common_dir=git_dir == common_dir,
+        ref_label=ref_label,
+        remote=remote,
+        commit_sha=commit_sha,
+        tree_sha=tree_sha,
+        tracked_files=tracked_files,
+        selected_source_tree_digest=selected_source_tree_digest,
+    )
+    return _SnapshotSeal(
+        root_device=root_metadata.st_dev,
+        root_inode=root_metadata.st_ino,
+        git_dir=git_dir,
+        git_dir_device=git_dir_metadata.st_dev,
+        git_dir_inode=git_dir_metadata.st_ino,
+        common_dir=common_dir,
+        common_dir_device=common_metadata.st_dev,
+        common_dir_inode=common_metadata.st_ino,
+        git_dir_is_common_dir=git_dir == common_dir,
+        ref_label=ref_label,
+        remote=remote,
+        commit_sha=commit_sha,
+        tree_sha=tree_sha,
+        tracked_files=tracked_files,
+        selected_source_tree_digest=selected_source_tree_digest,
+        digest=digest,
+    )
+
+
+def verify_repository_spec(spec: RepositorySpec) -> None:
+    """Reverify the manifest's frozen snapshot seal immediately before/after use."""
+
+    expected = spec.snapshot_seal
+    if expected is None:
+        raise IndexManifestError("source snapshot seal is unavailable")
+    observed = _collect_snapshot_seal(
+        spec.source_snapshot_root, spec.included_prefixes, spec.excluded_globs
+    )
+    if (
+        observed.ref_label != spec.ref_label
+        or observed.remote != expected.remote
+        or _normalize_repository_remote(observed.remote) != spec.repository_name
+        or observed.commit_sha != spec.commit_sha
+        or observed.selected_source_tree_digest != spec.source_tree_digest
+        or observed != expected
+    ):
+        raise IndexManifestError("source snapshot seal changed")
+
+
+def _filesystem_is_read_only(path: Path) -> bool:
+    """Trust filesystem mount state, never mutable permission bits or caller claims."""
+
+    try:
+        flags = os.statvfs(os.fspath(path)).f_flag
+    except OSError as error:
+        raise IndexManifestError("source snapshot read-only evidence is unavailable") from error
+    return bool(flags & getattr(os, "ST_RDONLY", 1))
+
+
+def _repository_relative_path(raw_path: bytes) -> str:
+    relative = raw_path.decode("utf-8")
+    if not relative or relative.startswith("/") or "\\" in relative:
+        raise IndexManifestError("source snapshot contains an unsafe Git path")
+    segments = relative.split("/")
+    if any(segment in {"", ".", ".."} for segment in segments):
+        raise IndexManifestError("source snapshot contains an unsafe Git path")
+    return relative
+
+
+def _git_blob_sha1(path: Path) -> str:
+    try:
+        content = path.read_bytes()
+    except OSError as error:
+        raise IndexManifestError(f"tracked source path disappeared: {path.name}") from error
+    digest = hashlib.sha1()
+    digest.update(f"blob {len(content)}\0".encode("ascii"))
+    digest.update(content)
+    return digest.hexdigest()
+
+
+def _reject_untracked_or_special_paths(root: Path, tracked_files: Sequence[_TrackedFile]) -> None:
+    """Census the entire worktree without invoking status, filters, or fsmonitor."""
+
+    tracked_paths = {tracked.relative_path for tracked in tracked_files}
+    tracked_directories: set[str] = set()
+    seen_entries = 0
+    for relative in tracked_paths:
+        parent = PurePosixPath(relative).parent
+        while parent != PurePosixPath("."):
+            tracked_directories.add(parent.as_posix())
+            parent = parent.parent
+
+    def visit(directory: Path, prefix: str) -> None:
+        nonlocal seen_entries
+        try:
+            entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
         except OSError as error:
-            raise IndexManifestError(f"tracked source path disappeared: {relative}") from error
-        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-            raise IndexManifestError(
-                f"source snapshot must contain only regular tracked files: {relative}"
-            )
-        if _is_lfs_pointer(file_path):
-            raise IndexManifestError(f"source snapshot contains unresolved LFS pointer: {relative}")
-        files.append((relative, file_path))
-    return tuple(files)
+            raise IndexManifestError("source snapshot filesystem census failed") from error
+        for entry in entries:
+            if not prefix and entry.name == ".git":
+                continue
+            seen_entries += 1
+            if seen_entries > _MAX_WORKTREE_CENSUS_ENTRIES:
+                raise IndexManifestError("source snapshot filesystem census exceeds its bound")
+            relative = f"{prefix}/{entry.name}" if prefix else entry.name
+            try:
+                metadata = entry.stat(follow_symlinks=False)
+            except OSError as error:
+                raise IndexManifestError("source snapshot filesystem census failed") from error
+            if stat.S_ISLNK(metadata.st_mode):
+                raise IndexManifestError(f"source snapshot contains symlink: {relative}")
+            if stat.S_ISDIR(metadata.st_mode):
+                if relative not in tracked_directories:
+                    raise IndexManifestError(
+                        f"source_snapshot_root must be a clean Git snapshot: untracked path {relative}"
+                    )
+                visit(Path(entry.path), relative)
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
+                raise IndexManifestError(f"source snapshot contains special path: {relative}")
+            if relative not in tracked_paths:
+                raise IndexManifestError(
+                    f"source_snapshot_root must be a clean Git snapshot: untracked path {relative}"
+                )
+
+    visit(root, "")
+
+
+def _snapshot_seal_digest(
+    *,
+    root_metadata: os.stat_result,
+    git_dir_metadata: os.stat_result,
+    common_metadata: os.stat_result,
+    git_dir_is_common_dir: bool,
+    ref_label: str,
+    remote: str,
+    commit_sha: str,
+    tree_sha: str,
+    tracked_files: Sequence[_TrackedFile],
+    selected_source_tree_digest: str,
+) -> str:
+    digest = hashlib.sha256()
+    for value in (
+        "mastermind.codeintel_snapshot_seal.v1",
+        str(root_metadata.st_dev),
+        str(root_metadata.st_ino),
+        str(git_dir_metadata.st_dev),
+        str(git_dir_metadata.st_ino),
+        str(common_metadata.st_dev),
+        str(common_metadata.st_ino),
+        "git_dir_is_common_dir" if git_dir_is_common_dir else "git_dir_is_distinct",
+        ref_label,
+        remote,
+        commit_sha,
+        tree_sha,
+        selected_source_tree_digest,
+    ):
+        digest.update(value.encode("utf-8"))
+        digest.update(b"\0")
+    for tracked in tracked_files:
+        for value in (
+            tracked.relative_path,
+            tracked.mode,
+            tracked.blob_sha,
+            tracked.content_blob_sha,
+            str(tracked.device),
+            str(tracked.inode),
+            str(tracked.size),
+            str(tracked.mtime_ns),
+            str(tracked.ctime_ns),
+        ):
+            digest.update(value.encode("utf-8"))
+            digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
