@@ -29,7 +29,6 @@ RECORD_PATHS = [
     "tests/test_autonomy_stage_b_durable_target_transfer_source_law.py",
 ]
 SOURCE_PATHS = [
-    "config/wake_session_targets.json",
     "control_plane/executive_runtime.py",
     "control_plane/runtime_binding_projection.py",
     "control_plane/sol_action_target_assignment.py",
@@ -233,7 +232,9 @@ def validate_contract(contract: dict[str, Any]) -> None:
     assert source["status"] == "HELD_PREDECESSORS"
     assert source["name"] == "STAGE_B1_CEO_CODEX_INITIAL_ASSIGNMENT_VERTICAL"
     assert source["paths"] == SOURCE_PATHS
-    assert source["maximum_paths"] == 7
+    assert source["maximum_paths"] == 6
+    assert "config/wake_session_targets.json" not in source["paths"]
+    assert source["target_definition_is_separate_predecessor"] is True
     assert source["release_claim"] == "BUILT_NOT_PROVEN / INITIAL_ASSIGNMENT_ONLY / PRODUCTION_DISARMED"
 
     no_rebuild = contract["no_rebuild"]
@@ -284,7 +285,7 @@ def test_v5_1_contract_and_false_support_mutations() -> None:
         "new_table": set_path(("no_rebuild", "tables"), ["sol_targets"]),
         "new_queue": set_path(("no_rebuild", "queues"), ["assignment_queue"]),
         "arm": set_path(("no_rebuild", "production_armed"), True),
-        "eighth_path": lambda item: item["source_wave"]["paths"].append("control_plane/sol_action_target.py"),
+        "target_config_reintroduced": lambda item: item["source_wave"]["paths"].append("config/wake_session_targets.json"),
     }
 
     survivors = []
@@ -368,13 +369,14 @@ def test_plan_gate_is_records_only_and_orders_c2_before_stage_b1() -> None:
     for path in RECORD_PATHS + SOURCE_PATHS:
         assert path in plan
     order = [
-        "1. PROTECT_CAPACITY_C1_SELECTION",
-        "2. BUILD_CAPACITY_C2_ROOT_BOUND_COMMITMENT",
-        "3. ADD_DISABLED_EXECUTIVE_CEO_CODEX_A_TARGET",
-        "4. PROTECT_STAGE_B0_V5_1_ARCHITECTURE",
+        "1. PROTECT_STAGE_B0_V5_1_ARCHITECTURE",
+        "2. PROTECT_CAPACITY_C1_SELECTION",
+        "3. BUILD_CAPACITY_C2_ROOT_BOUND_COMMITMENT",
+        "4. ADD_DISABLED_EXECUTIVE_CEO_CODEX_A_TARGET",
         "5. RED_STAGE_B1_PRODUCTION_ROOT_AND_COMMITMENT_CHAIN",
     ]
     indexes = [plan.index(item) for item in order]
     assert indexes == sorted(indexes)
-    assert "No eighth path" in plan
+    assert "No seventh path" in plan
+    assert "Do not modify `config/wake_session_targets.json`" in plan
     assert "Do not modify `control_plane/sol_action_target.py`" in plan
