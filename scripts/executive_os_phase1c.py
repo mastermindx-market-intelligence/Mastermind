@@ -48,6 +48,9 @@ SECRET_CANARY_ENVELOPE_SCHEMA_VERSION = (
 CONTROL_ENVIRONMENT_PROBE_SCHEMA_VERSION = (
     "mastermind.executive_control_env_probe/v1"
 )
+_CANONICAL_AGENT_RELAY_SOCKET = Path(
+    "/var/run/mastermind-agent-relay/agent-relay.sock"
+)
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
 _CONFIG_REQUIRED = frozenset(
     {
@@ -97,6 +100,8 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_socket_path",
         "ceo_ingress_launchd_socket_name",
         "ceo_ingress_peer_uid",
+        "terminal_return_armed",
+        "terminal_return_socket_path",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -104,6 +109,12 @@ _CEO_INGRESS_CONFIG_KEYS = frozenset(
         "ceo_ingress_socket_path",
         "ceo_ingress_launchd_socket_name",
         "ceo_ingress_peer_uid",
+    }
+)
+_TERMINAL_RETURN_CONFIG_KEYS = frozenset(
+    {
+        "terminal_return_armed",
+        "terminal_return_socket_path",
     }
 )
 
@@ -226,6 +237,9 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
+    terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
+    if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
+        raise ServiceError("terminal-return control config fields must be supplied together")
     for name in (
         "runtime_root",
         "control_socket_path",
@@ -244,6 +258,17 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         config["ceo_ingress_socket_path"] = _path(
             config["ceo_ingress_socket_path"], "ceo_ingress_socket_path"
         )
+    if terminal_return_present:
+        terminal_return_socket = config["terminal_return_socket_path"]
+        config["terminal_return_socket_path"] = _path(
+            terminal_return_socket,
+            "terminal_return_socket_path",
+        )
+        if terminal_return_socket != os.fspath(_CANONICAL_AGENT_RELAY_SOCKET):
+            raise ServiceError(
+                "control config terminal_return_socket_path must be exactly "
+                f"{_CANONICAL_AGENT_RELAY_SOCKET}"
+            )
     for name in ("control_uid", "worker_uid", "worker_gid", "shared_run_gid"):
         config[name] = _integer(config[name], name)
     if ceo_ingress_present:
@@ -273,6 +298,23 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             raise ServiceError("CeoIngress launchd socket name must differ from Operator")
         if config["ceo_ingress_peer_uid"] == config["control_uid"]:
             raise ServiceError("CeoIngress peer uid must differ from control uid")
+    if terminal_return_present:
+        if type(config["terminal_return_armed"]) is not bool:
+            raise ServiceError("control config terminal_return_armed must be boolean")
+        terminal_socket = config["terminal_return_socket_path"]
+        forbidden_sockets = {
+            "control socket": config["control_socket_path"],
+            "worker broker socket": config["worker_broker_socket_path"],
+        }
+        if ceo_ingress_present:
+            forbidden_sockets["CeoIngress socket"] = config[
+                "ceo_ingress_socket_path"
+            ]
+        for label, forbidden_socket in forbidden_sockets.items():
+            if terminal_socket == forbidden_socket:
+                raise ServiceError(
+                    f"terminal-return Relay socket must be distinct from {label}"
+                )
     if "coo_autonomy_armed" in config and not isinstance(
         config["coo_autonomy_armed"], bool
     ):
@@ -715,6 +757,8 @@ def _service_from_config(
         coo_operator_quota_class=str(
             raw.get("coo_operator_quota_class") or "codex-coo-operator"
         ),
+        terminal_return_armed=raw.get("terminal_return_armed", False),
+        terminal_return_socket_path=raw.get("terminal_return_socket_path"),
         operator_harness_binary_digest=binary_digest,
         operator_harness_version=binary_version,
         allowed_peer_uids=tuple(raw["allowed_peer_uids"]),
@@ -781,12 +825,31 @@ def _service_from_config(
         if identity.get("operator_harness_armed") is not True:
             raise ServiceError("control/worker Operator Harness arming state differs")
 
+    terminal_return_kwargs: dict[str, Any] = {}
+    if config.terminal_return_armed:
+        from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
+            ExecutiveTerminalReturnProjector,
+            RuntimeTerminalReturnBindingResolver,
+        )
+
+        def terminal_return_projector_factory(runtime_provider, socket_path):
+            return ExecutiveTerminalReturnProjector(
+                RuntimeTerminalReturnBindingResolver(runtime_provider),
+                socket_path=socket_path,
+            )
+
+        terminal_return_kwargs["terminal_return_projector_factory"] = (
+            terminal_return_projector_factory
+        )
+
     listener = activate_launchd_socket(str(raw["launchd_socket_name"]))
+    activated_listeners = [listener]
     ceo_ingress_kwargs: dict[str, Any] = {}
     if _CEO_INGRESS_CONFIG_KEYS <= set(raw):
         ceo_listener = activate_launchd_socket(
             str(raw["ceo_ingress_launchd_socket_name"])
         )
+        activated_listeners.append(ceo_listener)
         ceo_ingress_kwargs = {
             "ceo_ingress_socket_path": raw["ceo_ingress_socket_path"],
             "ceo_ingress_peer_uid": int(raw["ceo_ingress_peer_uid"]),
@@ -794,6 +857,25 @@ def _service_from_config(
             "ceo_ingress_armed": False,
             "ceo_ingress_activated_socket": ceo_listener,
         }
+    if config.terminal_return_socket_path is not None:
+        for activated_listener in activated_listeners:
+            getsockname = getattr(activated_listener, "getsockname", None)
+            if not callable(getsockname):
+                continue
+            activated_path = getsockname()
+            if isinstance(activated_path, bytes):
+                activated_path = os.fsdecode(activated_path)
+            if (
+                isinstance(activated_path, str)
+                and activated_path
+                and not activated_path.startswith("\0")
+                and Path(activated_path).resolve(strict=False)
+                == config.terminal_return_socket_path
+            ):
+                raise ServiceError(
+                    "terminal-return Relay socket must be distinct from every "
+                    "activated listener"
+                )
     return ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
@@ -806,6 +888,7 @@ def _service_from_config(
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
         **ceo_ingress_kwargs,
+        **terminal_return_kwargs,
     )
 
 
