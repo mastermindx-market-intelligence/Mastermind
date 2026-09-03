@@ -114,6 +114,14 @@ def test_live_fixture_fails_closed_on_github_actions_identity_drift(
         _require_exact_github_hosted_userns_runner(environment)
 
 
+def test_github_actions_live_runner_identity_is_exact() -> None:
+    """Keep collection-time platform skips from greening a drifted hosted job."""
+
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        pytest.skip("hosted runner identity gate applies only in GitHub Actions")
+    _require_exact_github_hosted_userns_runner(os.environ)
+
+
 def _request(**changes: str) -> runner.ExperimentRequest:
     values = {
         "operation_key": runner.Z0_OPERATION_KEY,
