@@ -297,18 +297,28 @@ def _route_for(obligation, *, registry=None, binding=None):
     return route_obligation(obligation, registry, binding=binding)
 
 
-def _ack_row(obligation, alias="PROPHET-COO-A"):
+def _ack_row(obligation, alias="PROPHET-COO-A", *, route=None, attempt_n=1):
+    route = route or _route_for(
+        obligation,
+        binding=_binding(alias=alias),
+    )
     ack = acknowledge(
         obligation,
         trusted=TrustedAckContext(
             ack_mode=AckMode.REASONING_SESSION,
             target_seat=obligation.declared_target_seat,
-            session_alias=alias,
-            reasoning_surface="chatgpt-sol",
-            binding_id=_BIND,
+            session_alias=route.session_alias,
+            reasoning_surface=route.reasoning_surface,
+            binding_id=route.binding_id,
+            binding_generation=route.binding_generation,
             acknowledged_at=_FROZEN,
         ),
         claimed_obligation_ids=[obligation.obligation_id],
+        delivered_command_id=ledger_command_id(
+            obligation.obligation_id,
+            LedgerPhase.DELIVERED,
+            attempt_n=attempt_n,
+        ),
     )
     return ack_record(obligation, ack)
 
@@ -867,7 +877,7 @@ def test_accepted_is_not_delivered():
 def test_delivery_and_acknowledgement_are_separate():
     obligation = _obligation_from_inbox()
     oid = obligation.obligation_id
-    route = _route_for(obligation)
+    route = _route_for(obligation, binding=_binding())
     delivered = ledger_command_id(oid, LedgerPhase.DELIVERED, attempt_n=1)
     accepted = ledger_command_id(oid, LedgerPhase.ACCEPTED, attempt_n=1)
     ack = ledger_command_id(oid, LedgerPhase.TARGET_ACKNOWLEDGED)
@@ -879,7 +889,7 @@ def test_delivery_and_acknowledgement_are_separate():
         delivery_record(oid, LedgerPhase.DELIVERED, attempt_n=1, route=route),
     ]
     assert reconstruct_status(oid, records, route=route) is ObligationStatus.DELIVERED_UNACKNOWLEDGED
-    records_ack = records + [_ack_row(obligation)]
+    records_ack = records + [_ack_row(obligation, route=route)]
     assert reconstruct_status(oid, records_ack, route=route) is ObligationStatus.TARGET_ACKNOWLEDGED
     replay = already_delivered_receipt(
         obligation,
@@ -1186,7 +1196,7 @@ def test_route_rotation_allows_second_delivery_until_ack():
         a2_delivered,
     ]
     assert reconstruct_status(oid, records2, route=r2) is ObligationStatus.DELIVERED_UNACKNOWLEDGED
-    closed = records2 + [_ack_row(obligation)]
+    closed = records2 + [_ack_row(obligation, route=r2, attempt_n=2)]
     assert reconstruct_status(oid, closed, route=r1) is ObligationStatus.TARGET_ACKNOWLEDGED
     assert reconstruct_status(oid, closed, route=r2) is ObligationStatus.TARGET_ACKNOWLEDGED
 

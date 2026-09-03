@@ -175,6 +175,34 @@ lawful continuation path, and emits the separate truthful `START` edge when all 
 clear. A packet merely discovered in Slack/GitHub/history remains retrieved data and does not
 self-assign a worker.
 
+Receiver assignment is child-specific. A terminal STOP consumes that child assignment. A standing
+program instruction does not self-assign a successor child; an independent successor requires a
+fresh Sol/Chairman delivery or canonical placement edge plus the fresh operation/carrier/pickup law.
+A worker must not mint a successor operation key and treat an older program-level Chairman sentence,
+prior STOPped child, seat identity, or historical Slack thread as the receiver-assignment edge.
+
+For a Slack direct-targeted child, preserve the exact parent thread chosen by the live delivery. The
+worker ACK belongs under that parent; posting the ACK as a new top-level message in the same channel
+does not create or move the carrier.
+
+### 5.4 New-child origination and unconsumed delivery
+
+A `DIRECT_TARGETED — NEW CHILD` reply buried under an unrelated parent/program/previous-child root
+cannot by itself originate a new independent child or become that child's receiver-assignment event.
+It may carry evidence or continue an already-ACKed child, but `CONTINUE`, `RULING`, and `STOP` remain
+reciprocal continuation/terminal edges on the exact root of an already-ACKed child; they cannot become
+sole assignment for a new child.
+
+A new independent Slack-only child requires its own Sol-authored top-level child commission root, an
+eligible command-create event, deliberate current live delivery into the actual provider interaction,
+or a production-proven exact native wake/resume path that binds that child to an exact root. This
+procedure preserves, rather than duplicates, Executive OS lifecycle and the accepted placement/router
+owners.
+
+DELIVERY_SENT or a Slack mention without a valid receiver PICKUP_ACK is DELIVERY_UNCONSUMED / PRE_START
+and must not be projected as active, STARTED, executing, waiting-on-worker, or watcher-consumed.
+PICKUP_ACK and START remain separate; Executive OS remains the lifecycle owner.
+
 ## 6. Receiver binding mode — capacity-selectable vs exact-session-required
 
 Every bounded handoff must distinguish logical responsibility from the concrete runtime account by
@@ -231,6 +259,25 @@ bound account/session.
 For `EXACT_SESSION_REQUIRED`, a different numbered account/session is a real target mismatch and must
 block or reconcile under the owning continuity/RuntimeBinding law. Capacity preference does not
 silently rewrite an exact-session target.
+
+**Slack user/seat identity is not exact native-session identity.** A mention or delivery addressed to
+an account/seat can be transport evidence without proving which provider-native reasoning session
+consumed it. When an `EXACT_SESSION_REQUIRED` packet lands in any session other than the frozen native
+session, **delivery to a different session is not PICKUP_ACK**. That landing must return
+`RECEIVER_SESSION_MISMATCH` (or the current typed equivalent), identify the actual landing session when
+safe, perform zero child effect, and **do not spawn or substitute another session**. Preserve the bound
+session and any dirty/effectful local state for canonical continuity reconciliation; a shared Slack
+identity, seat label, account nickname, or newly spawned same-model session cannot satisfy exactness.
+
+**Slack mention alone is not an exact-session delivery mechanism.** Sol may issue asynchronous
+`EXACT_SESSION_REQUIRED` delivery only when the exact provider conversation is already the current
+live interaction or a **production-proven exact native wake/resume path** can address that verified
+RuntimeBinding/native session. An account/seat mention, ordinary Slack notification, channel
+membership, task title, or ability to spawn a fresh same-model session is insufficient. If no proven
+exact-session path exists, represent the operation as `WAITING_EXACT_SESSION / wake_unavailable` and
+**do not emit an account-targeted DIRECT_TARGETED packet** pretending the named native session will
+consume it. Preserve any existing dirty/effectful owner and reconcile/materialize through the
+canonical RuntimeBinding/Wake/session-provisioning owners instead.
 
 Do not label ordinary new work `EXACT_SESSION_REQUIRED` merely because Sol happened to mention or tag a
 numbered account in an earlier packet. Exactness comes from the operation's real target requirement,

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import re
 from collections.abc import Mapping
 from typing import Any, Callable, TypeVar
 
@@ -20,6 +21,7 @@ from control_plane.executive_orchestration_principal import (
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.operator_harness_contract import (
     AdapterFailureClass,
+    AttentionTurnObservation,
     AuthIdentityConfidence,
     AuthRealmFact,
     AuthRealmRequirement,
@@ -47,6 +49,7 @@ from control_plane.operator_harness_contract import (
     SessionStartObservation,
     TurnRef,
     TurnStartObservation,
+    WorkerLocalWakeAckProjection,
     WorkspaceIdentity,
 )
 
@@ -119,13 +122,35 @@ def workspace_identity(value: Any) -> WorkspaceIdentity:
 
 
 def capability_identity(value: Any) -> CapabilityIdentity:
-    return _construct(CapabilityIdentity, value, name="capability identity")
+    identity = _construct(CapabilityIdentity, value, name="capability identity")
+    digest = identity.resource_contract_digest
+    if identity.kind == "resource":
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise OperatorHarnessWireError(
+                "resource contract digest must be exact lowercase SHA-256"
+            )
+    elif digest is not None:
+        raise OperatorHarnessWireError(
+            "resource contract digest is valid only for resource capabilities"
+        )
+    return identity
 
 
 def observed_capability_identity(value: Any) -> ObservedCapabilityIdentity:
-    return _construct(
+    identity = _construct(
         ObservedCapabilityIdentity, value, name="observed capability identity"
     )
+    digest = identity.resource_contract_digest
+    if identity.kind == "resource":
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise OperatorHarnessWireError(
+                "resource contract digest must be exact lowercase SHA-256"
+            )
+    elif digest is not None:
+        raise OperatorHarnessWireError(
+            "resource contract digest is valid only for resource capabilities"
+        )
+    return identity
 
 
 def capability_manifest(value: Any) -> CapabilityManifest:
@@ -287,9 +312,38 @@ def turn_start_observation(value: Any) -> TurnStartObservation:
     return _construct(TurnStartObservation, value, name="turn start observation")
 
 
+def attention_turn_observation(value: Any) -> AttentionTurnObservation:
+    raw = _closed(value, AttentionTurnObservation, name="attention turn observation")
+    projection = raw["wake_ack_projection"]
+    nested = None
+    if projection is not None:
+        nested_raw = _closed(
+            projection,
+            WorkerLocalWakeAckProjection,
+            name="worker-local Wake ACK projection",
+        )
+        nested = _construct(
+            WorkerLocalWakeAckProjection,
+            nested_raw,
+            name="worker-local Wake ACK projection",
+            obligation_ids=_tuple(
+                nested_raw["obligation_ids"],
+                _wire_text,
+                name="worker-local Wake ACK obligation ids",
+            ),
+        )
+    return _construct(
+        AttentionTurnObservation,
+        raw,
+        name="attention turn observation",
+        wake_ack_projection=nested,
+    )
+
+
 def reconcile_observation(value: Any) -> ReconcileObservation:
     raw = _closed(value, ReconcileObservation, name="reconcile observation")
     failure = raw["recommended_failure_class"]
+    late_raw = raw["late_attention_observation"]
     return _construct(
         ReconcileObservation,
         raw,
@@ -307,6 +361,11 @@ def reconcile_observation(value: Any) -> ReconcileObservation:
             None
             if failure is None
             else _enum(AdapterFailureClass, failure, name="adapter failure class")
+        ),
+        late_attention_observation=(
+            None
+            if late_raw is None
+            else attention_turn_observation(late_raw)
         ),
     )
 
@@ -377,6 +436,7 @@ def _wire_text(value: Any) -> str:
 
 __all__ = [
     "OperatorHarnessWireError",
+    "attention_turn_observation",
     "candidate_result",
     "event_cursor",
     "launch_comparison",

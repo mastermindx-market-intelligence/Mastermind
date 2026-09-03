@@ -31,8 +31,11 @@ from control_plane.executive_agent_capabilities import (
 )
 from control_plane.operator_harness_contract import (
     ACCOUNT_REALM_STATUS,
+    ATTENTION_TURN_INSTRUCTION,
+    COMMAND_ID_RE,
     OPERATOR_HARNESS_INTERFACE_VERSION,
     AdapterFailureClass,
+    AttentionTurnObservation,
     AuthIdentityConfidence,
     AuthRealmFact,
     CandidateResult,
@@ -59,7 +62,9 @@ from control_plane.operator_harness_contract import (
     StageConfigReceipt,
     TurnRef,
     TurnStartObservation,
+    WorkerLocalWakeAckProjection,
     WorkspaceIdentity,
+    runtime_binding_id_for,
 )
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
@@ -71,6 +76,7 @@ from control_plane.executive_orchestration_result import (
     canonical_digest as orchestration_result_digest,
     parse_canonical_json,
 )
+from control_plane.worker_browser_b1 import BROWSER_RESOURCE_ENV_KEYS
 from scripts.ohf.laboratory import AppServerClient, AppServerStopProof, JsonRpcError
 from scripts.ohf.redaction import redact_evidence_text
 from scripts.ohf.protocol import (
@@ -88,6 +94,15 @@ from scripts.ohf.protocol import (
 _CLIENT_INFO = {"name": "mastermind-ohf", "title": "Mastermind OHF", "version": "p1b"}
 _FAKE_ENV_PREFIX = "OHF_FAKE_"
 _SAFE_ENV_KEYS = frozenset({"PATH", "LC_ALL", "LANG", "PYTHONPATH"})
+_ATTENTION_COMPLETION_METHOD = "turn/completed"
+_ATTENTION_COMPLETION_TIMEOUT_PREFIX = (
+    "timeout waiting for notification turn/completed"
+)
+_ATTENTION_TERMINAL_STATUSES = frozenset({"completed", "failed", "interrupted"})
+_WAKE_ACK_MARKER_PREFIX = "MASTERMIND_WAKE_ACK "
+_WAKE_ACK_MARKER_RE = re.compile(r"^MASTERMIND_WAKE_ACK (WAKE-[A-Za-z0-9._:-]+)$")
+_CANONICAL_WAKE_ID_RE = re.compile(r"^WAKE-[0-9a-f]{32}$")
+_MARKDOWN_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
 class CodexAdapterError(RuntimeError):
@@ -113,6 +128,111 @@ BaseShaResolver = Callable[[Path], str]
 MAX_RAW_TURN_PAGES = 128
 MAX_RAW_TURN_CUMULATIVE_FRAME_BYTES = 134_217_728
 RAW_TURN_TOTAL_TIMEOUT_SECONDS = 120.0
+
+
+def _attention_final_text(completion: Mapping[str, Any]) -> str | None:
+    """Reduce one unique final agent message without exporting provider bytes."""
+
+    params = completion.get("params")
+    turn = params.get("turn") if isinstance(params, Mapping) else None
+    items = turn.get("items") if isinstance(turn, Mapping) else None
+    if not isinstance(items, list):
+        return None
+    messages = [
+        item
+        for item in items
+        if isinstance(item, Mapping)
+        and str(item.get("type") or "") in {"agent_message", "agentMessage"}
+    ]
+    phased = [item for item in messages if item.get("phase") is not None]
+    if phased:
+        if len(phased) != len(messages) or any(
+            item.get("phase") not in {"commentary", "final_answer"} for item in phased
+        ):
+            return None
+        selected = [item for item in phased if item.get("phase") == "final_answer"]
+    else:
+        selected = messages
+    if len(selected) != 1:
+        return None
+    message = selected[0]
+    direct = message.get("text")
+    content = message.get("content")
+    blocks: list[str] = []
+    if isinstance(content, list):
+        for block in content:
+            if (
+                not isinstance(block, Mapping)
+                or block.get("type") not in {"text", "output_text"}
+                or not isinstance(block.get("text"), str)
+            ):
+                return None
+            blocks.append(str(block["text"]))
+    joined = "".join(blocks) if blocks else None
+    if direct is not None and not isinstance(direct, str):
+        return None
+    if isinstance(direct, str) and joined is not None and direct != joined:
+        return None
+    return direct if isinstance(direct, str) else joined
+
+
+def _fenced_line_states(lines: Sequence[str]) -> tuple[bool, ...]:
+    states: list[bool] = []
+    fence_character: str | None = None
+    fence_length = 0
+    for line in lines:
+        states.append(fence_character is not None)
+        if fence_character is None:
+            match = _MARKDOWN_FENCE_OPEN_RE.match(line)
+            if match is None:
+                continue
+            marker = match.group(1)
+            fence_character = marker[0]
+            fence_length = len(marker)
+        elif re.fullmatch(
+            rf" {{0,3}}{re.escape(fence_character)}{{{fence_length},}}[ \t]*",
+            line,
+        ):
+            fence_character = None
+            fence_length = 0
+    return tuple(states)
+
+
+def _terminal_wake_ack_ids(completion: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """Accept only one exact, unfenced, contiguous terminal ACK trailer."""
+
+    text = _attention_final_text(completion)
+    if text is None:
+        return None
+    lines = text.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines or not lines[-1].startswith(_WAKE_ACK_MARKER_PREFIX):
+        return None
+    first = len(lines) - 1
+    while first > 0 and lines[first - 1].startswith(_WAKE_ACK_MARKER_PREFIX):
+        first -= 1
+    fence_states = _fenced_line_states(lines)
+    if any(fence_states[index] for index in range(first, len(lines))):
+        return None
+    ids: list[str] = []
+    for line in lines[first:]:
+        match = _WAKE_ACK_MARKER_RE.fullmatch(line)
+        if match is None or _CANONICAL_WAKE_ID_RE.fullmatch(match.group(1)) is None:
+            return None
+        ids.append(match.group(1))
+    if len(ids) != len(set(ids)):
+        return None
+    return tuple(sorted(ids))
+
+
+def _attention_terminal_status(completion: Mapping[str, Any]) -> str | None:
+    """Classify one exact provider terminal outcome without exporting it."""
+
+    params = completion.get("params")
+    turn = params.get("turn") if isinstance(params, Mapping) else None
+    status = turn.get("status") if isinstance(turn, Mapping) else None
+    return status if status in _ATTENTION_TERMINAL_STATUSES else None
 
 
 def _default_client_factory(
@@ -258,6 +378,15 @@ def _reject_symlink_components(path: Path, *, failure: AdapterFailureClass) -> N
 
 
 @dataclass
+class _PendingAttentionRequest:
+    attempt_id: str
+    binding_id: str
+    binding_generation: int
+    nudge_id: str
+    opaque_ids: tuple[str, ...]
+
+
+@dataclass
 class _GenerationState:
     epoch: SessionEpochRef
     generation: ProcessGenerationRef
@@ -267,12 +396,26 @@ class _GenerationState:
     provider_session_tree_id: str
     process: ProcessIdentityObservation
     attestation: ObservedHarnessAttestation
+    resource: Any | None = None
     writer_state: ProviderWriterState = ProviderWriterState.HELD
     events: list[NormalizedEvent] = field(default_factory=list)
     turns: dict[str, str] = field(default_factory=dict)
+    attention_inflight: bool = False
+    attention_native_turn_id: str | None = None
+    attention_request: _PendingAttentionRequest | None = None
     turn_subordinates: dict[str, set[str]] = field(default_factory=dict)
     audited_native_helper_turns: set[str] = field(default_factory=set)
     candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _BoundAttemptResource:
+    """One immutable authority snapshot plus its proof-only resource object."""
+
+    resource: Any
+    environment: tuple[tuple[str, str], ...]
+    observed_capability: ObservedCapabilityIdentity
+    network_state: str
 
 
 class CodexOperatorAdapter:
@@ -359,6 +502,7 @@ class CodexOperatorAdapter:
         self.extra_env = dict(extra_env or {})
         self._generations: dict[str, _GenerationState] = {}
         self._active_workers: dict[str, str] = {}
+        self._bound_resources: dict[str, _BoundAttemptResource] = {}
         self._validate_constructor()
         # Exact executable evidence is captured without starting it.
         self.binary_digest = _sha256_file(self.binary_path)
@@ -481,7 +625,7 @@ class CodexOperatorAdapter:
             gid=stat.st_gid,
         )
 
-    def _env(self) -> dict[str, str]:
+    def _env(self, resource: _BoundAttemptResource | None = None) -> dict[str, str]:
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": str(self.codex_home),
@@ -489,9 +633,87 @@ class CodexOperatorAdapter:
             "LC_ALL": "C",
         }
         env.update(self.extra_env)
+        if resource is not None:
+            env.update(dict(resource.environment))
         # In particular, no OPENAI_API_KEY or other parent credential variable
         # is inherited. Authentication stays inside the dedicated home.
         return env
+
+    def bind_attempt_resource(
+        self,
+        resource: Any,
+        *,
+        requested: RequestedExecutionProfile,
+        epoch: SessionEpochRef,
+        generation: ProcessGenerationRef,
+    ) -> None:
+        """Bind one already-started broker-owned resource to one generation."""
+
+        self._assert_refs(requested, epoch, generation)
+        if (
+            generation.process_generation_id in self._bound_resources
+            or generation.process_generation_id in self._generations
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                "process generation already has a bound resource",
+            )
+        requested_resources = tuple(
+            item for item in requested.capabilities.required if item.kind == "resource"
+        )
+        observed = getattr(resource, "observed_capability", None)
+        network_state = getattr(resource, "network_state", None)
+        if (
+            len(requested_resources) != 1
+            or not isinstance(observed, ObservedCapabilityIdentity)
+            or observed.kind != "resource"
+            or observed.name != requested_resources[0].name
+            or observed.resource_contract_digest
+            != requested_resources[0].resource_contract_digest
+            or getattr(resource, "attempt_id", None) != epoch.attempt_id
+            or getattr(resource, "session_epoch_id", None) != epoch.session_epoch_id
+            or getattr(resource, "process_generation_id", None)
+            != generation.process_generation_id
+            or network_state != requested.network_policy
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "browser resource identity does not match the requested generation",
+            )
+        raw_environment = getattr(resource, "environment", None)
+        try:
+            environment = (
+                dict(raw_environment)
+                if isinstance(raw_environment, Mapping)
+                else None
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "browser resource environment could not be snapshotted",
+            ) from exc
+        if environment is None or set(environment) != BROWSER_RESOURCE_ENV_KEYS:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "browser resource environment is not the reviewed closed binding",
+            )
+        if any(
+            not isinstance(value, str)
+            or not value
+            or "\x00" in value
+            or len(value.encode("utf-8")) > 4096
+            for value in environment.values()
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "browser resource environment contains an invalid value",
+            )
+        self._bound_resources[generation.process_generation_id] = _BoundAttemptResource(
+            resource=resource,
+            environment=tuple(sorted(environment.items())),
+            observed_capability=observed,
+            network_state=network_state,
+        )
 
     def describe_capabilities(self) -> HarnessAdapterCapabilities:
         return HarnessAdapterCapabilities(
@@ -567,8 +789,12 @@ class CodexOperatorAdapter:
             reasons=tuple(reasons),
         )
 
-    def _new_client(self) -> AppServerClient:
-        return self.client_factory(list(self.argv), self._env(), self.workspace_root)
+    def _new_client(
+        self, resource: _BoundAttemptResource | None = None
+    ) -> AppServerClient:
+        return self.client_factory(
+            list(self.argv), self._env(resource), self.workspace_root
+        )
 
     @staticmethod
     def _thread_id(result: Mapping[str, Any]) -> str:
@@ -580,6 +806,7 @@ class CodexOperatorAdapter:
         client: AppServerClient,
         requested: RequestedExecutionProfile,
         launch_binary_digest: str,
+        resource: _BoundAttemptResource | None = None,
     ) -> ObservedHarnessAttestation:
         try:
             initialized = client.request(
@@ -631,7 +858,8 @@ class CodexOperatorAdapter:
                         name=name,
                         tool_schema_digest=observed_mcp_tool_schema_digest(row),
                         mcp_server_identity=(
-                            str(server_info.get("name") or "").strip() or None
+                            str(server_info.get("name") or "").strip().lower()
+                            or None
                         ),
                         mcp_server_version=(
                             str(server_info.get("version") or "").strip() or None
@@ -643,6 +871,8 @@ class CodexOperatorAdapter:
                 )
         for name in plugins:
             capabilities.append(ObservedCapabilityIdentity(kind="plugin", name=name))
+        if resource is not None:
+            capabilities.append(resource.observed_capability)
 
         observed_config_digest = app_server_security_config_digest(config)
         helper_ceiling = ObservedTriState.FALSE
@@ -674,7 +904,11 @@ class CodexOperatorAdapter:
                 config.get("approval_policy") or config.get("approvalPolicy") or ""
             ).strip()
             or None,
-            network_state=_observed_network_state(config),
+            network_state=(
+                str(resource.network_state)
+                if resource is not None
+                else _observed_network_state(config)
+            ),
             effective_config_digest=observed_config_digest,
             auth=AuthRealmFact(
                 worker_id=self.worker_id,
@@ -735,7 +969,16 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
                 "harness binary changed after static validation",
             )
-        client = self._new_client()
+        requested_resources = tuple(
+            item for item in requested.capabilities.required if item.kind == "resource"
+        )
+        resource_binding = self._bound_resources.get(generation.process_generation_id)
+        if bool(requested_resources) != bool(resource_binding):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "requested browser resource is not bound to this generation",
+            )
+        client = self._new_client(resource_binding)
         try:
             client.start()
             if not client.pid or not client.alive():
@@ -752,7 +995,7 @@ class CodexOperatorAdapter:
                     effect_unknown=True,
                 )
             attestation = self._initialize_and_attest(
-                client, requested, launch_binary_digest
+                client, requested, launch_binary_digest, resource_binding
             )
             if _sha256_file(self.binary_path) != launch_binary_digest:
                 raise CodexAdapterError(
@@ -825,9 +1068,11 @@ class CodexOperatorAdapter:
             client.notifications.clear()
         except CodexAdapterError:
             client.close()
+            self._bound_resources.pop(generation.process_generation_id, None)
             raise
         except Exception as exc:
             client.close()
+            self._bound_resources.pop(generation.process_generation_id, None)
             raise _rpc_failure(exc, effect_unknown=True) from exc
 
         state = _GenerationState(
@@ -839,8 +1084,12 @@ class CodexOperatorAdapter:
             provider_session_tree_id=provider_session_tree_id,
             process=process,
             attestation=attestation,
+            resource=(
+                resource_binding.resource if resource_binding is not None else None
+            ),
         )
         self._generations[generation.process_generation_id] = state
+        self._bound_resources.pop(generation.process_generation_id, None)
         self._active_workers[self.worker_id] = generation.process_generation_id
         return SessionStartObservation(
             provider_session_id=provider_session_id,
@@ -1316,6 +1565,11 @@ class CodexOperatorAdapter:
         del operation_id
         state = self._state(generation)
         self._assert_turn(state, turn)
+        if state.attention_inflight:
+            raise CodexAdapterError(
+                AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                "turn refused while attention completion is unresolved",
+            )
         if launch.decision is not LaunchDecision.ALLOW:
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
@@ -1337,6 +1591,25 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.VALIDATION_FAILURE,
                 "turn input loader returned no prompt",
             )
+        resource_prompt = getattr(state.resource, "turn_prompt_suffix", None)
+        if callable(resource_prompt):
+            try:
+                suffix = resource_prompt()
+            except Exception as exc:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "attempt resource could not supply its closed turn contract",
+                ) from exc
+            if (
+                not isinstance(suffix, str)
+                or not suffix
+                or len(suffix.encode("utf-8")) > 8192
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "attempt resource turn contract is invalid",
+                )
+            prompt += suffix
         try:
             result = state.client.request(
                 "turn/start",
@@ -1366,6 +1639,299 @@ class CodexOperatorAdapter:
         return TurnStartObservation(
             provider_native_turn_id=native_turn_id, acknowledged=True
         )
+
+    def deliver_attention(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        attempt_id: str,
+        binding_id: str,
+        binding_generation: int,
+        provider_session_id: str,
+        nudge_id: str,
+        opaque_ids: Sequence[str],
+        instruction: str,
+        completion_timeout_seconds: float,
+    ) -> AttentionTurnObservation:
+        """Use the exact current generation client for one bounded Wake turn."""
+
+        state = self._state(generation)
+        opaque = () if isinstance(opaque_ids, (str, bytes)) else tuple(opaque_ids)
+        timeout = completion_timeout_seconds
+        if (
+            not isinstance(attempt_id, str)
+            or COMMAND_ID_RE.fullmatch(attempt_id) is None
+            or not isinstance(binding_id, str)
+            or COMMAND_ID_RE.fullmatch(binding_id) is None
+            or type(binding_generation) is not int
+            or binding_generation < 1
+            or not isinstance(provider_session_id, str)
+            or COMMAND_ID_RE.fullmatch(provider_session_id) is None
+            or not isinstance(nudge_id, str)
+            or COMMAND_ID_RE.fullmatch(nudge_id) is None
+            or not 1 <= len(opaque) <= 32
+            or any(
+                not isinstance(item, str) or COMMAND_ID_RE.fullmatch(item) is None
+                for item in opaque
+            )
+            or instruction != ATTENTION_TURN_INSTRUCTION
+            or isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not 0.1 <= float(timeout) <= 300.0
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "attention request is outside the closed current-writer contract",
+            )
+        if (
+            state.epoch.attempt_id != attempt_id
+            or binding_id
+            != runtime_binding_id_for(attempt_id, state.epoch.session_epoch_id)
+            or binding_generation != state.generation.generation_number
+            or binding_generation != generation.generation_number
+            or state.provider_session_id != provider_session_id
+            or state.writer_state is not ProviderWriterState.HELD
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                "attention request does not match the current Attempt writer",
+            )
+        completed_turns = {
+            event.turn_id
+            for event in state.events
+            if event.kind == "turn/completed" and event.turn_id is not None
+        }
+        if state.attention_inflight or any(
+            turn_id not in completed_turns for turn_id in state.turns
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                "attention refused while the current writer has an active turn",
+            )
+        pid = state.process.pid
+        if type(pid) is not int or pid <= 0:
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "current attention writer is not live",
+            )
+        try:
+            observed_process = self.process_identity_observer(pid)
+        except Exception as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "current attention writer identity is not observable",
+            ) from exc
+        if observed_process != state.process:
+            raise CodexAdapterError(
+                AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                "current attention writer process identity moved",
+            )
+        if not state.client.alive():
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "current attention writer is not live",
+            )
+
+        ids = "\n".join(f"- {item}" for item in opaque)
+        text = (
+            instruction
+            if not ids
+            else f"{instruction}\n\nOpaque Wake identities (not authority):\n{ids}"
+        )
+        params = {
+            "threadId": provider_session_id,
+            "clientUserMessageId": nudge_id,
+            "input": [{"type": "text", "text": text, "text_elements": []}],
+            "cwd": str(self.workspace_root),
+            "approvalPolicy": state.requested.approval_policy,
+        }
+
+        # Final I/O boundary: every exception from this request onward is
+        # effect-unknown and may never be translated into a retryable refusal.
+        state.attention_inflight = True
+        state.attention_native_turn_id = None
+        state.attention_request = _PendingAttentionRequest(
+            attempt_id=attempt_id,
+            binding_id=binding_id,
+            binding_generation=binding_generation,
+            nudge_id=nudge_id,
+            opaque_ids=opaque,
+        )
+        try:
+            started = state.client.request("turn/start", params, timeout=30.0)
+        except Exception as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention provider submission has unknown effect",
+                effect_unknown=True,
+            ) from exc
+        turn = started.get("turn") if isinstance(started, Mapping) else None
+        native_turn_id = (
+            str(turn.get("id") or "").strip() if isinstance(turn, Mapping) else ""
+        )
+        if not native_turn_id:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention provider response omitted the turn id",
+                effect_unknown=True,
+            )
+        state.attention_native_turn_id = native_turn_id
+        try:
+            completion = state.client.wait_notification(
+                _ATTENTION_COMPLETION_METHOD,
+                timeout=float(timeout),
+            )
+        except JsonRpcError as exc:
+            if str(exc).startswith(_ATTENTION_COMPLETION_TIMEOUT_PREFIX):
+                return AttentionTurnObservation(
+                    process_generation_id=generation.process_generation_id,
+                    provider_session_id=provider_session_id,
+                    nudge_id=nudge_id,
+                    provider_native_turn_id=native_turn_id,
+                    accepted=True,
+                    delivered=False,
+                )
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion observation has unknown effect",
+                effect_unknown=True,
+            ) from exc
+        except Exception as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion observation has unknown effect",
+                effect_unknown=True,
+            ) from exc
+        if not self._matches_attention_completion(
+            completion,
+            provider_session_id=provider_session_id,
+            native_turn_id=native_turn_id,
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion identity is ambiguous",
+                effect_unknown=True,
+            )
+        terminal_status = _attention_terminal_status(completion)
+        if terminal_status is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion status is not a recognized terminal outcome",
+                effect_unknown=True,
+            )
+        return self._terminal_attention_observation(
+            state,
+            completion=completion,
+            terminal_status=terminal_status,
+            native_turn_id=native_turn_id,
+        )
+
+    @staticmethod
+    def _matches_attention_completion(
+        completion: object,
+        *,
+        provider_session_id: str,
+        native_turn_id: str,
+    ) -> bool:
+        if not isinstance(completion, Mapping):
+            return False
+        params_value = completion.get("params")
+        if not isinstance(params_value, Mapping):
+            return False
+        completed_turn = params_value.get("turn")
+        return bool(
+            completion.get("method") == _ATTENTION_COMPLETION_METHOD
+            and str(params_value.get("threadId") or "").strip()
+            == provider_session_id
+            and isinstance(completed_turn, Mapping)
+            and str(completed_turn.get("id") or "").strip() == native_turn_id
+        )
+
+    @staticmethod
+    def _terminal_attention_observation(
+        state: _GenerationState,
+        *,
+        completion: object,
+        terminal_status: str,
+        native_turn_id: str,
+    ) -> AttentionTurnObservation:
+        pending = state.attention_request
+        if pending is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion has no exact pending request",
+                effect_unknown=True,
+            )
+        state.attention_inflight = False
+        state.attention_native_turn_id = None
+        state.attention_request = None
+        if terminal_status != "completed":
+            return AttentionTurnObservation(
+                process_generation_id=state.generation.process_generation_id,
+                provider_session_id=state.provider_session_id,
+                nudge_id=pending.nudge_id,
+                provider_native_turn_id=native_turn_id,
+                accepted=True,
+                delivered=False,
+            )
+        obligation_ids = _terminal_wake_ack_ids(completion)
+        wake_ack_projection = (
+            None
+            if obligation_ids is None
+            else WorkerLocalWakeAckProjection(
+                target_attempt_id=pending.attempt_id,
+                process_generation_id=state.generation.process_generation_id,
+                binding_id=pending.binding_id,
+                binding_generation=pending.binding_generation,
+                provider_session_id=state.provider_session_id,
+                provider_native_turn_id=native_turn_id,
+                nudge_id=pending.nudge_id,
+                obligation_ids=obligation_ids,
+                terminal_ack_trailer=True,
+            )
+        )
+        return AttentionTurnObservation(
+            process_generation_id=state.generation.process_generation_id,
+            provider_session_id=state.provider_session_id,
+            nudge_id=pending.nudge_id,
+            provider_native_turn_id=native_turn_id,
+            accepted=True,
+            delivered=True,
+            wake_ack_projection=wake_ack_projection,
+        )
+
+    def _reconcile_late_attention_completion(
+        self,
+        state: _GenerationState,
+    ) -> AttentionTurnObservation | None:
+        """Reduce a timed-out exact terminal completion without provider resubmission."""
+
+        native_turn_id = state.attention_native_turn_id
+        if not state.attention_inflight or not native_turn_id:
+            return None
+        while True:
+            try:
+                completion = state.client.wait_notification(
+                    _ATTENTION_COMPLETION_METHOD,
+                    timeout=0.0,
+                )
+            except Exception:
+                # Absence, transport loss, and malformed reader behavior are all
+                # fail-closed: none is evidence that the provider completed.
+                return None
+            if self._matches_attention_completion(
+                completion,
+                provider_session_id=state.provider_session_id,
+                native_turn_id=native_turn_id,
+            ):
+                terminal_status = _attention_terminal_status(completion)
+                if terminal_status is not None:
+                    return self._terminal_attention_observation(
+                        state,
+                        completion=completion,
+                        terminal_status=terminal_status,
+                        native_turn_id=native_turn_id,
+                    )
 
     def read_events(
         self, cursor: EventCursor, *, timeout_seconds: float = 30.0
@@ -1648,6 +2214,17 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
                 "raw result differs from the recorded candidate artifact",
             )
+        resource_observer = getattr(
+            state.resource, "observe_canonical_result", None
+        )
+        if callable(resource_observer):
+            try:
+                resource_observer(result_text)
+            except Exception as exc:
+                raise CodexAdapterError(
+                    AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                    "raw result did not satisfy the attempt resource proof contract",
+                ) from exc
         return RawRoleResultObservation(
             attempt_id=turn.attempt_id,
             session_epoch_id=turn.session_epoch_id,
@@ -1741,6 +2318,7 @@ class CodexOperatorAdapter:
                 recommended_failure_class=AdapterFailureClass.SESSION_MISSING,
             )
         if state.client.alive():
+            late_attention = self._reconcile_late_attention_completion(state)
             try:
                 result = state.client.request(
                     "thread/read", {"threadId": state.provider_session_id}
@@ -1759,6 +2337,7 @@ class CodexOperatorAdapter:
                 recommended_failure_class=(
                     None if reachable else AdapterFailureClass.SESSION_MISSING
                 ),
+                late_attention_observation=late_attention,
             )
         return self._observation(state, failure=AdapterFailureClass.PROCESS_CRASH)
 
