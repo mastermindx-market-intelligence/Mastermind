@@ -283,7 +283,7 @@ resumed handout, and sole Secretary-source ownership survive.
 
 ### 8.2 One permanent inbox scanner
 
-During migration, exactly one aggregate reasoning resource may own the permanent Secretary inbox. The CTO-TRACE resource must not independently retain that permanent Secretary source as an active CTO source or scan it. It preserves only the exact Secretary-owned exclusion identity needed to prove and carry this boundary through later rewrites.
+During migration, exactly one aggregate reasoning resource may own the permanent Secretary inbox. The CTO-TRACE resource must not independently retain that permanent Secretary source as an active CTO source or scan it. Its byte-locked R0 prompt preserves only the exact Secretary-owned exclusion identity needed to prove the boundary through later controller revisions.
 
 Removing that duplicate source must not disable distinct valid CTO-TRACE sources, sibling operations, or the Secretary bridge itself. Source lifetime and watcher-resource lifetime remain distinct.
 
@@ -293,9 +293,9 @@ dialogue-resume canary roots, and every vague or locator-incomplete legacy sourc
 `SECRETARY_BRIDGE_UNMIGRATED` until an exact carrier-specific migration receipt
 exists. CTO-TRACE and every child it commissions must not discover, inspect, or
 act on those sources. A source does not migrate merely because older CTO prose
-mentioned it. Their exact exclusion identities survive every baseline/source
-rewrite together with the current decisive hold-gate reasons; CTO never adopts
-them as active sources.
+mentioned it. Their exact exclusion identities and current decisive hold-gate
+reasons remain byte-identical through heartbeat turns and survive every
+separately reviewed controller revision; CTO never adopts them as active sources.
 
 The R0 boundary is inherited by every reader commission:
 
@@ -336,27 +336,36 @@ The bridge prompt may contain stable law pointers, active source locators, the l
 
 Terminal evidence remains in its canonical owner. The bridge rereads only the exact current source needed for a material action.
 
-Every self-update preserves the complete current non-Secretary source set,
-`SECRETARY_BRIDGE_UNMIGRATED`, held canary ownership, exactly one bounded
-baseline, and replacement-not-append structure. The operating target is at most
-10,500 UTF-8 bytes, with 12,000 bytes a hard refusal ceiling. A surviving source
-may be removed only after a fresh authenticated terminal edge on its exact
-carrier.
+The R0 heartbeat prompt is immutable to the heartbeat. Any automation update
+originating from a natural heartbeat may change only this same resource's
+`rrule`, must pass the entire current prompt byte-for-byte, and must preserve
+every other managed field. It never summarizes, compresses, adds, removes, or
+records baseline, source, exclusion, proof, or material state in prompt text.
+A material delta is returned in a bounded packet to its exact owner.
+
+Prompt revision is a separate controller-reviewed in-place update with fresh
+managed hashes, an idle/newest-turn fence, exact readback, and a later natural
+canary. Every controller revision preserves the complete current non-Secretary
+source set, `SECRETARY_BRIDGE_UNMIGRATED`, held canary ownership, and exactly one
+bounded baseline. The operating target is at most 10,500 UTF-8 bytes, with
+12,000 bytes a hard refusal ceiling. A surviving source may be removed only
+after a fresh authenticated terminal edge on its exact carrier.
 
 Compression removes narrative, not proof identity. The bounded baseline retains
 the exact receipt, run, job, and canonical blob locators needed to prove its
 material state, and a held exclusion retains its current gate reasons. Replacing
 those identifiers with generic `SUCCESS`, `HELD`, or equivalent prose fails the
-self-update boundary.
+controller-revision boundary.
 
-The prompt's prospective self-update instruction must itself require every
-later rewrite to retain the complete Secretary, Realm1, and held-canary
-exclusion identities, every decisive held-canary gate reason, and the current
-baseline's exact receipt/run/job/blob locators. Presence in the current literal
-baseline without that forward retention instruction is insufficient. If a
-failed turn has already genericized or dropped one of those identities, repair
-resolves it from the last accepted pre-turn disposition/candidate receipt and
-fresh bounded canonical evidence, never from the corrupted newest prompt alone.
+The prompt's byte-lock instruction must forbid the heartbeat from changing any
+prompt byte, and every separately reviewed controller-revision candidate must
+retain the complete Secretary, Realm1, and held-canary exclusion identities,
+every decisive held-canary gate reason, and the current baseline's exact
+receipt/run/job/blob locators. Presence in the current literal baseline without
+both protections is insufficient. If a failed turn has already genericized or
+dropped one of those identities, repair resolves it from the last accepted
+pre-turn disposition/candidate receipt and fresh bounded canonical evidence,
+never from the corrupted newest prompt alone.
 
 ### 8.5 Protected watcher-law classification
 
@@ -430,7 +439,7 @@ NO_MATERIAL_CHANGE
 - Verify the actual post-turn `rrule`; an external canary-acceptance signal is
   not a substitute for the source-law cadence transition.
 
-Exit evidence: Secretary handout continuity remains intact; duplicate source ownership is absent; no operation is lost or double-dispatched by the change; the final repaired prompt and its first later natural turn both satisfy the inherited read, ownership, and self-update boundaries.
+Exit evidence: Secretary handout continuity remains intact; duplicate source ownership is absent; no operation is lost or double-dispatched by the change; the final repaired prompt and its first later natural turn both satisfy the inherited read and ownership boundaries, and the post-turn prompt digest is byte-identical to the reviewed candidate.
 
 ### R1 — Deterministic detector shadow
 
@@ -583,7 +592,7 @@ Before R5, automated tests or controlled canaries must cover:
 26. Secretary independently refreshes its prompt during the CTO update window;
 27. a delegated reader touches Secretary-owned worktree content or metadata;
 28. a reader globally enumerates tasks/archives or reads local transcripts;
-29. a self-update drops an exact source, canary hold, or ownership partition;
+29. a heartbeat changes any prompt byte, or a controller revision drops an exact source, canary hold, proof identity, or ownership partition;
 30. a failed canary is repaired but no later natural canary is observed.
 
 Each case must state expected lifecycle effect, source effect, production effect, model-wake behavior, and rollback owner.

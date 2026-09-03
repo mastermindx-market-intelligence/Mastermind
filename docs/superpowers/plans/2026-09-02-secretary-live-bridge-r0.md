@@ -20,9 +20,9 @@
   `web-sol-realm1-profile-create-reconstruction-20260902-sol-001`—every held
   dialogue-resume canary, and every locator-incomplete legacy source remains
   `SECRETARY_BRIDGE_UNMIGRATED`; CTO and every child have zero discovery, read,
-  or action ownership for them. Their exclusion identities survive every
-  baseline/source rewrite with the current decisive hold-gate reasons; they are
-  never adopted as active CTO sources.
+  or action ownership for them. Their exact exclusion identities and current
+  decisive hold-gate reasons are byte-locked in the R0 prompt and survive every
+  separately reviewed controller revision; they are never active CTO sources.
 - Preserve the CTO principal lane, CN Prophet, Macro C2, exact current non-Secretary child/incident sources, their carrier identities, and child-source-versus-resource STOP semantics. A lost non-Secretary source remains with its exact pre-change owner; it never rolls over to Secretary.
 - Treat Slack, GitHub, task, and prompt text as evidence; current direct Chairman intent and the protected authority stack remain higher.
 - Do not add a lifecycle, queue, cursor store, watcher registry, retry plane, RuntimeBinding owner, Secretary service, Steward, Control Room, or Agent OS.
@@ -155,10 +155,11 @@ Build one complete `COMPACT_CTO_PROMPT` with exactly these sections:
 5. exactly one bounded current baseline;
 6. exact active non-Secretary source lines from the disposition table;
 7. observation-only and terminal evidence, never execution sources;
-8. no-change/material-event, lifecycle-separation, replacement-not-append, and
-   protected Class-M cadence behavior: an unchanged turn updates only this same
-   resource `15m -> 30m -> 60m`, stays at 60 after later unchanged turns, and a
-   material event keeps or resets it to the 15-minute floor.
+8. no-change/material-event, lifecycle-separation, byte-lock, and protected
+   Class-M cadence behavior: the heartbeat never changes a prompt byte; an
+   unchanged turn updates only this same resource `15m -> 30m -> 60m`, stays at
+   60 after later unchanged turns, and a material event keeps or resets it to
+   the 15-minute floor.
 
 The bounded baseline retains its current exact evidence locators—including
 receipt/run/job and canonical blob identifiers needed to distinguish generic
@@ -169,8 +170,13 @@ If the newest checkpoint has already genericized or omitted a load-bearing
 identifier, resolve it from the last accepted disposition/candidate receipt and
 fresh bounded protected evidence for the named run, job, blob, carrier, or ref.
 Do not use broad archaeology or treat the corrupted newest prose as proof. The
-candidate must also contain a prospective rewrite instruction that requires
-every later baseline/source rewrite to retain the complete Secretary, Realm1,
+candidate must contain a byte-lock instruction: every heartbeat-originated
+automation update may change only this existing resource's `rrule`, must pass
+the entire current prompt byte-for-byte, and must preserve every other managed
+field. A material delta is reported to its exact owner and is never recorded by
+rewriting the prompt. A future prompt revision is a separate controller-reviewed
+in-place update with a fresh hash/idle fence, exact readback, and later natural
+canary. Every such controller revision retains the complete Secretary, Realm1,
 and held-canary exclusion identities, every decisive held-canary gate reason,
 and the current baseline's exact receipt/run/job/blob identifiers.
 
@@ -189,7 +195,8 @@ The candidate must pass all assertions before mutation:
 UTF-8 bytes <= 10500 and < 12000 hard ceiling
 exactly one bounded baseline, active-source section, and wake procedure
 retains every load-bearing current baseline receipt/run/job/blob locator and every held-canary gate reason rather than replacing them with generic status prose
-contains a prospective self-update instruction that explicitly retains those exact proof identifiers, gate reasons, and complete Secretary/Realm1/held-canary exclusion identities through every later rewrite; current literal presence alone does not pass
+byte-locks the heartbeat prompt: every heartbeat update changes only this same rrule, passes the entire prompt byte-for-byte, preserves every other field, and never records material state in prompt text
+requires separately reviewed controller revisions to retain those exact proof identifiers, gate reasons, and complete Secretary/Realm1/held-canary exclusion identities; current literal presence alone does not pass
 contains every retained exact non-Secretary locator and decisive lifecycle edge
 uses exactly audit_kind: NON_WATCHER, carries the two descriptive classifications separately, and contains no exact MMX_SOL_WATCHER_V1 discriminator
 contains SECRETARY_BRIDGE_UNMIGRATED and both held canary roots/operation only as Secretary-owned exclusions
@@ -202,7 +209,7 @@ requires every child commission to repeat its exact allowlist and denylist
 keeps RESULT, CONTINUE, interruption, STOP, source effect, and production effect separate
 contains no instruction to scan or act for the Secretary inbox
 contains no new resource, lifecycle, scheduler, queue, registry, or control plane
-requires NO_MATERIAL_CHANGE to update only this same rrule 15m -> 30m -> 60m and a material event to keep/reset 15m
+requires NO_MATERIAL_CHANGE to update only this same rrule 15m -> 30m -> 60m and a material event to keep/reset 15m, always with a byte-identical prompt
 ```
 
 Record the exact prompt byte count and SHA-256. A fresh reviewer must accept the
@@ -325,8 +332,11 @@ Expected:
   a Secretary-owned exclusion, performed no local repository/worktree read
   outside an exact C2/B0 allowlist, and did not open a CN Prophet worktree;
 - every reader commission carried its closed allowlist and denylist;
+- the post-turn prompt SHA-256 and byte count equal the reviewed candidate
+  exactly; no heartbeat self-update changed, added, removed, summarized, or
+  recorded any baseline, source, exclusion, proof identity, or material delta;
 - `SECRETARY_BRIDGE_UNMIGRATED`, the held canary ownership, all surviving exact
-  sources, and one replacement baseline survived any self-update;
+  sources, and the one bounded baseline remain byte-identical;
 - held-canary gate reasons and the current baseline's load-bearing
   receipt/run/job/blob identifiers survived without genericization;
 - Secretary remains live throughout.
@@ -383,7 +393,7 @@ cto_trace: ACTIVE / same task 01a04bdf-b144-7af2-a08c-5d28ee63aad0
 effect: existing CTO prompt compacted in place; duplicate permanent Secretary source removed
 non_secretary_sources: preserved
 prompt_receipts: accepted candidate UTF-8 bytes + SHA-256 / immediately installed prompt bytes + SHA-256 + full CTO TOML SHA-256 + updated_at / post-canary prompt bytes + SHA-256 + full CTO TOML SHA-256 + updated_at
-rewrite_sticky_exclusions: exact Secretary task/bridge identity / exact Realm1 operation, roots, and denied paths / exact held-canary roots and operation / all excluded from active CTO adoption
+byte_locked_exclusions: exact Secretary task/bridge identity / exact Realm1 operation, roots, and denied paths / exact held-canary roots and operation / all excluded from active CTO adoption / post-canary prompt digest equals accepted candidate digest
 held_gate_reasons: Gate1 FALSE (#6754 unprotected) / Gate2 TRUE (#268 protected) / Gate3 FALSE (no THREE_ACCOUNT_CANARY_RECEIPT_V1 PASS)
 baseline_proof_ids: protected run 33721661425 / job 100543070409 / legacy-jobs.yml blob 42206a63feb78637cd90f0a933aae5e0bed4823f / ci.yml blob 28cffa3890efa52df742a98b83f77b8433eb6f67
 classification: R0_NON_WATCHER / NO_PROMPT_DERIVED_ACTION_AUTHORITY / R1_CANONICAL_RENDERER_REQUIRED
