@@ -10,6 +10,7 @@ production_effect: NONE
 # Mastermind AI Operating Hub — F0 Product, Experience, Intelligence, and Authority Architecture
 
 **Frozen at:** `e7d91bfe0f6ef176878a6a281afd459c0905e5aa`  
+**Review-repair basis:** `c7fa5b43de6ca702f942fbf20cbe3ac45a02b0f6`  
 **Program state after this record:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`  
 **Chairman intent:** continue the timed-out AI Hub assessment at maximum CEO-Sol effort and drive it toward a complete, coherent end state.
 
@@ -40,7 +41,6 @@ The durable moat is the combination of:
 - outcome instrumentation showing which interventions actually unblock work;
 - reusable workroom compositions that make complex AI organizations legible without flattening them into generic task lists.
 
-
 ## Relationship to protected substrates and the current estate
 
 The Hub does not originate a new top-level organizational body. It is a product/experience extension under the existing `WS:CHAIRMAN-CONTROL-ROOM` and consumes the Project Workroom Fabric rather than creating a competing “Hub workroom” program.
@@ -49,8 +49,12 @@ Current protected source establishes:
 
 - Project Workroom Fabric architecture at `docs/superpowers/specs/2026-08-29-project-workroom-fabric-design.md`;
 - the workspace-level Linear portfolio at `7 Initiatives / 64 Projects / 62 exact one-primary memberships / 2 deliberate exceptions` in `docs/superpowers/specs/2026-09-02-linear-initiative-portfolio-v1-current-epoch-source-consolidation.md`;
-- the existing Control Room implementation owners at `control_plane/chairman_control_room.py`, `scripts/chairman_control_room.py`, `control_plane/static/control_room.js`, and `control_plane/static/control_room.css`;
+- the shared pure Control Room compositor at `control_plane/chairman_control_room.py`;
+- the local P0A loopback/private server at `scripts/chairman_control_room.py`, with local entry `app/static/chairman_control/index.html` and shared `app/static/chairman_control/control_room.js` plus `app/static/chairman_control/control_room.css`;
+- the distinct remote X1 closed read-only projection at `control_plane/chairman_control_room_remote.py`, its Unix-socket server at `scripts/chairman_control_room_remote.py`, remote entry `app/static/chairman_control/remote.html`, the same shared JS/CSS, and the exact release closure owned by `control_plane.chairman_control_room_remote.REQUIRED_RUNTIME_PATHS` plus `ops/control_room_remote/install.sh` and `ops/control_room_remote/mastermind-control-room-remote.service`;
 - organizational ownership in `macro:agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md`.
+
+Local P0A and remote X1 are **separate accepted consumers/contracts**, not two names for one surface. P0A is the loopback-only private presentation process with its existing navigation-only local binding behavior. X1 is a smaller closed remote read projection and release closure. Their HTML entries, servers, route/auth contracts, release packaging, and proof obligations must not be collapsed merely because they share `control_room.js`, `control_room.css`, and the pure compositor. H0 must select and freeze the first real HUB-V1 consumer, contract generation, exact route, exact static/release paths, and production proof path before H1 receives implementation authority.
 
 The Hub may compose these owners but must never fork their identity, navigation, mutation, lifecycle, or correction laws. A Project/Initiative status is a selected human projection; it cannot become Executive runtime or production truth. The existing Control Room remains the shell/experience owner unless H0 proves an exact current source-law conflict.
 
@@ -367,6 +371,7 @@ The following are frozen until a new explicit Sol/Chairman architecture ruling:
 8. The first vertical includes a real consumer, evidence, failure states, and production proof—not infrastructure alone.
 9. One independently useful capability per PR.
 10. Any implementation target must extend existing owners and routes discovered in H0; no new “AI Hub OS” repository or lifecycle is authorized.
+11. H0 must preserve the distinct local P0A and remote X1 contracts and choose one exact first consumer; shared static assets do not collapse their authority, release, or proof boundaries.
 
 ## Exact next action
 
