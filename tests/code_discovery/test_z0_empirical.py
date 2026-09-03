@@ -96,16 +96,42 @@ def _trial(
 
 
 def _answer_keys(ledger: EvaluationLedger) -> dict[str, AnswerKey]:
-    return {
-        query.case_id: AnswerKey(
+    answer_keys: dict[str, AnswerKey] = {}
+    for query in ledger.manifest.queries:
+        canonical_bytes = json.dumps(
+            {
+                "case_id": query.case_id,
+                "census_digest": "a" * 64,
+                "query": {
+                    "query": f"synthetic-{query.case_id}",
+                    "regex": False,
+                    "case_sensitive": False,
+                    "repository_ids": [],
+                    "refs": [],
+                    "path_prefixes": [],
+                    "languages": [],
+                    "limit": 100,
+                    "context_lines": 0,
+                    "timeout_ms": 60_000,
+                },
+                "expected": [],
+                "forbidden": [],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical_bytes).hexdigest()
+        assert digest == query.answer_key_digest
+        answer_keys[query.case_id] = AnswerKey(
             case_id=query.case_id,
             expected_identities=(),
             forbidden_identities=(),
-            canonical_bytes=b"",
-            digest=query.answer_key_digest,
+            canonical_bytes=canonical_bytes,
+            digest=digest,
         )
-        for query in ledger.manifest.queries
-    }
+    return answer_keys
 
 
 def _query_payload(
@@ -417,14 +443,15 @@ def test_decision_builder_revalidates_every_public_completion_predicate() -> Non
         answer_keys=answer_keys,
     ) == "ZOEKT_REQUIRES_ARCHITECTURE_REVISION"
 
-    unbound_answer_keys = dict(answer_keys)
-    unbound_answer_keys["E1"] = AnswerKey(
+    forged_answer_keys = dict(answer_keys)
+    forged_answer_keys["E1"] = AnswerKey(
         case_id="E1",
-        expected_identities=(
-            ("alpha", "synthetic-org/alpha", "main", "engine/core.py", 1, 1),
-        ),
+        # Preserve the recorded grades and the manifest-facing digest.  Only the
+        # purported source-derived bytes are forged: a decision builder must
+        # recompute the digest rather than trusting this public label.
+        expected_identities=answer_keys["E1"].expected_identities,
         forbidden_identities=(),
-        canonical_bytes=b"unbound-answer-key",
+        canonical_bytes=b"forged-answer-key-canonical-bytes",
         digest=ledger.manifest.queries[0].answer_key_digest,
     )
     assert build_decision_from_evidence(
@@ -432,7 +459,7 @@ def test_decision_builder_revalidates_every_public_completion_predicate() -> Non
         repositories_safe=True,
         ledger=ledger,
         evaluation_manifest=ledger.manifest,
-        answer_keys=unbound_answer_keys,
+        answer_keys=forged_answer_keys,
     ) == "ZOEKT_REQUIRES_ARCHITECTURE_REVISION"
 
 
@@ -595,6 +622,42 @@ def test_paired_harness_uses_the_frozen_alternating_order_and_retains_callback_t
     assert timeout.resource.cpu_ms == UNKNOWN_RESOURCE
     assert tuple(item.trial_id for item in ledger.query_receipts) == ledger.manifest.trial_order
     assert ledger.freeze().state == "NON_DECISION_INCOMPLETE_EVIDENCE"
+
+
+def test_paired_harness_refuses_public_answer_key_identities_not_in_key_bytes() -> None:
+    """A transport-side identity swap must fail before either candidate executes."""
+
+    ledger = _ledger()
+    _publish_healthy_generation(ledger)
+    forged_answer_keys = _answer_keys(ledger)
+    forged_answer_keys["E1"] = replace(
+        forged_answer_keys["E1"],
+        expected_identities=(
+            ("alpha", "synthetic-org/alpha", "main", "engine/core.py", 1, 1),
+        ),
+    )
+
+    def unexpected_executor(query: object) -> CandidateTrialObservation:
+        del query
+        raise AssertionError("unbound answer key must fail before candidate execution")
+
+    def unexpected_receipt_factory(
+        query: object,
+        trial_id: str,
+        query_index: int,
+        observation: CandidateTrialObservation,
+    ) -> object:
+        del query, trial_id, query_index, observation
+        raise AssertionError("unbound answer key must fail before receipt construction")
+
+    with pytest.raises(EvidenceError, match="source-derived bytes"):
+        run_paired_trials(
+            ledger,
+            baseline_executor=unexpected_executor,
+            zoekt_executor=unexpected_executor,
+            answer_keys=forged_answer_keys,
+            query_receipt_factory=unexpected_receipt_factory,
+        )
 
 
 def test_paired_runner_records_query_receipt_failures_and_continues() -> None:

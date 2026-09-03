@@ -45,7 +45,7 @@
   },
   "queries": [
     {
-      "answer_key_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "answer_key_digest": "2cccc455921e36161cba6bb26eee85be49fa049fa65f6e2c76080a5e203b09f9",
       "case_id": "E1",
       "completeness_threshold": 1.0,
       "deterministic_grader_id": "source-census-v1",
@@ -64,7 +64,7 @@
       "warm_or_cold": "cold"
     },
     {
-      "answer_key_digest": "0202020202020202020202020202020202020202020202020202020202020202",
+      "answer_key_digest": "4df5ccb005b53793709a84093b8fa66630154f151f42d0403f66279b1dd21f80",
       "case_id": "X3",
       "completeness_threshold": 1.0,
       "deterministic_grader_id": "source-census-v1",
@@ -83,7 +83,7 @@
       "warm_or_cold": "warm"
     },
     {
-      "answer_key_digest": "0606060606060606060606060606060606060606060606060606060606060606",
+      "answer_key_digest": "a6537b01659248f96d8c1097aec88e67e6780c1639674609434b938d40b65ab4",
       "case_id": "R3",
       "completeness_threshold": 1.0,
       "deterministic_grader_id": "source-census-v1",
@@ -102,7 +102,7 @@
       "warm_or_cold": "cold"
     },
     {
-      "answer_key_digest": "1010101010101010101010101010101010101010101010101010101010101010",
+      "answer_key_digest": "174a8ccf1c90988cdcd8652ed48d1df7778badb6f9a5521aab76a26c6dd7ad41",
       "case_id": "A1",
       "completeness_threshold": 1.0,
       "deterministic_grader_id": "source-census-v1",

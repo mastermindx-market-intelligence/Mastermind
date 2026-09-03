@@ -114,6 +114,26 @@ _ZERO_RESULT_AUTHORITY_VALUES: Final = frozenset(
 )
 _QUERY_RECEIPT_FAILURE_STAGES: Final = frozenset({"FACTORY", "VALIDATION"})
 _QUERY_RECEIPT_FAILURE_CODES: Final = frozenset({"RESULT_SCHEMA_INVALID"})
+_ANSWER_KEY_PAYLOAD_FIELDS: Final = frozenset(
+    {"case_id", "census_digest", "query", "expected", "forbidden"}
+)
+_ANSWER_KEY_QUERY_FIELDS: Final = frozenset(
+    {
+        "query",
+        "regex",
+        "case_sensitive",
+        "repository_ids",
+        "refs",
+        "path_prefixes",
+        "languages",
+        "limit",
+        "context_lines",
+        "timeout_ms",
+    }
+)
+_ANSWER_KEY_MATCH_FIELDS: Final = frozenset(
+    {"identity", "preview", "source_content_digest"}
+)
 _QUERY_RECEIPT_FIELDS: Final = frozenset(
     {
         "schema_version",
@@ -532,7 +552,7 @@ def build_decision_from_evidence(
         raise EvidenceError("decision builder requires an EvaluationManifest")
     if not _manifest_binds_ledger(evaluation_manifest, ledger):
         return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
-    if not _answer_keys_bind_manifest(evaluation_manifest, answer_keys):
+    if not _answer_keys_bind_manifest(evaluation_manifest, ledger, answer_keys):
         return ZOEKT_REQUIRES_ARCHITECTURE_REVISION
     frozen = ledger.freeze()
     if evidence != frozen:
@@ -606,9 +626,10 @@ def _manifest_binds_ledger(
 
 def _answer_keys_bind_manifest(
     evaluation_manifest: EvaluationManifest,
+    ledger: EvaluationLedger,
     answer_keys: Mapping[str, AnswerKey],
 ) -> bool:
-    if not isinstance(answer_keys, Mapping):
+    if not isinstance(ledger, EvaluationLedger) or not isinstance(answer_keys, Mapping):
         return False
     expected_by_case = {
         query.case_id: query.answer_key_digest for query in evaluation_manifest.queries
@@ -621,9 +642,155 @@ def _answer_keys_bind_manifest(
             not isinstance(answer_key, AnswerKey)
             or answer_key.case_id != case_id
             or answer_key.digest != expected_digest
+            or not _answer_key_binds_canonical_source(
+                answer_key, ledger._source_census_digest
+            )
         ):
             return False
     return True
+
+
+def _answer_key_binds_canonical_source(
+    answer_key: AnswerKey,
+    source_census_digest: str,
+) -> bool:
+    """Bind public grader fields to the immutable direct-source key bytes.
+
+    ``AnswerKey`` is a dataclass for transport ergonomics, so its public
+    digest or identity fields alone cannot be trusted at the decision edge.
+    The frozen manifest commits to the canonical bytes; this verifier proves
+    the digest, source epoch, and every grade-affecting identity agree with
+    those bytes before the result can influence a decision.
+    """
+
+    if (
+        not isinstance(answer_key, AnswerKey)
+        or type(answer_key.canonical_bytes) is not bytes
+        or not isinstance(answer_key.case_id, str)
+        or not isinstance(answer_key.digest, str)
+        or hashlib.sha256(answer_key.canonical_bytes).hexdigest()
+        != answer_key.digest
+    ):
+        return False
+    try:
+        _require_sha256(answer_key.digest, "answer_key.digest")
+        _require_sha256(source_census_digest, "source_census_digest")
+        payload = _strict_receipt_json(answer_key.canonical_bytes)
+        _exact_receipt_fields(payload, _ANSWER_KEY_PAYLOAD_FIELDS, "answer key")
+        if _canonical_json(payload) != answer_key.canonical_bytes:
+            return False
+        if (
+            _answer_key_text(payload["case_id"], "answer key case_id")
+            != answer_key.case_id
+        ):
+            return False
+        if payload["census_digest"] != source_census_digest:
+            return False
+        _require_sha256(payload["census_digest"], "answer key census_digest")
+        _validate_answer_key_query(payload["query"])
+        expected = _answer_key_expected_identities(payload["expected"])
+        forbidden = _answer_key_forbidden_identities(payload["forbidden"])
+        _validate_identities(answer_key.expected_identities)
+        _validate_identities(answer_key.forbidden_identities)
+    except (EvidenceError, QueryReceiptError, TypeError, ValueError):
+        return False
+    return (
+        expected == answer_key.expected_identities
+        and forbidden == answer_key.forbidden_identities
+        and not (set(expected) & set(forbidden))
+    )
+
+
+def _validate_answer_key_query(value: object) -> None:
+    """Accept only the canonical ``BaselineQuery`` payload shape."""
+
+    query = _receipt_mapping(value, "answer key query")
+    _exact_receipt_fields(query, _ANSWER_KEY_QUERY_FIELDS, "answer key query")
+    query_text = _answer_key_text(query["query"], "answer key query.query")
+    if type(query["regex"]) is not bool or type(query["case_sensitive"]) is not bool:
+        raise EvidenceError("answer key query booleans are invalid")
+    for field in ("repository_ids", "refs", "path_prefixes", "languages"):
+        values = query[field]
+        if (
+            not isinstance(values, list)
+            or any(not isinstance(item, str) or not item for item in values)
+            or len(values) != len(set(values))
+        ):
+            raise EvidenceError(f"answer key query {field} is invalid")
+    if type(query["limit"]) is not int or not 1 <= query["limit"] <= 100:
+        raise EvidenceError("answer key query limit is invalid")
+    if type(query["context_lines"]) is not int or not 0 <= query["context_lines"] <= 8:
+        raise EvidenceError("answer key query context_lines is invalid")
+    if type(query["timeout_ms"]) is not int or not 1 <= query["timeout_ms"] <= 60_000:
+        raise EvidenceError("answer key query timeout_ms is invalid")
+    flags = 0 if query["case_sensitive"] else re.IGNORECASE
+    try:
+        re.compile(query_text if query["regex"] else re.escape(query_text), flags)
+    except re.error as error:
+        raise EvidenceError("answer key query regex is invalid") from error
+
+
+def _answer_key_expected_identities(
+    value: object,
+) -> tuple[tuple[str, str, str, str, int, int], ...]:
+    if not isinstance(value, list):
+        raise EvidenceError("answer key expected must be a list")
+    identities: list[tuple[str, str, str, str, int, int]] = []
+    for index, raw in enumerate(value):
+        match = _receipt_mapping(raw, f"answer key expected[{index}]")
+        _exact_receipt_fields(
+            match, _ANSWER_KEY_MATCH_FIELDS, f"answer key expected[{index}]"
+        )
+        if not isinstance(match["preview"], str):
+            raise EvidenceError("answer key expected preview is invalid")
+        _require_sha256(
+            match["source_content_digest"],
+            "answer key expected source_content_digest",
+        )
+        identities.append(_answer_key_identity(match["identity"]))
+    result = tuple(identities)
+    _validate_identities(result)
+    return result
+
+
+def _answer_key_forbidden_identities(
+    value: object,
+) -> tuple[tuple[str, str, str, str, int, int], ...]:
+    if not isinstance(value, list):
+        raise EvidenceError("answer key forbidden must be a list")
+    result = tuple(_answer_key_identity(raw) for raw in value)
+    _validate_identities(result)
+    return result
+
+
+def _answer_key_identity(
+    value: object,
+) -> tuple[str, str, str, str, int, int]:
+    if not isinstance(value, list) or len(value) != 6:
+        raise EvidenceError("answer key identity has an invalid closed shape")
+    identity = tuple(value)
+    if (
+        not all(isinstance(item, str) and item for item in identity[:4])
+        or type(identity[4]) is not int
+        or type(identity[5]) is not int
+        or identity[4] < 1
+        or identity[5] < identity[4]
+    ):
+        raise EvidenceError("answer key identity has an invalid closed shape")
+    return (
+        identity[0],
+        identity[1],
+        identity[2],
+        identity[3],
+        identity[4],
+        identity[5],
+    )
+
+
+def _answer_key_text(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise EvidenceError(f"{label} must be non-empty text")
+    return value
 
 
 def _trial_grades_bind_answer_keys(
@@ -1080,13 +1247,8 @@ def run_paired_trials(
         raise EvidenceError("paired harness requires a normalized query receipt factory")
     executors = {"baseline": baseline_executor, "zoekt": zoekt_executor}
     by_case = {query.case_id: query for query in ledger.manifest.queries}
-    if not isinstance(answer_keys, Mapping) or set(answer_keys) != set(by_case):
-        raise EvidenceError("paired harness requires one answer key per frozen case")
-    for case_id, answer_key in answer_keys.items():
-        if not isinstance(answer_key, AnswerKey) or answer_key.case_id != case_id:
-            raise EvidenceError("answer key identity does not bind its frozen case")
-        if answer_key.digest != by_case[case_id].answer_key_digest:
-            raise EvidenceError("answer key bytes do not match the frozen query digest")
+    if not _answer_keys_bind_manifest(ledger.manifest, ledger, answer_keys):
+        raise EvidenceError("answer keys do not bind the frozen source-derived bytes")
     receipts: list[TrialReceipt] = []
     for query_index, trial_id in enumerate(ledger.manifest.trial_order):
         case_id, candidate = trial_id.split(":", 1)
