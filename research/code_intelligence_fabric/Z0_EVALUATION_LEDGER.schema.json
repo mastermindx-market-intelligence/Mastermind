@@ -9,7 +9,9 @@
     "source_census_digest",
     "run_kind",
     "generation_receipts",
+    "failure_injection_receipts",
     "publication_receipts",
+    "query_receipts",
     "trial_receipts"
   ],
   "properties": {
@@ -18,15 +20,18 @@
     "source_census_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "run_kind": {"enum": ["real", "synthetic"]},
     "generation_receipts": {"type": "array", "items": {"$ref": "#/$defs/generation"}},
+    "failure_injection_receipts": {"type": "array", "items": {"$ref": "#/$defs/failure_injection"}},
     "publication_receipts": {"type": "array", "items": {"$ref": "#/$defs/publication"}},
+    "query_receipts": {"type": "array", "items": {"$ref": "#/$defs/query"}},
     "trial_receipts": {"type": "array", "items": {"$ref": "#/$defs/trial"}}
   },
   "$defs": {
     "generation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["generation_id", "logical_repo_id", "source_commit", "source_tree", "status", "indexed_commit_sha", "shard_digest", "failure_code"],
+      "required": ["schema_version", "generation_id", "logical_repo_id", "source_commit", "source_tree", "status", "indexed_commit_sha", "shard_digest", "failure_code", "index_build_receipt"],
       "properties": {
+        "schema_version": {"const": "mastermind.codeintel_generation.v1"},
         "generation_id": {"type": "string", "minLength": 1},
         "logical_repo_id": {"type": "string", "minLength": 1},
         "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
@@ -34,7 +39,41 @@
         "status": {"enum": ["succeeded", "failed", "partial"]},
         "indexed_commit_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
         "shard_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "failure_code": {"type": ["string", "null"]}
+        "failure_code": {"type": ["string", "null"]},
+        "index_build_receipt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "logical_repo_id", "source_commit", "source_tree", "indexed_commit_sha", "shard_digest"],
+          "properties": {
+            "schema_version": {"const": "mastermind.codeintel_index_build.v1"},
+            "logical_repo_id": {"type": "string", "minLength": 1},
+            "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "source_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "indexed_commit_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+            "shard_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      }
+    },
+    "failure_injection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "failure_code", "outcome", "cleanup", "correction_of", "evidence_digest"],
+      "properties": {
+        "schema_version": {"const": "mastermind.codeintel_correction.v1"},
+        "failure_code": {"type": "string", "minLength": 1},
+        "outcome": {"const": "REJECTED"},
+        "cleanup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "state"],
+          "properties": {
+            "schema_version": {"const": "mastermind.codeintel_cleanup.v1"},
+            "state": {"const": "SUCCEEDED"}
+          }
+        },
+        "correction_of": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },
     "publication": {
@@ -47,11 +86,54 @@
         "active_generation_id": {"type": ["string", "null"]}
       }
     },
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "trial_id", "query_index", "candidate", "query_digest",
+        "normalized_arguments_digest", "evaluation_manifest_digest", "requested_sources",
+        "index_identity", "started_at", "ended_at", "monotonic_duration_ms", "status",
+        "coverage", "health", "freshness", "query_completeness", "matches", "limits",
+        "zero_result_authority", "canonical_verification_required", "resource_observation",
+        "security_observation", "cleanup_observation", "raw_response_digest",
+        "normalized_response_digest", "correction_of"
+      ],
+      "properties": {
+        "schema_version": {"const": "mastermind.codeintel_discovery_query.v1"},
+        "trial_id": {"type": "string", "pattern": "^(E1|X3|R3|A1):(baseline|zoekt)$"},
+        "query_index": {"type": "integer", "minimum": 0},
+        "candidate": {"enum": ["baseline", "zoekt"]},
+        "query_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "normalized_arguments_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "evaluation_manifest_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "requested_sources": {"type": "array", "minItems": 1},
+        "index_identity": {"type": "object"},
+        "started_at": {"type": "string", "minLength": 1},
+        "ended_at": {"type": "string", "minLength": 1},
+        "monotonic_duration_ms": {"type": "integer", "minimum": 0},
+        "status": {"enum": ["SUCCESS", "ZERO_RESULTS", "DEGRADED", "STALE", "PARTIAL", "TRUNCATED", "REFUSED", "TIMEOUT", "CANCELLED", "INDEX_FAILED", "SCHEMA_INVALID", "EFFECT_UNKNOWN"]},
+        "coverage": {"type": "array", "minItems": 1},
+        "health": {"type": "array", "minItems": 1},
+        "freshness": {"type": "array", "minItems": 1},
+        "query_completeness": {"enum": ["COMPLETE", "TRUNCATED", "CANCELLED", "TIMED_OUT", "MALFORMED", "EXPENSIVE_QUERY_REFUSED", "UNKNOWN"]},
+        "matches": {"type": "array"},
+        "limits": {"type": "object"},
+        "zero_result_authority": {"enum": ["AUTHORITATIVE_NOT_FOUND_ON_HEALTHY_COVERED_EXACT_REF", "NONAUTHORITATIVE_COVERAGE_GAP", "NONAUTHORITATIVE_STALE_OR_MOVED", "NONAUTHORITATIVE_UNHEALTHY", "NONAUTHORITATIVE_TRUNCATED_OR_INCOMPLETE", "NONAUTHORITATIVE_IDENTITY_UNKNOWN", "NOT_APPLICABLE_MATCHES_RETURNED"]},
+        "canonical_verification_required": {"const": true},
+        "resource_observation": {"type": "object"},
+        "security_observation": {"type": "object"},
+        "cleanup_observation": {"type": "object"},
+        "raw_response_digest": {"type": "string", "pattern": "^(UNKNOWN|[0-9a-f]{64})$"},
+        "normalized_response_digest": {"type": "string", "pattern": "^(UNKNOWN|[0-9a-f]{64})$"},
+        "correction_of": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
     "trial": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["trial_id", "attempt_index", "outcome", "answer_key_digest", "source_census_digest", "generation_id", "query_completed", "truncated", "returned_identities", "recall", "false_positive_count", "resource", "failure_code"],
+      "required": ["schema_version", "trial_id", "attempt_index", "outcome", "answer_key_digest", "source_census_digest", "generation_id", "query_completed", "truncated", "returned_identities", "recall", "false_positive_count", "resource", "failure_code", "grader_receipt"],
       "properties": {
+        "schema_version": {"const": "mastermind.codeintel_query_trial.v1"},
         "trial_id": {"type": "string", "pattern": "^(E1|X3|R3|A1):(baseline|zoekt)$"},
         "attempt_index": {"const": 1},
         "outcome": {"enum": ["completed", "timeout", "error", "cancelled"]},
@@ -64,7 +146,18 @@
         "recall": {"type": "number", "minimum": 0, "maximum": 1},
         "false_positive_count": {"type": "integer", "minimum": 0},
         "resource": {"type": "object"},
-        "failure_code": {"type": ["string", "null"]}
+        "failure_code": {"type": ["string", "null"]},
+        "grader_receipt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "answer_key_digest", "recall", "false_positive_count"],
+          "properties": {
+            "schema_version": {"const": "mastermind.codeintel_grader.v1"},
+            "answer_key_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "recall": {"type": "number", "minimum": 0, "maximum": 1},
+            "false_positive_count": {"type": "integer", "minimum": 0}
+          }
+        }
       }
     }
   }

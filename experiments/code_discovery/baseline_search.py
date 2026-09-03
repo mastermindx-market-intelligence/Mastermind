@@ -11,8 +11,10 @@ import hashlib
 import json
 import re
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
 from typing import Final
 
 
@@ -104,6 +106,7 @@ class BaselineQuery:
     languages: tuple[str, ...] = ()
     limit: int = 100
     context_lines: int = 0
+    timeout_ms: int = 60_000
 
 
 @dataclass(frozen=True)
@@ -143,6 +146,8 @@ class BaselineResult:
     total_match_count: int
     truncated: bool
     census_digest: str
+    query_completed: bool = True
+    failure_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -254,17 +259,30 @@ def census_sources(snapshots: tuple[SourceSnapshot, ...]) -> SourceCensus:
     )
 
 
-def baseline_search(census: SourceCensus, query: BaselineQuery) -> BaselineResult:
+def baseline_search(
+    census: SourceCensus,
+    query: BaselineQuery,
+    *,
+    monotonic_clock: Callable[[], float] = monotonic,
+) -> BaselineResult:
     """Search every eligible source line with shared filters and limits."""
 
     _validate_census(census)
     pattern = _compile_query(query)
     matches: list[BaselineMatch] = []
+    deadline = monotonic_clock() + query.timeout_ms / 1000
+    timed_out = False
     for record in census.records:
+        if monotonic_clock() >= deadline:
+            timed_out = True
+            break
         if not _record_matches_filters(record, query):
             continue
         lines = record.text.split("\n")
         for offset, line in enumerate(lines):
+            if monotonic_clock() >= deadline:
+                timed_out = True
+                break
             if pattern.search(line) is None:
                 continue
             matches.append(
@@ -287,12 +305,16 @@ def baseline_search(census: SourceCensus, query: BaselineQuery) -> BaselineResul
                     source_content_digest=record.content_digest,
                 )
             )
+        if timed_out:
+            break
     matches.sort(key=lambda item: (*item.identity, item.preview))
     return BaselineResult(
         matches=tuple(matches[: query.limit]),
         total_match_count=len(matches),
-        truncated=len(matches) > query.limit,
+        truncated=timed_out or len(matches) > query.limit,
         census_digest=census.digest,
+        query_completed=not timed_out,
+        failure_code="TIMEOUT" if timed_out else None,
     )
 
 
@@ -311,6 +333,7 @@ def derive_answer_key(census: SourceCensus, case_id: str, query: BaselineQuery) 
         languages=query.languages,
         limit=100,
         context_lines=query.context_lines,
+        timeout_ms=query.timeout_ms,
     )
     result = baseline_search(census, unlimited)
     if result.truncated:
@@ -409,6 +432,8 @@ def _compile_query(query: BaselineQuery) -> re.Pattern[str]:
         raise SourceCensusError("query limit must be in 1..100")
     if type(query.context_lines) is not int or not 0 <= query.context_lines <= 8:
         raise SourceCensusError("query context_lines must be in 0..8")
+    if type(query.timeout_ms) is not int or not 1 <= query.timeout_ms <= 60_000:
+        raise SourceCensusError("query timeout_ms must be in 1..60000")
     for values, label in (
         (query.repository_ids, "repository_ids"),
         (query.refs, "refs"),
@@ -487,6 +512,7 @@ def _query_payload(query: BaselineQuery) -> dict[str, object]:
         "languages": list(query.languages),
         "limit": query.limit,
         "context_lines": query.context_lines,
+        "timeout_ms": query.timeout_ms,
     }
 
 

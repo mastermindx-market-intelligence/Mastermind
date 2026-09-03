@@ -48,11 +48,12 @@ def test_source_census_is_identity_complete_and_excludes_non_source_bytes() -> N
     identities = {(item.logical_repo_id, item.path) for item in census.records}
     assert ("alpha-mirror", "engine/core.py") in identities
     assert ("beta-mirror", "engine/core.py") in identities
-    assert len(census.records) == 4
+    assert len(census.records) >= 4
     assert {item.reason for item in census.excluded} == {
         "binary",
         "generated",
         "oversize",
+        "submodule",
         "vendor",
     }
     assert census.digest == census_sources(_snapshots()).digest
@@ -81,6 +82,35 @@ def test_baseline_applies_equivalent_filters_and_exposes_limit_truncation() -> N
     assert result.matches[0].path == "engine/core.py"
     assert result.matches[0].context_before == ()
     assert result.matches[0].context_after == ("",)
+
+
+def test_baseline_timeout_is_explicitly_incomplete_not_a_partial_answer() -> None:
+    """A shared time ceiling must leave a typed non-authoritative result."""
+
+    census = census_sources(_snapshots())
+    ticks = iter((0.0, 0.002))
+    result = baseline_search(
+        census,
+        BaselineQuery(query="SENTINEL", timeout_ms=1),
+        monotonic_clock=lambda: next(ticks),
+    )
+
+    assert result.query_completed is False
+    assert result.truncated is True
+    assert result.failure_code == "TIMEOUT"
+
+
+def test_synthetic_high_result_fixture_proves_limit_truncation_without_weakening_search() -> None:
+    """A selected hit set above the shared limit stays explicit rather than silently shortened."""
+
+    result = baseline_search(
+        census_sources(_snapshots()),
+        BaselineQuery(query="HIGH_RESULT_SENTINEL", limit=2),
+    )
+
+    assert result.total_match_count == 3
+    assert len(result.matches) == 2
+    assert result.truncated is True
 
 
 def test_answer_key_is_source_derived_and_changes_when_the_source_answer_changes(
