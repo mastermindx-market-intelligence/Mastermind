@@ -543,6 +543,9 @@ def _peer_anchor_provision(row: dict) -> dict:
     }
 
 
+_BOOTSTRAP_EVIDENCE = object()
+
+
 def _bootstrap_coordinator_state(monkeypatch, *, running=False):
     row = _mlx(4, running=running)
     provision = _peer_anchor_provision(row)
@@ -557,20 +560,22 @@ def _bootstrap_coordinator_state(monkeypatch, *, running=False):
         lambda: {"multilogin": [row], "gologin": []},
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr(
+        setup.vendors,
+        "mint_coordinator_peer_bootstrap_evidence",
+        lambda: _BOOTSTRAP_EVIDENCE,
+        raising=False,
+    )
     return row, provision
 
 
 def test_peer_setup_bootstrap_command_delegates_only_after_exact_local_ceremony(monkeypatch):
-    """The coordinator owns one phrase and one opaque bootstrap capability."""
+    """The exact phrase precedes a fresh evidence mint and one delegation."""
     _row, _provision = _bootstrap_coordinator_state(monkeypatch)
     expected_phrase = getattr(setup, "_CONFIRM_BOOTSTRAP_PEER", None)
     assert expected_phrase == "BOOTSTRAP THE EXISTING DISPOSABLE PEER LIFECYCLE"
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: expected_phrase)
     calls = []
-    bootstrap_authorization = getattr(
-        setup.vendors, "BOOTSTRAP_PEER_AUTHORIZATION", None,
-    )
-    assert bootstrap_authorization is not None
     monkeypatch.setattr(
         setup.vendors,
         "run_coordinator_peer_bootstrap",
@@ -579,7 +584,7 @@ def test_peer_setup_bootstrap_command_delegates_only_after_exact_local_ceremony(
     )
 
     assert setup.main(["bootstrap-peer-lifecycle"]) == 0
-    assert calls == [{"authorization": bootstrap_authorization}]
+    assert calls == [{"authorization": _BOOTSTRAP_EVIDENCE}]
 
 
 def test_peer_setup_bootstrap_confirmation_mismatch_refuses_without_state_effect(monkeypatch):
@@ -623,8 +628,8 @@ def test_peer_setup_bootstrap_running_anchor_refuses_before_confirmation_or_stat
         handler()
 
 
-def test_peer_setup_bootstrap_rechecks_stopped_anchor_after_confirmation(monkeypatch):
-    """A profile started while the operator types never receives bootstrap auth."""
+def test_peer_setup_bootstrap_refuses_failed_post_confirmation_evidence_mint(monkeypatch):
+    """A changed post-phrase census never releases bootstrap authority."""
     _row, _provision = _bootstrap_coordinator_state(monkeypatch)
     censuses = iter((
         {"multilogin": [_mlx(4, running=False)], "gologin": []},
@@ -634,6 +639,16 @@ def test_peer_setup_bootstrap_rechecks_stopped_anchor_after_confirmation(monkeyp
     monkeypatch.setattr(
         "builtins.input", lambda *_a, **_k: setup._CONFIRM_BOOTSTRAP_PEER,
     )
+    def _refusing_mint():
+        assert setup.chatgpt.list_local_environments()["multilogin"][0]["running"] is True
+        return None
+
+    monkeypatch.setattr(
+        setup.vendors,
+        "mint_coordinator_peer_bootstrap_evidence",
+        _refusing_mint,
+        raising=False,
+    )
     monkeypatch.setattr(
         setup.vendors,
         "run_coordinator_peer_bootstrap",
@@ -642,7 +657,7 @@ def test_peer_setup_bootstrap_rechecks_stopped_anchor_after_confirmation(monkeyp
         ),
     )
 
-    with pytest.raises(setup.SetupRefusal, match="stopped"):
+    with pytest.raises(setup.SetupRefusal, match="evidence"):
         setup.bootstrap_peer_interactive()
 
 

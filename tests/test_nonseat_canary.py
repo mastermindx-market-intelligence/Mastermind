@@ -6155,23 +6155,242 @@ def _peer_bootstrap_preimage(tmp_path):
 _DEFAULT_BOOTSTRAP_AUTHORIZATION = object()
 
 
+def _peer_bootstrap_census(provision, *, running=False):
+    return {
+        "multilogin": [{
+            "profile_id": provision["profile_id"],
+            "folder_id": provision["folder_id"],
+            "running": running,
+        }],
+        "gologin": [],
+    }
+
+
+def _peer_bootstrap_bindings_path(anchor_path):
+    path = Path(anchor_path).with_name("surface-bindings.json")
+    if not path.exists():
+        path.write_bytes(vendors._canonical_private_bytes(_binding_doc()))  # noqa: SLF001
+        path.chmod(0o600)
+    return path
+
+
+def _mint_peer_bootstrap_authorization(
+    provision, anchor_path, *, bindings_path=None, census_loader=None,
+):
+    bindings_path = bindings_path or _peer_bootstrap_bindings_path(anchor_path)
+    census_loader = census_loader or (
+        lambda: _peer_bootstrap_census(provision)
+    )
+    mint = getattr(vendors, "_mint_peer_bootstrap_evidence", None)
+    assert callable(mint), "the evidence-bound bootstrap mint is missing"
+    authorization = mint(
+        operation=vendors.PEER_BOOTSTRAP_OPERATION_KEY,
+        anchor_path=anchor_path,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+        now=_NOW,
+    )
+    assert authorization is not None, "the exact bootstrap evidence did not mint"
+    return authorization, bindings_path, census_loader
+
+
 def _bootstrap_existing_peer(
     anchor_path, state_path, provision_path, fence_path,
-    *, authorization=_DEFAULT_BOOTSTRAP_AUTHORIZATION,
+    *, authorization=_DEFAULT_BOOTSTRAP_AUTHORIZATION, bindings_path=None,
+    census_loader=None,
 ):
     bootstrap = getattr(
         vendors, "_bootstrap_peer_lifecycle_for_existing_anchor", None,
     )
     assert callable(bootstrap), "the explicit existing-v3 bootstrap is missing"
     if authorization is _DEFAULT_BOOTSTRAP_AUTHORIZATION:
-        authorization = getattr(vendors, "BOOTSTRAP_PEER_AUTHORIZATION", None)
+        provision = json.loads(Path(anchor_path).read_text(encoding="utf-8"))
+        authorization, bindings_path, census_loader = (
+            _mint_peer_bootstrap_authorization(
+                provision,
+                anchor_path,
+                bindings_path=bindings_path,
+                census_loader=census_loader,
+            )
+        )
+    else:
+        bindings_path = bindings_path or _peer_bootstrap_bindings_path(anchor_path)
+        census_loader = census_loader or (
+            lambda: _peer_bootstrap_census(
+                json.loads(Path(anchor_path).read_text(encoding="utf-8")),
+            )
+        )
     return bootstrap(
         authorization=authorization,
         anchor_path=anchor_path,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+        now=_NOW,
         state_path=state_path,
         peer_provision_path=provision_path,
         bootstrap_fence_path=fence_path,
     )
+
+
+@pytest.mark.parametrize("target_name", ("anchor", "bindings"))
+def test_peer_bootstrap_capability_refuses_same_byte_path_replacement(
+    tmp_path, target_name,
+):
+    """Held descriptors make same-byte unlink/recreate a different identity."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    target = anchor_path if target_name == "anchor" else bindings_path
+    original = target.read_bytes()
+    target.unlink()
+    target.write_bytes(original)
+    target.chmod(0o600)
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert not state_path.exists()
+
+
+def test_peer_bootstrap_capability_refuses_reduced_census_change_after_mint(tmp_path):
+    """A fresh helper-side census must equal the exact coordinator evidence."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    current = [_peer_bootstrap_census(provision)]
+    census_loader = lambda: current[0]
+    authorization, bindings_path, _loader = _mint_peer_bootstrap_authorization(
+        provision, anchor_path, census_loader=census_loader,
+    )
+    current[0] = _peer_bootstrap_census(provision, running=True)
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+
+
+def test_peer_bootstrap_capability_is_one_use_after_success_and_refusal(tmp_path):
+    """Consumption is monotonic regardless of the first call's outcome."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    kwargs = {
+        "authorization": authorization,
+        "bindings_path": bindings_path,
+        "census_loader": census_loader,
+    }
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path, **kwargs,
+    ) == vendors.CREATED_THIS_CALL
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path, **kwargs,
+    ) == vendors.REFUSED
+
+    refusal_authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    replacement = tmp_path / "replacement-anchor.json"
+    replacement.write_bytes(anchor_path.read_bytes())
+    replacement.chmod(0o600)
+    os.replace(replacement, anchor_path)
+    refusal_kwargs = {
+        "authorization": refusal_authorization,
+        "bindings_path": bindings_path,
+        "census_loader": census_loader,
+    }
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path, **refusal_kwargs,
+    ) == vendors.REFUSED
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path, **refusal_kwargs,
+    ) == vendors.REFUSED
+
+
+@pytest.mark.parametrize("mutation", ("operation", "generation", "pid", "cross_anchor"))
+def test_peer_bootstrap_capability_refuses_wrong_binding(tmp_path, monkeypatch, mutation):
+    """Operation, generation, process and anchor bindings are not transferable."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    if mutation == "operation":
+        authorization._operation = "wrong-operation"  # noqa: SLF001
+    elif mutation == "generation":
+        authorization._generation = "f" * 64  # noqa: SLF001
+    elif mutation == "pid":
+        authorization._mint_pid = os.getpid() + 1  # noqa: SLF001
+    else:
+        replacement = tmp_path / "other-anchor.json"
+        replacement.write_bytes(anchor_path.read_bytes())
+        replacement.chmod(0o600)
+        anchor_path = replacement
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+
+
+def test_peer_bootstrap_capability_is_noncopyable_and_closes_held_fds_once(tmp_path):
+    """The evidence is process-private and releases both kernel identities."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    held_fds = (authorization._anchor_fd, authorization._bindings_fd)  # noqa: SLF001
+    with pytest.raises(TypeError):
+        copy.copy(authorization)
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.CREATED_THIS_CALL
+    for held_fd in held_fds:
+        with pytest.raises(OSError):
+            os.fstat(held_fd)
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
 
 
 def _assert_completed_bootstrap(
