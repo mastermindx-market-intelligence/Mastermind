@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from experiments.code_discovery import index_manifest as index_manifest_module
 from experiments.code_discovery.baseline_search import (
     AnswerKey,
     SourceCensus,
@@ -65,6 +66,18 @@ _RESULT_SCHEMA = (
     / "code_intelligence_fabric"
     / "z0-result.schema.json"
 )
+
+
+@pytest.fixture(autouse=True)
+def _readonly_snapshot_mounts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Model the host-provisioned immutable snapshot mount in local unit fixtures."""
+
+    monkeypatch.setattr(
+        index_manifest_module,
+        "_filesystem_is_read_only",
+        lambda _path: True,
+        raising=False,
+    )
 
 
 def _canonical(value: object) -> bytes:

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from experiments.code_discovery import index_manifest as index_manifest_module
 from experiments.code_discovery.baseline_search import (
     BaselineQuery,
     SourceCensusError,
@@ -199,9 +200,16 @@ def test_census_fails_closed_for_duplicate_or_external_or_symlinked_source_ident
 
 
 def test_sealed_baseline_uses_manifest_selected_bytes_without_legacy_256_byte_cap(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A real baseline must search the parent-sealed corpus, not a weaker local walk."""
+
+    monkeypatch.setattr(
+        index_manifest_module,
+        "_filesystem_is_read_only",
+        lambda _path: True,
+        raising=False,
+    )
 
     root = tmp_path / "sealed-source"
     root.mkdir()
