@@ -26,7 +26,11 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence, Union
 
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
-from control_plane.executive_runtime import AttemptStatus
+from control_plane.executive_runtime import (
+    AttemptStatus,
+    ExecutiveDialogueSource,
+    WorkerStatus,
+)
 from control_plane.executive_terminal_return import TerminalReturnCandidate
 from control_plane.session_targets import (
     RuntimeBinding,
@@ -51,6 +55,11 @@ from integrations.slack_agent_dialogue.engine import (
 from integrations.slack_agent_dialogue.engine_v2 import (
     DialogueContextV2,
     DialogueEngineV2,
+)
+from integrations.slack_agent_dialogue.executive_observation_client import (
+    ExecutiveDialogueObservationClient,
+    ExecutiveObservationClientError,
+    ResolvedDialogueObservation,
 )
 from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
     ResolvedTerminalReturnBinding,
@@ -93,6 +102,9 @@ from integrations.slack_agent_dialogue.wake_projection import (
 
 _TOKEN_MAX_BYTES = 2048
 AGENT_RELAY_SOCKET_PATH = Path("/var/run/mastermind-agent-relay/agent-relay.sock")
+EXECUTIVE_OBSERVATION_SOCKET_PATH = Path(
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+)
 EXECUTIVE_CLIENT_UID = 450
 DEFAULT_MAX_TURN_CANDIDATES_PER_PASS = 32
 MAX_TURN_CANDIDATES_PER_PASS = 256
@@ -223,7 +235,7 @@ class RelayTurnCandidate:
     dialogue_parent: Mapping[str, Any]
     thread_ts: str
     current_worker: CurrentWorkerDialogueSnapshot | None
-    actor: WorkerDialogueCaller
+    actor: WorkerDialogueCaller | None
     terminal_candidate: TerminalReturnCandidate | None = None
     terminal_projection_receipt: TerminalReturnProjectionReceipt | None = None
 
@@ -257,6 +269,68 @@ class _FrozenCandidateIterator:
 
     async def aclose(self) -> None:
         self._index = len(self._values)
+
+
+def build_executive_observation_candidate_source(
+    engine_v2: DialogueEngineV2,
+    observation_client: ExecutiveDialogueObservationClient | object,
+    *,
+    maximum: int = DEFAULT_MAX_TURN_CANDIDATES_PER_PASS,
+) -> Callable[[], Awaitable[AsyncIterator[RelayTurnCandidate]]]:
+    """Compose bounded Relay discovery with the Executive read-only listener.
+
+    The engine supplies the existing shared Slack client and accepted parent
+    author policy.  Each eligible parent receives exactly one observation
+    request.  Typed non-resolution is zero-effect and contributes no candidate;
+    the outer collector still owns one absolute pass timeout and cardinality cap.
+    """
+
+    if not isinstance(engine_v2, DialogueEngineV2):
+        raise TypeError("engine_v2 must be DialogueEngineV2")
+    resolve = getattr(observation_client, "resolve", None)
+    if not callable(resolve):
+        raise TypeError("observation_client must expose resolve")
+    if (
+        isinstance(maximum, bool)
+        or not isinstance(maximum, int)
+        or not 1 <= maximum <= MAX_TURN_CANDIDATES_PER_PASS
+    ):
+        raise ValueError("maximum is outside the turn-candidate bound")
+
+    async def source() -> AsyncIterator[RelayTurnCandidate]:
+        parents = await engine_v2.discover_validated_parents(maximum=maximum)
+
+        async def observations() -> AsyncIterator[RelayTurnCandidate]:
+            for discovered in parents:
+                try:
+                    resolved = await resolve(
+                        parent=discovered.parent,
+                        thread_ts=discovered.thread_ts,
+                    )
+                except ExecutiveObservationClientError:
+                    continue
+                if (
+                    type(resolved) is not ResolvedDialogueObservation
+                    or resolved.state != "RESOLVED"
+                    or resolved.dialogue_parent != discovered.parent
+                    or resolved.thread_ts != discovered.thread_ts
+                ):
+                    raise ExecutiveObservationClientError("RESPONSE_REFUSED")
+                yield RelayTurnCandidate(
+                    delegation_identity=resolved.delegation_identity,
+                    dialogue_parent=discovered.parent,
+                    thread_ts=discovered.thread_ts,
+                    current_worker=resolved.current_worker,
+                    actor=resolved.actor,
+                    terminal_candidate=resolved.terminal_candidate,
+                    terminal_projection_receipt=(
+                        resolved.terminal_projection_receipt
+                    ),
+                )
+
+        return observations()
+
+    return source
 
 
 def _normalize_candidate_source(
@@ -326,6 +400,7 @@ class AgentRelayTurnRuntime:
         ] | None = None,
         dialogue_engine_v2: DialogueEngineV2 | None = None,
         terminal_binding_resolver: TerminalReturnBindingResolver | None = None,
+        _executive_observation_source: bool = False,
     ) -> None:
         if not hasattr(observer, "reconcile_once"):
             raise TypeError("observer must expose reconcile_once")
@@ -379,6 +454,9 @@ class AgentRelayTurnRuntime:
         self._active_waiter_context = active_waiter_context
         self._dialogue_engine_v2 = dialogue_engine_v2
         self._terminal_binding_resolver = terminal_binding_resolver
+        if type(_executive_observation_source) is not bool:
+            raise RelayRuntimeError("RUNTIME_INVALID")
+        self._executive_observation_source = _executive_observation_source
 
     @staticmethod
     def _receipt(
@@ -450,6 +528,89 @@ class AgentRelayTurnRuntime:
         except (AttributeError, TypeError, ValueError):
             raise TurnRoutingFactsError("DIALOGUE_BINDING_MISMATCH") from None
 
+    def _terminal_snapshot_from_observation(
+        self,
+        candidate: RelayTurnCandidate,
+    ) -> CurrentWorkerDialogueSnapshot | None:
+        """Adapt revalidated terminal facts to the existing terminal router.
+
+        Terminal routing consumes only the completed identity/status and parent
+        fields from this compatibility shape.  Its RuntimeBinding is a fresh
+        public COO target read; no active-worker or provider claim is inferred.
+        """
+
+        terminal = candidate.terminal_candidate
+        if (
+            type(terminal) is not TerminalReturnCandidate
+            or not self._executive_observation_source
+        ):
+            return None
+        try:
+            runtime_binding = self._current_binding_for("coo")
+        except Exception:
+            return None
+        if not isinstance(runtime_binding, RuntimeBinding):
+            return None
+        from integrations.mastermind_company_mcp.schemas import (
+            SERVER_IDENTITY,
+            SERVER_VERSION,
+            TOOL_SCHEMA_DIGEST,
+        )
+
+        return CurrentWorkerDialogueSnapshot(
+            root_job_id=terminal.root_job_id,
+            job_id=terminal.job_id,
+            attempt_id=terminal.attempt_id,
+            worker_id=terminal.worker_id,
+            attempt_status=AttemptStatus.COMPLETED,
+            worker_status=WorkerStatus.AVAILABLE,
+            execution_profile_id="executive-terminal",
+            execution_profile_digest=terminal.effective_grant_digest,
+            capability_policy_digest=terminal.effective_grant_digest,
+            runtime_binding=runtime_binding,
+            parent_fingerprint=str(candidate.dialogue_parent.get("fingerprint", "")),
+            company_dialogue_server_identity=SERVER_IDENTITY,
+            company_dialogue_server_version=SERVER_VERSION,
+            company_dialogue_tool_schema_digest=TOOL_SCHEMA_DIGEST,
+            company_dialogue_attested=True,
+        )
+
+    @staticmethod
+    def _terminal_binding_from_executive_observation(
+        candidate: RelayTurnCandidate,
+    ) -> ResolvedTerminalReturnBinding | None:
+        """Adapt only an Executive-resolved candidate into the existing router."""
+
+        terminal = candidate.terminal_candidate
+        if type(terminal) is not TerminalReturnCandidate:
+            return None
+        source = terminal.dialogue_source
+        if not isinstance(source, ExecutiveDialogueSource):
+            return None
+        try:
+            commission_ref = source.commission_ref.to_dict()
+            return ResolvedTerminalReturnBinding(
+                work_ref=source.work_ref,
+                commission_ref=commission_ref,
+                session_ref=terminal.session_ref,
+                operation_key=terminal.operation_key,
+                watch_mode=source.watch_mode,
+                actor_ref={
+                    "kind": "worker_attempt",
+                    "job_id": terminal.job_id,
+                    "attempt_id": terminal.attempt_id,
+                    "worker_id": terminal.worker_id,
+                },
+                applies_to={
+                    "kind": "executive_attempt",
+                    "job_id": terminal.job_id,
+                    "attempt_id": terminal.attempt_id,
+                    "worker_id": terminal.worker_id,
+                },
+            )
+        except (AttributeError, TypeError, ValueError):
+            return None
+
     async def _reconcile_terminal_candidate(
         self,
         candidate: RelayTurnCandidate,
@@ -459,6 +620,8 @@ class AgentRelayTurnRuntime:
         receipt = candidate.terminal_projection_receipt
         resolver = self._terminal_binding_resolver
         engine = self._dialogue_engine_v2
+        if current_worker is None:
+            current_worker = self._terminal_snapshot_from_observation(candidate)
         if (
             type(current_worker) is not CurrentWorkerDialogueSnapshot
             or type(terminal) is not TerminalReturnCandidate
@@ -470,13 +633,19 @@ class AgentRelayTurnRuntime:
                 ObservationOutcome.RECONCILIATION_INCOMPLETE,
                 "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
             )
-        try:
-            resolved = resolver.resolve(terminal)
-        except Exception:
-            return self._receipt(
-                ObservationOutcome.RECONCILIATION_INCOMPLETE,
-                "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
-            )
+        resolved = (
+            self._terminal_binding_from_executive_observation(candidate)
+            if self._executive_observation_source
+            else None
+        )
+        if resolved is None and not self._executive_observation_source:
+            try:
+                resolved = resolver.resolve(terminal)
+            except Exception:
+                return self._receipt(
+                    ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                    "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
+                )
         if type(resolved) is not ResolvedTerminalReturnBinding:
             return self._receipt(
                 ObservationOutcome.REFUSED,
@@ -611,12 +780,21 @@ class AgentRelayTurnRuntime:
                 ObservationOutcome.RECONCILIATION_INCOMPLETE,
                 "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
             )
+        if terminal_evidence_count == 2 and (
+            (
+                isinstance(current_worker, CurrentWorkerDialogueSnapshot)
+                and current_worker.attempt_status is AttemptStatus.COMPLETED
+            )
+            or (
+                current_worker is None
+                and self._executive_observation_source
+            )
+        ):
+            return await self._reconcile_terminal_candidate(candidate)
         if (
             isinstance(current_worker, CurrentWorkerDialogueSnapshot)
             and current_worker.attempt_status is AttemptStatus.COMPLETED
         ):
-            if terminal_evidence_count == 2:
-                return await self._reconcile_terminal_candidate(candidate)
             return self._receipt(
                 ObservationOutcome.RECONCILIATION_INCOMPLETE,
                 "TERMINAL_RESULT_POST_BINDING_UNAVAILABLE",
@@ -844,7 +1022,8 @@ def build_turn_runtime(
     dispatchers: WakeDispatcherRegistry,
     current_binding_for: Callable[[str], RuntimeBinding | None],
     retry_policy: WakeRetryPolicy,
-    candidate_source: _CandidateSource,
+    candidate_source: _CandidateSource | None = None,
+    observation_client: ExecutiveDialogueObservationClient | None = None,
     terminal_binding_resolver: RuntimeTerminalReturnBindingResolver,
     emitted_at: Callable[[], str] = utc_now_iso,
     poll_interval_seconds: float = 1.0,
@@ -859,6 +1038,23 @@ def build_turn_runtime(
         raise TypeError("service must be AgentDialogueService")
     if service.engine_v2 is None or service.engine.client is not service.engine_v2.client:
         raise RelayRuntimeError("RUNTIME_INVALID")
+    if (candidate_source is None) == (observation_client is None):
+        raise RelayRuntimeError("RUNTIME_INVALID")
+    if observation_client is not None:
+        if (
+            not isinstance(observation_client, ExecutiveDialogueObservationClient)
+            or observation_client.socket_path != EXECUTIVE_OBSERVATION_SOCKET_PATH
+        ):
+            raise RelayRuntimeError("RUNTIME_INVALID")
+        candidate_source = build_executive_observation_candidate_source(
+            service.engine_v2,
+            observation_client,
+            maximum=max_candidates_per_pass,
+        )
+    executive_observation_source = observation_client is not None
+    # ``candidate_source`` is the protected pre-I1 unit-test compatibility
+    # seam.  Production composition supplies ``observation_client`` above.
+    assert candidate_source is not None
     active_waiters = service.engine_v2.active_waiter_registry
     if not isinstance(active_waiters, ActiveWaiterRegistry):
         raise RelayRuntimeError("RUNTIME_INVALID")
@@ -919,6 +1115,7 @@ def build_turn_runtime(
         active_waiter_context=waiter_context,
         dialogue_engine_v2=service.engine_v2,
         terminal_binding_resolver=terminal_binding_resolver,
+        _executive_observation_source=executive_observation_source,
     )
 
 
@@ -1009,6 +1206,7 @@ __all__ = [
     "DEFAULT_MAX_TURN_CANDIDATES_PER_PASS",
     "DEFAULT_TURN_CANDIDATE_COLLECTION_TIMEOUT_SECONDS",
     "EXECUTIVE_CLIENT_UID",
+    "EXECUTIVE_OBSERVATION_SOCKET_PATH",
     "MAX_TURN_CANDIDATES_PER_PASS",
     "ActiveWaiterStateUnavailable",
     "AgentRelayTurnRuntime",
@@ -1020,6 +1218,7 @@ __all__ = [
     "RelayTurnCandidate",
     "TurnRoutingFactsError",
     "build_service",
+    "build_executive_observation_candidate_source",
     "build_turn_runtime",
     "main",
     "read_private_token_file",

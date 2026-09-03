@@ -127,6 +127,14 @@ class PreparedMessageSend:
     fingerprint: str
 
 
+@dataclass(frozen=True)
+class DiscoveredDialogueParent:
+    """One immutable, authority-filtered V2 parent found in bounded history."""
+
+    thread_ts: str
+    parent: Mapping[str, Any]
+
+
 @dataclass
 class _SendFlight:
     """One transient coalesced commit for an exact logical message."""
@@ -535,6 +543,71 @@ class DialogueEngineV2:
             )
         except Exception:
             raise DialogueEngineError("TRANSPORT_UNAVAILABLE") from None
+
+    async def discover_validated_parents(
+        self, *, maximum: int
+    ) -> tuple[DiscoveredDialogueParent, ...]:
+        """Discover bounded V2 parents through the Relay's existing Slack client.
+
+        This is a read-only composition seam, not another Slack discovery API.  It
+        deliberately applies author, mutation, schema, and cardinality gates here
+        before any parent is eligible for an Executive observation query.
+        """
+
+        if not isinstance(maximum, int) or isinstance(maximum, bool) or not 1 <= maximum:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+
+        page = await self._parent_history()
+        if not isinstance(page, HistoryPage) or not page.complete:
+            raise DialogueEngineError("THREAD_HISTORY_INCOMPLETE")
+        if not page.mutation_evidence_complete:
+            raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
+
+        eligible_authors = frozenset(
+            (*self.policy.allowed_parent_user_ids, self.policy.relay_bot_user_id)
+        )
+        discovered: list[DiscoveredDialogueParent] = []
+        fingerprints: set[str] = set()
+        for transport in page.messages:
+            if transport.thread_ts not in {None, transport.ts}:
+                continue
+            if transport.author_user_id not in eligible_authors:
+                continue
+
+            current_is_parent = transport.text.startswith(PARENT_DISCRIMINATOR_V2)
+            created_is_parent = (
+                transport.created_text is not None
+                and transport.created_text.startswith(PARENT_DISCRIMINATOR_V2)
+            )
+            if transport.edited or transport.deleted:
+                if transport.created_text is None or current_is_parent or created_is_parent:
+                    raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
+                continue
+            if not current_is_parent:
+                continue
+
+            try:
+                parent = parse_parent_frame_v2(transport.text)
+            except DialogueContractError:
+                raise DialogueEngineError("PARENT_MESSAGE_INVALID") from None
+            if tuple(parent["allowed_sol_user_ids"]) != self.policy.allowed_sol_user_ids:
+                raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+            fingerprint = parent["fingerprint"]
+            if fingerprint in fingerprints:
+                raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
+            fingerprints.add(fingerprint)
+            discovered.append(
+                DiscoveredDialogueParent(
+                    thread_ts=transport.ts,
+                    # Preserve the canonical JSON list shape required by the
+                    # strict observation wire validator.  The parser already
+                    # returned a detached value, and no cache retains it.
+                    parent=parent,
+                )
+            )
+            if len(discovered) > maximum:
+                raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
+        return tuple(discovered)
 
     @staticmethod
     def _bound_parent(
@@ -1273,4 +1346,9 @@ class DialogueEngineV2:
         }
 
 
-__all__ = ["DialogueContextV2", "DialogueEngineV2", "PreparedMessageSend"]
+__all__ = [
+    "DialogueContextV2",
+    "DialogueEngineV2",
+    "DiscoveredDialogueParent",
+    "PreparedMessageSend",
+]

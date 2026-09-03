@@ -52,6 +52,13 @@ from control_plane.executive_service import (
     ServiceError,
     send_control_request,
 )
+from control_plane.executive_dialogue_observation import (
+    REQUEST_SCHEMA as OBSERVATION_REQUEST_SCHEMA,
+    RESPONSE_SCHEMA as OBSERVATION_RESPONSE_SCHEMA,
+    ActiveObservationFacts,
+    DialogueObservationFacts,
+    PublicRuntimeBindingFacts,
+)
 from control_plane.executive_terminal_return import (
     TerminalReturnCandidate,
     TerminalReturnProjectionError,
@@ -72,10 +79,16 @@ from control_plane.executive_workspace import (
 )
 from control_plane import executive_service as es_mod
 from integrations.slack_agent_dialogue.contract import validate_commission_ref
+from integrations.mastermind_company_mcp.schemas import (
+    SERVER_IDENTITY as COMPANY_DIALOGUE_SERVER_IDENTITY,
+    SERVER_VERSION as COMPANY_DIALOGUE_SERVER_VERSION,
+    TOOL_SCHEMA_DIGEST as COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+)
 from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
     ExecutiveTerminalReturnProjector,
 )
 from scripts import executive_os_phase1c as service_cli
+from tests.test_company_dialogue_runtime_binding import parent as dialogue_parent
 
 
 @dataclass
@@ -399,6 +412,278 @@ def test_finish_pickup_projects_a_sealed_terminal_child_once(tmp_path: Path) -> 
             await service.close()
 
     asyncio.run(exercise())
+
+
+def _observation_facts(parent: dict) -> DialogueObservationFacts:
+    return DialogueObservationFacts(
+        active=(
+            ActiveObservationFacts(
+                root_job_id="JOB-100",
+                job_id="JOB-101",
+                attempt_id="ATT-201",
+                worker_id="worker-01",
+                attempt_status="RUNNING",
+                worker_status="BUSY",
+                execution_profile_id="profile-readonly",
+                execution_profile_digest="1" * 64,
+                capability_policy_digest="2" * 64,
+                runtime_binding=PublicRuntimeBindingFacts(
+                    session_alias="MM-COO-SEAT",
+                    binding_id="bind-observation-0001",
+                    binding_generation=7,
+                    reasoning_surface="codex",
+                ),
+                parent_fingerprint=parent["fingerprint"],
+                company_dialogue_server_identity=COMPANY_DIALOGUE_SERVER_IDENTITY,
+                company_dialogue_server_version=COMPANY_DIALOGUE_SERVER_VERSION,
+                company_dialogue_tool_schema_digest=COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+                company_dialogue_attested=True,
+            ),
+        )
+    )
+
+
+def _observation_request(parent: dict | None = None) -> bytes:
+    return (
+        json.dumps(
+            {
+                "schema": OBSERVATION_REQUEST_SCHEMA,
+                "parent": parent or dialogue_parent(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+
+
+def test_absent_dialogue_observation_has_no_listener_lifecycle_state(
+    tmp_path: Path,
+    short_socket_root: Path,
+) -> None:
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root / "operator"),
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+    )
+
+    assert service.dialogue_observation_socket_path is None
+    assert service.dialogue_observation_ready is False
+    for name in (
+        "_dialogue_observation_server",
+        "_dialogue_observation_tasks",
+        "_dialogue_observation_inode",
+    ):
+        assert not hasattr(service, name)
+
+
+def test_optional_dialogue_observation_is_third_listener_on_one_runtime_and_lock(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: 457)
+    calls: list[tuple[Runtime, dict]] = []
+
+    def provider(runtime: Runtime, parent: dict) -> DialogueObservationFacts:
+        calls.append((runtime, parent))
+        return _observation_facts(parent)
+
+    async def exercise() -> None:
+        socket_root = short_socket_root / "observation"
+        observation_path = socket_root / "dialogue-observation.sock"
+        holder: dict[str, object] = {}
+
+        def factory(runtime: Runtime):
+            holder["runtime"] = runtime
+            return _FakeSupervisor(runtime)
+
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root / "operator"),
+            supervisor_factory=factory,
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_observation_facts_provider=provider,
+        )
+        assert service.dialogue_observation_ready is False
+        await service.start()
+        try:
+            assert service.dialogue_observation_ready is True
+            assert service.runtime is holder["runtime"]
+            assert service._lock_fd is not None
+            assert stat.S_IMODE(socket_root.lstat().st_mode) == 0o710
+            assert stat.S_IMODE(observation_path.lstat().st_mode) == 0o660
+            reader, writer = await asyncio.open_unix_connection(observation_path)
+            writer.write(_observation_request())
+            await writer.drain()
+            response = json.loads(await reader.readline())
+            writer.close()
+            await writer.wait_closed()
+            assert response["schema"] == OBSERVATION_RESPONSE_SCHEMA
+            assert response["state"] == "RESOLVED"
+            assert response["mode"] == "ACTIVE_CURRENT_WORKER"
+            assert calls == [(service.runtime, dialogue_parent())]
+        finally:
+            await service.close()
+        assert service.dialogue_observation_ready is False
+        assert not observation_path.exists()
+
+    asyncio.run(exercise())
+
+
+def test_dialogue_observation_authenticates_before_parse_and_refuses_second_frame(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peer = 999
+    calls: list[dict] = []
+    monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: peer)
+
+    def provider(_runtime: Runtime, parent: dict) -> DialogueObservationFacts:
+        calls.append(parent)
+        return _observation_facts(parent)
+
+    async def exchange(path: Path, payload: bytes) -> dict:
+        reader, writer = await asyncio.open_unix_connection(path)
+        writer.write(payload)
+        await writer.drain()
+        response = json.loads(await reader.readline())
+        writer.close()
+        await writer.wait_closed()
+        return response
+
+    async def exercise() -> None:
+        nonlocal peer
+        observation_path = short_socket_root / "observation" / "dialogue-observation.sock"
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root / "operator"),
+            supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_observation_facts_provider=provider,
+        )
+        await service.start()
+        try:
+            denied = await exchange(observation_path, b"not json\n")
+            assert denied == {
+                "schema": OBSERVATION_RESPONSE_SCHEMA,
+                "state": "HELD",
+                "reason": "PEER_UID_REFUSED",
+            }
+            assert calls == []
+
+            peer = 457
+            second = await exchange(
+                observation_path,
+                _observation_request() + _observation_request(),
+            )
+            assert second == {
+                "schema": OBSERVATION_RESPONSE_SCHEMA,
+                "state": "HELD",
+                "reason": "MULTIPLE_REQUESTS_REFUSED",
+            }
+            assert calls == []
+
+            malformed = await exchange(
+                observation_path,
+                b'{"schema":"x","schema":"y"}\n',
+            )
+            assert malformed == {
+                "schema": OBSERVATION_RESPONSE_SCHEMA,
+                "state": "HELD",
+                "reason": "REQUEST_REFUSED",
+            }
+            assert calls == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_dialogue_observation_shutdown_never_unlinks_replaced_inode(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: 457)
+
+    async def exercise() -> None:
+        observation_path = short_socket_root / "observation" / "dialogue-observation.sock"
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root / "operator"),
+            supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_observation_facts_provider=lambda _runtime, parent: _observation_facts(parent),
+        )
+        await service.start()
+        bound = observation_path.lstat()
+        observation_path.unlink()
+        observation_path.write_text("foreign", encoding="utf-8")
+        await service.close()
+        assert observation_path.read_text(encoding="utf-8") == "foreign"
+        assert (bound.st_dev, bound.st_ino) != (
+            observation_path.lstat().st_dev,
+            observation_path.lstat().st_ino,
+        )
+
+    asyncio.run(exercise())
+
+
+def test_dialogue_observation_parent_symlink_fails_capability_not_ready(
+    tmp_path: Path, short_socket_root: Path,
+) -> None:
+    real = short_socket_root / "real-observation"
+    real.mkdir()
+    alias = short_socket_root / "observation-alias"
+    alias.symlink_to(real, target_is_directory=True)
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root / "operator"),
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        dialogue_observation_socket_path=alias / "dialogue-observation.sock",
+        dialogue_observation_peer_uid=457,
+        dialogue_observation_group_gid=os.getegid(),
+        dialogue_observation_facts_provider=lambda _runtime, parent: _observation_facts(parent),
+    )
+    with pytest.raises(ServiceError, match="CAPABILITY_NOT_READY"):
+        asyncio.run(service.start())
+
+
+@pytest.mark.parametrize("node_kind", ["socket", "symlink"])
+def test_dialogue_observation_foreign_or_symlink_socket_is_never_reclaimed(
+    tmp_path: Path,
+    short_socket_root: Path,
+    node_kind: str,
+) -> None:
+    observation_root = short_socket_root / f"observation-{node_kind}"
+    observation_root.mkdir(mode=0o710)
+    os.chown(observation_root, os.geteuid(), os.getegid())
+    observation_root.chmod(0o710)
+    observation_path = observation_root / "dialogue-observation.sock"
+    foreign: socket.socket | None = None
+    if node_kind == "socket":
+        foreign = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        foreign.bind(os.fspath(observation_path))
+        observation_path.chmod(0o660)
+    else:
+        target = observation_root / "foreign.sock"
+        target.write_text("foreign", encoding="utf-8")
+        observation_path.symlink_to(target)
+
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root / "operator"),
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        dialogue_observation_socket_path=observation_path,
+        dialogue_observation_peer_uid=457,
+        dialogue_observation_group_gid=os.getegid(),
+        dialogue_observation_facts_provider=(
+            lambda _runtime, parent: _observation_facts(parent)
+        ),
+    )
+    try:
+        with pytest.raises(ServiceError, match="CAPABILITY_NOT_READY"):
+            asyncio.run(service.start())
+        assert os.path.lexists(observation_path)
+    finally:
+        if foreign is not None:
+            foreign.close()
 
 
 def test_finish_pickup_provider_silence_and_failure_do_not_rewrite_lifecycle(
@@ -4240,6 +4525,50 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             }
             & set(unarmed)
         )
+        observation_keys = {
+            "dialogue_observation_socket_path",
+            "dialogue_observation_launchd_socket_name",
+            "dialogue_observation_peer_uid",
+        }
+        assert not (observation_keys & set(unarmed))
+        for missing in observation_keys:
+            partial_path = tmp_path / f"control-observation-missing-{missing}.json"
+            partial = {
+                **raw,
+                "dialogue_observation_socket_path": (
+                    "/var/run/mastermind-dialogue-observation/"
+                    "dialogue-observation.sock"
+                ),
+                "dialogue_observation_launchd_socket_name": "DialogueObservation",
+                "dialogue_observation_peer_uid": 457,
+            }
+            partial.pop(missing)
+            partial_path.write_text(json.dumps(partial), encoding="utf-8")
+            partial_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="must be supplied together"):
+                service_cli.load_control_config(partial_path)
+
+        observation_path = tmp_path / "control-observation.json"
+        observation_path.write_text(
+            json.dumps(
+                {
+                    **raw,
+                    "dialogue_observation_socket_path": (
+                        "/var/run/mastermind-dialogue-observation/"
+                        "dialogue-observation.sock"
+                    ),
+                    "dialogue_observation_launchd_socket_name": "DialogueObservation",
+                    "dialogue_observation_peer_uid": 457,
+                }
+            ),
+            encoding="utf-8",
+        )
+        observation_path.chmod(0o400)
+        observation_loaded = service_cli.load_control_config(observation_path)
+        assert observation_loaded["dialogue_observation_socket_path"] == Path(
+            "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+        ).resolve(strict=False)
+        assert observation_loaded["dialogue_observation_peer_uid"] == 457
 
         terminal_return_path = tmp_path / "control-terminal-return.json"
         terminal_return_path.write_text(
@@ -4328,6 +4657,29 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             lambda: object(), composed_config.terminal_return_socket_path
         )
         assert isinstance(projector, ExecutiveTerminalReturnProjector)
+
+        captured.clear()
+        activated_names: list[str] = []
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(
+                service_cli,
+                "activate_launchd_socket",
+                lambda name: (activated_names.append(name), listener)[1],
+            )
+            composition_patch.setattr(
+                service_cli, "ExecutiveControlService", capture_service
+            )
+            service_cli._service_from_config(
+                observation_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        observation_kwargs = captured["kwargs"]
+        assert activated_names == ["Operator", "DialogueObservation"]
+        assert observation_kwargs["dialogue_observation_peer_uid"] == 457
+        assert observation_kwargs["dialogue_observation_group_gid"] == 457
+        assert observation_kwargs["dialogue_observation_socket_path"] == Path(
+            "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+        ).resolve(strict=False)
 
         captured.clear()
         with monkeypatch.context() as composition_patch:

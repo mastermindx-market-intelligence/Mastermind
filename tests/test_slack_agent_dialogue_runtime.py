@@ -1112,7 +1112,9 @@ def test_turn_runtime_factory_reuses_the_existing_relay_slack_client(
         dispatchers=WakeDispatcherRegistry(),
         current_binding_for=_binding_for,
         retry_policy=_POLICY,
-        candidate_source=lambda: (),
+        observation_client=runtime.ExecutiveDialogueObservationClient(
+            runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
+        ),
         terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
     )
 
@@ -1130,6 +1132,412 @@ def test_turn_runtime_factory_reuses_the_existing_relay_slack_client(
         .default
         is None
     )
+
+
+def test_real_observation_source_discovers_parents_through_shared_v2_engine() -> None:
+    runtime = _runtime()
+    from integrations.slack_agent_dialogue.executive_observation_client import (
+        ResolvedDialogueObservation,
+    )
+
+    candidate, _binding, engine = _terminal_w3c_material(runtime)
+    active = _w3c_candidate(runtime)
+
+    class ObservationClient:
+        calls: list[tuple[dict, str]] = []
+
+        async def resolve(self, *, parent, thread_ts):
+            self.calls.append((dict(parent), thread_ts))
+            return ResolvedDialogueObservation(
+                state="RESOLVED",
+                mode="ACTIVE_CURRENT_WORKER",
+                dialogue_parent=dict(parent),
+                thread_ts=thread_ts,
+                delegation_identity=active.delegation_identity,
+                current_worker=active.current_worker,
+                actor=active.actor,
+            )
+
+    client = ObservationClient()
+
+    async def collect():
+        source = runtime.build_executive_observation_candidate_source(
+            engine,
+            client,
+            maximum=4,
+        )
+        iterator = await source()
+        return tuple([item async for item in iterator])
+
+    observed = asyncio.run(collect())
+
+    assert len(observed) == 1
+    assert observed[0].current_worker == active.current_worker
+    assert observed[0].actor == active.actor
+    assert observed[0].dialogue_parent == candidate.dialogue_parent
+    assert client.calls == [(candidate.dialogue_parent, candidate.thread_ts)]
+    assert engine.client.channel_history_call_count == 1
+
+
+def test_ephemeral_executive_listener_to_relay_source_vertical(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    import control_plane.executive_service as executive_service_module
+    from control_plane.executive_dialogue_observation import (
+        ActiveObservationFacts,
+        DialogueObservationFacts,
+        PublicRuntimeBindingFacts,
+    )
+    from control_plane.executive_service import ExecutiveControlService
+    from tests.test_executive_service import _FakeSupervisor, _config
+
+    active = _w3c_candidate(runtime)
+    current = active.current_worker
+    assert current is not None
+    _terminal, _binding, engine = _terminal_w3c_material(runtime)
+    observation_path = socket_root / "observation" / "dialogue-observation.sock"
+    monkeypatch.setattr(
+        executive_service_module,
+        "_peer_uid",
+        lambda _connection: 457,
+    )
+
+    def facts(_runtime, parent):
+        assert parent == active.dialogue_parent
+        return DialogueObservationFacts(
+            active=(
+                ActiveObservationFacts(
+                    root_job_id=current.root_job_id,
+                    job_id=current.job_id,
+                    attempt_id=current.attempt_id,
+                    worker_id=current.worker_id,
+                    attempt_status=current.attempt_status.value,
+                    worker_status=current.worker_status.value,
+                    execution_profile_id=current.execution_profile_id,
+                    execution_profile_digest=current.execution_profile_digest,
+                    capability_policy_digest=current.capability_policy_digest,
+                    runtime_binding=PublicRuntimeBindingFacts(
+                        session_alias=current.runtime_binding.session_alias,
+                        binding_id=current.runtime_binding.binding_id,
+                        binding_generation=(
+                            current.runtime_binding.binding_generation
+                        ),
+                        reasoning_surface=str(
+                            current.runtime_binding.reasoning_surface
+                        ),
+                    ),
+                    parent_fingerprint=parent["fingerprint"],
+                    company_dialogue_server_identity=(
+                        current.company_dialogue_server_identity
+                    ),
+                    company_dialogue_server_version=(
+                        current.company_dialogue_server_version
+                    ),
+                    company_dialogue_tool_schema_digest=(
+                        current.company_dialogue_tool_schema_digest
+                    ),
+                    company_dialogue_attested=True,
+                ),
+            )
+        )
+
+    executive = ExecutiveControlService(
+        _config(tmp_path, socket_root=socket_root / "operator"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        dialogue_observation_socket_path=observation_path,
+        dialogue_observation_peer_uid=457,
+        dialogue_observation_group_gid=os.getegid(),
+        dialogue_observation_facts_provider=facts,
+    )
+
+    async def scenario():
+        await executive.start()
+        try:
+            assert executive.runtime is not None
+            before = (
+                len(executive.runtime.jobs.list_jobs()),
+                len(executive.runtime.attempts.list_attempts()),
+                len(executive.runtime.workers.list_workers()),
+                len(executive.runtime.events.list_events()),
+            )
+            source = runtime.build_executive_observation_candidate_source(
+                engine,
+                runtime.ExecutiveDialogueObservationClient(
+                    observation_path,
+                    timeout_seconds=1,
+                ),
+                maximum=4,
+            )
+            iterator = await source()
+            observed = tuple([item async for item in iterator])
+            after = (
+                len(executive.runtime.jobs.list_jobs()),
+                len(executive.runtime.attempts.list_attempts()),
+                len(executive.runtime.workers.list_workers()),
+                len(executive.runtime.events.list_events()),
+            )
+            assert len(observed) == 1
+            projected = observed[0].current_worker
+            assert projected is not None
+            assert dataclasses.replace(
+                projected,
+                runtime_binding=current.runtime_binding,
+            ) == current
+            assert projected.runtime_binding.native_handle is None
+            assert projected.runtime_binding.account_label is None
+            assert observed[0].actor is not None
+            assert observed[0].actor.runtime_binding == projected.runtime_binding
+            assert after == before
+            assert engine.client.post_call_count == 0
+        finally:
+            await executive.close()
+
+    asyncio.run(scenario())
+
+
+def test_build_turn_runtime_selects_real_observation_source_when_enabled(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    from control_plane.executive_runtime import Runtime
+    from control_plane.wake_persist import WakeLedgerRepository
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
+        RuntimeTerminalReturnBindingResolver,
+    )
+    from tests.test_executive_wake_persisted_dispatch import _POLICY
+    from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _binding_for,
+        _registry,
+    )
+
+    monkeypatch.setattr(
+        runtime, "AGENT_RELAY_SOCKET_PATH", socket_root / "agent-relay.sock"
+    )
+    service = runtime.build_service(
+        _config(runtime, socket_root, _token_file(tmp_path / "relay-token"))
+    )
+    calls = []
+
+    async def empty_source():
+        return runtime._FrozenCandidateIterator(())
+
+    def compose(engine, client, *, maximum):
+        calls.append((engine, client, maximum))
+        return empty_source
+
+    client = runtime.ExecutiveDialogueObservationClient(
+        runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_executive_observation_candidate_source",
+        compose,
+    )
+    turn_runtime = runtime.build_turn_runtime(
+        service,
+        registry=_registry(),
+        repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger")),
+        dispatchers=WakeDispatcherRegistry(),
+        current_binding_for=_binding_for,
+        retry_policy=_POLICY,
+        observation_client=client,
+        terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
+    )
+
+    assert asyncio.run(turn_runtime.reconcile_once()) == ()
+    assert calls == [
+        (service.engine_v2, client, runtime.DEFAULT_MAX_TURN_CANDIDATES_PER_PASS)
+    ]
+
+
+def test_build_turn_runtime_refuses_parallel_candidate_authority_seams(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    from control_plane.executive_runtime import Runtime
+    from control_plane.wake_persist import WakeLedgerRepository
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
+        RuntimeTerminalReturnBindingResolver,
+    )
+    from tests.test_executive_wake_persisted_dispatch import _POLICY
+    from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _binding_for,
+        _registry,
+    )
+
+    monkeypatch.setattr(
+        runtime, "AGENT_RELAY_SOCKET_PATH", socket_root / "agent-relay.sock"
+    )
+    service = runtime.build_service(
+        _config(runtime, socket_root, _token_file(tmp_path / "relay-token"))
+    )
+
+    with pytest.raises(runtime.RelayRuntimeError, match="RUNTIME_INVALID"):
+        runtime.build_turn_runtime(
+            service,
+            registry=_registry(),
+            repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger")),
+            dispatchers=WakeDispatcherRegistry(),
+            current_binding_for=_binding_for,
+            retry_policy=_POLICY,
+            candidate_source=lambda: (),
+            observation_client=runtime.ExecutiveDialogueObservationClient(
+                runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
+            ),
+            terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
+        )
+
+    with pytest.raises(runtime.RelayRuntimeError, match="RUNTIME_INVALID"):
+        runtime.build_turn_runtime(
+            service,
+            registry=_registry(),
+            repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger-2")),
+            dispatchers=WakeDispatcherRegistry(),
+            current_binding_for=_binding_for,
+            retry_policy=_POLICY,
+            observation_client=runtime.ExecutiveDialogueObservationClient(
+                "/tmp/not-the-dedicated-executive-observation.sock"
+            ),
+            terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
+        )
+
+
+def test_slow_observation_collection_leaves_relay_v1_and_v2_responsive(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    from integrations.slack_agent_dialogue.contract_v2 import render_parent_v2
+    from integrations.slack_agent_dialogue.engine import HistoryPage, SlackMessage
+
+    os.chown(socket_root, os.geteuid(), os.getegid())
+    socket_root.chmod(0o710)
+    monkeypatch.setattr(
+        runtime, "AGENT_RELAY_SOCKET_PATH", socket_root / "agent-relay.sock"
+    )
+    monkeypatch.setattr(service_module, "_peer_uid", lambda _connection: 450)
+    service = runtime.build_service(
+        _config(runtime, socket_root, _token_file(tmp_path / "relay-token"))
+    )
+    dialogue_parent = _w3c_candidate(runtime).dialogue_parent
+
+    async def parent_history(**_kwargs):
+        return HistoryPage(
+            messages=(
+                SlackMessage(
+                    ts="1787961600.000001",
+                    author_user_id=service.engine.policy.relay_bot_user_id,
+                    text=render_parent_v2(dialogue_parent),
+                ),
+            ),
+            complete=True,
+            mutation_evidence_complete=True,
+        )
+
+    monkeypatch.setattr(
+        service.engine_v2.client,
+        "fetch_channel_history",
+        parent_history,
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowObservationClient:
+        async def resolve(self, **_kwargs):
+            entered.set()
+            await release.wait()
+            raise runtime.ExecutiveObservationClientError("UNAVAILABLE_ZERO_EFFECT")
+
+    async def collect():
+        source = runtime.build_executive_observation_candidate_source(
+            service.engine_v2,
+            SlowObservationClient(),
+            maximum=4,
+        )
+        iterator = await source()
+        return tuple([item async for item in iterator])
+
+    async def scenario() -> None:
+        await service.start()
+        collection = asyncio.create_task(collect())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            for version in (CONTROL_VERSION, CONTROL_VERSION_V2):
+                response = await asyncio.wait_for(
+                    call_service(service.config.socket_path, _request(version)),
+                    timeout=0.2,
+                )
+                assert response["ok"] is True
+            release.set()
+            assert await asyncio.wait_for(collection, timeout=1) == ()
+        finally:
+            release.set()
+            await asyncio.gather(collection, return_exceptions=True)
+            await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_terminal_observation_candidate_uses_executive_revalidated_binding() -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _binding_for,
+        _registry,
+    )
+
+    candidate, _binding, engine = _terminal_w3c_material(runtime)
+    candidate = dataclasses.replace(
+        candidate,
+        current_worker=None,
+        actor=None,
+    )
+
+    class NeverLocalResolver:
+        def resolve(self, _candidate):
+            raise AssertionError("Executive-revalidated binding must be consumed directly")
+
+    class Observer:
+        calls = 0
+
+        async def reconcile_once(self, **_kwargs):
+            self.calls += 1
+            return runtime.ObservationReceipt(
+                outcome=runtime.ObservationOutcome.NO_ACTION,
+                reason="EXECUTIVE_OBSERVATION_TERMINAL",
+                decision=None,
+                obligation=None,
+                route=None,
+            )
+
+    observer = Observer()
+    turn_runtime = runtime.AgentRelayTurnRuntime(
+        observer=observer,
+        registry=_registry(),
+        current_binding_for=_binding_for,
+        candidate_source=lambda: (candidate,),
+        **_w3c_dependencies(
+            runtime,
+            engine=engine,
+            terminal_binding_resolver=NeverLocalResolver(),
+        ),
+        _executive_observation_source=True,
+    )
+
+    receipt = asyncio.run(turn_runtime.reconcile_once())[0]
+
+    assert receipt.outcome is runtime.ObservationOutcome.NO_ACTION
+    assert receipt.reason == "EXECUTIVE_OBSERVATION_TERMINAL"
+    assert observer.calls == 1
 
 
 @pytest.mark.parametrize("missing", ["registry", "resolver"])
@@ -1176,7 +1584,9 @@ def test_turn_runtime_composition_refuses_missing_trusted_owner(
             dispatchers=WakeDispatcherRegistry(),
             current_binding_for=_binding_for,
             retry_policy=_POLICY,
-            candidate_source=lambda: (),
+            observation_client=runtime.ExecutiveDialogueObservationClient(
+                runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
+            ),
             terminal_binding_resolver=resolver,
         )
 

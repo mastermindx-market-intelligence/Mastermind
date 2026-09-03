@@ -51,6 +51,9 @@ CONTROL_ENVIRONMENT_PROBE_SCHEMA_VERSION = (
 _CANONICAL_AGENT_RELAY_SOCKET = Path(
     "/var/run/mastermind-agent-relay/agent-relay.sock"
 )
+_CANONICAL_DIALOGUE_OBSERVATION_SOCKET = Path(
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+)
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
 _CONFIG_REQUIRED = frozenset(
     {
@@ -117,6 +120,14 @@ _TERMINAL_RETURN_CONFIG_KEYS = frozenset(
         "terminal_return_socket_path",
     }
 )
+_DIALOGUE_OBSERVATION_CONFIG_KEYS = frozenset(
+    {
+        "dialogue_observation_socket_path",
+        "dialogue_observation_launchd_socket_name",
+        "dialogue_observation_peer_uid",
+    }
+)
+_CONFIG_DISABLED_EXTENSIONS = _DIALOGUE_OBSERVATION_CONFIG_KEYS
 
 
 def _absolute_path(value: str) -> Path:
@@ -229,7 +240,12 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         raise ServiceError("unsupported Executive control config schema")
     keys = set(config)
     missing = sorted(_CONFIG_REQUIRED - keys)
-    unknown = sorted(keys - _CONFIG_REQUIRED - _CONFIG_OPTIONAL)
+    unknown = sorted(
+        keys
+        - _CONFIG_REQUIRED
+        - _CONFIG_OPTIONAL
+        - _CONFIG_DISABLED_EXTENSIONS
+    )
     if missing or unknown:
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
@@ -240,6 +256,11 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
     if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
         raise ServiceError("terminal-return control config fields must be supplied together")
+    observation_present = keys & _DIALOGUE_OBSERVATION_CONFIG_KEYS
+    if observation_present and observation_present != _DIALOGUE_OBSERVATION_CONFIG_KEYS:
+        raise ServiceError(
+            "dialogue-observation control config fields must be supplied together"
+        )
     for name in (
         "runtime_root",
         "control_socket_path",
@@ -269,12 +290,32 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
                 "control config terminal_return_socket_path must be exactly "
                 f"{_CANONICAL_AGENT_RELAY_SOCKET}"
             )
+    if observation_present:
+        observation_socket = config["dialogue_observation_socket_path"]
+        config["dialogue_observation_socket_path"] = _path(
+            observation_socket,
+            "dialogue_observation_socket_path",
+        )
+        if observation_socket != os.fspath(_CANONICAL_DIALOGUE_OBSERVATION_SOCKET):
+            raise ServiceError(
+                "control config dialogue_observation_socket_path must be exactly "
+                f"{_CANONICAL_DIALOGUE_OBSERVATION_SOCKET}"
+            )
     for name in ("control_uid", "worker_uid", "worker_gid", "shared_run_gid"):
         config[name] = _integer(config[name], name)
     if ceo_ingress_present:
         config["ceo_ingress_peer_uid"] = _integer(
             config["ceo_ingress_peer_uid"], "ceo_ingress_peer_uid"
         )
+    if observation_present:
+        config["dialogue_observation_peer_uid"] = _integer(
+            config["dialogue_observation_peer_uid"],
+            "dialogue_observation_peer_uid",
+        )
+        if config["dialogue_observation_peer_uid"] != 457:
+            raise ServiceError(
+                "dialogue observation peer uid must be Agent Relay uid 457"
+            )
     if config["control_uid"] != os.geteuid():
         raise ServiceError("control service effective uid does not match control config")
     if config["worker_uid"] == config["control_uid"]:
@@ -298,6 +339,31 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             raise ServiceError("CeoIngress launchd socket name must differ from Operator")
         if config["ceo_ingress_peer_uid"] == config["control_uid"]:
             raise ServiceError("CeoIngress peer uid must differ from control uid")
+    if observation_present:
+        name = config["dialogue_observation_launchd_socket_name"]
+        if not isinstance(name, str) or not name.strip():
+            raise ServiceError(
+                "control config dialogue_observation_launchd_socket_name is required"
+            )
+        names = {config["launchd_socket_name"]}
+        if ceo_ingress_present:
+            names.add(config["ceo_ingress_launchd_socket_name"])
+        if name in names:
+            raise ServiceError(
+                "Dialogue Observation launchd socket name must be distinct"
+            )
+        observation_socket = config["dialogue_observation_socket_path"]
+        forbidden_sockets = {
+            config["control_socket_path"],
+            config["worker_broker_socket_path"],
+            _CANONICAL_AGENT_RELAY_SOCKET,
+        }
+        if ceo_ingress_present:
+            forbidden_sockets.add(config["ceo_ingress_socket_path"])
+        if observation_socket in forbidden_sockets:
+            raise ServiceError(
+                "Dialogue Observation socket must be distinct from every service path"
+            )
     if terminal_return_present:
         if type(config["terminal_return_armed"]) is not bool:
             raise ServiceError("control config terminal_return_armed must be boolean")
@@ -857,6 +923,22 @@ def _service_from_config(
             "ceo_ingress_armed": False,
             "ceo_ingress_activated_socket": ceo_listener,
         }
+    dialogue_observation_kwargs: dict[str, Any] = {}
+    if _DIALOGUE_OBSERVATION_CONFIG_KEYS <= set(raw):
+        observation_listener = activate_launchd_socket(
+            str(raw["dialogue_observation_launchd_socket_name"])
+        )
+        activated_listeners.append(observation_listener)
+        dialogue_observation_kwargs = {
+            "dialogue_observation_socket_path": raw[
+                "dialogue_observation_socket_path"
+            ],
+            "dialogue_observation_peer_uid": int(
+                raw["dialogue_observation_peer_uid"]
+            ),
+            "dialogue_observation_group_gid": 457,
+            "dialogue_observation_activated_socket": observation_listener,
+        }
     if config.terminal_return_socket_path is not None:
         for activated_listener in activated_listeners:
             getsockname = getattr(activated_listener, "getsockname", None)
@@ -888,6 +970,7 @@ def _service_from_config(
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
         **ceo_ingress_kwargs,
+        **dialogue_observation_kwargs,
         **terminal_return_kwargs,
     )
 
