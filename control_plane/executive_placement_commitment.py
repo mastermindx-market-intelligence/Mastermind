@@ -11,7 +11,13 @@ projections for private Runtime adapters.  Exact-key validation does not make
 ordinary caller data authoritative: C2-R1 must construct both projections from
 the SessionTargetRegistry and one current Runtime transaction, never expose
 them on a public service route, and never recycle a historical Event as current
-expectations.
+expectations.  Inside the existing Runtime ``BEGIN IMMEDIATE`` transaction and
+before any claim, Event, quota, or other write, C2-R1 must look up the current
+``(SESSION_ALIAS, CARRIER_GENERATION)`` carrier.  If none exists, the current
+validated target fingerprint may continue through the normal C2-R1 claim logic.
+If one exists, its persisted target fingerprint must match the current plan;
+an A/B mismatch raises exactly ``TARGET_DEFINITION_CONFLICT`` and rolls back
+with zero writes, no succession, and no effect.
 """
 
 from __future__ import annotations
@@ -36,9 +42,6 @@ EVENT_TYPE = "CAPACITY_PLACEMENT_COMMITTED"
 
 SESSION_ALIAS = "EXECUTIVE-CEO-CODEX-A"
 CARRIER_GENERATION = 1
-_GENERATION_ONE_TARGET_DEFINITION_FINGERPRINT = (
-    "f6636381fe18d7a05224d9e9fc5105d6d6727acc895b306f46659c40f6b6b7a5"
-)
 
 TARGET_DEFINITION_FINGERPRINT_KEYS = frozenset(
     {
@@ -250,32 +253,6 @@ def fingerprint_target_definition(value: Any) -> str:
     return digest(_canonical_target_definition(value))
 
 
-def _bound_generation_one_target_definition(value: Any) -> dict[str, Any]:
-    """Reconcile the protected alias-generation binding before command derivation.
-
-    Generation 1 is already bound to the protected SessionTarget definition.
-    A changed exact-shape projection is target drift, not authority to derive a
-    second initial carrier.  Malformed outer projections retain their closed
-    shape refusal; same-alias field drift fails as the fixed conflict required
-    by the no-succession contract.
-    """
-
-    try:
-        target = _canonical_target_definition(value)
-    except PlacementCommitmentError as exc:
-        if isinstance(value, Mapping):
-            supplied = dict(value)
-            if (
-                set(supplied) == TARGET_DEFINITION_FINGERPRINT_KEYS
-                and supplied.get("session_alias") == SESSION_ALIAS
-            ):
-                raise PlacementCommitmentError("TARGET_DEFINITION_CONFLICT") from exc
-        raise
-    if digest(target) != _GENERATION_ONE_TARGET_DEFINITION_FINGERPRINT:
-        raise PlacementCommitmentError("TARGET_DEFINITION_CONFLICT")
-    return target
-
-
 def _canonical_selection(value: Any) -> tuple[dict[str, Any], dict[str, Any], str]:
     try:
         selection = validate_placement_selection(value)
@@ -469,7 +446,9 @@ def build_commitment_plan(
         expected_source_root_revision,
         code="EXPECTED_SOURCE_ROOT_REVISION_INVALID",
     )
-    target = _bound_generation_one_target_definition(validated_target_facts)
+    target = _canonical_target_definition(validated_target_facts)
+    if target["session_alias"] != SESSION_ALIAS:
+        raise PlacementCommitmentError("TARGET_DEFINITION_CONFLICT")
     target_fingerprint = digest(target)
 
     selection, selected, placement_mode = _canonical_selection(placement_selection)
@@ -603,11 +582,12 @@ def _runtime_facts_for_plan(
     conflict_code: str,
 ) -> dict[str, Any]:
     facts = _canonical_runtime_facts(value)
+    if facts["target_definition_fingerprint"] != plan.target_definition_fingerprint:
+        raise PlacementCommitmentError("TARGET_DEFINITION_CONFLICT")
     expected = {
         "source_root_job_id": plan.source_root_job_id,
         "source_root_revision": plan.expected_source_root_revision,
         "session_alias": plan.session_alias,
-        "target_definition_fingerprint": plan.target_definition_fingerprint,
         "carrier_generation": plan.carrier_generation,
         "carrier_job_created_command_id": plan.carrier_job_created_command_id,
         "carrier_disposition": _PLACEMENT_MODE_TO_DISPOSITION[plan.placement_mode],
@@ -716,7 +696,10 @@ def validate_commitment_event_payload(
             conflict_code="COMMITMENT_EVENT_REPLAY_CONFLICT",
         )
     except PlacementCommitmentError as exc:
-        if exc.code == "RUNTIME_FACTS_SHAPE_INVALID":
+        if exc.code in {
+            "RUNTIME_FACTS_SHAPE_INVALID",
+            "TARGET_DEFINITION_CONFLICT",
+        }:
             raise
         raise PlacementCommitmentError("COMMITMENT_EVENT_REPLAY_CONFLICT") from exc
     expected = _event_payload(plan=plan, runtime_facts=facts)

@@ -133,10 +133,9 @@ _FORBIDDEN_EVENT_FIELDS = {
     "arming_state",
 }
 
-_TARGET_FINGERPRINT = "f6636381fe18d7a05224d9e9fc5105d6d6727acc895b306f46659c40f6b6b7a5"
-_CARRIER_COMMAND = "SOL-CARRIER-b84e2db087de11ea3b496b7b86b09070"
 _SOURCE_AUTHORITY_FINGERPRINT = "a" * 64
 _CARRIER_AUTHORITY_FINGERPRINT = "b" * 64
+_ARBITRARY_TARGET_SEAT = "fixture-seat-a"
 _UNSET = object()
 
 
@@ -149,6 +148,20 @@ def _independent_digest(value: object) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _independent_target_fingerprint(target: dict[str, object]) -> str:
+    return _independent_digest({key: target[key] for key in _TARGET_FINGERPRINT_KEYS})
+
+
+def _independent_carrier_command(target: dict[str, object]) -> str:
+    semantics = {
+        "schema_version": "mastermind.sol_session_carrier_command/v1",
+        "session_alias": target["session_alias"],
+        "target_definition_fingerprint": _independent_target_fingerprint(target),
+        "carrier_generation": 1,
+    }
+    return f"SOL-CARRIER-{_independent_digest(semantics)[:32]}"
 
 
 def _source(owner: SourceOwner, ref: str) -> SourceRef:
@@ -211,7 +224,7 @@ def _selection(
 def _target_facts(**changes: object) -> dict[str, object]:
     value: dict[str, object] = {
         "session_alias": "EXECUTIVE-CEO-CODEX-A",
-        "target_seat": "ceo",
+        "target_seat": _ARBITRARY_TARGET_SEAT,
         "reasoning_surface": "codex",
         "wake_transport": "codex-app-server",
         "allowed_transports": ["codex-app-server"],
@@ -319,21 +332,20 @@ def test_v2_schemas_constants_and_literal_wire_shapes_are_pinned() -> None:
 def test_target_fingerprint_and_carrier_command_use_exact_independent_domains() -> None:
     target = _target_facts()
     target_semantics = {key: target[key] for key in _TARGET_FINGERPRINT_KEYS}
-    assert _independent_digest(target_semantics) == _TARGET_FINGERPRINT
-    assert c2.fingerprint_target_definition(target) == _TARGET_FINGERPRINT
+    target_fingerprint = _independent_digest(target_semantics)
+    assert c2.fingerprint_target_definition(target) == target_fingerprint
 
     plan = _plan(target_facts=dict(reversed(list(target.items()))))
     carrier_semantics = {
         "schema_version": "mastermind.sol_session_carrier_command/v1",
         "session_alias": "EXECUTIVE-CEO-CODEX-A",
-        "target_definition_fingerprint": _TARGET_FINGERPRINT,
+        "target_definition_fingerprint": target_fingerprint,
         "carrier_generation": 1,
     }
     assert plan.carrier_command_semantics() == carrier_semantics
-    assert _independent_digest(carrier_semantics) == (
-        "b84e2db087de11ea3b496b7b86b09070586742064b5b848b8e9098c9b5e3b9a1"
+    assert plan.carrier_job_created_command_id == (
+        f"SOL-CARRIER-{_independent_digest(carrier_semantics)[:32]}"
     )
-    assert plan.carrier_job_created_command_id == _CARRIER_COMMAND
 
 
 def test_target_projection_rejects_missing_extra_and_non_mapping_values() -> None:
@@ -350,24 +362,37 @@ def test_target_projection_rejects_missing_extra_and_non_mapping_values() -> Non
 @pytest.mark.parametrize(
     ("field", "changed"),
     (
-        ("session_alias", "EXECUTIVE-CEO-A"),
-        ("target_seat", "coo"),
+        ("target_seat", "fixture-seat-b"),
         ("reasoning_surface", "chatgpt-sol"),
         ("wake_transport", "chatgpt-gui"),
         ("allowed_transports", ["chatgpt-gui"]),
         ("workstream", "prophet"),
     ),
 )
-def test_generation_one_target_definition_drift_is_a_fixed_conflict(
+def test_changed_exact_target_derives_a_distinct_pure_plan_without_authority(
     field: str,
     changed: object,
 ) -> None:
+    current_target = _target_facts()
+    changed_target = _target_facts(**{field: changed})
     accepted = _plan()
-    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
-        _plan(target_facts=_target_facts(**{field: changed}))
-    assert excinfo.value.code == "TARGET_DEFINITION_CONFLICT"
+    changed_plan = _plan(target_facts=changed_target)
+
+    assert accepted.target_definition_fingerprint == _independent_target_fingerprint(
+        current_target
+    )
+    assert changed_plan.target_definition_fingerprint == (
+        _independent_target_fingerprint(changed_target)
+    )
+    assert changed_plan.target_definition_fingerprint != (
+        accepted.target_definition_fingerprint
+    )
+    assert changed_plan.carrier_job_created_command_id != (
+        accepted.carrier_job_created_command_id
+    )
+    assert changed_plan.commitment_command_id != accepted.commitment_command_id
     assert accepted.carrier_generation == 1
-    assert accepted.carrier_job_created_command_id == _CARRIER_COMMAND
+    assert changed_plan.carrier_generation == 1
 
 
 @pytest.mark.parametrize(
@@ -375,29 +400,42 @@ def test_generation_one_target_definition_drift_is_a_fixed_conflict(
     (
         ["codex-app-server", "chatgpt-gui"],
         ["chatgpt-gui", "codex-app-server"],
-        ["codex-app-server", "codex-app-server"],
     ),
 )
-def test_allowed_transport_extra_order_or_duplicate_cannot_mint_a_carrier(
+def test_allowed_transport_value_and_order_are_part_of_pure_target_identity(
     allowed_transports: list[str],
 ) -> None:
-    accepted = _plan()
+    target = _target_facts(allowed_transports=allowed_transports)
+    plan = _plan(target_facts=target)
+    assert plan.target_definition_fingerprint == _independent_target_fingerprint(target)
+    assert plan.carrier_job_created_command_id == _independent_carrier_command(target)
+
+
+def test_allowed_transport_order_changes_pure_target_and_carrier_identity() -> None:
+    first_target = _target_facts(allowed_transports=["codex-app-server", "chatgpt-gui"])
+    second_target = _target_facts(
+        allowed_transports=["chatgpt-gui", "codex-app-server"]
+    )
+    first = _plan(target_facts=first_target)
+    second = _plan(target_facts=second_target)
+
+    assert first.target_definition_fingerprint != second.target_definition_fingerprint
+    assert first.carrier_job_created_command_id != second.carrier_job_created_command_id
+
+
+def test_duplicate_allowed_transport_is_invalid_target_input() -> None:
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
-        _plan(target_facts=_target_facts(allowed_transports=allowed_transports))
-    assert excinfo.value.code == "TARGET_DEFINITION_CONFLICT"
-    assert accepted.carrier_generation == 1
-    assert accepted.carrier_job_created_command_id == _CARRIER_COMMAND
+        _plan(
+            target_facts=_target_facts(
+                allowed_transports=["codex-app-server", "codex-app-server"]
+            )
+        )
+    assert excinfo.value.code == "TARGET_DEFINITION_INVALID"
 
 
-def test_target_conflict_precedes_any_alternate_carrier_command_derivation(
-    monkeypatch,
-) -> None:
-    def unexpected_carrier_derivation(*args, **kwargs):
-        pytest.fail("target drift reached carrier command derivation")
-
-    monkeypatch.setattr(c2, "_carrier_command_id", unexpected_carrier_derivation)
+def test_fixed_alias_cannot_drift_in_trusted_target_projection() -> None:
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
-        _plan(target_facts=_target_facts(reasoning_surface="chatgpt-sol"))
+        _plan(target_facts=_target_facts(session_alias="EXECUTIVE-CEO-A"))
     assert excinfo.value.code == "TARGET_DEFINITION_CONFLICT"
 
 
@@ -452,9 +490,11 @@ def test_selected_c1_document_derives_exact_stable_commitment_semantics() -> Non
             selection["selected"]
         ),
         "session_alias": "EXECUTIVE-CEO-CODEX-A",
-        "target_definition_fingerprint": _TARGET_FINGERPRINT,
+        "target_definition_fingerprint": _independent_target_fingerprint(
+            _target_facts()
+        ),
         "carrier_generation": 1,
-        "carrier_job_created_command_id": _CARRIER_COMMAND,
+        "carrier_job_created_command_id": _independent_carrier_command(_target_facts()),
     }
     expected_fingerprint = _independent_digest(expected)
 
@@ -497,8 +537,9 @@ def test_carrier_identity_converges_across_roots_while_commitment_does_not() -> 
     first = _plan(source_root_job_id="job-source-1")
     second = _plan(source_root_job_id="job-source-2")
 
-    assert first.carrier_job_created_command_id == _CARRIER_COMMAND
-    assert second.carrier_job_created_command_id == _CARRIER_COMMAND
+    expected_carrier = _independent_carrier_command(_target_facts())
+    assert first.carrier_job_created_command_id == expected_carrier
+    assert second.carrier_job_created_command_id == expected_carrier
     assert first.carrier_command_semantics() == second.carrier_command_semantics()
     assert first.commitment_command_id != second.commitment_command_id
     assert first.command_fingerprint != second.command_fingerprint
@@ -653,10 +694,12 @@ def test_event_binds_source_and_carrier_receipts_without_duplicate_placement() -
             plan.committed_placement_snapshot_digest
         ),
         "session_alias": "EXECUTIVE-CEO-CODEX-A",
-        "target_definition_fingerprint": _TARGET_FINGERPRINT,
+        "target_definition_fingerprint": _independent_target_fingerprint(
+            _target_facts()
+        ),
         "carrier_generation": 1,
         "carrier_job_id": "job-ceo-carrier-1",
-        "carrier_job_created_command_id": _CARRIER_COMMAND,
+        "carrier_job_created_command_id": _independent_carrier_command(_target_facts()),
         "carrier_authority_fingerprint": _CARRIER_AUTHORITY_FINGERPRINT,
         "carrier_disposition": "created",
         "committed_carrier_attempt_id": "attempt-ceo-carrier-1",
@@ -680,7 +723,6 @@ def test_event_binds_source_and_carrier_receipts_without_duplicate_placement() -
         ("source_root_job_id", "job-source-2"),
         ("source_root_revision", 8),
         ("session_alias", "EXECUTIVE-CEO-A"),
-        ("target_definition_fingerprint", "c" * 64),
         ("carrier_generation", 2),
         ("carrier_job_created_command_id", "SOL-CARRIER-" + "d" * 32),
         ("carrier_disposition", "reused"),
@@ -697,6 +739,27 @@ def test_event_builder_refuses_runtime_facts_that_conflict_with_plan(
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
         _event(plan, _runtime_facts(plan, **{field: changed}))
     assert excinfo.value.code == "RUNTIME_FACTS_CONFLICT"
+
+
+def test_existing_carrier_target_a_conflicts_with_current_plan_b() -> None:
+    plan_a = _plan()
+    target_b = _target_facts(reasoning_surface="chatgpt-sol")
+    plan_b = _plan(target_facts=target_b)
+    carrier_a_facts = _runtime_facts(plan_a)
+    carrier_a_event = _event(plan_a, carrier_a_facts)
+
+    assert plan_b.target_definition_fingerprint != plan_a.target_definition_fingerprint
+    assert plan_b.carrier_job_created_command_id != (
+        plan_a.carrier_job_created_command_id
+    )
+
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _event(plan_b, carrier_a_facts)
+    assert excinfo.value.code == "TARGET_DEFINITION_CONFLICT"
+
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(carrier_a_event, plan=plan_b, runtime_facts=carrier_a_facts)
+    assert excinfo.value.code == "TARGET_DEFINITION_CONFLICT"
 
 
 @pytest.mark.parametrize(
@@ -781,7 +844,6 @@ def test_stale_runtime_revision_still_refuses_at_private_boundary(
         ("source_job_created_command_id", "CEO-V2-ROOT-CREATED-2"),
         ("source_authority_fingerprint", "c" * 64),
         ("session_alias", "EXECUTIVE-CEO-A"),
-        ("target_definition_fingerprint", "c" * 64),
         ("carrier_generation", 2),
         ("carrier_job_id", "job-ceo-carrier-2"),
         ("carrier_job_created_command_id", "SOL-CARRIER-" + "d" * 32),
