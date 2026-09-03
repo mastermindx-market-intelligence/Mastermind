@@ -252,12 +252,19 @@ def _parse_response(
     if not _strict_int(result["Duration"]):
         raise ZoektResponseValidationError("response duration must be an integer")
 
-    matches = _parse_file_matches(result["FileMatches"])
     stats = _object(result["Stats"], "response.result.Stats")
     total_match_count = stats["MatchCount"]
     assert isinstance(total_match_count, int)
     if total_match_count < 0:
         raise ZoektResponseValidationError("response MatchCount must be non-negative")
+    # Zoekt's current empty-result serializer may emit null instead of []; the
+    # engine count remains authoritative.  A nonzero count with no rows is
+    # therefore accepted only as an explicitly truncated result below.
+    matches = (
+        []
+        if result["FileMatches"] is None
+        else _parse_file_matches(result["FileMatches"])
+    )
     if total_match_count < len(matches):
         raise ZoektResponseValidationError("response MatchCount is below parsed match count")
     truncated = (
