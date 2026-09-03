@@ -24,7 +24,10 @@ from control_plane.executive_delegation_identity import derive_delegation_identi
 from integrations.mastermind_company_mcp.adapter import (
     DialogueBinding,
 )
-from integrations.slack_agent_dialogue.contract import FABLE_MESSAGE_TYPES
+from integrations.slack_agent_dialogue.contract import (
+    DialogueContractError,
+    FABLE_MESSAGE_TYPES,
+)
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_SCHEMA_V2,
     build_message_v2,
@@ -100,7 +103,7 @@ class RuntimeTerminalReturnBindingResolver:
             raise ValueError("terminal-return delegation identity drifted")
         return ResolvedTerminalReturnBinding(
             work_ref=source.work_ref,
-            commission_ref=dict(source.commission_ref),
+            commission_ref=_commission_ref_dict(source.commission_ref),
             session_ref=identity.session_ref,
             operation_key=identity.operation_key,
             watch_mode=source.watch_mode,
@@ -118,6 +121,18 @@ class TerminalReturnProjectionReceipt:
     fingerprint: str
     message_ts: str
     duplicate_timestamps: tuple[str, ...]
+    thread_ts: str
+    parent_author_user_id: str
+    parent_fingerprint: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _RelayParentAttestation:
+    """One immutable Relay-owned parent identity for a physical RESULT."""
+
+    thread_ts: str
+    parent_author_user_id: str
+    parent_fingerprint: str
 
 
 def _refuse(code: str) -> None:
@@ -131,6 +146,16 @@ def _candidate_attempt_ref(candidate: TerminalReturnCandidate, *, kind: str) -> 
         "attempt_id": candidate.attempt_id,
         "worker_id": candidate.worker_id,
     }
+
+
+def _commission_ref_dict(value: Any) -> dict[str, str]:
+    """Adapt the Runtime-owned immutable CommissionRef at the dialogue edge."""
+
+    to_dict = getattr(value, "to_dict", None)
+    raw = to_dict() if callable(to_dict) else value
+    if not isinstance(raw, Mapping):
+        raise TypeError("commission_ref must expose a mapping")
+    return dict(raw)
 
 
 def _normalize_binding(
@@ -172,10 +197,18 @@ def _normalize_binding(
     except (DialogueEngineError, TypeError, ValueError):
         _refuse("DIALOGUE_BINDING_UNAVAILABLE")
     source = candidate.dialogue_source
+    try:
+        source_commission_ref = (
+            _commission_ref_dict(source.commission_ref)
+            if source is not None
+            else None
+        )
+    except TypeError:
+        _refuse("DIALOGUE_BINDING_UNAVAILABLE")
     if (
         source is None
         or source.work_ref != normalized["work_ref"]
-        or source.commission_ref != normalized["commission_ref"]
+        or source_commission_ref != normalized["commission_ref"]
         or source.watch_mode != normalized["watch_mode"]
         or normalized["session_ref"] != candidate.session_ref
         or normalized["operation_key"] != candidate.operation_key
@@ -192,7 +225,7 @@ def _bound_thread(
     response: Any,
     *,
     expected_thread_ts: str | None,
-) -> str:
+) -> _RelayParentAttestation:
     """Validate one closed Relay-owned parent-attestation response."""
 
     if not isinstance(response, dict) or set(response) not in (
@@ -231,7 +264,11 @@ def _bound_thread(
         or _DIGEST_RE.fullmatch(result["parent_fingerprint"]) is None
     ):
         _refuse("DIALOGUE_BINDING_UNAVAILABLE")
-    return result["thread_ts"]
+    return _RelayParentAttestation(
+        thread_ts=result["thread_ts"],
+        parent_author_user_id=result["parent_author_user_id"],
+        parent_fingerprint=result["parent_fingerprint"],
+    )
 
 
 def _build_message(
@@ -242,22 +279,35 @@ def _build_message(
         not isinstance(candidate, TerminalReturnCandidate)
         or candidate.runtime_status != "COMPLETED"
         or candidate.result_status != "RESULT"
-        or not isinstance(candidate.terminal_digest, str)
-        or _DIGEST_RE.fullmatch(candidate.terminal_digest) is None
+        or not isinstance(candidate.terminal_evidence_digest, str)
+        or _DIGEST_RE.fullmatch(candidate.terminal_evidence_digest) is None
         or candidate.message_key
-        != f"asd-exec-result-{candidate.terminal_digest}"
+        != f"asd-exec-result-{candidate.terminal_evidence_digest}"
         or candidate.role not in {"plan", "work", "review", "repair"}
-        or not isinstance(candidate.result_digest, str)
-        or _DIGEST_RE.fullmatch(candidate.result_digest) is None
+        or any(
+            not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None
+            for value in (
+                candidate.result_envelope_digest,
+                candidate.terminal_evidence_digest,
+                candidate.artifact_receipt_digest,
+                candidate.validation_receipt_digest,
+                candidate.effective_grant_digest,
+            )
+        )
         or not isinstance(candidate.summary, str)
     ):
         _refuse("DIALOGUE_REFUSED")
-    if candidate.review_verdict is not None:
-        if candidate.role != "review" or candidate.review_verdict not in {
-            "approve",
-            "reject",
-        }:
+    if candidate.role == "review":
+        if (
+            not isinstance(candidate.review_verdict, str)
+            or candidate.review_verdict not in ("approve", "reject")
+        ):
             _refuse("DIALOGUE_REFUSED")
+        body_status = "PASS" if candidate.review_verdict == "approve" else "FAIL"
+    else:
+        if candidate.review_verdict is not None:
+            _refuse("DIALOGUE_REFUSED")
+        body_status = "PASS"
 
     def envelope(result: str) -> dict[str, Any]:
         return {
@@ -271,38 +321,53 @@ def _build_message(
             "reply_to_message_key": None,
             "applies_to": context["applies_to"],
             "summary": f"Executive {candidate.role} terminal result.",
-            "body": {"status": "PASS", "result": result},
+            "body": {"status": body_status, "result": result},
             "evidence_refs": [],
             "requires_response": False,
             "created_at": candidate.terminal_at,
         }
 
-    # Preserve a Runtime summary exactly only when the existing Agent Dialogue
-    # contract accepts it.  Otherwise project a deterministic digest synopsis;
-    # never truncate, redact into a different claim, or invent review prose.
-    try:
-        return build_message_v2(envelope(candidate.summary))
-    except Exception:
-        synopsis = json.dumps(
-            {
-                "evidence_ref": f"result-envelope-sha256:{candidate.result_digest}",
-                "role": candidate.role,
-                "status": "RESULT",
-                "summary_sha256": hashlib.sha256(
-                    candidate.summary.encode("utf-8")
-                ).hexdigest(),
-            },
+    def synopsis(*, include_summary: bool) -> str:
+        result: dict[str, str] = {
+            "schema": "mastermind.executive_terminal_result_synopsis/v1",
+            "role": candidate.role,
+            "outcome": body_status,
+            "result_envelope_digest": candidate.result_envelope_digest,
+            "terminal_evidence_digest": candidate.terminal_evidence_digest,
+            "artifact_receipt_digest": candidate.artifact_receipt_digest,
+            "validation_receipt_digest": candidate.validation_receipt_digest,
+            "effective_grant_digest": candidate.effective_grant_digest,
+        }
+        if include_summary:
+            result["summary"] = candidate.summary
+        else:
+            result["summary_sha256"] = hashlib.sha256(
+                candidate.summary.encode("utf-8")
+            ).hexdigest()
+        return json.dumps(
+            result,
             ensure_ascii=True,
             separators=(",", ":"),
             sort_keys=True,
         )
+
+    # RESULT always carries the stable evidence synopsis.  Contract-only
+    # refusal of the raw summary (too large or unsafe) selects its digest form.
+    try:
+        return build_message_v2(envelope(synopsis(include_summary=True)))
+    except DialogueContractError:
         try:
-            return build_message_v2(envelope(synopsis))
-        except Exception:
+            return build_message_v2(envelope(synopsis(include_summary=False)))
+        except DialogueContractError:
             _refuse("DIALOGUE_REFUSED")
 
 
-def _receipt(response: Any, *, message: Mapping[str, Any]) -> TerminalReturnProjectionReceipt:
+def _receipt(
+    response: Any,
+    *,
+    message: Mapping[str, Any],
+    parent: _RelayParentAttestation,
+) -> TerminalReturnProjectionReceipt:
     if not isinstance(response, dict) or set(response) not in (
         {"ok", "result"},
         {"ok", "error"},
@@ -325,6 +390,9 @@ def _receipt(response: Any, *, message: Mapping[str, Any]) -> TerminalReturnProj
         "fingerprint",
         "message_ts",
         "duplicate_timestamps",
+        "thread_ts",
+        "parent_author_user_id",
+        "parent_fingerprint",
     }:
         _refuse("EFFECT_UNKNOWN")
     duplicates = value["duplicate_timestamps"]
@@ -335,6 +403,9 @@ def _receipt(response: Any, *, message: Mapping[str, Any]) -> TerminalReturnProj
         or value["fingerprint"] != message["fingerprint"]
         or not isinstance(value["message_ts"], str)
         or _THREAD_TS_RE.fullmatch(value["message_ts"]) is None
+        or value["thread_ts"] != parent.thread_ts
+        or value["parent_author_user_id"] != parent.parent_author_user_id
+        or value["parent_fingerprint"] != parent.parent_fingerprint
         or not isinstance(duplicates, list)
         or bool(duplicates)
         or any(
@@ -350,6 +421,9 @@ def _receipt(response: Any, *, message: Mapping[str, Any]) -> TerminalReturnProj
         fingerprint=value["fingerprint"],
         message_ts=value["message_ts"],
         duplicate_timestamps=tuple(duplicates),
+        thread_ts=value["thread_ts"],
+        parent_author_user_id=value["parent_author_user_id"],
+        parent_fingerprint=value["parent_fingerprint"],
     )
 
 
@@ -397,7 +471,7 @@ class ExecutiveTerminalReturnProjector:
         *,
         context: Mapping[str, Any],
         thread_ts: str | None,
-    ) -> str:
+    ) -> _RelayParentAttestation:
         bind_request = {
             "version": CONTROL_VERSION_V2,
             "operation": "bind_or_verify_relay_parent_thread",
@@ -430,7 +504,7 @@ class ExecutiveTerminalReturnProjector:
         before_write: Callable[[], Any] | None = None,
     ) -> TerminalReturnProjectionReceipt:
         context, expected_thread_ts, message = self._resolve(candidate)
-        thread_ts = await self._bind(
+        parent = await self._bind(
             context=context,
             thread_ts=expected_thread_ts,
         )
@@ -439,7 +513,7 @@ class ExecutiveTerminalReturnProjector:
             "operation": "send_message",
             "args": {
                 "context": context,
-                "thread_ts": thread_ts,
+                "thread_ts": parent.thread_ts,
                 "message": message,
                 "send_protocol": EXACT_SEND_PROTOCOL,
             },
@@ -456,6 +530,8 @@ class ExecutiveTerminalReturnProjector:
         except DialogueServiceError as exc:
             if exc.code == "SEND_EFFECT_UNKNOWN":
                 _refuse("EFFECT_UNKNOWN")
+            if exc.code == "TRANSPORT_UNAVAILABLE":
+                _refuse("TRANSPORT_UNAVAILABLE")
             if exc.code in {
                 "SERVICE_UNAVAILABLE",
                 "PEER_CREDENTIALS_UNAVAILABLE",
@@ -466,7 +542,7 @@ class ExecutiveTerminalReturnProjector:
             raise
         except Exception:
             _refuse("SERVICE_UNAVAILABLE")
-        return _receipt(response, message=message)
+        return _receipt(response, message=message, parent=parent)
 
     async def reconcile(
         self,
@@ -479,14 +555,14 @@ class ExecutiveTerminalReturnProjector:
         """
 
         context, expected_thread_ts, message = self._resolve(candidate)
-        thread_ts = await self._bind(
+        parent = await self._bind(
             context=context,
             thread_ts=expected_thread_ts,
         )
         request = {
             "version": CONTROL_VERSION_V2,
             "operation": "read_thread",
-            "args": {"context": context, "thread_ts": thread_ts},
+            "args": {"context": context, "thread_ts": parent.thread_ts},
         }
         try:
             response = await self._service_call(self._socket_path, request)
@@ -527,7 +603,7 @@ class ExecutiveTerminalReturnProjector:
         if (
             not isinstance(result, dict)
             or set(result) != expected_keys
-            or result.get("thread_ts") != thread_ts
+            or result.get("thread_ts") != parent.thread_ts
             or not isinstance(result.get("messages"), list)
             or result.get("historical_messages") != []
             or type(result.get("ineligible_count")) is not int
@@ -572,6 +648,9 @@ class ExecutiveTerminalReturnProjector:
             fingerprint=str(message["fingerprint"]),
             message_ts=str(match["primary_ts"]),
             duplicate_timestamps=tuple(duplicates),
+            thread_ts=parent.thread_ts,
+            parent_author_user_id=parent.parent_author_user_id,
+            parent_fingerprint=parent.parent_fingerprint,
         )
 
     async def __call__(self, candidate: TerminalReturnCandidate) -> None:

@@ -133,7 +133,7 @@ _REQUIRED_KEYS = frozenset(
 )
 _OPTIONAL_KEYS = frozenset({"workstream"})
 _V2_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"intent_kind", "business_impact"})
-_V2_OPTIONAL_KEYS = _OPTIONAL_KEYS | frozenset({"dialogue_source"})
+_V2_OPTIONAL_KEYS = _OPTIONAL_KEYS
 _V2_INTENT_KIND = "executive_coo_cycle"
 _V2_BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
 
@@ -617,18 +617,6 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         intent["workstream"] = _text(
             raw["workstream"], "intent.workstream", pattern=_WORKSTREAM_RE, max_chars=72
         )
-    if "dialogue_source" in raw:
-        if schema != INTENT_SCHEMA_V2 or "workstream" not in intent:
-            raise CeoIntentError(
-                "intent.dialogue_source requires a strict v2 workstream admission"
-            )
-        try:
-            intent["dialogue_source"] = normalize_executive_dialogue_source(
-                raw["dialogue_source"],
-                work_ref=intent["workstream"],
-            ).to_dict()
-        except StateConflict as exc:
-            raise CeoIntentError(str(exc)) from exc
     size = len(canonical_bytes(intent))
     if size > MAX_ENVELOPE_BYTES:
         raise CeoIntentError(
@@ -752,12 +740,6 @@ def _provenance(intent: Mapping[str, Any], fingerprint: str) -> dict[str, Any]:
     }
     if "workstream" in intent:
         value["workstream"] = intent["workstream"]
-    if "dialogue_source" in intent:
-        source = dict(intent["dialogue_source"])
-        value["dialogue_source"] = source
-        value["dialogue_source_digest"] = hashlib.sha256(
-            canonical_bytes(source)
-        ).hexdigest()
     return value
 
 
@@ -832,8 +814,46 @@ def _receipt_from_event(
             raise CeoIntentError(
                 f"intent {intent_id!r} does not resolve to its strict v2 aggregation root"
             )
+        durable_source = provenance.get("dialogue_source")
+        durable_source_digest = provenance.get("dialogue_source_digest")
+        if durable_source is None:
+            if durable_source_digest is not None:
+                raise CeoIntentError(
+                    f"intent {intent_id!r} has drifted host dialogue-source evidence"
+                )
+        else:
+            work_ref = provenance.get("workstream")
+            if not isinstance(work_ref, str):
+                raise CeoIntentError(
+                    f"intent {intent_id!r} has no durable workstream for its "
+                    "host dialogue source"
+                )
+            try:
+                normalized_durable_source = normalize_executive_dialogue_source(
+                    durable_source,
+                    work_ref=work_ref,
+                ).to_dict()
+            except StateConflict as exc:
+                raise CeoIntentError(str(exc)) from exc
+            expected_source_digest = hashlib.sha256(
+                json.dumps(
+                    normalized_durable_source,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+            if (
+                durable_source != normalized_durable_source
+                or not isinstance(durable_source_digest, str)
+                or _FINGERPRINT_RE.fullmatch(durable_source_digest) is None
+                or durable_source_digest != expected_source_digest
+            ):
+                raise CeoIntentError(
+                    f"intent {intent_id!r} has drifted host dialogue-source evidence"
+                )
         if dialogue_source is not _DIALOGUE_SOURCE_UNSET:
-            durable_source = provenance.get("dialogue_source")
             if dialogue_source is None:
                 if durable_source is not None:
                     raise CeoIntentConflict(
@@ -853,7 +873,10 @@ def _receipt_from_event(
                         work_ref=work_ref,
                     ).to_dict()
                 except StateConflict as exc:
-                    raise CeoIntentError(str(exc)) from exc
+                    raise CeoIntentConflict(
+                        f"intent {intent_id!r} was accepted with a different "
+                        "host dialogue source"
+                    ) from exc
                 if durable_source != expected_source:
                     raise CeoIntentConflict(
                         f"intent {intent_id!r} was accepted with a different "
@@ -923,7 +946,8 @@ def submit_intent(
     *,
     workspace_root: "Path | str | None" = None,
     execution_binding: "dict[str, Any] | None" = None,
-    dialogue_source: "Mapping[str, Any] | None" = None,
+    dialogue_source: Any = _DIALOGUE_SOURCE_UNSET,
+    require_dialogue_source: bool = False,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -943,29 +967,18 @@ def submit_intent(
     in Job constraints, making provider/profile selection host-owned while the
     original CEO operation identity remains the complete normalized envelope.
 
-    Strict-v2 ``dialogue_source`` is admission-owned envelope identity.  The
-    optional keyword is retained only as a compatibility assertion: when both
-    forms are supplied they must normalize to the same source.  The admitted
-    source is stored in immutable root ``JOB_CREATED`` provenance and duplicate
-    submission cannot attach, remove, or rewrite it after admission.
+    Strict-v2 ``dialogue_source`` is trusted host admission input, never a
+    public envelope field and never part of the caller-controlled fingerprint.
+    The source is stored in immutable root ``JOB_CREATED`` provenance and a
+    duplicate submission cannot attach, remove, or rewrite it after admission.
+    A configured host provider sets ``require_dialogue_source`` so a missing
+    first source refuses before root creation.  Omitting the keyword on replay
+    trusts the already-accepted durable source; explicitly changing or removing
+    that source remains an exact identity conflict.
     """
 
     intent = validate_intent(payload)
     _require_workspace(intent, Path(workspace_root) if workspace_root else None)
-    admitted_source = intent.get("dialogue_source")
-    if admitted_source is not None and dialogue_source is not None:
-        try:
-            legacy_source = normalize_executive_dialogue_source(
-                dialogue_source,
-                work_ref=str(intent.get("workstream") or ""),
-            ).to_dict()
-        except StateConflict as exc:
-            raise CeoIntentError(str(exc)) from exc
-        if admitted_source != legacy_source:
-            raise CeoIntentConflict(
-                "v2 dialogue source disagrees with the accepted root admission"
-            )
-    effective_dialogue_source = admitted_source or dialogue_source
     fingerprint = intent_fingerprint(intent)
     intent_id = intent["intent_id"]
     command_id = command_id_for(intent_id)
@@ -977,8 +990,13 @@ def submit_intent(
             existing,
             intent_id=intent_id,
             fingerprint=fingerprint,
-            dialogue_source=effective_dialogue_source,
+            dialogue_source=dialogue_source,
         )
+    effective_dialogue_source = (
+        None if dialogue_source is _DIALOGUE_SOURCE_UNSET else dialogue_source
+    )
+    if require_dialogue_source and effective_dialogue_source is None:
+        raise CeoIntentError("trusted host dialogue source is unavailable")
 
     contract = intent["execution_contract"]
     try:
@@ -994,7 +1012,7 @@ def submit_intent(
         else:
             if execution_binding is not None:
                 raise StateConflict("v1 CEO intent cannot carry a host execution binding")
-            if dialogue_source is not None:
+            if effective_dialogue_source is not None:
                 raise StateConflict("v1 CEO intent cannot carry a host dialogue source")
             job = runtime.jobs.create_job(
                 intent["objective"],
@@ -1026,7 +1044,7 @@ def submit_intent(
                 settled,
                 intent_id=intent_id,
                 fingerprint=fingerprint,
-                dialogue_source=effective_dialogue_source,
+                dialogue_source=dialogue_source,
             )
         raise CeoIntentError(str(exc)) from exc
 
@@ -1051,7 +1069,12 @@ def resolve_intent(runtime: Any, intent_id: str) -> dict[str, Any]:
     event = runtime.store.find_event_by_command_id(command_id_for(resolved))
     if event is None:
         raise CeoIntentError(f"no accepted CEO intent named {resolved!r}")
-    receipt = _receipt_from_event(runtime, event, intent_id=resolved, fingerprint=None)
+    receipt = _receipt_from_event(
+        runtime,
+        event,
+        intent_id=resolved,
+        fingerprint=None,
+    )
     # A read-back is not a second acceptance; ``duplicate`` describes submission.
     receipt["duplicate"] = False
     return receipt

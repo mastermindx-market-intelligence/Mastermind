@@ -4,8 +4,10 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import json
 import os
 import pwd
+import sqlite3
 import stat
 from pathlib import Path
 
@@ -23,7 +25,12 @@ from control_plane.executive_orchestration_result import (
     canonical_bytes,
     canonical_digest,
 )
-from control_plane.executive_runtime import AttemptStatus, JobStatus, Runtime
+from control_plane.executive_runtime import (
+    AttemptStatus,
+    JobStatus,
+    Runtime,
+    StateConflict,
+)
 from control_plane.executive_supervisor import ExecutiveSupervisor
 from control_plane.executive_terminal_return import (
     TerminalReturnError,
@@ -243,6 +250,41 @@ def _completed_planner_with_runtime(tmp_path):
     return runtime, job, attempt
 
 
+def test_runtime_refuses_dialogue_source_digest_without_source(tmp_path: Path) -> None:
+    runtime, job, attempt = _completed_planner_with_runtime(tmp_path)
+    root_id = job.root_job_id
+    with runtime.store.read() as connection:
+        row = connection.execute(
+            """SELECT event_id,payload_json FROM events
+               WHERE event_type='JOB_CREATED' AND job_id=?""",
+            (root_id,),
+        ).fetchone()
+    assert row is not None
+    payload = json.loads(str(row["payload_json"]))
+    assert "dialogue_source" not in payload["provenance"]
+    payload["provenance"]["dialogue_source_digest"] = "a" * 64
+
+    connection = sqlite3.connect(runtime.store.path)
+    try:
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                int(row["event_id"]),
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(StateConflict, match="dialogue source drifted"):
+        runtime.validated_role_completion(
+            job.job_id,
+            expected_attempt_id=attempt.attempt_id,
+        )
+
+
 def test_reducer_projects_positive_canonical_sealed_worker_completion(
     tmp_path: Path,
 ) -> None:
@@ -376,6 +418,11 @@ def test_reducer_projects_positive_canonical_sealed_worker_completion(
     assert candidate.summary == "sealed planner completed"
     assert candidate.result_digest == material.result_digest
     assert candidate.terminal_digest == terminal["terminal_evidence_digest"]
+    assert candidate.result_envelope_digest == terminal["result_envelope_digest"]
+    assert candidate.terminal_evidence_digest == terminal["terminal_evidence_digest"]
+    assert candidate.artifact_receipt_digest == terminal["artifact_receipt_digest"]
+    assert candidate.validation_receipt_digest == terminal["validation_receipt_digest"]
+    assert candidate.effective_grant_digest == terminal["effective_grant_digest"]
     assert candidate.message_key == (
         f"asd-exec-result-{terminal['terminal_evidence_digest']}"
     )
@@ -470,6 +517,36 @@ def test_reducer_is_deterministic_and_preserves_review_verdict_shape(
 
     assert first == second
     assert first.review_verdict == verdict
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        pytest.param("missing", id="missing"),
+        pytest.param("unknown", id="unknown"),
+        pytest.param([], id="unhashable-list"),
+    ],
+)
+def test_reducer_refuses_noncanonical_review_verdict(tmp_path, mutation) -> None:
+    runtime, job, attempt = _completed_review(tmp_path, "approve")
+    material = runtime.validated_role_completion(
+        job.job_id,
+        expected_attempt_id=attempt.attempt_id,
+    )
+    changed = dict(material.result_envelope)
+    role_result = dict(changed["role_result"])
+    if mutation == "missing":
+        role_result.pop("verdict")
+    else:
+        role_result["verdict"] = mutation
+    changed["role_result"] = role_result
+
+    with pytest.raises(TerminalReturnError) as refused:
+        reduce_terminal_return(
+            material=dataclasses.replace(material, result_envelope=changed)
+        )
+
+    assert refused.value.code == "EVIDENCE_REFUSED"
 
 
 @pytest.mark.parametrize(

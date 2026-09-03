@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from common.commission_ref import CommissionRef
 from control_plane import ceo_intent, ceo_request
 from control_plane import executive_ceo_ingress as ceo_ingress
 from control_plane.executive_delegation_identity import derive_delegation_identity
@@ -20,6 +21,7 @@ from control_plane.executive_runtime import (
     ExecutiveDialogueSource,
     JobStatus,
     Runtime,
+    StateConflict,
 )
 from control_plane.executive_service import (
     ExecutiveControlService,
@@ -52,6 +54,7 @@ from integrations.slack_agent_dialogue.engine_v2 import (
 )
 from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
     ExecutiveTerminalReturnProjector,
+    RuntimeTerminalReturnBindingResolver,
     TerminalReturnProjectionError,
 )
 from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
@@ -99,8 +102,11 @@ def _candidate() -> TerminalReturnCandidate:
         session_ref="asd-session-exec-job-002",
         runtime_status="COMPLETED",
         result_status="RESULT",
-        result_digest="b" * 64,
-        terminal_digest=terminal_digest,
+        result_envelope_digest="b" * 64,
+        terminal_evidence_digest=terminal_digest,
+        artifact_receipt_digest="c" * 64,
+        validation_receipt_digest="d" * 64,
+        effective_grant_digest="e" * 64,
         terminal_at="2026-08-30T10:00:00Z",
         message_key=f"asd-exec-result-{terminal_digest}",
         summary="The commissioned work completed with canonical evidence.",
@@ -117,6 +123,28 @@ def _candidate() -> TerminalReturnCandidate:
             watch_mode="turn_watch_v1",
         ),
     )
+
+
+def test_runtime_dialogue_source_refuses_hostile_commission_ref_subclass() -> None:
+    class HostileCommissionRef(CommissionRef):
+        def to_dict(self) -> dict[str, str]:
+            return {
+                **super().to_dict(),
+                "content_sha256": "f" * 64,
+            }
+
+    with pytest.raises(StateConflict, match="commission_ref is invalid"):
+        ExecutiveDialogueSource(
+            schema_version="mastermind.executive_dialogue_source/v1",
+            work_ref="WS:WORKER-PRESENCE",
+            commission_ref=HostileCommissionRef(
+                repository=REPO,
+                commit="c" * 40,
+                path="research/commission.md",
+                content_sha256="d" * 64,
+            ),
+            watch_mode="turn_watch_v1",
+        )
 
 
 def _binding(candidate: TerminalReturnCandidate) -> DialogueBinding:
@@ -204,6 +232,9 @@ async def _projected_message(candidate: TerminalReturnCandidate) -> dict[str, ob
                 "fingerprint": message["fingerprint"],
                 "message_ts": "1787961600.000002",
                 "duplicate_timestamps": [],
+                "thread_ts": _binding(candidate).thread_ts,
+                "parent_author_user_id": BOT,
+                "parent_fingerprint": "e" * 64,
             },
         }
 
@@ -216,6 +247,48 @@ async def _projected_message(candidate: TerminalReturnCandidate) -> dict[str, ob
     message = captured.get("message")
     assert isinstance(message, dict)
     return message
+
+
+def _canonical_synopsis(
+    candidate: TerminalReturnCandidate,
+    *,
+    outcome: str,
+    include_summary: bool,
+) -> str:
+    value: dict[str, str] = {
+        "schema": "mastermind.executive_terminal_result_synopsis/v1",
+        "role": candidate.role,
+        "outcome": outcome,
+        "result_envelope_digest": candidate.result_envelope_digest,
+        "terminal_evidence_digest": candidate.terminal_evidence_digest,
+        "artifact_receipt_digest": candidate.artifact_receipt_digest,
+        "validation_receipt_digest": candidate.validation_receipt_digest,
+        "effective_grant_digest": candidate.effective_grant_digest,
+    }
+    if include_summary:
+        value["summary"] = candidate.summary
+    else:
+        value["summary_sha256"] = hashlib.sha256(
+            candidate.summary.encode("utf-8")
+        ).hexdigest()
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
+def test_projector_always_projects_the_five_digest_canonical_result_synopsis() -> None:
+    candidate = _candidate()
+
+    message = asyncio.run(_projected_message(candidate))
+
+    assert message["message_type"] == "RESULT"
+    assert message["body"] == {
+        "status": "PASS",
+        "result": _canonical_synopsis(
+            candidate,
+            outcome="PASS",
+            include_summary=True,
+        ),
+    }
+    assert message["requires_response"] is False
 
 
 def test_projector_candidate_keys_resolution_and_verifies_parent_before_send() -> None:
@@ -238,6 +311,12 @@ def test_projector_candidate_keys_resolution_and_verifies_parent_before_send() -
                     "fingerprint": message["fingerprint"],
                     "message_ts": "1787961600.000002",
                     "duplicate_timestamps": [],
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "e" * 64,
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "e" * 64,
                 },
             }
 
@@ -250,9 +329,77 @@ def test_projector_candidate_keys_resolution_and_verifies_parent_before_send() -
 
         assert resolver.calls == 1
         assert receipt.action == "POSTED"
+        assert receipt.thread_ts == _binding(candidate).thread_ts
+        assert receipt.parent_author_user_id == BOT
+        assert receipt.parent_fingerprint == "e" * 64
         assert operations == ["bind_or_verify_relay_parent_thread", "send_message"]
 
     asyncio.run(scenario())
+
+
+def test_projector_refuses_a_send_receipt_attested_to_a_different_parent() -> None:
+    async def scenario() -> None:
+        candidate = _candidate()
+
+        async def service_call(_socket_path: Path, request):
+            if request["operation"] == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            message = request["args"]["message"]
+            return {
+                "ok": True,
+                "result": {
+                    "action": "POSTED",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787961600.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "f" * 64,
+                },
+            }
+
+        projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate)),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+        )
+        with pytest.raises(TerminalReturnProjectionError) as refused:
+            await projector.project(candidate)
+        assert refused.value.code == "EFFECT_UNKNOWN"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "result_envelope_digest",
+        "terminal_evidence_digest",
+        "artifact_receipt_digest",
+        "validation_receipt_digest",
+        "effective_grant_digest",
+    ],
+)
+def test_projector_binds_each_terminal_digest_into_the_message_fingerprint(
+    field: str,
+) -> None:
+    candidate = _candidate()
+    changed = dataclasses.replace(
+        candidate,
+        **{field: "f" * 64},
+        message_key=(
+            f"asd-exec-result-{'f' * 64}"
+            if field == "terminal_evidence_digest"
+            else candidate.message_key
+        ),
+    )
+
+    baseline = asyncio.run(_projected_message(candidate))
+    projected = asyncio.run(_projected_message(changed))
+
+    assert projected["fingerprint"] != baseline["fingerprint"]
+    assert projected["body"] != baseline["body"]
 
 
 def test_projector_requires_relay_parent_attestation_before_send() -> None:
@@ -283,6 +430,9 @@ def test_projector_requires_relay_parent_attestation_before_send() -> None:
                     "fingerprint": message["fingerprint"],
                     "message_ts": "1787961600.000002",
                     "duplicate_timestamps": [],
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "e" * 64,
                 },
             }
 
@@ -318,6 +468,9 @@ def test_projector_builds_one_deterministic_result_for_the_exact_trusted_binding
                     "fingerprint": message["fingerprint"],
                     "message_ts": "1787961600.000002",
                     "duplicate_timestamps": [],
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "e" * 64,
                 },
             }
 
@@ -345,7 +498,11 @@ def test_projector_builds_one_deterministic_result_for_the_exact_trusted_binding
         assert message["applies_to"] == _binding(candidate).applies_to
         assert message["body"] == {
             "status": "PASS",
-            "result": candidate.summary,
+            "result": _canonical_synopsis(
+                candidate,
+                outcome="PASS",
+                include_summary=True,
+            ),
         }
         assert message["created_at"] == candidate.terminal_at
 
@@ -407,6 +564,9 @@ def test_projector_exact_duplicate_returns_without_attempt_callback() -> None:
                     "fingerprint": message["fingerprint"],
                     "message_ts": "1787961600.000002",
                     "duplicate_timestamps": [],
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "e" * 64,
                 },
             }
 
@@ -422,21 +582,84 @@ def test_projector_exact_duplicate_returns_without_attempt_callback() -> None:
     asyncio.run(scenario())
 
 
-def test_projector_preserves_exact_safe_review_result_at_900_characters() -> None:
-    """Deleting raw-summary pass-through or adding verdict prose must fail."""
+@pytest.mark.parametrize(
+    "verdict,expected_status",
+    [
+        pytest.param("approve", "PASS", id="approve-pass"),
+        pytest.param("reject", "FAIL", id="reject-fail"),
+    ],
+)
+def test_projector_preserves_exact_review_outcome_at_900_characters(
+    verdict: str,
+    expected_status: str,
+) -> None:
+    """Completion is RESULT; the canonical verdict alone selects PASS or FAIL."""
 
     summary = "r" * 900
     candidate = dataclasses.replace(
         _candidate(),
         role="review",
         summary=summary,
-        review_verdict="approve",
+        review_verdict=verdict,
     )
 
     message = asyncio.run(_projected_message(candidate))
 
-    assert message["body"] == {"status": "PASS", "result": summary}
-    assert len(message["body"]["result"]) == 900
+    assert message["body"] == {
+        "status": expected_status,
+        "result": _canonical_synopsis(
+            candidate,
+            outcome=expected_status,
+            include_summary=False,
+        ),
+    }
+    assert summary not in message["body"]["result"]
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        pytest.param(None, id="missing"),
+        pytest.param("", id="empty"),
+        pytest.param("unknown", id="unknown"),
+        pytest.param(1, id="integer"),
+        pytest.param([], id="unhashable-list"),
+    ],
+)
+def test_projector_refuses_noncanonical_review_verdict_before_relay_call(
+    verdict: object,
+) -> None:
+    async def scenario() -> None:
+        candidate = dataclasses.replace(
+            _candidate(),
+            role="review",
+            review_verdict=verdict,  # type: ignore[arg-type]
+        )
+        service_calls = 0
+        before_write_calls = 0
+
+        async def service_call(*_args, **_kwargs):
+            nonlocal service_calls
+            service_calls += 1
+            raise AssertionError("invalid review verdict reached Agent Relay")
+
+        async def before_write() -> None:
+            nonlocal before_write_calls
+            before_write_calls += 1
+
+        projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+        )
+        with pytest.raises(TerminalReturnProjectionError) as refused:
+            await projector.project(candidate, before_write=before_write)
+
+        assert refused.value.code == "DIALOGUE_REFUSED"
+        assert service_calls == 0
+        assert before_write_calls == 0
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize(
@@ -452,13 +675,10 @@ def test_projector_uses_digest_synopsis_for_oversize_runtime_summary(
     """A 901+ character Runtime summary must be represented, never sliced."""
 
     candidate = dataclasses.replace(_candidate(), summary=summary)
-    expected_summary_digest = hashlib.sha256(summary.encode("utf-8")).hexdigest()
-    expected = (
-        '{"evidence_ref":"result-envelope-sha256:'
-        + str(candidate.result_digest)
-        + '","role":"work","status":"RESULT","summary_sha256":"'
-        + expected_summary_digest
-        + '"}'
+    expected = _canonical_synopsis(
+        candidate,
+        outcome="PASS",
+        include_summary=False,
     )
 
     first = asyncio.run(_projected_message(candidate))
@@ -472,36 +692,33 @@ def test_projector_uses_digest_synopsis_for_oversize_runtime_summary(
 
 
 @pytest.mark.parametrize(
-    "summary",
+    "summary,include_summary",
     [
-        pytest.param(" leading whitespace", id="leading-whitespace"),
-        pytest.param("trailing whitespace ", id="trailing-whitespace"),
-        pytest.param("line one\nline two", id="control-newline"),
-        pytest.param("unsafe\u2028separator", id="unicode-line-separator"),
-        pytest.param("notify <@U12345678>", id="slack-mention"),
-        pytest.param("xoxb-1234567890ABCDEF", id="secret-shaped"),
+        pytest.param(" leading whitespace", True, id="leading-whitespace"),
+        pytest.param("trailing whitespace ", True, id="trailing-whitespace"),
+        pytest.param("line one\nline two", True, id="control-newline"),
+        pytest.param("unsafe\u2028separator", True, id="unicode-line-separator"),
+        pytest.param("notify <@U12345678>", False, id="slack-mention"),
+        pytest.param("xoxb-1234567890ABCDEF", False, id="secret-shaped"),
     ],
 )
 def test_projector_replaces_unsafe_runtime_summary_with_nonleaking_digest_synopsis(
-    summary: str,
+    summary: str, include_summary: bool,
 ) -> None:
     """Unsafe raw text must neither cross Agent Dialogue nor become invented prose."""
 
     candidate = dataclasses.replace(_candidate(), summary=summary)
-    expected_summary_digest = hashlib.sha256(summary.encode("utf-8")).hexdigest()
-    expected = (
-        '{"evidence_ref":"result-envelope-sha256:'
-        + str(candidate.result_digest)
-        + '","role":"work","status":"RESULT","summary_sha256":"'
-        + expected_summary_digest
-        + '"}'
+    expected = _canonical_synopsis(
+        candidate,
+        outcome="PASS",
+        include_summary=include_summary,
     )
 
     message = asyncio.run(_projected_message(candidate))
 
     assert message["body"] == {"status": "PASS", "result": expected}
     assert message["evidence_refs"] == []
-    assert summary not in expected
+    assert ("summary" in json.loads(expected)) is include_summary
 
 
 @pytest.mark.parametrize(
@@ -593,6 +810,9 @@ def test_projector_refuses_malformed_service_receipts_as_closed_errors(
                 "fingerprint": message["fingerprint"],
                 "message_ts": "1787961600.000002",
                 "duplicate_timestamps": [],
+                "thread_ts": _binding(candidate).thread_ts,
+                "parent_author_user_id": BOT,
+                "parent_fingerprint": "e" * 64,
             }
             result.update(receipt_change)
             return {"ok": True, "result": result}
@@ -630,9 +850,46 @@ def test_projector_preserves_post_dispatch_effect_unknown() -> None:
     asyncio.run(scenario())
 
 
-def test_projector_reconciles_effect_unknown_by_read_without_a_second_send() -> None:
+def test_projector_preserves_known_zero_transport_unavailability() -> None:
     async def scenario() -> None:
         candidate = _candidate()
+
+        async def service_call(_socket_path, request):
+            if request["operation"] == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            raise DialogueServiceError("TRANSPORT_UNAVAILABLE")
+
+        projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate)),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+        )
+        with pytest.raises(TerminalReturnProjectionError) as raised:
+            await projector.project(candidate)
+        assert raised.value.code == "TRANSPORT_UNAVAILABLE"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "role,verdict,expected_status",
+    [
+        pytest.param("work", None, "PASS", id="work-pass"),
+        pytest.param("review", "approve", "PASS", id="review-approve-pass"),
+        pytest.param("review", "reject", "FAIL", id="review-reject-fail"),
+    ],
+)
+def test_projector_reconciles_effect_unknown_by_read_without_a_second_send(
+    role: str,
+    verdict: str | None,
+    expected_status: str,
+) -> None:
+    async def scenario() -> None:
+        candidate = dataclasses.replace(
+            _candidate(),
+            role=role,
+            review_verdict=verdict,
+        )
         operations: list[str] = []
         sent_message: dict[str, object] | None = None
 
@@ -665,7 +922,7 @@ def test_projector_reconciles_effect_unknown_by_read_without_a_second_send() -> 
             }
 
         projector = ExecutiveTerminalReturnProjector(
-            _Resolver(_binding(candidate)),
+            _Resolver(_binding(candidate), expected_candidate=candidate),
             socket_path=Path("/tmp/mastermind-terminal-return.sock"),
             service_call=service_call,
         )
@@ -673,17 +930,80 @@ def test_projector_reconciles_effect_unknown_by_read_without_a_second_send() -> 
             await projector.project(candidate)
         assert raised.value.code == "EFFECT_UNKNOWN"
 
-        recovered = await projector.reconcile(candidate)
+        # Restart-equivalent: a fresh projector instance must recover the
+        # exact previously-sent RESULT by read, never issue a second send.
+        restarted_projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+        )
+        recovered = await restarted_projector.reconcile(candidate)
 
         assert recovered is not None
         assert recovered.action == "RECOVERED"
         assert recovered.message_key == candidate.message_key
+        assert sent_message is not None
+        assert sent_message["message_type"] == "RESULT"
+        assert sent_message["body"]["status"] == expected_status
+        assert recovered.fingerprint == sent_message["fingerprint"]
+        assert recovered.thread_ts == _binding(candidate).thread_ts
+        assert recovered.parent_author_user_id == BOT
+        assert recovered.parent_fingerprint == "e" * 64
         assert operations == [
             "bind_or_verify_relay_parent_thread",
             "send_message",
             "bind_or_verify_relay_parent_thread",
             "read_thread",
         ]
+
+    asyncio.run(scenario())
+
+
+def test_projector_does_not_reconcile_stale_pass_for_rejecting_review() -> None:
+    async def scenario() -> None:
+        candidate = dataclasses.replace(
+            _candidate(),
+            role="review",
+            review_verdict="reject",
+        )
+        stale_pass = await _projected_message(
+            dataclasses.replace(candidate, review_verdict="approve")
+        )
+        operations: list[str] = []
+
+        async def service_call(_socket_path, request):
+            operation = request["operation"]
+            operations.append(operation)
+            if operation == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            assert operation == "read_thread"
+            return {
+                "ok": True,
+                "result": {
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "messages": [
+                        {
+                            "message": stale_pass,
+                            "primary_ts": "1787961600.000002",
+                            "duplicate_timestamps": [],
+                        }
+                    ],
+                    "historical_messages": [],
+                    "ineligible_count": 0,
+                    "mutated_count": 0,
+                },
+            }
+
+        projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+        )
+        with pytest.raises(TerminalReturnProjectionError) as refused:
+            await projector.reconcile(candidate)
+
+        assert refused.value.code == "EFFECT_UNKNOWN"
+        assert operations == ["bind_or_verify_relay_parent_thread", "read_thread"]
 
     asyncio.run(scenario())
 
@@ -748,6 +1068,9 @@ def test_projector_callback_preserves_the_none_return_contract() -> None:
                     "fingerprint": message["fingerprint"],
                     "message_ts": "1787961600.000002",
                     "duplicate_timestamps": [],
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "e" * 64,
                 },
             }
 
@@ -917,7 +1240,6 @@ def test_terminal_candidate_posts_one_result_and_one_persisted_wake_across_repla
                 "workstream": source["work_ref"],
                 "attempt_limit": 1,
             },
-            "dialogue_source": source,
         }
 
         client = InMemorySlackClient(relay_bot_user_id=BOT)
@@ -960,6 +1282,12 @@ def test_terminal_candidate_posts_one_result_and_one_persisted_wake_across_repla
                 supervisors.append((runtime, adapter))
                 return _supervisor(runtime, tmp_path, adapter)
 
+            def projector_factory(runtime_getter, socket_path):
+                return ExecutiveTerminalReturnProjector(
+                    RuntimeTerminalReturnBindingResolver(runtime_getter),
+                    socket_path=socket_path,
+                )
+
             return ExecutiveControlService(
                 config,
                 supervisor_factory=supervisor_factory,
@@ -967,7 +1295,11 @@ def test_terminal_candidate_posts_one_result_and_one_persisted_wake_across_repla
                 ceo_ingress_socket_path=ingress_path,
                 ceo_ingress_peer_uid=os.geteuid(),
                 ceo_ingress_grounding_provider=grounding,
+                ceo_ingress_dialogue_source_provider=(
+                    lambda _intent_id, _workstream: source
+                ),
                 ceo_ingress_armed=True,
+                terminal_return_projector_factory=projector_factory,
             )
 
         relay = new_relay()
@@ -988,7 +1320,7 @@ def test_terminal_candidate_posts_one_result_and_one_persisted_wake_across_repla
                 ingress_path,
                 ingress_frame,
             )
-            assert submitted["ok"] is True
+            assert submitted["ok"] is True, submitted
             result = submitted["result"]
             assert isinstance(result, dict)
             assert result["duplicate"] is False

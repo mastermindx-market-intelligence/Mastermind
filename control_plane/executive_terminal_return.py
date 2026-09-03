@@ -7,6 +7,7 @@ for an optional caller-owned projection boundary; it performs no I/O.
 from __future__ import annotations
 
 import dataclasses
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -66,13 +67,28 @@ class TerminalReturnCandidate:
     session_ref: str
     runtime_status: str
     result_status: str
-    result_digest: str | None
-    terminal_digest: str | None
+    result_envelope_digest: str
+    terminal_evidence_digest: str
+    artifact_receipt_digest: str
+    validation_receipt_digest: str
+    effective_grant_digest: str
     terminal_at: str
     message_key: str
     summary: str
     review_verdict: str | None
     dialogue_source: ExecutiveDialogueSource | None = None
+
+    @property
+    def result_digest(self) -> str:
+        """Compatibility spelling for the result-envelope digest."""
+
+        return self.result_envelope_digest
+
+    @property
+    def terminal_digest(self) -> str:
+        """Compatibility spelling for the terminal-evidence digest."""
+
+        return self.terminal_evidence_digest
 
 
 _TERMINAL_STATUS_MAP = {
@@ -132,14 +148,27 @@ def reduce_terminal_return(
 
     envelope = material.result_envelope
     terminal_receipt = material.terminal_receipt
+    digest_names = (
+        "result_envelope_digest",
+        "terminal_evidence_digest",
+        "artifact_receipt_digest",
+        "validation_receipt_digest",
+        "effective_grant_digest",
+    )
     try:
-        terminal_digest = terminal_receipt["terminal_evidence_digest"]
+        digests = {name: terminal_receipt[name] for name in digest_names}
         summary = envelope["summary"]
     except (KeyError, TypeError):
         _refuse("EVIDENCE_REFUSED")
     if (
-        not isinstance(terminal_digest, str)
-        or not isinstance(summary, str)
+        not isinstance(summary, str)
+        or any(
+            not isinstance(value, str)
+            or re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in digests.values()
+        )
+        or digests["result_envelope_digest"] != material.result_digest
+        or digests["effective_grant_digest"] != attempt.effective_grant_digest
         or envelope.get("job_id") != job.job_id
         or envelope.get("run_id") != attempt.attempt_id
         or envelope.get("worker_id") != attempt.worker_id
@@ -148,8 +177,11 @@ def reduce_terminal_return(
         _refuse("EVIDENCE_REFUSED")
     review_verdict: str | None = None
     if job.orchestration_role == "review":
-        verdict = envelope["role_result"].get("verdict")
-        if verdict not in {"approve", "reject"}:
+        role_result = envelope.get("role_result")
+        if not isinstance(role_result, dict):
+            _refuse("EVIDENCE_REFUSED")
+        verdict = role_result.get("verdict")
+        if not isinstance(verdict, str) or verdict not in ("approve", "reject"):
             _refuse("EVIDENCE_REFUSED")
         review_verdict = verdict
     return TerminalReturnCandidate(
@@ -162,10 +194,13 @@ def reduce_terminal_return(
         session_ref=identity.session_ref,
         runtime_status=attempt.status.value,
         result_status=terminal[1],
-        result_digest=material.result_digest,
-        terminal_digest=terminal_digest,
+        result_envelope_digest=digests["result_envelope_digest"],
+        terminal_evidence_digest=digests["terminal_evidence_digest"],
+        artifact_receipt_digest=digests["artifact_receipt_digest"],
+        validation_receipt_digest=digests["validation_receipt_digest"],
+        effective_grant_digest=digests["effective_grant_digest"],
         terminal_at=_terminal_utc(attempt.finished_at),
-        message_key=f"asd-exec-result-{terminal_digest}",
+        message_key=f"asd-exec-result-{digests['terminal_evidence_digest']}",
         summary=summary,
         review_verdict=review_verdict,
         dialogue_source=material.dialogue_source,

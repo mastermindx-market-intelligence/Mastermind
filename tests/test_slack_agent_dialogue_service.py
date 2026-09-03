@@ -23,6 +23,7 @@ from integrations.slack_agent_dialogue.contract import (
 from integrations.slack_agent_dialogue.engine import (
     DialogueEngine,
     DialoguePolicy,
+    MessageReceipt,
     SlackMessage,
 )
 from integrations.slack_agent_dialogue.engine_v2 import PreparedMessageSend
@@ -71,6 +72,8 @@ class FakeV2Engine:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
+        self.relay_parent_thread_ts = THREAD_TS
+        self.prepare_duplicate = False
 
     def status(self) -> dict[str, object]:
         self.calls.append(("status", None))
@@ -92,7 +95,7 @@ class FakeV2Engine:
         normalized = context.normalized()
         self.calls.append(("bind_or_verify_relay_parent_thread", normalized))
         return {
-            "thread_ts": THREAD_TS,
+            "thread_ts": self.relay_parent_thread_ts,
             "parent_author_user_id": BOT,
             "parent_fingerprint": "a" * 64,
         }
@@ -137,6 +140,14 @@ class FakeV2Engine:
                 },
             )
         )
+        if self.prepare_duplicate:
+            return MessageReceipt(
+                action="DUPLICATE",
+                message_key=message["message_key"],
+                fingerprint=message["fingerprint"],
+                message_ts="1787471000.000002",
+                duplicate_timestamps=(),
+            )
         return PreparedMessageSend(
             thread_ts=thread_ts,
             context=context,
@@ -733,6 +744,159 @@ def test_exact_send_calls_hook_only_after_ready_then_commits_same_fingerprint(
     run(scenario())
 
 
+def test_exact_send_committed_receipt_is_closed_over_verified_relay_parent(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        request = exact_send_request_v2()
+        message = request["args"]["message"]
+        try:
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {
+                "ok": True,
+                "result": {
+                    "action": "POSTED",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787471000.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": THREAD_TS,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "a" * 64,
+                },
+            }
+            assert [name for name, _value in fake.calls] == [
+                "bind_or_verify_relay_parent_thread",
+                "prepare_send_message",
+                "commit_send_message",
+            ]
+        finally:
+            await task
+
+    run(scenario())
+
+
+def test_exact_send_duplicate_receipt_is_closed_over_verified_relay_parent(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        fake.prepare_duplicate = True
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        request = exact_send_request_v2()
+        message = request["args"]["message"]
+        try:
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {
+                "ok": True,
+                "result": {
+                    "action": "DUPLICATE",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787471000.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": THREAD_TS,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "a" * 64,
+                },
+            }
+            assert [name for name, _value in fake.calls] == [
+                "bind_or_verify_relay_parent_thread",
+                "prepare_send_message",
+            ]
+        finally:
+            await task
+
+    run(scenario())
+
+
+def test_exact_send_refuses_request_thread_not_owned_by_verified_relay_parent(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        fake.relay_parent_thread_ts = "1787471000.000099"
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        try:
+            response = await call_service(srv.config.socket_path, exact_send_request_v2())
+            assert response == {
+                "ok": False,
+                "error": {"code": "THREAD_CONTEXT_MISMATCH"},
+            }
+            assert [name for name, _value in fake.calls] == [
+                "bind_or_verify_relay_parent_thread",
+            ]
+        finally:
+            await task
+
+    run(scenario())
+
+
+def test_exact_send_deep_snapshots_request_before_ready_callback_mutation(
+    socket_root: Path,
+) -> None:
+    """The COMMIT fingerprint is fixed before the first await ignores mutation."""
+
+    async def scenario() -> None:
+        path = socket_root / "exact-send-deep-snapshot.sock"
+        request = exact_send_request_v2()
+        original_fingerprint = request["args"]["message"]["fingerprint"]
+        commit_seen = asyncio.Event()
+        prepare_seen = asyncio.Event()
+        release_ready = asyncio.Event()
+
+        async def exact_server(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            observed = json.loads(await reader.readline())
+            assert observed["args"]["message"]["fingerprint"] == original_fingerprint
+            prepare_seen.set()
+            await release_ready.wait()
+            writer.write(
+                json.dumps(
+                    {"ok": True, "ready": {"fingerprint": original_fingerprint}},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            assert json.loads(await reader.readline()) == {
+                "commit": "COMMIT",
+                "fingerprint": original_fingerprint,
+            }
+            commit_seen.set()
+            writer.write(
+                b'{"ok":true,"result":{"accepted":true}}\n'
+            )
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(exact_server, path)
+        try:
+            caller = asyncio.create_task(
+                call_service(path, request, timeout_seconds=1)
+            )
+            await asyncio.wait_for(prepare_seen.wait(), timeout=1)
+            request["args"]["message"]["fingerprint"] = "f" * 64
+            release_ready.set()
+            response = await caller
+            assert response == {"ok": True, "result": {"accepted": True}}
+            await asyncio.wait_for(commit_seen.wait(), timeout=1)
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
 def test_exact_send_ready_disconnect_runs_no_commit_or_provider_dispatch(
     socket_root: Path,
 ) -> None:
@@ -756,7 +920,10 @@ def test_exact_send_ready_disconnect_runs_no_commit_or_provider_dispatch(
         await writer.wait_closed()
         await task
 
-        assert [name for name, _value in fake.calls] == ["prepare_send_message"]
+        assert [name for name, _value in fake.calls] == [
+            "bind_or_verify_relay_parent_thread",
+            "prepare_send_message",
+        ]
 
     run(scenario())
 
@@ -792,7 +959,10 @@ def test_exact_send_commit_fingerprint_mismatch_dispatches_zero_times(
         await writer.wait_closed()
         await task
 
-        assert [name for name, _value in fake.calls] == ["prepare_send_message"]
+        assert [name for name, _value in fake.calls] == [
+            "bind_or_verify_relay_parent_thread",
+            "prepare_send_message",
+        ]
 
     run(scenario())
 

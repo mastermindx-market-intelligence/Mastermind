@@ -541,16 +541,46 @@ class AgentDialogueService:
             or not isinstance(values["message"], dict)
         ):
             raise DialogueServiceError("REQUEST_INVALID")
+        context = _context_v2(values["context"])
+        parent = self.engine_result(
+            await engine.bind_or_verify_relay_parent_thread(context)
+        )
+        parent_fields = {
+            "thread_ts",
+            "parent_author_user_id",
+            "parent_fingerprint",
+        }
+        if (
+            not isinstance(parent, dict)
+            or set(parent) != parent_fields
+            or any(not isinstance(parent[field], str) for field in parent_fields)
+        ):
+            raise DialogueServiceError("INTERNAL_ERROR")
+        if parent["thread_ts"] != values["thread_ts"]:
+            raise DialogueServiceError("THREAD_CONTEXT_MISMATCH")
+
+        def parent_bound_receipt(receipt: Any) -> dict[str, Any]:
+            value = self.engine_result(receipt)
+            receipt_fields = {
+                "action",
+                "message_key",
+                "fingerprint",
+                "message_ts",
+                "duplicate_timestamps",
+            }
+            if not isinstance(value, dict) or set(value) != receipt_fields:
+                raise DialogueServiceError("INTERNAL_ERROR")
+            return {**value, **parent}
 
         prepared = await engine.prepare_send_message(
             thread_ts=values["thread_ts"],
-            context=_context_v2(values["context"]),
+            context=context,
             message=values["message"],
         )
         if isinstance(prepared, MessageReceipt):
             await self._send(
                 writer,
-                {"ok": True, "result": self.engine_result(prepared)},
+                {"ok": True, "result": parent_bound_receipt(prepared)},
             )
             return
         if not isinstance(prepared, PreparedMessageSend):
@@ -588,7 +618,7 @@ class AgentDialogueService:
         )
         await self._send(
             writer,
-            {"ok": True, "result": self.engine_result(result)},
+            {"ok": True, "result": parent_bound_receipt(result)},
         )
 
     async def _handle_connection(
@@ -839,17 +869,26 @@ async def call_service(
     payload = _canonical_json(request)
     if len(payload) > DEFAULT_MAX_REQUEST_BYTES:
         raise DialogueServiceError("REQUEST_TOO_LARGE")
-    args = request.get("args")
+    request_snapshot = _strict_json(payload)
+    if not isinstance(request_snapshot, dict):
+        raise DialogueServiceError("REQUEST_INVALID")
+    args = request_snapshot.get("args")
     exact_send = (
-        request.get("version") == CONTROL_VERSION_V2
-        and request.get("operation") == "send_message"
+        request_snapshot.get("version") == CONTROL_VERSION_V2
+        and request_snapshot.get("operation") == "send_message"
         and isinstance(args, Mapping)
         and args.get("send_protocol") == EXACT_SEND_PROTOCOL
     )
+    exact_send_fingerprint = None
+    if exact_send:
+        message = args.get("message")
+        exact_send_fingerprint = (
+            message.get("fingerprint") if isinstance(message, Mapping) else None
+        )
     send_effect_code = (
         "SEND_EFFECT_UNKNOWN"
-        if request.get("version") == CONTROL_VERSION_V2
-        and request.get("operation") == "send_message"
+        if request_snapshot.get("version") == CONTROL_VERSION_V2
+        and request_snapshot.get("operation") == "send_message"
         else "SERVICE_UNAVAILABLE"
     )
     try:
@@ -933,10 +972,7 @@ async def call_service(
         if not exact_send:
             raise DialogueServiceError(send_effect_code)
 
-        message = args.get("message") if isinstance(args, Mapping) else None
-        expected_fingerprint = (
-            message.get("fingerprint") if isinstance(message, Mapping) else None
-        )
+        expected_fingerprint = exact_send_fingerprint
         if (
             not isinstance(expected_fingerprint, str)
             or set(response) != {"ok", "ready"}

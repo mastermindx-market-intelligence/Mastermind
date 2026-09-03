@@ -8,9 +8,11 @@ import json
 import os
 import shutil
 import socket
+import sqlite3
 import stat
 import subprocess
 import tempfile
+import threading
 import ast
 import dataclasses
 from dataclasses import dataclass
@@ -69,6 +71,10 @@ from control_plane.executive_workspace import (
     prepare_credentialless_clone,
 )
 from control_plane import executive_service as es_mod
+from integrations.slack_agent_dialogue.contract import validate_commission_ref
+from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
+    ExecutiveTerminalReturnProjector,
+)
 from scripts import executive_os_phase1c as service_cli
 
 
@@ -88,6 +94,9 @@ def _projection_receipt(
         "fingerprint": "f" * 64,
         "message_ts": "1787961600.000002",
         "duplicate_timestamps": [],
+        "thread_ts": "1787961600.000001",
+        "parent_author_user_id": "U0RELAY01",
+        "parent_fingerprint": "a" * 64,
     }
 
 
@@ -580,30 +589,6 @@ def test_startup_reconstructs_a_missed_terminal_projection_from_runtime_truth(
             identity_seed=749,
         )
 
-        assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
-        assert cycle.run_once(root.job_id).action == "DISPATCHED"
-        invalid_repair_review = dispatches[-1]
-        approve_repair = _review_body(
-            root_id=root.job_id,
-            plan_attempt_id=planner.attempt.attempt_id,
-            plan_digest=str(work_job.plan_digest),
-            target_job_id=repair.attempt.job_id,
-            target_attempt_id=repair.attempt.attempt_id,
-            target_result_digest=repair_seal["role_result_digest"],
-            repair_round=1,
-            verdict="approve",
-        )
-        _complete_ohf_role(
-            runtime,
-            invalid_repair_review,
-            approve_repair,
-            identity_seed=750,
-        )
-        _delete_terminal_seal_event(
-            runtime,
-            invalid_repair_review.attempt.attempt_id,
-        )
-
         valid_by_job_id = {
             planner.job_id: ("plan", planner.attempt.attempt_id),
             work.attempt.job_id: ("work", work.attempt.attempt_id),
@@ -624,14 +609,6 @@ def test_startup_reconstructs_a_missed_terminal_projection_from_runtime_truth(
             "review",
             "repair",
         }
-        invalid_attempt_id = invalid_repair_review.attempt.attempt_id
-        assert invalid_attempt_id not in {
-            attempt_id for _role, attempt_id in expected
-        }
-        for job in runtime.jobs.list_jobs():
-            if job.job_id == invalid_repair_review.attempt.job_id:
-                assert job.status is JobStatus.COMPLETED
-                assert job.current_attempt_id == invalid_attempt_id
         before_events = tuple(runtime.events.list_events())
 
         received: list[TerminalReturnCandidate] = []
@@ -651,9 +628,6 @@ def test_startup_reconstructs_a_missed_terminal_projection_from_runtime_truth(
             assert tuple(
                 (candidate.role, candidate.attempt_id) for candidate in received
             ) == expected
-            assert invalid_attempt_id not in {
-                candidate.attempt_id for candidate in received
-            }
             after_events = tuple(service.runtime.events.list_events())
             assert after_events[: len(before_events)] == before_events
             projection_events = after_events[len(before_events) :]
@@ -706,6 +680,570 @@ def test_startup_does_not_project_terminal_returns_while_awaiting_canary(
             assert tuple(service.runtime.events.list_events()) == before_events
         finally:
             await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_canary_activation_replays_preexisting_sourced_terminal_once(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests import test_executive_os_phase1fc as phase1fc_fixtures
+
+    original_submit = phase1fc_fixtures.submit_intent
+
+    def sourced_submit(runtime, payload):
+        return original_submit(
+            runtime,
+            {**payload, "workstream": "WS:EXECUTIVE-OS"},
+            dialogue_source=_terminal_dialogue_source(),
+            require_dialogue_source=True,
+        )
+
+    monkeypatch.setattr(phase1fc_fixtures, "submit_intent", sourced_submit)
+
+    async def exercise() -> None:
+        config = dataclasses.replace(
+            _config(tmp_path, socket_root=short_socket_root),
+            terminal_return_armed=True,
+            terminal_return_socket_path=tmp_path / "agent-relay.sock",
+        )
+        runtime, _cycle, _dispatches, _root, planner, work, _seal = (
+            _cycle_through_completed_work(
+                config.runtime_root,
+                intent_id="CEO-SERVICE-CANARY-TERMINAL-REPLAY",
+                review_workers=["worker-b"],
+            )
+        )
+
+        class ApplyingProjector:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            async def project(self, candidate, *, before_write):
+                self.calls.append(candidate.attempt_id)
+                before_write()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("an APPLIED candidate must not reconcile")
+
+        # Leave exactly the planner unresolved so activation has one observable
+        # obligation while startup also audits an existing APPLIED family.
+        setup_projector = ApplyingProjector()
+        setup = ExecutiveControlService(
+            _config(tmp_path / "setup"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=setup_projector,
+        )
+        setup.runtime = runtime
+        await setup._project_terminal_return(
+            work.attempt.job_id,
+            expected_attempt_id=work.attempt.attempt_id,
+        )
+        assert setup_projector.calls == [work.attempt.attempt_id]
+
+        activated_projector = ApplyingProjector()
+
+        def factory(opened):
+            supervisor = _FakeSupervisor(opened)
+            supervisor.secret_canary_verdict = {}
+            supervisor.require_complete_launch_attestation = False
+            return supervisor
+
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=factory,
+            terminal_return_projector_factory=(
+                lambda _runtime_provider, _socket_path: activated_projector
+            ),
+            service_state="AWAITING_CANARY",
+        )
+        await service.start()
+        assert activated_projector.calls == []
+        verdict = {
+            "schema_version": "mastermind.executive_secret_canary/v1",
+            "passed": True,
+            "checks": {
+                "control_service_environment": "DENIED",
+                "administrative_checkout": "DENIED",
+                "executive_database": "DENIED",
+                "other_worker_home": "DENIED",
+                "forbidden_production_path": "DENIED",
+            },
+            "receipt_sha256": "b" * 64,
+            "control_environment_probe_sha256": "c" * 64,
+            "observed_at": "2026-08-11T00:00:00Z",
+            "worker_auth_exception": "DEDICATED_CODEX_HOME_ONLY",
+        }
+        await service.activate_canary(verdict)
+        assert service.service_state == "READY"
+        assert activated_projector.calls == [planner.attempt.attempt_id]
+        await service.close()
+
+        restart_projector = ApplyingProjector()
+        restarted = ExecutiveControlService(
+            config,
+            supervisor_factory=factory,
+            terminal_return_projector_factory=(
+                lambda _runtime_provider, _socket_path: restart_projector
+            ),
+        )
+        await restarted.start()
+        try:
+            assert restart_projector.calls == []
+            assert restarted._terminal_return_last_diagnostic == (
+                "terminal-return:ALREADY_APPLIED"
+            )
+        finally:
+            await restarted.close()
+
+    asyncio.run(exercise())
+
+
+def test_startup_bound_counts_only_unresolved_source_eligible_obligations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Keep the algorithmic boundary small while using complete canonical
+    # Runtime graphs.  The production ceiling itself remains frozen at 256.
+    assert es_mod._TERMINAL_RETURN_STARTUP_REPLAY_LIMIT == 256
+    assert es_mod._TERMINAL_RETURN_STARTUP_PHASE_AUDIT_LIMIT == 4096
+    monkeypatch.setattr(es_mod, "_TERMINAL_RETURN_STARTUP_REPLAY_LIMIT", 2)
+
+    from tests import test_executive_os_phase1fc as phase1fc_fixtures
+
+    original_register = phase1fc_fixtures._register
+
+    def register_once(runtime: Runtime, worker_id: str = "worker-1") -> None:
+        try:
+            original_register(runtime, worker_id)
+        except StateConflict as exc:
+            if "already registered" not in str(exc):
+                raise
+
+    monkeypatch.setattr(phase1fc_fixtures, "_register", register_once)
+    original_complete = phase1fc_fixtures._complete_ohf_role
+    completion_ordinal = 0
+
+    def complete_once(runtime, outcome, role_result, *, identity_seed: int):
+        nonlocal completion_ordinal
+        completion_ordinal += 1
+        return original_complete(
+            runtime,
+            outcome,
+            role_result,
+            identity_seed=identity_seed + completion_ordinal * 10_000,
+        )
+
+    monkeypatch.setattr(
+        phase1fc_fixtures,
+        "_complete_ohf_role",
+        complete_once,
+    )
+
+    def completed_planners(root: Path, prefix: str, count: int):
+        cycles = [
+            _cycle_through_completed_work(
+                root,
+                intent_id=f"{prefix}-{index}",
+                review_workers=["worker-b"],
+            )
+            for index in range(count)
+        ]
+        return cycles[0][0], [role for cycle in cycles for role in cycle[4:6]]
+
+    async def exercise() -> None:
+        applied_runtime, applied_planners = completed_planners(
+            tmp_path / "applied-runtime",
+            "CEO-SERVICE-HISTORICAL-APPLIED",
+            3,
+        )
+
+        class ApplyingProjector:
+            calls = 0
+
+            async def project(self, candidate, *, before_write):
+                self.calls += 1
+                before_write()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("fresh projection must not reconcile")
+
+        applying = ApplyingProjector()
+        initial = ExecutiveControlService(
+            _config(tmp_path / "initial"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=applying,
+        )
+        initial.runtime = applied_runtime
+        for planner in applied_planners:
+            await initial._project_terminal_return(
+                planner.job_id,
+                expected_attempt_id=planner.attempt.attempt_id,
+            )
+        assert applying.calls == 6
+
+        class CountingProjector:
+            calls = 0
+
+            async def project(self, _candidate, *, before_write):
+                del before_write
+                self.calls += 1
+                raise AssertionError("historical rows must not be replayed")
+
+            async def reconcile(self, _candidate):
+                self.calls += 1
+                raise AssertionError("historical rows must not be reconciled")
+
+        applied_counter = CountingProjector()
+        applied_restart = ExecutiveControlService(
+            _config(tmp_path / "applied-restart"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=applied_counter,
+        )
+        applied_restart.runtime = applied_runtime
+        await applied_restart._replay_terminal_returns_on_startup()
+        assert applied_restart.service_state == "READY"
+        assert applied_counter.calls == 0
+
+        before_audit = tuple(applied_runtime.events.list_events())
+        monkeypatch.setattr(
+            es_mod,
+            "_TERMINAL_RETURN_STARTUP_PHASE_AUDIT_LIMIT",
+            2,
+        )
+        audit_counter = CountingProjector()
+        audit_restart = ExecutiveControlService(
+            _config(tmp_path / "audit-restart"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=audit_counter,
+        )
+        audit_restart.runtime = applied_runtime
+        await audit_restart._replay_terminal_returns_on_startup()
+        assert audit_restart.service_state == "QUARANTINED"
+        assert audit_restart._terminal_return_last_diagnostic == (
+            "terminal-return:STARTUP_PHASE_AUDIT_LIMIT_EXCEEDED"
+        )
+        assert audit_counter.calls == 0
+        assert tuple(applied_runtime.events.list_events()) == before_audit
+        monkeypatch.setattr(
+            es_mod,
+            "_TERMINAL_RETURN_STARTUP_PHASE_AUDIT_LIMIT",
+            4096,
+        )
+
+        source_free_runtime, _source_free_planners = completed_planners(
+            tmp_path / "source-free-runtime",
+            "CEO-SERVICE-HISTORICAL-SOURCE-FREE",
+            3,
+        )
+        armed_config = dataclasses.replace(
+            _config(tmp_path / "source-free-restart"),
+            terminal_return_armed=True,
+            terminal_return_socket_path=tmp_path / "agent-relay.sock",
+        )
+        source_free_counter = CountingProjector()
+        source_free_restart = ExecutiveControlService(
+            armed_config,
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector_factory=(
+                lambda _runtime_provider, _socket_path: source_free_counter
+            ),
+        )
+        source_free_restart.runtime = source_free_runtime
+        await source_free_restart._replay_terminal_returns_on_startup()
+        assert source_free_restart.service_state == "READY"
+        assert source_free_counter.calls == 0
+        assert source_free_restart._terminal_return_last_diagnostic == (
+            "terminal-return:SKIPPED_SOURCE_FREE"
+        )
+
+        unresolved_runtime, _unresolved_planners = completed_planners(
+            tmp_path / "unresolved-runtime",
+            "CEO-SERVICE-HISTORICAL-UNRESOLVED",
+            3,
+        )
+        unresolved_counter = CountingProjector()
+        unresolved_restart = ExecutiveControlService(
+            _config(tmp_path / "unresolved-restart"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=unresolved_counter,
+        )
+        unresolved_restart.runtime = unresolved_runtime
+        before = tuple(unresolved_runtime.events.list_events())
+        await unresolved_restart._replay_terminal_returns_on_startup()
+        assert unresolved_restart.service_state == "QUARANTINED"
+        assert unresolved_restart._terminal_return_last_diagnostic == (
+            "terminal-return:STARTUP_REPLAY_LIMIT_EXCEEDED"
+        )
+        assert unresolved_counter.calls == 0
+        assert tuple(unresolved_runtime.events.list_events()) == before
+
+    asyncio.run(exercise())
+
+
+def test_startup_quarantines_malformed_applied_namespace_before_relay(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-MALFORMED-APPLIED-STARTUP",
+                review_workers=["worker-b"],
+            )
+        )
+        attempt_id = planner.attempt.attempt_id
+        with runtime.store.transaction() as connection:
+            runtime.store.append_event(
+                connection,
+                aggregate_type="terminal_return_projection",
+                aggregate_id=attempt_id,
+                event_type="EXECUTIVE_TERMINAL_RETURN_APPLIED",
+                actor="foreign-writer",
+                job_id=planner.job_id,
+                attempt_id=attempt_id,
+                worker_id=planner.attempt.worker_id,
+                payload={},
+                command_id=f"terminal-return:{attempt_id}:foreign:applied",
+            )
+
+        class RefusingProjector:
+            calls = 0
+
+            async def project(self, _candidate, *, before_write):
+                del before_write
+                self.calls += 1
+                raise AssertionError("malformed APPLIED must fail before Relay")
+
+            async def reconcile(self, _candidate):
+                self.calls += 1
+                raise AssertionError("malformed APPLIED must fail before Relay")
+
+        projector = RefusingProjector()
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=projector,
+        )
+        service.runtime = runtime
+        before = tuple(runtime.events.list_events())
+        await service._replay_terminal_returns_on_startup()
+        assert service.service_state == "QUARANTINED"
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:EVIDENCE_REFUSED"
+        )
+        assert projector.calls == 0
+        assert tuple(runtime.events.list_events()) == before
+
+    asyncio.run(exercise())
+
+
+def test_startup_validates_every_fresh_candidate_before_first_relay_write(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-FRESH-PROOF-STARTUP",
+                review_workers=["worker-b"],
+            )
+        )
+        _delete_terminal_seal_event(runtime, work.attempt.attempt_id)
+
+        class RefusingProjector:
+            calls = 0
+
+            async def project(self, _candidate, *, before_write):
+                del before_write
+                self.calls += 1
+                raise AssertionError("proof census must finish before Relay")
+
+            async def reconcile(self, _candidate):
+                self.calls += 1
+                raise AssertionError("proof census must finish before Relay")
+
+        projector = RefusingProjector()
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=projector,
+        )
+        service.runtime = runtime
+        before = tuple(runtime.events.list_events())
+        await service._replay_terminal_returns_on_startup()
+        assert service.service_state == "QUARANTINED"
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:EVIDENCE_REFUSED"
+        )
+        assert projector.calls == 0
+        assert tuple(runtime.events.list_events()) == before
+        assert planner.attempt.attempt_id != work.attempt.attempt_id
+
+    asyncio.run(exercise())
+
+
+def test_close_drains_terminal_flight_created_by_dispatch_shutdown_race(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-CLOSE-TERMINAL-RACE",
+                review_workers=["worker-b"],
+            )
+        )
+        finish_release = asyncio.Event()
+        projector_entered = asyncio.Event()
+        projector_release = asyncio.Event()
+
+        class FinishingSupervisor(_FakeSupervisor):
+            async def finish_job(self, _active):
+                await finish_release.wait()
+
+        class BlockingProjector:
+            async def project(self, candidate, *, before_write):
+                before_write()
+                projector_entered.set()
+                await projector_release.wait()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("fresh projection must not reconcile")
+
+        config = _config(tmp_path / "service", shutdown_grace_seconds=0.1)
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=lambda opened: FinishingSupervisor(opened),
+            terminal_return_projector=BlockingProjector(),
+        )
+        service.runtime = runtime
+        service.supervisor = FinishingSupervisor(runtime)
+        active = _Active(lease=SimpleNamespace(attempt=planner.attempt))
+        dispatch_task = asyncio.create_task(
+            service._finish_dispatched(planner.job_id, active)
+        )
+        service._dispatch_tasks[planner.job_id] = dispatch_task
+
+        close_task = asyncio.create_task(service.close())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        finish_release.set()
+        await asyncio.wait_for(projector_entered.wait(), timeout=1)
+        await asyncio.sleep(0.15)
+        assert close_task.done() is False
+
+        projector_release.set()
+        await asyncio.wait_for(close_task, timeout=1)
+        assert service._terminal_return_flights == {}
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=f"terminal-return:{planner.attempt.attempt_id}:",
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_close_shields_attempted_terminal_flight_through_cleanup(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-CANCELLED-CLOSE-TERMINAL-FLIGHT",
+                review_workers=["worker-b"],
+            )
+        )
+        projector_entered = asyncio.Event()
+        projector_release = asyncio.Event()
+        sends = 0
+
+        class BlockingProjector:
+            async def project(self, candidate, *, before_write):
+                nonlocal sends
+                before_write()
+                sends += 1
+                projector_entered.set()
+                await projector_release.wait()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("fresh projection must not reconcile")
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=BlockingProjector(),
+        )
+        service.runtime = runtime
+        projection_task = asyncio.create_task(
+            service._project_terminal_return(
+                planner.job_id,
+                expected_attempt_id=planner.attempt.attempt_id,
+            )
+        )
+        await asyncio.wait_for(projector_entered.wait(), timeout=1)
+
+        close_task = asyncio.create_task(service.close())
+        await asyncio.sleep(0)
+        close_task.cancel()
+        await asyncio.sleep(0)
+        assert close_task.done() is False
+        assert sends == 1
+
+        projector_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await close_task
+        await projection_task
+        assert service._terminal_return_flights == {}
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=(
+                    f"terminal-return:{planner.attempt.attempt_id}:"
+                ),
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+        class NoSecondSendProjector:
+            async def project(self, _candidate, *, before_write):
+                del before_write
+                raise AssertionError("restart must not send an applied result")
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("restart must not reconcile an applied result")
+
+        restarted = ExecutiveControlService(
+            _config(tmp_path / "restarted"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=NoSecondSendProjector(),
+        )
+        restarted.runtime = runtime
+        await restarted._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+        assert restarted._terminal_return_last_diagnostic == (
+            "terminal-return:ALREADY_APPLIED"
+        )
 
     asyncio.run(exercise())
 
@@ -953,13 +1491,7 @@ def test_terminal_return_projection_is_single_flight_per_service(
                 self.entered.set()
                 await self.release.wait()
                 before_write()
-                return {
-                    "action": "POSTED",
-                    "message_key": candidate.message_key,
-                    "fingerprint": "f" * 64,
-                    "message_ts": "1787961600.000002",
-                    "duplicate_timestamps": [],
-                }
+                return _projection_receipt(candidate)
 
         projector = BlockingProjector()
         service = ExecutiveControlService(
@@ -1036,7 +1568,7 @@ def test_terminal_return_prepared_material_conflict_refuses_across_restart(
     )
     conflicting = dataclasses.replace(
         candidate,
-        terminal_digest=alternate_digest,
+        terminal_evidence_digest=alternate_digest,
         message_key=f"asd-exec-result-{alternate_digest}",
     )
     restarted = ExecutiveControlService(
@@ -1145,13 +1677,7 @@ def test_terminal_return_result_without_dispatch_boundary_is_typed_refusal(
         class InvalidProjector:
             async def project(self, candidate, *, before_write):
                 del before_write
-                return {
-                    "action": "POSTED",
-                    "message_key": candidate.message_key,
-                    "fingerprint": "f" * 64,
-                    "message_ts": "1787961600.000002",
-                    "duplicate_timestamps": [],
-                }
+                return _projection_receipt(candidate, action="POSTED")
 
         service = ExecutiveControlService(
             _config(tmp_path / "service"),
@@ -1178,6 +1704,264 @@ def test_terminal_return_result_without_dispatch_boundary_is_typed_refusal(
         ] == [
             "EXECUTIVE_TERMINAL_RETURN_PREPARED",
             "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_applied_requires_atomic_action_predecessor(
+    tmp_path: Path,
+) -> None:
+    runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+        _cycle_through_completed_work(
+            tmp_path / "runtime",
+            intent_id="CEO-SERVICE-TERMINAL-ATOMIC-PREDECESSOR",
+            review_workers=["worker-b"],
+        )
+    )
+    material = runtime.validated_role_completion(
+        planner.job_id,
+        expected_attempt_id=planner.attempt.attempt_id,
+    )
+    candidate = reduce_terminal_return(material=material)
+    service = ExecutiveControlService(
+        _config(tmp_path / "service"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        terminal_return_projector=lambda _candidate: None,
+    )
+    service.runtime = runtime
+    phase, applied_command, event_material = (
+        service._begin_terminal_return_projection(candidate)
+    )
+    assert phase == "PREPARED"
+
+    with pytest.raises(StateConflict, match="phase order drifted"):
+        service._complete_terminal_return_projection(
+            candidate,
+            applied_command=applied_command,
+            material=event_material,
+            projection_receipt=_projection_receipt(candidate, action="POSTED"),
+        )
+    assert [
+        event.event_type
+        for event in runtime.events.list_events(
+            attempt_id=planner.attempt.attempt_id,
+            command_id_prefix=f"terminal-return:{planner.attempt.attempt_id}:",
+        )
+    ] == ["EXECUTIVE_TERMINAL_RETURN_PREPARED"]
+
+
+def test_terminal_return_phase_write_revalidates_every_predecessor(
+    tmp_path: Path,
+) -> None:
+    runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+        _cycle_through_completed_work(
+            tmp_path / "runtime",
+            intent_id="CEO-SERVICE-TERMINAL-PHASE-RACE-DRIFT",
+            review_workers=["worker-b"],
+        )
+    )
+    material = runtime.validated_role_completion(
+        planner.job_id,
+        expected_attempt_id=planner.attempt.attempt_id,
+    )
+    candidate = reduce_terminal_return(material=material)
+    service = ExecutiveControlService(
+        _config(tmp_path / "service"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        terminal_return_projector=lambda _candidate: None,
+    )
+    service.runtime = runtime
+    phase, applied_command, event_material = (
+        service._begin_terminal_return_projection(candidate)
+    )
+    assert phase == "PREPARED"
+    command_base, _ = service._terminal_return_event_material(candidate)
+    drifted = {**event_material, "root_job_id": "JOB-FOREIGN"}
+    with runtime.store.transaction() as connection:
+        runtime.store.append_event(
+            connection,
+            aggregate_type="terminal_return_projection",
+            aggregate_id=candidate.attempt_id,
+            event_type="EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+            actor="foreign-writer",
+            job_id=candidate.job_id,
+            attempt_id=candidate.attempt_id,
+            worker_id=candidate.worker_id,
+            payload=drifted,
+            command_id=f"{command_base}:pre-submit-refused",
+        )
+
+    with pytest.raises(StateConflict, match="projection event drifted"):
+        service._record_terminal_return_phase(
+            candidate,
+            phase="ATTEMPTED",
+            material=event_material,
+        )
+    with pytest.raises(StateConflict, match="projection event drifted"):
+        service._complete_terminal_return_projection(
+            candidate,
+            applied_command=applied_command,
+            material=event_material,
+            projection_receipt=_projection_receipt(candidate, action="DUPLICATE"),
+        )
+    assert [
+        event.event_type
+        for event in runtime.events.list_events(
+            attempt_id=candidate.attempt_id,
+            command_id_prefix=f"terminal-return:{candidate.attempt_id}:",
+        )
+    ] == [
+        "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+        "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+    ]
+
+
+def test_terminal_return_phase_race_quarantines_without_provider_commit_or_append(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-PHASE-RACE-QUARANTINE",
+                review_workers=["worker-b"],
+            )
+        )
+        provider_commits = 0
+
+        class RacingProjector:
+            async def project(self, candidate, *, before_write):
+                nonlocal provider_commits
+                command_base, material = service._terminal_return_event_material(
+                    candidate
+                )
+                drifted = {**material, "root_job_id": "JOB-FOREIGN"}
+                with runtime.store.transaction() as connection:
+                    runtime.store.append_event(
+                        connection,
+                        aggregate_type="terminal_return_projection",
+                        aggregate_id=candidate.attempt_id,
+                        event_type=(
+                            "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED"
+                        ),
+                        actor="foreign-writer",
+                        job_id=candidate.job_id,
+                        attempt_id=candidate.attempt_id,
+                        worker_id=candidate.worker_id,
+                        payload=drifted,
+                        command_id=f"{command_base}:pre-submit-refused",
+                    )
+                before_write()
+                provider_commits += 1
+                return _projection_receipt(candidate)
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=RacingProjector(),
+        )
+        service.runtime = runtime
+        await service._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+
+        assert provider_commits == 0
+        assert service.service_state == "QUARANTINED"
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:EVIDENCE_REFUSED"
+        )
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=(
+                    f"terminal-return:{planner.attempt.attempt_id}:"
+                ),
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+        ]
+        assert service._terminal_return_flights == {}
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_known_zero_after_commit_remains_retryable(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-PROVEN-NO-EFFECT",
+                review_workers=["worker-b"],
+            )
+        )
+        attempt_id = planner.attempt.attempt_id
+
+        class KnownZeroProjector:
+            async def project(self, _candidate, *, before_write):
+                before_write()
+                raise TerminalReturnProjectionError("TRANSPORT_UNAVAILABLE")
+
+        first = ExecutiveControlService(
+            _config(tmp_path / "first"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=KnownZeroProjector(),
+        )
+        first.runtime = runtime
+        await first._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert first._terminal_return_last_diagnostic == (
+            "terminal-return:PROVEN_NO_EFFECT:TRANSPORT_UNAVAILABLE"
+        )
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=attempt_id,
+                command_id_prefix=f"terminal-return:{attempt_id}:",
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_PROVEN_NO_EFFECT",
+        ]
+
+        class RecoveredProjector:
+            async def project(self, candidate, *, before_write):
+                before_write()
+                # A commissioned retry may discover that another exact actor
+                # already posted the immutable message after the prior proven
+                # no-effect attempt.  DUPLICATE is a valid terminal receipt.
+                return _projection_receipt(candidate, action="DUPLICATE")
+
+        restarted = ExecutiveControlService(
+            _config(tmp_path / "restarted"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=RecoveredProjector(),
+        )
+        restarted.runtime = runtime
+        await restarted._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert restarted._terminal_return_last_diagnostic == "terminal-return:APPLIED"
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=attempt_id,
+                command_id_prefix=f"terminal-return:{attempt_id}:",
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_PROVEN_NO_EFFECT",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
         ]
 
     asyncio.run(exercise())
@@ -1222,6 +2006,53 @@ def test_terminal_return_exact_duplicate_applies_without_false_attempt(
             )
         ] == [
             "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_post_commit_duplicate_applies_after_attempted_boundary(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-POST-COMMIT-DUPLICATE",
+                review_workers=["worker-b"],
+            )
+        )
+
+        class DuplicateAfterCommitProjector:
+            async def project(self, candidate, *, before_write):
+                before_write()
+                return _projection_receipt(candidate, action="DUPLICATE")
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=DuplicateAfterCommitProjector(),
+        )
+        service.runtime = runtime
+        await service._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+
+        assert service.service_state == "READY"
+        assert service._terminal_return_last_diagnostic == "terminal-return:APPLIED"
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=(
+                    f"terminal-return:{planner.attempt.attempt_id}:"
+                ),
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
             "EXECUTIVE_TERMINAL_RETURN_APPLIED",
         ]
 
@@ -1642,108 +2473,272 @@ def _terminal_dialogue_source() -> dict[str, object]:
     }
 
 
-def test_v2_host_dialogue_source_is_immutable_in_the_root_creation_event(
+def test_v2_public_dialogue_source_is_rejected_before_admission(
     tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    intent = _coo_intent(config, "dialogue-source")
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+    intent["dialogue_source"] = _terminal_dialogue_source()
+
+    with pytest.raises(ceo_intent_mod.CeoIntentError, match="unexpected key"):
+        ceo_intent_mod.validate_intent(intent)
+    assert runtime.jobs.list_jobs() == []
+
+
+def test_v2_trusted_host_dialogue_source_is_immutable_in_root_creation(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    source_state: list[dict[str, object] | None] = [_terminal_dialogue_source()]
+    provider_calls: list[tuple[str, str]] = []
+
+    def source_provider(intent_id: str, workstream: str):
+        provider_calls.append((intent_id, workstream))
+        return source_state[0]
+
+    service = ExecutiveControlService(
+        config,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=source_provider,
+    )
+    service.runtime = runtime
+    intent = _coo_intent(config, "dialogue-source")
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+
+    receipt = service._submit_service_intent(intent)
+    duplicate = service._submit_service_intent(intent)
+    event = runtime.store.find_event_by_command_id(
+        ceo_intent_mod.command_id_for(intent["intent_id"])
+    )
+    assert event is not None
+    assert event["payload"]["provenance"]["dialogue_source"] == source_state[0]
+    expected_source_digest = hashlib.sha256(
+        json.dumps(
+            source_state[0],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert event["payload"]["provenance"]["dialogue_source_digest"] == expected_source_digest
+    assert event["payload"]["provenance"]["fingerprint"] == (
+        ceo_intent_mod.intent_fingerprint(intent)
+    )
+    assert "dialogue_source" not in intent
+    assert duplicate["duplicate"] is True
+    assert duplicate["job_id"] == receipt["job_id"]
+    # Admission observes and immediately re-observes one deep-frozen source.
+    # Durable replay is source-provider independent.
+    assert provider_calls == [(intent["intent_id"], intent["workstream"])] * 2
+
+    original_source = _terminal_dialogue_source()
+    source_state[0] = {
+        **original_source,
+        "commission_ref": {
+            **original_source["commission_ref"],
+            "commit": "e" * 40,
+        },
+    }
+    replay_after_provider_drift = service._submit_service_intent(intent)
+    assert replay_after_provider_drift["duplicate"] is True
+
+    source_state[0] = None
+    replay_during_provider_outage = service._submit_service_intent(intent)
+    assert replay_during_provider_outage["duplicate"] is True
+    assert provider_calls == [(intent["intent_id"], intent["workstream"])] * 2
+    assert [job.job_id for job in runtime.jobs.list_jobs()] == [receipt["job_id"]]
+
+
+def test_v2_dialogue_source_digest_drift_refuses_replay_and_status(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    source = _terminal_dialogue_source()
+    service = ExecutiveControlService(
+        config,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=(
+            lambda _intent_id, _workstream: source
+        ),
+    )
+    service.runtime = runtime
+    intent = _coo_intent(config, "dialogue-source-digest-drift")
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+    service._submit_service_intent(intent)
+
+    command_id = ceo_intent_mod.command_id_for(intent["intent_id"])
+    event = runtime.store.find_event_by_command_id(command_id)
+    assert event is not None
+    payload = event["payload"]
+    payload["provenance"]["dialogue_source_digest"] = "0" * 64
+    # Simulate out-of-band disk corruption by bypassing the normal immutable
+    # Event API. The production writer can never perform this update.
+    connection = sqlite3.connect(runtime.store.path)
+    try:
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE command_id=?",
+            (
+                json.dumps(
+                    payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ),
+                command_id,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(ceo_intent_mod.CeoIntentError, match="drifted"):
+        service._submit_service_intent(intent)
+    with pytest.raises(ceo_intent_mod.CeoIntentError, match="drifted"):
+        ceo_intent_mod.resolve_intent(
+            runtime,
+            intent["intent_id"],
+        )
+
+
+def test_v2_dialogue_source_reobservation_drift_refuses_before_root_creation(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    first_source = _terminal_dialogue_source()
+    second_source = {
+        **first_source,
+        "commission_ref": {
+            **first_source["commission_ref"],
+            "commit": "e" * 40,
+        },
+    }
+    source_iterator = iter((first_source, second_source))
+
+    def source_provider(_intent_id: str, _workstream: str):
+        return next(source_iterator)
+
+    service = ExecutiveControlService(
+        config,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=source_provider,
+    )
+    service.runtime = runtime
+    intent = _coo_intent(config, "dialogue-source-concurrent-divergence")
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+
+    with pytest.raises(ceo_intent_mod.CeoIntentConflict, match="changed"):
+        service._submit_service_intent(intent)
+    assert runtime.jobs.list_jobs() == []
+    assert runtime.store.find_event_by_command_id(
+        ceo_intent_mod.command_id_for(intent["intent_id"])
+    ) is None
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        pytest.param(
+            lambda _intent_id, _workstream: {
+                **_terminal_dialogue_source(),
+                "work_ref": "WS:FOREIGN",
+            },
+            id="work-ref-mismatch",
+        ),
+        pytest.param(
+            lambda _intent_id, _workstream: {"schema_version": "malformed"},
+            id="malformed",
+        ),
+        pytest.param(
+            lambda _intent_id, _workstream: (_ for _ in ()).throw(
+                RuntimeError("provider unavailable")
+            ),
+            id="provider-error",
+        ),
+        pytest.param(
+            lambda _intent_id, _workstream: None,
+            id="missing",
+        ),
+    ],
+)
+def test_invalid_trusted_dialogue_source_refuses_before_root_creation(
+    tmp_path: Path,
+    provider,
 ) -> None:
     config = _config(tmp_path)
     runtime = Runtime.at(config.runtime_root)
     service = ExecutiveControlService(
         config,
         supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=provider,
     )
-    intent = _coo_intent(config, "dialogue-source")
+    service.runtime = runtime
+    intent = _coo_intent(config, "invalid-dialogue-source")
     intent["workstream"] = "WS:EXECUTIVE-OS"
-    source = _terminal_dialogue_source()
-    intent["dialogue_source"] = source
 
-    receipt = ceo_intent_mod.submit_intent(
-        runtime,
-        intent,
-        workspace_root=config.proof_workspace_root,
-        execution_binding=service._coo_execution_binding,
-    )
-    event = runtime.store.find_event_by_command_id(
+    with pytest.raises(ceo_intent_mod.CeoIntentError):
+        service._submit_service_intent(intent)
+
+    assert runtime.jobs.list_jobs() == []
+    assert runtime.store.find_event_by_command_id(
         ceo_intent_mod.command_id_for(intent["intent_id"])
-    )
-    assert event is not None
-    assert event["payload"]["provenance"]["dialogue_source"] == source
+    ) is None
 
-    changed = {
-        **intent,
-        "dialogue_source": {
-            **source,
-            "commission_ref": {
-                **source["commission_ref"],
-                "commit": "e" * 40,
-            },
+
+def test_v2_ingress_public_frame_refuses_dialogue_source_before_submission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    async def should_not_submit(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(ceo_ingress_mod, "_handle_submit_v2", should_not_submit)
+    frame = {
+        "schema": ceo_ingress_mod.SUBMIT_SCHEMA_V2,
+        "request_ref": "req-r2-public-source-refusal-20260903-001",
+        "observed_grounding": {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40},
+        "request": {
+            "objective": "Run one bounded Executive terminal-return fixture.",
+            "department": "executive-infrastructure",
+            "priority": 9,
+            "execution_profile": "research_only",
+            "workstream": "WS:EXECUTIVE-OS",
+            "attempt_limit": 2,
         },
+        "dialogue_source": _terminal_dialogue_source(),
     }
-    with pytest.raises(ceo_intent_mod.CeoIntentConflict, match="different envelope"):
-        ceo_intent_mod.submit_intent(
-            runtime,
-            changed,
-            workspace_root=config.proof_workspace_root,
-            execution_binding=service._coo_execution_binding,
-        )
-    assert receipt["job_id"] == runtime.jobs.list_jobs()[0].job_id
 
-
-def test_dedicated_ceo_ingress_replay_conflicts_on_changed_dialogue_source(
-    tmp_path: Path,
-) -> None:
-    """A durable fingerprint match must not launder host-source drift."""
-
-    async def exercise() -> None:
-        config = _config(tmp_path)
-        runtime = Runtime.at(config.runtime_root)
-        service = ExecutiveControlService(
-            config,
-            supervisor_factory=lambda opened: _FakeSupervisor(opened),
-        )
-        intent = _coo_intent(config, "dialogue-source-drift")
-        intent["workstream"] = "WS:EXECUTIVE-OS"
-        first_source = _terminal_dialogue_source()
-        changed_source = {
-            **first_source,
-            "commission_ref": {
-                **first_source["commission_ref"],
-                "commit": "e" * 40,
-            },
-        }
-
-        def submit_with(source):
-            return lambda envelope: ceo_intent_mod.submit_intent(
-                runtime,
-                envelope,
-                workspace_root=config.proof_workspace_root,
-                execution_binding=service._coo_execution_binding,
-                dialogue_source=source,
+    with pytest.raises(ceo_ingress_mod.CeoIngressError) as refused:
+        asyncio.run(
+            ceo_ingress_mod.handle_frame(
+                frame,
+                runtime=object(),
+                grounding_provider=object(),
+                workspace_root=tmp_path,
+                service_state="READY",
+                ceo_ingress_armed=True,
             )
-
-        first = await ceo_ingress_mod._submit(
-            runtime,
-            intent,
-            config.proof_workspace_root,
-            submit_with(first_source),
         )
-        assert first["duplicate"] is False
+    assert refused.value.code == "invalid_input"
+    assert called is False
 
-        with pytest.raises(ceo_ingress_mod.CeoIngressError) as refused:
-            await ceo_ingress_mod._submit(
-                runtime,
-                intent,
-                config.proof_workspace_root,
-                submit_with(changed_source),
-            )
-        assert refused.value.code == "operation_conflict"
-        assert len(runtime.jobs.list_jobs()) == 1
-
-    asyncio.run(exercise())
+    nested = dict(frame["request"])
+    nested["dialogue_source"] = _terminal_dialogue_source()
+    with pytest.raises(ceo_ingress_mod.ceo_request.CeoRequestInvalid):
+        ceo_ingress_mod.ceo_request.normalize_automated_request(nested)
 
 
-def test_v2_ingress_dialogue_source_is_admission_owned_and_fingerprinted(
-    tmp_path: Path,
-) -> None:
+def test_v2_ingress_builds_a_source_free_strict_v2_envelope(tmp_path: Path) -> None:
     normalized = ceo_ingress_mod.ceo_request.normalize_automated_request(
         {
             "objective": "Run one bounded Executive terminal-return fixture.",
@@ -1754,47 +2749,96 @@ def test_v2_ingress_dialogue_source_is_admission_owned_and_fingerprinted(
             "attempt_limit": 2,
         }
     )
-    source = {
-        "schema_version": "mastermind.executive_dialogue_source/v1",
-        "work_ref": "WS:EXECUTIVE-OS",
-        "commission_ref": {
-            "repository": "mastermindx-market-intelligence/Mastermind",
-            "commit": "c" * 40,
-            "path": "docs/commissions/executive-terminal-return.md",
-            "content_sha256": "d" * 64,
-        },
-        "watch_mode": "turn_watch_v1",
-    }
-    grounding = {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40}
-
     envelope = ceo_ingress_mod._build_envelope(
         normalized,
         intent_id="auto-" + "1" * 32,
         workspace_root=tmp_path,
-        grounding=grounding,
-        dialogue_source=source,
-    )
-    changed = ceo_ingress_mod._build_envelope(
-        normalized,
-        intent_id="auto-" + "1" * 32,
-        workspace_root=tmp_path,
-        grounding=grounding,
-        dialogue_source={
-            **source,
-            "commission_ref": {**source["commission_ref"], "commit": "e" * 40},
-        },
+        grounding={"mastermind_sha": "a" * 40, "macro_sha": "b" * 40},
+        strict_v2=True,
     )
 
     assert envelope["schema"] == ceo_intent_mod.INTENT_SCHEMA_V2
-    assert envelope["dialogue_source"] == source
-    assert not (
-        {"allowed_sol_user_ids", "relay_bot_user_id", "thread_ts", "session_ref", "operation_key"}
-        & set(envelope["dialogue_source"])
-    )
+    assert "dialogue_source" not in envelope
     assert ceo_intent_mod.validate_intent(envelope) == envelope
-    assert ceo_intent_mod.intent_fingerprint(envelope) != ceo_intent_mod.intent_fingerprint(
-        changed
+
+
+def test_v2_ingress_host_source_provider_selects_source_free_strict_root(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    provider_calls: list[tuple[str, str]] = []
+
+    def source_provider(intent_id: str, workstream: str):
+        provider_calls.append((intent_id, workstream))
+        return _terminal_dialogue_source()
+
+    service = ExecutiveControlService(
+        config,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=source_provider,
     )
+    service.runtime = runtime
+    grounding = {
+        "mastermind_sha": config.proof_base_sha,
+        "macro_sha": "b" * 40,
+        "boot_packet_schema": ceo_ingress_mod.BOOT_PACKET_SCHEMA,
+    }
+
+    class GroundingProvider:
+        def observe(self):
+            return dict(grounding)
+
+    frame = {
+        "schema": ceo_ingress_mod.SUBMIT_SCHEMA_V2,
+        "request_ref": "req-r2-host-source-20260903-001",
+        "observed_grounding": grounding,
+        "request": {
+            "objective": "Run one bounded Executive terminal-return fixture.",
+            "department": "executive-infrastructure",
+            "priority": 9,
+            "execution_profile": "research_only",
+            "workstream": "WS:EXECUTIVE-OS",
+            "attempt_limit": 2,
+        },
+    }
+
+    async def submit_twice():
+        async def submit():
+            return await ceo_ingress_mod.handle_frame(
+                frame,
+                runtime=runtime,
+                grounding_provider=GroundingProvider(),
+                workspace_root=config.proof_workspace_root,
+                service_state="READY",
+                ceo_ingress_armed=True,
+                strict_v2_admission=True,
+                execution_binding_provider=service._require_current_coo_binding,
+                dialogue_source_provider=source_provider,
+            )
+
+        return [await submit(), await submit()]
+
+    receipts = asyncio.run(submit_twice())
+    receipt = receipts[0]
+
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    assert root.orchestration_role == "aggregation"
+    assert root.orchestration_provenance["creator"] == "ceo_intent"
+    event = runtime.store.find_event_by_command_id(
+        ceo_intent_mod.command_id_for(receipt["intent_id"])
+    )
+    assert event is not None
+    assert event["payload"]["provenance"]["dialogue_source"] == (
+        _terminal_dialogue_source()
+    )
+    assert {item["job_id"] for item in receipts} == {receipt["job_id"]}
+    assert sorted(item["duplicate"] for item in receipts) == [False, True]
+    assert provider_calls == [
+        (receipt["intent_id"], "WS:EXECUTIVE-OS"),
+        (receipt["intent_id"], "WS:EXECUTIVE-OS"),
+    ]
 
 
 def test_terminal_return_production_composition_is_explicit_and_complete(
@@ -1809,15 +2853,75 @@ def test_terminal_return_production_composition_is_explicit_and_complete(
         terminal_return_armed=True,
         terminal_return_socket_path=tmp_path / "agent-relay.sock",
     )
+
+    class GroundingProvider:
+        def observe(self):
+            return {
+                "mastermind_sha": armed.proof_base_sha,
+                "macro_sha": "b" * 40,
+                "boot_packet_schema": ceo_ingress_mod.BOOT_PACKET_SCHEMA,
+            }
+
+    class Projector:
+        async def project(self, _candidate, *, before_write=None):
+            if before_write is not None:
+                before_write()
+
+        async def reconcile(self, _candidate):
+            return None
+
+    def projector_factory(_runtime_getter, _socket_path):
+        return Projector()
+
+    with pytest.raises(ValueError, match="terminal-return.*CeoIngress"):
+        ExecutiveControlService(
+            armed,
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            ceo_ingress_socket_path=armed.terminal_return_socket_path,
+            ceo_ingress_peer_uid=os.geteuid(),
+            ceo_ingress_grounding_provider=GroundingProvider(),
+            terminal_return_projector_factory=projector_factory,
+        )
+
+    # Terminal-only recovery is a startup capability even while the trusted
+    # admission-source provider is unavailable.  A new strict-v2 admission
+    # will refuse dynamically; construction must not disable durable replay.
+    outage_service = ExecutiveControlService(
+        armed,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_socket_path=tmp_path / "ceo-ingress.sock",
+        ceo_ingress_peer_uid=os.geteuid(),
+        ceo_ingress_grounding_provider=GroundingProvider(),
+        ceo_ingress_armed=True,
+        terminal_return_projector_factory=projector_factory,
+    )
+    assert outage_service._terminal_return_projector is not None
+    outage_runtime = Runtime.at(armed.runtime_root)
+    outage_service.runtime = outage_runtime
+    outage_intent = _coo_intent(armed, "armed-source-outage")
+    outage_intent["workstream"] = "WS:EXECUTIVE-OS"
+    with pytest.raises(
+        ceo_intent_mod.CeoIntentError,
+        match="trusted host dialogue source is unavailable",
+    ):
+        outage_service._submit_service_intent(outage_intent)
+    assert outage_runtime.jobs.list_jobs() == []
+    assert outage_runtime.store.find_event_by_command_id(
+        ceo_intent_mod.command_id_for(outage_intent["intent_id"])
+    ) is None
+
     service = ExecutiveControlService(
         armed,
         supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=(
+            lambda _intent_id, _workstream: _terminal_dialogue_source()
+        ),
+        terminal_return_projector_factory=projector_factory,
     )
     runtime = Runtime.at(armed.runtime_root)
     service.runtime = runtime
     intent = _coo_intent(armed, "armed-dialogue-source")
     intent["workstream"] = "WS:EXECUTIVE-OS"
-    intent["dialogue_source"] = _terminal_dialogue_source()
 
     receipt = service._submit_service_intent(intent)
 
@@ -1830,6 +2934,110 @@ def test_terminal_return_production_composition_is_explicit_and_complete(
         **_terminal_dialogue_source(),
     }
     assert service._terminal_return_projector is not None
+
+
+def test_armed_terminal_return_skips_source_free_history_without_phase_events(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-SOURCE-FREE-HISTORY",
+                review_workers=["worker-b"],
+            )
+        )
+        called = False
+
+        class Projector:
+            async def project(self, _candidate, *, before_write=None):
+                nonlocal called
+                called = True
+
+            async def reconcile(self, _candidate):
+                nonlocal called
+                called = True
+
+        config = dataclasses.replace(
+            _config(tmp_path / "service"),
+            terminal_return_armed=True,
+            terminal_return_socket_path=tmp_path / "agent-relay.sock",
+        )
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector_factory=lambda _runtime, _path: Projector(),
+        )
+        service.runtime = runtime
+
+        await service._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+
+        assert called is False
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:SKIPPED_SOURCE_FREE"
+        )
+        assert runtime.events.list_events(
+            attempt_id=planner.attempt.attempt_id,
+            aggregate_type="terminal_return_projection",
+        ) == []
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_independent_candidates_do_not_share_an_io_lock(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-INDEPENDENT-TERMINALS",
+                review_workers=["worker-b"],
+            )
+        )
+        both_entered = asyncio.Event()
+        release = asyncio.Event()
+        entered: list[str] = []
+
+        class Projector:
+            async def project(self, candidate, *, before_write):
+                entered.append(candidate.attempt_id)
+                if len(entered) == 2:
+                    both_entered.set()
+                await release.wait()
+                before_write()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("a fresh candidate must not reconcile")
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=Projector(),
+        )
+        service.runtime = runtime
+        tasks = [
+            asyncio.create_task(
+                service._project_terminal_return(
+                    item.job_id,
+                    expected_attempt_id=item.attempt.attempt_id,
+                )
+            )
+            for item in (planner, work)
+        ]
+        await asyncio.wait_for(both_entered.wait(), timeout=1)
+        release.set()
+        await asyncio.gather(*tasks)
+        assert set(entered) == {
+            planner.attempt.attempt_id,
+            work.attempt.attempt_id,
+        }
+
+    asyncio.run(exercise())
 
 
 def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
@@ -3033,17 +4241,42 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             & set(unarmed)
         )
 
-        partial_path = tmp_path / "control-partial.json"
-        partial_path.write_text(
-            json.dumps({**raw, "terminal_return_armed": True}),
+        terminal_return_path = tmp_path / "control-terminal-return.json"
+        terminal_return_path.write_text(
+            json.dumps(
+                {
+                    **raw,
+                    "terminal_return_armed": True,
+                    "terminal_return_socket_path": (
+                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                    ),
+                }
+            ),
             encoding="utf-8",
         )
-        partial_path.chmod(0o400)
-        with pytest.raises(
-            ServiceError,
-            match="terminal-return control config fields must be supplied together",
-        ):
-            service_cli.load_control_config(partial_path)
+        terminal_return_path.chmod(0o400)
+        terminal_loaded = service_cli.load_control_config(terminal_return_path)
+        assert terminal_loaded["terminal_return_armed"] is True
+        assert terminal_loaded["terminal_return_socket_path"] == Path(
+            "/var/run/mastermind-agent-relay/agent-relay.sock"
+        ).resolve(strict=False)
+        terminal_unarmed_path = tmp_path / "control-terminal-return-unarmed.json"
+        terminal_unarmed_path.write_text(
+            json.dumps(
+                {
+                    **raw,
+                    "terminal_return_armed": False,
+                    "terminal_return_socket_path": (
+                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                    ),
+                }
+            ),
+            encoding="utf-8",
+        )
+        terminal_unarmed_path.chmod(0o400)
+        terminal_unarmed_loaded = service_cli.load_control_config(
+            terminal_unarmed_path
+        )
 
         stale_policy_path = tmp_path / "control-stale-policy.json"
         stale_policy_path.write_text(
@@ -3060,29 +4293,64 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         with pytest.raises(ServiceError, match="unknown=.*terminal_return_allowed"):
             service_cli.load_control_config(stale_policy_path)
 
-        raw.update(
-            {
-                "terminal_return_armed": True,
-                "terminal_return_socket_path": str(
-                    short_socket_root / "agent-relay.sock"
-                ),
-            }
-        )
         config_path = tmp_path / "control.json"
         config_path.write_text(json.dumps(raw), encoding="utf-8")
         config_path.chmod(0o400)
         loaded = service_cli.load_control_config(config_path)
-        assert loaded["terminal_return_armed"] is True
-        assert loaded["terminal_return_socket_path"] == (
-            short_socket_root / "agent-relay.sock"
-        ).resolve()
         monkeypatch.setattr(
             service_cli, "activate_launchd_socket", lambda _name: listener
         )
-        with pytest.raises(ValueError, match="terminal-return arming must be boolean"):
-            service_cli._service_from_config(
-                {**loaded, "terminal_return_armed": "false"}
+        captured: dict[str, object] = {}
+
+        def capture_service(config, **kwargs):
+            captured["config"] = config
+            captured["kwargs"] = kwargs
+            return object()
+
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(
+                service_cli, "activate_launchd_socket", lambda _name: listener
             )
+            composition_patch.setattr(
+                service_cli, "ExecutiveControlService", capture_service
+            )
+            service_cli._service_from_config(
+                terminal_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        composed_config = captured["config"]
+        composed_kwargs = captured["kwargs"]
+        assert isinstance(composed_config, ServiceConfig)
+        assert composed_config.terminal_return_armed is True
+        assert isinstance(composed_kwargs, dict)
+        projector_factory = composed_kwargs["terminal_return_projector_factory"]
+        projector = projector_factory(
+            lambda: object(), composed_config.terminal_return_socket_path
+        )
+        assert isinstance(projector, ExecutiveTerminalReturnProjector)
+
+        captured.clear()
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(
+                service_cli, "activate_launchd_socket", lambda _name: listener
+            )
+            composition_patch.setattr(
+                service_cli, "ExecutiveControlService", capture_service
+            )
+            service_cli._service_from_config(
+                terminal_unarmed_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        unarmed_composed_config = captured["config"]
+        unarmed_composed_kwargs = captured["kwargs"]
+        assert isinstance(unarmed_composed_config, ServiceConfig)
+        assert unarmed_composed_config.terminal_return_armed is False
+        assert unarmed_composed_config.terminal_return_socket_path == Path(
+            "/var/run/mastermind-agent-relay/agent-relay.sock"
+        ).resolve(strict=False)
+        assert isinstance(unarmed_composed_kwargs, dict)
+        assert "terminal_return_projector_factory" not in unarmed_composed_kwargs
+
         with pytest.raises(ValueError, match="coo_tick_interval_seconds"):
             service_cli._service_from_config(
                 {**loaded, "coo_tick_interval_seconds": 0}
@@ -3091,10 +4359,8 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             loaded,
             initial_canary=json.loads(canary.read_text(encoding="utf-8")),
         )
-        assert service.config.terminal_return_armed is True
-        assert service.config.terminal_return_socket_path == (
-            short_socket_root / "agent-relay.sock"
-        ).resolve()
+        assert service.config.terminal_return_armed is False
+        assert service.config.terminal_return_socket_path is None
         await service.start()
         try:
             from control_plane.executive_worker_broker import (

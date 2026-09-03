@@ -29,6 +29,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 from uuid import uuid4
 
+from common.commission_ref import (
+    CommissionRef,
+    CommissionRefError,
+    normalize_commission_ref,
+)
 from control_plane.executive_authority import (
     AuthorityDenied,
     AuthorityPolicyError,
@@ -1024,57 +1029,58 @@ class _RetrySafetyMaterial:
     tx9_material: tuple[sqlite3.Row, dict[str, Any], str, dict[str, Any], str] | None
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class ExecutiveDialogueSource:
     """Admission-owned immutable source for one strict-v2 dialogue family."""
 
     schema_version: str
     work_ref: str
-    commission_ref: dict[str, str]
+    commission_ref: CommissionRef
     watch_mode: str | None
+
+    def __post_init__(self) -> None:
+        if self.schema_version != EXECUTIVE_DIALOGUE_SOURCE_SCHEMA:
+            raise StateConflict("v2 host dialogue source schema is invalid")
+        if not isinstance(self.work_ref, str) or re.fullmatch(
+            r"WS:[A-Z0-9][A-Z0-9-]{1,63}", self.work_ref
+        ) is None:
+            raise StateConflict("v2 dialogue source requires an exact work_ref")
+        try:
+            immutable_commission = normalize_commission_ref(self.commission_ref)
+        except CommissionRefError:
+            raise StateConflict(
+                "v2 host dialogue source commission_ref is invalid"
+            ) from None
+        if self.watch_mode not in {None, "turn_watch_v1"}:
+            raise StateConflict("v2 host dialogue source watch_mode is invalid")
+        object.__setattr__(self, "commission_ref", immutable_commission)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "work_ref": self.work_ref,
-            "commission_ref": dict(self.commission_ref),
+            "commission_ref": self.commission_ref.to_dict(),
             "watch_mode": self.watch_mode,
         }
 
 
 def normalize_executive_dialogue_source(
-    value: Mapping[str, Any], *, work_ref: str | None = None
+    value: Mapping[str, Any],
+    *,
+    work_ref: str | None = None,
 ) -> ExecutiveDialogueSource:
     """Validate immutable root-admission dialogue provenance."""
 
     if not isinstance(value, Mapping) or set(value) != _EXECUTIVE_DIALOGUE_SOURCE_KEYS:
         raise StateConflict("v2 host dialogue source fields are incomplete or drifted")
-    if value.get("schema_version") != EXECUTIVE_DIALOGUE_SOURCE_SCHEMA:
-        raise StateConflict("v2 host dialogue source schema is invalid")
     source_work_ref = value.get("work_ref")
-    if not isinstance(source_work_ref, str) or re.fullmatch(
-        r"WS:[A-Z0-9][A-Z0-9-]{1,63}", source_work_ref
-    ) is None:
-        raise StateConflict("v2 dialogue source requires an exact work_ref")
     if work_ref is not None and source_work_ref != work_ref:
         raise StateConflict("v2 dialogue source work_ref disagrees with admission")
-    try:
-        from integrations.slack_agent_dialogue.contract import (
-            DialogueContractError,
-            validate_commission_ref,
-        )
-
-        commission = validate_commission_ref(dict(value["commission_ref"]))
-    except (DialogueContractError, KeyError, TypeError, ValueError):
-        raise StateConflict("v2 host dialogue source commission_ref is invalid") from None
-    watch_mode = value.get("watch_mode")
-    if watch_mode not in {None, "turn_watch_v1"}:
-        raise StateConflict("v2 host dialogue source watch_mode is invalid")
     return ExecutiveDialogueSource(
-        schema_version=EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
+        schema_version=value.get("schema_version"),
         work_ref=source_work_ref,
-        commission_ref=dict(commission),
-        watch_mode=watch_mode,
+        commission_ref=value.get("commission_ref"),
+        watch_mode=value.get("watch_mode"),
     )
 
 
@@ -1127,10 +1133,12 @@ def _dialogue_source_from_root_creation(
     if not isinstance(provenance, dict):
         raise StateConflict("terminal completion root lost its host provenance")
     stored = provenance.get("dialogue_source")
+    stored_digest = provenance.get("dialogue_source_digest")
     if stored is None:
+        if stored_digest is not None:
+            raise StateConflict("terminal completion dialogue source drifted")
         return None
     work_ref = provenance.get("workstream")
-    stored_digest = provenance.get("dialogue_source_digest")
     if (
         not isinstance(stored, dict)
         or set(stored) != _EXECUTIVE_DIALOGUE_SOURCE_KEYS
@@ -7508,24 +7516,15 @@ class JobRegistry:
         }
         if "workstream" in normalized:
             provenance["workstream"] = normalized["workstream"]
-        admitted_source = normalized.get("dialogue_source")
         if dialogue_source is not None:
             work_ref = normalized.get("workstream")
             if not isinstance(work_ref, str):
                 raise StateConflict(
                     "v2 dialogue source requires the intent's exact workstream"
                 )
-            legacy_source = normalize_executive_dialogue_source(
+            normalized_source = normalize_executive_dialogue_source(
                 dialogue_source,
                 work_ref=work_ref,
-            ).to_dict()
-            if admitted_source is not None and admitted_source != legacy_source:
-                raise StateConflict("v2 dialogue source disagrees with root admission")
-            admitted_source = legacy_source
-        if admitted_source is not None:
-            normalized_source = normalize_executive_dialogue_source(
-                admitted_source,
-                work_ref=str(normalized.get("workstream") or ""),
             ).to_dict()
             provenance["dialogue_source"] = normalized_source
             provenance["dialogue_source_digest"] = hashlib.sha256(
