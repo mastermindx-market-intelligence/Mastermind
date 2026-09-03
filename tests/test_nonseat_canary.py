@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import inspect
 import io
 import json
@@ -1593,7 +1594,7 @@ def test_vendor_configure_operation_emits_only_redacted_configuration_receipt(tm
         profile_id=provision["profile_id"], folder_id=provision["folder_id"],
     )
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         [
             "configure-canary-port", "--vendor", "multilogin",
             "--provision-path", str(path),
@@ -1622,7 +1623,7 @@ def test_vendor_run_refuses_default_policy_without_update_or_start(tmp_path):
         profile_id=provision["profile_id"], folder_id=provision["folder_id"],
     )
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
@@ -1663,7 +1664,7 @@ def test_vendor_run_requires_exact_preflight_and_postflight_without_update(tmp_p
     monkeypatch.setattr(vendors._core, "run_matrix", fake_matrix)
     monkeypatch.setattr(vendors, "live_process_probe", lambda provision: lambda: {})
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
@@ -1705,7 +1706,7 @@ def test_vendor_run_postflight_drift_vetoes_matrix_pass(tmp_path, monkeypatch):
     monkeypatch.setattr(vendors._core, "run_matrix", fake_matrix)
     monkeypatch.setattr(vendors, "live_process_probe", lambda provision: lambda: {})
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
@@ -2037,9 +2038,10 @@ def test_hostile_helper_vendor_provision_mismatch_refuses_before_keychain_or_cli
             raise AssertionError("client must never be constructed on a vendor mismatch")
 
     buf = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["--vendor", "multilogin", "--provision-path", str(path)],
         stdout=buf, bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(_valid_provision("multilogin")),
         credential_stream_factory=_boom_credential_factory,
         client_factory=_BoomClient, now=_NOW,
     )
@@ -2173,9 +2175,10 @@ def test_hostile_bindings_unavailable_prevents_keychain_http_origin_and_launch(t
         raise AssertionError("binding refusal must precede origin/browser construction")
 
     buf = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["--vendor", "multilogin", "--provision-path", str(path)],
         stdout=buf, bindings_loader=lambda: (None, []),
+        environment_loader=_environment_loader_for(_valid_provision("multilogin")),
         credential_stream_factory=_credential_stream_factory,
         client_factory=_client_factory, origin_factory=_origin_factory, now=_NOW,
     )
@@ -2184,18 +2187,22 @@ def test_hostile_bindings_unavailable_prevents_keychain_http_origin_and_launch(t
     assert calls == {"keychain_spawn": 0, "client": 0, "origin": 0}
 
 
-def test_non_mimic_provision_refuses_before_local_census_origin_keychain_or_http(tmp_path):
-    """Catches deferring the approved Mimic gate until after secret access."""
+def test_non_mimic_provision_refuses_after_census_but_before_origin_keychain_or_http(tmp_path):
+    """The trusted census is acquired first, while the Mimic gate still precedes secrets."""
     provision = _valid_provision("multilogin", browser_type="stealthfox")
     path = _write_provision(tmp_path, provision)
     calls = []
+    def _environment():
+        calls.append("environment")
+        return _environment_loader_for(provision)()
+
     boom = lambda *args, **kwargs: calls.append("unexpected")
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["configure-canary-port", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
-        environment_loader=boom,
+        environment_loader=_environment,
         origin_factory=boom,
         credential_stream_factory=boom,
         client_factory=boom,
@@ -2203,14 +2210,14 @@ def test_non_mimic_provision_refuses_before_local_census_origin_keychain_or_http
     )
     assert code == 2
     assert json.loads(out.getvalue())["code"] == "UNSUPPORTED_PORT_STATE"
-    assert calls == []
+    assert calls == ["environment"]
 
 
 @pytest.mark.parametrize(
     ("environment", "expected"),
     (
-        ({"multilogin": [], "gologin": []}, "PROFILE_NOT_FOUND"),
-        ("running", "BUSY_PROFILE"),
+        ("missing", "PROFILE_NOT_FOUND"),
+        ("running", "BINDINGS_UNAVAILABLE"),
     ),
 )
 def test_local_disposable_census_refuses_before_origin_keychain_or_http(
@@ -2223,14 +2230,16 @@ def test_local_disposable_census_refuses_before_origin_keychain_or_http(
     if environment == "running":
         environment_loader = _environment_loader_for(provision, running=True)
     else:
-        environment_loader = lambda: environment
+        current = _realm1_environment(provision)
+        current["multilogin"].clear()
+        environment_loader = lambda: current
 
     def unexpected(*args, **kwargs):
         calls.append("unexpected")
         raise AssertionError("local refusal must precede origin, Keychain, and HTTP")
 
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
@@ -2256,7 +2265,7 @@ def test_busy_fixed_port_refuses_before_keychain_or_http(tmp_path):
         raise OSError("synthetic busy port")
 
     buf = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["--vendor", "multilogin", "--provision-path", str(path)],
         stdout=buf,
         bindings_loader=_no_collision_loader,
@@ -2977,9 +2986,9 @@ def _authorized_peer_main(argv, **kwargs):
         kwargs.setdefault("peer_intent_path", test_parent / "peer-state.json")
         kwargs.setdefault("peer_provision_path", test_parent / "peer-profile.json")
     if operation == "create-peer-profile":
-        return vendors.run_coordinator_peer_create(rest, **kwargs)
+        return vendors._run_coordinator_peer_create(rest, **kwargs)  # noqa: SLF001
     if operation == "rollback-peer-profile":
-        return vendors.run_coordinator_peer_rollback(rest, **kwargs)
+        return vendors._run_coordinator_peer_rollback(rest, **kwargs)  # noqa: SLF001
     raise AssertionError(f"not a peer operation: {operation}")
 
 
@@ -3091,7 +3100,8 @@ def test_peer_d2_running_anchor_profile_refuses_before_keychain_or_http(tmp_path
     )
     assert code == 2
     assert json.loads(out.getvalue())["code"] == (
-        "BUSY_PROFILE" if operation == "create-peer-profile" else "PROVISION_MISSING"
+        "BINDINGS_UNAVAILABLE"
+        if operation == "create-peer-profile" else "PROVISION_MISSING"
     )
 
 
@@ -4351,7 +4361,7 @@ def test_peer_r2_unsafe_fixed_path_refuses_before_anchor_environment_secret_or_c
         return _raise
 
     out = io.StringIO()
-    code = vendors.run_coordinator_peer_create(
+    code = vendors._run_coordinator_peer_create(  # noqa: SLF001
         ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
         peer_intent_path=state_path,
         peer_provision_path=tmp_path / "peer-provision.json",
@@ -4490,12 +4500,15 @@ def test_peer_r2_peer_provision_refuses_byte_identical_foreign_replacement(
             injected = True
 
     monkeypatch.setattr(vendors.os, "fsync", _replace_after_leaf_fsync)
+    current_environment_snapshot = _seal_realm1_environment(_realm1_environment())
+    assert current_environment_snapshot is not None
     written, loaded = vendors._write_peer_provision(
         provision_path,
         profile_id=_PEER_CREATED_UUID,
         folder_id=_PEER_FOLDER,
         bindings_loader=lambda: binding_calls.append(True),
         now=_NOW,
+        current_environment_snapshot=current_environment_snapshot,
     )
 
     assert injected is True
@@ -5461,7 +5474,7 @@ def test_peer_r2_invalid_ownership_receipt_refuses_before_secret_or_vendor(
         return _call
 
     out = io.StringIO()
-    code = vendors.run_coordinator_peer_rollback(
+    code = vendors._run_coordinator_peer_rollback(  # noqa: SLF001
         ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
         peer_intent_path=state_path,
         peer_provision_path=peer_provision_path,
@@ -5526,7 +5539,7 @@ def test_peer_r2_rollback_reloads_fresh_ownership_receipt_before_remove(
         else _NOW,
     ))
     out = io.StringIO()
-    code = vendors.run_coordinator_peer_rollback(
+    code = vendors._run_coordinator_peer_rollback(  # noqa: SLF001
         ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
         peer_intent_path=state_path,
         peer_provision_path=peer_provision_path,
@@ -5587,7 +5600,7 @@ def test_peer_r2_wrong_forged_or_cross_operation_authorization_is_inert(
         return _call
 
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — authorization seam under test
         [operation, "--vendor", "multilogin", "--provision-path", str(tmp_path / "anchor.json")],
         peer_intent_path=tmp_path / "peer-state.json",
         peer_provision_path=tmp_path / "peer-provision.json",
@@ -5636,7 +5649,7 @@ def test_peer_r2_path_aliases_refuse_before_anchor_secret_or_vendor(
         return _call
 
     out = io.StringIO()
-    code = vendors.run_coordinator_peer_create(
+    code = vendors._run_coordinator_peer_create(  # noqa: SLF001
         ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
         peer_intent_path=state_path,
         peer_provision_path=peer_provision_path,
@@ -5689,7 +5702,7 @@ def test_peer_r2_foreign_inode_replacement_between_preflights_refuses_presecret(
         return _call
 
     out = io.StringIO()
-    code = vendors.run_coordinator_peer_create(
+    code = vendors._run_coordinator_peer_create(  # noqa: SLF001
         ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
         peer_intent_path=state_path,
         peer_provision_path=peer_provision_path,
@@ -5837,12 +5850,15 @@ def test_peer_r2_refused_provision_replacement_is_never_reaccepted(
             injected["value"] = True
 
     monkeypatch.setattr(vendors.os, "fsync", _replace_at_durability_boundary)
+    current_environment_snapshot = _seal_realm1_environment(_realm1_environment())
+    assert current_environment_snapshot is not None
     first = vendors._write_peer_provision(
         path,
         profile_id=_PEER_CREATED_UUID,
         folder_id=_PEER_FOLDER,
         bindings_loader=_no_collision_loader,
         now=_NOW,
+        current_environment_snapshot=current_environment_snapshot,
     )
     assert first[0] is False
 
@@ -5853,6 +5869,7 @@ def test_peer_r2_refused_provision_replacement_is_never_reaccepted(
         folder_id=_PEER_FOLDER,
         bindings_loader=_no_collision_loader,
         now=_NOW,
+        current_environment_snapshot=current_environment_snapshot,
     )
     assert second[0] is False
 
@@ -7142,6 +7159,88 @@ def test_realm1_live_snapshot_accepts_only_exact_rows_normalizes_uuids_and_detac
     assert core._is_current_environment_snapshot(_Lookalike()) is False  # noqa: SLF001
 
 
+def test_realm1_live_snapshot_has_an_exact_total_cardinality_ceiling():
+    """The authority snapshot is bounded before any downstream decision."""
+    raw = _realm1_environment()
+    raw["gologin"].extend(
+        {"profile_id": f"{index:024x}", "running": False}
+        for index in range(996)
+    )
+    assert len(raw["gologin"]) + len(raw["multilogin"]) == 1000
+    assert _seal_realm1_environment(raw) is not None
+    raw["gologin"].append({"profile_id": f"{996:024x}", "running": False})
+    assert _seal_realm1_environment(raw) is None
+
+
+def test_realm1_snapshot_order_and_digest_are_canonical_over_closed_rows():
+    """Input order cannot change authority, and the digest covers canonical rows."""
+    first_raw = _realm1_environment()
+    first_raw["gologin"].reverse()
+    first = _seal_realm1_environment(first_raw)
+    second = _seal_realm1_environment(_realm1_environment())
+    assert first is not None and second is not None
+    assert tuple(dict(row) for row in first.rows) == tuple(
+        dict(row) for row in second.rows
+    )
+    canonical = json.dumps(
+        [dict(row) for row in first.rows],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    assert first.digest == hashlib.sha256(canonical).hexdigest()
+    assert first.digest == second.digest
+
+    changed_raw = _realm1_environment()
+    changed_raw["multilogin"][0]["workspace_id"] = (
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    )
+    changed = _seal_realm1_environment(changed_raw)
+    assert changed is not None
+    assert changed.digest != first.digest
+
+
+def test_realm1_snapshot_digest_is_revalidated_by_every_consumer(tmp_path):
+    """Forced corruption cannot turn a once-valid object into freshness authority."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, provision)
+    snapshot = _seal_realm1_environment(_realm1_environment(provision))
+    assert snapshot is not None
+    object.__setattr__(snapshot, "digest", "0" * 64)
+    assert core._is_current_environment_snapshot(snapshot) is False  # noqa: SLF001
+    loaded, code = core.load_provision(
+        path,
+        bindings_loader=lambda: (_stale_realm1_bindings(), []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert loaded is None and code == "BINDINGS_UNAVAILABLE"
+    assert vendors._local_disposable_preflight(  # noqa: SLF001
+        provision, current_environment_snapshot=snapshot,
+    ) == "BINDINGS_UNAVAILABLE"
+
+
+def test_realm1_raw_or_lookalike_snapshot_never_activates_live_freshness(tmp_path):
+    """Only the private sealed value can bypass stale navigation timestamps."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, provision)
+    snapshot = _seal_realm1_environment(_realm1_environment(provision))
+    assert snapshot is not None
+
+    class _Lookalike:
+        rows = snapshot.rows
+        digest = snapshot.digest
+
+    for untrusted in (_realm1_environment(provision), _Lookalike()):
+        loaded, code = core.load_provision(
+            path,
+            bindings_loader=lambda: (_stale_realm1_bindings(), []),
+            current_environment_snapshot=untrusted,
+            now=_NOW,
+        )
+        assert loaded is None and code == "BINDINGS_UNAVAILABLE"
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
@@ -7223,10 +7322,60 @@ def test_realm1_stale_bindings_pass_only_with_sealed_exact_live_seats_and_candid
     assert bindings == before
 
 
+def test_realm1_candidate_collision_uses_exact_manager_folder_profile_identity(tmp_path):
+    """A shared UUID in another folder is distinct; the exact seat identity is forbidden."""
+    candidate = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, candidate)
+    bindings = _binding_doc(colliding_profile_id=candidate["profile_id"])
+    for binding in bindings["bindings"]:
+        binding["observed_at"] = "2026-08-01T00:00:00Z"
+    seat_folder = bindings["bindings"][0]["locator"]["folder_id"]
+    raw = {
+        "gologin": [
+            {"profile_id": "222222222222222222222222", "running": True},
+            {"profile_id": "333333333333333333333333", "running": True},
+        ],
+        "multilogin": [
+            {
+                "workspace_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                "folder_id": seat_folder,
+                "profile_id": candidate["profile_id"],
+                "running": True,
+            },
+            {
+                "workspace_id": _REALM1_WORKSPACE,
+                "folder_id": candidate["folder_id"],
+                "profile_id": candidate["profile_id"],
+                "running": False,
+            },
+        ],
+    }
+    snapshot = _seal_realm1_environment(raw)
+    assert snapshot is not None
+    loaded, code = core.load_provision(
+        path,
+        bindings_loader=lambda: (bindings, []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert code is None and loaded == candidate
+
+    exact = dict(candidate, folder_id=seat_folder)
+    exact_path = _write_provision(tmp_path, exact)
+    loaded, code = core.load_provision(
+        exact_path,
+        bindings_loader=lambda: (bindings, []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert loaded is None and code == "DISALLOWED_TARGET"
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
-        "seat_stopped", "extra_running", "binding_disagrees", "seat_identity_reused",
+        "seat_missing", "seat_stopped", "extra_running",
+        "binding_disagrees", "seat_identity_reused",
     ),
 )
 def test_realm1_live_gate_refuses_running_set_and_binding_mutations(tmp_path, mutation):
@@ -7235,7 +7384,9 @@ def test_realm1_live_gate_refuses_running_set_and_binding_mutations(tmp_path, mu
     path = _write_provision(tmp_path, provision)
     raw = _realm1_environment(provision)
     bindings = _stale_realm1_bindings()
-    if mutation == "seat_stopped":
+    if mutation == "seat_missing":
+        raw["gologin"].pop(0)
+    elif mutation == "seat_stopped":
         raw["gologin"][0]["running"] = False
     elif mutation == "extra_running":
         raw["gologin"].append({"profile_id": "444444444444444444444444", "running": True})
@@ -7259,6 +7410,47 @@ def test_realm1_live_gate_refuses_running_set_and_binding_mutations(tmp_path, mu
     )
     assert loaded is None
     assert code == "BINDINGS_UNAVAILABLE"
+
+
+def test_realm1_multilogin_seat_requires_exact_folder_identity(tmp_path):
+    """A running Multilogin row in another folder cannot satisfy a bound seat."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, provision)
+    seat_profile = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    bindings = _binding_doc(colliding_profile_id=seat_profile)
+    for binding in bindings["bindings"]:
+        binding["observed_at"] = "2026-08-01T00:00:00Z"
+    seat_folder = bindings["bindings"][0]["locator"]["folder_id"]
+    raw = {
+        "gologin": [
+            {"profile_id": "222222222222222222222222", "running": True},
+            {"profile_id": "333333333333333333333333", "running": True},
+        ],
+        "multilogin": [
+            {
+                "workspace_id": _REALM1_WORKSPACE,
+                "folder_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                "profile_id": seat_profile,
+                "running": True,
+            },
+            {
+                "workspace_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                "folder_id": provision["folder_id"],
+                "profile_id": provision["profile_id"],
+                "running": False,
+            },
+        ],
+    }
+    assert raw["multilogin"][0]["folder_id"] != seat_folder
+    snapshot = _seal_realm1_environment(raw)
+    assert snapshot is not None
+    loaded, code = core.load_provision(
+        path,
+        bindings_loader=lambda: (bindings, []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert loaded is None and code == "BINDINGS_UNAVAILABLE"
 
 
 @pytest.mark.parametrize(
@@ -7290,7 +7482,12 @@ def test_realm1_local_gate_requires_exact_distinct_stopped_candidate(
         current_environment_snapshot=snapshot,
         now=_NOW,
     )
-    assert code is None and loaded == provision
+    if mutation == "candidate_running":
+        # The seat gate sees this as the forbidden fourth running identity;
+        # the local candidate gate independently retains its BUSY result.
+        assert loaded is None and code == "BINDINGS_UNAVAILABLE"
+    else:
+        assert code is None and loaded == provision
     assert vendors._local_disposable_preflight(  # noqa: SLF001
         provision, current_environment_snapshot=snapshot,
     ) == expected
@@ -7298,13 +7495,18 @@ def test_realm1_local_gate_requires_exact_distinct_stopped_candidate(
 
 def test_realm1_public_vendor_entrypoints_cannot_accept_inventory_injection():
     """Only the private hermetic seam may replace the trusted census owner."""
-    forbidden = {"environment_loader", "current_environment_snapshot", "raw_rows"}
-    assert forbidden.isdisjoint(inspect.signature(vendors.main).parameters)
-    for coordinator in (
+    forbidden = {
+        "census_loader", "environment_loader",
+        "current_environment_snapshot", "raw_rows",
+    }
+    for entrypoint in (
+        vendors.main,
         vendors.run_coordinator_peer_create,
         vendors.run_coordinator_peer_rollback,
+        vendors.mint_coordinator_peer_bootstrap_evidence,
+        vendors.run_coordinator_peer_bootstrap,
     ):
-        signature = inspect.signature(coordinator)
+        signature = inspect.signature(entrypoint)
         assert not any(
             parameter.kind is inspect.Parameter.VAR_KEYWORD
             for parameter in signature.parameters.values()
@@ -7312,6 +7514,99 @@ def test_realm1_public_vendor_entrypoints_cannot_accept_inventory_injection():
         assert forbidden.isdisjoint(signature.parameters)
     private_main = getattr(vendors, "_main", None)
     assert callable(private_main), "the hermetic-only vendor entry seam is missing"
+
+    with pytest.raises(TypeError):
+        vendors.main([], environment_loader=lambda: _realm1_environment())
+    for coordinator in (
+        vendors.run_coordinator_peer_create,
+        vendors.run_coordinator_peer_rollback,
+    ):
+        with pytest.raises(TypeError):
+            coordinator([], environment_loader=lambda: _realm1_environment())
+    with pytest.raises(TypeError):
+        vendors.mint_coordinator_peer_bootstrap_evidence(
+            census_loader=lambda: _realm1_environment(),
+        )
+    with pytest.raises(TypeError):
+        vendors.run_coordinator_peer_bootstrap(
+            authorization=object(),
+            census_loader=lambda: _realm1_environment(),
+        )
+
+
+@pytest.mark.parametrize("loader_result", ("raises", "malformed"))
+def test_realm1_inventory_failure_refuses_before_core_origin_secret_or_client(
+    loader_result,
+):
+    """No downstream owner is reached unless one strict snapshot was sealed."""
+    calls = []
+
+    def _inventory():
+        calls.append("inventory")
+        if loader_result == "raises":
+            raise RuntimeError("synthetic census failure")
+        return {"gologin": [], "multilogin": [], "unknown": []}
+
+    def _unexpected(*_args, **_kwargs):
+        calls.append("unexpected")
+        raise AssertionError("invalid inventory must refuse before downstream work")
+
+    out = io.StringIO()
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
+        ["run", "--vendor", "multilogin", "--provision-path", "/unused.json"],
+        stdout=out,
+        environment_loader=_inventory,
+        bindings_loader=_unexpected,
+        origin_factory=_unexpected,
+        credential_stream_factory=_unexpected,
+        client_factory=_unexpected,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "BINDINGS_UNAVAILABLE"
+    assert calls == ["inventory"]
+
+
+def test_realm1_all_peer_revalidation_sites_thread_the_current_snapshot():
+    """Every nested peer-provision gate must remain bound to the same epoch."""
+    tree = ast.parse(VENDORS_PATH.read_text(encoding="utf-8"))
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    for function_name in (
+        "_write_peer_provision",
+        "_create_peer_profile_cli",
+        "_main",
+    ):
+        calls = [
+            node for node in ast.walk(functions[function_name])
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_validate_provision_document"
+        ]
+        assert len(calls) == 1
+        snapshot_keyword = next(
+            keyword for keyword in calls[0].keywords
+            if keyword.arg == "current_environment_snapshot"
+        )
+        assert isinstance(snapshot_keyword.value, ast.Name)
+        assert snapshot_keyword.value.id == "current_environment_snapshot"
+
+    create_calls = [
+        node for node in ast.walk(functions["_main"])
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_create_peer_profile_cli"
+    ]
+    assert len(create_calls) == 1
+    snapshot_keyword = next(
+        keyword for keyword in create_calls[0].keywords
+        if keyword.arg == "current_environment_snapshot"
+    )
+    assert isinstance(snapshot_keyword.value, ast.Name)
+    assert snapshot_keyword.value.id == "current_environment_snapshot"
 
 
 def test_realm1_private_vendor_seam_samples_once_and_threads_one_snapshot_presecret(monkeypatch):
@@ -7360,16 +7655,51 @@ def test_realm1_private_vendor_seam_samples_once_and_threads_one_snapshot_presec
     assert len(snapshots) == 2 and snapshots[0] is snapshots[1]
 
 
+def test_realm1_peer_provision_post_effect_validation_reuses_snapshot_without_persisting_it(
+    tmp_path, monkeypatch,
+):
+    """The post-create provision gate cannot fall back to stale timestamps."""
+    snapshot = _seal_realm1_environment(_realm1_environment())
+    assert snapshot is not None
+    observed = []
+
+    def _validate(document, **kwargs):
+        observed.append(kwargs.get("current_environment_snapshot"))
+        return dict(document), None
+
+    monkeypatch.setattr(vendors._core, "_validate_provision_document", _validate)
+    path = tmp_path / "peer-provision.json"
+    written, loaded = vendors._write_peer_provision(  # noqa: SLF001
+        path,
+        profile_id=_PEER_CREATED_UUID,
+        folder_id=_PEER_FOLDER,
+        bindings_loader=_no_collision_loader,
+        now=_NOW,
+        current_environment_snapshot=snapshot,
+    )
+    assert written is True and loaded is not None
+    assert observed == [snapshot]
+    serialized = path.read_text(encoding="utf-8")
+    assert snapshot.digest not in serialized
+    assert "current_environment_snapshot" not in serialized
+
+
 def test_realm1_bootstrap_digest_rejects_shape_old_reducer_ignored(tmp_path):
     """Mint and consume must independently seal the entire strict census shape."""
     provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
         _peer_bootstrap_preimage(tmp_path)
     )
     current = [_peer_bootstrap_census(provision)]
-    census_loader = lambda: current[0]
+    census_calls = []
+
+    def census_loader():
+        census_calls.append("sample")
+        return current[0]
+
     authorization, bindings_path, _loader = _mint_peer_bootstrap_authorization(
         provision, anchor_path, census_loader=census_loader,
     )
+    assert census_calls == ["sample"]
     current[0] = copy.deepcopy(current[0])
     current[0]["ignored-by-old-reducer"] = []
     assert _bootstrap_existing_peer(
@@ -7381,7 +7711,37 @@ def test_realm1_bootstrap_digest_rejects_shape_old_reducer_ignored(tmp_path):
         bindings_path=bindings_path,
         census_loader=census_loader,
     ) == vendors.REFUSED
+    assert census_calls == ["sample", "sample"]
     assert not fence_path.exists()
+
+
+def test_realm1_bootstrap_one_validation_uses_one_snapshot_for_both_predicates(
+    monkeypatch,
+):
+    """Bootstrap cannot mix candidate state from one observation with seats from another."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    raw = _realm1_environment(provision)
+    observed = []
+
+    def _local(_provision, **kwargs):
+        observed.append(kwargs.get("current_environment_snapshot"))
+        return None
+
+    def _seats(*_args, **kwargs):
+        observed.append(kwargs.get("current_environment_snapshot"))
+        return "clear"
+
+    monkeypatch.setattr(vendors, "_local_disposable_preflight", _local)
+    monkeypatch.setattr(vendors._core, "_current_chairman_profile_census", _seats)
+    digest = vendors._validate_peer_bootstrap_evidence_documents(  # noqa: SLF001
+        provision,
+        _stale_realm1_bindings(),
+        raw,
+        now=_NOW,
+    )
+    assert len(observed) == 2 and observed[0] is observed[1]
+    assert core._is_current_environment_snapshot(observed[0]) is True  # noqa: SLF001
+    assert digest == observed[0].digest
 
 
 def test_realm1_peer_generation_is_frozen_and_old_generation_is_not_current(tmp_path):

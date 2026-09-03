@@ -108,10 +108,10 @@ PEER_GENESIS_WITNESS_SCHEMA = "mastermind.mas115_nonseat_peer_genesis_witness.v1
 PEER_BOOTSTRAP_FENCE_SCHEMA = "mastermind.mas115_nonseat_peer_bootstrap_fence.v1"
 PEER_RECEIPT_SCHEMA = "mastermind.mas115_nonseat_peer_lifecycle.v1"
 PEER_OWNERSHIP_FACT_SCHEMA = "mastermind.mas115_peer_downstream_ownership.v1"
-# Semantic source generation for the reviewed REALM1-C1 R2 lifecycle.  It is
+# Semantic source generation for the reviewed REALM1-C1 R3 lifecycle.  It is
 # deliberately independent of a self-referential Git commit hash, but changes
 # whenever this authority/state contract changes.
-PEER_SOURCE_GENERATION = "ce075b8e36138211ad9a170fd946cabef1af50406b0f427c79ccff1fe298e5d9"
+PEER_SOURCE_GENERATION = "c39dac9ab0c51047b442ac5e8bb2683f2780dd6045c5489b79560b4ce6b131a8"
 PF1_OPERATION_KEY = "web-sol-pf1-provider-continuation-falsifier-20260901-sol-001"
 INSTALL1_OPERATION_KEY = "web-sol-install1-two-profile-disposable-proof-20260902-sol-001"
 _MAX_OWNERSHIP_RECEIPT_AGE = timedelta(minutes=5)
@@ -2058,36 +2058,37 @@ def _emit_refusal(out, vendor: str, code: str) -> int:
     return 2
 
 
-def _local_disposable_preflight(provision: dict, environment_loader=None):
+def _local_disposable_preflight(
+    provision: dict, *, current_environment_snapshot,
+):
     """Require one exact locally stopped Multilogin profile before secrets."""
 
-    if environment_loader is None:
-        from integrations.chairman_surfaces import chatgpt as _chatgpt
-
-        environment_loader = _chatgpt.list_local_environments
-    try:
-        census = environment_loader()
-    except Exception:  # noqa: BLE001 — local uncertainty has one fixed result
+    if not _core._is_current_environment_snapshot(current_environment_snapshot):  # noqa: SLF001
+        return "BINDINGS_UNAVAILABLE"
+    if not isinstance(provision, dict):
         return "VENDOR_ERROR"
-    if not isinstance(census, dict) or not isinstance(census.get("multilogin"), list):
+    profile_id = provision.get("profile_id")
+    folder_id = provision.get("folder_id")
+    if (
+        provision.get("vendor") != "multilogin"
+        or not isinstance(profile_id, str)
+        or not isinstance(folder_id, str)
+    ):
         return "VENDOR_ERROR"
-    profile_id = provision["profile_id"]
-    folder_id = provision["folder_id"]
-    matches = []
-    for row in census["multilogin"]:
-        if not isinstance(row, dict):
-            return "VENDOR_ERROR"
-        row_profile = row.get("profile_id")
-        row_folder = row.get("folder_id")
-        if isinstance(row_profile, str) and row_profile.lower() == profile_id:
-            if not isinstance(row_folder, str) or row_folder.lower() != folder_id:
-                return "VENDOR_ERROR"
-            matches.append(row)
-    if not matches:
+    profile_id = profile_id.lower()
+    folder_id = folder_id.lower()
+    profile_matches = [
+        row for row in current_environment_snapshot.rows
+        if row["env_manager"] == "multilogin" and row["profile_id"] == profile_id
+    ]
+    if not profile_matches:
         return "PROFILE_NOT_FOUND"
-    if len(matches) != 1 or type(matches[0].get("running")) is not bool:
+    if (
+        len(profile_matches) != 1
+        or profile_matches[0]["folder_id"] != folder_id
+    ):
         return "VENDOR_ERROR"
-    return "BUSY_PROFILE" if matches[0]["running"] else None
+    return "BUSY_PROFILE" if profile_matches[0]["running"] else None
 
 
 def atomic_private_json(doc: dict, path) -> None:
@@ -3127,52 +3128,13 @@ def _open_held_private_json(target: Path, parent_fd: int, *, max_bytes: int):
         raise _PeerStateRefusal() from None
 
 
-def _canonical_reduced_local_census(census) -> tuple[bytes, list[dict]]:
-    """Reduce the local environment census to identity plus running state."""
-    if not isinstance(census, dict):
+def _canonical_reduced_local_census(census):
+    """Return the one canonical strict snapshot or refuse the whole census."""
+
+    snapshot = _core._seal_current_environment_snapshot(census)  # noqa: SLF001
+    if snapshot is None:
         raise _PeerStateRefusal()
-    rows = []
-    for manager in _surface_bindings.ENV_MANAGERS:
-        raw_rows = census.get(manager)
-        if not isinstance(raw_rows, list):
-            raise _PeerStateRefusal()
-        for raw in raw_rows:
-            if not isinstance(raw, dict):
-                continue
-            profile_id = raw.get("profile_id")
-            if manager == "multilogin":
-                folder_id = raw.get("folder_id")
-                workspace_id = raw.get("workspace_id")
-                if (
-                    not isinstance(profile_id, str)
-                    or _surface_bindings.UUID_RE.fullmatch(profile_id) is None
-                    or not isinstance(folder_id, str)
-                    or _surface_bindings.UUID_RE.fullmatch(folder_id) is None
-                    or not isinstance(workspace_id, str)
-                    or _surface_bindings.UUID_RE.fullmatch(workspace_id) is None
-                ):
-                    continue
-                rows.append({
-                    "env_manager": manager,
-                    "workspace_id": workspace_id,
-                    "folder_id": folder_id,
-                    "profile_id": profile_id,
-                    "running": raw.get("running") is True,
-                })
-            elif (
-                isinstance(profile_id, str)
-                and _surface_bindings.GOLOGIN_PROFILE_ID_RE.fullmatch(profile_id)
-            ):
-                rows.append({
-                    "env_manager": manager,
-                    "profile_id": profile_id,
-                    "running": raw.get("running") is True,
-                })
-    rows.sort(key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")))
-    raw = json.dumps(
-        rows, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-    ).encode("utf-8")
-    return raw, rows
+    return snapshot
 
 
 def _validate_peer_bootstrap_evidence_documents(
@@ -3183,22 +3145,21 @@ def _validate_peer_bootstrap_evidence_documents(
         or _surface_bindings.validate_bindings_document(bindings_document)
     ):
         raise _PeerStateRefusal()
-    census_raw, rows = _canonical_reduced_local_census(census)
-    matches = [
-        row for row in rows
-        if row.get("env_manager") == "multilogin"
-        and row.get("profile_id") == anchor_document.get("profile_id")
-        and row.get("folder_id") == anchor_document.get("folder_id")
-    ]
-    if len(matches) != 1 or matches[0].get("running") is True:
+    snapshot = _canonical_reduced_local_census(census)
+    if _local_disposable_preflight(
+        anchor_document, current_environment_snapshot=snapshot,
+    ) is not None:
         raise _PeerStateRefusal()
     if _core._current_chairman_profile_census(  # noqa: SLF001
         bindings_document,
         now=now,
         candidate_profile_id=anchor_document["profile_id"],
+        candidate_vendor=anchor_document["vendor"],
+        candidate_folder_id=anchor_document["folder_id"],
+        current_environment_snapshot=snapshot,
     ) != "clear":
         raise _PeerStateRefusal()
-    return hashlib.sha256(census_raw).hexdigest()
+    return snapshot.digest
 
 
 def _mint_peer_bootstrap_evidence(
@@ -4278,7 +4239,7 @@ def _exclusive_private_json(path, document):
 
 def _write_peer_provision(
     path, *, profile_id: str, folder_id: str, bindings_loader, now,
-    snapshot_sink=None,
+    current_environment_snapshot, snapshot_sink=None,
 ):
     """Exclusive-write or exact-reconcile the private peer provision."""
     profile_id = _canonical_multilogin_profile_id(profile_id)
@@ -4311,7 +4272,10 @@ def _write_peer_provision(
     ):
         return False, None
     loaded, _code = _core._validate_provision_document(
-        snapshot.document, bindings_loader=bindings_loader, now=now,
+        snapshot.document,
+        bindings_loader=bindings_loader,
+        now=now,
+        current_environment_snapshot=current_environment_snapshot,
     )
     current = _peer_provision_snapshot(path)
     if current is None or not _same_snapshot(current, snapshot):
@@ -4324,7 +4288,7 @@ def _write_peer_provision(
 def _create_peer_profile_cli(
     client: "MultiloginClient", provision: dict, *,
     peer_intent_path, peer_provision_path, bindings_loader, now,
-    initial_state=None,
+    current_environment_snapshot, initial_state=None,
 ) -> dict:
     """CLI-layer wrapper: owns the intent/provision file I/O that
     :meth:`MultiloginClient.create_peer_profile` deliberately does not."""
@@ -4512,6 +4476,7 @@ def _create_peer_profile_cli(
                 provision_snapshot.document,
                 bindings_loader=bindings_loader,
                 now=now,
+                current_environment_snapshot=current_environment_snapshot,
             )
         try:
             fresh_state, fresh_provision = _preflight_peer_paths(
@@ -4578,6 +4543,7 @@ def _create_peer_profile_cli(
     written, _loaded = _write_peer_provision(
         peer_provision_path, profile_id=peer_profile_id, folder_id=folder_id,
         bindings_loader=bindings_loader, now=now,
+        current_environment_snapshot=current_environment_snapshot,
         snapshot_sink=provision_snapshots,
     )
     predicates = dict(receipt["predicates"])
@@ -4645,7 +4611,7 @@ def _create_peer_profile_cli(
     )
 
 
-def main(
+def _main(
     argv=None, *, stdout=None, bindings_loader=None, credential_stream_factory=None,
     client_factory=BoundedHttpClient, origin_factory=LoopbackBenignOrigin,
     environment_loader=None, now=None, peer_provision_path=None, peer_intent_path=None,
@@ -4736,8 +4702,21 @@ def main(
                 # before anchor, bindings, environment, Keychain, or vendor.
                 return _emit_refusal(out, args.vendor, "BINDINGS_UNAVAILABLE")
 
+    census_loader = environment_loader or _coordinator_local_census
+    try:
+        current_environment_snapshot = _core._seal_current_environment_snapshot(  # noqa: SLF001
+            census_loader(),
+        )
+    except Exception:  # noqa: BLE001 — current local proof is all-or-nothing
+        current_environment_snapshot = None
+    if current_environment_snapshot is None:
+        return _emit_refusal(out, args.vendor, "BINDINGS_UNAVAILABLE")
+
     provision, code = _core.load_provision(
-        args.provision_path, bindings_loader=bindings_loader, now=reference_time,
+        args.provision_path,
+        bindings_loader=bindings_loader,
+        now=reference_time,
+        current_environment_snapshot=current_environment_snapshot,
     )
     if provision is None:
         return _emit_refusal(out, args.vendor, code)
@@ -4745,7 +4724,9 @@ def main(
         return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
     if provision.get("browser_type") != "mimic":
         return _emit_refusal(out, args.vendor, "UNSUPPORTED_PORT_STATE")
-    local_code = _local_disposable_preflight(provision, environment_loader)
+    local_code = _local_disposable_preflight(
+        provision, current_environment_snapshot=current_environment_snapshot,
+    )
     if local_code is not None:
         return _emit_refusal(out, args.vendor, local_code)
 
@@ -4779,6 +4760,7 @@ def main(
             peer_provision_snapshot.document,
             bindings_loader=bindings_loader,
             now=reference_time,
+            current_environment_snapshot=current_environment_snapshot,
         )
         if peer_provision is None:
             return _emit_refusal(out, args.vendor, peer_code or "PROVISION_MISSING")
@@ -4852,6 +4834,7 @@ def main(
                 vendor_client, provision,
                 peer_intent_path=peer_intent_path, peer_provision_path=peer_provision_path,
                 bindings_loader=bindings_loader, now=reference_time,
+                current_environment_snapshot=current_environment_snapshot,
                 initial_state=peer_state_snapshot,
             )
             print(json.dumps(receipt, indent=2, sort_keys=True), file=out)
@@ -5045,21 +5028,70 @@ def main(
     return 0 if receipts.get("verdict") == "PASS" else 1
 
 
-def run_coordinator_peer_create(argv=None, **kwargs) -> int:
-    """In-process create entry owned by the trusted interactive coordinator."""
-    return main(
+def main(
+    argv=None, *, stdout=None, bindings_loader=None, credential_stream_factory=None,
+    client_factory=BoundedHttpClient, origin_factory=LoopbackBenignOrigin,
+    now=None, peer_provision_path=None, peer_intent_path=None,
+    create_authorization=None, rollback_authorization=None,
+    ownership_receipt_loader=None, clock=None,
+) -> int:
+    """Live CLI entry with the current-census owner fixed inside this module."""
+
+    return _main(
+        argv,
+        stdout=stdout,
+        bindings_loader=bindings_loader,
+        credential_stream_factory=credential_stream_factory,
+        client_factory=client_factory,
+        origin_factory=origin_factory,
+        environment_loader=_coordinator_local_census,
+        now=now,
+        peer_provision_path=peer_provision_path,
+        peer_intent_path=peer_intent_path,
+        create_authorization=create_authorization,
+        rollback_authorization=rollback_authorization,
+        ownership_receipt_loader=ownership_receipt_loader,
+        clock=clock,
+    )
+
+
+def _run_coordinator_peer_create(argv=None, **kwargs) -> int:
+    """Hermetic coordinator seam; only tests may replace trusted dependencies."""
+
+    return _main(
         ["create-peer-profile", *(list(argv) if argv is not None else [])],
         create_authorization=CREATE_PEER_AUTHORIZATION,
         **kwargs,
     )
 
 
-def run_coordinator_peer_rollback(argv=None, **kwargs) -> int:
-    """In-process rollback entry; a trusted ownership fact is still required."""
-    return main(
+def _run_coordinator_peer_rollback(argv=None, **kwargs) -> int:
+    """Hermetic rollback seam; tests still must supply an exact ownership fact."""
+
+    return _main(
         ["rollback-peer-profile", *(list(argv) if argv is not None else [])],
         rollback_authorization=ROLLBACK_PEER_AUTHORIZATION,
         **kwargs,
+    )
+
+
+def run_coordinator_peer_create(argv=None) -> int:
+    """Trusted live create entry with no caller-supplied census seam."""
+
+    return _main(
+        ["create-peer-profile", *(list(argv) if argv is not None else [])],
+        create_authorization=CREATE_PEER_AUTHORIZATION,
+        environment_loader=_coordinator_local_census,
+    )
+
+
+def run_coordinator_peer_rollback(argv=None) -> int:
+    """Trusted live rollback entry with no caller-supplied census seam."""
+
+    return _main(
+        ["rollback-peer-profile", *(list(argv) if argv is not None else [])],
+        rollback_authorization=ROLLBACK_PEER_AUTHORIZATION,
+        environment_loader=_coordinator_local_census,
     )
 
 

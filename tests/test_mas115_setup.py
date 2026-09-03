@@ -62,9 +62,15 @@ def _selections() -> dict:
 
 def _local_census(*additional_rows: dict) -> dict:
     """Exact live shape: three running seats plus any explicit candidates."""
+    def _raw(row: dict) -> dict:
+        return {key: value for key, value in row.items() if key != "env_manager"}
+
     return {
         "gologin": [],
-        "multilogin": [*(_mlx(index) for index in range(1, 4)), *additional_rows],
+        "multilogin": [
+            *(_raw(_mlx(index)) for index in range(1, 4)),
+            *(_raw(row) for row in additional_rows),
+        ],
     }
 
 
@@ -250,6 +256,46 @@ def test_legacy_migration_accepts_only_exact_v2_origin_and_preserves_identity(tm
     }
     assert path.stat().st_mode & 0o777 == 0o600
     assert json.loads(path.read_text(encoding="utf-8")) == migrated
+
+
+def test_legacy_migration_threads_one_live_snapshot_through_stale_bindings(
+    tmp_path, monkeypatch,
+):
+    """The v2 and post-write v3 gates share one live proof without refreshing bindings."""
+    path = tmp_path / "provision.json"
+    legacy = _legacy_v2_provision()
+    setup._atomic_private_json(legacy, path)
+    bindings = setup.build_enrollment_document(
+        None, _selections(), observed_at="2026-08-01T00:00:00Z",
+    )
+    bindings_before = json.loads(json.dumps(bindings))
+    snapshot = canary._seal_current_environment_snapshot(  # noqa: SLF001
+        _local_census(_mlx(4, running=False)),
+    )
+    assert snapshot is not None
+    observed = []
+    real_legacy_load = canary.load_legacy_provision_for_migration
+    real_current_load = canary.load_provision
+
+    def _legacy_load(*args, **kwargs):
+        observed.append(kwargs.get("current_environment_snapshot"))
+        return real_legacy_load(*args, **kwargs)
+
+    def _current_load(*args, **kwargs):
+        observed.append(kwargs.get("current_environment_snapshot"))
+        return real_current_load(*args, **kwargs)
+
+    monkeypatch.setattr(canary, "load_legacy_provision_for_migration", _legacy_load)
+    monkeypatch.setattr(canary, "load_provision", _current_load)
+    migrated, code = setup._migrate_legacy_provision(  # noqa: SLF001
+        path,
+        bindings_loader=lambda: (bindings, []),
+        now=datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc),
+        current_environment_snapshot=snapshot,
+    )
+    assert code is None and migrated is not None
+    assert observed == [snapshot, snapshot]
+    assert bindings == bindings_before
 
 
 @pytest.mark.parametrize(
@@ -470,7 +516,19 @@ def test_atomic_private_provision_is_0600_and_canonical(tmp_path):
 def test_configure_command_migrates_then_routes_fixed_default_provision(monkeypatch):
     """Catches caller-selected configuration fields or a skipped legacy migration."""
     calls = []
-    monkeypatch.setattr(setup, "_load_current_provision", lambda: (None, "PROVISION_MISSING"))
+    snapshot = canary._seal_current_environment_snapshot(  # noqa: SLF001
+        _local_census(_mlx(4, running=False)),
+    )
+    assert snapshot is not None
+    monkeypatch.setattr(setup, "_acquire_current_environment_snapshot", lambda: snapshot)
+    monkeypatch.setattr(
+        setup, "_load_current_provision",
+        lambda **kwargs: (
+            (None, "PROVISION_MISSING")
+            if kwargs.get("current_environment_snapshot") is snapshot
+            else (_ for _ in ()).throw(AssertionError("must thread the setup snapshot"))
+        ),
+    )
     monkeypatch.setattr(
         setup,
         "_migrate_legacy_provision",
@@ -488,9 +546,18 @@ def test_configure_command_migrates_then_routes_fixed_default_provision(monkeypa
 def test_configure_command_reuses_valid_v3_without_migration(monkeypatch):
     """Catches making the idempotent configuration command v2-only."""
     calls = []
+    snapshot = canary._seal_current_environment_snapshot(  # noqa: SLF001
+        _local_census(_mlx(4, running=False)),
+    )
+    assert snapshot is not None
+    monkeypatch.setattr(setup, "_acquire_current_environment_snapshot", lambda: snapshot)
     monkeypatch.setattr(
         setup, "_load_current_provision",
-        lambda: ({"vendor": "multilogin"}, None),
+        lambda **kwargs: (
+            ({"vendor": "multilogin"}, None)
+            if kwargs.get("current_environment_snapshot") is snapshot
+            else (_ for _ in ()).throw(AssertionError("must thread the setup snapshot"))
+        ),
     )
     monkeypatch.setattr(
         setup, "_migrate_legacy_provision",
@@ -561,7 +628,7 @@ def _bootstrap_coordinator_state(monkeypatch, *, running=False):
         None, _selections(), observed_at="2026-08-23T12:00:00Z",
     )
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
-    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
         setup.chatgpt,
         "list_local_environments",
@@ -632,7 +699,7 @@ def test_peer_setup_bootstrap_running_anchor_refuses_before_confirmation_or_stat
     )
     handler = getattr(setup, "bootstrap_peer_interactive", None)
     assert callable(handler), "the distinct bootstrap coordinator is missing"
-    with pytest.raises(setup.SetupRefusal, match="stopped"):
+    with pytest.raises(setup.SetupRefusal, match="running|stop"):
         handler()
 
 
@@ -648,7 +715,13 @@ def test_peer_setup_bootstrap_refuses_failed_post_confirmation_evidence_mint(mon
         "builtins.input", lambda *_a, **_k: setup._CONFIRM_BOOTSTRAP_PEER,
     )
     def _refusing_mint():
-        assert setup.chatgpt.list_local_environments()["multilogin"][0]["running"] is True
+        census = setup.chatgpt.list_local_environments()
+        candidate = next(
+            item for item in census["multilogin"]
+            if item["profile_id"] == _mlx(4)["profile_id"]
+            and item["folder_id"] == _mlx(4)["folder_id"]
+        )
+        assert candidate["running"] is True
         return None
 
     monkeypatch.setattr(
@@ -820,27 +893,34 @@ def test_peer_setup_missing_bindings_refuses_before_provision_or_dispatch(monkey
 
 
 @pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
-def test_peer_setup_missing_provision_refuses_before_local_census_or_dispatch(monkeypatch, command):
+def test_peer_setup_missing_provision_refuses_after_one_census_without_dispatch(monkeypatch, command):
+    row = _mlx(4, running=False)
+    census_calls = []
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: ({"schema": sb.SCHEMA, "bindings": []}, []))
-    monkeypatch.setattr(setup, "_load_current_provision", lambda: (None, "PROVISION_MISSING"))
+    monkeypatch.setattr(
+        setup,
+        "_load_current_provision",
+        lambda **_kwargs: (None, "PROVISION_MISSING"),
+    )
     monkeypatch.setattr(
         setup.chatgpt, "list_local_environments",
-        lambda: (_ for _ in ()).throw(AssertionError("must refuse before reading the local census")),
+        lambda: census_calls.append("inventory") or _local_census(row),
     )
     _refuse_any_peer_dispatch(monkeypatch, "must refuse before any dispatch")
     assert setup.main([command, "--vendor", "multilogin"]) == 2
+    assert census_calls == ["inventory"]
 
 
 @pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
 def test_peer_setup_seat_collision_refuses_before_confirmation_or_dispatch(monkeypatch, command):
-    row = _mlx(1, running=False)
+    row = _mlx(4, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
-    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
         setup.chatgpt, "list_local_environments",
-        lambda: {"multilogin": [row], "gologin": []},
+        lambda: _local_census(row),
     )
     monkeypatch.setattr(
         setup, "assert_current_nonseat",
@@ -863,14 +943,14 @@ def test_peer_setup_seat_collision_refuses_before_confirmation_or_dispatch(monke
     ),
 )
 def test_peer_setup_confirmation_mismatch_refuses_without_dispatch(monkeypatch, command, confirm_const):
-    row = _mlx(1, running=False)
+    row = _mlx(4, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
-    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
         setup.chatgpt, "list_local_environments",
-        lambda: {"multilogin": [row], "gologin": []},
+        lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: "the wrong phrase")
@@ -881,14 +961,14 @@ def test_peer_setup_confirmation_mismatch_refuses_without_dispatch(monkeypatch, 
 
 
 def test_peer_setup_create_happy_path_delegates_to_exact_capability(monkeypatch):
-    row = _mlx(1, running=False)
+    row = _mlx(4, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
-    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
         setup.chatgpt, "list_local_environments",
-        lambda: {"multilogin": [row], "gologin": []},
+        lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_CREATE_PEER)
@@ -905,14 +985,14 @@ def test_peer_setup_create_happy_path_delegates_to_exact_capability(monkeypatch)
 
 
 def test_peer_setup_rollback_without_release_receipt_refuses_before_confirmation(monkeypatch):
-    row = _mlx(1, running=False)
+    row = _mlx(4, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
-    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
         setup.chatgpt, "list_local_environments",
-        lambda: {"multilogin": [row], "gologin": []},
+        lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
     monkeypatch.setattr(setup.vendors, "coordinator_peer_rollback_receipt_ready", lambda: False)
@@ -928,14 +1008,14 @@ def test_peer_setup_rollback_without_release_receipt_refuses_before_confirmation
 
 
 def test_peer_setup_rollback_with_release_receipt_delegates_to_distinct_capability(monkeypatch):
-    row = _mlx(1, running=False)
+    row = _mlx(4, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
-    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
         setup.chatgpt, "list_local_environments",
-        lambda: {"multilogin": [row], "gologin": []},
+        lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_ROLLBACK_PEER)
@@ -954,14 +1034,14 @@ def test_peer_setup_rollback_with_release_receipt_delegates_to_distinct_capabili
 def test_peer_setup_coordinator_never_touches_credential_or_http(monkeypatch):
     """The coordinator forwards only argv/exit code — it never reads a
     credential, constructs vendor HTTP, or sees a raw vendor response."""
-    row = _mlx(1, running=False)
+    row = _mlx(4, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
-    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
         setup.chatgpt, "list_local_environments",
-        lambda: {"multilogin": [row], "gologin": []},
+        lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_CREATE_PEER)
