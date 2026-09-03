@@ -1,6 +1,7 @@
 """MAS-115 operator setup — hermetic privacy and fail-closed tests."""
 from __future__ import annotations
 
+import inspect
 import io
 import json
 import os
@@ -515,3 +516,462 @@ def test_configure_command_refuses_gologin_before_provision_or_vendor(monkeypatc
         lambda argv: (_ for _ in ()).throw(AssertionError("must refuse before vendor")),
     )
     assert setup.main(["configure-canary-port", "--vendor", "gologin"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# REALM1-C1 — MAS-115 peer create/rollback coordinator (Mastermind #385)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_peer_fixed_path_gates(request, monkeypatch):
+    if not request.node.name.startswith("test_peer_setup_"):
+        return
+    monkeypatch.setattr(setup.vendors, "coordinator_peer_paths_safe", lambda _operation: True)
+    monkeypatch.setattr(setup.vendors, "coordinator_peer_rollback_receipt_ready", lambda: True)
+
+
+def _peer_anchor_provision(row: dict) -> dict:
+    return {
+        "schema": canary.PROVISION_SCHEMA,
+        "vendor": "multilogin",
+        "profile_id": row["profile_id"],
+        "folder_id": row["folder_id"],
+        "browser_type": "mimic",
+        "origin_policy": port_policy.ORIGIN_POLICY,
+        "disposable_ack": canary.REQUIRED_ACK,
+    }
+
+
+_BOOTSTRAP_EVIDENCE = object()
+
+
+def _bootstrap_coordinator_state(monkeypatch, *, running=False):
+    row = _mlx(4, running=running)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(
+        None, _selections(), observed_at="2026-08-23T12:00:00Z",
+    )
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt,
+        "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr(
+        setup.vendors,
+        "mint_coordinator_peer_bootstrap_evidence",
+        lambda: _BOOTSTRAP_EVIDENCE,
+        raising=False,
+    )
+    return row, provision
+
+
+def test_peer_setup_bootstrap_command_delegates_only_after_exact_local_ceremony(monkeypatch):
+    """The exact phrase precedes a fresh evidence mint and one delegation."""
+    _row, _provision = _bootstrap_coordinator_state(monkeypatch)
+    expected_phrase = getattr(setup, "_CONFIRM_BOOTSTRAP_PEER", None)
+    assert expected_phrase == "BOOTSTRAP THE EXISTING DISPOSABLE PEER LIFECYCLE"
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: expected_phrase)
+    calls = []
+    monkeypatch.setattr(
+        setup.vendors,
+        "run_coordinator_peer_bootstrap",
+        lambda **kwargs: calls.append(kwargs) or setup.vendors.CREATED_THIS_CALL,
+        raising=False,
+    )
+
+    assert setup.main(["bootstrap-peer-lifecycle"]) == 0
+    assert calls == [{"authorization": _BOOTSTRAP_EVIDENCE}]
+
+
+def test_peer_setup_bootstrap_confirmation_mismatch_refuses_without_state_effect(monkeypatch):
+    """A generic Boolean/string or either existing ceremony cannot bootstrap."""
+    _bootstrap_coordinator_state(monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_CREATE_PEER)
+    monkeypatch.setattr(
+        setup.vendors,
+        "run_coordinator_peer_bootstrap",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("wrong phrase must create no bootstrap state"),
+        ),
+        raising=False,
+    )
+    handler = getattr(setup, "bootstrap_peer_interactive", None)
+    assert callable(handler), "the distinct bootstrap coordinator is missing"
+    with pytest.raises(setup.SetupRefusal, match="confirmation"):
+        handler()
+
+
+def test_peer_setup_bootstrap_running_anchor_refuses_before_confirmation_or_state(monkeypatch):
+    """A locally running profile_A can never seed the lifecycle genesis."""
+    _bootstrap_coordinator_state(monkeypatch, running=True)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("running anchor must refuse before confirmation"),
+        ),
+    )
+    monkeypatch.setattr(
+        setup.vendors,
+        "run_coordinator_peer_bootstrap",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("running anchor must create no bootstrap state"),
+        ),
+        raising=False,
+    )
+    handler = getattr(setup, "bootstrap_peer_interactive", None)
+    assert callable(handler), "the distinct bootstrap coordinator is missing"
+    with pytest.raises(setup.SetupRefusal, match="stopped"):
+        handler()
+
+
+def test_peer_setup_bootstrap_refuses_failed_post_confirmation_evidence_mint(monkeypatch):
+    """A changed post-phrase census never releases bootstrap authority."""
+    _row, _provision = _bootstrap_coordinator_state(monkeypatch)
+    censuses = iter((
+        {"multilogin": [_mlx(4, running=False)], "gologin": []},
+        {"multilogin": [_mlx(4, running=True)], "gologin": []},
+    ))
+    monkeypatch.setattr(setup.chatgpt, "list_local_environments", lambda: next(censuses))
+    monkeypatch.setattr(
+        "builtins.input", lambda *_a, **_k: setup._CONFIRM_BOOTSTRAP_PEER,
+    )
+    def _refusing_mint():
+        assert setup.chatgpt.list_local_environments()["multilogin"][0]["running"] is True
+        return None
+
+    monkeypatch.setattr(
+        setup.vendors,
+        "mint_coordinator_peer_bootstrap_evidence",
+        _refusing_mint,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        setup.vendors,
+        "run_coordinator_peer_bootstrap",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("a newly running anchor must receive no authority"),
+        ),
+    )
+
+    with pytest.raises(setup.SetupRefusal, match="evidence"):
+        setup.bootstrap_peer_interactive()
+
+
+def test_peer_setup_bootstrap_refuses_missing_bindings_before_anchor_or_confirmation(monkeypatch):
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (None, ["stale"]))
+    monkeypatch.setattr(
+        setup,
+        "_load_current_provision",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse before anchor")),
+    )
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("must refuse before confirmation"),
+        ),
+    )
+    handler = getattr(setup, "bootstrap_peer_interactive", None)
+    assert callable(handler), "the distinct bootstrap coordinator is missing"
+    with pytest.raises(setup.SetupRefusal, match="enroll"):
+        handler()
+
+
+def test_peer_setup_bootstrap_coordinator_never_touches_secret_http_or_vendor_cli(monkeypatch):
+    """The ceremony performs local state bootstrap only, never profile work."""
+    _bootstrap_coordinator_state(monkeypatch)
+    handler = getattr(setup, "bootstrap_peer_interactive", None)
+    assert callable(handler), "the distinct bootstrap coordinator is missing"
+    source = inspect.getsource(handler)
+    for forbidden in (
+        "Credential(", ".expose(", "_open_keychain_credential_pipe",
+        "BoundedHttpClient(", "httpx.", "vendors.main(",
+    ):
+        assert forbidden not in source
+    monkeypatch.setattr(
+        "builtins.input", lambda *_a, **_k: setup._CONFIRM_BOOTSTRAP_PEER,
+    )
+    monkeypatch.setattr(
+        setup.vendors,
+        "run_coordinator_peer_bootstrap",
+        lambda **_kwargs: setup.vendors.EXISTING_EXACT,
+        raising=False,
+    )
+    assert handler() == 0
+
+
+def test_peer_setup_direct_vendor_cli_cannot_invoke_bootstrap():
+    """Only mas115_setup exposes the ceremony; the secret helper CLI does not."""
+    with pytest.raises(SystemExit) as exc_info:
+        setup.vendors.main(["bootstrap-peer-lifecycle"])
+    assert exc_info.value.code == 2
+
+
+def test_peer_setup_prepare_disposable_does_not_create_a_competing_bootstrap_fence(tmp_path):
+    """Ordinary new-anchor preparation keeps its existing genesis path only."""
+    provision = _peer_anchor_provision(_mlx(4, running=False))
+    anchor_path = tmp_path / "anchor.json"
+    state_path = tmp_path / "peer-state.json"
+    peer_path = tmp_path / "peer-provision.json"
+    assert setup._prepare_anchor_with_peer_lifecycle(
+        provision,
+        anchor_path=anchor_path,
+        state_path=state_path,
+        peer_provision_path=peer_path,
+    ) == setup.vendors.CREATED_THIS_CALL
+    fence_path_for = getattr(setup.vendors, "_peer_bootstrap_fence_path", None)
+    assert callable(fence_path_for), "the fixed bootstrap coordinate is missing"
+    assert not fence_path_for(state_path).exists()
+
+
+@pytest.mark.parametrize("deleted", ("anchor_and_state", "state_and_witness"))
+def test_peer_setup_loss_fence_never_recreates_a_consumed_genesis(tmp_path, deleted):
+    """Setup does not treat missing runtime records as a fresh installation."""
+    provision = _peer_anchor_provision(_mlx(4, running=False))
+    anchor_path = tmp_path / "anchor.json"
+    state_path = tmp_path / "peer-state.json"
+    peer_provision_path = tmp_path / "peer-provision.json"
+    assert setup._prepare_anchor_with_peer_lifecycle(
+        provision,
+        anchor_path=anchor_path,
+        state_path=state_path,
+        peer_provision_path=peer_provision_path,
+    ) == setup.vendors.CREATED_THIS_CALL
+    witness_path = setup.vendors._peer_genesis_witness_path(state_path)  # noqa: SLF001
+    assert setup.vendors._commit_peer_intent(  # noqa: SLF001
+        state_path,
+        folder_id=provision["folder_id"],
+        anchor_profile_id=provision["profile_id"],
+        peer_name=setup.vendors.peer_profile_name(
+            provision["folder_id"], provision["profile_id"],
+        ),
+        peer_provision_path=peer_provision_path,
+    ) == setup.vendors.CREATED_THIS_CALL
+
+    if deleted == "anchor_and_state":
+        anchor_path.unlink()
+        state_path.unlink()
+        witness_before = witness_path.read_bytes()
+    else:
+        state_path.unlink()
+        witness_path.unlink()
+        anchor_before = anchor_path.read_bytes()
+
+    with pytest.raises(setup.SetupRefusal, match="genesis is unavailable|already consumed"):
+        setup._prepare_anchor_with_peer_lifecycle(
+            provision,
+            anchor_path=anchor_path,
+            state_path=state_path,
+            peer_provision_path=peer_provision_path,
+        )
+
+    assert not state_path.exists()
+    if deleted == "anchor_and_state":
+        assert not anchor_path.exists()
+        assert witness_path.read_bytes() == witness_before
+    else:
+        assert not witness_path.exists()
+        assert anchor_path.read_bytes() == anchor_before
+
+
+def _refuse_any_peer_dispatch(monkeypatch, message):
+    def _raise(*_args, **_kwargs):
+        raise AssertionError(message)
+
+    monkeypatch.setattr(setup.vendors, "run_coordinator_peer_create", _raise)
+    monkeypatch.setattr(setup.vendors, "run_coordinator_peer_rollback", _raise)
+
+
+@pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_setup_gologin_refuses_before_bindings_or_provision(monkeypatch, command):
+    """Coordinator #385-2: GoLogin is refused before any local I/O."""
+    monkeypatch.setattr(
+        setup.sb, "load_bindings",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse GoLogin before reading bindings")),
+    )
+    monkeypatch.setattr(
+        setup, "_load_current_provision",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse GoLogin before loading a provision")),
+    )
+    _refuse_any_peer_dispatch(monkeypatch, "must refuse GoLogin before any dispatch")
+    assert setup.main([command, "--vendor", "gologin"]) == 2
+
+
+@pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_setup_missing_bindings_refuses_before_provision_or_dispatch(monkeypatch, command):
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (None, ["stale"]))
+    monkeypatch.setattr(
+        setup, "_load_current_provision",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse before loading a provision")),
+    )
+    _refuse_any_peer_dispatch(monkeypatch, "must refuse before any dispatch")
+    assert setup.main([command, "--vendor", "multilogin"]) == 2
+
+
+@pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_setup_missing_provision_refuses_before_local_census_or_dispatch(monkeypatch, command):
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: ({"schema": sb.SCHEMA, "bindings": []}, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (None, "PROVISION_MISSING"))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse before reading the local census")),
+    )
+    _refuse_any_peer_dispatch(monkeypatch, "must refuse before any dispatch")
+    assert setup.main([command, "--vendor", "multilogin"]) == 2
+
+
+@pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_setup_seat_collision_refuses_before_confirmation_or_dispatch(monkeypatch, command):
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(
+        setup, "assert_current_nonseat",
+        lambda *a, **k: (_ for _ in ()).throw(setup.SetupRefusal("the selected disposable profile collides with a Chairman seat")),
+    )
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must refuse before prompting for confirmation")),
+    )
+    _refuse_any_peer_dispatch(monkeypatch, "must refuse before any dispatch")
+    with pytest.raises(setup.SetupRefusal, match="collides"):
+        (setup.create_peer_interactive if command == "create-peer-profile" else setup.rollback_peer_interactive)()
+
+
+@pytest.mark.parametrize(
+    ("command", "confirm_const"),
+    (
+        ("create-peer-profile", "_CONFIRM_CREATE_PEER"),
+        ("rollback-peer-profile", "_CONFIRM_ROLLBACK_PEER"),
+    ),
+)
+def test_peer_setup_confirmation_mismatch_refuses_without_dispatch(monkeypatch, command, confirm_const):
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: "the wrong phrase")
+    _refuse_any_peer_dispatch(monkeypatch, "a confirmation mismatch must dispatch nothing")
+    handler = setup.create_peer_interactive if command == "create-peer-profile" else setup.rollback_peer_interactive
+    with pytest.raises(setup.SetupRefusal, match="confirmation"):
+        handler()
+
+
+def test_peer_setup_create_happy_path_delegates_to_exact_capability(monkeypatch):
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_CREATE_PEER)
+    calls = []
+    monkeypatch.setattr(
+        setup.vendors, "run_coordinator_peer_create",
+        lambda argv, **kwargs: calls.append((argv, kwargs)) or 0,
+    )
+    assert setup.main(["create-peer-profile", "--vendor", "multilogin"]) == 0
+    assert calls == [([
+        "--vendor", "multilogin",
+        "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+    ], {})]
+
+
+def test_peer_setup_rollback_without_release_receipt_refuses_before_confirmation(monkeypatch):
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr(setup.vendors, "coordinator_peer_rollback_receipt_ready", lambda: False)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("missing downstream ownership proof must refuse before confirmation"),
+        ),
+    )
+    _refuse_any_peer_dispatch(monkeypatch, "missing downstream ownership proof must dispatch nothing")
+    with pytest.raises(setup.SetupRefusal, match="ownership"):
+        setup.rollback_peer_interactive()
+
+
+def test_peer_setup_rollback_with_release_receipt_delegates_to_distinct_capability(monkeypatch):
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_ROLLBACK_PEER)
+    calls = []
+    monkeypatch.setattr(
+        setup.vendors, "run_coordinator_peer_rollback",
+        lambda argv, **kwargs: calls.append((argv, kwargs)) or 0,
+    )
+    assert setup.rollback_peer_interactive() == 0
+    assert calls == [([
+        "--vendor", "multilogin",
+        "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+    ], {})]
+
+
+def test_peer_setup_coordinator_never_touches_credential_or_http(monkeypatch):
+    """The coordinator forwards only argv/exit code — it never reads a
+    credential, constructs vendor HTTP, or sees a raw vendor response."""
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_CREATE_PEER)
+
+    source = inspect.getsource(setup.create_peer_interactive) + inspect.getsource(setup.rollback_peer_interactive)
+    for forbidden in ("Credential(", ".expose(", "_open_keychain_credential_pipe", "BoundedHttpClient(", "httpx."):
+        assert forbidden not in source
+
+    monkeypatch.setattr(setup.vendors, "run_coordinator_peer_create", lambda argv, **kwargs: 0)
+    assert setup.main(["create-peer-profile", "--vendor", "multilogin"]) == 0
+
+
+def test_atomic_private_json_has_exactly_one_implementation(tmp_path):
+    """#3.10: after the move, setup._atomic_private_json must be the same
+    object as vendors.atomic_private_json — never a second copy."""
+    assert setup._atomic_private_json is setup.vendors.atomic_private_json
+    doc = {"a": 1}
+    path = tmp_path / "x.json"
+    setup.vendors.atomic_private_json(doc, path)
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(path.read_text(encoding="utf-8")) == doc
