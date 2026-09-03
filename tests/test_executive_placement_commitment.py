@@ -9,6 +9,7 @@ import pytest
 
 from control_plane import executive_placement_commitment as c2
 from control_plane import executive_placement_selection as c1
+from control_plane.executive_orchestration_principal import digest
 from control_plane.executive_steward import (
     CapacityState,
     EffectState,
@@ -18,6 +19,9 @@ from control_plane.executive_steward import (
     SourceOwner,
     SourceRef,
 )
+
+_CREATED_COMMAND = "CEO-ROOT-1"
+_AUTHORITY_FINGERPRINT = "a" * 64
 
 
 def _source(owner: SourceOwner, ref: str) -> SourceRef:
@@ -83,8 +87,18 @@ def _event(plan: c2.PlacementCommitmentPlan | None = None) -> dict:
     return c2.build_commitment_event_payload(
         plan=plan or _plan(),
         committed_attempt_id="attempt-1",
-        responsibility_job_created_command_id="CEO-ROOT-1",
-        responsibility_authority_fingerprint="a" * 64,
+        responsibility_job_created_command_id=_CREATED_COMMAND,
+        responsibility_authority_fingerprint=_AUTHORITY_FINGERPRINT,
+    )
+
+
+def _validate(payload: dict, *, plan: c2.PlacementCommitmentPlan | None = None, attempt_id: str = "attempt-1") -> dict:
+    return c2.validate_commitment_event_payload(
+        payload,
+        plan=plan or _plan(),
+        expected_attempt_id=attempt_id,
+        expected_responsibility_job_created_command_id=_CREATED_COMMAND,
+        expected_responsibility_authority_fingerprint=_AUTHORITY_FINGERPRINT,
     )
 
 
@@ -168,18 +182,34 @@ def test_event_payload_is_closed_secret_safe_and_contains_no_runtime_binding() -
     assert "provider_session" not in json.dumps(payload, sort_keys=True)
 
 
-def test_event_replay_revalidates_the_current_plan_and_attempt() -> None:
+def test_event_replay_revalidates_current_plan_attempt_and_root_authority() -> None:
     plan = _plan()
     payload = _event(plan)
-    assert c2.validate_commitment_event_payload(
-        payload, plan=plan, expected_attempt_id="attempt-1"
-    ) == payload
+    assert _validate(payload, plan=plan) == payload
 
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
-        c2.validate_commitment_event_payload(
-            payload, plan=plan, expected_attempt_id="attempt-2"
-        )
+        _validate(payload, plan=plan, attempt_id="attempt-2")
     assert excinfo.value.code == "COMMITTED_ATTEMPT_MISMATCH"
+
+    with pytest.raises(c2.PlacementCommitmentError) as created_error:
+        c2.validate_commitment_event_payload(
+            payload,
+            plan=plan,
+            expected_attempt_id="attempt-1",
+            expected_responsibility_job_created_command_id="CEO-ROOT-2",
+            expected_responsibility_authority_fingerprint=_AUTHORITY_FINGERPRINT,
+        )
+    assert created_error.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
+
+    with pytest.raises(c2.PlacementCommitmentError) as authority_error:
+        c2.validate_commitment_event_payload(
+            payload,
+            plan=plan,
+            expected_attempt_id="attempt-1",
+            expected_responsibility_job_created_command_id=_CREATED_COMMAND,
+            expected_responsibility_authority_fingerprint="b" * 64,
+        )
+    assert authority_error.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
 
 
 def test_changed_replay_payload_conflicts_instead_of_becoming_a_second_event() -> None:
@@ -187,9 +217,31 @@ def test_changed_replay_payload_conflicts_instead_of_becoming_a_second_event() -
     payload = _event(plan)
     payload["selected_worker_id"] = "worker-2"
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
-        c2.validate_commitment_event_payload(
-            payload, plan=plan, expected_attempt_id="attempt-1"
-        )
+        _validate(payload, plan=plan)
+    assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
+
+
+def test_historical_event_cannot_self_authenticate_changed_root_authority() -> None:
+    """Changing both authority evidence and its internal digest must still fail.
+
+    This kills the unsafe implementation where replay rebuilt its expectation
+    from the event's own authority fields instead of current Runtime truth.
+    """
+
+    plan = _plan()
+    payload = _event(plan)
+    forged = dict(payload)
+    forged["responsibility_job_created_command_id"] = "CEO-ROOT-ATTACKER"
+    forged["responsibility_authority_fingerprint"] = "b" * 64
+    evidence = {
+        key: forged[key]
+        for key in forged
+        if key not in {"schema_version", "commitment_evidence_digest"}
+    }
+    forged["commitment_evidence_digest"] = digest(evidence)
+
+    with pytest.raises(c2.PlacementCommitmentError) as excinfo:
+        _validate(forged, plan=plan)
     assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
 
 
@@ -199,9 +251,7 @@ def test_event_evidence_digest_binds_every_receipt_fact() -> None:
     tampered = dict(payload)
     tampered["responsibility_job_created_command_id"] = "CEO-ROOT-2"
     with pytest.raises(c2.PlacementCommitmentError) as excinfo:
-        c2.validate_commitment_event_payload(
-            tampered, plan=plan, expected_attempt_id="attempt-1"
-        )
+        _validate(tampered, plan=plan)
     assert excinfo.value.code == "COMMITMENT_EVENT_REPLAY_CONFLICT"
 
 
@@ -225,6 +275,19 @@ def test_caller_cannot_supply_command_id_or_attempt_to_plan_builder() -> None:
     assert "command_id" not in parameters
     assert "attempt_id" not in parameters
     assert "runtime_binding" not in parameters
+
+
+def test_replay_validator_requires_current_runtime_authority_arguments() -> None:
+    parameters = inspect.signature(c2.validate_commitment_event_payload).parameters
+    assert set(parameters) == {
+        "value",
+        "plan",
+        "expected_attempt_id",
+        "expected_responsibility_job_created_command_id",
+        "expected_responsibility_authority_fingerprint",
+    }
+    for name in parameters:
+        assert parameters[name].default is inspect.Parameter.empty
 
 
 def test_invalid_identity_and_revision_fail_with_fixed_codes() -> None:
