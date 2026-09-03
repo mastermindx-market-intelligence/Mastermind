@@ -36,6 +36,8 @@
   "secret_canary_receipt_path": "/var/db/mastermind-executive/control/canaries/secret-canary.json",
   "shared_run_gid": 451,
   "shutdown_grace_seconds": 10.0,
+  "terminal_return_armed": false,
+  "terminal_return_socket_path": "/var/run/mastermind-agent-relay/agent-relay.sock",
   "worker_account_label": "dedicated-codex-home",
   "worker_broker_socket_path": "/var/run/mastermind-executive/worker.sock",
   "worker_gid": 451,

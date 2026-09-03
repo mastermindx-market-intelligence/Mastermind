@@ -1,485 +1,219 @@
-# Autonomy Stage-B0 / Stage-B1 — Durable Sol Action-Target Transfer Implementation Plan
+---
+schema: mastermind.autonomy_stage_b_f0_plan.v5
+architecture_revision: v5.3-post-handoff-aggregation
+operation: stage-b0-r1-real-owner-gap-repair-20260902-sol-001
+capability: SPEC_ONLY
+production_effect: NONE
+---
 
-**Date:** 2026-09-01  
-**Owner:** Sol, AI CEO  
-**Chairman:** Chris  
-**Operation:** `autonomy-stage-b-durable-target-transfer-f0-20260901-sol-001`  
-**Protected source and Skillpack basis:** `mastermindx-market-intelligence/Mastermind@c6af57d1ce96ed3f5ca8237099f4a5ecfa01d3cf`, `mastermind.sol_skillpack.v1` 1.0.1, bootstrap major 1  
-**Governing design:** `docs/superpowers/specs/2026-09-01-autonomy-stage-b-durable-target-transfer-design.md`  
-**State:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`
+# Stage-B0 v5.3 — post-handoff aggregation implementation plan
 
-## 1. Observable mission
+## Outcome
 
-Deliver one deterministic, command-reconcilable Executive capability where an existing root Job’s
-current Sol target can be initially assigned, advanced to a successor RuntimeBinding generation, or
-transferred to another lawful Sol alias through one immutable Runtime event—and the unchanged Stage-A
-resolver immediately consumes that folded assignment without a second target store or provider action.
-
-## 2. Why this is the next dependency
-
-Mastermind now has separate pieces for logical SessionTargets, RuntimeBinding projection, exact action
-authority, Capacity selection, ACK, terminal return, and context-rotation law. The missing seam is the
-durable handoff between “the successor exists and acknowledged” and “this exact successor is now the
-one Sol allowed to act for the root responsibility.”
-
-Without Stage B:
-
-- a fresh session may exist but remain observer-only;
-- a stale root binding may survive context rotation;
-- a UI or operator may be tempted to choose the newest visible tab;
-- lost transfer responses cannot be reconciled safely;
-- responsibility transfer remains manual Slack archaeology rather than a canonical Executive fact.
-
-Stage B closes only this seam. Provider materialization, capacity selection, ACK, terminal return,
-Control Room deployment, and production canaries remain independent capabilities.
-
-## 3. Authority and document precedence
-
-Highest specificity first:
-
-1. current explicit Chairman directive to continue the Autonomy completion program;
-2. current protected Skillpack and universal source laws at the action-time protected SHA;
-3. `docs/superpowers/specs/2026-09-01-autonomy-stage-b-durable-target-transfer-design.md`;
-4. `docs/EXECUTIVE_WEB_SOL_CONTEXT_ROTATION_LAW.md`;
-5. `docs/superpowers/specs/2026-08-29-organizational-continuity-sol-action-authority-amendment.md`;
-6. current `control_plane/sol_action_target.py`, `session_targets.py`,
-   `runtime_binding_projection.py`, and `executive_runtime.py`;
-7. this implementation plan;
-8. worker PR prose and transport messages as evidence only.
-
-A newer protected source that changes Runtime transaction, target authority, RuntimeBinding, ACK,
-terminal-return, or context-rotation semantics must be reconciled before implementation. Path-disjoint
-data, research, evaluation, or publication movement may be joined history-preservingly without
-regenerating accepted Stage-B source.
-
-## 4. Verified current state
-
-### `PROVEN_LIVE`
-
-None of the Stage-B transfer capability is production-proven.
-
-### `BUILT_NOT_PROVEN`
-
-- exact action-target Stage-A deterministic resolver;
-- Executive Runtime immutable event/transaction primitives;
-- Runtime current-harness binding facts;
-- SessionTarget and RuntimeBinding contracts.
-
-### `SPEC_ONLY`
-
-- Web-Sol context-rotation succession law;
-- this Stage-B records wave until protected.
-
-### `NOT_BUILT`
-
-- durable root-job target assignment/transfer event family;
-- command-first transfer transaction;
-- Stage-B projector into the Stage-A consumer;
-- real successor-session transfer canary.
-
-### Material disagreement repaired by this records wave
-
-Earlier local reports described Stage-B0 and Stage-B1 as built or staged, but canonical GitHub had no
-branch, PR, or operation-key carrier. The correct pre-wave state is `NOT_BUILT`. This plan creates the
-first real records carrier and does not reuse those failed reports as implementation evidence.
-
-## 5. Exact Stage-B0 records scope
-
-This records wave changes exactly:
+Freeze the shortest correct path from an accepted CEO-v2 responsibility to one exact Codex CEO action target without inventing a parallel lifecycle:
 
 ```text
-docs/superpowers/specs/2026-09-01-autonomy-stage-b-durable-target-transfer-design.md
-docs/superpowers/plans/2026-09-01-autonomy-stage-b-durable-target-transfer.md
-tests/test_autonomy_stage_b_durable_target_transfer_source_law.py
+CEO-v2 intent
+-> strict aggregation root
+-> canonical COO planner/work/review-repair lifecycle
+-> validated aggregation handoff
+-> C1 deterministic selection
+-> C2 atomic aggregation-root claim commitment
+-> existing Operator Harness materializes the exact current writer
+-> Stage-B1 immutable initial target assignment
+-> unchanged Stage-A exact-actor enforcement
 ```
 
-It creates no code path, service, migration, configuration, route, provider process, Runtime row, or
-production effect.
+The protected Runtime is authoritative. `create_v2_orchestration_root()` creates an aggregation root with the canonical stored owner seat `coo`; admission alone is not claim readiness. C2 cannot run until the existing COO cycle has produced the exact validated aggregation handoff.
 
-## 6. Stage-B1 operator handoff
+## Current source state
 
-### Routing receipt
+- records only;
+- no currently authorized assignment mode;
+- no Runtime, Worker, Attempt, provider, target, Wake, deployment or production effect;
+- source implementation held on explicit predecessors;
+- Capacity C1 remains selection evidence only;
+- the disabled Codex CEO target remains a separate source prerequisite;
+- exact current Operator Harness materialization remains a runtime prerequisite.
+
+## Correction gate
+
+<!-- STAGE_B1_CORRECTION_GATE_BEGIN -->
+```json
+{
+  "schema": "mastermind.autonomy_stage_b1_correction_gate.v5",
+  "architecture_revision": "v5.3-post-handoff-aggregation",
+  "protected_runtime_sha": "c7fa5b43de6ca702f942fbf20cbe3ac45a02b0f6",
+  "records_paths": [
+    "docs/superpowers/specs/2026-09-01-autonomy-stage-b-durable-target-transfer-design.md",
+    "docs/superpowers/plans/2026-09-01-autonomy-stage-b-durable-target-transfer.md",
+    "tests/test_autonomy_stage_b_durable_target_transfer_source_law.py"
+  ],
+  "records_only": true,
+  "architecture_state": "FROZEN",
+  "stage_b1_state": "HELD_PREDECESSORS",
+  "predecessors": [
+    "COO_AGGREGATION_HANDOFF_VALIDATED",
+    "CAPACITY_C1_PROTECTED",
+    "CAPACITY_C2_ROOT_BOUND_CLAIM_COMMITMENT_PROTECTED",
+    "EXECUTIVE_CEO_CODEX_A_TARGET_PROTECTED",
+    "EXACT_CURRENT_OHF_WRITER_MATERIALIZED"
+  ],
+  "next_program_wave": "CAPACITY_C2_POST_HANDOFF_AGGREGATION_CLAIM_VERTICAL",
+  "stage_b1_after_predecessors": "STAGE_B1_CEO_CODEX_INITIAL_ASSIGNMENT_VERTICAL",
+  "production_assignment_caller": "ExecutiveControlService exact current-writer materialization/replay path after post-handoff C2 commitment",
+  "c2_root_role": "aggregation",
+  "c2_root_stored_owner_seat": "coo",
+  "c2_requires_validated_aggregation_handoff": true,
+  "c2_pre_handoff_mutation_allowed": false,
+  "c2_contains_runtime_binding": false,
+  "destination_session_self_authority": false,
+  "caller_destination_authority": false,
+  "trusted_replay_revalidates_current_truth": true,
+  "requires_exact_binding_generation_fence": true,
+  "requires_complete_root_map_preservation": true,
+  "requires_unchanged_stage_a": true,
+  "runtime_effect": false,
+  "provider_effect": false,
+  "production_armed": false
+}
+```
+<!-- STAGE_B1_CORRECTION_GATE_END -->
+
+## Ordered completion sequence
+
+1. PROTECT_STAGE_B0_V5_3_POST_HANDOFF_ARCHITECTURE
+2. PROTECT_CAPACITY_C1_SELECTION
+3. COMPLETE_COO_CYCLE_TO_VALIDATED_AGGREGATION_HANDOFF
+4. BUILD_CAPACITY_C2_POST_HANDOFF_AGGREGATION_CLAIM_COMMITMENT
+5. ADD_DISABLED_EXECUTIVE_CEO_CODEX_A_TARGET
+6. MATERIALIZE_EXACT_CURRENT_OHF_WRITER
+7. RED_STAGE_B1_PRODUCTION_ROOT_COMMITMENT_AND_BINDING_CHAIN
+8. BUILD_STAGE_B1_INITIAL_ASSIGNMENT
+9. RUN_SEPARATE_DISPOSABLE_CANARY
+
+Steps 2 and 5 may protect in parallel. Runtime execution remains ordered: the COO handoff must exist before C2; C2 must exist before materialization is accepted for Stage B; the exact current writer and disabled target definition must both exist before assignment.
+
+## Wave C2 — atomic post-handoff aggregation claim
+
+### Mission
 
 ```text
-COGNITION_ROUTE: CHAT_PRO_DEFAULT
-PREFERRED_AVENUE: CTO Sol
-ROUTE: Codex-backed bounded architecture-sensitive engineering worker
-WHY: the transaction, event, replay, projection and concurrency boundaries are frozen and require disciplined repository implementation and adversarial tests
-WHY NOT FABLE: no unresolved product thesis or cross-repository principal ambiguity remains after STAGE-B0; scarce principal capacity is unnecessary
-RECEIVER_BINDING_MODE: CAPACITY_SELECTABLE
-PLACEMENT_STATE: WAITING_CAPACITY / needs_placement
+strict CEO-v2 aggregation root
++ exact current validated aggregation handoff
++ exact protected C1 document
+-> one existing BEGIN IMMEDIATE claim transaction
+-> aggregation Worker/Attempt claim + placement snapshot
+-> CAPACITY_PLACEMENT_COMMITTED
 ```
 
-No worker-facing open pickup is emitted merely because automated placement is incomplete. Once a
-concrete eligible receiver is lawfully assigned, delivery is the assignment edge and the worker must
-ACK, read current source, arm continuation, and separately START when gates are clear.
+### Exact owner extension
 
-### Exact expected implementation paths
+Extend the existing `AttemptRegistry.claim_job` transaction through one private, unforgeable C2 capability. Do not call public `claim_job()` and append a commitment in a second transaction. Do not copy the quota CAS, fence, Attempt insert, Job transition or placement-snapshot SQL.
+
+Before any capacity mutation, the C2 path must:
+
+1. reconstruct the strict CEO-v2 aggregation root and accepted immutable provenance;
+2. prove `orchestration_role == "aggregation"` and stored `owner_seat == "coo"`;
+3. require root `QUEUED`, no current Attempt and no cancel request;
+4. call the existing `_validated_aggregation_handoff()` inside the same transaction;
+5. bind the exact handoff command/digest, plan Attempt and plan digest;
+6. validate/recompute C1 exactly once;
+7. force the exact selected Worker/quota/provider candidate;
+8. reuse the existing claim mutation;
+9. append one root-bound commitment Event before commit.
+
+A new root with no planner, an unadmitted plan, any living work/review/repair child, or a missing/changed handoff produces zero mutation. C2 never changes planner creation, plan admission, review/repair policy or child dispatch.
+
+### Maximum six paths
+
+- `control_plane/executive_placement_commitment.py`
+- `control_plane/executive_runtime.py`
+- `control_plane/executive_service.py` only if a real internal consumer is required
+- `tests/test_executive_placement_commitment.py`
+- the current canonical Executive Runtime test owner
+- optionally the current canonical Executive service test owner
+
+No seventh path. No table, migration, capacity registry, queue, scheduler, lease, target, RuntimeBinding or provider path.
+
+### Required proof
+
+- exact post-handoff claim succeeds once;
+- every pre-handoff state is zero mutation;
+- C1, handoff, root revision, Worker/quota/fence and placement snapshot are exact;
+- injected failure before commitment Event rolls back Job/Attempt/quota/Event together;
+- identical replay revalidates current root, handoff, C1, Attempt and snapshot;
+- changed replay conflicts;
+- same-root concurrency yields one Event;
+- independent roots remain independent;
+- no RuntimeBinding/provider/Wake/assignment effect.
+
+## Wave Stage-B1 — initial target assignment
+
+### Mission
 
 ```text
-control_plane/sol_action_target_transfer.py
-control_plane/executive_runtime.py
-tests/test_sol_action_target_transfer.py
-tests/test_sol_action_target.py
-tests/test_executive_runtime.py
+post-handoff aggregation root
++ exact protected C2 commitment for its current aggregation Attempt
++ exact disabled EXECUTIVE-CEO-CODEX-A definition
++ exact current RuntimeBinding projected after OHF materialization
+-> SOL_ACTION_TARGET_ASSIGNED revision 1
+-> complete-map SessionTargetRegistry projection
+-> unchanged require_sol_action_authority
 ```
 
-A fresh collision census may narrow these paths. A required sixth authority/production path, new
-migration, new table, provider adapter, or common worker-wire change requires a finite
-`DECISION_REQUEST` before edit.
-
-### Explicit non-goals
-
-- no provider process/session creation, resume, wake, stop, or cleanup;
-- no Capacity selection or placement commitment;
-- no mutation of Job, Attempt, Worker, RuntimeBinding, ACK, or source-resolution rows;
-- no target pointer/current-target table;
-- no second SessionTargetRegistry or RuntimeBinding registry;
-- no Slack/Linear/Agent OS lifecycle state;
-- no Control Room UI work;
-- no automatic context rollover;
-- no production route, installer, service, credential, or deployment;
-- no generic retry/failover policy;
-- no CAP-S1, ACK1, terminal-return, or materialization implementation absorbed into this PR.
-
-## 7. Data and contract behavior
-
-### Identity
-
-The root Job is the durable responsibility. Target identity is the tuple:
-
-```text
-session_alias
-binding_id
-binding_generation
-attempt_id
-session_epoch_id
-reasoning_surface
-```
-
-Provider-native handles, provider session IDs, account labels, Slack principals, raw model text, and
-filesystem paths are excluded from Stage-B persistence.
-
-### Time and freshness
-
-Stage B does not read wall-clock time to elect a target. Currentness comes from canonical source state
-inside the Runtime transaction and current authority/evidence events. Timestamps may be retained by
-the existing Event owner but never rank candidates or choose the latest session.
-
-### Nulls
-
-- `previous_target` is null only for `INITIAL_ASSIGNMENT`;
-- source terminal/release evidence is null only where the mode explicitly permits it;
-- missing destination materialization or ACK is a typed wait/refusal, never a guessed positive;
-- missing current binding is unavailable, not zero-generation or default alias.
-
-### Replay
-
-The stable command ID is derived from canonical semantics. Identical replay returns the existing event
-before mutable-state reads. Changed semantics conflict. A lost response never authorizes a second
-operation key, carrier, target, or transfer.
-
-### Correction
+### Maximum six paths
 
-Events are immutable. Correction is a new transfer at the next expected assignment revision after
-current-state reconciliation. No update/delete/rewrite path is introduced.
+- `control_plane/executive_runtime.py`
+- `control_plane/runtime_binding_projection.py`
+- `control_plane/sol_action_target_assignment.py`
+- `control_plane/executive_service.py`
+- `tests/test_autonomy_stage_b_initial_assignment.py`
+- `tests/test_autonomy_stage_b_durable_target_transfer_source_law.py`
 
-## 8. Deterministic versus model-generated behavior
+No seventh path. Do not modify `config/wake_session_targets.json`. Do not modify `control_plane/sol_action_target.py`.
 
-Deterministic first-party code owns:
+### Authority and replay
 
-- command normalization and digest;
-- transaction and command lookup;
-- event-history fold;
-- revision and source/destination comparison;
-- RuntimeBinding read and validation;
-- evidence-event identity checks;
-- event append;
-- snapshot projection;
-- Stage-A consumer invocation;
-- error mapping and secret-safe output.
-
-Model output has zero authority to select a target, claim an ACK/release, choose a revision, construct
-a binding, resolve a replay, or widen scope. A model may help write code or propose a transfer, but the
-Runtime transaction independently re-derives and validates every privileged fact.
-
-## 9. Ordered implementation sequence
+The internal Executive service derives the command from the root, C2 commitment, protected target definition and exact current RuntimeBinding. Public callers expose no destination fields and cannot supply actor, Worker, Attempt, RuntimeBinding, provider, account, session or command identity.
 
-<!-- STAGE_B1_IMPLEMENTATION_ORDER_BEGIN -->
-```text
-1. RE-PIN_AND_COLLISION_FREEZE
-2. RED_COMMAND_EVENT_AND_FOLD_TESTS
-3. IMPLEMENT_CLOSED_TYPES_CANONICALIZATION_AND_PROJECTOR
-4. RED_RUNTIME_TRANSACTION_AND_REPLAY_TESTS
-5. IMPLEMENT_EXISTING_RUNTIMESTORE_TRANSACTION_SEAM
-6. RED_STAGE_A_REAL_CONSUMER_TESTS
-7. INTEGRATE_ROOT_BINDING_OVERLAY_WITH_UNCHANGED_STAGE_A_RESOLVER
-8. RED_CONCURRENCY_EFFECT_UNKNOWN_AND_SECRET_TESTS
-9. RUN_MUTATION_AND_FORBIDDEN_PLANE_PROOF
-10. RUN_FOCUSED_ADJACENT_FULL_FEASIBLE_AND_STATIC_GATES
-11. PUBLISH_ONE_DRAFT_HOLD_CARRIER
-12. INDEPENDENT_EXACT_HEAD_REVIEW_AND_HOSTED_CI
-13. SOL_RELEASE_ADJUDICATION
-```
-<!-- STAGE_B1_IMPLEMENTATION_ORDER_END -->
+A command hit must revalidate:
 
-### Step 1 — Re-pin and freeze
+- active post-handoff aggregation root;
+- the same handoff bound by C2;
+- exact C2 Event and canonical current aggregation Attempt;
+- exact target-definition fingerprint;
+- exact current RuntimeBinding ID/generation and Codex reasoning surface;
+- global same-alias coherence.
 
-- load current protected Skillpack and governing sources at one SHA;
-- read the complete commission carrier;
-- inspect all open PRs and branches touching the expected five paths;
-- verify STAGE-B0 is protected;
-- identify exact current Runtime transaction, binding, ACK, terminal-return, and materialization event
-  owners;
-- return `PATH_FREEZE` before source edits;
-- emit separate `START` only when no duplicate owner/effect exists.
+A moved handoff, commitment, Attempt or RuntimeBinding invalidates historical success. No current writer is `TARGET_RUNTIME_NOT_MATERIALIZED`. Effect uncertainty is reconciliation-only. No worker/provider/alias/carrier failover.
 
-### Step 2 — RED command/event/fold tests
+### Projection and Stage A
 
-Write failing tests for strict fields, canonical key ordering, deterministic command identity,
-initial assignment, valid succession/transfer, history gaps, duplicate revisions, wrong previous
-links, unsupported modes, forbidden persisted fields, and immutable correction behavior.
+Fold one contiguous assignment history starting at revision 1. Copy the complete root/seat map and replace only the selected root's `ceo` alias. Call the unchanged Stage-A resolver with the actual actor RuntimeBinding. Wrong, sister, stale and replacement-generation actors remain observer-only or refused.
 
-### Step 3 — Closed types and projector
+## Failure families
 
-Implement one Python-stdlib-only module with immutable dataclasses/enums, exact wire parsing,
-canonical JSON, stable digest, event fold, root-binding overlay, and snapshot projection. It owns no
-I/O except through explicitly injected current source rows.
+- invalid or terminal aggregation root;
+- root not ready for aggregation claim;
+- aggregation handoff missing or conflicting;
+- placement commitment missing/conflicting/effect unknown;
+- target definition missing/conflicting;
+- target runtime not materialized/unavailable/conflicting;
+- alias already binds another RuntimeBinding;
+- assignment history conflict;
+- expected revision mismatch;
+- command replay conflict;
+- stale assigned binding;
+- effect unknown reconcile first;
+- Runtime transaction unavailable.
 
-### Step 4 — RED Runtime transaction tests
+Every refusal is fixed and value-free. Timestamps are audit only and never elect a destination.
 
-Prove command lookup occurs before mutable assignment and binding reads, same-command replay survives
-later session movement, changed replay conflicts, stale expected revision refuses, and all evidence is
-read on the same connection.
+## No-rebuild boundary
 
-### Step 5 — RuntimeStore composition
+Do not add a table, migration, lifecycle, queue, scheduler, target store, RuntimeBinding store, retry ledger, watcher database or provider path. Do not duplicate the COO cycle, aggregation handoff, Capacity selector, Worker/Attempt claim, RuntimeBinding projection, Wake or Stage-A owners.
 
-Add the smallest Runtime method that:
+## Release boundary
 
-- opens `RuntimeStore.transaction()`;
-- checks `get_event_by_command_id()` first;
-- folds the root Job’s target events;
-- calls `current_harness_binding_source(..., connection=tx)`;
-- validates exact evidence events;
-- appends one event with `append_event(..., connection=tx)`.
-
-Do not add a table, migration, cursor, cache, transaction owner, or provider call.
-
-### Step 6 — RED Stage-A consumer tests
-
-Use the real `resolve_sol_action_target()` API. Prove the destination actor becomes authoritative only
-after the folded root binding and exact RuntimeBinding snapshot agree, while source/sister/stale actors
-remain observer-only.
-
-### Step 7 — Integration
-
-Create the registry overlay through `SessionTargetRegistry.with_root_job_bindings()` and feed a
-complete RuntimeBinding snapshot to Stage A. Preserve the exact Stage-A public signature and all prior
-negative behavior.
-
-### Step 8 — Concurrency and failure law
-
-Prove concurrent revision-N transfers serialize; one append wins and the other refuses without
-rebasing. Prove effect-unknown evidence, response loss, missing ACK/materialization/release/terminal
-records, stale authority, Runtime conflict, and transaction unavailability all fail closed.
-
-### Step 9 — Mutation and forbidden-plane proof
-
-Individually remove or bypass:
-
-- command-first lookup;
-- expected revision compare;
-- previous-target compare;
-- same-transaction binding read;
-- source release gate;
-- source terminal gate;
-- destination materialization gate;
-- destination ACK gate;
-- actor check in Stage A;
-- forbidden-field filter.
-
-Each mutation must make its intended discriminator fail. Census source for forbidden table/migration,
-provider/network/Slack/Agent OS writes, and secret/native-handle leakage.
-
-### Step 10 — Repository proof
-
-Run focused and adjacent tests, all feasible repository tests, compile, diff check, secret scan, and
-static ownership census. Local environment gaps must be named; hosted CI is the release receipt.
-
-### Step 11 — One carrier
-
-Publish one Draft/HOLD PR from one branch and one operation key. Never replace it because protected
-master moves. Join path-disjoint current source history-preservingly, preserve implementation blobs,
-and rerun only the proof invalidated by movement.
-
-### Step 12 — Independent review
-
-Reviewer must evaluate the original capability, not merely syntax. Required questions:
-
-- does the real Stage-A consumer see exactly one current target?
-- can an identical replay succeed after the old writer is gone?
-- can changed payload or stale revision create a second event?
-- did any path mutate RuntimeBinding or provider state?
-- can a caller/model smuggle privileged binding data?
-- is a source law/spec being called production proof?
-
-### Step 13 — Sol adjudication
-
-Merge only an exact current-base head with green hosted checks, empty blocking threads, bounded path
-surface, accepted independent review, and truthful `BUILT_NOT_PROVEN / PRODUCTION_DISARMED` state.
-
-## 10. Acceptance matrix
-
-### Truth
-
-- exact root Job and assignment revision;
-- exact SessionTarget alias and target seat;
-- exact current RuntimeBinding ID/generation;
-- exact materialization, ACK, source terminal/release, and authority evidence references;
-- command-first replay and immutable event history;
-- correction-safe next-revision behavior.
-
-### Intelligence and authority
-
-- deterministic mode/precondition classification;
-- no newest-tab/account/title/timestamp election;
-- caller/model claims independently re-derived;
-- effect uncertainty blocks transfer;
-- no transfer before successor readiness.
-
-### Product/machine capability
-
-- one real Stage-A resolver call changes from source-authoritative to destination-authoritative after
-  the event fold;
-- source/sister actors remain observer-only;
-- absent/conflict/unknown state is visible and typed;
-- restart/replay produces no second transfer.
-
-### Learning/evidence
-
-- exact immutable head and path set;
-- focused/adjacent/full feasible counts;
-- mutation kills bound to named laws;
-- hosted CI/security receipts;
-- explicit zero-row-mutation and zero-provider-action proof;
-- next production canary gate recoverable without chat history.
-
-## 11. Required adverse cases
-
-At minimum:
-
-```text
-no prior assignment
-valid initial assignment
-initial static-root mismatch
-valid same-alias succession
-same generation or lower generation
-source release missing
-valid cross-alias transfer
-source terminal missing
-source alias equals destination in cross-alias mode
-missing destination materialization
-missing destination ACK
-missing destination RuntimeBinding
-two destination bindings
-surface mismatch
-stale authority
-EFFECT_UNKNOWN
-stale expected revision
-wrong previous target
-identical command replay
-changed semantic replay
-lost response after commit
-concurrent same-revision commands
-history revision gap
-history duplicate revision
-history wrong previous link
-unsupported mode
-forbidden persisted field injection
-actor/source/sister authority separation
-key/list/input permutation determinism
-```
-
-## 12. Stop states
-
-Return to Sol without widening on:
-
-```text
-STAGE_B0_NOT_PROTECTED
-ACTIVE_WRITER_COLLISION
-CURRENT_SOURCE_MOVED_MATERIALLY
-RUNTIME_TRANSACTION_OWNER_UNRESOLVED
-ACK_EVIDENCE_OWNER_UNRESOLVED
-MATERIALIZATION_EVIDENCE_OWNER_UNRESOLVED
-TARGET_EVENT_AGGREGATE_CONFLICT
-NEW_TABLE_OR_MIGRATION_REQUIRED
-SIXTH_AUTHORITY_PATH_REQUIRED
-COMMON_WIRE_SCOPE_COLLISION
-EFFECT_UNKNOWN
-PROVIDER_ACTION_REQUIRED
-```
-
-A deterministic pre-effect defect inside the frozen five paths may be repaired on the same carrier.
-A response ambiguity or possible modifying effect must be reconciled on that carrier before any
-retry or receiver change.
-
-## 13. Release and completion boundary
-
-### STAGE-B0 release
-
-One exact-current-base records PR, source-law tests, hosted CI/security, independent review, and
-expected-head merge. Result only:
-
-```text
-SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT / PROTECTED
-```
-
-### STAGE-B1 release
-
-One exact-current-base implementation PR, all blockers closed, real Stage-A consumer proof, hosted
-CI/security, independent review, expected-head merge. Result only:
-
-```text
-BUILT_NOT_PROVEN / TRANSFER_SOURCE_PRODUCTION_DISARMED / PROTECTED
-```
-
-### Production proof later
-
-A separate bounded canary must prove:
-
-```text
-existing source target
--> terminal/continuity and release evidence
--> successor materialization
--> successor RuntimeBinding
--> successor ACK1
--> Stage-B event
--> Stage-A destination authority
--> bounded useful turn
--> predecessor cleanup
--> restart replay
--> Control Room visibility
-```
-
-Only that real path can promote the capability toward `PROVEN_LIVE`.
-
-## 14. Continuation handoff required from Stage-B1 worker
-
-Return on the exact carrier with:
-
-- protected base, exact head, tree, parents, branch and PR;
-- exact changed paths and active-writer census;
-- command/event/snapshot field sets;
-- transaction ordering and owner methods;
-- RED-to-GREEN counts and named mutation kills;
-- concurrent/replay/effect-unknown proof;
-- real Stage-A consumer result;
-- Job/Attempt/Worker/RuntimeBinding/ACK/source-resolution/provider zero-mutation evidence;
-- compile/diff/secret/forbidden-plane results;
-- hosted CI/security and independent review status;
-- local, remote, runtime, provider and production effects;
-- exact live-canary predecessor and next action;
-- watcher state.
-
-After a worker `RESULT`, Sol must issue one explicit same-carrier `STOP` or repair continuation. Silence
-is not terminal.
+This carrier is records-only. A protected merge authorizes neither C2 nor Stage-B1 implementation by itself and creates no runtime or production effect. Each later source wave stops at a current-base Draft/HOLD candidate. Provider materialization and the disposable live canary remain separate effects.
