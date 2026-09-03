@@ -90,7 +90,7 @@ def _script(
     path: Path, body: str, *, role: str = "zoekt-git-index"
 ) -> ExecutableSpec:
     interpreter = Path(sys.executable).resolve()
-    path.write_text(f"#!{interpreter}\n" + body)
+    path.write_text(f"#!{interpreter} -S\n" + body)
     path.chmod(0o700)
     return ExecutableSpec(
         path=path,
@@ -153,7 +153,7 @@ def _process_set(
 def test_test_executables_bind_the_exact_interpreter(tmp_path: Path) -> None:
     executable = _script(tmp_path / "exact-python", "pass\n")
     first_line = executable.path.read_text(encoding="utf-8").splitlines()[0]
-    assert first_line == f"#!{Path(sys.executable).resolve()}"
+    assert first_line == f"#!{Path(sys.executable).resolve()} -S"
     assert "/usr/bin/env" not in first_line
 
 

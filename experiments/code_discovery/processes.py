@@ -26,8 +26,27 @@ from .index_manifest import IndexManifest, RepositorySpec
 
 ZOEKT_SOURCE_COMMIT: Final = "5f833dde1bc4b1a8f99007617b4b721e44506c4f"
 _MAX_PROCESS_OUTPUT_BYTES: Final = 64 * 1024
+_MAX_STARTUP_ATTEMPTS: Final = 3
+_STARTUP_STABILITY_SECONDS: Final = 0.20
 _CLOSED_ENV: Final = {"LANG": "C", "LC_ALL": "C"}
 _HOST_ROLES: Final = frozenset({"zoekt-git-index", "zoekt-webserver"})
+_STARTUP_CATEGORIES: Final = frozenset(
+    {
+        "STARTED",
+        "BIND_COLLISION",
+        "PROCESS_EXITED",
+        "OUTPUT_OVERFLOW",
+        "START_TIMEOUT",
+        "START_ERROR",
+    }
+)
+_ENDPOINT_DISPOSITIONS: Final = frozenset(
+    {"BOUND", "RELEASED", "EXTERNAL_OCCUPIED", "UNEXPECTED_OPEN"}
+)
+_BIND_COLLISION_MARKERS: Final = (
+    b"address already in use",
+    b"eaddrinuse",
+)
 
 
 class ExecutableVerificationError(ValueError):
@@ -125,41 +144,122 @@ class LoopbackEndpoint:
         return f"http://{self.authority}"
 
 
+@dataclass(frozen=True)
+class StartupAttemptReceipt:
+    """Closed, non-echoing evidence for one host-owned startup attempt."""
+
+    attempt: int
+    category: str
+    return_code: int | None
+    stdout_bytes: int
+    stderr_bytes: int
+    diagnostics_truncated: bool
+    diagnostics_sha256: str
+    endpoint_disposition: str
+    cleanup_complete: bool
+
+    def __post_init__(self) -> None:
+        if type(self.attempt) is not int or not 1 <= self.attempt <= _MAX_STARTUP_ATTEMPTS:
+            raise ValueError("startup attempt is outside the closed range")
+        if self.category not in _STARTUP_CATEGORIES:
+            raise ValueError("startup category is not closed")
+        if self.return_code is not None and type(self.return_code) is not int:
+            raise ValueError("startup return_code must be an integer or null")
+        if type(self.stdout_bytes) is not int or self.stdout_bytes < 0:
+            raise ValueError("stdout_bytes must be a non-negative integer")
+        if type(self.stderr_bytes) is not int or self.stderr_bytes < 0:
+            raise ValueError("stderr_bytes must be a non-negative integer")
+        if type(self.diagnostics_truncated) is not bool:
+            raise ValueError("diagnostics_truncated must be a boolean")
+        if (
+            len(self.diagnostics_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in self.diagnostics_sha256)
+        ):
+            raise ValueError("diagnostics_sha256 must be lowercase SHA-256")
+        if self.endpoint_disposition not in _ENDPOINT_DISPOSITIONS:
+            raise ValueError("endpoint disposition is not closed")
+        if type(self.cleanup_complete) is not bool:
+            raise ValueError("cleanup_complete must be a boolean")
+
+
+@dataclass(frozen=True)
+class _CaptureSnapshot:
+    stdout: bytes
+    stderr: bytes
+    stdout_bytes: int
+    stderr_bytes: int
+    truncated: bool
+    sha256: str
+
+
 class _ProcessCapture:
-    """Bound diagnostic capture that terminates a noisy long-lived server."""
+    """Retain bounded private diagnostics while stopping a noisy server."""
 
     def __init__(self, process: subprocess.Popen[bytes], maximum: int) -> None:
         self._process = process
         self._maximum = maximum
-        self._seen = 0
+        self._buffers = {"stdout": bytearray(), "stderr": bytearray()}
+        self._counts = {"stdout": 0, "stderr": 0}
+        self._stored = 0
         self._overflow = False
         self._lock = threading.Lock()
         self._threads = tuple(
-            threading.Thread(target=self._drain, args=(stream,), daemon=True)
-            for stream in (process.stdout, process.stderr)
+            threading.Thread(
+                target=self._drain,
+                args=(label, stream),
+                daemon=True,
+            )
+            for label, stream in (
+                ("stdout", process.stdout),
+                ("stderr", process.stderr),
+            )
             if stream is not None
         )
         for thread in self._threads:
             thread.start()
 
-    def _drain(self, stream: object) -> None:
+    def _drain(self, label: str, stream: object) -> None:
         assert hasattr(stream, "read")
         reader = getattr(stream, "read1", stream.read)
         while True:
             chunk = reader(8192)
             if not chunk:
                 return
+            overflow_now = False
             with self._lock:
-                self._seen += len(chunk)
-                if self._seen > self._maximum:
+                self._counts[label] += len(chunk)
+                room = max(0, self._maximum - self._stored)
+                retained = chunk[:room]
+                if retained:
+                    self._buffers[label].extend(retained)
+                    self._stored += len(retained)
+                if len(retained) != len(chunk):
                     self._overflow = True
-                    if self._process.poll() is None:
-                        _terminate_process_group(self._process, timeout_seconds=1.0)
+                    overflow_now = True
+            if overflow_now and self._process.poll() is None:
+                _signal_process_group(self._process.pid, signal.SIGTERM)
 
     def raise_if_overflow(self) -> None:
         with self._lock:
             if self._overflow:
                 raise ProcessOutputOverflow("Zoekt process exceeded bounded diagnostics")
+
+    def snapshot(self) -> _CaptureSnapshot:
+        with self._lock:
+            stdout = bytes(self._buffers["stdout"])
+            stderr = bytes(self._buffers["stderr"])
+            stdout_bytes = self._counts["stdout"]
+            stderr_bytes = self._counts["stderr"]
+            truncated = self._overflow
+        material = b"stdout\0" + stdout + b"\0stderr\0" + stderr
+        return _CaptureSnapshot(
+            stdout=stdout,
+            stderr=stderr,
+            stdout_bytes=stdout_bytes,
+            stderr_bytes=stderr_bytes,
+            truncated=truncated,
+            sha256=hashlib.sha256(material).hexdigest(),
+        )
 
     def join(self) -> None:
         for thread in self._threads:
@@ -195,10 +295,17 @@ class ZoektProcessSet:
         self._search_process: subprocess.Popen[bytes] | None = None
         self._search_capture: _ProcessCapture | None = None
         self._endpoint: LoopbackEndpoint | None = None
+        self._startup_receipts: list[StartupAttemptReceipt] = []
         self._closed = False
         self._generation_id = hashlib.sha256(
             os.urandom(32) + os.fspath(self.shard_root).encode("utf-8")
         ).hexdigest()
+
+    @property
+    def startup_attempt_receipts(self) -> tuple[StartupAttemptReceipt, ...]:
+        """Return immutable, non-echoing startup evidence in attempt order."""
+
+        return tuple(self._startup_receipts)
 
     def build_indexes(
         self, manifest: IndexManifest
@@ -257,7 +364,7 @@ class ZoektProcessSet:
         return self._statuses
 
     def start_search(self) -> LoopbackEndpoint:
-        """Start one exact webserver bound to numeric loopback after receipt checks."""
+        """Start the exact webserver through bounded host-owned local attempts."""
 
         self._require_open()
         if self._search_process is not None:
@@ -272,24 +379,168 @@ class ZoektProcessSet:
                 status,
             )
         self.webserver.verify()
-        endpoint = LoopbackEndpoint("127.0.0.1", _reserve_loopback_port())
-        argv = _webserver_argv(self.webserver, endpoint, self.shard_root, self.log_root)
-        process = _spawn_exact(
-            self.webserver,
-            argv,
-            cwd=self.shard_root,
-        )
-        capture = _ProcessCapture(process, _MAX_PROCESS_OUTPUT_BYTES)
-        self._search_process = process
-        self._search_capture = capture
-        self._endpoint = endpoint
-        try:
-            self.webserver.verify()
-            _wait_for_loopback(process, capture, endpoint, self.startup_timeout_seconds)
-        except Exception:
-            self.close()
-            raise
-        return endpoint
+
+        for attempt in range(1, _MAX_STARTUP_ATTEMPTS + 1):
+            endpoint = LoopbackEndpoint("127.0.0.1", _reserve_loopback_port())
+            attempt_log_root = self.log_root / f"startup-{attempt}"
+            if attempt_log_root.exists():
+                self._terminal_start_failure()
+                raise ZoektProcessError("startup attempt log root already exists")
+            attempt_log_root.mkdir(mode=0o700)
+            argv = _webserver_argv(
+                self.webserver, endpoint, self.shard_root, attempt_log_root
+            )
+            try:
+                process = _spawn_exact(
+                    self.webserver,
+                    argv,
+                    cwd=self.shard_root,
+                )
+            except Exception:
+                cleanup_complete = _remove_attempt_log_root(attempt_log_root)
+                snapshot = _empty_capture_snapshot()
+                self._startup_receipts.append(
+                    _startup_receipt(
+                        attempt=attempt,
+                        category="START_ERROR",
+                        return_code=None,
+                        snapshot=snapshot,
+                        endpoint_disposition=(
+                            "UNEXPECTED_OPEN" if _loopback_is_open(endpoint) else "RELEASED"
+                        ),
+                        cleanup_complete=cleanup_complete,
+                    )
+                )
+                self._terminal_start_failure()
+                raise
+
+            capture = _ProcessCapture(process, _MAX_PROCESS_OUTPUT_BYTES)
+            try:
+                self.webserver.verify()
+                _wait_for_loopback(
+                    process,
+                    capture,
+                    endpoint,
+                    self.startup_timeout_seconds,
+                )
+                self.webserver.verify()
+                capture.raise_if_overflow()
+                if process.poll() is not None:
+                    raise ZoektProcessExited(
+                        f"ZOEKT_PROCESS_EXITED: zoekt-webserver exited with {process.returncode}"
+                    )
+            except ProcessOutputOverflow:
+                snapshot, return_code, endpoint_open, cleanup_complete = (
+                    _cleanup_startup_attempt(
+                        process, capture, endpoint, attempt_log_root
+                    )
+                )
+                self._startup_receipts.append(
+                    _startup_receipt(
+                        attempt=attempt,
+                        category="OUTPUT_OVERFLOW",
+                        return_code=return_code,
+                        snapshot=snapshot,
+                        endpoint_disposition=(
+                            "UNEXPECTED_OPEN" if endpoint_open else "RELEASED"
+                        ),
+                        cleanup_complete=cleanup_complete and not endpoint_open,
+                    )
+                )
+                self._terminal_start_failure()
+                raise
+            except ZoektProcessExited as error:
+                snapshot, return_code, endpoint_open, cleanup_complete = (
+                    _cleanup_startup_attempt(
+                        process, capture, endpoint, attempt_log_root
+                    )
+                )
+                bind_collision = _is_bind_collision(
+                    snapshot=snapshot,
+                    return_code=return_code,
+                    endpoint_open=endpoint_open,
+                )
+                self._startup_receipts.append(
+                    _startup_receipt(
+                        attempt=attempt,
+                        category=("BIND_COLLISION" if bind_collision else "PROCESS_EXITED"),
+                        return_code=return_code,
+                        snapshot=snapshot,
+                        endpoint_disposition=(
+                            "EXTERNAL_OCCUPIED"
+                            if bind_collision
+                            else ("UNEXPECTED_OPEN" if endpoint_open else "RELEASED")
+                        ),
+                        cleanup_complete=cleanup_complete,
+                    )
+                )
+                if bind_collision and cleanup_complete and attempt < _MAX_STARTUP_ATTEMPTS:
+                    continue
+                self._terminal_start_failure()
+                if bind_collision:
+                    raise ZoektProcessExited(
+                        "ZOEKT_PROCESS_EXITED: loopback bind collision attempts exhausted"
+                    ) from error
+                raise
+            except ZoektProcessTimeout:
+                snapshot, return_code, endpoint_open, cleanup_complete = (
+                    _cleanup_startup_attempt(
+                        process, capture, endpoint, attempt_log_root
+                    )
+                )
+                self._startup_receipts.append(
+                    _startup_receipt(
+                        attempt=attempt,
+                        category="START_TIMEOUT",
+                        return_code=return_code,
+                        snapshot=snapshot,
+                        endpoint_disposition=(
+                            "UNEXPECTED_OPEN" if endpoint_open else "RELEASED"
+                        ),
+                        cleanup_complete=cleanup_complete and not endpoint_open,
+                    )
+                )
+                self._terminal_start_failure()
+                raise
+            except Exception:
+                snapshot, return_code, endpoint_open, cleanup_complete = (
+                    _cleanup_startup_attempt(
+                        process, capture, endpoint, attempt_log_root
+                    )
+                )
+                self._startup_receipts.append(
+                    _startup_receipt(
+                        attempt=attempt,
+                        category="START_ERROR",
+                        return_code=return_code,
+                        snapshot=snapshot,
+                        endpoint_disposition=(
+                            "UNEXPECTED_OPEN" if endpoint_open else "RELEASED"
+                        ),
+                        cleanup_complete=cleanup_complete and not endpoint_open,
+                    )
+                )
+                self._terminal_start_failure()
+                raise
+
+            snapshot = capture.snapshot()
+            self._startup_receipts.append(
+                _startup_receipt(
+                    attempt=attempt,
+                    category="STARTED",
+                    return_code=None,
+                    snapshot=snapshot,
+                    endpoint_disposition="BOUND",
+                    cleanup_complete=False,
+                )
+            )
+            self._search_process = process
+            self._search_capture = capture
+            self._endpoint = endpoint
+            return endpoint
+
+        self._terminal_start_failure()
+        raise ZoektProcessExited("ZOEKT_PROCESS_EXITED: no startup attempt succeeded")
 
     def assert_search_alive(self) -> None:
         """Raise a typed failure if the local disposable server no longer exists."""
@@ -324,6 +575,12 @@ class ZoektProcessSet:
             self._discard_scratch()
             self._closed = True
 
+    def _terminal_start_failure(self) -> None:
+        try:
+            self._discard_scratch()
+        finally:
+            self._closed = True
+
     def _require_open(self) -> None:
         if self._closed:
             raise ZoektProcessError("disposable Zoekt generation has already been closed")
@@ -337,6 +594,87 @@ class ZoektProcessSet:
                 raise ZoektProcessError(
                     f"unable to discard disposable Zoekt scratch root: {root}"
                 ) from error
+
+
+def _startup_receipt(
+    *,
+    attempt: int,
+    category: str,
+    return_code: int | None,
+    snapshot: _CaptureSnapshot,
+    endpoint_disposition: str,
+    cleanup_complete: bool,
+) -> StartupAttemptReceipt:
+    return StartupAttemptReceipt(
+        attempt=attempt,
+        category=category,
+        return_code=return_code,
+        stdout_bytes=snapshot.stdout_bytes,
+        stderr_bytes=snapshot.stderr_bytes,
+        diagnostics_truncated=snapshot.truncated,
+        diagnostics_sha256=snapshot.sha256,
+        endpoint_disposition=endpoint_disposition,
+        cleanup_complete=cleanup_complete,
+    )
+
+
+def _empty_capture_snapshot() -> _CaptureSnapshot:
+    material = b"stdout\0\0stderr\0"
+    return _CaptureSnapshot(
+        stdout=b"",
+        stderr=b"",
+        stdout_bytes=0,
+        stderr_bytes=0,
+        truncated=False,
+        sha256=hashlib.sha256(material).hexdigest(),
+    )
+
+
+def _cleanup_startup_attempt(
+    process: subprocess.Popen[bytes],
+    capture: _ProcessCapture,
+    endpoint: LoopbackEndpoint,
+    attempt_log_root: Path,
+) -> tuple[_CaptureSnapshot, int | None, bool, bool]:
+    cleanup_error: Exception | None = None
+    try:
+        _terminate_process_group(process, timeout_seconds=2.0)
+    except Exception as error:
+        cleanup_error = error
+    capture.join()
+    snapshot = capture.snapshot()
+    return_code = process.poll()
+    endpoint_open = _loopback_is_open(endpoint)
+    logs_removed = _remove_attempt_log_root(attempt_log_root)
+    group_dead = not _process_group_is_alive(process.pid)
+    cleanup_complete = cleanup_error is None and logs_removed and group_dead
+    if cleanup_error is not None:
+        raise ZoektProcessError("startup process-group cleanup failed") from cleanup_error
+    return snapshot, return_code, endpoint_open, cleanup_complete
+
+
+def _remove_attempt_log_root(path: Path) -> bool:
+    if not path.exists() and not path.is_symlink():
+        return True
+    if path.is_symlink():
+        path.unlink(missing_ok=True)
+        return False
+    try:
+        shutil.rmtree(path)
+    except OSError:
+        return False
+    return not path.exists()
+
+
+def _is_bind_collision(
+    *, snapshot: _CaptureSnapshot, return_code: int | None, endpoint_open: bool
+) -> bool:
+    """Classify only a bounded diagnostic plus an independently occupied endpoint."""
+
+    if snapshot.truncated or return_code in (None, 0) or not endpoint_open:
+        return False
+    diagnostics = (snapshot.stdout + b"\n" + snapshot.stderr).lower()
+    return any(marker in diagnostics for marker in _BIND_COLLISION_MARKERS)
 
 
 def _indexer_argv(
@@ -446,7 +784,7 @@ def _collect_bounded_output(
                 if len(buffer) + len(chunk) > maximum:
                     overflow = True
                     if process.poll() is None:
-                        _terminate_process_group(process, timeout_seconds=1.0)
+                        _signal_process_group(process.pid, signal.SIGTERM)
                 else:
                     buffer.extend(chunk)
         process.wait(timeout=1)
@@ -464,56 +802,67 @@ def _wait_for_loopback(
     timeout_seconds: float,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
+    stable_since: float | None = None
     while time.monotonic() < deadline:
         capture.raise_if_overflow()
         if process.poll() is not None:
             raise ZoektProcessExited(
                 f"ZOEKT_PROCESS_EXITED: zoekt-webserver exited with {process.returncode}"
             )
-        try:
-            with socket.create_connection((endpoint.host, endpoint.port), timeout=0.1):
+        reachable = _loopback_is_open(endpoint)
+        now = time.monotonic()
+        if reachable:
+            if stable_since is None:
+                stable_since = now
+            elif now - stable_since >= _STARTUP_STABILITY_SECONDS:
                 return
-        except OSError:
-            time.sleep(0.02)
+        else:
+            stable_since = None
+        time.sleep(0.02)
     raise ZoektProcessTimeout("zoekt-webserver did not bind loopback before timeout")
+
+
+def _signal_process_group(group_id: int, sig: signal.Signals) -> None:
+    try:
+        os.killpg(group_id, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _process_group_is_alive(group_id: int) -> bool:
+    try:
+        os.killpg(group_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def _terminate_process_group(
     process: subprocess.Popen[bytes], *, timeout_seconds: float
 ) -> None:
-    """Terminate the fresh-session process group, not merely its original parent."""
+    """Terminate and verify the fresh-session process group, even if its leader exited."""
 
-    try:
-        group_id = os.getpgid(process.pid)
-    except ProcessLookupError:
-        return
-    try:
-        os.killpg(group_id, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    except PermissionError:
-        # A host that denies a group signal still receives no parent-success path.
-        # The direct child is terminated, and callers fail if it remains alive.
-        try:
-            process.terminate()
-        except ProcessLookupError:
-            pass
+    group_id = process.pid
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        _signal_process_group(group_id, sig)
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            process.poll()
+            if not _process_group_is_alive(group_id):
+                try:
+                    process.wait(timeout=0.1)
+                except (subprocess.TimeoutExpired, ChildProcessError):
+                    pass
+                return
+            time.sleep(0.02)
     try:
         process.wait(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(group_id, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        except PermissionError:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
-        try:
-            process.wait(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired as error:
-            raise ZoektProcessError("Zoekt process group survived forced cleanup") from error
+    except (subprocess.TimeoutExpired, ChildProcessError):
+        pass
+    if _process_group_is_alive(group_id):
+        raise ZoektProcessError("Zoekt process group survived forced cleanup")
 
 
 def _loopback_is_open(endpoint: LoopbackEndpoint) -> bool:
