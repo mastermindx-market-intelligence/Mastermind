@@ -814,3 +814,293 @@ def test_checkpoint_empty_descendant_commit_is_valid_with_positive_unpushed_coun
     assert result.local_equals_remote is False
     assert result.local_tree_sha == result.remote_tree_sha
     assert result.unpushed_commit_count == 1
+
+
+FINAL_OWNED_PATHS = (
+    "control_plane/source_continuity.py",
+    "scripts/source_continuity.py",
+    "tests/test_source_continuity.py",
+    "docs/sol_skills/COMMISSION_WAVE.md",
+    "docs/sol_skills/REVIEW_RETURN.md",
+    "docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md",
+)
+CLI_PATH = ROOT / "scripts" / "source_continuity.py"
+COMMISSION_WAVE_PATH = ROOT / "docs" / "sol_skills" / "COMMISSION_WAVE.md"
+REVIEW_RETURN_PATH = ROOT / "docs" / "sol_skills" / "REVIEW_RETURN.md"
+SESSION_CLOSE_PATH = ROOT / "docs" / "AGENT_DIALOGUE_SESSION_CLOSE_LAW.md"
+
+
+def _cli_module():
+    assert CLI_PATH.is_file(), "scripts/source_continuity.py must exist"
+    name = "source_continuity_cli_under_test"
+    spec = importlib.util.spec_from_file_location(name, CLI_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _cli_argv(kind: str = "CHECKPOINT_VERIFIED") -> list[str]:
+    args = [
+        "--receipt-kind",
+        kind,
+        "--operation-key",
+        OPERATION,
+        "--repository",
+        REPOSITORY,
+        "--pr-number",
+        str(PR_NUMBER),
+        "--branch",
+        BRANCH,
+        "--base-ref",
+        "master",
+        "--pinned-base-sha",
+        BASE_SHA,
+        "--external-effect-state",
+        "NONE",
+        "--branch-effect-dependency",
+        "NONE",
+        "--external-effect-evidence-fingerprint",
+        EFFECT_FINGERPRINT,
+    ]
+    for path in FINAL_OWNED_PATHS:
+        args.extend(("--owned-path", path))
+    return args
+
+
+class _ProbeRunner:
+    def __init__(
+        self,
+        *,
+        auth_ok: bool = True,
+        move_remote_head_on_second_read: bool = False,
+    ) -> None:
+        self.auth_ok = auth_ok
+        self.move_remote_head_on_second_read = move_remote_head_on_second_read
+        self.calls: list[tuple[str, ...]] = []
+        self.pr_reads = 0
+
+    @staticmethod
+    def _done(returncode: int = 0, stdout: str = "", stderr: str = ""):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+    def __call__(self, command, **_kwargs):
+        call = tuple(str(part) for part in command)
+        self.calls.append(call)
+
+        if call == ("gh", "auth", "status", "--hostname", "github.com"):
+            return self._done(0 if self.auth_ok else 1, stderr="sensitive auth failure")
+        if call == ("git", "rev-parse", "--show-toplevel"):
+            return self._done(stdout="/repo\n")
+        if call == ("git", "symbolic-ref", "--quiet", "--short", "HEAD"):
+            return self._done(stdout=f"{BRANCH}\n")
+        if call == ("git", "rev-parse", "HEAD"):
+            return self._done(stdout=f"{HEAD_SHA}\n")
+        if call == ("git", "rev-parse", "HEAD^{tree}"):
+            return self._done(stdout=f"{TREE_SHA}\n")
+        if call == ("git", "cat-file", "-e", f"{HEAD_SHA}^{{commit}}"):
+            return self._done()
+        if call == ("git", "merge-base", "--is-ancestor", HEAD_SHA, "HEAD"):
+            return self._done()
+        if call == ("git", "rev-list", "--count", f"{HEAD_SHA}..HEAD"):
+            return self._done(stdout="0\n")
+        if call == ("git", "diff", "--name-only", "-z", "HEAD"):
+            return self._done()
+        if call == ("git", "diff", "--cached", "--name-only", "-z"):
+            return self._done()
+        if call == ("git", "ls-files", "--others", "--exclude-standard", "-z"):
+            return self._done()
+
+        if call[:2] != ("gh", "api") or len(call) != 3:
+            raise AssertionError(f"unexpected probe command: {call!r}")
+        endpoint = call[2]
+        pr_endpoint = f"repos/{REPOSITORY}/pulls/{PR_NUMBER}"
+        if endpoint == pr_endpoint:
+            self.pr_reads += 1
+            head = (
+                "9" * 40
+                if self.move_remote_head_on_second_read and self.pr_reads > 1
+                else HEAD_SHA
+            )
+            return self._done(
+                stdout=json.dumps(
+                    {
+                        "state": "open",
+                        "draft": True,
+                        "labels": [],
+                        "head": {
+                            "ref": BRANCH,
+                            "sha": head,
+                            "repo": {"full_name": REPOSITORY},
+                        },
+                        "base": {"ref": "master"},
+                    }
+                )
+            )
+        if endpoint == f"repos/{REPOSITORY}/branches/sol%2Fsource-continuity-v1-20260903":
+            return self._done(stdout=json.dumps({"commit": {"sha": HEAD_SHA}}))
+        if endpoint == f"repos/{REPOSITORY}/git/commits/{HEAD_SHA}":
+            return self._done(stdout=json.dumps({"tree": {"sha": TREE_SHA}}))
+        if endpoint == f"repos/{REPOSITORY}/branches/master":
+            return self._done(stdout=json.dumps({"commit": {"sha": CURRENT_BASE_SHA}}))
+        if endpoint == f"repos/{REPOSITORY}/compare/{CURRENT_BASE_SHA}...{HEAD_SHA}":
+            return self._done(stdout=json.dumps({"merge_base_commit": {"sha": BASE_SHA}}))
+        if endpoint == f"repos/{REPOSITORY}/pulls/{PR_NUMBER}/files?per_page=100&page=1":
+            return self._done(
+                stdout=json.dumps([{"filename": path} for path in FINAL_OWNED_PATHS])
+            )
+        if endpoint == f"repos/{REPOSITORY}/git/trees/{TREE_SHA}?recursive=1":
+            entries = []
+            for index, path in enumerate(FINAL_OWNED_PATHS):
+                entries.append(
+                    {
+                        "path": path,
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": f"{index + 7:x}" * 40,
+                        "size": 100 + index,
+                    }
+                )
+            return self._done(stdout=json.dumps({"truncated": False, "tree": entries}))
+        if endpoint == f"repos/{REPOSITORY}/pulls?state=open&per_page=100&page=1":
+            return self._done(stdout=json.dumps([{"number": PR_NUMBER}]))
+        raise AssertionError(f"unexpected gh endpoint: {endpoint}")
+
+
+@pytest.mark.parametrize("kind", ["CHECKPOINT_VERIFIED", "REMOTE_COMPLETE_VERIFIED"])
+def test_cli_collects_facts_with_read_only_commands_and_prints_one_canonical_receipt(
+    kind: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _cli_module()
+    runner = _ProbeRunner()
+
+    exit_code = module.main(_cli_argv(kind), runner=runner, clock=lambda: VERIFIED_AT)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    assert captured.out.count("\n") == 1
+    payload = json.loads(captured.out)
+    assert payload["schema"] == "mastermind.source_continuity_receipt/v1"
+    assert payload["receipt_kind"] == kind
+    assert payload["changed_paths"] == sorted(FINAL_OWNED_PATHS)
+    assert payload["local_equals_remote"] is True
+    assert payload["authority_effect"] == "NONE"
+    assert payload["writer_release_authorized"] is False
+    assert payload["merge_authorized"] is False
+    assert payload["receiver_transfer_authorized"] is False
+
+    allowed_git = {
+        "rev-parse",
+        "symbolic-ref",
+        "cat-file",
+        "merge-base",
+        "rev-list",
+        "diff",
+        "ls-files",
+    }
+    forbidden = {
+        "fetch",
+        "checkout",
+        "add",
+        "commit",
+        "push",
+        "reset",
+        "rebase",
+        "merge",
+        "pull",
+        "switch",
+        "clean",
+    }
+    for call in runner.calls:
+        if call[0] == "git":
+            assert call[1] in allowed_git
+            assert call[1] not in forbidden
+        elif call[0] == "gh":
+            assert call[1] in {"auth", "api"}
+
+
+def test_cli_rejects_invalid_request_before_any_git_or_github_probe(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _cli_module()
+    runner = _ProbeRunner()
+    args = _cli_argv()
+    args[args.index("--repository") + 1] = "not-a-repository"
+
+    exit_code = module.main(args, runner=runner, clock=lambda: VERIFIED_AT)
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert runner.calls == []
+    payload = json.loads(captured.out)
+    assert payload["code"] == "INVALID_REQUEST"
+    assert OPERATION not in captured.out
+    assert BRANCH not in captured.out
+
+
+def test_cli_auth_failure_is_fixed_value_free_and_stops_before_local_probe(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _cli_module()
+    runner = _ProbeRunner(auth_ok=False)
+
+    exit_code = module.main(_cli_argv(), runner=runner, clock=lambda: VERIFIED_AT)
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert runner.calls == [("gh", "auth", "status", "--hostname", "github.com")]
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["code"] == "AUTH_UNAVAILABLE"
+    assert "sensitive auth failure" not in captured.out
+    assert REPOSITORY not in captured.out
+
+
+def test_cli_refuses_if_remote_head_moves_during_the_same_proof(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _cli_module()
+    runner = _ProbeRunner(move_remote_head_on_second_read=True)
+
+    exit_code = module.main(_cli_argv(), runner=runner, clock=lambda: VERIFIED_AT)
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.out)
+    assert payload["code"] == "REMOTE_PROOF_CHANGED"
+    assert runner.pr_reads == 2
+    assert "9" * 40 not in captured.out
+
+
+def test_commission_wave_requires_a_remote_checkpoint_before_long_source_exposure() -> None:
+    text = COMMISSION_WAVE_PATH.read_text(encoding="utf-8")
+    assert "### Source Continuity checkpoint gate" in text
+    assert "CHECKPOINT_VERIFIED" in text
+    assert "before long CI, review, or context-budget exposure" in text
+    assert "same operation branch and Draft/HOLD PR" in text
+    assert "does not grant receiver transfer, retry, Ready, merge, or writer release" in text
+    assert "refresh the receipt after head, path, base, or external-effect identity moves" in text
+
+
+def test_session_close_keeps_remote_complete_nonterminal_until_writer_release() -> None:
+    text = SESSION_CLOSE_PATH.read_text(encoding="utf-8")
+    assert "### 3.6 Source-writer stickiness and remote-complete terminality" in text
+    sequence = """REMOTE_COMPLETE_VERIFIED
+-> SOL_ACCEPTED_BUILDER_RESULT
+-> TERMINAL_BUILDER_STOP
+-> EXACT_CHILD_SOURCE_REMOVAL_OR_WATCH_STOP_FAILED
+-> BRANCH_WRITER_RELEASED"""
+    assert sequence in text
+    assert "CHECKPOINT_VERIFIED is never a terminal, retry, transfer, or writer-release edge" in text
+    assert "EFFECT_UNKNOWN remains exact-session sticky" in text
+
+
+def test_review_return_remote_complete_preserves_review_reuse_and_release_maintainer_boundary() -> None:
+    text = REVIEW_RETURN_PATH.read_text(encoding="utf-8")
+    for required in ("REVIEW_REUSE_ALLOWED", "FULL_REREVIEW_REQUIRED", "RELEASE_BLOCKED"):
+        assert required in text
+    assert "### Step 8A — Source Continuity remote-complete and release-maintainer boundary" in text
+    assert "REMOTE_COMPLETE_VERIFIED is evidence, not terminality or writer-release authority" in text
+    assert "fresh maintenance-only release operation on the same PR/branch" in text
+    assert "must not edit feature semantics" in text
+    assert "Step 2A review-reuse classification remains controlling" in text
