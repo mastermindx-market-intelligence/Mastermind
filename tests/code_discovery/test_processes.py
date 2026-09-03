@@ -404,6 +404,7 @@ def test_indexer_environment_is_hermetic_and_can_resolve_pinned_git(
         "GIT_ASKPASS": "/bin/false",
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
         "GIT_TERMINAL_PROMPT": "0",
         "LANG": "C",
         "LC_ALL": "C",
@@ -548,6 +549,38 @@ def test_index_build_rechecks_the_frozen_git_common_dir_identity(
         processes.build_indexes(manifest)
 
     assert not trace.exists()
+    assert processes._statuses == ()
+    processes.close()
+
+
+def test_index_build_rechecks_the_source_seal_after_restored_during_run_mutation(
+    tmp_path: Path,
+) -> None:
+    """A restored byte sequence still changes the frozen file identity during indexing."""
+
+    manifest = _manifest(tmp_path)
+    marker = tmp_path / "indexer-mutated-source"
+    indexer = _script(
+        tmp_path / "mutating-indexer",
+        "import time\n"
+        "from pathlib import Path\n"
+        "target = Path('engine/core.py')\n"
+        "original = target.read_bytes()\n"
+        "target.write_bytes(b\"VALUE = 'transient mutation'\\n\")\n"
+        "time.sleep(0.02)\n"
+        "target.write_bytes(original)\n"
+        f"Path({str(marker)!r}).write_text('restored')\n",
+    )
+    processes = _process_set(
+        tmp_path,
+        indexer,
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+
+    with pytest.raises(ZoektProcessError, match="source snapshot seal"):
+        processes.build_indexes(manifest)
+
+    assert marker.read_text() == "restored"
     assert processes._statuses == ()
     processes.close()
 

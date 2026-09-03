@@ -22,7 +22,12 @@ from pathlib import Path
 from typing import Final
 
 from .discovery_contract import RepositoryIndexStatus
-from .index_manifest import IndexManifest, RepositorySpec
+from .index_manifest import (
+    IndexManifest,
+    IndexManifestError,
+    RepositorySpec,
+    verify_repository_spec,
+)
 
 
 ZOEKT_SOURCE_COMMIT: Final = "5f833dde1bc4b1a8f99007617b4b721e44506c4f"
@@ -35,6 +40,7 @@ _CLOSED_ENV: Final = {
     "GIT_ASKPASS": "/bin/false",
     "GIT_CONFIG_GLOBAL": "/dev/null",
     "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_OPTIONAL_LOCKS": "0",
     "GIT_TERMINAL_PROMPT": "0",
     "LANG": "C",
     "LC_ALL": "C",
@@ -324,6 +330,7 @@ class ZoektProcessSet:
             os.urandom(32) + os.fspath(self.shard_root).encode("utf-8")
         ).hexdigest()
         self._operation_index_root: Path | None = None
+        self._source_specs: tuple[RepositorySpec, ...] = ()
 
     @property
     def startup_attempt_receipts(self) -> tuple[StartupAttemptReceipt, ...]:
@@ -365,12 +372,16 @@ class ZoektProcessSet:
             argv = _indexer_argv(
                 self.indexer, spec, operation_index_root, metadata_path
             )
-            _run_bounded(
-                self.indexer,
-                argv,
-                cwd=spec.source_snapshot_root,
-                timeout_seconds=self.startup_timeout_seconds,
-            )
+            try:
+                _run_bounded(
+                    self.indexer,
+                    argv,
+                    cwd=spec.source_snapshot_root,
+                    timeout_seconds=self.startup_timeout_seconds,
+                    source_spec=spec,
+                )
+            finally:
+                _verify_source_seal(spec)
             self.indexer.verify()
             now = datetime.now(UTC)
             status = RepositoryIndexStatus(
@@ -399,6 +410,7 @@ class ZoektProcessSet:
             )
         self._statuses = tuple(statuses)
         self._repository_identities = tuple(identities)
+        self._source_specs = tuple(manifest.repositories)
         return self._statuses
 
     def start_search(self) -> LoopbackEndpoint:
@@ -412,6 +424,8 @@ class ZoektProcessSet:
             raise ZoektProcessError("build_indexes must complete before start_search")
         if self._operation_index_root is None or not self._operation_index_root.is_dir():
             raise ZoektProcessError("operation index root is unavailable")
+        for spec in self._source_specs:
+            _verify_source_seal(spec)
         for status in self._statuses:
             assert status.shard_namespace is not None
             _verify_receipt(
@@ -783,8 +797,9 @@ def _run_bounded(
     *,
     cwd: Path,
     timeout_seconds: float,
+    source_spec: RepositorySpec | None = None,
 ) -> tuple[bytes, bytes]:
-    process = _spawn_exact(executable, argv, cwd=cwd)
+    process = _spawn_exact(executable, argv, cwd=cwd, source_spec=source_spec)
     stdout, stderr = _collect_bounded_output(
         process, maximum=_MAX_PROCESS_OUTPUT_BYTES, timeout_seconds=timeout_seconds
     )
@@ -795,14 +810,29 @@ def _run_bounded(
     return stdout, stderr
 
 
+def _verify_source_seal(spec: RepositorySpec) -> None:
+    """Translate a failed immutable-source recheck into a closed process failure."""
+
+    try:
+        verify_repository_spec(spec)
+    except IndexManifestError as error:
+        raise ZoektProcessError("source snapshot seal verification failed") from error
+
+
 def _spawn_exact(
-    executable: ExecutableSpec, argv: Sequence[str], *, cwd: Path
+    executable: ExecutableSpec,
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    source_spec: RepositorySpec | None = None,
 ) -> subprocess.Popen[bytes]:
     executable.verify()
     if not argv or argv[0] != os.fspath(executable.path):
         raise ZoektProcessError("closed Zoekt role received an unbound argv template")
     if not cwd.is_absolute() or cwd.is_symlink() or not cwd.is_dir():
         raise ZoektProcessError("closed Zoekt role requires a real absolute working directory")
+    if source_spec is not None:
+        _verify_source_seal(source_spec)
     return subprocess.Popen(
         list(argv),
         cwd=os.fspath(cwd),
