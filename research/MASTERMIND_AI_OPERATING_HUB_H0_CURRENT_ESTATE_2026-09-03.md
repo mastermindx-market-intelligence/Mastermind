@@ -52,7 +52,7 @@ carrier cannot itself accept honestly unpromoted.
 ### 1a. Accepted capability truth (Agent OS owner evidence, not this carrier's observation)
 
 Source: `mastermindx-market-intelligence/macro@6d72b43777f84c9b8040cd641c8580b14876e34b:agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md`
-(public repository, fetched directly; dated observation, see §11).
+(public repository, fetched directly; dated observation, see §12).
 
 | Sub-capability | State | Accepted evidence |
 |---|---|---|
@@ -73,7 +73,7 @@ promoting the overall workstream past `PARTIAL`.
 | Sub-capability | State | Evidence and meaning |
 |---|---|---|
 | Pure Control Room compositor `mastermind.chairman_control_room.v1` | `BUILT_NOT_PROVEN` | `control_plane/chairman_control_room.py` on protected master. This carrier observed source and its own contract test only; §1a's P0A/H0 acceptance is the owner's evidence for the *presentation* capability built on this compositor, not a claim that this carrier itself reran that proof. |
-| Autonomy responsibility projection `mastermind.autonomy_control_room.v1` | `BUILT_NOT_PROVEN` | Open Draft PR #326 at head `b59753a4deab4b7748b2896a518d9532762d8a74`, **unresolved, two `CHANGES_REQUESTED` reviews** (§5). **Absent from protected master.** Treated strictly as an unaccepted open-PR candidate, never protected or live capability — see §5's blocker summary before assuming any of its dispatch/status output is trustworthy. |
+| Autonomy responsibility projection `mastermind.autonomy_control_room.v1` | `BUILT_NOT_PROVEN` | Open Draft PR #326 at head `8639d7a3f06277ea84c1e071b9d298d39695d91c`, **unresolved, three `CHANGES_REQUESTED` reviews** (§5). **Absent from protected master.** Treated strictly as an unaccepted open-PR candidate, never protected or live capability — see §5's blocker summary before assuming any of its dispatch/status output is trustworthy. |
 | Protected Agent Dialogue Wake runtime (PR #357) | `BUILT_NOT_PROVEN` | Merged as `b28023f92458ba186937afa1e619f3b4464e149f` (§5). A protected *source* movement H1 may later read from once wired by an accepting owner; not itself a Hub capability. |
 | AI Hub F0 architecture | `SPEC_ONLY` | PR #416 merged; `research/MASTERMIND_AI_OPERATING_HUB_F0_ARCHITECTURE_2026-09-02.md` protected. |
 | AI Hub H0 current-estate freeze | `SPEC_ONLY` | This record. |
@@ -106,7 +106,7 @@ field; there is no fuzzy matching anywhere in the module. H1 inherits that law u
 | Agent Dialogue Wake runtime | PR #357 (protected, disjoint) | `integrations/slack_agent_dialogue/{engine_v2,runtime,turn_routing_facts,turn_runtime_primitives,wake_projection}.py` |
 | `job_id` / `attempt_id` / `worker_id` | Executive OS | read through `control_plane/executive_inbox.py` and runtime jobs; never recreated |
 | PR / check / commit identity | GitHub | `project_active_builds.v1` snapshot; exact immutable identities only |
-| portfolio projection | Linear | projection only; disagreement shown, never averaged; current epoch `7 / 65 / 63 / 2` (§10) |
+| portfolio projection | Linear | projection only; disagreement shown, never averaged; current epoch `7 / 65 / 63 / 2` (§11) |
 | carrier (`workspace_id`/`channel_id`/`parent_ts`) | Slack | transport evidence only; never runtime consumption |
 
 ## 3. Producer / owner boundaries — proven, not assumed
@@ -201,7 +201,7 @@ stale, the surface disables the affordance and names the exact blocker.
 owner fact has no lawful deep link, the field must render `NOT_AVAILABLE` or `NOT_APPLICABLE` with
 the owner/source identity attached — never a fabricated URL manufactured merely to satisfy "every
 claim has a deep link." `NOT_AVAILABLE` means a link is expected at that owner but is not currently
-obtainable; `NOT_APPLICABLE` means no deep-link concept applies to that owner/fact at all. §11
+obtainable; `NOT_APPLICABLE` means no deep-link concept applies to that owner/fact at all. §12
 lists real deep links this record actually cites, as the positive contrast case.
 
 ## 5. Collision census and PR archaeology
@@ -224,15 +224,15 @@ landed after that census and before this record's final integration; it touches
 `scripts/mas115_setup.py`, and two test files — entirely disjoint from H0's owned paths, every
 Control Room/dialogue/portfolio owner path, and the Skillpack, and it changes neither PR #326's
 nor PR #350's head. Classified path-disjoint and non-material; folded in by ordinary non-force
-integration under §11's law without a further semantic repair round.
+integration under §12's law without a further semantic repair round.
 
 | PR | State | Head | Relevance |
 |---|---|---|---|
 | #416 | `MERGED` (merge commit `812be940cec5db025a5ef8f99f71a0e30a92bb8e`) | `e2e8543b3a3bcd4edd33e5f95a611e3c945bbbe5` | F0 architecture protected. This H0 record is its successor; no stale F0-release step is executed. |
-| #326 | `OPEN / DRAFT`, **UNRESOLVED — two `CHANGES_REQUESTED` reviews** | `b59753a4deab4b7748b2896a518d9532762d8a74` | **Blocking for all nine H1 paths, not only the UI subset.** Effective delta is now 10 paths (adds `control_plane/autonomy_control_room_projection.py`, `tests/test_autonomy_control_room_projection.py`, modifies `control_room.js`/`.css`/`index.html`, the compositor, `chairman_control_room_remote.py`, and three more Control Room test files). Review `5100408653` (2026-09-03T09:51:23Z) and review `5103135217` (2026-09-03T14:24:15Z, latest) both `CHANGES_REQUESTED`. The latest review's five blockers: (1) the compositor calls the dispatch projection with `dispatch_evidence=None`, so every card gets no real dispatch producer — the production compositor is dark/disconnected on this path; (2) `project_dispatch_consumption()` accepts unvalidated caller-controlled mappings that can crash the Control Room or leak/break serialization; (3) a terminal Attempt plus four nonblank watcher strings can be misclassified as a returned dialogue; (4) watcher/decision proof is forgeable and not required to be causally ordered after the return it claims to close; (5) unknown/unmatched dispatch evidence is visually de-historicized instead of being marked freshness-unknown. **Its dispatch-consumption output is therefore treated strictly as an unaccepted open-PR candidate — never a protected or live capability — until independently re-reviewed and merged.** |
+| #326 | `OPEN / DRAFT`, **UNRESOLVED — three `CHANGES_REQUESTED` reviews** | `8639d7a3f06277ea84c1e071b9d298d39695d91c` | **Blocking for all nine H1 paths, not only the UI subset.** Effective delta remains 10 paths (adds `control_plane/autonomy_control_room_projection.py`, `tests/test_autonomy_control_room_projection.py`, modifies `control_room.js`/`.css`/`index.html`, the compositor, `chairman_control_room_remote.py`, and three more Control Room test files). Three reviews, all `CHANGES_REQUESTED`: `5100408653` (09:51), `5103135217` (14:24), `5105026300` (17:43, latest). This PR is under active concurrent development by another party — its head has moved repeatedly during this H0 operation — and each successive review has surfaced *deeper* incompleteness, not less: the latest finds the real Agent-OS-to-Runtime-root join unreachable (every card falls back to `UNKNOWN`), Attempt/Wake correlation wrong for responsibility roots with child work, and the protected terminal-RESULT owner still unconsumed, on top of the earlier dark dispatch producer, unvalidated input mappings, terminal-Attempt misclassification, forgeable watcher/decision proof, and de-historicized unknown evidence. **Its dispatch-consumption output is therefore treated strictly as an unaccepted open-PR candidate — never a protected or live capability — until independently re-reviewed and merged.** |
 | #350 | `OPEN / DRAFT` | `f0e681bf797522e09f2224fbc866f5aab2f62bb1` | Downstream of #326 on the shared packaging paths `control_plane/chairman_control_room_remote.py` and `ops/control_room_remote/install.sh`. |
 | #357 | `MERGED` (merge commit `b28023f92458ba186937afa1e619f3b4464e149f`) | `58c884c418ff6dc2603d7e0db153c20825499d4f` | "[W3C] Trusted Agent Dialogue Wake runtime." Protects `integrations/slack_agent_dialogue/{engine_v2,runtime,turn_routing_facts,turn_runtime_primitives,wake_projection}.py` plus tests. **Disjoint from H0's four owned paths and from every Control Room owner path.** Recorded here as current Agent Dialogue source movement; Slack remains transport evidence, Executive OS remains lifecycle owner, and the Hub remains a read-only consumer of this boundary once an accepting owner wires it in — H1 may not independently derive dialogue/dispatch lifecycle from these modules. |
-| #421 | `MERGED` (merge commit `6c5c2a6225a3fa2c2ec3e3398dcc8b8629b3a988`) | `7a34f6c43e76c8a6cac565e11bde7f3eee703108` | "[LINEAR] Advance Initiative portfolio to current 7/65/63/2 epoch." Adds `docs/superpowers/specs/2026-09-03-linear-initiative-portfolio-v1-temporal-grain-current-epoch-amendment.md`. **Disjoint from H0's four owned paths.** Portfolio/source movement only — see §10. |
+| #421 | `MERGED` (merge commit `6c5c2a6225a3fa2c2ec3e3398dcc8b8629b3a988`) | `7a34f6c43e76c8a6cac565e11bde7f3eee703108` | "[LINEAR] Advance Initiative portfolio to current 7/65/63/2 epoch." Adds `docs/superpowers/specs/2026-09-03-linear-initiative-portfolio-v1-temporal-grain-current-epoch-amendment.md`. **Disjoint from H0's four owned paths.** Portfolio/source movement only — see §11. |
 
 **The material archaeology finding.** PR #326 is not merely a UI change. It already implements the
 derived status/attention combination logic that a naive H1 would invent: a per-card single
@@ -269,8 +269,9 @@ retry or failover, duplicate identity mapping, second auth layer, or Hub-owned w
 **Why no exact blocker exists.** P0A already has a live server process, a real route surface, a
 real static entry, the shared JS/CSS, and a direct dependency on the pure compositor. It is
 loopback-private, so an added read-only view carries no public exposure, no new auth layer, and no
-deployment step. It is the smallest surface on which an authorized user can complete the H1
-orientation job end to end. This selection is corroborated, not merely permitted, by §1a's
+deployment step. It is the smallest surface on which the Chairman or a supervised local operator
+inside the accepted P0A host/account threat boundary can complete the H1 orientation job end to
+end. This selection is corroborated, not merely permitted, by §1a's
 accepted `PROVEN_LIVE` evidence for the local P0A path.
 
 **Why X1 is not the first consumer.** X1 is deliberately smaller and closed: a fixed
@@ -331,22 +332,84 @@ actionability, dialogue, dispatch, watcher, or evidence classifiers.
 
 ## 9. Exact local route, security, cache, and threat boundary for H1
 
-Because the first consumer is local P0A, H1 may expose **exactly one** fixed read route:
+Because the first consumer is local P0A, H1 may expose **exactly one** fixed read route. The three
+security layers below are verified directly against real `scripts/chairman_control_room.py`
+source — an earlier draft of this record incorrectly claimed two protections the real source does
+not provide on a JSON GET; §9 now states only what is actually true of the code.
 
 - **Route:** `GET /api/hub/workstream/chairman-control-room`
 - **Resolves server-side to the literal workstream** `WS:CHAIRMAN-CONTROL-ROOM` — no arbitrary
-  workstream query parameter, and no fuzzy match.
+  workstream query parameter, no non-empty query string of any kind, and no fuzzy match.
 - **Data source:** the existing process-memory cached `mastermind.chairman_control_room.v1`
   composed document only. No request-time re-gather, no network call, no subprocess, no file
   discovery, and no second compositor.
-- **Preserved exactly as on `/api/state`:** loopback-only binding, `Host` header check, `Origin`
-  header check, CSP, request/response body bounds, and the same `X-CCR-Token` gate.
+
+**Three real, separated security layers — not one blanket inheritance from `/api/state`:**
+
+1. **HTML/static shell.** `Content-Security-Policy` and same-origin static policy are properties of
+   `_serve_index` (the HTML shell, `csp=True`) only. `_send_json()` — the function every JSON route
+   including `/api/state` and the new H1 route uses — never sets CSP. H1 must not claim or invent a
+   CSP response header on its JSON GET.
+2. **H1 JSON GET, the actual inherited gate.** Loopback-only binding, `Host` header check, `Origin`
+   header check, the same `X-CCR-Token` gate, and `Cache-Control: no-store` — verified as the real
+   behavior of `_loopback_and_host_ok()` and `_api_auth_ok()`. H1 additionally freezes its own
+   deterministic maximum canonical Workroom payload of **`262144` bytes**: the response is fully
+   serialized and length-checked before any byte is written, and on overflow the route returns the
+   fixed refusal state `WORKROOM_RESPONSE_TOO_LARGE` rather than a partial body. This response cap
+   is new to H1 — P0A's real `_MAX_BODY_BYTES` (64 KiB) does not bound outbound JSON at all;
+   `_handle_state()`'s call to `_send_json` has no length check on its payload.
+3. **Existing POST routes, unrelated to this GET.** `_MAX_BODY_BYTES` (64 KiB) is enforced only
+   inside `_read_json_body()`, called only from `do_POST`. The H1 GET route reads no request body,
+   so this cap does not bound it and must never be described as an H1 GET protection.
+
 - **Token honesty law.** Per the Agent OS source's own landmine record: *"`X-CCR-Token` is a
   per-process browser-origin/CSRF capability nonce, not authentication against another same-user
-  local process; `GET /` intentionally bootstraps that nonce."* H1 must state this honestly and
-  must never claim a verified user identity or public/remote authorization from this token.
+  local process; `GET /` intentionally bootstraps that nonce."* This is independently corroborated
+  by `_api_auth_ok()`'s own docstring in `scripts/chairman_control_room.py`, which cites an earlier
+  Sol review (`5000983751`) making the identical point. H1 must state this honestly and must never
+  claim a verified user identity or public/remote authorization from this token.
+- **Human boundary law.** H1 and its production receipt describe **the Chairman or a supervised
+  local operator inside the accepted P0A host/account threat boundary** — never an
+  authenticated/authorized human identity, public authorization, or protection from another
+  same-user local process. The separate remote/public authorization problem stays out of scope.
 
-## 10. Linear portfolio — current epoch (dated observation)
+**Forward-compatible route and static-asset closure.** H0's own source-law test parses P0A's real
+`path == <literal>` route set and its static-asset map. Both are closed sets today, and both must
+stay closed after H1 legitimately adds its one route and its two static assets — never open-ended:
+
+| | Baseline (today) | The only permitted future addition |
+|---|---|---|
+| API routes | `/favicon.ico`, `/api/state`, `/api/discover`, `/api/open`, `/api/bind`, `/api/unbind`, `/api/refresh-builds` | exactly `/api/hub/workstream/chairman-control-room` |
+| Static assets | `index.html`, `control_room.js`, `control_room.css` | exactly `hub_workroom.js`, `hub_workroom.css` |
+
+Any arbitrary workstream-parameterized route, any second Hub route, any new POST/mutation route, or
+any static asset name outside this closure fails. Remote X1's route allowlist stays exact and
+unchanged by this law.
+
+## 10. Closed field and redaction law for H1 (from protected F0)
+
+Protected F0 forbids the Hub from ever rendering credentials, raw tokens, hidden provider prompts,
+private reasoning/chain-of-thought, or secret-bearing exception text. H0 freezes the missing
+implementation law now, so H1 cannot treat this as an afterthought:
+
+- H1's pure reducer uses **explicit per-section field allowlists**. It must not recursively pass
+  through arbitrary `work`, `executive`, `github`, `autonomy`, `sources`, `issues`, error, or
+  receipt mappings into the browser contract.
+- Unknown privileged or source fields **fail closed or are omitted with a typed `NOT_AVAILABLE`**;
+  they never acquire authority merely by being present in an input mapping.
+- The Workroom output refuses or redacts: credentials, bearer/cookie/token material, hidden
+  prompts, private reasoning/chain-of-thought, raw traceback/exception bodies, absolute host paths,
+  browser profile/session secrets, and other source-owner-private values. Repository-relative
+  source identities and reviewed public GitHub links remain allowed.
+- Error output carries **static reason codes**, never the offending value.
+- **The local P0A threat boundary does not waive F0's secret/private-evidence law.**
+
+This law is implemented later, inside H1's own pure reducer/route using this frozen closed
+contract — it creates no second redaction service and makes no change to remote X1. H1's browser
+proof must confirm every forbidden value category is absent from both the DOM and the serialized
+H1 JSON response.
+
+## 11. Linear portfolio — current epoch (dated observation)
 
 Protected source: `docs/superpowers/specs/2026-09-03-linear-initiative-portfolio-v1-temporal-grain-current-epoch-amendment.md`
 (PR #421, merged as `6c5c2a6225a3fa2c2ec3e3398dcc8b8629b3a988`).
@@ -370,20 +433,21 @@ This is a **portfolio/source movement only**. Linear remains a selected human pr
 runtime, completion, or Hub truth authority — this ruler tells H1 nothing about capability state
 and must not be read into §1's ledger.
 
-## 11. Immutable contract versus dated observation
+## 12. Immutable contract versus dated observation
 
 Two different kinds of fact live in this record, and they must never be conflated:
 
 **Immutable contract facts** are derived directly from source code via `ast` parsing and change
 only when that source itself changes: the compositor's `SCHEMA`/`OUTPUT_KEYS`, the remote
 projection's `REMOTE_SCHEMA`/`RELEASE_SCHEMA`/`REQUIRED_RUNTIME_PATHS`, the P0A/X1
-transport/route/token laws in §3 and §9, the reference workstream token, and the H1 path ceiling
-itself. These are verified by direct source parsing in `tests/test_ai_operating_hub_h0_source_law.py`
-and hold regardless of how much time has passed.
+transport/route/token laws in §3 and §9, the forward-compatible route/asset closure and the field
+redaction law in §9–§10, the reference workstream token, and the H1 path ceiling itself. These are
+verified by direct source parsing in `tests/test_ai_operating_hub_h0_source_law.py` and hold
+regardless of how much time has passed.
 
 **Dated observations** are point-in-time receipts captured at an explicit `observed_at`: the
 protected-master SHA in this record's frontmatter, PR #326's exact head and review state (§5), the
-Linear portfolio ruler (§10), and the accepted-capability citations in §1a. These are expected to
+Linear portfolio ruler (§11), and the accepted-capability citations in §1a. These are expected to
 go stale as protected source moves. The source law proves this record's **internal**
 consistency — that the record, the evidence JSON, and the H1 plan agree with each other and with
 the source they cite — and proves derivation from the cited snapshot. It deliberately does **not**
@@ -397,12 +461,12 @@ law in §4: <https://github.com/mastermindx-market-intelligence/Mastermind/pull/
 `.../pull/113`, `.../pull/133`, `.../pull/134`, `.../pull/138`, `.../pull/326`, `.../pull/357`,
 `.../pull/421`.
 
-## 12. H1 handoff
+## 13. H1 handoff
 
 The bounded H1 mission is specified in
 `docs/superpowers/plans/2026-09-03-ai-operating-hub-h1-read-only-workstream.md`.
 
-## 13. Effects and non-effects of this record
+## 14. Effects and non-effects of this record
 
 **Effects:** one branch, one Draft/HOLD PR, four records-only files (this repair modifies the same
 four files; no fifth path was added), history-preserving non-force integration of current protected

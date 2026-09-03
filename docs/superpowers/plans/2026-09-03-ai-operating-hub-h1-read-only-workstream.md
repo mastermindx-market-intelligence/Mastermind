@@ -21,7 +21,8 @@ production_effect: NONE
 
 ## Observable mission
 
-A real authorized user opens the local P0A Chairman Control Room and, for the reference workstream
+The Chairman or a supervised local operator inside the accepted P0A host/account threat boundary
+opens the local P0A Chairman Control Room and, for the reference workstream
 `WS:CHAIRMAN-CONTROL-ROOM`, correctly answers — from one screen, with every answer auditable to its
 canonical owner:
 
@@ -83,12 +84,14 @@ A tenth path requires `DECISION_REQUEST / PATH_BOUNDARY_REQUIRED effect=NONE` be
 
 ## Blocking precondition — dual protection, not a UI-only gate
 
-PR #326 is `OPEN / DRAFT` at head `b59753a4deab4b7748b2896a518d9532762d8a74`, with **two unresolved
-`CHANGES_REQUESTED` reviews** (latest: `5103135217`, 2026-09-03T14:24:15Z). Its five open blockers:
-a dark/disconnected dispatch producer, unvalidated caller-controlled mapping input, terminal-Attempt
-misclassified as a return, forgeable/non-causal watcher and decision proof, and unknown evidence
-rendered as if it were current. Until independently re-reviewed and merged, its dispatch/status
-output is an **unaccepted candidate**, not protected or live capability.
+PR #326 is `OPEN / DRAFT` at head `8639d7a3f06277ea84c1e071b9d298d39695d91c`, with **three
+unresolved `CHANGES_REQUESTED` reviews** (latest: `5105026300`, 2026-09-03T17:43:56Z). It is under
+active concurrent development and each successive review has found deeper incompleteness: an
+unreachable Agent-OS-to-Runtime-root join, wrong Attempt/Wake correlation for responsibility roots
+with child work, an unconsumed terminal-RESULT owner, a dark/disconnected dispatch producer,
+unvalidated caller-controlled mapping input, terminal-Attempt misclassified as a return, and
+forgeable/non-causal watcher and decision proof. Until independently re-reviewed and merged, its
+dispatch/status output is an **unaccepted candidate**, not protected or live capability.
 
 Consequences for H1, all mandatory:
 
@@ -106,19 +109,65 @@ Consequences for H1, all mandatory:
 
 ## Exact local route, security, cache, and threat boundary
 
-H1 may expose **exactly one** fixed read route:
+H1 may expose **exactly one** fixed read route. The security layers below are the *real* behavior
+of `scripts/chairman_control_room.py`, verified by source-law AST discriminators — a prior draft of
+this handoff incorrectly claimed two protections the real source does not provide on a JSON GET.
 
 - **Route:** `GET /api/hub/workstream/chairman-control-room`, resolving server-side to the literal
-  workstream `WS:CHAIRMAN-CONTROL-ROOM` — no arbitrary workstream parameter, no fuzzy match.
+  workstream `WS:CHAIRMAN-CONTROL-ROOM` — no arbitrary workstream parameter, no non-empty query
+  string of any kind, no fuzzy match.
 - **Data source:** the existing process-memory cached `mastermind.chairman_control_room.v1`
   composed document only. No request-time re-gather, network call, subprocess, file discovery, or
   second compositor.
-- **Preserved exactly as on `/api/state`:** loopback-only binding, `Host`/`Origin` header checks,
-  CSP, request/response body bounds, and the same `X-CCR-Token` gate.
+
+**Three real, separated security layers:**
+
+1. **HTML/static shell:** `Content-Security-Policy` and same-origin static policy belong to
+   `_serve_index` only. `_send_json()` never sets CSP on any JSON route, including this one — H1
+   must not claim or invent a CSP header on its JSON GET.
+2. **The actual inherited gate for this GET:** loopback-only binding, `Host` header check, `Origin`
+   header check, the same `X-CCR-Token` gate, and `Cache-Control: no-store`. H1 additionally
+   freezes its own deterministic maximum canonical payload of **`262144` bytes**, fully serialized
+   and length-checked before any byte is written; on overflow it returns the fixed refusal state
+   `WORKROOM_RESPONSE_TOO_LARGE`, never a partial body.
+3. **Existing POST routes, unrelated to this GET:** the 64 KiB `_MAX_BODY_BYTES` cap bounds only
+   inbound POST bodies read via `_read_json_body()`. This GET route reads no request body and must
+   never be described as inheriting that cap.
+
 - **Token honesty law.** `X-CCR-Token` is a per-process browser-origin/CSRF capability nonce,
   not authentication against another same-user local process; `GET /` intentionally bootstraps
   that nonce. H1 must state this honestly and must not claim a verified user identity or
   public/remote authorization from this token.
+- **Human boundary law.** H1 and its production receipt describe the Chairman or a supervised
+  local operator inside the accepted P0A host/account threat boundary — never an
+  authenticated/authorized human identity, public authorization, or protection from another
+  same-user local process.
+
+**Forward-compatible route and static-asset closure.** The current P0A route/asset set is a
+required baseline; the only permitted future additions, ever, are this exact API route and the
+exact static assets `hub_workroom.js`/`hub_workroom.css`. Any arbitrary workstream-parameterized
+route, second Hub route, new POST/mutation route, or extra static asset name fails. Remote X1's
+route allowlist stays exact and unchanged.
+
+## Closed field and redaction law (from protected F0)
+
+Protected F0 forbids the Hub from ever rendering credentials, raw tokens, hidden provider prompts,
+private reasoning/chain-of-thought, or secret-bearing exception text. H1's pure reducer must:
+
+- use **explicit per-section field allowlists** — never recursively pass through arbitrary `work`,
+  `executive`, `github`, `autonomy`, `sources`, `issues`, error, or receipt mappings;
+- treat unknown privileged/source fields as fail-closed or typed `NOT_AVAILABLE` — never granted
+  authority merely by being present in an input mapping;
+- refuse or redact credentials, bearer/cookie/token material, hidden prompts, private
+  reasoning/chain-of-thought, raw traceback/exception bodies, absolute host paths, and browser
+  profile/session secrets — while allowing repository-relative source identities and reviewed
+  public GitHub links;
+- emit static reason codes on error, never the offending value.
+
+The local P0A threat boundary does not waive F0's secret/private-evidence law. This is implemented
+inside H1's own pure reducer/route — no second redaction service, no remote X1 change. H1's browser
+proof must confirm every forbidden value category is absent from both the DOM and the serialized
+JSON response.
 
 ## Sequence
 
@@ -157,7 +206,10 @@ The derived contract must:
 - emit `null` rather than a fabricated default for any absent identity;
 - attach every rendered claim to its canonical owner and a deep link, or, where no lawful deep link
   exists, emit `NOT_AVAILABLE` / `NOT_APPLICABLE` with the owner/source identity — never a
-  fabricated URL.
+  fabricated URL;
+- use explicit per-section field allowlists per the closed field/redaction law above — never a
+  recursive pass-through of an arbitrary input mapping — and refuse to write a response exceeding
+  `262144` bytes, returning `WORKROOM_RESPONSE_TOO_LARGE` instead of a partial body.
 
 ## Required failure states — all must be designed, built, tested, and shown in browser proof
 
@@ -180,6 +232,15 @@ A state that is not reachable in the browser proof is not delivered.
 - a path-ceiling test asserting the H1 change set is a subset of the nine permitted paths
 - a fabricated-deep-link test: any field typed as a deep link is either a real, resolvable URL or
   exactly `NOT_AVAILABLE`/`NOT_APPLICABLE` with owner attribution
+- a response-cap test proving the fixed route refuses `WORKROOM_RESPONSE_TOO_LARGE` rather than
+  writing a partial body once the canonical payload exceeds `262144` bytes
+- a forward-compatible route/asset test proving the authorized H1 route and the two named static
+  assets pass while any arbitrary workstream-parameterized route, second Hub route, mutation route,
+  or extra static asset name fails
+- redaction tests proving credential/bearer/cookie/token material, hidden prompts, private
+  reasoning/chain-of-thought, raw traceback text, and absolute host paths never appear in the
+  serialized JSON or the DOM, and that an unknown privileged field is omitted or `NOT_AVAILABLE`
+  rather than passed through
 
 ## Proof obligations
 

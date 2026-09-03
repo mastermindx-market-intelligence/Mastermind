@@ -91,6 +91,8 @@
       "h1_path_ceiling.may_create",
       "h1_path_ceiling.may_modify_only_after_h0_and_pr_326_protect",
       "h1_route_security_contract",
+      "h1_route_forward_compatible_closure",
+      "h1_field_redaction_law",
       "reference_workstream"
     ],
     "rule": "Immutable contract fields are derived directly from source code via ast parsing and change only when the underlying source itself changes; the source law verifies them against real source, not against this record's prose. Dated observation fields are point-in-time receipts captured at an explicit observed_at and are expected to become stale as protected source moves. The source law proves internal consistency across this record, the evidence, and the H1 plan, and proves derivation from the cited snapshot, but it does not compare against a live-fetched origin/master, so a future path-disjoint protected-source movement does not itself turn this record red. A change to an immutable contract fact, a Control Room owner, the Agent Dialogue boundary, an H1 path owner, or a governing source still requires a fresh same-carrier repair before the next return."
@@ -121,7 +123,11 @@
       "SOL REQUEST_REPAIR / CONTINUE @1788452549.529609",
       "SOL RULING / CONTINUE ADDENDUM @1788453811.359239",
       "SOL PRE-REVIEW ADDENDUM / CONTINUE @1788454107.719739",
-      "SECRETARY DELIVERY RECEIPT / EXACT-SESSION REENTRY (attention only, no new obligation)"
+      "SECRETARY DELIVERY RECEIPT / EXACT-SESSION REENTRY (attention only, no new obligation)",
+      "GitHub PR #424 review 5104876709 / CHANGES_REQUESTED / mastermindx-3",
+      "GitHub PR #424 review 5104899502 / COMMENTED / mastermindx-3 (forward-compatible route law)",
+      "GitHub PR #424 review 5104907449 / COMMENTED / mastermindx-3 (real security-layer separation)",
+      "GitHub PR #424 review 5104924912 / COMMENTED / mastermindx-3 (closed field/redaction law)"
     ],
     "support_file_disposition": "F0C05PQJJG0 advisory only; not machine-readable through the available Slack reader (zip payload); not relied upon",
     "worker_pickup_ack": "1788440085.758959",
@@ -275,23 +281,63 @@
       "subprocess",
       "file discovery",
       "arbitrary workstream query parameter",
+      "any non-empty query string",
       "fuzzy match",
       "second compositor"
     ],
+    "html_shell_boundary": "Content-Security-Policy and same-origin static policy are properties of the HTML/static shell only (index.html via _serve_index, csp=True). _send_json() never sets CSP for any JSON route, including /api/state, /api/discover, or the new H1 route; H1 must not claim or invent a CSP response header on its JSON GET.",
     "http_method": "GET",
-    "preserved_from_api_state": [
+    "human_boundary_law": "H1 and its production receipt describe the Chairman or supervised local operator inside the accepted P0A host/account threat boundary -- never an authenticated/authorized human identity, public authorization, or protection from another same-user local process.",
+    "no_partial_write_law": "the canonical payload is fully serialized and length-checked before any byte is written to the response; on overflow the fixed route returns WORKROOM_RESPONSE_TOO_LARGE instead of a partial body",
+    "post_body_cap_boundary": "The existing 64 KiB _MAX_BODY_BYTES cap is enforced only inside _read_json_body(), which is called only from do_POST. The H1 fixed GET route reads no request body, so this cap does not apply to it and must never be described as an H1 GET protection.",
+    "preserved_from_p0a_json_routes": [
       "loopback-only binding",
       "Host header check",
       "Origin header check",
-      "CSP",
-      "request body bound",
-      "response body bound",
-      "X-CCR-Token gate"
+      "X-CCR-Token gate",
+      "Cache-Control: no-store"
     ],
+    "h1_specific_refusal_state": "WORKROOM_RESPONSE_TOO_LARGE",
+    "h1_specific_response_cap_bytes": 262144,
     "resolves_to_literal_workstream": "WS:CHAIRMAN-CONTROL-ROOM",
     "route": "/api/hub/workstream/chairman-control-room",
-    "source_citation": "mastermindx-market-intelligence/macro@6d72b43777f84c9b8040cd641c8580b14876e34b:agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md (landmines list, verbatim)",
+    "source_citation": "mastermindx-market-intelligence/macro@6d72b43777f84c9b8040cd641c8580b14876e34b:agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md (token honesty law, verbatim); scripts/chairman_control_room.py (real inherited-gate boundaries, verified by source-law AST discriminators)",
     "token_honesty_law": "X-CCR-Token is a per-process browser-origin/CSRF capability nonce, not authentication against another same-user local process. H1 must not claim a verified user identity or public/remote authorization from this token."
+  },
+  "h1_route_forward_compatible_closure": {
+    "baseline_api_routes": [
+      "/api/bind",
+      "/api/discover",
+      "/api/open",
+      "/api/refresh-builds",
+      "/api/state",
+      "/api/unbind",
+      "/favicon.ico"
+    ],
+    "baseline_static_assets": ["index.html", "control_room.js", "control_room.css"],
+    "permitted_future_api_route_additions": ["/api/hub/workstream/chairman-control-room"],
+    "permitted_future_static_asset_additions": ["hub_workroom.js", "hub_workroom.css"],
+    "rule": "The current P0A route/asset set is a required baseline. The only permitted future additions, ever, are the exact H1 API route and the exact two H1 static asset names above. Any arbitrary workstream-parameterized route, any second Hub route, any new POST/mutation route, or any static asset name outside this closure fails. Remote X1's route allowlist is exact and unchanged by this law."
+  },
+  "h1_field_redaction_law": {
+    "allowed_value_categories": ["repository-relative source identities", "reviewed public GitHub links"],
+    "allowlist_rule": "H1's pure reducer uses explicit per-section field allowlists. It must not recursively pass through arbitrary work/executive/github/autonomy/sources/issues/error/receipt mappings into the browser contract.",
+    "browser_proof_requirement": "H1's browser proof must confirm every forbidden value category is absent from both the DOM and the serialized H1 JSON response.",
+    "error_output_rule": "Error output contains static reason codes, never the offending value.",
+    "forbidden_value_categories": [
+      "credentials",
+      "bearer/cookie/token material",
+      "hidden provider prompts",
+      "private reasoning/chain-of-thought",
+      "raw traceback/exception bodies",
+      "absolute host paths",
+      "browser profile/session secrets",
+      "other source-owner-private values"
+    ],
+    "no_second_service_rule": "This law is implemented inside H1's own pure reducer/route; it does not create a second redaction service, and it does not change remote X1.",
+    "no_waiver_rule": "The local P0A threat boundary does not waive protected F0's secret/private-evidence law.",
+    "source": "protected F0 architecture (research/MASTERMIND_AI_OPERATING_HUB_F0_ARCHITECTURE_2026-09-02.md); Sol review 5104924912",
+    "unknown_field_rule": "Unknown privileged or source fields fail closed or are omitted with a typed NOT_AVAILABLE. They never acquire authority merely by being present in an input mapping."
   },
   "linear_portfolio": {
     "exceptions_unchanged": [
@@ -325,7 +371,7 @@
   "operation_key": "mastermind-ai-operating-hub-h0-current-estate-freeze-20260903-sol-001",
   "owner_boundaries": {
     "anti_collapse_law": "local P0A and remote X1 are separate accepted contracts; their contract schemas must never be equal",
-    "derived_status_owner": "control_plane/autonomy_control_room_projection.py (open Draft PR #326, head b59753a4deab4b7748b2896a518d9532762d8a74, two unresolved CHANGES_REQUESTED reviews, absent from protected master)",
+    "derived_status_owner": "control_plane/autonomy_control_room_projection.py (open Draft PR #326, head 8639d7a3f06277ea84c1e071b9d298d39695d91c, three unresolved CHANGES_REQUESTED reviews, absent from protected master)",
     "dialogue_boundary_owner": "integrations/slack_agent_dialogue/* (PR #357, merged b28023f92458ba186937afa1e619f3b4464e149f); H1 is a read-only consumer via an accepting owner, never a second dialogue classifier",
     "h1_misclassification_guards": [
       "terminal Attempt state alone is never a worker return",
@@ -376,19 +422,20 @@
     },
     {
       "effective_delta_paths": 10,
-      "head": "b59753a4deab4b7748b2896a518d9532762d8a74",
+      "head": "8639d7a3f06277ea84c1e071b9d298d39695d91c",
       "number": 326,
-      "observed_at": "2026-09-03T16:59:38Z",
+      "observed_at": "2026-09-03T17:50:00Z",
       "owns": [
         "control_plane/autonomy_control_room_projection.py",
         "app/static/chairman_control/control_room.js",
         "app/static/chairman_control/control_room.css",
         "app/static/chairman_control/index.html"
       ],
-      "relevance": "blocking for all nine H1 paths; owns mastermind.autonomy_control_room.v1 with its own OUTPUT_KEYS and query_status/is_actionable/_combine_status logic which H1 must consume and never re-derive, once protected",
+      "relevance": "blocking for all nine H1 paths; owns mastermind.autonomy_control_room.v1 with its own OUTPUT_KEYS and query_status/is_actionable/_combine_status logic which H1 must consume and never re-derive, once protected. Under active concurrent development by another party -- its head has moved repeatedly during this H0 operation (2eb9d23b -> b59753a4 -> 6e4a5a89 -> 8639d7a3). Each successive review has surfaced deeper incompleteness, not less: the latest finds the real Agent-OS-to-Runtime-root join unreachable, Attempt/Wake correlation wrong for responsibility roots with child work, and the protected terminal-RESULT owner still unconsumed. This only reinforces H0's existing framing that its output is an unaccepted candidate.",
       "reviews": [
         {"id": 5100408653, "state": "CHANGES_REQUESTED", "submitted_at": "2026-09-03T09:51:23Z"},
-        {"id": 5103135217, "state": "CHANGES_REQUESTED", "submitted_at": "2026-09-03T14:24:15Z"}
+        {"id": 5103135217, "state": "CHANGES_REQUESTED", "submitted_at": "2026-09-03T14:24:15Z"},
+        {"id": 5105026300, "state": "CHANGES_REQUESTED", "submitted_at": "2026-09-03T17:43:56Z"}
       ],
       "review_classification": "FULL_REREVIEW_REQUIRED",
       "state": "OPEN_DRAFT",

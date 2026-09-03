@@ -421,11 +421,17 @@ def test_overall_workstream_partial_does_not_conflict_with_sub_capability_rows()
 
 
 def test_unaccepted_pr_326_projection_stays_unpromoted() -> None:
-    """This carrier's own observation ceiling: PR #326's dispatch projection is
-    not independently accepted, so it must stay BUILT_NOT_PROVEN, never PROVEN_LIVE."""
-    ledger = _evidence()["capability_ledger"]
-    assert ledger["autonomy_responsibility_projection"] == "BUILT_NOT_PROVEN"
-    assert not (ROOT / "control_plane" / "autonomy_control_room_projection.py").exists()
+    """This carrier's own observation ceiling: while PR #326's dated row is
+    unresolved, its dispatch projection must stay BUILT_NOT_PROVEN, never
+    PROVEN_LIVE.  This is a dated-observation check, not a filesystem check —
+    asserting the file is absent would fleet-red protected master the moment
+    #326 legitimately merges, which is exactly the defect Sol review
+    5104876709 caught in an earlier draft of this test."""
+    evidence = _evidence()
+    row = {r["number"]: r for r in evidence["pr_archaeology"]}[326]
+    ledger = evidence["capability_ledger"]
+    if row["unresolved"]:
+        assert ledger["autonomy_responsibility_projection"] == "BUILT_NOT_PROVEN"
 
 
 # ---------------------------------------------------------------------------
@@ -538,19 +544,44 @@ def test_h1_route_security_contract_is_frozen_and_honest() -> None:
         "network call",
         "subprocess",
         "arbitrary workstream query parameter",
+        "any non-empty query string",
         "fuzzy match",
         "second compositor",
     ):
         assert forbidden in contract["forbidden"]
-    for preserved in ("Host header check", "Origin header check", "X-CCR-Token gate", "CSP"):
-        assert preserved in contract["preserved_from_api_state"]
+    # The real, corrected inherited gate — CSP and body bounds are NOT here;
+    # see test_p0a_json_responses_never_set_csp and
+    # test_p0a_body_cap_is_request_only_and_post_only for why.
+    for preserved in (
+        "loopback-only binding",
+        "Host header check",
+        "Origin header check",
+        "X-CCR-Token gate",
+        "Cache-Control: no-store",
+    ):
+        assert preserved in contract["preserved_from_p0a_json_routes"]
+    assert "CSP" not in contract["preserved_from_p0a_json_routes"]
+    assert not any("body bound" in item for item in contract["preserved_from_p0a_json_routes"])
+    assert contract["h1_specific_response_cap_bytes"] == 262144
+    assert contract["h1_specific_refusal_state"] == "WORKROOM_RESPONSE_TOO_LARGE"
+    assert "csp" in contract["html_shell_boundary"].lower()
+    assert "never sets csp" in contract["html_shell_boundary"].lower()
+    assert "_read_json_body" in contract["post_body_cap_boundary"]
+    assert "do_post" in contract["post_body_cap_boundary"].lower()
     honesty = contract["token_honesty_law"]
     assert "not authentication against another same-user local process" in honesty
     assert "must not claim a verified user identity" in honesty
+    boundary = contract["human_boundary_law"]
+    assert "chairman" in boundary.lower()
+    assert "supervised local operator" in boundary.lower()
     plan = _collapsed(_text(PLAN))
     assert "/api/hub/workstream/chairman-control-room" in plan
     assert "X-CCR-Token" in plan
     assert "not authentication against another same-user local process" in plan
+    assert "supervised local operator" in plan.lower()
+    assert "authorized user" not in plan.lower()
+    record = _collapsed(_text(RECORD)).lower()
+    assert "authorized user" not in record
 
 
 def test_h1_route_contract_missing_any_law_element_would_be_caught() -> None:
@@ -564,6 +595,7 @@ def test_h1_route_contract_missing_any_law_element_would_be_caught() -> None:
         "subprocess",
         "file discovery",
         "arbitrary workstream query parameter",
+        "any non-empty query string",
         "fuzzy match",
         "second compositor",
     }
@@ -572,12 +604,226 @@ def test_h1_route_contract_missing_any_law_element_would_be_caught() -> None:
         "loopback-only binding",
         "Host header check",
         "Origin header check",
-        "CSP",
-        "request body bound",
-        "response body bound",
         "X-CCR-Token gate",
+        "Cache-Control: no-store",
     }
-    assert required_preserved.issubset(set(contract["preserved_from_api_state"]))
+    assert required_preserved.issubset(set(contract["preserved_from_p0a_json_routes"]))
+
+
+def test_h1_route_contract_does_not_reinstate_the_false_inheritance() -> None:
+    """Discriminator: reinstating the falsely-inherited CSP or body-bound
+    claims must fail — this is the exact defect Sol reviews 5104876709 and
+    5104907449 caught in an earlier draft."""
+    contract = _evidence()["h1_route_security_contract"]
+    preserved = set(contract["preserved_from_p0a_json_routes"])
+    assert "CSP" not in preserved
+    assert "request body bound" not in preserved
+    assert "response body bound" not in preserved
+
+
+# ---------------------------------------------------------------------------
+# AST discriminators against the real P0A security functions
+# ---------------------------------------------------------------------------
+
+
+def _function_source(tree: ast.Module, source: str, name: str) -> str:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            segment = ast.get_source_segment(source, node)
+            assert segment is not None
+            return segment
+    raise AssertionError(f"function not found: {name}")
+
+
+def _calls_method(fn_source_node: ast.AST, method_name: str) -> bool:
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == method_name
+        for node in ast.walk(fn_source_node)
+    )
+
+
+def test_p0a_json_responses_never_set_csp() -> None:
+    """AST discriminator: `_send_json` must never pass ``csp=True`` — only the
+    HTML shell (`_serve_index`) may.  Reinstating a false CSP claim on a JSON
+    route must fail here (Sol review 5104907449)."""
+    p0a_source = _text(P0A_SERVER)
+    tree = _module(P0A_SERVER)
+    send_json_src = _function_source(tree, p0a_source, "_send_json")
+    assert "csp=True" not in send_json_src
+    serve_index_src = _function_source(tree, p0a_source, "_serve_index")
+    assert "csp=True" in serve_index_src
+
+
+def test_p0a_body_cap_is_request_only_and_post_only() -> None:
+    """AST discriminator: `_MAX_BODY_BYTES` is enforced only inside
+    `_read_json_body`.  `do_POST` dispatches to per-route handlers rather than
+    reading the body itself, so the real guarantee is: `do_GET` and both GET
+    handlers never call it, while it is genuinely called somewhere in the
+    module (confirmed by source archaeology to be the POST-dispatched
+    `_handle_open`/`_handle_bind`/`_handle_unbind`/`_handle_refresh_builds`)."""
+    p0a_source = _text(P0A_SERVER)
+    tree = _module(P0A_SERVER)
+    read_body_src = _function_source(tree, p0a_source, "_read_json_body")
+    assert "_MAX_BODY_BYTES" in read_body_src
+    functions = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    assert not _calls_method(functions["do_GET"], "_read_json_body"), (
+        "_read_json_body must not be called from do_GET"
+    )
+    for get_handler in ("_handle_state", "_handle_discover"):
+        assert not _calls_method(functions[get_handler], "_read_json_body"), (
+            f"{get_handler} must not read a request body"
+        )
+    assert p0a_source.count("_read_json_body()") >= 1, "_read_json_body must be called somewhere"
+
+
+def test_p0a_state_handler_has_no_response_size_cap() -> None:
+    """AST discriminator: confirms the real defect this repair fixes — the
+    `/api/state` handler's `_send_json` call carries no length bound on its
+    payload, so H0 must not claim an inherited response cap (Sol review
+    5104876709, blocker 2)."""
+    p0a_source = _text(P0A_SERVER)
+    tree = _module(P0A_SERVER)
+    handle_state_src = _function_source(tree, p0a_source, "_handle_state")
+    assert "_MAX_BODY_BYTES" not in handle_state_src
+    assert "262144" not in handle_state_src, (
+        "H0 does not modify protected P0A source; the 262144 cap is H1-specific and new"
+    )
+
+
+def test_p0a_auth_checks_token_and_origin() -> None:
+    """AST discriminator: `_api_auth_ok` really does check `X-CCR-Token` and
+    `Origin`, corroborating the token-honesty law from real source."""
+    p0a_source = _text(P0A_SERVER)
+    tree = _module(P0A_SERVER)
+    auth_src = _function_source(tree, p0a_source, "_api_auth_ok")
+    assert "X-CCR-Token" in auth_src
+    assert "Origin" in auth_src
+    assert "not local-process authentication" in auth_src.lower()
+
+
+# ---------------------------------------------------------------------------
+# forward-compatible route / static-asset closure
+# ---------------------------------------------------------------------------
+
+
+def _route_set_permitted(observed: set, baseline: set, permitted_addition: str) -> bool:
+    """Pure closure logic mirroring h1_route_forward_compatible_closure: the
+    observed route set must be exactly the baseline, or exactly the baseline
+    plus the one named permitted addition — nothing else, ever."""
+    return observed == baseline or observed == baseline | {permitted_addition}
+
+
+def test_forward_compatible_closure_is_frozen() -> None:
+    closure = _evidence()["h1_route_forward_compatible_closure"]
+    frozen = _evidence()["frozen_contract_values"]
+    assert set(closure["baseline_api_routes"]) == set(frozen["p0a_path_equality_routes"])
+    assert closure["permitted_future_api_route_additions"] == [
+        "/api/hub/workstream/chairman-control-room"
+    ]
+    assert set(closure["baseline_static_assets"]) == {"index.html", "control_room.js", "control_room.css"}
+    assert set(closure["permitted_future_static_asset_additions"]) == {"hub_workroom.js", "hub_workroom.css"}
+
+
+def test_current_p0a_routes_satisfy_the_forward_compatible_closure() -> None:
+    """Today's real route set (baseline only, H1 not yet built) must satisfy
+    the closure, and so must baseline-plus-the-one-permitted-route; an
+    arbitrary extra route must not."""
+    frozen = _evidence()["frozen_contract_values"]
+    baseline = set(frozen["p0a_path_equality_routes"])
+    permitted = "/api/hub/workstream/chairman-control-room"
+    real_routes = _path_equality_routes(_module(P0A_SERVER))
+    assert _route_set_permitted(real_routes, baseline, permitted), (
+        "current P0A routes must satisfy the forward-compatible closure today"
+    )
+    assert _route_set_permitted(baseline | {permitted}, baseline, permitted)
+
+
+def test_forward_compatible_closure_rejects_arbitrary_routes() -> None:
+    """Discriminator: an arbitrary parameterized workstream route, a second
+    Hub route, or a new mutation route must all be rejected by the closure
+    logic — it is closed, not open-ended."""
+    frozen = _evidence()["frozen_contract_values"]
+    baseline = set(frozen["p0a_path_equality_routes"])
+    permitted = "/api/hub/workstream/chairman-control-room"
+    for arbitrary in (
+        "/api/hub/workstream/some-other-workstream",
+        "/api/hub/second-route",
+        "/api/hub/workstream/chairman-control-room/mutate",
+    ):
+        assert not _route_set_permitted(baseline | {arbitrary}, baseline, permitted)
+        assert not _route_set_permitted(baseline | {permitted, arbitrary}, baseline, permitted)
+
+
+def test_forward_compatible_closure_rejects_an_open_static_directory() -> None:
+    closure = _evidence()["h1_route_forward_compatible_closure"]
+    baseline = set(closure["baseline_static_assets"])
+    permitted = set(closure["permitted_future_static_asset_additions"])
+    for arbitrary in ("evil.js", "arbitrary.css", "second_workroom.js"):
+        observed = baseline | permitted | {arbitrary}
+        assert observed != baseline
+        assert observed != (baseline | permitted)  # the arbitrary name is not in the closed set
+
+
+def test_current_p0a_static_map_matches_the_frozen_baseline() -> None:
+    tree = _module(P0A_SERVER)
+    static_map = ast.literal_eval(_assigned(tree, "_STATIC_NAME_BY_PATH"))
+    closure = _evidence()["h1_route_forward_compatible_closure"]
+    assert set(static_map.values()) == set(closure["baseline_static_assets"])
+
+
+# ---------------------------------------------------------------------------
+# closed field and redaction law
+# ---------------------------------------------------------------------------
+
+
+def test_field_redaction_law_is_complete() -> None:
+    law = _evidence()["h1_field_redaction_law"]
+    for category in (
+        "credentials",
+        "bearer/cookie/token material",
+        "hidden provider prompts",
+        "private reasoning/chain-of-thought",
+        "raw traceback/exception bodies",
+        "absolute host paths",
+        "browser profile/session secrets",
+    ):
+        assert category in law["forbidden_value_categories"]
+    assert "repository-relative source identities" in law["allowed_value_categories"]
+    assert "reviewed public GitHub links" in law["allowed_value_categories"]
+    assert "NOT_AVAILABLE" in law["unknown_field_rule"]
+    assert "does not waive" in law["no_waiver_rule"]
+    assert "static reason codes" in law["error_output_rule"]
+    plan = _collapsed(_text(PLAN))
+    record = _collapsed(_text(RECORD))
+    for doc in (plan, record):
+        assert "NOT_AVAILABLE" in doc
+        assert "does not waive" in doc.lower()
+        for category_fragment in ("bearer/cookie/token", "chain-of-thought", "traceback"):
+            assert category_fragment in doc
+
+
+def test_field_redaction_law_forbids_no_second_service_and_no_x1_change() -> None:
+    law = _evidence()["h1_field_redaction_law"]
+    assert "second redaction service" in law["no_second_service_rule"]
+    assert "remote x1" in law["no_second_service_rule"].lower()
+
+
+def test_field_redaction_law_missing_category_would_be_caught() -> None:
+    """Discriminator: a redaction law missing a required forbidden category
+    fails — verified by asserting the complete required set, not a subset."""
+    law = _evidence()["h1_field_redaction_law"]
+    required = {
+        "credentials",
+        "bearer/cookie/token material",
+        "hidden provider prompts",
+        "private reasoning/chain-of-thought",
+        "raw traceback/exception bodies",
+        "absolute host paths",
+        "browser profile/session secrets",
+    }
+    assert required.issubset(set(law["forbidden_value_categories"]))
 
 
 # ---------------------------------------------------------------------------
@@ -679,16 +925,16 @@ def test_pr_archaeology_records_exact_immutable_identities() -> None:
 def test_pr_326_is_recorded_as_unresolved_at_its_current_head() -> None:
     rows = {row["number"]: row for row in _evidence()["pr_archaeology"]}
     row = rows[326]
-    assert row["head"] == "b59753a4deab4b7748b2896a518d9532762d8a74"
+    assert row["head"] == "8639d7a3f06277ea84c1e071b9d298d39695d91c"
     assert row["state"] == "OPEN_DRAFT"
     assert row["unresolved"] is True
     assert row["review_classification"] == "FULL_REREVIEW_REQUIRED"
     assert row["effective_delta_paths"] == 10
     review_states = {r["state"] for r in row["reviews"]}
     assert review_states == {"CHANGES_REQUESTED"}
-    assert len(row["reviews"]) == 2
+    assert len(row["reviews"]) == 3
     latest = max(row["reviews"], key=lambda r: r["submitted_at"])
-    assert latest["id"] == 5103135217
+    assert latest["id"] == 5105026300
     assert (
         "control_plane/autonomy_control_room_projection.py" in row["owns"]
     ), "PR #326 archaeology must record the derived-status owner"
@@ -731,11 +977,40 @@ def test_pr_421_linear_epoch_is_disjoint_from_h0_owned_paths() -> None:
         assert path not in owned, f"PR #421 path collides with an H0 owned path: {path}"
 
 
-def test_derived_status_owner_is_not_on_protected_master() -> None:
-    """PR #326's projection is BUILT_NOT_PROVEN precisely because it is unresolved."""
-    ledger = _evidence()["capability_ledger"]
-    assert ledger["autonomy_responsibility_projection"] == "BUILT_NOT_PROVEN"
-    assert not (ROOT / "control_plane" / "autonomy_control_room_projection.py").exists()
+def test_pr326_capability_inflation_discriminators() -> None:
+    """Discriminators, all keyed off PR #326's own dated row rather than the
+    filesystem: while unresolved, it must never be recorded MERGED or
+    PROVEN_LIVE, its current blockers must not be dropped, and the H1 gate
+    must still require both predecessors.  Once a future repair legitimately
+    records #326 as MERGED with unresolved=False, this test stops asserting
+    BUILT_NOT_PROVEN for that key — a real merge is exactly the event that
+    should unblock it, and a promotion at that point is not an inflation."""
+    evidence = _evidence()
+    row = {r["number"]: r for r in evidence["pr_archaeology"]}[326]
+    if row["unresolved"]:
+        assert evidence["capability_ledger"]["autonomy_responsibility_projection"] != "PROVEN_LIVE"
+        assert row["state"] != "MERGED"
+        assert row["reviews"], "PR #326's current blockers must not be dropped while unresolved"
+        assert row["review_classification"] == "FULL_REREVIEW_REQUIRED"
+    gate = _collapsed(_evidence()["h1_path_ceiling"]["gate"]).lower()
+    assert "held until both this h0 record and pr #326" in gate
+
+
+def test_pr326_row_shape_is_a_dated_observation_not_a_filesystem_check() -> None:
+    """The evidence's own contract_law must list pr_archaeology as dated, and
+    no source-law test in this file may assert filesystem (non-)existence of
+    the PR #326 projection module — that was the exact defect this repair
+    fixes (Sol review 5104876709, blocker 1)."""
+    assert "pr_archaeology" in _evidence()["contract_law"]["dated_observation_fields"]
+    my_path = pathlib.Path(__file__)
+    my_source = _text(my_path)
+    my_tree = ast.parse(my_source)
+    for node in ast.walk(my_tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "exists":
+            segment = ast.get_source_segment(my_source, node) or ""
+            assert "autonomy_control_room_projection" not in segment, (
+                "a filesystem-existence check on the PR #326 projection module survived the repair"
+            )
 
 
 # ---------------------------------------------------------------------------
