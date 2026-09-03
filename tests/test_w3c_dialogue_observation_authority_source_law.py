@@ -217,9 +217,18 @@ def _validate(document: dict[str, Any]) -> None:
         "session_ref",
         "target_seat",
     ]
+    assert waiter["maximum_active_registration_per_key"] == 1
+    assert waiter["duplicate_registration"] == "CONFLICT_ZERO_EFFECT"
+    assert waiter["registration_identity"] == "OPAQUE_PROCESS_LOCAL_TOKEN"
+    assert waiter["remove_requires"] == "KEY_PLUS_EXACT_REGISTRATION_TOKEN"
+    assert waiter["stale_cleanup"] == "INERT"
+    assert waiter["lookup_rule"] == "ACTIVE_ONLY_FOR_CURRENT_EXACT_REGISTRATION"
     assert waiter["source_ref_is_key"] is False
     assert waiter["provider_attention_inflight_is_equivalent"] is False
     assert waiter["missing_or_failed_lookup"] == "FAIL_CLOSED_BEFORE_WAKE_PERSISTENCE"
+    assert waiter["restart_behavior"] == (
+        "REGISTRY_EMPTY_AND_WAKE_IDEMPOTENCY_REMAINS_AUTHORITY"
+    )
 
     failures = document["failure_states"]
     assert failures["R2_EFFECT_UNKNOWN"] == "UNKNOWN_ZERO_EFFECT"
@@ -228,6 +237,7 @@ def _validate(document: dict[str, Any]) -> None:
     assert failures["PEER_UID_REFUSED"] == "REFUSE_ZERO_EFFECT"
     assert failures["COLLECTION_TIMEOUT"] == "UNKNOWN_ZERO_EFFECT"
     assert failures["WAITER_LOOKUP_UNAVAILABLE"] == "HELD_ZERO_EFFECT"
+    assert failures["WAITER_REGISTRATION_CONFLICT"] == "CONFLICT_ZERO_EFFECT"
 
     assert {
         "NO_NEW_JOB_ATTEMPT_WORKER_EVENT_LIFECYCLE",
@@ -294,6 +304,10 @@ def test_plan_freezes_owner_host_sequence_and_real_canary_boundary() -> None:
         "foreign or ambiguous inode",
         "wave p1 - executive active observation",
         "wave p2 - relay waiter and async discovery",
+        "opaque process-local registration token",
+        "compare-and-delete",
+        "stale cleanup",
+        "cannot clear a newer waiter",
         "existing orion r2 - terminal result projection",
         "wave p3 - terminal observation extension",
         "wave p4 - one-target canary",
@@ -331,8 +345,15 @@ def test_false_support_mutations_are_detected() -> None:
             changed(("transport", "unbound_response_is_uniform"), False),
             changed(("candidate_collection", "synchronous_iterable_callback_allowed"), True),
             changed(("candidate_collection", "worker_thread_allowed"), True),
+            changed(("active_waiter", "maximum_active_registration_per_key"), 2),
+            changed(("active_waiter", "duplicate_registration"), "OVERWRITE"),
+            changed(("active_waiter", "registration_identity"), "KEY_ONLY"),
+            changed(("active_waiter", "remove_requires"), "KEY_ONLY"),
+            changed(("active_waiter", "stale_cleanup"), "DELETE_CURRENT"),
+            changed(("active_waiter", "lookup_rule"), "KEY_PRESENT"),
             changed(("active_waiter", "provider_attention_inflight_is_equivalent"), True),
             changed(("active_waiter", "source_ref_is_key"), True),
+            changed(("failure_states", "WAITER_REGISTRATION_CONFLICT"), "OVERWRITE_ALLOWED"),
             changed(("mode_non_interchangeability", "effect_unknown_terminal_is"), "RESOLVED"),
         ]
     )
