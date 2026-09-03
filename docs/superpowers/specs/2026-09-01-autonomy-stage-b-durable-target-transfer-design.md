@@ -14,11 +14,12 @@ This records-only architecture supersedes Stage-B V1-V4. It freezes one narrow f
 
 Current state is `SPEC_ONLY / PREDECESSORS_HELD / SOURCE_NOT_BUILT / PRODUCTION_INERT`.
 
-V5.1 closes three prior authority errors:
+V5.1 closes four prior authority/ownership errors:
 
 1. root creation is grounded in the real protected production call path, not a test overlay;
 2. a caller, model, selected snapshot, provider identity, or destination session cannot authorize its own assignment;
-3. replay never returns an old assignment as authority without revalidating the current root, C2 commitment, target definition and binding generation.
+3. replay never returns an old assignment as authority without revalidating the current root, C2 commitment, target definition and binding generation;
+4. the Codex CEO target definition is one separately protected SessionTargetRegistry predecessor and is consumed byte-for-byte by Stage-B1 rather than recreated on the assignment carrier.
 
 ## One-system model
 
@@ -32,6 +33,8 @@ CeoIngress v2
 protected Capacity C1 selection
 -> Capacity C2 same-transaction reread and canonical Worker/Attempt claim
 -> immutable root-bound CAPACITY_PLACEMENT_COMMITTED Event
+
+separately protected disabled EXECUTIVE-CEO-CODEX-A target definition
 
 existing ExecutiveControlService C2 completion/replay path
 -> Stage-B initial-assignment reducer
@@ -327,7 +330,6 @@ Executive Runtime remains the only Job, Attempt, Worker and Event owner. Capacit
     "status": "HELD_PREDECESSORS",
     "name": "STAGE_B1_CEO_CODEX_INITIAL_ASSIGNMENT_VERTICAL",
     "paths": [
-      "config/wake_session_targets.json",
       "control_plane/executive_runtime.py",
       "control_plane/runtime_binding_projection.py",
       "control_plane/sol_action_target_assignment.py",
@@ -335,7 +337,8 @@ Executive Runtime remains the only Job, Attempt, Worker and Event owner. Capacit
       "tests/test_autonomy_stage_b_initial_assignment.py",
       "tests/test_autonomy_stage_b_durable_target_transfer_source_law.py"
     ],
-    "maximum_paths": 7,
+    "maximum_paths": 6,
+    "target_definition_is_separate_predecessor": true,
     "release_claim": "BUILT_NOT_PROVEN / INITIAL_ASSIGNMENT_ONLY / PRODUCTION_DISARMED"
   },
   "no_rebuild": {
@@ -368,6 +371,12 @@ C1 remains deterministic evidence and explicitly not commitment. C2 must perform
 
 The C2 Event and the Stage-B Event are not duplicate planes: the former proves which concrete worker/runtime was transactionally committed; the latter binds the CEO responsibility root to the logical Sol alias consumed by Stage A. Both use the existing Runtime Event plane.
 
+### Target definition is one separate predecessor
+
+SessionTargetRegistry owns the exact disabled `EXECUTIVE-CEO-CODEX-A` definition. That definition must be protected by its own bounded owner carrier before Stage-B1 starts. Stage-B1 reads and fingerprints the protected entry; it does not modify `config/wake_session_targets.json`, recreate the target or combine target-definition review with assignment implementation.
+
+This separation prevents two carriers from owning the same target and keeps target vocabulary distinct from root assignment authority.
+
 ### Initial assignment is a system transition, not destination self-authorization
 
 The destination session does not assign itself. The internal Executive service C2 completion/replay path invokes Stage B. No public request may carry a worker, Attempt, carrier Job, RuntimeBinding, native handle, actor label or destination alias that selects the target. The command contains only comparisons to already-owned facts.
@@ -386,8 +395,8 @@ Stage B folds the immutable assignment into a complete SessionTargetRegistry ove
 - `SPEC_ONLY`: this V5.1 Stage-B architecture.
 - `NOT_BUILT`: Capacity C2 commitment Event, disabled Codex CEO target, Stage-B assignment source and service composition.
 - `HELD`: implementation until all three predecessors protect; succession, cross-alias transfer, ChatGPT-Sol, COO-root escalation and production canary.
-- `REJECTED_BY_DESIGN`: caller/destination self-assignment, C1-as-commitment, RuntimeBinding-as-authority, arbitrary root overlays, direct public assignment call, newest-session election, implicit generation transfer, destructive map replacement and blind retry/failover.
+- `REJECTED_BY_DESIGN`: caller/destination self-assignment, C1-as-commitment, RuntimeBinding-as-authority, arbitrary root overlays, direct public assignment call, newest-session election, implicit generation transfer, destructive map replacement, duplicate target ownership and blind retry/failover.
 
 ## Stop law
 
-Stop without widening on an active path collision, material movement of the CEO root/C2/Event/RuntimeBinding/Stage-A owners, a need for a new table/registry/lifecycle/queue/lease, common provider-wire change, Stage-A signature change, effect uncertainty, provider action, production arming or an eighth source path.
+Stop without widening on an active path collision, material movement of the CEO root/C2/Event/RuntimeBinding/Stage-A owners, a need for a new table/registry/lifecycle/queue/lease, common provider-wire change, Stage-A signature change, target-config modification inside Stage-B1, effect uncertainty, provider action, production arming or a seventh source path.
