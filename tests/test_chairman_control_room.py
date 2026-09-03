@@ -2108,3 +2108,181 @@ def test_a_mandatory_transitive_dependency_is_a_hard_failure_not_a_degrade():
     # Assert the blocked module is the one that raised.
     assert result.stdout.startswith("RAISED"), (result.stdout, result.stderr[-400:])
     assert "executive_orchestration_principal" in result.stdout, result.stdout
+
+
+# ---------------------------------------------------------------------------
+# CR1A optional-import contract (Sol ruling, 2026-09-03 — resolution (a))
+#
+# A static `from control_plane import autonomy_control_room_projection` made
+# `executive_steward` MANDATORY, because the projection imports it at module
+# scope.  That silently converted C1's optional capability into a hard
+# requirement: with only the steward blocked, importing this module raised
+# ModuleNotFoundError where master booted with `executive_steward is None`.
+#
+# These run in a SUBPROCESS on purpose.  The same-process technique used by
+# the older steward regressions cannot see this class of defect: they evict
+# only {selector, steward, chairman_control_room} from sys.modules, while
+# `control_plane.autonomy_control_room_projection` stays warm AND remains an
+# attribute of the already-imported `control_plane` package object, so the
+# static import resolves from cache and the blocked steward import is never
+# attempted.  A fresh interpreter clears the whole namespace, which is the
+# only way the blocked import is actually re-tried.
+# ---------------------------------------------------------------------------
+
+import subprocess as _subprocess
+import sys as _sys
+import textwrap as _textwrap
+from pathlib import Path as _Path
+
+#: repo root, so the fresh-interpreter probes below import the WORKING TREE's
+#: control_plane rather than whatever happens to be on the ambient path.
+_REPO_ROOT = _Path(__file__).resolve().parents[1]
+
+
+_BOOT_PROBE = """
+import importlib, sys
+blocked = set(__BLOCKED__)
+class _Absence:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in blocked:
+            raise ModuleNotFoundError("not shipped: " + fullname)
+        return None
+sys.meta_path.insert(0, _Absence())
+try:
+    mod = importlib.import_module("control_plane.chairman_control_room")
+except BaseException as exc:
+    print("HARD_FAIL " + type(exc).__name__)
+else:
+    print("BOOTS proj=%s steward=%s" % (
+        mod.autonomy_control_room_projection is None,
+        mod.executive_steward is None,
+    ))
+"""
+
+
+def _boot_with_blocked(blocked):
+    """Import the compositor in a FRESH interpreter with `blocked` unshipped."""
+    script = _BOOT_PROBE.replace("__BLOCKED__", repr(sorted(blocked)))
+    proc = _subprocess.run(
+        [_sys.executable, "-c", script],
+        capture_output=True, text=True, cwd=str(_REPO_ROOT), timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout.strip().splitlines()[-1]
+
+
+def test_cr1a_module_boots_in_a_fresh_interpreter_with_steward_absent():
+    """The exact regression: steward unshipped, projection shipped."""
+    assert _boot_with_blocked({"control_plane.executive_steward"}) == (
+        "BOOTS proj=True steward=True"
+    )
+
+
+def test_cr1a_module_boots_in_a_fresh_interpreter_with_projection_absent():
+    """The autonomy consumer itself unshipped: degrade, never crash."""
+    assert _boot_with_blocked({"control_plane.autonomy_control_room_projection"}) == (
+        "BOOTS proj=True steward=False"
+    )
+
+
+def test_cr1a_module_boots_in_a_fresh_interpreter_with_both_absent():
+    assert _boot_with_blocked({
+        "control_plane.autonomy_control_room_projection",
+        "control_plane.executive_steward",
+    }) == "BOOTS proj=True steward=True"
+
+
+def test_cr1a_module_loads_both_when_the_release_ships_them():
+    """Positive control — the degrade path must not be the only path."""
+    assert _boot_with_blocked(set()) == "BOOTS proj=False steward=False"
+
+
+def test_cr1a_a_shipped_but_broken_projection_fails_loudly():
+    """`find_spec` distinguishes absent from broken; broken must NOT degrade.
+
+    A module that IS shipped but raises on import must abort loudly rather
+    than masquerading as "not shipped" — otherwise a genuine fault inside the
+    projection would silently blank the Chairman's autonomy surface.
+    """
+    inject = _textwrap.dedent(
+        """
+        import sys, importlib.abc, importlib.machinery
+        class _BrokenLoader(importlib.abc.Loader):
+            def create_module(self, spec):
+                return None
+            def exec_module(self, module):
+                raise RuntimeError("deliberately broken shipped module")
+        class _BrokenFinder:
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "control_plane.autonomy_control_room_projection":
+                    return importlib.machinery.ModuleSpec(fullname, _BrokenLoader())
+                return None
+        sys.meta_path.insert(0, _BrokenFinder())
+        """
+    )
+    proc = _subprocess.run(
+        [_sys.executable, "-c", inject + "import control_plane.chairman_control_room"],
+        capture_output=True, text=True, cwd=str(_REPO_ROOT), timeout=120,
+    )
+    assert proc.returncode != 0, "a broken shipped module must not be swallowed"
+    assert "deliberately broken shipped module" in proc.stderr
+
+
+def test_cr1a_degraded_document_keeps_the_closed_autonomy_key(
+    boot_packet, inbox, active_builds, bindings, monkeypatch,
+):
+    """Unshipped projection: key retained, value non-actionable, degrade named."""
+    monkeypatch.setattr(ccr, "autonomy_control_room_projection", None)
+    doc = _compose(boot_packet, inbox, active_builds, bindings)
+
+    assert set(doc.keys()) == ccr.OUTPUT_KEYS  # closed contract intact
+    assert doc["autonomy"] is None  # non-actionable unavailable value
+    assert "autonomy: unavailable (module not shipped)" in doc["degraded"]
+
+
+def test_cr1a_compositor_attaches_dispatch_consumption_to_every_card(
+    boot_packet, inbox, active_builds, bindings,
+):
+    """The dispatch projection must be WIRED, not merely importable.
+
+    Without this the second pass is dead code: every test in the projection
+    module can pass while no card the Chairman sees carries a dispatch state
+    at all.  With no owner evidence supplied — which is the real current
+    state, since the owners need a Runtime and a sqlite connection this pure
+    path does not have — every card must read UNKNOWN and non-actionable
+    rather than any successful stage.
+    """
+    # The shared fixtures' workstream rows carry no `owner` field, so every
+    # one of them reads as an unrecognized owner and produces an UNMAPPED row
+    # rather than a card — which means those fixtures cannot exercise this at
+    # all.  A hermetic row with a recognized owner token is supplied here so
+    # the assertion has real cards to run against.
+    agent_os_state = {
+        "generated_at": "2026-09-01T00:00:00Z",
+        "workstreams": [
+            {
+                "key": "WS:CR1A-DISPATCH-WIRING",
+                "title": "Dispatch wiring probe",
+                "status": "active",
+                "owner": "chairman",
+            }
+        ],
+    }
+    doc = _compose(
+        boot_packet, inbox, active_builds, bindings, agent_os_state=agent_os_state
+    )
+    cards = doc["autonomy"]["responsibilities"]
+    assert cards, "the recognized-owner row must produce a card"
+
+    for card in cards:
+        dispatch = card["dispatch"]
+        assert dispatch["dispatch_state"] == "UNKNOWN"
+        assert dispatch["reason"] == "dispatch_evidence_not_supplied"
+        assert dispatch["actionable"] is False
+        assert dispatch["watch_proven"] is False
+        # Law 1: the row is joined on the exact pair, never re-derived.
+        assert dispatch["responsibility_ref"] == card["responsibility_ref"]
+        assert dispatch["root_job_id"] == card["root_job_id"]
+
+    # Law 10: placement_selection stays selection-only and is not merged in.
+    assert "dispatch" not in (doc["placement_selection"] or {})

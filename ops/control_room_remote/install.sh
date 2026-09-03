@@ -28,7 +28,6 @@ RELEASE_TRACKED_PATHS=(
   common/redaction.py
   config/strategic_state.yml
   control_plane/__init__.py
-  control_plane/autonomy_control_room_projection.py
   control_plane/ceo_boot_packet.py
   control_plane/ceo_intent.py
   control_plane/chairman_control_room.py
@@ -43,7 +42,6 @@ RELEASE_TRACKED_PATHS=(
   control_plane/executive_orchestration_result.py
   control_plane/executive_retry_safety.py
   control_plane/executive_runtime.py
-  control_plane/executive_steward.py
   control_plane/executive_supervisor.py
   control_plane/executive_worker_broker.py
   control_plane/executive_workspace.py

@@ -1101,6 +1101,12 @@ def test_addendum_behavioural_owed_binding_is_withheld_from_stale_cards() -> Non
     var STATE = { workByRef: { "WS:X": { work_ref: "WS:X" } } };
     function uniqueBinding(work, seat) { return { seat: seat, target: "dest" }; }
     function bindingConfidence(b) { return { openable: true }; }
+    // AD-CR1A dispatch-consumption groundwork: none of these fixture cards
+    // carry a `dispatch` field, so the real auDispatchUnsafe would also
+    // return false for every one of them — this stub is behaviourally
+    // equivalent, not a weakened substitute (see the dedicated
+    // test_dispatch_behavioural_* tests below for the real function).
+    function auDispatchUnsafe(card) { return false; }
     %s
     var stale = { responsibility_ref: "WS:X", is_actionable: false,
                   owed_turn: { seat: "sol" } };
@@ -1169,3 +1175,95 @@ def test_addendum_behavioural_ledger_counts_only_actionable_turns() -> None:
     assert mixed_cells["You"] == {"n": "1", "yours": True}
     assert mixed_cells["Worker"]["n"] == "1"
     assert mixed_cells["Fable"]["n"] == "0", "a stale card must not count as a live turn"
+
+
+def _extract_var(name: str) -> str:
+    """The real source of one top-level `var NAME = {...};` in control_room.js."""
+    js = JS.read_text(encoding="utf-8")
+    start = js.index("  var %s = " % name)
+    end = js.index("\n  };", start) + len("\n  };")
+    return js[start:end]
+
+
+def test_dispatch_behavioural_state_renders_visibly() -> None:
+    """AD-CR1A dispatch-consumption groundwork: the state is VISIBLE — a
+    chip renders naming it, using the real AU_DISPATCH/AU_DISPATCH_VARIANT
+    data and the real auDispatchChip function, not a source-text guess."""
+    harness = """
+    function isBlank(v) { return v === null || v === undefined || v === ""; }
+    function el(tag, opts) {
+      opts = opts || {};
+      return { tag: tag, className: opts.className || "", text: opts.text || "" };
+    }
+    %s
+    %s
+    %s
+    var returned = { dispatch: { dispatch_state: "RETURNED", historical: false } };
+    var unconsumed = { dispatch: { dispatch_state: "DELIVERY_UNCONSUMED", historical: false } };
+    var noEvidence = {};
+    console.log(JSON.stringify({
+      returned: auDispatchChip(returned),
+      unconsumed: auDispatchChip(unconsumed),
+      noEvidence: auDispatchChip(noEvidence)
+    }));
+    """ % (
+        _extract_fn("chip"),
+        _extract_var("AU_DISPATCH") + "\n" + _extract_var("AU_DISPATCH_VARIANT"),
+        _extract_fn("auDispatchChip"),
+    )
+    out = _run_node(harness)
+
+    assert out["returned"]["text"] == "RETURNED — AWAITING SOL"
+    assert out["returned"]["className"] == "ccr-chip is-brass"
+    assert out["unconsumed"]["text"] == "DELIVERED, NEVER PICKED UP"
+    assert out["unconsumed"]["className"] == "ccr-chip is-danger"
+    assert out["noEvidence"] is None, "no dispatch evidence yet must render nothing, not a guess"
+
+
+def test_dispatch_behavioural_unsafe_states_expose_no_open_control() -> None:
+    """FROZEN SPEC UI law, proven behaviourally: 'No owed-action Open
+    control may render for a stale, unacknowledged, watch-unproven,
+    binding-reconciliation or effect-unknown state.' Source-text assertions
+    alone are insufficient and have already failed this project once."""
+    harness = """
+    var REMOTE_READ_ONLY = false;
+    function auIsHold(card) { return false; }
+    function auOwedSeat(card) { return "worker"; }
+    var STATE = { workByRef: { "WS:X": { work_ref: "WS:X" } } };
+    function uniqueBinding(work, seat) { return { seat: seat, target: "dest" }; }
+    function bindingConfidence(b) { return { openable: true }; }
+    %s
+    %s
+    %s
+    function mk(state, historical) {
+      return { responsibility_ref: "WS:X", is_actionable: true,
+               owed_turn: { seat: "worker" },
+               dispatch: state ? { dispatch_state: state, historical: !!historical } : undefined };
+    }
+    console.log(JSON.stringify({
+      safeStarted: auOwedBinding(mk("STARTED", false)) ? auOwedBinding(mk("STARTED", false)).seat : null,
+      unconsumed: auOwedBinding(mk("DELIVERY_UNCONSUMED", false)),
+      watchUnproven: auOwedBinding(mk("WATCH_UNPROVEN", false)),
+      reconciliation: auOwedBinding(mk("RUNTIME_BINDING_RECONCILIATION_REQUIRED", false)),
+      effectUnknown: auOwedBinding(mk("EFFECT_UNKNOWN", false)),
+      unknown: auOwedBinding(mk("UNKNOWN", false)),
+      staleReturned: auOwedBinding(mk("RETURNED", true)),
+      liveReturned: auOwedBinding(mk("RETURNED", false)) ? "present" : null,
+      noEvidence: auOwedBinding(mk(null)) ? "present" : null
+    }));
+    """ % (
+        _extract_var("AU_DISPATCH_UNSAFE"),
+        _extract_fn("auDispatchUnsafe"),
+        _extract_fn("auOwedBinding"),
+    )
+    out = _run_node(harness)
+
+    assert out["safeStarted"] == "worker", "a safe dispatch state must not lose the existing Open control"
+    assert out["unconsumed"] is None
+    assert out["watchUnproven"] is None
+    assert out["reconciliation"] is None
+    assert out["effectUnknown"] is None
+    assert out["unknown"] is None
+    assert out["staleReturned"] is None, "stale (historical) evidence must suppress the Open control too"
+    assert out["liveReturned"] == "present", "a fresh RETURNED card keeps its owed-action Open control"
+    assert out["noEvidence"] == "present", "absent dispatch evidence must not newly suppress anything"

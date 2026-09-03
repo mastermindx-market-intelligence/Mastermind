@@ -2856,3 +2856,377 @@ def test_addendum_current_effect_unknown_still_requires_a_chairman_decision():
     assert card["is_actionable"] is False
     assert card["chairman_decision_required"] is True
     assert "WS:AD-CR1A" in doc["chairman_decisions"]
+
+
+# ---------------------------------------------------------------------------
+# dispatch-consumption projection (AD-CR1A commissioning packet, 2026-09-03)
+#
+# ``project_dispatch_consumption`` is a SECOND pure pass over already-produced
+# responsibility cards (the exact ``responsibility_ref``/``root_job_id`` pair
+# each card already carries — Law 1's exact join key, never title/provider
+# label/newest-timestamp).  It answers one question the rest of this module
+# never asks: was a dispatched piece of work actually picked up and started,
+# or sent into a void?  The real owners (wake_ledger.reconstruct_status,
+# sol_action_target.resolve_sol_action_target, operator_continuity_
+# projection's attempt/continuation facts, the Agent Dialogue TurnDecision/
+# ObservationReceipt) all require I/O or live outside control_plane's
+# importable surface, so this module never calls them — every test here
+# hands the mapper already-gathered plain data through ``dispatch_evidence``,
+# exactly as ``declared_blockers``/``unmapped_responsibilities`` already do
+# for ``project_autonomy``.
+# ---------------------------------------------------------------------------
+
+_DISPATCH_GENERATED_AT = "2026-09-01T00:00:00Z"
+_DISPATCH_STALE_OBSERVED_AT = "2026-08-20T00:00:00Z"  # >48h before generated_at
+
+
+def _dcard(ref="WS:AD-CR1A", root_job_id="JOB-AD-CR1A"):
+    return {"responsibility_ref": ref, "root_job_id": root_job_id}
+
+
+def _drow(
+    ref="WS:AD-CR1A",
+    root_job_id="JOB-AD-CR1A",
+    *,
+    observed_at=_DISPATCH_GENERATED_AT,
+    obligation_status=None,
+    action_target_state=None,
+    action_target_reason=None,
+    binding_evidence_state=None,
+    attempt_state=None,
+    effect_state=None,
+    watch_child_ref=None,
+    watch_carrier_ref=None,
+    watch_mechanism=None,
+    watch_baseline_receipt=None,
+    sol_decision=None,
+    sol_decision_carrier_ref=None,
+):
+    return {
+        "responsibility_ref": ref,
+        "root_job_id": root_job_id,
+        "observed_at": observed_at,
+        "obligation_status": obligation_status,
+        "action_target_state": action_target_state,
+        "action_target_reason": action_target_reason,
+        "binding_evidence_state": binding_evidence_state,
+        "attempt_state": attempt_state,
+        "effect_state": effect_state,
+        "watch_child_ref": watch_child_ref,
+        "watch_carrier_ref": watch_carrier_ref,
+        "watch_mechanism": watch_mechanism,
+        "watch_baseline_receipt": watch_baseline_receipt,
+        "sol_decision": sol_decision,
+        "sol_decision_carrier_ref": sol_decision_carrier_ref,
+    }
+
+
+def _proven_watch(**overrides):
+    values = {
+        "watch_child_ref": "child:JOB-AD-CR1A",
+        "watch_carrier_ref": "carrier:C0123",
+        "watch_mechanism": "cron",
+        "watch_baseline_receipt": "receipt:abc123",
+    }
+    values.update(overrides)
+    return values
+
+
+def _dcard_of(doc, ref):
+    for card in doc["cards"]:
+        if card["responsibility_ref"] == ref:
+            return card
+    raise AssertionError(f"no dispatch card for {ref}")
+
+
+def test_dispatch_unconsumed_delivery():
+    """Law 2: a delivery with no valid exact receiver ACK is DELIVERY_UNCONSUMED."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(obligation_status="DELIVERED_UNACKNOWLEDGED")],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "DELIVERY_UNCONSUMED"
+    assert card["actionable"] is False
+
+
+def test_dispatch_ack_without_start():
+    """Law 3: PICKUP_ACKNOWLEDGED stays distinct from STARTED with no attempt evidence."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(obligation_status="TARGET_ACKNOWLEDGED")],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "PICKUP_ACKNOWLEDGED"
+    assert card["dispatch_state"] != "STARTED"
+    assert card["actionable"] is False
+
+
+def test_dispatch_start_without_valid_binding():
+    """Law 4+7: attempt evidence exists but the binding is missing -> reconciliation, not STARTED."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="RUNNING",
+            action_target_state="UNAVAILABLE",
+            action_target_reason="ROOT_TARGET_MISSING",
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "RUNTIME_BINDING_RECONCILIATION_REQUIRED"
+    assert card["dispatch_state"] != "STARTED"
+    assert card["actionable"] is False
+
+
+def test_dispatch_post_start_contradictory_rebind():
+    """Law 7: a later CONFLICT demotes even though attempt evidence still reads RUNNING."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="RUNNING",
+            action_target_state="CONFLICT",
+            binding_evidence_state="CURRENT",
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "RUNTIME_BINDING_RECONCILIATION_REQUIRED"
+
+
+def test_dispatch_result_awaiting_sol():
+    """Law 5: RETURNED remains awaiting Sol with no valid CONTINUE/STOP yet."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            **_proven_watch(),
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "RETURNED"
+    assert card["actionable"] is True
+
+
+def test_dispatch_continue():
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            sol_decision="CONTINUE",
+            sol_decision_carrier_ref="carrier:C0123",
+            **_proven_watch(),
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "CONTINUED"
+    assert card["actionable"] is False
+
+
+def test_dispatch_stop():
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            sol_decision="STOP",
+            sol_decision_carrier_ref="carrier:C0123",
+            **_proven_watch(),
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "STOPPED"
+    assert card["actionable"] is False
+
+
+def test_dispatch_continue_from_a_different_carrier_is_not_trusted():
+    """Law 5: 'valid same-carrier' — a decision from a different carrier never resolves RETURNED."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            sol_decision="CONTINUE",
+            sol_decision_carrier_ref="carrier:SOMEONE_ELSE",
+            **_proven_watch(),
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "RETURNED"
+
+
+def test_dispatch_missing_watcher_receipt():
+    """Law 6: WATCH_PROVEN requires exact child + carrier + mechanism + baseline receipt."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            watch_child_ref="child:JOB-AD-CR1A",
+            watch_carrier_ref="carrier:C0123",
+            # watch_mechanism and watch_baseline_receipt are missing
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "WATCH_UNPROVEN"
+    assert card["watch_proven"] is False
+    assert card["actionable"] is False
+
+
+def test_dispatch_missed_fire_is_stale_returned_never_actionable():
+    """A proven-watch terminal attempt whose evidence has gone stale must not be actionable."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            observed_at=_DISPATCH_STALE_OBSERVED_AT,
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            **_proven_watch(),
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "RETURNED"
+    assert card["historical"] is True
+    assert card["actionable"] is False, "stale evidence must never leave an actuator open"
+
+
+def test_dispatch_stale_evidence_marks_non_returned_steps_historical_too():
+    """Law 9: a stale contributing source makes the projected step historical, not just RETURNED."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            observed_at=_DISPATCH_STALE_OBSERVED_AT,
+            obligation_status="ACCEPTED",
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "DELIVERY_SENT"
+    assert card["historical"] is True
+
+
+def test_dispatch_effect_unknown_outranks_optimistic_progress():
+    """Law 8: EFFECT_UNKNOWN outranks optimistic progress and disables every actuator."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            obligation_status="TARGET_ACKNOWLEDGED",
+            attempt_state="COMPLETED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+            effect_state="effect_unknown",
+            **_proven_watch(),
+        )],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "EFFECT_UNKNOWN"
+    assert card["actionable"] is False
+
+
+def test_dispatch_absent_owner_input_renders_unknown_never_a_success():
+    """Absent dispatch_evidence: every card reads UNKNOWN, never a fabricated success stage."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard(), _dcard(ref="WS:OTHER", root_job_id="JOB-OTHER")],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=None,
+    )
+    for card in doc["cards"]:
+        assert card["dispatch_state"] == "UNKNOWN"
+        assert card["actionable"] is False
+    assert doc["counts"]["UNKNOWN"] == 2
+    assert all(state == 0 for token, state in doc["counts"].items() if token != "UNKNOWN")
+
+
+def test_dispatch_no_exact_join_match_renders_unknown_not_a_fuzzy_pick():
+    """Law 1: exact join only — a mismatched root_job_id never matches by ref alone."""
+    doc = proj.project_dispatch_consumption(
+        [_dcard(root_job_id="JOB-REAL")],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(root_job_id="JOB-DIFFERENT", obligation_status="TARGET_ACKNOWLEDGED")],
+    )
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "UNKNOWN"
+
+
+def test_dispatch_waiting_capacity_and_receiver_selected_happy_path():
+    """Mission-suggested mapping: NOT_SEEN with no receiver -> WAITING_CAPACITY;
+    ActionTargetState.RESOLVED with no delivery evidence -> RECEIVER_SELECTED."""
+    waiting = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(obligation_status="NOT_SEEN", action_target_state="UNKNOWN")],
+    )
+    assert _dcard_of(waiting, "WS:AD-CR1A")["dispatch_state"] == "WAITING_CAPACITY"
+
+    selected = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(obligation_status="NOT_SEEN", action_target_state="RESOLVED")],
+    )
+    assert _dcard_of(selected, "WS:AD-CR1A")["dispatch_state"] == "RECEIVER_SELECTED"
+
+
+def test_dispatch_reconciliation_required_direct_signal():
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(obligation_status="RECONCILIATION_REQUIRED")],
+    )
+    assert _dcard_of(doc, "WS:AD-CR1A")["dispatch_state"] == "RUNTIME_BINDING_RECONCILIATION_REQUIRED"
+
+
+def test_dispatch_no_actuator_renders_for_any_unsafe_state():
+    """No owed-action Open control may render for an unsafe state (mirrors the FROZEN SPEC UI law)."""
+    unsafe_rows = {
+        "DELIVERY_UNCONSUMED": _drow(obligation_status="DELIVERED_UNACKNOWLEDGED"),
+        "WATCH_UNPROVEN": _drow(
+            obligation_status="TARGET_ACKNOWLEDGED", attempt_state="COMPLETED",
+            action_target_state="RESOLVED", binding_evidence_state="CURRENT",
+        ),
+        "RUNTIME_BINDING_RECONCILIATION_REQUIRED": _drow(obligation_status="RECONCILIATION_REQUIRED"),
+        "EFFECT_UNKNOWN": _drow(effect_state="effect_unknown"),
+        "UNKNOWN": _drow(obligation_status="not-a-real-token"),
+    }
+    for expected_state, row in unsafe_rows.items():
+        doc = proj.project_dispatch_consumption(
+            [_dcard()], generated_at=_DISPATCH_GENERATED_AT, dispatch_evidence=[row],
+        )
+        card = _dcard_of(doc, "WS:AD-CR1A")
+        assert card["dispatch_state"] == expected_state, (expected_state, card)
+        assert card["actionable"] is False, f"{expected_state} must never expose an actuator"
+
+
+def test_dispatch_purity_same_input_twice_is_byte_identical():
+    dispatch_evidence = [_drow(obligation_status="ACCEPTED")]
+    first = proj.project_dispatch_consumption(
+        [_dcard()], generated_at=_DISPATCH_GENERATED_AT, dispatch_evidence=dispatch_evidence,
+    )
+    second = proj.project_dispatch_consumption(
+        [_dcard()], generated_at=_DISPATCH_GENERATED_AT, dispatch_evidence=dispatch_evidence,
+    )
+    assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)

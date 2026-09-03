@@ -67,7 +67,6 @@ from pathlib import Path
 from typing import Any
 
 from control_plane import (
-    autonomy_control_room_projection,
     ceo_boot_packet,
     executive_inbox,
     executive_runtime,
@@ -168,6 +167,21 @@ executive_placement_selection = _optional_control_plane_module(
     "executive_placement_selection", requires=_SELECTOR_CONTROL_PLANE_REQUIRES
 )
 executive_steward = _optional_control_plane_module("executive_steward")
+
+#: CR1A's autonomy consumer is loaded through the SAME protected mechanism as
+#: the selector above, and for the same reason.  A static
+#: ``from control_plane import autonomy_control_room_projection`` at the top of
+#: this module made ``executive_steward`` MANDATORY — the projection imports it
+#: at module scope — which silently converted C1's optional capability into a
+#: hard requirement and defeated the degraded-boot contract this file
+#: documents.  Measured before the repair: with only ``executive_steward``
+#: blocked, importing this module raised ``ModuleNotFoundError`` where master
+#: booted with ``executive_steward is None``.  Packaging closure is NOT
+#: permission to narrow that contract (Sol ruling, 2026-09-03), so the
+#: dependency is declared here and absence degrades by name instead.
+autonomy_control_room_projection = _optional_control_plane_module(
+    "autonomy_control_room_projection", requires=("executive_steward",)
+)
 
 #: Schema version of the document this module emits.
 SCHEMA = "mastermind.chairman_control_room.v1"
@@ -1025,50 +1039,74 @@ def compose_control_room(
             placement_selection_out = None
 
     # --- autonomy responsibility projection ---------------------------------
-    # Additive: control_plane.autonomy_control_room_projection.
-    # build_autonomy_snapshot maps these same already-gathered plain-data
-    # inputs into an ExecutiveStewardSnapshot, and project_autonomy renders
-    # it — this compositor's own generated_at is passed straight through so
-    # the whole document stays deterministic and clock-free.  Fix 1
-    # (adversarial-review repair packet, 2026-09-01): that same
-    # generated_at is now ALSO the reference timestamp every constructed
-    # fact's freshness is judged against — threaded into
-    # build_autonomy_snapshot and its two mapper siblings below, not just
-    # into project_autonomy — so a real, aged Agent OS/inbox/bindings
-    # document reads honestly STALE instead of unconditionally CURRENT.
-    autonomy_snapshot = autonomy_control_room_projection.build_autonomy_snapshot(
-        inbox=inbox,
-        boot_packet=boot_packet,
-        active_builds=active_builds,
-        agent_os_state=agent_os_state,
-        runtime_jobs=runtime_jobs,
-        bindings=bindings,
-        generated_at=generated_at,
-    )
-    # Agent-OS-declared blockers travel beside the snapshot rather than inside
-    # it: the Steward's BlockerFact contract admits only Executive OS / Inbox /
-    # Wake owners, so an agent_os-owned blocker cannot lawfully be a BlockerFact
-    # and is carried as separately-attributed plain data instead.
-    autonomy_declared_blockers = (
-        autonomy_control_room_projection.declared_blockers_from_agent_os_state(
-            agent_os_state, generated_at
+    # Optional exactly like placement_selection above: a release that does not
+    # ship the projection (or its required steward) still composes a complete
+    # document.  The closed `autonomy` output key is RETAINED with a
+    # non-actionable unavailable value and the absence degrades BY NAME, using
+    # the same vocabulary this module already uses for the selector.
+    autonomy: dict[str, Any] | None = None
+    if autonomy_control_room_projection is None:
+        degraded.append("autonomy: unavailable (module not shipped)")
+    else:
+        # --- autonomy responsibility projection ---------------------------------
+        # Additive: control_plane.autonomy_control_room_projection.
+        # build_autonomy_snapshot maps these same already-gathered plain-data
+        # inputs into an ExecutiveStewardSnapshot, and project_autonomy renders
+        # it — this compositor's own generated_at is passed straight through so
+        # the whole document stays deterministic and clock-free.  Fix 1
+        # (adversarial-review repair packet, 2026-09-01): that same
+        # generated_at is now ALSO the reference timestamp every constructed
+        # fact's freshness is judged against — threaded into
+        # build_autonomy_snapshot and its two mapper siblings below, not just
+        # into project_autonomy — so a real, aged Agent OS/inbox/bindings
+        # document reads honestly STALE instead of unconditionally CURRENT.
+        autonomy_snapshot = autonomy_control_room_projection.build_autonomy_snapshot(
+            inbox=inbox,
+            boot_packet=boot_packet,
+            active_builds=active_builds,
+            agent_os_state=agent_os_state,
+            runtime_jobs=runtime_jobs,
+            bindings=bindings,
+            generated_at=generated_at,
         )
-    )
-    # Blast-radius repair packet, 2026-09-01: an unrecognized workstream
-    # owner is a bounded, per-row mapping gap, never a SourceFailure — see
-    # autonomy_control_room_projection.unmapped_responsibilities_from_
-    # agent_os_state.  Threaded the same additive way as declared_blockers.
-    autonomy_unmapped_responsibilities = (
-        autonomy_control_room_projection.unmapped_responsibilities_from_agent_os_state(
-            agent_os_state, generated_at
+        # Agent-OS-declared blockers travel beside the snapshot rather than inside
+        # it: the Steward's BlockerFact contract admits only Executive OS / Inbox /
+        # Wake owners, so an agent_os-owned blocker cannot lawfully be a BlockerFact
+        # and is carried as separately-attributed plain data instead.
+        autonomy_declared_blockers = (
+            autonomy_control_room_projection.declared_blockers_from_agent_os_state(
+                agent_os_state, generated_at
+            )
         )
-    )
-    autonomy = autonomy_control_room_projection.project_autonomy(
-        autonomy_snapshot,
-        generated_at=generated_at,
-        declared_blockers=autonomy_declared_blockers,
-        unmapped_responsibilities=autonomy_unmapped_responsibilities,
-    )
+        # Blast-radius repair packet, 2026-09-01: an unrecognized workstream
+        # owner is a bounded, per-row mapping gap, never a SourceFailure — see
+        # autonomy_control_room_projection.unmapped_responsibilities_from_
+        # agent_os_state.  Threaded the same additive way as declared_blockers.
+        autonomy_unmapped_responsibilities = (
+            autonomy_control_room_projection.unmapped_responsibilities_from_agent_os_state(
+                agent_os_state, generated_at
+            )
+        )
+        autonomy = autonomy_control_room_projection.project_autonomy(
+            autonomy_snapshot,
+            generated_at=generated_at,
+            declared_blockers=autonomy_declared_blockers,
+            unmapped_responsibilities=autonomy_unmapped_responsibilities,
+        )
+        # Dispatch-consumption is a SECOND pure pass over the cards just
+        # produced, joined on the same exact (responsibility_ref, root_job_id)
+        # key the projection already owns.  No dispatch evidence is gathered
+        # here: the real owners (wake_ledger, sol_action_target,
+        # operator-continuity Attempt facts, Agent Dialogue decisions) need a
+        # Runtime and a sqlite connection, which this pure path does not have
+        # and must not acquire.  With no evidence supplied every card reads
+        # UNKNOWN and non-actionable — ignorance, never a fabricated stage.
+        autonomy = autonomy_control_room_projection.attach_dispatch_consumption(
+            autonomy,
+            autonomy_control_room_projection.project_dispatch_consumption(
+                autonomy["responsibilities"], generated_at=generated_at
+            ),
+        )
 
     doc = {
         "schema": SCHEMA,

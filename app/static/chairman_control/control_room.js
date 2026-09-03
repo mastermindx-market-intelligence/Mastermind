@@ -1272,6 +1272,80 @@
     unknown: { text: "FRESHNESS UNKNOWN", variant: "is-dim" },
   };
 
+  // Dispatch-consumption groundwork (AD-CR1A commissioning packet,
+  // 2026-09-03). Mirrors control_plane.autonomy_control_room_projection.
+  // DISPATCH_STATES exactly, one entry per closed-vocabulary token —
+  // read-only, additive. `card.dispatch` does not exist on any card yet
+  // (project_dispatch_consumption is not wired through the compositor in
+  // this packet — chairman_control_room.py is out of scope here), so
+  // every function below is undefined-safe and renders nothing until a
+  // future PR threads it through.
+  var AU_DISPATCH = {
+    WAITING_CAPACITY: "Waiting for capacity",
+    RECEIVER_SELECTED: "Receiver selected",
+    DELIVERY_SENT: "Delivery sent",
+    PICKUP_ACKNOWLEDGED: "Pickup acknowledged",
+    STARTED: "Started",
+    RETURNED: "Returned — awaiting Sol",
+    CONTINUED: "Continued",
+    STOPPED: "Stopped",
+    DELIVERY_UNCONSUMED: "Delivered, never picked up",
+    WATCH_UNPROVEN: "Watch not proven",
+    RUNTIME_BINDING_RECONCILIATION_REQUIRED: "Binding needs reconciliation",
+    EFFECT_UNKNOWN: "Effect not confirmed",
+    UNKNOWN: "Dispatch state unknown",
+  };
+  var AU_DISPATCH_VARIANT = {
+    WAITING_CAPACITY: "is-dim",
+    RECEIVER_SELECTED: "is-slate",
+    DELIVERY_SENT: "is-slate",
+    PICKUP_ACKNOWLEDGED: "is-slate",
+    STARTED: "is-slate",
+    RETURNED: "is-brass",
+    CONTINUED: "is-ok",
+    STOPPED: "is-slate",
+    DELIVERY_UNCONSUMED: "is-danger",
+    WATCH_UNPROVEN: "is-danger",
+    RUNTIME_BINDING_RECONCILIATION_REQUIRED: "is-danger",
+    EFFECT_UNKNOWN: "is-danger",
+    UNKNOWN: "is-dim",
+  };
+  // The five states the FROZEN SPEC names verbatim: "No owed-action Open
+  // control may render for a stale, unacknowledged, watch-unproven,
+  // binding-reconciliation or effect-unknown state." UNKNOWN is included
+  // defensively — the same "never fabricate a success" law this whole
+  // surface exists to enforce.
+  var AU_DISPATCH_UNSAFE = {
+    DELIVERY_UNCONSUMED: true,
+    WATCH_UNPROVEN: true,
+    RUNTIME_BINDING_RECONCILIATION_REQUIRED: true,
+    EFFECT_UNKNOWN: true,
+    UNKNOWN: true,
+  };
+
+  // True when this card's dispatch read is one of the five named-unsafe
+  // states, or when Law 9's "stale/unknown contributing source" made the
+  // read historical. False (never suppresses anything) when `card.dispatch`
+  // is absent — a card with no dispatch evidence supplied is unaffected by
+  // this gate until the projection is actually wired in.
+  function auDispatchUnsafe(card) {
+    var dispatch = card.dispatch;
+    if (!dispatch) return false;
+    if (AU_DISPATCH_UNSAFE[dispatch.dispatch_state] === true) return true;
+    return dispatch.historical === true;
+  }
+
+  // Visible dispatch-state chip — the whole point of this projection: make
+  // "was this actually picked up" a fact the Chairman can SEE, not infer.
+  // Returns null (renders nothing) when no dispatch evidence exists yet.
+  function auDispatchChip(card) {
+    var dispatch = card.dispatch;
+    if (!dispatch || isBlank(dispatch.dispatch_state)) return null;
+    var value = String(dispatch.dispatch_state);
+    var text = AU_DISPATCH[value] || value.replace(/_/g, " ");
+    return chip(text.toUpperCase(), AU_DISPATCH_VARIANT[value] || "is-dim");
+  }
+
   function auWords(map, code, fallback) {
     if (isBlank(code)) return fallback;
     return map[code] || String(code).replace(/_/g, " ");
@@ -1300,6 +1374,14 @@
   function auOwedBinding(card) {
     if (REMOTE_READ_ONLY) return null;
     if (auIsHold(card)) return null;
+    // AD-CR1A dispatch-consumption groundwork, 2026-09-03: the FROZEN SPEC
+    // names the same law auIsHold already enforces for EFFECT_UNKNOWN
+    // placement, extended to the dispatch read — "No owed-action Open
+    // control may render for a stale, unacknowledged, watch-unproven,
+    // binding-reconciliation or effect-unknown state." A no-op today
+    // (card.dispatch is undefined until a future PR wires the projection
+    // through the compositor); see auDispatchUnsafe.
+    if (auDispatchUnsafe(card)) return null;
     // Repair B (Sol addendum 2, 2026-09-03): this suppressed only the
     // EFFECT_UNKNOWN hold, so a stale/history card still offered
     // "Open Sol/Fable/Worker" built from stale routing evidence while the
@@ -1360,6 +1442,8 @@
     else if (auIsHistory(card)) marks.appendChild(chip("HISTORY", "is-dim"));
     else marks.appendChild(chip("NOT ACTIONABLE", "is-dim"));
     marks.appendChild(auPlacementChip(card));
+    var dispatchChip = auDispatchChip(card);
+    if (dispatchChip) marks.appendChild(dispatchChip);
     var freshness = AU_FRESHNESS_CHIP[card.freshness];
     if (freshness) marks.appendChild(chip(freshness.text, freshness.variant));
     var status = AU_QUERY_CHIP[card.query_status];

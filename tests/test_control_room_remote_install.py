@@ -432,14 +432,21 @@ def test_installer_exact_extracted_allowlist_boots_under_isolated_python(tmp_pat
         path for path in manifest["files"] if path.endswith(".py")
     } == _repo_python_import_closure(source)
     # Literal tripwire beside the computed closure assertion above: it makes
-    # any growth of the remote runtime closure visible in review rather than
-    # silent.  25 -> 27 when the compositor gained the autonomy projection,
-    # which pulls in control_plane/autonomy_control_room_projection.py and the
-    # control_plane/executive_steward.py it consumes.
+    # any change to the remote runtime closure visible in review rather than
+    # silent.  Recomputed from current source rather than carried forward:
+    # 25 -> 27 when the compositor gained a STATIC autonomy projection import,
+    # then back to 25 when the Sol optional-import ruling (2026-09-03) moved
+    # that import onto C1's `_optional_control_plane_module` mechanism.  An
+    # optionally-loaded module is deliberately NOT in the packaging
+    # allowlist -- that is the whole point of the mechanism, and it is exactly
+    # how C1's own `executive_placement_selection` is treated: the release may
+    # omit it and the compositor degrades by name.  The remote read-only
+    # projection omits the `autonomy` payload regardless, so the remote loses
+    # nothing by not shipping the projection.
     assert sum(
         path.startswith("control_plane/") and path.endswith(".py")
         for path in manifest["files"]
-    ) == 27
+    ) == 25
     assert "config/strategic_state.yml" in manifest["files"]
     assert not any(path.startswith(".git/") for path in manifest["files"])
     for unrelated in (

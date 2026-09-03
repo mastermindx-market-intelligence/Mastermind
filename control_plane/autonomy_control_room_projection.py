@@ -2040,6 +2040,391 @@ def declared_blockers_from_agent_os_state(
     return out
 
 
+# ---------------------------------------------------------------------------
+# dispatch-consumption projection (AD-CR1A commissioning packet, 2026-09-03)
+#
+# A pure, read-only SECOND pass over already-produced responsibility cards
+# (``project_autonomy``'s own ``responsibilities`` output, or any mapping
+# carrying the same two identity fields).  Answers exactly one question the
+# rest of this module never asks: was a dispatched piece of work actually
+# picked up and started, or sent into a void?  An unacknowledged delivery
+# must never read as active/executing — that is the single most dangerous
+# falsehood this projection exists to prevent (an unconsumed dispatch that
+# LOOKS like progress is never re-sent).
+#
+# Real owners this state machine is *informed by* but never calls (all three
+# require a Runtime/sqlite connection or live outside control_plane's
+# importable surface, so calling them here would violate purity):
+#   - control_plane.wake_ledger.reconstruct_status(...) -> ObligationStatus
+#     (NOT_SEEN, PENDING_RETRYABLE, ATTEMPTED, RECONCILIATION_REQUIRED,
+#     ACCEPTED, DELIVERED_UNACKNOWLEDGED, TARGET_ACKNOWLEDGED,
+#     SOURCE_RESOLVED).
+#   - control_plane.sol_action_target.resolve_sol_action_target(...) ->
+#     ActionTargetState (RESOLVED, UNAVAILABLE, CONFLICT, UNKNOWN) and
+#     BindingEvidenceState (CURRENT, UNKNOWN).
+#   - control_plane.operator_continuity_projection's AttemptState (CLAIMED,
+#     RUNNING, CHECKPOINTED, CANCEL_REQUESTED, RATE_LIMITED, FAILED, LOST,
+#     COMPLETED, CANCELLED).
+#   - The Agent Dialogue owner (TurnDecision/ObservationReceipt,
+#     integrations/slack_agent_dialogue/) is not importable from
+#     control_plane at all — RETURNED/CONTINUED/STOPPED evidence is
+#     therefore *only* ever supplied plain data (``sol_decision``,
+#     ``sol_decision_carrier_ref``); this module invents none of it.
+#
+# ``project_dispatch_consumption``'s ``dispatch_evidence`` parameter is
+# threaded exactly like ``project_autonomy``'s ``declared_blockers``/
+# ``unmapped_responsibilities``: optional plain data, defaulting to "not
+# supplied", never a Steward fact.  Each row is matched to a card by the
+# EXACT join Law 1 names — ``responsibility_ref`` AND ``root_job_id``
+# together, never title, provider label, newest timestamp, or recency —
+# and an unmatched, duplicate/ambiguous, or wholly absent input renders
+# every affected card ``UNKNOWN`` with a named reason, never a fabricated
+# success stage.
+# ---------------------------------------------------------------------------
+
+#: Closed dispatch-consumption vocabulary (frozen by the commissioning
+#: authority, 2026-09-03).  Ordered happy path first, then the five
+#: non-happy states — every one of the twelve renders explicitly and is
+#: never silently collapsed into a neighbour.
+DISPATCH_STATES = frozenset({
+    "WAITING_CAPACITY", "RECEIVER_SELECTED", "DELIVERY_SENT",
+    "PICKUP_ACKNOWLEDGED", "STARTED", "RETURNED", "CONTINUED", "STOPPED",
+    "DELIVERY_UNCONSUMED", "WATCH_UNPROVEN",
+    "RUNTIME_BINDING_RECONCILIATION_REQUIRED", "EFFECT_UNKNOWN", "UNKNOWN",
+})
+
+#: Schema version of the document :func:`project_dispatch_consumption` emits.
+DISPATCH_SCHEMA = "mastermind.autonomy_dispatch_consumption.v1"
+
+#: ``ObligationStatus`` wire values (``wake_ledger.py``) that mean a delivery
+#: was attempted/landed but no valid receiver ACK was ever recorded — Law 2:
+#: "A delivery with no valid exact receiver ACK is DELIVERY_UNCONSUMED,
+#: never active/executing."  ``ATTEMPTED`` (a FAILED or TARGET_UNAVAILABLE
+#: ledger phase) is folded in here too: a failed attempt has, if anything,
+#: LESS claim to being consumed than a landed-but-unacknowledged one, and
+#: the closed vocabulary has no separate "delivery failed" token.
+_OBLIGATION_NO_ACK = frozenset({"DELIVERED_UNACKNOWLEDGED", "ATTEMPTED"})
+
+#: ``ObligationStatus`` values meaning pickup was acknowledged but NOT that
+#: work started (Law 3: PICKUP_ACKNOWLEDGED "remains DISTINCT from
+#: STARTED").  ``SOURCE_RESOLVED`` (the wake obligation's own terminal
+#: ledger phase) is folded in here too — it closes the *wake* obligation,
+#: never the Attempt itself, so it carries no more START authority than a
+#: bare TARGET_ACKNOWLEDGED (Law 4: pickup "cannot imply" STARTED).
+_OBLIGATION_PICKUP_ACK = frozenset({"TARGET_ACKNOWLEDGED", "SOURCE_RESOLVED"})
+
+#: ``ObligationStatus`` values meaning "not yet delivered" — combined below
+#: with ``action_target_state`` per the mission's given rule (NOT_SEEN with
+#: no receiver -> WAITING_CAPACITY).  ``PENDING_RETRYABLE`` is folded in
+#: here rather than treated as DELIVERY_SENT: ``wake_ledger.reconstruct_
+#: status`` returns it both when no destination is even known yet and as a
+#: non-terminal fallback, so it never proves a delivery landed — treating
+#: it identically to NOT_SEEN for placement purposes is the conservative
+#: reading (never claims DELIVERY_SENT prematurely).
+_OBLIGATION_NOT_YET_DELIVERED = frozenset({None, "NOT_SEEN", "PENDING_RETRYABLE"})
+
+#: ``AttemptState`` wire values (``operator_continuity_projection.py``)
+#: meaning the Attempt is still open/in flight.
+_ATTEMPT_IN_PROGRESS = frozenset({
+    "CLAIMED", "RUNNING", "CHECKPOINTED", "CANCEL_REQUESTED", "RATE_LIMITED",
+})
+
+#: ``AttemptState`` wire values meaning the Attempt has concluded — the
+#: precondition for even asking whether a RETURNED/CONTINUED/STOPPED
+#: transition happened (still gated by WATCH_PROVEN, Law 6).
+_ATTEMPT_TERMINAL = frozenset({"COMPLETED", "FAILED", "LOST", "CANCELLED"})
+
+#: The four fields Law 6 names verbatim: "WATCH_PROVEN requires exact child
+#: + carrier + mechanism + baseline receipt; otherwise WATCH_UNPROVEN."  All
+#: four must be present as non-blank strings — Watcher evidence with any one
+#: missing "grants no authority".
+_WATCH_PROOF_FIELDS = (
+    "watch_child_ref", "watch_carrier_ref", "watch_mechanism",
+    "watch_baseline_receipt",
+)
+
+
+def _dispatch_nonblank(value: Any) -> bool:
+    return isinstance(value, str) and value.strip() != ""
+
+
+def _watch_proven(row: Mapping[str, Any]) -> bool:
+    """Law 6: exact child + carrier + mechanism + baseline receipt, all four."""
+    return all(_dispatch_nonblank(row.get(field)) for field in _WATCH_PROOF_FIELDS)
+
+
+def _dispatch_binding_unresolved(action_target_state: Any, binding_evidence_state: Any) -> tuple[bool, str | None]:
+    """Law 7: "Missing/ambiguous/stale RuntimeBinding becomes RUNTIME_BINDING_
+    RECONCILIATION_REQUIRED, not receiver selection by recency."  Returns
+    ``(unresolved, reason)`` — never ``True`` with no named reason.
+
+    - ambiguous: ``ActionTargetState.CONFLICT``.
+    - missing:   ``ActionTargetState.UNAVAILABLE`` (the target resolver
+      could not name a root target/runtime at all).
+    - stale:     ``BindingEvidenceState.UNKNOWN`` (the binding snapshot
+      itself carries no current evidence — see
+      ``sol_action_target.RuntimeBindingSnapshot``).
+    - genuinely unresolved: ``ActionTargetState.UNKNOWN`` (the resolver
+      could not even classify the target) — treated the same conservative
+      way; this module never guesses a receiver was validly selected from
+      an unclassifiable target state.
+    """
+    if action_target_state == "CONFLICT":
+        return True, "runtime_binding_conflict"
+    if action_target_state == "UNAVAILABLE":
+        return True, "runtime_binding_missing"
+    if binding_evidence_state == "UNKNOWN":
+        return True, "runtime_binding_evidence_unknown"
+    if action_target_state == "UNKNOWN":
+        return True, "runtime_binding_state_unknown"
+    return False, None
+
+
+def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[str, str, bool]:
+    """``(dispatch_state, reason, historical)`` for one matched evidence row.
+
+    Pure: reads only ``row`` and the injected ``generated_at`` (via
+    :func:`_freshness_for`, never a clock).  ``historical`` is Law 9's
+    "stale/unknown contributing source" signal — computed from the row's own
+    ``observed_at`` against ``generated_at``, independent of which state was
+    derived, so a stale RETURNED reads exactly as historical as a stale
+    DELIVERY_SENT.
+    """
+    _observed_at, freshness = _freshness_for(row.get("observed_at"), generated_at)
+    historical = freshness is not Freshness.CURRENT
+
+    # Law 8: "EFFECT_UNKNOWN outranks optimistic progress and disables every
+    # actuator" — checked first, ahead of every other signal on the row.
+    if row.get("effect_state") == "effect_unknown":
+        return "EFFECT_UNKNOWN", "effect_unknown_reported", historical
+
+    obligation_status = row.get("obligation_status")
+    action_target_state = row.get("action_target_state")
+    binding_evidence_state = row.get("binding_evidence_state")
+    attempt_state = row.get("attempt_state")
+
+    has_delivery_progress = obligation_status not in (None, "NOT_SEEN")
+    has_attempt_progress = attempt_state is not None
+
+    # A direct wake-ledger reconciliation signal always wins, regardless of
+    # binding/attempt state (mission-suggested mapping, verified: this is
+    # the module's own literal RECONCILIATION_REQUIRED code, reused as a
+    # plain string exactly as WAKE_OUTCOME_TOKENS already reuses this
+    # sibling module's literal wire values without importing it).
+    if obligation_status == "RECONCILIATION_REQUIRED":
+        return (
+            "RUNTIME_BINDING_RECONCILIATION_REQUIRED",
+            "wake_ledger_reconciliation_required",
+            historical,
+        )
+
+    binding_unresolved, binding_reason = _dispatch_binding_unresolved(
+        action_target_state, binding_evidence_state
+    )
+    if action_target_state == "CONFLICT":
+        # An active conflict is always worth flagging, even pre-dispatch —
+        # "post-START contradictory rebind": attempt evidence may still say
+        # RUNNING/COMPLETED, but a rebind conflict must demote it every time.
+        return "RUNTIME_BINDING_RECONCILIATION_REQUIRED", binding_reason, historical
+    if binding_unresolved and (has_delivery_progress or has_attempt_progress):
+        # Only a reconciliation problem once something is actually in
+        # flight — an unresolved/unknown target with NO delivery/attempt
+        # evidence yet is just "not dispatched", handled below.
+        return "RUNTIME_BINDING_RECONCILIATION_REQUIRED", binding_reason, historical
+
+    if has_attempt_progress:
+        # Law 4: STARTED requires separate current start/Attempt evidence —
+        # reached here only with a resolved, current binding (the gate
+        # above already excluded every unresolved-binding case).
+        if attempt_state in _ATTEMPT_IN_PROGRESS:
+            return "STARTED", f"attempt_in_progress:{attempt_state}", historical
+        if attempt_state in _ATTEMPT_TERMINAL:
+            if not _watch_proven(row):
+                # Law 6: "Watcher evidence grants no authority" — a terminal
+                # Attempt with no proven watch can never advance past this;
+                # RETURNED/CONTINUED/STOPPED are all unavailable.
+                return "WATCH_UNPROVEN", "watch_evidence_incomplete", historical
+            decision = row.get("sol_decision")
+            decision_carrier = row.get("sol_decision_carrier_ref")
+            carrier = row.get("watch_carrier_ref")
+            # Law 5: "a valid SAME-CARRIER CONTINUE or STOP" — a decision
+            # attributed to a different carrier than the one that carried
+            # the return is never trusted; RETURNED stands.
+            valid_decision = (
+                decision in ("CONTINUE", "STOP")
+                and decision_carrier is not None
+                and decision_carrier == carrier
+            )
+            if valid_decision and decision == "CONTINUE":
+                return "CONTINUED", "sol_continue_same_carrier", historical
+            if valid_decision and decision == "STOP":
+                return "STOPPED", "sol_stop_same_carrier", historical
+            return "RETURNED", "awaiting_sol_decision", historical
+        return "UNKNOWN", f"unrecognized_attempt_state:{attempt_state}", historical
+
+    # No Attempt evidence at all: Law 4 forbids inferring STARTED from
+    # delivery/pickup evidence alone, so the ceiling here is
+    # PICKUP_ACKNOWLEDGED.
+    if obligation_status in _OBLIGATION_NO_ACK:
+        return "DELIVERY_UNCONSUMED", f"obligation_status:{obligation_status}", historical
+    if obligation_status in _OBLIGATION_PICKUP_ACK:
+        return "PICKUP_ACKNOWLEDGED", f"obligation_status:{obligation_status}", historical
+    if obligation_status == "ACCEPTED":
+        return "DELIVERY_SENT", "obligation_status:ACCEPTED", historical
+    if obligation_status in _OBLIGATION_NOT_YET_DELIVERED:
+        if action_target_state == "RESOLVED":
+            return "RECEIVER_SELECTED", "action_target_resolved_no_delivery_yet", historical
+        return "WAITING_CAPACITY", "no_receiver_selected", historical
+    return "UNKNOWN", f"unrecognized_obligation_status:{obligation_status}", historical
+
+
+def project_dispatch_consumption(
+    cards: Sequence[Mapping[str, Any]],
+    *,
+    generated_at: str,
+    dispatch_evidence: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Pure, deterministic dispatch-consumption projection, one row per card.
+
+    No I/O, no subprocess, no clock read, no environment read, no
+    randomness, no mutation of ``cards``/``dispatch_evidence``.  Same
+    arguments in -> byte-identical ``json.dumps(doc, sort_keys=True)`` out.
+
+    ``cards`` is any sequence of mappings carrying ``responsibility_ref``
+    and ``root_job_id`` — in practice :func:`project_autonomy`'s own
+    ``responsibilities`` output, never re-derived here (Law 1: this module
+    reuses that exact join key, it does not invent a second one).
+
+    ``dispatch_evidence`` (optional, keyword-only, threaded exactly like
+    ``project_autonomy``'s ``declared_blockers``/``unmapped_
+    responsibilities``) is a sequence of already-gathered plain-data rows —
+    one per ``(responsibility_ref, root_job_id)`` pair a caller has
+    resolved via the real owners (``wake_ledger.reconstruct_status``,
+    ``sol_action_target.resolve_sol_action_target``, an operator-continuity
+    Attempt fact, an Agent Dialogue TurnDecision/ObservationReceipt) — never
+    fetched by this function itself.  Each row may carry: ``observed_at``,
+    ``obligation_status``, ``action_target_state``, ``action_target_reason``,
+    ``binding_evidence_state``, ``attempt_state``, ``effect_state``,
+    ``watch_child_ref``, ``watch_carrier_ref``, ``watch_mechanism``,
+    ``watch_baseline_receipt``, ``sol_decision``, ``sol_decision_carrier_ref``.
+
+    Absent, empty, unmatched, or ambiguous (more than one row sharing the
+    same exact join key) evidence renders that card's ``dispatch_state`` as
+    ``"UNKNOWN"`` with a named ``reason`` — never a fabricated success
+    stage (mission WHY: an absent/ambiguous fact must render as ignorance,
+    never as progress).
+
+    Each output card carries:
+      - ``dispatch_state``: one of :data:`DISPATCH_STATES`.
+      - ``reason``: a short machine token naming the cause.
+      - ``actionable``: ``True`` only for a fresh ``"RETURNED"`` card — the
+        one state where a decision is genuinely owed to Sol AND the
+        evidence backing it is current.  Never ``True`` for any of the
+        five unsafe states, and never ``True`` when ``historical`` is
+        ``True`` (Law 8's "disables every actuator" + Law 9's
+        "non-actionable" apply identically here).
+      - ``historical``: ``True`` whenever the row's own ``observed_at`` is
+        stale or unknown relative to ``generated_at`` (Law 9) — computed
+        independently of ``dispatch_state`` itself.
+      - ``watch_proven``: Law 6's four-field proof, always computed (even
+        when irrelevant to the derived state) so a caller can inspect it.
+      - ``evidence``: the matched row's non-``None`` fields, verbatim, for
+        forensic inspection — ``None`` when no row was matched.
+
+    ``counts`` is a closed histogram over every :data:`DISPATCH_STATES`
+    token, always present (zero-filled), so a caller never has to guess
+    whether a missing key means "zero" or "not computed".
+    """
+    evidence_rows = tuple(dispatch_evidence) if dispatch_evidence else ()
+
+    lookup: dict[tuple[Any, Any], list[Mapping[str, Any]]] = {}
+    for row in evidence_rows:
+        key = (row.get("responsibility_ref"), row.get("root_job_id"))
+        lookup.setdefault(key, []).append(row)
+
+    out_cards: list[dict[str, Any]] = []
+    counts = {state: 0 for state in sorted(DISPATCH_STATES)}
+
+    for card in cards:
+        ref = card.get("responsibility_ref")
+        root_job_id = card.get("root_job_id")
+        matches = lookup.get((ref, root_job_id), [])
+
+        if not evidence_rows:
+            state, reason, historical = "UNKNOWN", "dispatch_evidence_not_supplied", False
+            evidence: dict[str, Any] | None = None
+            watch_proven = False
+        elif len(matches) == 0:
+            state, reason, historical = "UNKNOWN", "no_exact_join_match", False
+            evidence = None
+            watch_proven = False
+        elif len(matches) > 1:
+            state, reason, historical = "UNKNOWN", "ambiguous_dispatch_evidence", False
+            evidence = None
+            watch_proven = False
+        else:
+            row = matches[0]
+            state, reason, historical = _classify_dispatch_row(row, generated_at)
+            evidence = {k: v for k, v in sorted(row.items()) if v is not None}
+            watch_proven = _watch_proven(row)
+
+        actionable = state == "RETURNED" and not historical
+
+        out_cards.append({
+            "responsibility_ref": ref,
+            "root_job_id": root_job_id,
+            "dispatch_state": state,
+            "reason": reason,
+            "actionable": actionable,
+            "historical": historical,
+            "watch_proven": watch_proven,
+            "evidence": evidence,
+        })
+        counts[state] += 1
+
+    out_cards.sort(key=lambda c: (c["responsibility_ref"] or "", c["root_job_id"] or ""))
+
+    return {
+        "schema": DISPATCH_SCHEMA,
+        "generated_at": generated_at,
+        "cards": out_cards,
+        "counts": counts,
+    }
+
+
+def attach_dispatch_consumption(
+    autonomy: Mapping[str, Any],
+    dispatch: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Attach each dispatch row to its card on the EXACT join key.
+
+    Pure and non-mutating: returns a new document, leaves both inputs
+    untouched.  The join is ``(responsibility_ref, root_job_id)`` and nothing
+    else (Law 1) — a row whose pair matches no card is dropped rather than
+    attached by title, provider label or recency, and a card with no matching
+    row simply carries no ``dispatch`` field, which the UI renders as absence
+    rather than as a successful stage.
+
+    Kept here, beside the projection, rather than in the compositor: the join
+    key belongs to this module and the compositor must not acquire a second
+    copy of it.
+    """
+    rows = {
+        (row.get("responsibility_ref"), row.get("root_job_id")): row
+        for row in dispatch.get("cards", ())
+    }
+    cards: list[dict[str, Any]] = []
+    for card in autonomy.get("responsibilities", ()):
+        merged = dict(card)
+        row = rows.get((card.get("responsibility_ref"), card.get("root_job_id")))
+        if row is not None:
+            merged["dispatch"] = dict(row)
+        cards.append(merged)
+    out = dict(autonomy)
+    out["responsibilities"] = cards
+    return out
+
+
 def build_autonomy_snapshot(
     *,
     inbox: dict[str, Any] | None,
@@ -2131,7 +2516,10 @@ __all__ = [
     "SCHEMA",
     "OUTPUT_KEYS",
     "WAKE_OUTCOME_TOKENS",
+    "DISPATCH_SCHEMA",
+    "DISPATCH_STATES",
     "project_autonomy",
+    "project_dispatch_consumption",
     "build_autonomy_snapshot",
     "declared_blockers_from_agent_os_state",
     "unmapped_responsibilities_from_agent_os_state",
