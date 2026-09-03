@@ -1,9 +1,9 @@
-"""Fixed GitHub API port for exact expected-head branch patch commits.
+"""Fixed GitHub API port for exact expected-head branch repair commits.
 
 No model-visible input reaches an HTTP method, host, endpoint family, credential,
 or request header. Repository, branch, and paths arrive only from the accepted
-server-side authority resolver. The port keeps canonical GitHub as effect truth
-and exposes no retry loop.
+server-side authority resolver or an authenticated token-bound reconciliation
+target. GitHub remains effect truth and this port contains no retry loop.
 """
 from __future__ import annotations
 
@@ -29,11 +29,10 @@ from integrations.mastermind_github_app.models import (
     ResolvedPatchTarget,
 )
 
-
 REST_ROOT = "https://api.github.com"
 GRAPHQL_ENDPOINT = "https://api.github.com/graphql"
 API_VERSION = "2022-11-28"
-USER_AGENT = "Mastermind-GitHub-Patch/0.1"
+USER_AGENT = "Mastermind-GitHub-Patch/0.3"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_LIVE_BLOB_BYTES = 4 * 1024 * 1024
 MAX_COMMIT_SCAN = 100
@@ -68,13 +67,11 @@ class HttpTransport(Protocol):
         headers: Mapping[str, str],
         body: bytes | None,
         timeout_seconds: float,
-    ) -> HttpResponse:
-        """Perform one bounded HTTPS request."""
+    ) -> HttpResponse: ...
 
 
 class GithubTokenProvider(Protocol):
-    async def installation_token(self) -> str:
-        """Return one short-lived GitHub installation token outside model context."""
+    async def installation_token(self) -> str: ...
 
 
 class GithubReadError(RuntimeError):
@@ -82,9 +79,12 @@ class GithubReadError(RuntimeError):
         super().__init__("github_read_error")
 
 
-class UrllibHttpTransport:
-    """Minimal stdlib transport; production policy still owns egress and TLS."""
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
 
+
+class UrllibHttpTransport:
     async def request(
         self,
         *,
@@ -111,14 +111,10 @@ class UrllibHttpTransport:
         body: bytes | None,
         timeout_seconds: float,
     ) -> HttpResponse:
-        request = urllib.request.Request(
-            url=url,
-            data=body,
-            headers=dict(headers),
-            method=method,
-        )
+        request = urllib.request.Request(url=url, data=body, headers=dict(headers), method=method)
+        opener = urllib.request.build_opener(_NoRedirect())
         try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            with opener.open(request, timeout=timeout_seconds) as response:
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
                 if len(raw) > MAX_RESPONSE_BYTES:
                     raise GithubReadError()
@@ -180,7 +176,6 @@ class GithubApiPatchPort:
         repository = self._repository(target.repository)
         head = self._oid(head_oid)
         parts = self._path_parts(path)
-
         commit, _ = await self._json_request(
             "GET",
             f"{REST_ROOT}/repos/{repository}/git/commits/{head}",
@@ -215,6 +210,7 @@ class GithubApiPatchPort:
                 tree_oid = self._oid(entry.get("sha"))
         if entry is None:
             raise GithubReadError()
+
         blob_oid = self._oid(entry.get("sha"))
         blob, _ = await self._json_request(
             "GET",
@@ -240,6 +236,8 @@ class GithubApiPatchPort:
         except (ValueError, UnicodeError) as exc:
             raise GithubReadError() from exc
         if len(raw) != size or len(raw) > MAX_LIVE_BLOB_BYTES:
+            raise GithubReadError()
+        if self._git_blob_oid(raw, width=len(blob_oid)) != blob_oid:
             raise GithubReadError()
         return GithubBlob(
             path="/".join(parts),
@@ -282,24 +280,11 @@ class GithubApiPatchPort:
                 raw = item.content.encode("utf-8")
             except UnicodeError as exc:
                 raise NativeCommitError(effect_possible=False) from exc
-            if len(raw) > MAX_LIVE_BLOB_BYTES:
+            if len(raw) > MAX_LIVE_BLOB_BYTES or hashlib.sha256(raw).hexdigest() != after_digest:
                 raise NativeCommitError(effect_possible=False)
-            if hashlib.sha256(raw).hexdigest() != after_digest:
-                raise NativeCommitError(effect_possible=False)
-            additions.append(
-                {
-                    "path": path,
-                    "contents": base64.b64encode(raw).decode("ascii"),
-                }
-            )
+            additions.append({"path": path, "contents": base64.b64encode(raw).decode("ascii")})
             after_lines.append(f"Mastermind-File: {path} {after_digest}")
 
-        body_lines = [
-            f"Mastermind-Operation: {operation}",
-            f"Mastermind-Effect: {effect}",
-            f"Mastermind-Expected-Head: {expected_head}",
-            *after_lines,
-        ]
         variables = {
             "input": {
                 "branch": {
@@ -308,7 +293,14 @@ class GithubApiPatchPort:
                 },
                 "message": {
                     "headline": f"fix(scf): apply bounded branch patch {effect[:12]}",
-                    "body": "\n".join(body_lines),
+                    "body": "\n".join(
+                        [
+                            f"Mastermind-Operation: {operation}",
+                            f"Mastermind-Effect: {effect}",
+                            f"Mastermind-Expected-Head: {expected_head}",
+                            *after_lines,
+                        ]
+                    ),
                 },
                 "fileChanges": {"additions": additions},
                 "expectedHeadOid": expected_head,
@@ -323,17 +315,13 @@ class GithubApiPatchPort:
             value, _ = await self._json_request("POST", GRAPHQL_ENDPOINT, payload)
         except GithubReadError as exc:
             raise NativeCommitError(effect_possible=True) from exc
-        if value.get("errors"):
+        if not isinstance(value, Mapping) or value.get("errors"):
             raise NativeCommitError(effect_possible=True)
         try:
             oid = self._oid(value["data"]["createCommitOnBranch"]["commit"]["oid"])
         except (KeyError, TypeError) as exc:
             raise NativeCommitError(effect_possible=True) from exc
-        return NativeCommitResult(
-            request_sent=True,
-            commit_oid=oid,
-            definite_no_effect=False,
-        )
+        return NativeCommitResult(request_sent=True, commit_oid=oid, definite_no_effect=False)
 
     async def reconcile_branch_patch(
         self,
@@ -357,7 +345,7 @@ class GithubApiPatchPort:
 
         current_head = await self.read_branch_head(target)
         query = urllib.parse.urlencode({"sha": branch, "per_page": MAX_COMMIT_SCAN})
-        commits, headers = await self._json_request(
+        commits, _ = await self._json_request(
             "GET",
             f"{REST_ROOT}/repos/{repository}/commits?{query}",
             None,
@@ -366,6 +354,7 @@ class GithubApiPatchPort:
             raise GithubReadError()
         marker = self._marker(operation, effect, expected_head, expected_after)
         candidates: list[str] = []
+        observed_oids: list[str] = []
         for row in commits:
             if not isinstance(row, Mapping):
                 raise GithubReadError()
@@ -374,15 +363,14 @@ class GithubApiPatchPort:
                 message = row["commit"]["message"]
             except (KeyError, TypeError) as exc:
                 raise GithubReadError() from exc
+            if not isinstance(message, str):
+                raise GithubReadError()
+            observed_oids.append(oid)
             if message == marker:
                 candidates.append(oid)
+
         if len(candidates) > 1:
-            return EffectObservation(
-                state=EffectState.EFFECT_UNKNOWN,
-                commit_oid=None,
-                branch_head_oid=current_head,
-                complete=False,
-            )
+            return EffectObservation(EffectState.EFFECT_UNKNOWN, None, current_head, False)
         if len(candidates) == 1:
             candidate = candidates[0]
             valid = await self._verify_effect_commit(
@@ -393,26 +381,19 @@ class GithubApiPatchPort:
                 target=target,
             )
             return EffectObservation(
-                state=EffectState.APPLIED if valid else EffectState.EFFECT_UNKNOWN,
-                commit_oid=candidate if valid else None,
-                branch_head_oid=current_head,
-                complete=valid,
+                EffectState.APPLIED if valid else EffectState.EFFECT_UNKNOWN,
+                candidate if valid else None,
+                current_head,
+                valid,
             )
 
-        paginated = 'rel="next"' in headers.get("link", "")
-        if current_head == expected_head and not paginated:
-            return EffectObservation(
-                state=EffectState.NOT_APPLIED,
-                commit_oid=None,
-                branch_head_oid=current_head,
-                complete=True,
-            )
-        return EffectObservation(
-            state=EffectState.EFFECT_UNKNOWN,
-            commit_oid=None,
-            branch_head_oid=current_head,
-            complete=False,
-        )
+        # The exact createCommitOnBranch effect, if applied, must be a child of
+        # expected_head and remain in the branch history. Seeing expected_head
+        # in the complete scanned prefix proves no such child marker exists,
+        # even when unrelated later commits advanced the branch.
+        if current_head == expected_head or expected_head in observed_oids:
+            return EffectObservation(EffectState.NOT_APPLIED, None, current_head, True)
+        return EffectObservation(EffectState.EFFECT_UNKNOWN, None, current_head, False)
 
     async def _verify_effect_commit(
         self,
@@ -462,10 +443,7 @@ class GithubApiPatchPort:
     ) -> tuple[object, Mapping[str, str]]:
         if method not in {"GET", "POST"}:
             raise GithubReadError()
-        if not (
-            url == GRAPHQL_ENDPOINT
-            or url.startswith(f"{REST_ROOT}/repos/")
-        ):
+        if not (url == GRAPHQL_ENDPOINT or url.startswith(f"{REST_ROOT}/repos/")):
             raise GithubReadError()
         try:
             token = await self._token_provider.installation_token()
@@ -505,6 +483,15 @@ class GithubApiPatchPort:
         return value, {str(key).lower(): str(item) for key, item in response.headers.items()}
 
     @staticmethod
+    def _git_blob_oid(content: bytes, *, width: int) -> str:
+        framed = b"blob " + str(len(content)).encode("ascii") + b"\0" + content
+        if width == 40:
+            return hashlib.sha1(framed, usedforsecurity=False).hexdigest()
+        if width == 64:
+            return hashlib.sha256(framed).hexdigest()
+        raise GithubReadError()
+
+    @staticmethod
     def _marker(
         operation_key: str,
         effect_digest: str,
@@ -536,6 +523,8 @@ class GithubApiPatchPort:
             not isinstance(value, str)
             or not value
             or len(value) > 255
+            or value == "HEAD"
+            or value.startswith("refs/")
             or value.startswith("-")
             or value.endswith(".")
             or ".." in value
