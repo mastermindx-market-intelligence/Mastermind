@@ -56,6 +56,8 @@ Usage
 """
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import json
 import os
 import re
@@ -64,7 +66,107 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from control_plane import ceo_boot_packet, executive_inbox, executive_runtime, surface_bindings
+from control_plane import (
+    ceo_boot_packet,
+    executive_inbox,
+    executive_runtime,
+    surface_bindings,
+)
+
+# CAP-C1 placement selection is an OPTIONAL capability: an extracted
+# control-room-remote release stages an exact runtime file allowlist, and
+# that allowlist may omit the selector modules or a genuinely optional
+# dependency of theirs. This module must therefore boot — and compose a
+# complete document — when they are absent. The import is DELIBERATELY
+# dynamic, not static: a static import would both crash the extracted boot
+# and widen the release's audited import closure.
+#
+# Genuine optional absence fails SOFT, by name, into the
+# "placement_selection: unavailable (module not shipped)" degraded path.
+#
+# That softness has an exact limit. It applies only to a module the audited
+# allowlist can actually omit — one this file does not already require. A
+# dependency that is reachable through this module's own MANDATORY imports
+# is not optional in any release: its absence raises before the optional
+# block below is ever reached, and that hard failure is correct rather than
+# a gap to paper over. See _SELECTOR_CONTROL_PLANE_REQUIRES for which
+# dependencies fall on which side of that line.
+
+
+def _optional_control_plane_module(name: str, *, requires: tuple[str, ...] = ()):
+    """``None`` when the module is genuinely not shipped; loud otherwise.
+
+    ``find_spec`` distinguishes the two failure classes: a missing file
+    yields a ``None`` spec (→ optional capability absent, degrade by name),
+    while a module that IS shipped but broken imports without a net so it
+    fails loudly instead of masquerading as "not shipped".
+
+    ``requires`` names this module's own STATIC control-plane dependencies,
+    and they are resolved BEFORE the import (review 5086941171 BLOCKER 4).
+    Resolving only ``name`` was not enough: in a release that ships the
+    selector but not the steward, the selector's spec resolves fine, and the
+    unguarded ``import_module`` below then raises ``ModuleNotFoundError``
+    from the selector's own ``from control_plane.executive_steward import
+    ...`` — aborting the import of THIS module entirely instead of degrading
+    by name. Checking the dependency's spec turns that asymmetric packaging
+    into the same fail-closed "not shipped" answer.
+
+    This deliberately checks SPEC PRESENCE only. A dependency that is
+    present but broken still raises from ``import_module``, so a genuine
+    fault inside a shipped module keeps failing loudly rather than
+    masquerading as absent.
+    """
+    qualified = f"control_plane.{name}"
+    for dependency in (name, *requires):
+        try:
+            spec = importlib.util.find_spec(f"control_plane.{dependency}")
+        except ModuleNotFoundError:
+            spec = None
+        if spec is None:
+            return None
+    return importlib.import_module(qualified)
+
+
+#: Every control-plane module :mod:`control_plane.executive_placement_selection`
+#: STATICALLY imports, derived from its own AST by
+#: ``tests/test_chairman_control_room.py::
+#: test_declared_selector_dependencies_match_its_actual_static_imports`` so
+#: the list cannot silently drift if a STATIC import is added later.
+#:
+#: Scope of that guarantee, stated exactly, because the unqualified version
+#: of this sentence was falsifiable: the derivation sees STATIC import forms
+#: only. A DYNAMIC import (``importlib.import_module``, ``__import__``, or an
+#: attribute reached off a bare ``import control_plane``) is invisible to any
+#: AST walk and would leave this list stale while the guard stayed green.
+#: Rather than claim a completeness the derivation cannot deliver, the guard
+#: additionally REFUSES a dynamic import in the selector — turning that
+#: silent gap into a loud one.
+#:
+#: What this buys, stated exactly — because an earlier pass over-claimed it:
+#: declaring a dependency here converts its absence into the documented
+#: "not shipped" degrade ONLY IF the dependency is not ALREADY reachable
+#: from this module's own mandatory imports. ``executive_steward`` is such a
+#: case and genuinely degrades. ``executive_orchestration_principal`` is NOT:
+#: the unconditional ``from control_plane import (...)`` above pulls it
+#: transitively. The observed traceback runs ``chairman_control_room ->
+#: executive_inbox -> executive_runtime -> executive_orchestration_principal``;
+#: ``executive_runtime`` is also imported directly here, so BOTH routes are
+#: mandatory. Its absence therefore raises long before this optional block
+#: is reached. It is listed here because it IS a
+#: static import of the selector and the AST guard is the source of truth —
+#: but a mandatory transitive dependency cannot be softened from here, and
+#: ``test_a_mandatory_transitive_dependency_is_a_hard_failure_not_a_degrade``
+#: pins that hard failure as the correct behaviour rather than pretending
+#: otherwise.
+_SELECTOR_CONTROL_PLANE_REQUIRES: tuple[str, ...] = (
+    "executive_orchestration_principal",
+    "executive_steward",
+)
+
+executive_placement_selection = _optional_control_plane_module(
+    "executive_placement_selection", requires=_SELECTOR_CONTROL_PLANE_REQUIRES
+)
+executive_steward = _optional_control_plane_module("executive_steward")
 
 #: Schema version of the document this module emits.
 SCHEMA = "mastermind.chairman_control_room.v1"
@@ -164,6 +266,7 @@ _BINDING_SUMMARY_KEYS = (
 OUTPUT_KEYS = frozenset({
     "schema", "generated_at", "sources", "degraded", "attention", "work",
     "unjoined_open_prs", "unbound_surfaces", "binding_conflicts",
+    "placement_selection",
 })
 
 
@@ -649,6 +752,7 @@ def compose_control_room(
     runtime_jobs: list[dict[str, Any]] | None = None,
     bindings: dict[str, Any] | None,
     binding_problems: Sequence[str] = (),
+    placement_selection: dict[str, Any] | None = None,
     generated_at: str,
 ) -> dict[str, Any]:
     """Pure, deterministic projection of every already-collected source.
@@ -898,6 +1002,27 @@ def compose_control_room(
             "disagreements": _disagreements(agent_os_entry, jobs, prs),
         })
 
+    # --- placement selection (CAP-C1) ---------------------------------------
+    # Optional pure input: a wire dict already produced by
+    # executive_placement_selection.select_placement().to_dict() (or `None`
+    # when no facts document was supplied — the common case). A well-typed
+    # `None` renders no section and degrades nothing, matching how every
+    # other optional source in this module behaves. A present-but-invalid
+    # dict degrades by name, exactly like a malformed boot_packet/inbox/
+    # active_builds/agent_os_state input — this function still returns a
+    # complete, well-formed document rather than raising.
+    placement_selection_out: dict[str, Any] | None = None
+    if placement_selection is not None and executive_placement_selection is None:
+        degraded.append("placement_selection: unavailable (module not shipped)")
+    elif placement_selection is not None:
+        try:
+            placement_selection_out = executive_placement_selection.validate_placement_selection(
+                placement_selection
+            )
+        except (ValueError, TypeError) as exc:
+            degraded.append(f"placement_selection: {exc}")
+            placement_selection_out = None
+
     doc = {
         "schema": SCHEMA,
         "generated_at": generated_at,
@@ -921,6 +1046,7 @@ def compose_control_room(
         "unjoined_open_prs": _unjoined_open_prs(open_prs, joined_pr_identities),
         "unbound_surfaces": unbound_surfaces,
         "binding_conflicts": binding_conflicts,
+        "placement_selection": placement_selection_out,
     }
     assert set(doc.keys()) == OUTPUT_KEYS  # self-check: no "overall" field, closed set
     return doc
@@ -1033,6 +1159,144 @@ def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | N
     return result, None
 
 
+# ---------------------------------------------------------------------------
+# placement selection facts document (CAP-C1) — read + parse + select, never
+# raises. This is the ONE gather-layer seam for
+# :mod:`control_plane.executive_placement_selection`: a caller-supplied JSON
+# document is parsed into the module's own typed, secret-safe facts, handed
+# to the pure :func:`control_plane.executive_placement_selection.
+# select_placement`, and the resulting decision's closed wire dict is what
+# flows into :func:`compose_control_room`. No file is ever written here.
+# ---------------------------------------------------------------------------
+
+def _parse_source_ref(raw: Any) -> executive_steward.SourceRef:
+    if not isinstance(raw, Mapping):
+        raise ValueError("source must be an object")
+    return executive_steward.SourceRef(
+        owner=executive_steward.SourceOwner(raw["owner"]),
+        ref=raw["ref"],
+        observed_at=raw.get("observed_at"),
+        freshness=executive_steward.Freshness(raw["freshness"]),
+    )
+
+
+def _parse_responsibility_fact(raw: Any) -> executive_steward.ResponsibilityFact:
+    if not isinstance(raw, Mapping):
+        raise ValueError("responsibility must be an object")
+    return executive_steward.ResponsibilityFact(
+        responsibility_ref=raw["responsibility_ref"],
+        title=raw["title"],
+        accountable_seat=executive_steward.Seat(raw["accountable_seat"]),
+        state=raw.get("state"),
+        root_job_id=raw.get("root_job_id"),
+        source=_parse_source_ref(raw["source"]),
+    )
+
+
+def _parse_placement_demand(raw: Any) -> executive_placement_selection.PlacementDemand:
+    if not isinstance(raw, Mapping):
+        raise ValueError("demand must be an object")
+    capabilities = raw["required_capabilities"]
+    if not isinstance(capabilities, list):
+        raise ValueError("demand.required_capabilities must be a list")
+    # Mode wave: allowed_modes is required (no soft default — an omitted
+    # or empty set would silently mean "no candidate can ever satisfy
+    # this", which PlacementDemand itself already refuses).
+    allowed_modes_raw = raw["allowed_modes"]
+    if not isinstance(allowed_modes_raw, list):
+        raise ValueError("demand.allowed_modes must be a list")
+    return executive_placement_selection.PlacementDemand(
+        required_capabilities=frozenset(capabilities),
+        quota_class=raw["quota_class"],
+        provider=raw.get("provider"),
+        allowed_modes=frozenset(
+            executive_placement_selection.PlacementMode(item) for item in allowed_modes_raw
+        ),
+    )
+
+
+def _parse_placement_candidate(raw: Any) -> executive_placement_selection.PlacementCandidateFact:
+    if not isinstance(raw, Mapping):
+        raise ValueError("candidate must be an object")
+    capabilities = raw["capabilities"]
+    if not isinstance(capabilities, list):
+        raise ValueError("candidate.capabilities must be a list")
+    return executive_placement_selection.PlacementCandidateFact(
+        worker_id=raw["worker_id"],
+        provider=raw["provider"],
+        account_label=raw["account_label"],
+        quota_class=raw["quota_class"],
+        capabilities=frozenset(capabilities),
+        observed_at_ms=raw["observed_at_ms"],
+        occupancy=executive_placement_selection.OccupancyState(raw["occupancy"]),
+        occupancy_source=_parse_source_ref(raw["occupancy_source"]),
+        capacity_state=executive_steward.CapacityState(raw["capacity_state"]),
+        capacity_source=_parse_source_ref(raw["capacity_source"]),
+        host_source_closure_proven=raw["host_source_closure_proven"],
+        closure_source=_parse_source_ref(raw["closure_source"]),
+        effect_state=executive_steward.EffectState(raw["effect_state"]),
+        # Mode wave: mode is required; the two creation bools default to
+        # None where absent — the exact shape a reuse candidate's facts
+        # document naturally omits them in (PlacementCandidateFact itself
+        # still refuses a fresh-lane candidate whose bools were left None).
+        mode=executive_placement_selection.PlacementMode(raw["mode"]),
+        creation_surface_accessible=raw.get("creation_surface_accessible"),
+        session_creation_allowed=raw.get("session_creation_allowed"),
+    )
+
+
+def _read_placement_selection(
+    path: str | Path | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Read one placement-selection facts document and run ``select_placement``.
+
+    ``path`` is ``None`` in the common case (no ``--placement-selection``
+    flag) — that returns ``(None, None)`` with no degraded entry at all,
+    exactly like an optional feature that was never asked for. Any other
+    failure (missing file, invalid JSON, wrong shape, a typed fact that
+    fails its own secret-safe validation, or ``select_placement`` itself
+    refusing the input) becomes ``(None, "<reason>")`` — this function never
+    raises, matching every other gather-layer reader in this module.
+
+    Reviewer m-7: unlike this module's other gather-layer readers (whose
+    ``degraded`` rows may embed ``str(exc)``/a path — an inherited,
+    out-of-scope idiom), this ONE reader's failure reason names only the
+    exception CLASS, never ``str(exc)`` or ``path`` itself. The facts
+    document this reads can carry caller-supplied enum/token values (an
+    invalid ``SourceOwner``/``Freshness``/... raises a stdlib ``ValueError``
+    whose message echoes the bad value verbatim), and the ``degraded`` list
+    is user-visible product surface — it must never become a channel for
+    replaying facts-document content or filesystem paths back out.
+    """
+    if not path:
+        return None, None
+    if executive_placement_selection is None:
+        return None, "unavailable (module not shipped)"
+    try:
+        raw_text = Path(path).read_text(encoding="utf-8")
+        raw = json.loads(raw_text)
+        if not isinstance(raw, Mapping):
+            raise ValueError("placement selection facts document must be a JSON object")
+        responsibility = _parse_responsibility_fact(raw["responsibility"])
+        demand = _parse_placement_demand(raw["demand"])
+        candidates_raw = raw["candidates"]
+        if not isinstance(candidates_raw, list):
+            raise ValueError("candidates must be a list")
+        candidates = tuple(_parse_placement_candidate(item) for item in candidates_raw)
+        accepted_tie_breaker = raw.get("accepted_tie_breaker")
+        decision = executive_placement_selection.select_placement(
+            responsibility=responsibility,
+            demand=demand,
+            candidates=candidates,
+            accepted_tie_breaker=accepted_tie_breaker,
+        )
+        return decision.to_dict(), None
+    except Exception as exc:  # noqa: BLE001 — gather layer never raises
+        # Name only the exception CLASS — never str(exc), never `path` — see
+        # the leak-safety note above.
+        return None, f"unreadable ({exc.__class__.__name__})"
+
+
 def build_control_room(
     *,
     repo_root: Path | None = None,
@@ -1041,6 +1305,7 @@ def build_control_room(
     now: str | None = None,
     timeout: float = DEFAULT_TIMEOUT,
     bindings_path: str | Path | None = None,
+    placement_selection_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Collect every source and hand them to :func:`compose_control_room`.
 
@@ -1108,6 +1373,10 @@ def build_control_room(
 
     bindings, binding_problems = surface_bindings.load_bindings(bindings_path)
 
+    placement_selection, placement_selection_failure = _read_placement_selection(
+        placement_selection_path
+    )
+
     doc = compose_control_room(
         inbox=inbox,
         boot_packet=packet,
@@ -1116,6 +1385,7 @@ def build_control_room(
         runtime_jobs=runtime_jobs,
         bindings=bindings,
         binding_problems=binding_problems,
+        placement_selection=placement_selection,
         generated_at=generated_at,
     )
 
@@ -1130,6 +1400,8 @@ def build_control_room(
         extra_degraded.append(f"agent_os_state: {agent_os_state_failure}")
     if runtime_jobs_failure:
         extra_degraded.append(f"executive_runtime: {runtime_jobs_failure}")
+    if placement_selection_failure:
+        extra_degraded.append(f"placement_selection: {placement_selection_failure}")
     if extra_degraded:
         doc = dict(doc)
         doc["degraded"] = sorted(list(doc["degraded"]) + extra_degraded)
