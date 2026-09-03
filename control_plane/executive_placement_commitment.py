@@ -278,9 +278,16 @@ def validate_commitment_event_payload(
     value: Any,
     *,
     plan: PlacementCommitmentPlan,
-    expected_attempt_id: str | None = None,
+    expected_attempt_id: str,
+    expected_responsibility_job_created_command_id: str,
+    expected_responsibility_authority_fingerprint: str,
 ) -> dict[str, Any]:
-    """Validate replay evidence against the current recomputed C2 plan."""
+    """Validate replay against current Runtime-owned root and claim facts.
+
+    Every mutable authority expectation is supplied by the current Runtime
+    reread.  Historical Event fields are evidence only and may never validate
+    themselves merely because their internal digest is coherent.
+    """
 
     if not isinstance(value, Mapping) or set(value) != _EVENT_KEYS:
         raise PlacementCommitmentError("COMMITMENT_EVENT_SHAPE_INVALID")
@@ -291,19 +298,24 @@ def validate_commitment_event_payload(
     attempt_id = _token(
         value.get("committed_attempt_id"), code="COMMITTED_ATTEMPT_ID_INVALID"
     )
-    if expected_attempt_id is not None and attempt_id != _token(
+    current_attempt_id = _token(
         expected_attempt_id, code="COMMITTED_ATTEMPT_ID_INVALID"
-    ):
+    )
+    if attempt_id != current_attempt_id:
         raise PlacementCommitmentError("COMMITTED_ATTEMPT_MISMATCH")
+    current_created_command_id = _token(
+        expected_responsibility_job_created_command_id,
+        code="RESPONSIBILITY_CREATED_COMMAND_ID_INVALID",
+    )
+    current_authority_fingerprint = _digest_token(
+        expected_responsibility_authority_fingerprint,
+        code="RESPONSIBILITY_AUTHORITY_FINGERPRINT_INVALID",
+    )
     expected = build_commitment_event_payload(
         plan=plan,
-        committed_attempt_id=attempt_id,
-        responsibility_job_created_command_id=value.get(
-            "responsibility_job_created_command_id"
-        ),
-        responsibility_authority_fingerprint=value.get(
-            "responsibility_authority_fingerprint"
-        ),
+        committed_attempt_id=current_attempt_id,
+        responsibility_job_created_command_id=current_created_command_id,
+        responsibility_authority_fingerprint=current_authority_fingerprint,
     )
     if dict(value) != expected:
         raise PlacementCommitmentError("COMMITMENT_EVENT_REPLAY_CONFLICT")
