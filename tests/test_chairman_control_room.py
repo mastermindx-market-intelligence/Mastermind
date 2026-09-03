@@ -3002,3 +3002,42 @@ def test_review_an_all_unclassifiable_tree_still_falls_back_to_the_ancestor_rule
     assert _cand_ids([
         _J("JOB-001", None, "ATT-a"), _J("JOB-002", "JOB-001", "ATT-b"),
     ]) == ["JOB-002"]
+
+
+def test_review_liveness_never_drifts_from_the_runtimes_own_terminal_vocabulary():
+    """The Control Room must not hold a second opinion about what "finished"
+    means.
+
+    RATE_LIMITED was allowlisted as live while the Runtime's own
+    `_TERMINAL_JOB_STATUSES` counts it terminal and its `_living_child_rows`
+    excludes it from "living" -- so a rate-limited child evicted a RUNNING
+    root and the row asserted a terminal state over a live responsibility.
+    Requeuability is not the criterion: FAILED and LOST are equally
+    requeuable and are correctly dead.
+
+    This pins the two sets against each other so the vocabularies cannot
+    drift apart again silently.
+    """
+    runtime_terminal = {
+        getattr(status, "value", status)
+        for status in ccr.executive_runtime._TERMINAL_JOB_STATUSES
+    }
+
+    assert ccr._LIVE_JOB_STATUSES & runtime_terminal == set(), (
+        "a status the Runtime calls terminal is being treated as live"
+    )
+    assert "RATE_LIMITED" in runtime_terminal  # the case that actually drifted
+    assert ccr._LIVE_JOB_STATUSES, "the allowlist must not be empty"
+
+
+def test_review_a_rate_limited_child_does_not_evict_a_running_root():
+    """The concrete shape the drift produced."""
+    class _J(_FakeJob):
+        def __init__(self, job_id, parent, attempt, job_status):
+            super().__init__(job_id, parent, "JOB-001", attempt)
+            self.status = job_status
+
+    root = _J("JOB-001", None, "ATT-root", "RUNNING")
+    limited = _J("JOB-002", "JOB-001", "ATT-limited", "RATE_LIMITED")
+
+    assert _cand_ids([root, limited]) == ["JOB-001"]

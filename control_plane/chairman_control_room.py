@@ -1370,8 +1370,16 @@ def _dispatch_evidence_newer(current: str | None, candidate: Any) -> str | None:
 #: ancestor we know is running beats reporting a descendant we cannot
 #: classify.  An all-unclassifiable tree simply has no live candidate and
 #: falls back to the ancestor rule, exactly as an all-terminal tree does.
+#: RATE_LIMITED is DELIBERATELY absent.  The Runtime's own
+#: `_TERMINAL_JOB_STATUSES` counts it terminal alongside FAILED/LOST/
+#: COMPLETED/CANCELLED, and its `_living_child_rows` excludes it from
+#: "living" -- so calling it live here contradicted the owner's model and let
+#: a rate-limited child evict a RUNNING root.  Requeuability is not the
+#: criterion either: FAILED and LOST are equally requeuable and are correctly
+#: dead.  `tests` pins this set against the Runtime's own terminal set so the
+#: two cannot drift again.
 _LIVE_JOB_STATUSES = frozenset({
-    "QUEUED", "RUNNING", "CHECKPOINTED", "RATE_LIMITED", "CANCEL_REQUESTED",
+    "QUEUED", "RUNNING", "CHECKPOINTED", "CANCEL_REQUESTED",
 })
 
 
@@ -1406,7 +1414,6 @@ def _executable_attempt_candidates(tree_jobs: Sequence[Any]) -> list[Any]:
         candidates = live
         if len(candidates) < 2:
             return candidates
-    live_ids = {getattr(j, "job_id", None) for j in candidates}
     by_id = {getattr(j, "job_id", None): j for j in tree_jobs}
     candidate_ids = {getattr(j, "job_id", None) for j in candidates}
     aggregating: set[Any] = set()
@@ -1415,8 +1422,13 @@ def _executable_attempt_candidates(tree_jobs: Sequence[Any]) -> list[Any]:
         parent = getattr(job, "parent_job_id", None)
         while parent and parent not in seen:
             seen.add(parent)
-            if parent in candidate_ids and getattr(job, "job_id", None) in live_ids:
-                # a dead descendant never evicts its ancestor
+            if parent in candidate_ids:
+                # Eviction protection lives ENTIRELY in the `candidates = live`
+                # narrowing above; an earlier version repeated a `job in
+                # live_ids` test here, which was always true because both sets
+                # are built from the same list.  It read as a second line of
+                # defence and was none, so it is gone rather than left to
+                # mislead the next reader.
                 aggregating.add(parent)
             parent_job = by_id.get(parent)
             parent = getattr(parent_job, "parent_job_id", None) if parent_job else None
