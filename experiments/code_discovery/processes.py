@@ -846,9 +846,14 @@ def _wait_for_loopback(
             raise ZoektProcessExited(
                 f"ZOEKT_PROCESS_EXITED: zoekt-webserver exited with {process.returncode}"
             )
+        reachable = _loopback_has_exact_identities(endpoint, expected_identities)
+        capture.raise_if_overflow()
+        if process.poll() is not None:
+            raise ZoektProcessExited(
+                f"ZOEKT_PROCESS_EXITED: zoekt-webserver exited with {process.returncode}"
+            )
         snapshot = capture.snapshot()
         contested = endpoint_was_open_before_spawn or _snapshot_has_bind_collision(snapshot)
-        reachable = _loopback_has_exact_identities(endpoint, expected_identities)
         now = time.monotonic()
         if reachable and not contested:
             if stable_since is None:
@@ -936,12 +941,22 @@ def _loopback_has_exact_identities(
 
     try:
         payload = _post_loopback_list(endpoint)
-        repositories = payload.get("Repos")
+        listing = payload.get("List")
+        if not isinstance(listing, dict) or set(listing) != {"Repos", "Crashes", "Stats"}:
+            return False
+        repositories = listing.get("Repos")
+        crashes = listing.get("Crashes")
+        if type(crashes) is not int or crashes != 0:
+            return False
         if not isinstance(repositories, list) or len(repositories) != len(expected):
             return False
         observed: list[_RepositoryIdentity] = []
         for item in repositories:
-            if not isinstance(item, dict) or set(item) != {"Repository"}:
+            if not isinstance(item, dict) or not {
+                "Repository",
+                "IndexMetadata",
+                "Stats",
+            }.issubset(item):
                 return False
             repository = item["Repository"]
             if not isinstance(repository, dict):

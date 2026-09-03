@@ -134,9 +134,10 @@ def _webserver(path: Path, trace: Path) -> ExecutableSpec:
             "metadata_path = next(index.rglob('z0-index-meta.json'))\n"
             "metadata = json.loads(metadata_path.read_text())\n"
             "identity = metadata['Metadata']\n"
-            "payload = json.dumps({'Repos': [{'Repository': {'Name': metadata['Name'], "
+            "payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], "
             "'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], "
-            "'Version': identity['commit_sha']}]}}]}).encode()\n"
+            "'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], "
+            "'Crashes': 0, 'Stats': {}}}).encode()\n"
             "while True:\n"
             "    connection, _ = listener.accept()\n"
             "    with connection:\n"
@@ -242,7 +243,7 @@ def test_closed_role_and_process_group_cleanup_leave_no_child_or_scratch(
             "index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
             "metadata = json.loads(next(index.rglob('z0-index-meta.json')).read_text())\n"
             "identity = metadata['Metadata']\n"
-            "payload = json.dumps({'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}}]}).encode()\n"
+            "payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], 'Crashes': 0, 'Stats': {}}}).encode()\n"
             "while True:\n"
             "    connection, _ = listener.accept()\n"
             "    with connection:\n"
@@ -596,6 +597,82 @@ def test_final_identity_probe_collision_marker_vetoes_start(
         )
 
 
+def test_identity_http_boundary_rejects_redirect_oversize_and_strict_json(
+    tmp_path: Path,
+) -> None:
+    """The real private HTTP boundary rejects malformed and non-success list replies."""
+
+    manifest = _manifest(tmp_path)
+    trace = tmp_path / "indexer-argv.txt"
+    processes = _process_set(
+        tmp_path,
+        _indexer(tmp_path / "zoekt-git-index", trace),
+        _webserver(tmp_path / "zoekt-webserver", tmp_path / "webserver-argv.txt"),
+    )
+    processes.build_indexes(manifest)
+    identity = processes._repository_identities[0]
+    valid = json.dumps(
+        {
+            "List": {
+                "Repos": [
+                    {
+                        "Repository": {
+                            "Name": identity.repository_name,
+                            "Metadata": identity.metadata,
+                            "Branches": [
+                                {"Name": identity.ref_label, "Version": identity.commit_sha}
+                            ],
+                        },
+                        "IndexMetadata": {},
+                        "Stats": {},
+                    }
+                ],
+                "Crashes": 0,
+                "Stats": {},
+            }
+        },
+        separators=(",", ":"),
+    ).encode()
+
+    def probe(status: int, body: bytes, *, content_length: int | None = None) -> bool:
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = int(listener.getsockname()[1])
+
+        def reply() -> None:
+            with listener:
+                connection, _ = listener.accept()
+                with connection:
+                    connection.recv(4096)
+                    length = len(body) if content_length is None else content_length
+                    connection.sendall(
+                        f"HTTP/1.1 {status} reply\r\nContent-Length: {length}\r\n"
+                        "Connection: close\r\n\r\n".encode()
+                        + body
+                    )
+
+        thread = threading.Thread(target=reply)
+        thread.start()
+        try:
+            return processes_module._loopback_has_exact_identities(
+                LoopbackEndpoint("127.0.0.1", port), processes._repository_identities
+            )
+        finally:
+            thread.join(timeout=1)
+
+    assert probe(200, valid)
+    assert not probe(302, valid)
+    assert not probe(200, b'{"List":NaN}')
+    assert not probe(200, b'{"List":{},"List":{}}')
+    assert not probe(
+        200,
+        b"{}",
+        content_length=processes_module._MAX_IDENTITY_RESPONSE_BYTES + 1,
+    )
+    processes.close()
+
+
 def test_first_bind_collision_is_cleaned_and_second_attempt_starts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -681,7 +758,7 @@ def test_delayed_bind_failure_cannot_use_an_unrelated_listener_as_readiness(
             "            index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
             "            metadata = json.loads(next(index.rglob('z0-index-meta.json')).read_text())\n"
             "            identity = metadata['Metadata']\n"
-            "            payload = json.dumps({'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}}]}).encode()\n"
+            "            payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], 'Crashes': 0, 'Stats': {}}}).encode()\n"
             "            response = (b'HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\n' + f'Content-Length: {len(payload)}\\r\\nConnection: close\\r\\n\\r\\n'.encode() + payload)\n"
             "            connection.sendall(response)\n"
         ),
@@ -750,7 +827,7 @@ def test_late_wrong_identity_listener_cannot_false_start_before_bind_failure(
             "            index = Path(next(argument.split('=', 1)[1] for argument in sys.argv if argument.startswith('--index=')))\n"
             "            metadata = json.loads(next(index.rglob('z0-index-meta.json')).read_text())\n"
             "            identity = metadata['Metadata']\n"
-            "            payload = json.dumps({'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}}]}).encode()\n"
+            "            payload = json.dumps({'List': {'Repos': [{'Repository': {'Name': metadata['Name'], 'Metadata': identity, 'Branches': [{'Name': identity['ref_label'], 'Version': identity['commit_sha']}]}, 'IndexMetadata': {}, 'Stats': {}}], 'Crashes': 0, 'Stats': {}}}).encode()\n"
             "            response = (b'HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\n' + f'Content-Length: {len(payload)}\\r\\nConnection: close\\r\\n\\r\\n'.encode() + payload)\n"
             "            connection.sendall(response)\n"
         ),
