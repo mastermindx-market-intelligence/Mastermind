@@ -558,16 +558,17 @@ def bootstrap_peer_interactive() -> int:
         raise SetupRefusal(
             "peer-bootstrap confirmation did not match; no state was written"
         )
-    # The operator may spend arbitrary time at the confirmation prompt. Re-run
-    # both exact local identity and non-seat/stopped gates immediately before
-    # releasing the bootstrap-only capability.
-    anchor_row = _matching_local_row(bound_doc)
-    if anchor_row.get("running") is True:
+    # The operator may spend arbitrary time at the confirmation prompt. Mint
+    # only from fresh canonical binding and anchor bytes parsed through the
+    # no-follow descriptors retained by the one-use evidence capability. The
+    # mint also repeats the exact stopped/non-seat census proof.
+    authorization = vendors.mint_coordinator_peer_bootstrap_evidence()
+    if authorization is None:
         raise SetupRefusal(
-            "the disposable anchor must be stopped before lifecycle bootstrap"
+            "the exact post-confirmation bootstrap evidence could not be proven"
         )
     outcome = vendors.run_coordinator_peer_bootstrap(
-        authorization=vendors.BOOTSTRAP_PEER_AUTHORIZATION,
+        authorization=authorization,
     )
     if outcome not in (vendors.CREATED_THIS_CALL, vendors.EXISTING_EXACT):
         raise SetupRefusal(

@@ -170,10 +170,24 @@ The ordered journey is:
    coordinator requires healthy three-seat bindings, freshly re-identifies the
    exact anchor as a non-Chairman local profile, proves it stopped, and requires
    the distinct phrase `BOOTSTRAP THE EXISTING DISPOSABLE PEER LIFECYCLE`.
-   It then passes an opaque bootstrap-only capability to one fixed-coordinate,
-   local-file seam. The seam reads no credential, constructs no HTTP client,
-   invokes no vendor command, creates no profile or account, and never starts a
-   browser; ordinary peer creation remains the separate item-6 ceremony.
+   Only after that phrase, it opens the exact anchor and canonical surface-
+   bindings files read-only with `O_NOFOLLOW`, parses and validates their bytes
+   through those same retained descriptors, and repeats the fresh stopped/non-
+   Chairman reduced local-census proof. It then passes a private, non-copyable,
+   non-serializable, one-use capability binding the exact bytes, digests,
+   security tuples, operation, source generation, census digest, and minting
+   process to one fixed-coordinate local-file seam. The seam reads no
+   credential, constructs no HTTP client, invokes no vendor command, creates no
+   profile or account, and never starts a browser; ordinary peer creation
+   remains the separate item-6 ceremony.
+
+   Under the single exclusive control-room parent lock, the seam atomically
+   consumes that capability, compares both named paths to the still-open
+   descriptors, re-reads and validates their exact bytes and security, and
+   requires an equal fresh reduced-census digest before any fence, state, or
+   witness effect. It closes both retained descriptors on every success,
+   refusal, or exception. Reuse, process transfer, source replacement, a wrong
+   operation or generation, or a changed census is a closed refusal.
 
    The seam O_EXCL-creates one private, self-bound bootstrap fence at
    `PEER_BOOTSTRAP_FENCE_PATH` in `PENDING` before it may create the existing v5

@@ -97,7 +97,7 @@ _MLX_PROFILE_CREATE_PATH = "/profile/create"
 _MLX_PROFILE_REMOVE_PATH = "/profile/remove"
 
 PEER_OPERATION_KEY = "web-sol-realm1-multilogin-profile-create-owner-20260902-sol-001"
-PEER_BOOTSTRAP_OPERATION_KEY = "web-sol-realm1-first-rollout-bootstrap-repair-20260903-sol-001"
+PEER_BOOTSTRAP_OPERATION_KEY = "web-sol-realm1-bootstrap-evidence-binding-repair-20260903-sol-001"
 PEER_PROVISION_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_canary_peer.json"
 PEER_INTENT_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_peer_create_intent.json"
 PEER_GENESIS_WITNESS_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_peer_genesis_witness.json"
@@ -111,7 +111,7 @@ PEER_OWNERSHIP_FACT_SCHEMA = "mastermind.mas115_peer_downstream_ownership.v1"
 # Semantic source generation for the reviewed REALM1-C1 R2 lifecycle.  It is
 # deliberately independent of a self-referential Git commit hash, but changes
 # whenever this authority/state contract changes.
-PEER_SOURCE_GENERATION = "093401d6e7b104c782dfab4375e3c5e8bd40acb3ce4e23ff8ce3b20ded625873"
+PEER_SOURCE_GENERATION = "ce075b8e36138211ad9a170fd946cabef1af50406b0f427c79ccff1fe298e5d9"
 PF1_OPERATION_KEY = "web-sol-pf1-provider-continuation-falsifier-20260901-sol-001"
 INSTALL1_OPERATION_KEY = "web-sol-install1-two-profile-disposable-proof-20260902-sol-001"
 _MAX_OWNERSHIP_RECEIPT_AGE = timedelta(minutes=5)
@@ -185,13 +185,81 @@ CREATE_PEER_AUTHORIZATION = _PeerAuthorization()
 ROLLBACK_PEER_AUTHORIZATION = _PeerAuthorization()
 
 
-class _PeerBootstrapAuthorization:
-    """Distinct opaque capability held only by the local setup coordinator."""
-
-    __slots__ = ()
+_PEER_BOOTSTRAP_EVIDENCE_SEAL = object()
 
 
-BOOTSTRAP_PEER_AUTHORIZATION = _PeerBootstrapAuthorization()
+class _PeerBootstrapEvidence:
+    """One-use, process-bound proof retaining both exact source inodes."""
+
+    __slots__ = (
+        "_seal", "_operation", "_generation", "_mint_pid", "_anchor_path",
+        "_anchor_fd", "_anchor_raw", "_anchor_sha256", "_anchor_security",
+        "_bindings_path", "_bindings_fd", "_bindings_raw",
+        "_bindings_sha256", "_bindings_security", "_census_digest",
+        "_guard", "_consumed", "_closed",
+    )
+
+    def __init__(
+        self, seal, *, operation, generation, anchor_path, anchor_fd,
+        anchor_raw, anchor_security, bindings_path, bindings_fd, bindings_raw,
+        bindings_security, census_digest,
+    ):
+        if seal is not _PEER_BOOTSTRAP_EVIDENCE_SEAL:
+            raise TypeError("peer bootstrap evidence is private")
+        self._seal = seal
+        self._operation = operation
+        self._generation = generation
+        self._mint_pid = os.getpid()
+        self._anchor_path = anchor_path
+        self._anchor_fd = anchor_fd
+        self._anchor_raw = anchor_raw
+        self._anchor_sha256 = hashlib.sha256(anchor_raw).hexdigest()
+        self._anchor_security = anchor_security
+        self._bindings_path = bindings_path
+        self._bindings_fd = bindings_fd
+        self._bindings_raw = bindings_raw
+        self._bindings_sha256 = hashlib.sha256(bindings_raw).hexdigest()
+        self._bindings_security = bindings_security
+        self._census_digest = census_digest
+        self._guard = threading.Lock()
+        self._consumed = False
+        self._closed = False
+
+    def __copy__(self):
+        raise TypeError("peer bootstrap evidence cannot be copied")
+
+    def __deepcopy__(self, _memo):
+        raise TypeError("peer bootstrap evidence cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("peer bootstrap evidence cannot be serialized")
+
+    def _begin_consume(self) -> bool:
+        with self._guard:
+            if self._consumed or self._closed:
+                return False
+            self._consumed = True
+            return True
+
+    def _close_held_descriptors(self) -> None:
+        with self._guard:
+            if self._closed:
+                return
+            self._closed = True
+            descriptors = (self._anchor_fd, self._bindings_fd)
+            self._anchor_fd = -1
+            self._bindings_fd = -1
+        for descriptor in descriptors:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+    def __del__(self):
+        try:
+            self._close_held_descriptors()
+        except Exception:  # noqa: BLE001 — destructor must never escape
+            pass
 
 PEER_EFFECT_CODES = frozenset({
     "NONE", "CREATE_DISPATCHED", "CREATE_APPLIED", "CREATE_EFFECT_UNKNOWN",
@@ -2982,6 +3050,295 @@ def _peer_bootstrap_anchor_shape_exact(document) -> bool:
     )
 
 
+def _read_bounded_private_fd(leaf_fd: int, *, max_bytes: int) -> bytes:
+    os.lseek(leaf_fd, 0, os.SEEK_SET)
+    chunks = []
+    remaining = max_bytes + 1
+    while remaining:
+        chunk = os.read(leaf_fd, min(remaining, 4096))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    raw = b"".join(chunks)
+    if len(raw) > max_bytes:
+        raise _PeerStateRefusal()
+    return raw
+
+
+def _closed_json_object(raw: bytes) -> dict:
+    def _closed_object(pairs):
+        document = {}
+        for key, value in pairs:
+            if not isinstance(key, str) or key in document:
+                raise ValueError("duplicate or non-string JSON key")
+            document[key] = value
+        return document
+
+    document = json.loads(
+        raw.decode("utf-8", errors="strict"),
+        object_pairs_hook=_closed_object,
+    )
+    if not isinstance(document, dict):
+        raise _PeerStateRefusal()
+    return document
+
+
+def _open_held_private_json(target: Path, parent_fd: int, *, max_bytes: int):
+    """Open, parse and retain one exact private file through a no-follow fd."""
+    leaf_fd = None
+    try:
+        before = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or before.st_nlink != 1
+            or before.st_size > max_bytes
+        ):
+            raise _PeerStateRefusal()
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        leaf_fd = os.open(target.name, flags, dir_fd=parent_fd)
+        fcntl.flock(leaf_fd, fcntl.LOCK_SH)
+        opened = os.fstat(leaf_fd)
+        security = _private_security_tuple(opened)
+        if security != _private_security_tuple(before):
+            raise _PeerStateRefusal()
+        raw = _read_bounded_private_fd(leaf_fd, max_bytes=max_bytes)
+        document = _closed_json_object(raw)
+        after_read = os.fstat(leaf_fd)
+        named = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            _private_security_tuple(after_read) != security
+            or _private_security_tuple(named) != security
+        ):
+            raise _PeerStateRefusal()
+        return leaf_fd, raw, document, security
+    except (OSError, UnicodeError, ValueError, _PeerStateRefusal):
+        if leaf_fd is not None:
+            try:
+                os.close(leaf_fd)
+            except OSError:
+                pass
+        raise _PeerStateRefusal() from None
+
+
+def _canonical_reduced_local_census(census) -> tuple[bytes, list[dict]]:
+    """Reduce the local environment census to identity plus running state."""
+    if not isinstance(census, dict):
+        raise _PeerStateRefusal()
+    rows = []
+    for manager in _surface_bindings.ENV_MANAGERS:
+        raw_rows = census.get(manager)
+        if not isinstance(raw_rows, list):
+            raise _PeerStateRefusal()
+        for raw in raw_rows:
+            if not isinstance(raw, dict):
+                continue
+            profile_id = raw.get("profile_id")
+            if manager == "multilogin":
+                folder_id = raw.get("folder_id")
+                workspace_id = raw.get("workspace_id")
+                if (
+                    not isinstance(profile_id, str)
+                    or _surface_bindings.UUID_RE.fullmatch(profile_id) is None
+                    or not isinstance(folder_id, str)
+                    or _surface_bindings.UUID_RE.fullmatch(folder_id) is None
+                    or not isinstance(workspace_id, str)
+                    or _surface_bindings.UUID_RE.fullmatch(workspace_id) is None
+                ):
+                    continue
+                rows.append({
+                    "env_manager": manager,
+                    "workspace_id": workspace_id,
+                    "folder_id": folder_id,
+                    "profile_id": profile_id,
+                    "running": raw.get("running") is True,
+                })
+            elif (
+                isinstance(profile_id, str)
+                and _surface_bindings.GOLOGIN_PROFILE_ID_RE.fullmatch(profile_id)
+            ):
+                rows.append({
+                    "env_manager": manager,
+                    "profile_id": profile_id,
+                    "running": raw.get("running") is True,
+                })
+    rows.sort(key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")))
+    raw = json.dumps(
+        rows, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+    return raw, rows
+
+
+def _validate_peer_bootstrap_evidence_documents(
+    anchor_document, bindings_document, census, *, now,
+) -> str:
+    if (
+        not _peer_bootstrap_anchor_shape_exact(anchor_document)
+        or _surface_bindings.validate_bindings_document(bindings_document)
+    ):
+        raise _PeerStateRefusal()
+    census_raw, rows = _canonical_reduced_local_census(census)
+    matches = [
+        row for row in rows
+        if row.get("env_manager") == "multilogin"
+        and row.get("profile_id") == anchor_document.get("profile_id")
+        and row.get("folder_id") == anchor_document.get("folder_id")
+    ]
+    if len(matches) != 1 or matches[0].get("running") is True:
+        raise _PeerStateRefusal()
+    if _core._current_chairman_profile_census(  # noqa: SLF001
+        bindings_document,
+        now=now,
+        candidate_profile_id=anchor_document["profile_id"],
+    ) != "clear":
+        raise _PeerStateRefusal()
+    return hashlib.sha256(census_raw).hexdigest()
+
+
+def _mint_peer_bootstrap_evidence(
+    *, operation, anchor_path, bindings_path, census_loader, now,
+):
+    """Mint one exact post-confirmation proof while retaining both source fds."""
+    anchor_fd = None
+    bindings_fd = None
+    parent_fd = None
+    try:
+        if operation != PEER_BOOTSTRAP_OPERATION_KEY or not callable(census_loader):
+            raise _PeerStateRefusal()
+        anchor_target = _normalized_private_path(anchor_path)
+        bindings_target = _normalized_private_path(bindings_path)
+        if (
+            anchor_target == bindings_target
+            or anchor_target.parent != bindings_target.parent
+        ):
+            raise _PeerStateRefusal()
+        anchor_target, parent_fd = _open_private_parent(anchor_target)
+        anchor_fd, anchor_raw, anchor_document, anchor_security = (
+            _open_held_private_json(
+                anchor_target, parent_fd, max_bytes=_MAX_PEER_STATE_BYTES,
+            )
+        )
+        bindings_fd, bindings_raw, bindings_document, bindings_security = (
+            _open_held_private_json(
+                bindings_target,
+                parent_fd,
+                max_bytes=_surface_bindings._MAX_BYTES,  # noqa: SLF001
+            )
+        )
+        census_digest = _validate_peer_bootstrap_evidence_documents(
+            anchor_document,
+            bindings_document,
+            census_loader(),
+            now=now,
+        )
+        evidence = _PeerBootstrapEvidence(
+            _PEER_BOOTSTRAP_EVIDENCE_SEAL,
+            operation=operation,
+            generation=PEER_SOURCE_GENERATION,
+            anchor_path=anchor_target,
+            anchor_fd=anchor_fd,
+            anchor_raw=anchor_raw,
+            anchor_security=anchor_security,
+            bindings_path=bindings_target,
+            bindings_fd=bindings_fd,
+            bindings_raw=bindings_raw,
+            bindings_security=bindings_security,
+            census_digest=census_digest,
+        )
+        anchor_fd = None
+        bindings_fd = None
+        return evidence
+    except Exception:  # noqa: BLE001 — every failed proof is a closed refusal
+        return None
+    finally:
+        for descriptor in (bindings_fd, anchor_fd, parent_fd):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+
+def _held_bootstrap_snapshot(
+    evidence, *, anchor_target, bindings_target, parent_fd, census_loader, now,
+):
+    """Revalidate held bytes, named paths and fresh census in one lock epoch."""
+    if (
+        not isinstance(evidence, _PeerBootstrapEvidence)
+        or evidence._seal is not _PEER_BOOTSTRAP_EVIDENCE_SEAL
+        or evidence._operation != PEER_BOOTSTRAP_OPERATION_KEY
+        or evidence._generation != PEER_SOURCE_GENERATION
+        or evidence._mint_pid != os.getpid()
+        or evidence._anchor_path != anchor_target
+        or evidence._bindings_path != bindings_target
+    ):
+        raise _PeerStateRefusal()
+
+    documents = []
+    for target, descriptor, expected_raw, expected_sha256, expected_security, limit in (
+        (
+            anchor_target,
+            evidence._anchor_fd,
+            evidence._anchor_raw,
+            evidence._anchor_sha256,
+            evidence._anchor_security,
+            _MAX_PEER_STATE_BYTES,
+        ),
+        (
+            bindings_target,
+            evidence._bindings_fd,
+            evidence._bindings_raw,
+            evidence._bindings_sha256,
+            evidence._bindings_security,
+            _surface_bindings._MAX_BYTES,  # noqa: SLF001
+        ),
+    ):
+        opened = os.fstat(descriptor)
+        named = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            _private_security_tuple(opened) != expected_security
+            or _private_security_tuple(named) != expected_security
+        ):
+            raise _PeerStateRefusal()
+        raw = _read_bounded_private_fd(descriptor, max_bytes=limit)
+        after_read = os.fstat(descriptor)
+        if (
+            raw != expected_raw
+            or hashlib.sha256(raw).hexdigest() != expected_sha256
+            or _private_security_tuple(after_read) != expected_security
+        ):
+            raise _PeerStateRefusal()
+        documents.append(_closed_json_object(raw))
+
+    anchor_document, bindings_document = documents
+    census_digest = _validate_peer_bootstrap_evidence_documents(
+        anchor_document,
+        bindings_document,
+        census_loader(),
+        now=now,
+    )
+    if census_digest != evidence._census_digest:
+        raise _PeerStateRefusal()
+    security = evidence._anchor_security
+    return _PrivateJsonSnapshot(
+        path=anchor_target,
+        document=anchor_document,
+        raw=evidence._anchor_raw,
+        sha256=evidence._anchor_sha256,
+        st_dev=security[0],
+        st_ino=security[1],
+        st_uid=security[2],
+        st_mode=security[3],
+        st_nlink=security[4],
+    )
+
+
 def _peer_bootstrap_complete_matches(
     fence, *, anchor_path, state_path, witness_path, peer_provision_path,
     anchor, state, witness,
@@ -3034,8 +3391,8 @@ def _peer_bootstrap_complete_matches(
 
 
 def _bootstrap_peer_lifecycle_for_existing_anchor(
-    *, authorization, anchor_path, state_path, peer_provision_path,
-    bootstrap_fence_path,
+    *, authorization, anchor_path, bindings_path, census_loader, now,
+    state_path, peer_provision_path, bootstrap_fence_path,
 ) -> str:
     """Bootstrap the one historical v3 anchor under a monotonic fence.
 
@@ -3044,17 +3401,24 @@ def _bootstrap_peer_lifecycle_for_existing_anchor(
     PENDING can recover only its exact crash prefix; COMPLETE is read-only and
     refuses any missing, replaced, linked, malformed, or mismatched record.
     """
-    if authorization is not BOOTSTRAP_PEER_AUTHORIZATION:
+    evidence = (
+        authorization
+        if isinstance(authorization, _PeerBootstrapEvidence)
+        else None
+    )
+    if evidence is None:
         return REFUSED
+    parent_fd = None
     try:
         anchor_target = _normalized_private_path(anchor_path)
+        bindings_target = _normalized_private_path(bindings_path)
         state_target = _normalized_private_path(state_path)
         witness_target = _peer_genesis_witness_path(state_target)
         provision_target = _normalized_private_path(peer_provision_path)
         fence_target = _normalized_private_path(bootstrap_fence_path)
         coordinates = (
-            anchor_target, state_target, witness_target, provision_target,
-            fence_target,
+            anchor_target, bindings_target, state_target, witness_target,
+            provision_target, fence_target,
         )
         if (
             len(set(coordinates)) != len(coordinates)
@@ -3064,9 +3428,17 @@ def _bootstrap_peer_lifecycle_for_existing_anchor(
         anchor_target, parent_fd = _open_private_parent(
             anchor_target, exclusive=True,
         )
-    except (_PeerStateRefusal, OSError):
-        return REFUSED
-    try:
+        if not evidence._begin_consume():
+            return REFUSED
+        anchor = _held_bootstrap_snapshot(
+            evidence,
+            anchor_target=anchor_target,
+            bindings_target=bindings_target,
+            parent_fd=parent_fd,
+            census_loader=census_loader,
+            now=now,
+        )
+
         def _named_snapshot_or_none(target):
             try:
                 os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
@@ -3074,14 +3446,12 @@ def _bootstrap_peer_lifecycle_for_existing_anchor(
                 return None
             return _snapshot_from_parent(target, parent_fd)
 
-        anchor = _named_snapshot_or_none(anchor_target)
         state = _named_snapshot_or_none(state_target)
         witness = _named_snapshot_or_none(witness_target)
         provision = _named_snapshot_or_none(provision_target)
         fence = _named_snapshot_or_none(fence_target)
         if (
-            anchor is None
-            or not _peer_bootstrap_anchor_shape_exact(anchor.document)
+            not _peer_bootstrap_anchor_shape_exact(anchor.document)
             or provision is not None
         ):
             return REFUSED
@@ -3194,17 +3564,42 @@ def _bootstrap_peer_lifecycle_for_existing_anchor(
         ):
             return REFUSED
         return CREATED_THIS_CALL if created_fence else EXISTING_EXACT
-    except (_PeerStateRefusal, OSError, KeyError, TypeError):
+    except Exception:  # noqa: BLE001 — no local proof failure may escape
         return REFUSED
     finally:
-        os.close(parent_fd)
+        evidence._close_held_descriptors()
+        if parent_fd is not None:
+            try:
+                os.close(parent_fd)
+            except OSError:
+                pass
+
+
+def _coordinator_local_census():
+    from . import chatgpt
+
+    return chatgpt.list_local_environments()
+
+
+def mint_coordinator_peer_bootstrap_evidence():
+    """Mint the fixed-coordinate proof after the operator's exact phrase."""
+    return _mint_peer_bootstrap_evidence(
+        operation=PEER_BOOTSTRAP_OPERATION_KEY,
+        anchor_path=_core.DEFAULT_PROVISION_PATH,
+        bindings_path=_surface_bindings.DEFAULT_PATH,
+        census_loader=_coordinator_local_census,
+        now=datetime.now(timezone.utc),
+    )
 
 
 def run_coordinator_peer_bootstrap(*, authorization) -> str:
-    """Run only the local, fixed-coordinate first-rollout bootstrap seam."""
+    """Consume one proof in the fixed-coordinate local bootstrap seam."""
     return _bootstrap_peer_lifecycle_for_existing_anchor(
         authorization=authorization,
         anchor_path=_core.DEFAULT_PROVISION_PATH,
+        bindings_path=_surface_bindings.DEFAULT_PATH,
+        census_loader=_coordinator_local_census,
+        now=datetime.now(timezone.utc),
         state_path=PEER_INTENT_PATH,
         peer_provision_path=PEER_PROVISION_PATH,
         bootstrap_fence_path=_peer_bootstrap_fence_path(PEER_INTENT_PATH),

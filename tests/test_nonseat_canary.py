@@ -16,6 +16,7 @@ import inspect
 import io
 import json
 import os
+import pickle
 import re
 import stat
 import threading
@@ -6158,6 +6159,7 @@ _DEFAULT_BOOTSTRAP_AUTHORIZATION = object()
 def _peer_bootstrap_census(provision, *, running=False):
     return {
         "multilogin": [{
+            "workspace_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
             "profile_id": provision["profile_id"],
             "folder_id": provision["folder_id"],
             "running": running,
@@ -6262,6 +6264,47 @@ def test_peer_bootstrap_capability_refuses_same_byte_path_replacement(
     assert not state_path.exists()
 
 
+@pytest.mark.parametrize("target_name", ("anchor", "bindings"))
+def test_peer_bootstrap_capability_refuses_valid_changed_source_after_mint(
+    tmp_path, target_name,
+):
+    """A different valid anchor or bindings document is still unauthorized."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    if target_name == "anchor":
+        replacement_document = dict(provision)
+        replacement_document["profile_id"] = _PEER_ALT_UUID
+        replacement_document["folder_id"] = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        target = anchor_path
+    else:
+        replacement_document = _binding_doc()
+        replacement_document["bindings"][0]["locator"]["url"] = (
+            "https://chatgpt.com/c/replacement-binding"
+        )
+        assert sb.validate_bindings_document(replacement_document) == []
+        target = bindings_path
+    replacement = tmp_path / f"replacement-{target_name}.json"
+    replacement.write_bytes(vendors._canonical_private_bytes(replacement_document))  # noqa: SLF001
+    replacement.chmod(0o600)
+    os.replace(replacement, target)
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert not state_path.exists()
+
+
 def test_peer_bootstrap_capability_refuses_reduced_census_change_after_mint(tmp_path):
     """A fresh helper-side census must equal the exact coordinator evidence."""
     provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
@@ -6286,6 +6329,31 @@ def test_peer_bootstrap_capability_refuses_reduced_census_change_after_mint(tmp_
     assert not fence_path.exists()
 
 
+def test_peer_bootstrap_capability_closes_held_fds_when_census_probe_raises(tmp_path):
+    """An unexpected helper-side probe failure cannot leak reusable evidence."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, _census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    held_fds = (authorization._anchor_fd, authorization._bindings_fd)  # noqa: SLF001
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=lambda: (_ for _ in ()).throw(RuntimeError("probe failed")),
+    ) == vendors.REFUSED
+    for held_fd in held_fds:
+        with pytest.raises(OSError):
+            os.fstat(held_fd)
+    assert not fence_path.exists()
+
+
 def test_peer_bootstrap_capability_is_one_use_after_success_and_refusal(tmp_path):
     """Consumption is monotonic regardless of the first call's outcome."""
     provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
@@ -6306,13 +6374,19 @@ def test_peer_bootstrap_capability_is_one_use_after_success_and_refusal(tmp_path
         anchor_path, state_path, peer_path, fence_path, **kwargs,
     ) == vendors.REFUSED
 
-    refusal_authorization, bindings_path, census_loader = (
-        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    refusal_root = tmp_path / "refusal"
+    refusal_root.mkdir(mode=0o700)
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(refusal_root)
     )
-    replacement = tmp_path / "replacement-anchor.json"
-    replacement.write_bytes(anchor_path.read_bytes())
-    replacement.chmod(0o600)
-    os.replace(replacement, anchor_path)
+    current = [_peer_bootstrap_census(provision)]
+    census_loader = lambda: current[0]
+    refusal_authorization, bindings_path, _loader = (
+        _mint_peer_bootstrap_authorization(
+            provision, anchor_path, census_loader=census_loader,
+        )
+    )
+    current[0] = _peer_bootstrap_census(provision, running=True)
     refusal_kwargs = {
         "authorization": refusal_authorization,
         "bindings_path": bindings_path,
@@ -6321,13 +6395,53 @@ def test_peer_bootstrap_capability_is_one_use_after_success_and_refusal(tmp_path
     assert _bootstrap_existing_peer(
         anchor_path, state_path, peer_path, fence_path, **refusal_kwargs,
     ) == vendors.REFUSED
+    current[0] = _peer_bootstrap_census(provision)
     assert _bootstrap_existing_peer(
         anchor_path, state_path, peer_path, fence_path, **refusal_kwargs,
     ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert not state_path.exists()
+
+
+def test_peer_bootstrap_capability_same_instance_has_one_atomic_consumer(tmp_path):
+    """Two callers racing one capability cannot both pass its consume edge."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    barrier = threading.Barrier(2)
+    outcomes = []
+
+    def _run():
+        barrier.wait()
+        outcomes.append(_bootstrap_existing_peer(
+            anchor_path,
+            state_path,
+            peer_path,
+            fence_path,
+            authorization=authorization,
+            bindings_path=bindings_path,
+            census_loader=census_loader,
+        ))
+
+    workers = [threading.Thread(target=_run) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+        assert not worker.is_alive()
+
+    assert outcomes.count(vendors.CREATED_THIS_CALL) == 1
+    assert outcomes.count(vendors.REFUSED) == 1
+    _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
 
 
 @pytest.mark.parametrize("mutation", ("operation", "generation", "pid", "cross_anchor"))
-def test_peer_bootstrap_capability_refuses_wrong_binding(tmp_path, monkeypatch, mutation):
+def test_peer_bootstrap_capability_refuses_wrong_binding(tmp_path, mutation):
     """Operation, generation, process and anchor bindings are not transferable."""
     provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
         _peer_bootstrap_preimage(tmp_path)
@@ -6370,6 +6484,8 @@ def test_peer_bootstrap_capability_is_noncopyable_and_closes_held_fds_once(tmp_p
     held_fds = (authorization._anchor_fd, authorization._bindings_fd)  # noqa: SLF001
     with pytest.raises(TypeError):
         copy.copy(authorization)
+    with pytest.raises(TypeError):
+        pickle.dumps(authorization)
     assert _bootstrap_existing_peer(
         anchor_path,
         state_path,
@@ -6730,8 +6846,11 @@ def test_peer_bootstrap_absent_fence_requires_exact_canonical_v3_mimic_anchor(
     tmp_path, mutation,
 ):
     """ABSENT is not a migration surface for any approximate anchor shape."""
-    _provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
         _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
     )
     if mutation == "missing":
         anchor_path.unlink()
@@ -6748,7 +6867,13 @@ def test_peer_bootstrap_absent_fence_requires_exact_canonical_v3_mimic_anchor(
         anchor_path.write_bytes(vendors._canonical_private_bytes(document))
 
     assert _bootstrap_existing_peer(
-        anchor_path, state_path, peer_path, fence_path,
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
     ) == vendors.REFUSED
     assert not fence_path.exists()
     assert not state_path.exists()
@@ -6840,8 +6965,9 @@ def test_peer_bootstrap_holds_one_parent_lock_without_reentry(tmp_path, monkeypa
     assert _bootstrap_existing_peer(
         anchor_path, state_path, peer_path, fence_path,
     ) == vendors.CREATED_THIS_CALL
-    assert len(calls) == 1
-    assert calls[0][1] == {"exclusive": True}
+    assert len(calls) == 2
+    assert calls[0][1] == {}
+    assert calls[1][1] == {"exclusive": True}
 
 
 # --- mutation-kill discipline ----------------------------------------------
