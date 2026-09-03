@@ -1,194 +1,186 @@
-# Linear Initiative Portfolio V1 — Current-Epoch Source Consolidation
+# Linear Initiative Portfolio V1 — Current 62-Membership Source
 
-**Date:** 2026-09-02  
+**Date:** 2026-09-03  
 **Owner:** Sol / portfolio architecture  
 **Chairman:** Chris  
-**Status:** `DRAFT / SOURCE-LAW CONSOLIDATION / NO LIVE EFFECT`  
+**Status:** `CURRENT-EPOCH SOURCE / RECORDS-ONLY / NO LINEAR EFFECT`  
 **Operation key:** `linear-initiative-v1-current-epoch-source-20260902-sol-001`  
 **Carrier:** `Mastermind:sol/linear-initiative-v1-current-epoch-source-20260902`  
-**Initial branch base:** `mastermindx-market-intelligence/Mastermind@162af533a4bcf380125895d225b6962987c3c582`  
-**Current procedure re-pin:** `mastermindx-market-intelligence/Mastermind@24fa9bc4acfbffb77f09193dd50d1ee8f90bcbf8`  
+**Protected procedure used for this amendment:** `mastermindx-market-intelligence/Mastermind@793e75639911f21dae9c90a77c3a5dbf4b37cbb0`  
 **Base strategic design:** `mastermindx-market-intelligence/Mastermind@d004f5bf7953e943281dff7efd8fe17a54b0cf6c:docs/superpowers/specs/2026-08-29-linear-initiative-portfolio-architecture-design.md`  
-**Agent OS census pin:** `mastermindx-market-intelligence/macro@818451efac2c1a95917f6110fabb024054911356`  
+**Agent OS census epoch:** `mastermindx-market-intelligence/macro@931870b1feccb91b5122d92b07995e9749566aae`  
+**Current Macro tip observed after that epoch:** `dbf02455c035c458af0c7127349c56b7b0f77d05`  
 **Companion rollout amendment:** `docs/superpowers/plans/2026-09-02-linear-initiative-portfolio-v1-current-epoch.md`
 
-This record closes the exact authority and census gap in the Linear Initiative portfolio. It does not authorize a Linear write, Project or Initiative creation, GitHub merge, Agent OS mutation, Executive runtime action, worker dispatch, Workroom build, deployment or production claim.
+This record is the complete current Initiative-membership source for the Linear portfolio. It incorporates the protected 50-row base design and adds exactly the twelve classifications in §3. It authorizes no Linear write, Project creation, Initiative creation, GitHub merge, Executive operation, worker dispatch, Workroom build, deployment, or production claim by itself.
 
-## 1. Why this consolidation is required
+The Macro tip after `931870b1...` differs only through publication/outbox data. That later movement does not change the Agent OS workstream census used here.
 
-The protected base design froze seven Initiative definitions, fifty exact Project-to-Initiative memberships and two deliberately unassigned exceptions. The portfolio then changed in two distinct ways:
+## 1. Outcome and authority
 
-1. two canonical workstreams were explicitly classified after the base design and added to the Macro strategy companion;
-2. six additional active Project-plan workstreams existed at the current Agent OS census but were absent from that 52-row companion.
+The Chairman’s outcome is a Linear portfolio that makes the company navigable as seven strategic outcomes rather than a flat issue backlog. Linear remains a selected human projection:
 
-The intermediate state was therefore not merely a stale source locator. It was an incomplete current-epoch classification:
+- Agent OS owns durable workstreams, decisions, discoveries, and handoffs.
+- Executive OS owns Job, Attempt, Worker, Event, claim, lease, and runtime lifecycle.
+- GitHub owns implementation, review, CI, merge, and evidence truth.
+- Linear owns only the selected portfolio projection and its human navigation.
+- Slack owns transport and hot-state visibility, not lifecycle or completion truth.
 
-```text
-protected strategic source at d004f5bf... -> 50 memberships
-Macro companion in PR #6658             -> 52 memberships
-current approved strategy set           -> 58 memberships
-current active/candidate coverage        -> complete only with those 58 rows + the exact WS exception
-```
+The Initiative layer therefore classifies existing canonical workstreams. It does not originate workstreams, infer execution, close production gates, or create another strategy/lifecycle store.
 
-The 52-row companion could pass its own static count while still refusing a fresh current Project plan with `strategy_unmapped_active_workstream`. A content digest proves which companion bytes were consumed; it does not prove that the companion covers every currently mandatory active/review-candidate workstream or that each later classification was authorized.
+## 2. Base source and set laws
 
-Slack and GitHub discussion preserve decision evidence, but neither is the durable portfolio strategy authority. This protected consolidation incorporates the immutable 50-row base, records the eight exact additions required by the current Agent OS census, and makes the complete epoch independently recoverable without creating another registry.
+The protected base design at `d004f5bf7953e943281dff7efd8fe17a54b0cf6c` remains authoritative for:
 
-## 2. Source-of-truth, Project-plan universe and precedence law
-
-The base design at `d004f5bf7953e943281dff7efd8fe17a54b0cf6c` remains authoritative for:
-
-- the seven Initiative definitions and metadata;
-- Initiative outcome, moat, completion-ruler and scope-law prose;
+- the seven Initiative definitions and their product/company outcomes;
 - the original fifty exact primary memberships;
-- the one-primary-membership rule;
-- the two deliberate exceptions;
-- the prohibition on fuzzy/title/program/market inference;
-- the Linear, Agent OS, Executive OS, GitHub and Slack source-owner boundaries.
+- one and only one primary Initiative per eligible Project;
+- the two deliberate unassigned exceptions;
+- no fuzzy, title, owner, program, or market inference;
+- immutable-ID-over-name behavior;
+- Linear, Agent OS, Executive OS, GitHub, and Slack source ownership;
+- correction-safe and effect-unknown behavior.
 
-The canonical Project compiler at the Agent OS census pin defines three relevant buckets mechanically:
-
-```text
-active Projects: status in active | blocked | awaiting_ci | awaiting_review
-review candidates: status == proposed
-excluded Projects: status in done | parked | killed
-Project-plan universe: active Projects + review candidates + excluded Projects
-```
-
-The Initiative strategy obeys two different set laws that must not be blurred:
-
-1. every strategy membership key must exist somewhere in the complete Project-plan universe, including historically retained excluded Projects;
-2. every active Project and every review candidate must be either explicitly mapped or equal the one approved workstream exception, `WS:WATCHLIST-PORTFOLIO-CEO`.
-
-An excluded Project may retain an approved historical Initiative membership. An excluded workstream that was never approved as a strategy member need not be newly classified merely because its durable record still exists. Names, programs, owners and semantic similarity have zero implicit classification authority.
-
-**After this file is reviewed and merged to protected `master`, this file becomes the current v1 membership source identity.** It incorporates the immutable base design and adds only the eight rows in §3. It has narrow precedence over stale literal counts, membership totals and missing-Project lists in the base design and the 2026-08-29 rollout plan.
-
-The Agent OS census pin is part of the epoch boundary. A later active or review-candidate workstream does not inherit an Initiative by analogy. It invalidates live-apply readiness until Sol records a new protected amendment or consolidation and the deterministic companion is updated and re-proven. A later excluded-only record is reconciled under the two set laws above rather than silently treated as a mandatory new membership.
-
-Nothing in this file changes the seven Initiative definitions, reclassifies an original membership, removes a membership, creates another exception or widens Linear into canonical organizational/runtime truth.
-
-## 3. Exact current-epoch additions relative to the 50-row base
-
-### 3.1 Cross-Repository Contract Governance
+The current Project-plan universe is derived mechanically from Agent OS:
 
 ```text
-workstream: WS:CROSS-REPO-CONTRACT-GOVERNANCE
-primary Initiative key: canonical-intelligence-substrate-learning
-primary Initiative name: Canonical Intelligence Substrate & Learning
+active Projects:
+  status in active | blocked | awaiting_ci | awaiting_review
+
+review candidates:
+  status == proposed
+
+excluded Projects:
+  status in done | parked | killed
+
+complete Project-plan universe:
+  active Projects + review candidates + excluded Projects
 ```
 
-**Rationale:** its durable job is to make cross-repository producer/consumer contracts explicit, versioned, correction-safe, authority-safe and production-provable while refusing a new runtime/control plane. The primary company outcome is reusable canonical intelligence composition.
+Two different laws apply:
 
-### 3.2 Technical Opportunity Intelligence
+1. Every strategy membership key must exist somewhere in the complete Project-plan universe.
+2. Every active Project and every review candidate must be either explicitly mapped or equal the one approved workstream exception, `WS:WATCHLIST-PORTFOLIO-CEO`.
+
+An excluded Project may retain an approved historical membership. An excluded record that was never approved as a strategy member does not become one merely because its durable file remains present.
+
+After this file is merged to protected `master`, it becomes the current V1 membership source identity. It has narrow precedence over stale literal counts, membership totals, missing-Project lists, and source locators in the base design, the 2026-08-29 rollout plan, and the earlier 58-row draft of this file. It does not change the seven Initiative definitions or any of the original fifty classifications.
+
+## 3. Exact additions relative to the protected 50-row base
+
+The twelve additions below are explicit classifications. None may be generalized to another workstream by analogy.
+
+### 3.1 Canonical Intelligence Substrate & Learning
 
 ```text
-workstream: WS:TECHNICAL-OPPORTUNITY-INTELLIGENCE
-primary Initiative key: legendary-alpha-discovery-timing
-primary Initiative name: Legendary Alpha Discovery & Timing
+WS:CROSS-REPO-CONTRACT-GOVERNANCE
+  -> canonical-intelligence-substrate-learning
 ```
 
-**Rationale:** its durable job is a multi-timeframe opportunity/timing layer that distinguishes Forming/Armed from Triggered/Confirmed and earns authority through prospective evidence. The primary company outcome is opportunity discovery and timing.
+This workstream makes cross-repository producer/consumer contracts explicit, versioned, correction-safe, authority-safe, and production-provable without creating a second runtime or control plane.
 
-### 3.3 Agent Evaluation Fabric
+### 3.2 Legendary Alpha Discovery & Timing
 
 ```text
-workstream: WS:AGENT-EVAL-FABRIC
-primary Initiative key: autonomous-ai-organization
-primary Initiative name: Autonomous AI Organization
+WS:TECHNICAL-OPPORTUNITY-INTELLIGENCE
+  -> legendary-alpha-discovery-timing
+
+WS:PROPHET-CANDIDATE-ADDED-DATE
+  -> legendary-alpha-discovery-timing
 ```
 
-**Rationale:** it evaluates and improves Mastermind's own cognition and execution through governed corpora, reproducible experiments, deterministic scoring and prospective learning without creating another lifecycle, router, memory or policy authority. Its direct beneficiary is the AI organization itself.
+Technical Opportunity Intelligence builds a multi-timeframe discovery/timing layer whose authority is earned prospectively. Candidate Added Date restores truthful tenure evidence needed to distinguish early discovery from mature exposure.
 
-### 3.4 Executive OS Disaster Recovery
+### 3.3 Personal Institutional Desk
 
 ```text
-workstream: WS:EXECUTIVE-OS-DISASTER-RECOVERY
-primary Initiative key: trusted-production-customer-platform
-primary Initiative name: Trusted Production & Customer Platform
+WS:REACTIVE-PROJECTION
+  -> personal-institutional-desk
 ```
 
-**Rationale:** it protects company-critical Executive lifecycle history with encrypted off-host recovery, explicit restore and measured drills. The capability is operational resilience and recoverability, not a second Executive runtime.
+Reactive Projection turns durable intelligence into a coherent, freshness-aware user workflow without replacing the underlying data or intelligence owners.
 
-### 3.5 Operation Assurance
+### 3.4 Trusted Production & Customer Platform
 
 ```text
-workstream: WS:OPERATION-ASSURANCE
-primary Initiative key: autonomous-ai-organization
-primary Initiative name: Autonomous AI Organization
+WS:EXECUTIVE-OS-DISASTER-RECOVERY
+  -> trusted-production-customer-platform
+
+WS:REPRODUCIBLE-WORKER-ENVIRONMENTS
+  -> trusted-production-customer-platform
+
+WS:TERMINAL-GITHUB-CANONICALIZATION
+  -> trusted-production-customer-platform
 ```
 
-**Rationale:** it gives Program CEOs and machine admission consumers deterministic liveness/soundness assessments and actionable counterexamples over the existing lifecycle, eventually informing Control Room and admission decisions. Its primary outcome is a more reliable autonomous organization.
+Executive OS Disaster Recovery protects company-critical lifecycle history through controlled recovery. Reproducible Worker Environments makes selected build/test toolchains dependable without acquiring credential, worker-identity, provider-home, runtime, or deployment authority. Terminal GitHub Canonicalization owns the reliable source/deployment/repository program anchored to Terminal issue #483.
 
-### 3.6 Prophet Candidate Added Date
+`WS:TERMINAL-GITHUB-CANONICAL-DEPLOYMENT` is not a thirteenth addition. Macro merge `931870b1feccb91b5122d92b07995e9749566aae` parked it as a compatibility tombstone and made `WS:TERMINAL-GITHUB-CANONICALIZATION` the sole active organizational owner. The tombstone receives no Initiative membership.
+
+### 3.5 Autonomous AI Organization
 
 ```text
-workstream: WS:PROPHET-CANDIDATE-ADDED-DATE
-primary Initiative key: legendary-alpha-discovery-timing
-primary Initiative name: Legendary Alpha Discovery & Timing
+WS:AGENT-EVAL-FABRIC
+  -> autonomous-ai-organization
+
+WS:OPERATION-ASSURANCE
+  -> autonomous-ai-organization
+
+WS:CODE-INTELLIGENCE-FABRIC
+  -> autonomous-ai-organization
+
+WS:EXECUTIVE-ATTENTION-ECONOMICS
+  -> autonomous-ai-organization
 ```
 
-**Rationale:** it restores truthful, left-censoring-aware board-tenure evidence on Prophet candidate surfaces. Candidate tenure is part of understanding discovery timing and whether an opportunity is early or already mature.
+Agent Evaluation Fabric evaluates and improves cognition/execution through governed, reproducible evidence. Operation Assurance gives Program CEOs and admission consumers deterministic liveness and soundness assessments. Code Intelligence Fabric creates a governed semantic understanding of the estate for agents and reviewers. Executive Attention Economics improves where scarce executive reasoning is spent without creating another lifecycle or routing authority.
 
-### 3.7 Reactive Projection
+### 3.6 Global Markets, Regimes & Risk Command
 
 ```text
-workstream: WS:REACTIVE-PROJECTION
-primary Initiative key: personal-institutional-desk
-primary Initiative name: Personal Institutional Desk
+WS:FLOW-OBSERVATORY-V2
+  -> global-markets-regimes-risk-command
 ```
 
-**Rationale:** it turns durable nightly intelligence into a responsive user-facing Intelligence Hub experience with honest freshness, coverage and deterministic current projection. The primary outcome is a coherent, live personal institutional workflow; it does not replace the underlying market-data or intelligence owners.
+Flow Observatory V2 turns cross-asset flow, liquidity, positioning, and market-structure evidence into a coherent command layer for regimes and risk.
 
-### 3.8 Reproducible Worker Environments
+## 4. Complete current structural ruler
+
+The current source is:
 
 ```text
-workstream: WS:REPRODUCIBLE-WORKER-ENVIRONMENTS
-primary Initiative key: trusted-production-customer-platform
-primary Initiative name: Trusted Production & Customer Platform
+50 protected base memberships
++ 12 exact additions in §3
+= 62 memberships
 ```
 
-**Rationale:** it makes selected build/test toolchains reproducible across approved hosts and CI with exact lock/receipt identity while refusing credential, worker-identity, provider-home, runtime or deployment authority. Its primary outcome is dependable engineering and release infrastructure.
-
-None of these eight workstreams is an unassigned exception. None of these classifications may be inferred for another workstream by title, program, owner or semantic similarity.
-
-## 4. Complete current-epoch structural ruler
-
-The complete current membership source is:
-
-```text
-base 50 rows from Mastermind@d004f5bf... architecture design
-+ 8 exact additions from §3
-= 58 memberships
-```
-
-The exact structural counts are:
+Exact constants:
 
 ```text
 Initiatives: 7
-memberships: 58
+memberships: 62
 unassigned exceptions: 2
 parent/sub-Initiative relations: 0
-Initiative labels created by v1: 0
-new Project labels created by v1: 0
+Initiative labels created by V1: 0
+new Project labels created by V1: 0
 ```
 
-Exact membership group counts, in the frozen Initiative order, are:
+Exact membership counts in frozen Initiative order:
 
 ```text
 Canonical Intelligence Substrate & Learning:       10
 Legendary Alpha Discovery & Timing:                 16
 Institutional Company & Event Intelligence:         11
-Global Markets, Regimes & Risk Command:              5
+Global Markets, Regimes & Risk Command:              6
 Personal Institutional Desk:                         4
-Trusted Production & Customer Platform:              7
-Autonomous AI Organization:                          5
+Trusted Production & Customer Platform:              8
+Autonomous AI Organization:                          7
 ```
 
-The arithmetic is closed:
+Arithmetic:
 
 ```text
-10 + 16 + 11 + 5 + 4 + 7 + 5 = 58
+10 + 16 + 11 + 6 + 4 + 8 + 7 = 62
 ```
 
 The two exceptions remain exactly:
@@ -198,9 +190,9 @@ WS:WATCHLIST-PORTFOLIO-CEO
 Linear Project 9aef6461-306a-4a3c-911b-c6a4b6635a78 (Mastermind-X Linear OS)
 ```
 
-## 5. Current read-only Linear witness consequence
+## 5. Current Linear witness consequence
 
-The fresh read-only Linear witness on 2026-09-02 showed:
+The latest direct Linear witness used by this program showed:
 
 ```text
 visible Projects: 50
@@ -208,7 +200,7 @@ Initiatives: 0
 Project -> Initiative memberships: 0
 ```
 
-Every visible Project had an empty Initiative-parent set. The two frozen exceptions remained present and unassigned. Ten current strategy members were absent as Linear Projects, and all ten were active at the pinned Agent OS census:
+If that witness remains unchanged at apply time, fourteen current strategy members are absent as Linear Projects:
 
 ```text
 WS:TOP-ANATOMY
@@ -221,104 +213,113 @@ WS:OPERATION-ASSURANCE
 WS:PROPHET-CANDIDATE-ADDED-DATE
 WS:REACTIVE-PROJECTION
 WS:REPRODUCIBLE-WORKER-ENVIRONMENTS
+WS:CODE-INTELLIGENCE-FABRIC
+WS:EXECUTIVE-ATTENTION-ECONOMICS
+WS:FLOW-OBSERVATORY-V2
+WS:TERMINAL-GITHUB-CANONICALIZATION
 ```
 
-If that exact Linear witness and the pinned Agent OS Project-plan buckets remain unchanged at the accepted dry-run boundary, the deterministic pre-apply signature is:
+Under that unchanged witness, deterministic pre-apply drift is:
 
 ```text
 initiative_missing: 7
 membership_missing: 48
-project_create_required: 10
+project_create_required: 14
 hard_blockers: 0
 ```
 
 The corresponding post-apply structural census is:
 
 ```text
-visible Projects: 60
-Projects with exactly one Initiative: 58
+visible Projects: 64
+Projects with exactly one Initiative: 62
 unassigned visible exceptions: 2
 Initiatives: 7
 ```
 
-These are witness-derived values, not permanent quotas. Any material Linear or Agent OS change before apply requires a fresh snapshot, current-epoch census and recompilation. The protected strategy remains 58 memberships only for the exact epoch declared here.
+These witness-derived create and drift values are not quotas. A live-estate change requires a fresh snapshot and recompilation. A new active/review-candidate Agent OS workstream invalidates apply readiness until explicitly classified in a protected source amendment; it never inherits an Initiative by analogy.
 
-## 6. Protected source identity and compiler receipt contract
+## 6. Machine-readable source and receipt contract
 
-Once this record lands, the machine-readable strategy companion must identify the protected source as:
+After protection, the Macro strategy companion must identify this source as:
 
 ```text
 repository: mastermindx-market-intelligence/Mastermind
 path: docs/superpowers/specs/2026-09-02-linear-initiative-portfolio-v1-current-epoch-source-consolidation.md
-protected_revision: <the exact protected merge commit containing this file>
+protected_revision: <exact protected merge commit containing this 62-row file>
 ```
-
-A source identity that still points only to `d004f5bf7953e943281dff7efd8fe17a54b0cf6c` is stale for every post-base epoch. A companion containing 52 memberships is also stale for the current `Macro@818451ef...` active/review-candidate set.
 
 The deterministic compiler receipt must bind:
 
-- the exact structured protected source identity;
-- the exact consumed strategy companion bytes through `strategy_content_sha256`;
-- the exact desired 58 membership rows through `desired_memberships_sha256`;
-- the Initiative-plan semantic hash;
-- the Project-plan semantic hash;
-- the exact desired, group, exception, create and drift counts;
-- enough Project-plan source identity to prove the plan was compiled from the intended Agent OS epoch.
+- exact protected source identity;
+- exact strategy companion bytes through `strategy_content_sha256`;
+- exact desired 62 membership rows through `desired_memberships_sha256`;
+- Initiative-plan semantic hash;
+- Project-plan semantic hash;
+- exact Initiative, membership, group, exception, create, and drift counts;
+- the Project-plan/Agent OS source epoch used for classification;
+- immutable Project and Initiative IDs whenever live witness data exists.
 
-A reviewer must be able to locate this protected source, follow its immutable base-source incorporation, reproduce the companion and membership digests, and distinguish the approved 58-row epoch from both the original 50-row and intermediate 52-row epochs without access to process-local state.
-
-The compiler remains deterministic, zero-network and zero-write. It validates source identity and set relationships but does not call GitHub or Linear at runtime. GitHub protection/review proves the source revision externally.
+The compiler is deterministic, zero-network, and zero-write. GitHub protection proves the source revision externally. Linear apply is a separate operation.
 
 ## 7. Failure and correction behavior
 
 The current epoch fails closed on:
 
 - missing or malformed source identity;
-- source repository, path or protected revision mismatch;
-- source identity still naming the 50-row base while the companion contains a later epoch;
-- a 50-row or 52-row companion presented as current against the pinned active/review-candidate set;
-- any membership count other than 58;
-- any group counts other than `10,16,11,5,4,7,5`;
-- any of the eight added workstreams missing, duplicated, mapped elsewhere or also listed as an exception;
+- source repository/path/protected revision mismatch;
+- a source locator that still names the 50-, 52-, or 58-row epoch as current;
+- any membership count other than 62;
+- group counts other than `10,16,11,6,4,8,7`;
+- any of the twelve additions missing, duplicated, mapped elsewhere, or also listed as an exception;
 - any change to the two frozen exceptions;
-- any active or review-candidate workstream absent from both the exact membership map and approved workstream-exception set;
-- any strategy membership whose workstream is absent from the complete Project-plan universe;
-- any unexpected Initiative, confusingly similar name, duplicate ID, multi-parent membership, malformed witness row or effect-unknown live state;
+- any active/review-candidate workstream absent from memberships and the approved workstream-exception set;
+- any strategy membership absent from the complete Project-plan universe;
+- any attempt to include parked `WS:TERMINAL-GITHUB-CANONICAL-DEPLOYMENT`;
+- any unexpected Initiative, confusingly similar name, duplicate immutable ID, multi-parent membership, malformed witness row, or effect-unknown live mutation;
 - any input ordering that changes semantic output.
 
-A future membership change requires a new durable protected amendment or consolidation. Editing the static companion alone is insufficient. A Slack ruling or PR comment may preserve decision evidence, but it does not replace the protected strategy source.
+A future classification change requires another protected amendment to this same source lineage. Editing only a static companion, Slack message, PR comment, or Linear object is insufficient.
 
-## 8. No-rebuild and authority boundaries
-
-Preserve all existing owners:
-
-- Agent OS owns durable workstream identity and organizational status;
-- `linear_portfolio_plan.py` remains the Project normalization compiler;
-- `linear_initiative_plan.py` remains the deterministic Initiative desired-state/drift compiler;
-- Linear remains the selected human portfolio projection;
-- Executive OS remains Job/Attempt/Worker/Event truth;
-- GitHub remains implementation/evidence truth;
-- Slack remains transport/hot-state visibility;
-- Project Workrooms remain downstream consumers and may not create a second Initiative strategy store.
-
-This source consolidation introduces no database, queue, lifecycle, router, identity service, retry plane, watcher, provider binding or SaaS write path.
-
-## 9. Release and completion boundary
-
-Merging this record to protected `master` makes only the current 58-membership strategic source durable. It does not make the Macro compiler accepted, create any Linear object, normalize any Project, implement WR-P0, create a Slack channel or prove the AI Operating Hub live.
-
-The dependency sequence is exact:
+For a live write timeout or lost response:
 
 ```text
-protect this 58-row source consolidation
--> terminate the stale 52-preserving Macro child operation
--> repair the same Macro PR/branch under a fresh 58-row operation
--> independently review and merge the compiler as BUILT_NOT_PROVEN / PRODUCTION_INERT
--> capture a fresh read-only Project + Initiative witness
--> deterministic dry run and stop-condition check
--> one bounded Linear normalization/create/membership apply
--> full post-apply read-back and durable closeout
--> start WR-P0 against accepted 7/58/2 portfolio truth
+classify EFFECT_UNKNOWN
+keep the same operation and carrier
+read the exact target by immutable identity
+do not retry until canonical Linear readback proves not-applied
 ```
 
-Any new active or review-candidate workstream before the dry-run/apply boundary returns the program to source reconciliation. It does not authorize inference, silent omission or a live write against an outdated epoch.
+## 8. No-rebuild boundaries
+
+Preserve the existing owners and implementations:
+
+- Agent OS remains the workstream/status owner.
+- `linear_portfolio_plan.py` remains the Project normalization compiler.
+- `linear_initiative_plan.py` remains the Initiative desired-state/drift compiler.
+- Linear remains the selected human projection.
+- Executive OS remains runtime lifecycle truth.
+- GitHub remains implementation/evidence truth.
+- Slack remains transport/hot-state visibility.
+- Project Workrooms remain downstream consumers and may not create a second Initiative strategy store.
+
+This source introduces no database, queue, lifecycle, router, identity service, retry plane, watcher, provider binding, or SaaS write path.
+
+## 9. Completion boundary and accelerated sequence
+
+Merging this record makes only the complete 62-membership strategy source durable. It does not create Linear objects.
+
+The completion path is intentionally compact:
+
+```text
+protect this 62-row source
+-> update the existing Macro #6658 compiler/companion in place
+-> require only discriminating deterministic tests and current branch protection
+-> capture a fresh Linear snapshot
+-> create missing Projects and seven Initiatives
+-> apply exactly 62 one-primary memberships
+-> read back 7 Initiatives / 64 Projects / 62 memberships / 2 exceptions
+-> activate views, updates, integrations, cycles, releases, and automation as bounded live capabilities
+```
+
+Redundant re-reviews, ceremonial worker handoffs, duplicate canaries, and source-only status loops are not completion gates. The irreducible gates are exact source identity, deterministic mapping, no duplicate/ambiguous live identity, safe effect reconciliation, and full post-write readback.
