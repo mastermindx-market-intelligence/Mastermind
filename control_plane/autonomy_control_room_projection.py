@@ -2495,7 +2495,17 @@ _DISPATCH_SECRET_OR_PATH_RE = re.compile(
     # bare token walked straight through.
     r"|sk-[A-Za-z0-9_-]{8,}|xox[abprs]-[A-Za-z0-9-]{8,}"
     r"|ghp_[A-Za-z0-9]{16,}|gho_[A-Za-z0-9]{16,}|glpat-[A-Za-z0-9_-]{16,}"
-    r"|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})"
+    r"|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
+    # Google API keys and OAuth tokens, two more named families.
+    r"|AIza[A-Za-z0-9_-]{10,}|ya29\.[A-Za-z0-9_.-]{10,}"
+    # STRUCTURAL, not another named family.  Enumerating credential
+    # prefixes is a losing shape: each round of "add the ones we missed"
+    # still missed the next.  These fields carry identifiers, refs and
+    # receipts, and no legitimate value of that kind contains a URL
+    # scheme, an authority separator or an at-sign — so refusing those two
+    # characters kills credential URLs (`postgres://user:pass@host`) and
+    # e-mail addresses structurally, whatever their shape.
+    r"|://|@)"
 )
 
 

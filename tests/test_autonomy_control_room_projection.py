@@ -3702,3 +3702,48 @@ def test_review_validator_never_raises_on_a_hostile_mapping():
 
     card = _rv_card(_Hostile(responsibility_ref="WS:X", root_job_id="JOB-1"))
     assert card["actionable"] is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "AIzaQQLEAKQQ1234567890abcdefghij",
+        "ya29.QQLEAKQQ-abcdefghijklmnopqr",
+        "postgres://user:QQLEAKQQ@db.internal/mydb",
+        "QQLEAKQQ@example.com",
+    ],
+)
+def test_review_structural_refusal_covers_shapes_no_prefix_list_would(value):
+    """Enumerating credential prefixes was a losing shape.
+
+    Two rounds of "add the ones we missed" still missed the next: after
+    sk-/ghp_/JWT were added, a Google key, an OAuth token, a credential URL
+    and an e-mail address all still reached the rendered document. These
+    fields carry identifiers, refs and receipts, and no legitimate value of
+    that kind contains a URL scheme or an at-sign, so those two characters
+    are refused structurally rather than by family.
+    """
+    card = _rv_card({**_RV_BASE, "watch_mechanism": value})
+
+    assert card["actionable"] is False
+    assert "QQLEAKQQ" not in json.dumps(card)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",  # a real SHA-shaped receipt
+        "cron",
+        "WS:AD-CR1A/job-1",
+    ],
+)
+def test_review_structural_refusal_still_accepts_legitimate_identifiers(value):
+    """Positive control: the refusal must not swallow the field's real use.
+
+    A 40-hex value is exactly what `watch_baseline_receipt` is for, so
+    refusing high-entropy strings outright would have broken the contract
+    while looking like extra safety.
+    """
+    card = _rv_card({**_RV_BASE, "watch_mechanism": value})
+
+    assert card["reason"] != "dispatch_evidence_rejected"
