@@ -223,8 +223,139 @@ def assert_current_nonseat(bound_doc: dict, row: dict, *, now: datetime) -> None
 _atomic_private_json = vendors.atomic_private_json
 
 
+def _initialize_peer_lifecycle_for_anchor(
+    provision: dict, *, state_path=vendors.PEER_INTENT_PATH,
+    peer_provision_path=vendors.PEER_PROVISION_PATH,
+) -> None:
+    """Pre-provision the inert peer lifecycle inode during trusted setup."""
+    folder_id = provision.get("folder_id")
+    anchor_profile_id = provision.get("profile_id")
+    if not isinstance(folder_id, str) or not isinstance(anchor_profile_id, str):
+        raise SetupRefusal("the disposable anchor cannot initialize peer lifecycle state")
+    outcome = vendors.initialize_peer_lifecycle_state(
+        state_path,
+        folder_id=folder_id,
+        anchor_profile_id=anchor_profile_id,
+        peer_name=vendors.peer_profile_name(folder_id, anchor_profile_id),
+        peer_provision_path=peer_provision_path,
+    )
+    if outcome not in (vendors.CREATED_THIS_CALL, vendors.EXISTING_EXACT):
+        raise SetupRefusal("the peer lifecycle genesis is unavailable or already consumed")
+
+
+def _exact_initialized_peer_lifecycle(
+    provision: dict, *, state_path=vendors.PEER_INTENT_PATH,
+    peer_provision_path=vendors.PEER_PROVISION_PATH,
+):
+    """Read one exact inert genesis without creating or re-arming it."""
+    folder_id = provision.get("folder_id")
+    anchor_profile_id = provision.get("profile_id")
+    if not isinstance(folder_id, str) or not isinstance(anchor_profile_id, str):
+        raise SetupRefusal("the disposable anchor cannot bind peer lifecycle state")
+    try:
+        state, peer_provision = vendors._preflight_peer_paths(  # noqa: SLF001
+            operation="create-peer-profile",
+            state_path=state_path,
+            provision_path=peer_provision_path,
+        )
+    except vendors._PeerStateRefusal:  # noqa: SLF001
+        raise SetupRefusal("the peer lifecycle genesis is unavailable or already consumed") from None
+    if (
+        peer_provision is not None
+        or state.document.get("phase") != vendors.PEER_PHASE_INITIALIZED
+        or not vendors._state_matches_authority(  # noqa: SLF001
+            state,
+            folder_id=folder_id,
+            anchor_profile_id=anchor_profile_id,
+            peer_name=vendors.peer_profile_name(folder_id, anchor_profile_id),
+            peer_provision_path=peer_provision_path,
+        )
+    ):
+        raise SetupRefusal("the peer lifecycle genesis is unavailable or already consumed")
+    return state
+
+
+def _prepare_anchor_with_peer_lifecycle(
+    provision: dict, *, anchor_path=canary.DEFAULT_PROVISION_PATH,
+    state_path=vendors.PEER_INTENT_PATH,
+    peer_provision_path=vendors.PEER_PROVISION_PATH,
+) -> str:
+    """One-time setup of the anchor and inert peer lifecycle genesis.
+
+    Runtime create never calls this helper.  If an anchor already exists, a
+    missing lifecycle is indistinguishable from deletion after dispatch and is
+    therefore terminally refused before the anchor inode can be replaced.
+    """
+    try:
+        existing_anchor = vendors._optional_private_json_snapshot(anchor_path)  # noqa: SLF001
+    except vendors._PeerStateRefusal:  # noqa: SLF001
+        raise SetupRefusal("the disposable anchor path is not a private exact file") from None
+
+    if existing_anchor is not None:
+        if existing_anchor.document != provision:
+            raise SetupRefusal("an existing disposable anchor cannot be replaced by prepare-disposable")
+        state = _exact_initialized_peer_lifecycle(
+            provision,
+            state_path=state_path,
+            peer_provision_path=peer_provision_path,
+        )
+        try:
+            current_anchor = vendors._optional_private_json_snapshot(anchor_path)  # noqa: SLF001
+        except vendors._PeerStateRefusal:  # noqa: SLF001
+            current_anchor = None
+        current_state = _exact_initialized_peer_lifecycle(
+            provision,
+            state_path=state_path,
+            peer_provision_path=peer_provision_path,
+        )
+        if (
+            current_anchor is None
+            or not vendors._same_snapshot(current_anchor, existing_anchor)  # noqa: SLF001
+            or not vendors._same_snapshot(current_state, state)  # noqa: SLF001
+        ):
+            raise SetupRefusal("the disposable anchor or peer lifecycle changed during setup")
+        return vendors.EXISTING_EXACT
+
+    # A missing anchor is the only ordinary setup state allowed to mint the
+    # genesis.  A prior crash may already have left the exact inert genesis;
+    # accepting it is safe because no runtime effect can precede a valid anchor.
+    _initialize_peer_lifecycle_for_anchor(
+        provision,
+        state_path=state_path,
+        peer_provision_path=peer_provision_path,
+    )
+    state = _exact_initialized_peer_lifecycle(
+        provision,
+        state_path=state_path,
+        peer_provision_path=peer_provision_path,
+    )
+    outcome, anchor_snapshot = vendors._exclusive_private_json(  # noqa: SLF001
+        anchor_path, provision,
+    )
+    if outcome not in (vendors.CREATED_THIS_CALL, vendors.EXISTING_EXACT):
+        raise SetupRefusal("the disposable anchor appeared or changed during setup")
+    try:
+        current_anchor = vendors._optional_private_json_snapshot(anchor_path)  # noqa: SLF001
+    except vendors._PeerStateRefusal:  # noqa: SLF001
+        current_anchor = None
+    current_state = _exact_initialized_peer_lifecycle(
+        provision,
+        state_path=state_path,
+        peer_provision_path=peer_provision_path,
+    )
+    if (
+        anchor_snapshot is None
+        or current_anchor is None
+        or not vendors._same_snapshot(current_anchor, anchor_snapshot)  # noqa: SLF001
+        or not vendors._same_snapshot(current_state, state)  # noqa: SLF001
+    ):
+        raise SetupRefusal("the disposable anchor or peer lifecycle changed during setup")
+    return outcome
+
+
 def _migrate_legacy_provision(
     path=canary.DEFAULT_PROVISION_PATH, *, bindings_loader=None, now=None,
+    peer_intent_path=None, peer_provision_path=None,
 ):
     """Atomically migrate only the exact validated historical provision."""
 
@@ -233,10 +364,30 @@ def _migrate_legacy_provision(
     )
     if migrated is None:
         return None, code
+    should_initialize_peer = (
+        peer_intent_path is not None
+        or Path(path).expanduser() == Path(canary.DEFAULT_PROVISION_PATH).expanduser()
+    )
+    if should_initialize_peer:
+        # Exact legacy migration is the sole exception to the ordinary rule
+        # forbidding genesis creation beside an existing anchor.  Seed before
+        # replacement so a consumed/mismatched lifecycle refuses with the
+        # historical anchor inode and bytes untouched.
+        _initialize_peer_lifecycle_for_anchor(
+            migrated,
+            state_path=peer_intent_path or vendors.PEER_INTENT_PATH,
+            peer_provision_path=peer_provision_path or vendors.PEER_PROVISION_PATH,
+        )
     _atomic_private_json(migrated, path)
     loaded, code = canary.load_provision(
         path, bindings_loader=bindings_loader, now=now,
     )
+    if loaded is not None and should_initialize_peer:
+        _exact_initialized_peer_lifecycle(
+            loaded,
+            state_path=peer_intent_path or vendors.PEER_INTENT_PATH,
+            peer_provision_path=peer_provision_path or vendors.PEER_PROVISION_PATH,
+        )
     return (loaded, None) if loaded is not None else (None, code)
 
 
@@ -331,7 +482,7 @@ def provision_interactive() -> int:
     provision = build_provision(refreshed, browser_type=browser_type)
     if input(f"Type {canary.REQUIRED_ACK!r} to attest this is disposable and not a Chairman seat: ").strip() != canary.REQUIRED_ACK:
         raise SetupRefusal("disposable acknowledgement did not match; nothing was written")
-    _atomic_private_json(provision, canary.DEFAULT_PROVISION_PATH)
+    _prepare_anchor_with_peer_lifecycle(provision)
 
     loaded, code = _load_current_provision()
     if loaded is None:
@@ -367,17 +518,17 @@ def create_peer_interactive() -> int:
     HTTP, and never sees a raw vendor response — it only forwards the exit
     code and lets ``vendors.main`` print its own receipt.
     """
+    if not vendors.coordinator_peer_paths_safe("create-peer-profile"):
+        raise SetupRefusal("peer lifecycle paths are unsafe or inconsistent")
     bound_doc, problems = sb.load_bindings()
     if problems or bound_doc is None:
         raise SetupRefusal("enroll all three Chairman ChatGPT seats before preparing a disposable peer profile")
     _matching_local_row(bound_doc)
     if input(f"Type {_CONFIRM_CREATE_PEER!r} to create one disposable peer profile: ").strip() != _CONFIRM_CREATE_PEER:
         raise SetupRefusal("peer-create confirmation did not match; nothing was dispatched")
-    return vendors.main([
-        "create-peer-profile",
+    return vendors.run_coordinator_peer_create([
         "--vendor", "multilogin",
         "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
-        "--confirmed",
     ])
 
 
@@ -388,17 +539,19 @@ def rollback_peer_interactive() -> int:
     HTTP, and never sees a raw vendor response — it only forwards the exit
     code and lets ``vendors.main`` print its own receipt.
     """
+    if not vendors.coordinator_peer_paths_safe("rollback-peer-profile"):
+        raise SetupRefusal("peer lifecycle paths are unsafe or inconsistent")
+    if not vendors.coordinator_peer_rollback_receipt_ready():
+        raise SetupRefusal("trusted fresh downstream ownership release receipt is required")
     bound_doc, problems = sb.load_bindings()
     if problems or bound_doc is None:
         raise SetupRefusal("enroll all three Chairman ChatGPT seats before rolling back a disposable peer profile")
     _matching_local_row(bound_doc)
     if input(f"Type {_CONFIRM_ROLLBACK_PEER!r} to remove the operation-created peer profile: ").strip() != _CONFIRM_ROLLBACK_PEER:
         raise SetupRefusal("peer-rollback confirmation did not match; nothing was dispatched")
-    return vendors.main([
-        "rollback-peer-profile",
+    return vendors.run_coordinator_peer_rollback([
         "--vendor", "multilogin",
         "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
-        "--confirmed",
     ])
 
 

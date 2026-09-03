@@ -24,6 +24,8 @@ script-evaluation, cookie, storage, download, or arbitrary-command surface.
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import http.client
 import http.server
 import importlib.util
@@ -38,12 +40,14 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
 import httpx
 
+from control_plane import surface_bindings as _surface_bindings
 from . import nonseat_canary as _core
 from . import mas115_multilogin_port_policy as _port_policy
 #: Frozen official Multilogin X surfaces.  Launcher profile status/stop are
@@ -77,6 +81,13 @@ _WEBDRIVER_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _WEBDRIVER_MISSING = object()
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
+
+def _canonical_multilogin_profile_id(value):
+    """Return the one canonical Multilogin UUID, never a loose identifier."""
+    if not isinstance(value, str) or _surface_bindings.UUID_RE.fullmatch(value) is None:
+        return None
+    return value.lower()
+
 # ---------------------------------------------------------------------------
 # REALM1-C1 — MAS-115 one-profile Multilogin peer create/reconcile/remove
 # (Mastermind #385). See docs/CHAIRMAN_CONTROL_ROOM.md item 6/7.
@@ -88,12 +99,76 @@ _MLX_PROFILE_REMOVE_PATH = "/profile/remove"
 PEER_OPERATION_KEY = "web-sol-realm1-multilogin-profile-create-owner-20260902-sol-001"
 PEER_PROVISION_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_canary_peer.json"
 PEER_INTENT_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_peer_create_intent.json"
-PEER_INTENT_SCHEMA = "mastermind.mas115_nonseat_peer_create_intent.v1"
+PEER_GENESIS_WITNESS_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_peer_genesis_witness.json"
+PEER_OWNERSHIP_RECEIPT_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_peer_release_receipt.json"
+PEER_INTENT_SCHEMA = "mastermind.mas115_nonseat_peer_lifecycle_state.v5"
+PEER_GENESIS_WITNESS_SCHEMA = "mastermind.mas115_nonseat_peer_genesis_witness.v1"
 PEER_RECEIPT_SCHEMA = "mastermind.mas115_nonseat_peer_lifecycle.v1"
+PEER_OWNERSHIP_FACT_SCHEMA = "mastermind.mas115_peer_downstream_ownership.v1"
+# Semantic source generation for the reviewed REALM1-C1 R2 lifecycle.  It is
+# deliberately independent of a self-referential Git commit hash, but changes
+# whenever this authority/state contract changes.
+PEER_SOURCE_GENERATION = "faa91f0817a4b960043f8d778ef99617c8fa7e99727271d6071199ac401f0b43"
+PF1_OPERATION_KEY = "web-sol-pf1-provider-continuation-falsifier-20260901-sol-001"
+INSTALL1_OPERATION_KEY = "web-sol-install1-two-profile-disposable-proof-20260902-sol-001"
+_MAX_OWNERSHIP_RECEIPT_AGE = timedelta(minutes=5)
 _PEER_NAME_PREFIX = "mas115-peer-"
 _PEER_BROWSER_TYPE = "mimic"
 _PEER_OS_TYPE = "macos"
 _PEER_REMOVE_PERMANENTLY = False  # recoverable; absence is proven against the active census
+
+CREATED_THIS_CALL = "CREATED_THIS_CALL"
+EXISTING_EXACT = "EXISTING_EXACT"
+REFUSED = "REFUSED"
+_CLAIM_DISPOSITIONS = frozenset({CREATED_THIS_CALL, EXISTING_EXACT, REFUSED})
+
+PEER_PHASE_INITIALIZED = "INITIALIZED"
+PEER_PHASE_CREATE_CLAIMED = "CREATE_CLAIMED"
+PEER_PHASE_CREATE_AUTH_REJECTED = "CREATE_AUTH_REJECTED"
+PEER_PHASE_CREATE_RESPONSE_OBSERVED = "CREATE_RESPONSE_OBSERVED"
+PEER_PHASE_PROFILE_STOPPED = "PROFILE_STOPPED_PROVEN"
+PEER_PHASE_PROVISION_COMMITTED = "PROVISION_COMMITTED"
+PEER_PHASE_REMOVE_DISPATCHED = "REMOVE_DISPATCHED"
+PEER_PHASE_ROLLBACK_VERIFIED = "ROLLBACK_VERIFIED"
+_PEER_PHASES = frozenset({
+    PEER_PHASE_INITIALIZED,
+    PEER_PHASE_CREATE_CLAIMED,
+    PEER_PHASE_CREATE_AUTH_REJECTED,
+    PEER_PHASE_CREATE_RESPONSE_OBSERVED,
+    PEER_PHASE_PROFILE_STOPPED,
+    PEER_PHASE_PROVISION_COMMITTED,
+    PEER_PHASE_REMOVE_DISPATCHED,
+    PEER_PHASE_ROLLBACK_VERIFIED,
+})
+_PEER_STATE_KEYS = frozenset({
+    "schema", "operation", "generation", "folder_digest",
+    "anchor_profile_digest", "browser_type", "os_type", "peer_name",
+    "state_dev", "state_ino", "genesis_witness_coordinate_digest",
+    "genesis_witness_dev", "genesis_witness_ino",
+    "peer_profile_digest", "peer_provision_coordinate_digest",
+    "peer_provision_digest", "peer_provision_dev", "peer_provision_ino",
+    "phase", "response_profile_digest", "ownership_fact_digest",
+    "ownership_observed_at",
+})
+_PEER_GENESIS_WITNESS_PENDING = "PENDING"
+_PEER_GENESIS_WITNESS_BOUND = "BOUND"
+_PEER_GENESIS_WITNESS_KEYS = frozenset({
+    "schema", "operation", "source_generation", "lifecycle_generation",
+    "state_coordinate_digest", "peer_provision_coordinate_digest",
+    "folder_digest", "anchor_profile_digest", "peer_name_digest",
+    "witness_dev", "witness_ino", "state_dev", "state_ino", "phase",
+})
+_MAX_PEER_STATE_BYTES = 16 * 1024
+
+
+class _PeerAuthorization:
+    """Opaque in-process capability; no serialized CLI value can create one."""
+
+    __slots__ = ()
+
+
+CREATE_PEER_AUTHORIZATION = _PeerAuthorization()
+ROLLBACK_PEER_AUTHORIZATION = _PeerAuthorization()
 
 PEER_EFFECT_CODES = frozenset({
     "NONE", "CREATE_DISPATCHED", "CREATE_APPLIED", "CREATE_EFFECT_UNKNOWN",
@@ -570,10 +645,28 @@ def _exact_profile_create_id(response):
     ids = data.get("ids")
     if not isinstance(ids, list) or len(ids) != 1:
         return None
-    only_id = ids[0]
-    if not isinstance(only_id, str) or not only_id:
+    return _canonical_multilogin_profile_id(ids[0])
+
+
+def _observed_profile_create_id(response):
+    """Return one safely bounded response profile id, independent of prose.
+
+    This is identity evidence only.  A response with drifted status prose or
+    extra advisory fields is still not an exact acknowledgement, but its one
+    structurally usable id must constrain the subsequent census read-back.
+    """
+    if response is None or not 200 <= response.status_code < 300:
         return None
-    return only_id
+    payload = response.payload
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    ids = data.get("ids")
+    if not isinstance(ids, list) or len(ids) != 1:
+        return None
+    return _canonical_multilogin_profile_id(ids[0])
 
 
 def _is_exact_profile_create_success(response) -> bool:
@@ -985,12 +1078,12 @@ class MultiloginClient:
             for item in profiles:
                 if not isinstance(item, dict) or not {"id", "folder_id", "name"}.issubset(item):
                     raise _core.CanaryRefusal("VENDOR_ERROR")
-                item_id = item.get("id")
-                item_folder = item.get("folder_id")
+                item_id = _canonical_multilogin_profile_id(item.get("id"))
+                item_folder = _canonical_multilogin_profile_id(item.get("folder_id"))
                 item_name = item.get("name")
                 if (
-                    not isinstance(item_id, str)
-                    or not isinstance(item_folder, str)
+                    item_id is None
+                    or item_folder is None
                     or not isinstance(item_name, str)
                 ):
                     raise _core.CanaryRefusal("VENDOR_ERROR")
@@ -1003,7 +1096,10 @@ class MultiloginClient:
                     if not isinstance(item.get("browser_type"), str) or not isinstance(item.get("os_type"), str):
                         # We cannot prove identity we cannot see.
                         raise _core.CanaryRefusal("VENDOR_ERROR")
-                    matches.append(dict(item))
+                    canonical = dict(item)
+                    canonical["id"] = item_id
+                    canonical["folder_id"] = item_folder
+                    matches.append(canonical)
             offset += len(profiles)
             if offset == total:
                 return matches
@@ -1039,7 +1135,11 @@ class MultiloginClient:
             "anchor_profile": _core.sha256_hex(anchor_profile_id),
         }
 
-    def create_peer_profile(self, *, folder_id, anchor_profile_id, intent_present, commit_intent) -> dict:
+    def create_peer_profile(
+        self, *, folder_id, anchor_profile_id, intent_present, commit_intent,
+        observed_profile_digest=None, record_response_id=None,
+        intent_reconciliation_ready=False,
+    ) -> dict:
         """Create the one missing stopped disposable peer profile.
 
         At most ONE create dispatch, ever. The vendor response never decides
@@ -1069,6 +1169,7 @@ class MultiloginClient:
         dispatched = False
         reconciled = False
         acknowledged_id = None
+        observed_id = None
 
         if candidates_before >= 1 and not intent_present:
             # A name-colliding profile we did not create is a conflict; we
@@ -1076,6 +1177,17 @@ class MultiloginClient:
             return _receipt("NONE", "BUSY_PROFILE", "REFUSED", candidates_before=candidates_before)
 
         if intent_present and candidates_before == 1:
+            if not intent_reconciliation_ready:
+                # CREATE_CLAIMED may still belong to a live owner between
+                # dispatch and durable response-ID recording.  A second
+                # invocation cannot provision its census row until the state
+                # itself carries the response identity (or a later phase).
+                return _receipt(
+                    "CREATE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
+                    candidates_before=candidates_before,
+                    dispatched=False,
+                    reconciled=True,
+                )
             if not self._peer_identity_matches(candidates[0], folder_id=folder_id, peer_name=peer_name):
                 return _receipt("NONE", "VENDOR_ERROR", "REFUSED", candidates_before=candidates_before)
             dispatched = False
@@ -1092,27 +1204,52 @@ class MultiloginClient:
             try:
                 committed = commit_intent()
             except Exception:  # noqa: BLE001 — a raising commit is a failed commit
-                committed = False
-            if committed is not True:
+                committed = REFUSED
+            if committed == EXISTING_EXACT:
+                # A concurrent invocation won the durable claim.  This call
+                # becomes reconciliation-only; it must never send a second
+                # create even though its own pre-claim census saw zero rows.
+                intent_committed = True
+                dispatched = False
+                reconciled = True
+                return _receipt(
+                    "CREATE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
+                    candidates_before=0,
+                    dispatched=False,
+                    reconciled=True,
+                )
+            elif committed != CREATED_THIS_CALL:
                 return _receipt(
                     "NONE", "PROVISION_MISSING", "REFUSED", candidates_before=0, dispatched=False,
                 )
-            intent_committed = True
-            response = None
-            try:
-                response = self._client._mlx_profile_create(self._credential, folder_id, peer_name)
-            except Exception:  # noqa: BLE001 — never echo a dynamic transport error
+            else:
+                intent_committed = True
                 response = None
-            if response is not None and response.status_code in (401, 403):
-                # Auth rejection precedes creation; the ONLY pre-effect exit
-                # after commit.
-                return _receipt(
-                    "NONE", "AUTH_EXPIRED", "REFUSED", candidates_before=0, dispatched=False,
-                )
-            acknowledged_id = _exact_profile_create_id(response)
-            exact = acknowledged_id is not None
-            dispatched = True
-            reconciled = not exact
+                try:
+                    response = self._client._mlx_profile_create(self._credential, folder_id, peer_name)
+                except Exception:  # noqa: BLE001 — never echo a dynamic transport error
+                    response = None
+                if response is not None and response.status_code in (401, 403):
+                    # Auth rejection precedes creation; the ONLY pre-effect
+                    # exit after an acquired claim.
+                    return _receipt(
+                        "NONE", "AUTH_EXPIRED", "REFUSED", candidates_before=0, dispatched=False,
+                    )
+                observed_id = _observed_profile_create_id(response)
+                if observed_id is not None and record_response_id is not None:
+                    try:
+                        recorded = record_response_id(observed_id)
+                    except Exception:  # noqa: BLE001 — state uncertainty is effect uncertainty
+                        recorded = False
+                    if recorded is not True:
+                        return _receipt(
+                            "CREATE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
+                            candidates_before=0, dispatched=True, reconciled=False,
+                        )
+                acknowledged_id = _exact_profile_create_id(response)
+                exact = acknowledged_id is not None
+                dispatched = True
+                reconciled = not exact
         else:  # pragma: no cover — every (intent_present, candidates_before)
             # combination is covered by the three branches above; this exists
             # only so a future mutation cannot silently fall through to a
@@ -1147,8 +1284,15 @@ class MultiloginClient:
                 exact_readback=False,
             )
 
-        if acknowledged_id is not None and record.get("id") != acknowledged_id:
-            # The vendor named one id and the folder census returned another.
+        response_constraint = observed_id or acknowledged_id
+        if (
+            response_constraint is not None
+            and record.get("id") != response_constraint
+        ) or (
+            observed_profile_digest is not None
+            and _core.sha256_hex(record.get("id")) != observed_profile_digest
+        ):
+            # The vendor/state named one id and the folder census returned another.
             # Adopting the census row here would leave the acknowledged
             # profile untracked in the approved folder, unreachable by
             # rollback, and fatal to every later create. Contradiction is
@@ -1181,7 +1325,10 @@ class MultiloginClient:
             exact_readback=True, stopped_proven=True, cleanup_lease_retained=True,
         )
 
-    def remove_peer_profile(self, *, folder_id, anchor_profile_id, peer_profile_id) -> dict:
+    def remove_peer_profile(
+        self, *, folder_id, anchor_profile_id, peer_profile_id,
+        remove_already_claimed=False, claim_remove=None,
+    ) -> dict:
         """Remove ONLY the exact stopped, unowned, operation-created peer
         profile. At most ONE remove dispatch, ever; the vendor response
         never decides the effect on its own."""
@@ -1210,6 +1357,11 @@ class MultiloginClient:
 
         candidates_before = len(candidates)
         if candidates_before == 0:
+            if remove_already_claimed:
+                return _receipt(
+                    "ROLLBACK_VERIFIED", "OK", "PASS", candidates_before=0,
+                    dispatched=False, reconciled=True, removed_absent=True,
+                )
             return _receipt("NONE", "PROFILE_NOT_FOUND", "REFUSED", candidates_before=0)
 
         exact_target = (
@@ -1229,39 +1381,59 @@ class MultiloginClient:
         if state != "stopped":
             return _receipt("NONE", "BUSY_PROFILE", "REFUSED", candidates_before=candidates_before)
 
-        response = None
-        try:
-            response = self._client._mlx_profile_remove(self._credential, peer_profile_id)
-        except Exception:  # noqa: BLE001 — never echo a dynamic transport error
-            response = None
-        if response is not None and response.status_code in (401, 403):
+        dispatch_owned = False
+        if remove_already_claimed:
+            claim = EXISTING_EXACT
+        elif claim_remove is None:
+            # Direct unit callers without lifecycle state are never granted a
+            # durable external remove.  The coordinator supplies the claim.
+            claim = REFUSED
+        else:
+            try:
+                claim = claim_remove()
+            except Exception:  # noqa: BLE001 — claim uncertainty is refusal
+                claim = REFUSED
+        if claim == CREATED_THIS_CALL:
+            dispatch_owned = True
+        elif claim != EXISTING_EXACT:
             return _receipt(
-                "NONE", "AUTH_EXPIRED", "REFUSED", candidates_before=candidates_before,
+                "NONE", "PROVISION_MISSING", "REFUSED",
+                candidates_before=candidates_before, dispatched=False,
             )
-        exact = _is_exact_profile_remove_success(response)
+
+        response = None
+        exact = False
+        if dispatch_owned:
+            try:
+                response = self._client._mlx_profile_remove(self._credential, peer_profile_id)
+            except Exception:  # noqa: BLE001 — never echo a dynamic transport error
+                response = None
+            if response is not None and response.status_code in (401, 403):
+                # The durable remove claim remains: a retry could duplicate an
+                # effect if the remote classification were ever wrong.
+                return _receipt(
+                    "REMOVE_EFFECT_UNKNOWN", "AUTH_EXPIRED", "HOLD",
+                    candidates_before=candidates_before, dispatched=True, reconciled=False,
+                )
+            exact = _is_exact_profile_remove_success(response)
 
         try:
             after = self.peer_candidates(folder_id=folder_id, peer_name=peer_name)
         except _core.CanaryRefusal:
             return _receipt(
                 "REMOVE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
-                candidates_before=candidates_before, dispatched=True, reconciled=True,
+                candidates_before=candidates_before, dispatched=dispatch_owned, reconciled=True,
             )
 
         if len(after) == 0:
             return _receipt(
                 "ROLLBACK_VERIFIED", "OK", "PASS",
-                candidates_before=candidates_before, dispatched=True,
+                candidates_before=candidates_before, dispatched=dispatch_owned,
                 reconciled=not exact, removed_absent=True,
-            )
-        if exact:
-            return _receipt(
-                "REMOVE_DISPATCHED", "VENDOR_ERROR", "REFUSED",
-                candidates_before=candidates_before, dispatched=True, reconciled=False,
             )
         return _receipt(
             "REMOVE_EFFECT_UNKNOWN", "VENDOR_ERROR", "HOLD",
-            candidates_before=candidates_before, dispatched=True, reconciled=True,
+            candidates_before=candidates_before, dispatched=dispatch_owned, reconciled=True,
         )
 
     def port_policy_snapshot(self, profile_ref: dict):
@@ -1859,81 +2031,1461 @@ def atomic_private_json(doc: dict, path) -> None:
         raise
 
 
-def _peer_intent_present(path, *, peer_name: str) -> bool:
-    """True iff ``path`` holds an exact, schema/operation/peer_name-matching
-    intent document. A malformed or mismatched file is treated as NOT
-    present (see :func:`_commit_peer_intent`, which additionally refuses to
-    silently overwrite such a file)."""
+class _PeerStateRefusal(Exception):
+    """Internal fixed-state refusal.  Its text is never emitted."""
+
+
+@dataclass(frozen=True)
+class _PrivateJsonSnapshot:
+    path: Path
+    document: dict
+    raw: bytes
+    sha256: str
+    st_dev: int
+    st_ino: int
+    st_uid: int
+    st_mode: int
+    st_nlink: int
+
+
+def _normalized_private_path(path) -> Path:
     target = Path(path).expanduser()
+    if not target.is_absolute():
+        target = Path.cwd() / target
+    return Path(os.path.abspath(os.fspath(target)))
+
+
+def _open_private_parent(path, *, exclusive=False):
+    """Open and lock one private, symlink-free parent directory."""
+    target = _normalized_private_path(path)
+    parent = target.parent
+    parent_fd = None
     try:
-        if not target.is_file():
-            return False
-        doc = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
+        if os.path.realpath(parent) != os.path.abspath(parent):
+            raise _PeerStateRefusal()
+        before = os.stat(parent, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) & 0o077
+        ):
+            raise _PeerStateRefusal()
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        parent_fd = os.open(parent, flags)
+        after = os.fstat(parent_fd)
+        if (
+            (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
+            or not stat.S_ISDIR(after.st_mode)
+            or after.st_uid != os.geteuid()
+            or stat.S_IMODE(after.st_mode) & 0o077
+        ):
+            os.close(parent_fd)
+            parent_fd = None
+            raise _PeerStateRefusal()
+        fcntl.flock(parent_fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        # The path may have been renamed/replaced while the advisory lock was
+        # being acquired.  A descriptor for the old directory cannot confer
+        # authority over the fixed path in the replacement directory.
+        named_after_lock = os.stat(parent, follow_symlinks=False)
+        if (
+            (named_after_lock.st_dev, named_after_lock.st_ino)
+            != (after.st_dev, after.st_ino)
+            or not stat.S_ISDIR(named_after_lock.st_mode)
+            or named_after_lock.st_uid != os.geteuid()
+            or stat.S_IMODE(named_after_lock.st_mode) & 0o077
+        ):
+            raise _PeerStateRefusal()
+        return target, parent_fd
+    except (_PeerStateRefusal, OSError):
+        if parent_fd is not None:
+            try:
+                os.close(parent_fd)
+            except OSError:
+                pass
+        raise _PeerStateRefusal() from None
+
+
+def _private_security_tuple(info):
     return (
-        isinstance(doc, dict)
-        and doc.get("schema") == PEER_INTENT_SCHEMA
-        and doc.get("operation") == PEER_OPERATION_KEY
-        and doc.get("peer_name") == peer_name
+        info.st_dev,
+        info.st_ino,
+        info.st_uid,
+        stat.S_IMODE(info.st_mode),
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
     )
 
 
-def _commit_peer_intent(path, *, folder_id: str, anchor_profile_id: str, peer_name: str) -> bool:
-    """Atomically write the intent sidecar BEFORE any create dispatch.
+def _snapshot_created_private_fd(
+    target: Path, parent_fd: int, leaf_fd: int, *, document: dict, raw: bytes,
+):
+    """Bind a just-created private record to its descriptor and fixed path.
 
-    Idempotent: an existing file that already byte-matches the candidate
-    document is treated as already committed. Any other existing file
-    (malformed, foreign, or from a different operation) blocks — it is
-    never silently overwritten.
+    The caller holds the parent and leaf locks.  Validation is repeated after
+    the directory durability barrier so a hard-link, rename, parent swap, or
+    byte-identical replacement can only turn the operation into a refusal.
     """
-    target = Path(path).expanduser()
-    candidate = {
-        "schema": PEER_INTENT_SCHEMA,
+    try:
+        fcntl.flock(leaf_fd, fcntl.LOCK_EX)
+        opened = os.fstat(leaf_fd)
+        opened_security = _private_security_tuple(opened)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or opened.st_nlink != 1
+            or opened.st_size != len(raw)
+            or len(raw) > _MAX_PEER_STATE_BYTES
+        ):
+            raise _PeerStateRefusal()
+        readback = _read_private_fd(leaf_fd)
+        after_read = os.fstat(leaf_fd)
+        if readback != raw or _private_security_tuple(after_read) != opened_security:
+            raise _PeerStateRefusal()
+        named = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        if _private_security_tuple(named) != opened_security:
+            raise _PeerStateRefusal()
+
+        os.fsync(parent_fd)
+
+        final_opened = os.fstat(leaf_fd)
+        final_named = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        parent_opened = os.fstat(parent_fd)
+        parent_named = os.stat(target.parent, follow_symlinks=False)
+        if (
+            _private_security_tuple(final_opened) != opened_security
+            or _private_security_tuple(final_named) != opened_security
+            or (parent_named.st_dev, parent_named.st_ino)
+            != (parent_opened.st_dev, parent_opened.st_ino)
+            or not stat.S_ISDIR(parent_named.st_mode)
+            or parent_named.st_uid != os.geteuid()
+            or stat.S_IMODE(parent_named.st_mode) & 0o077
+        ):
+            raise _PeerStateRefusal()
+        return _PrivateJsonSnapshot(
+            path=target,
+            document=dict(document),
+            raw=readback,
+            sha256=hashlib.sha256(readback).hexdigest(),
+            st_dev=final_opened.st_dev,
+            st_ino=final_opened.st_ino,
+            st_uid=final_opened.st_uid,
+            st_mode=stat.S_IMODE(final_opened.st_mode),
+            st_nlink=final_opened.st_nlink,
+        )
+    except (OSError, _PeerStateRefusal):
+        raise _PeerStateRefusal() from None
+
+
+def _snapshot_from_parent(target: Path, parent_fd: int) -> _PrivateJsonSnapshot:
+    name = target.name
+    try:
+        before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or before.st_nlink != 1
+            or before.st_size > _MAX_PEER_STATE_BYTES
+        ):
+            raise _PeerStateRefusal()
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        leaf_fd = os.open(name, flags, dir_fd=parent_fd)
+        try:
+            fcntl.flock(leaf_fd, fcntl.LOCK_SH)
+            opened = os.fstat(leaf_fd)
+            stable_before = (
+                before.st_dev, before.st_ino, before.st_uid,
+                stat.S_IMODE(before.st_mode), before.st_nlink, before.st_size,
+                before.st_mtime_ns, before.st_ctime_ns,
+            )
+            stable_opened = (
+                opened.st_dev, opened.st_ino, opened.st_uid,
+                stat.S_IMODE(opened.st_mode), opened.st_nlink, opened.st_size,
+                opened.st_mtime_ns, opened.st_ctime_ns,
+            )
+            if (
+                stable_opened != stable_before
+                or not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != os.geteuid()
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or opened.st_nlink != 1
+            ):
+                raise _PeerStateRefusal()
+            chunks = []
+            remaining = _MAX_PEER_STATE_BYTES + 1
+            while remaining:
+                chunk = os.read(leaf_fd, min(remaining, 4096))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            raw = b"".join(chunks)
+            if len(raw) > _MAX_PEER_STATE_BYTES:
+                raise _PeerStateRefusal()
+            after_read = os.fstat(leaf_fd)
+            stable_after_read = (
+                after_read.st_dev, after_read.st_ino, after_read.st_uid,
+                stat.S_IMODE(after_read.st_mode), after_read.st_nlink,
+                after_read.st_size, after_read.st_mtime_ns, after_read.st_ctime_ns,
+            )
+            if stable_after_read != stable_opened:
+                raise _PeerStateRefusal()
+        finally:
+            os.close(leaf_fd)
+        named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        stable_named = (
+            named.st_dev, named.st_ino, named.st_uid,
+            stat.S_IMODE(named.st_mode), named.st_nlink, named.st_size,
+            named.st_mtime_ns, named.st_ctime_ns,
+        )
+        if stable_named != stable_after_read:
+            raise _PeerStateRefusal()
+        def _closed_object(pairs):
+            document = {}
+            for key, value in pairs:
+                if not isinstance(key, str) or key in document:
+                    raise ValueError("duplicate or non-string JSON key")
+                document[key] = value
+            return document
+
+        document = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_closed_object,
+        )
+        if not isinstance(document, dict):
+            raise _PeerStateRefusal()
+        return _PrivateJsonSnapshot(
+            path=target,
+            document=document,
+            raw=raw,
+            sha256=hashlib.sha256(raw).hexdigest(),
+            st_dev=before.st_dev,
+            st_ino=before.st_ino,
+            st_uid=before.st_uid,
+            st_mode=stat.S_IMODE(before.st_mode),
+            st_nlink=before.st_nlink,
+        )
+    except (OSError, UnicodeError, ValueError, _PeerStateRefusal):
+        raise _PeerStateRefusal() from None
+
+
+def _read_private_json_snapshot(path) -> _PrivateJsonSnapshot:
+    target, parent_fd = _open_private_parent(path)
+    try:
+        return _snapshot_from_parent(target, parent_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def _optional_private_json_snapshot(path):
+    target = _normalized_private_path(path)
+    try:
+        target, parent_fd = _open_private_parent(target)
+        try:
+            try:
+                os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return None
+            return _snapshot_from_parent(target, parent_fd)
+        finally:
+            os.close(parent_fd)
+    except _PeerStateRefusal:
+        raise
+
+
+def _peer_genesis_witness_path(state_path) -> Path:
+    """Return the one witness coordinate for a lifecycle coordinate.
+
+    Production is deliberately pinned to :data:`PEER_GENESIS_WITNESS_PATH`.
+    Tests use an equally deterministic sibling so the runtime surface never
+    accepts a caller-selected witness path.
+    """
+    target = _normalized_private_path(state_path)
+    if target == _normalized_private_path(PEER_INTENT_PATH):
+        return _normalized_private_path(PEER_GENESIS_WITNESS_PATH)
+    return target.with_name(f"{target.name}.genesis")
+
+
+def _peer_genesis_witness_document(
+    *, state_path, peer_provision_path, folder_id: str,
+    anchor_profile_id: str, peer_name: str, generation: str,
+    witness_dev=None, witness_ino=None, state_dev=None, state_ino=None,
+    phase=_PEER_GENESIS_WITNESS_PENDING,
+) -> dict:
+    return {
+        "schema": PEER_GENESIS_WITNESS_SCHEMA,
         "operation": PEER_OPERATION_KEY,
+        "source_generation": PEER_SOURCE_GENERATION,
+        "lifecycle_generation": generation,
+        "state_coordinate_digest": _core.sha256_hex(
+            os.fspath(_normalized_private_path(state_path))
+        ),
+        "peer_provision_coordinate_digest": _core.sha256_hex(
+            os.fspath(_normalized_private_path(peer_provision_path))
+        ),
         "folder_digest": _core.sha256_hex(folder_id),
         "anchor_profile_digest": _core.sha256_hex(anchor_profile_id),
-        "peer_name": peer_name,
+        "peer_name_digest": _core.sha256_hex(peer_name),
+        "witness_dev": witness_dev,
+        "witness_ino": witness_ino,
+        "state_dev": state_dev,
+        "state_ino": state_ino,
+        "phase": phase,
+    }
+
+
+def _peer_genesis_witness_shape_exact(document) -> bool:
+    if not isinstance(document, dict) or set(document) != _PEER_GENESIS_WITNESS_KEYS:
+        return False
+    if (
+        document.get("schema") != PEER_GENESIS_WITNESS_SCHEMA
+        or document.get("operation") != PEER_OPERATION_KEY
+        or document.get("source_generation") != PEER_SOURCE_GENERATION
+        or not isinstance(document.get("lifecycle_generation"), str)
+        or not re.fullmatch(r"[0-9a-f]{32,64}", document["lifecycle_generation"])
+        or document.get("phase") not in (
+            _PEER_GENESIS_WITNESS_PENDING,
+            _PEER_GENESIS_WITNESS_BOUND,
+        )
+    ):
+        return False
+    for key in (
+        "state_coordinate_digest", "peer_provision_coordinate_digest",
+        "folder_digest", "anchor_profile_digest", "peer_name_digest",
+    ):
+        if not isinstance(document.get(key), str) or not _HEX64_RE.fullmatch(document[key]):
+            return False
+    for key in ("witness_dev", "witness_ino"):
+        value = document.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return False
+    for key in ("state_dev", "state_ino"):
+        value = document.get(key)
+        if value is not None and (
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+        ):
+            return False
+    if document["phase"] == _PEER_GENESIS_WITNESS_PENDING:
+        return document["state_dev"] is None and document["state_ino"] is None
+    return document["state_dev"] is not None and document["state_ino"] is not None
+
+
+def _peer_genesis_witness_snapshot(path):
+    try:
+        snapshot = _read_private_json_snapshot(path)
+    except _PeerStateRefusal:
+        return None
+    return snapshot if (
+        _peer_genesis_witness_shape_exact(snapshot.document)
+        and snapshot.document["witness_dev"] == snapshot.st_dev
+        and snapshot.document["witness_ino"] == snapshot.st_ino
+    ) else None
+
+
+def _peer_genesis_witness_matches_authority(
+    snapshot, *, state_path, peer_provision_path, folder_id: str,
+    anchor_profile_id: str, peer_name: str, generation: str,
+) -> bool:
+    if snapshot is None or not _peer_genesis_witness_shape_exact(snapshot.document):
+        return False
+    expected = _peer_genesis_witness_document(
+        state_path=state_path,
+        peer_provision_path=peer_provision_path,
+        folder_id=folder_id,
+        anchor_profile_id=anchor_profile_id,
+        peer_name=peer_name,
+        generation=generation,
+        witness_dev=snapshot.st_dev,
+        witness_ino=snapshot.st_ino,
+        state_dev=snapshot.document.get("state_dev"),
+        state_ino=snapshot.document.get("state_ino"),
+        phase=snapshot.document.get("phase"),
+    )
+    return snapshot.document == expected
+
+
+def _peer_state_shape_exact(document: dict) -> bool:
+    if not isinstance(document, dict) or set(document) != _PEER_STATE_KEYS:
+        return False
+    nullable_digests = (
+        "peer_profile_digest", "response_profile_digest", "peer_provision_digest",
+        "ownership_fact_digest",
+    )
+    if (
+        document.get("schema") != PEER_INTENT_SCHEMA
+        or document.get("operation") != PEER_OPERATION_KEY
+        or not isinstance(document.get("generation"), str)
+        or not re.fullmatch(r"[0-9a-f]{32,64}", document["generation"])
+        or not isinstance(document.get("peer_name"), str)
+        or not document["peer_name"].startswith(_PEER_NAME_PREFIX)
+        or document.get("browser_type") != _PEER_BROWSER_TYPE
+        or document.get("os_type") != _PEER_OS_TYPE
+        or document.get("phase") not in _PEER_PHASES
+        or document.get("ownership_observed_at") is not None
+        and not isinstance(document.get("ownership_observed_at"), str)
+    ):
+        return False
+    for key in (
+        "folder_digest", "anchor_profile_digest",
+        "peer_provision_coordinate_digest", "genesis_witness_coordinate_digest",
+    ):
+        if not isinstance(document.get(key), str) or not _HEX64_RE.fullmatch(document[key]):
+            return False
+    for key in nullable_digests:
+        value = document.get(key)
+        if value is not None and (not isinstance(value, str) or not _HEX64_RE.fullmatch(value)):
+            return False
+    for key in (
+        "state_dev", "state_ino", "genesis_witness_dev", "genesis_witness_ino",
+    ):
+        value = document.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return False
+    for key in ("peer_provision_dev", "peer_provision_ino"):
+        value = document.get(key)
+        if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+            return False
+    phase = document["phase"]
+    if phase in (
+        PEER_PHASE_INITIALIZED,
+        PEER_PHASE_CREATE_CLAIMED,
+        PEER_PHASE_CREATE_AUTH_REJECTED,
+        PEER_PHASE_CREATE_RESPONSE_OBSERVED,
+    ):
+        if document["peer_profile_digest"] is not None:
+            return False
+    if phase in (
+        PEER_PHASE_INITIALIZED,
+        PEER_PHASE_CREATE_CLAIMED,
+        PEER_PHASE_CREATE_AUTH_REJECTED,
+    ) and (
+        document["response_profile_digest"] is not None
+    ):
+        return False
+    if (
+        phase == PEER_PHASE_CREATE_RESPONSE_OBSERVED
+        and document["response_profile_digest"] is None
+    ):
+        return False
+    if phase in (
+        PEER_PHASE_PROFILE_STOPPED, PEER_PHASE_PROVISION_COMMITTED,
+        PEER_PHASE_REMOVE_DISPATCHED, PEER_PHASE_ROLLBACK_VERIFIED,
+    ) and document["peer_profile_digest"] is None:
+        return False
+    if phase in (
+        PEER_PHASE_INITIALIZED,
+        PEER_PHASE_CREATE_CLAIMED, PEER_PHASE_CREATE_AUTH_REJECTED,
+        PEER_PHASE_CREATE_RESPONSE_OBSERVED,
+        PEER_PHASE_PROFILE_STOPPED,
+    ) and any(document[key] is not None for key in (
+        "peer_provision_digest", "peer_provision_dev", "peer_provision_ino",
+    )):
+        return False
+    if phase in (
+        PEER_PHASE_PROVISION_COMMITTED, PEER_PHASE_REMOVE_DISPATCHED,
+        PEER_PHASE_ROLLBACK_VERIFIED,
+    ) and any(document[key] is None for key in (
+        "peer_provision_digest", "peer_provision_dev", "peer_provision_ino",
+    )):
+        return False
+    if phase not in (PEER_PHASE_REMOVE_DISPATCHED, PEER_PHASE_ROLLBACK_VERIFIED):
+        if document["ownership_fact_digest"] is not None or document["ownership_observed_at"] is not None:
+            return False
+    elif document["ownership_fact_digest"] is None or document["ownership_observed_at"] is None:
+        return False
+    if (
+        document["response_profile_digest"] is not None
+        and document["peer_profile_digest"] is not None
+        and document["response_profile_digest"] != document["peer_profile_digest"]
+    ):
+        return False
+    return True
+
+
+def _peer_authority_document(
+    *, folder_id: str, anchor_profile_id: str, peer_name: str,
+    peer_provision_path, generation: str, state_dev=None, state_ino=None,
+    genesis_witness_path=None, genesis_witness_dev=None,
+    genesis_witness_ino=None,
+    phase=PEER_PHASE_INITIALIZED,
+) -> dict:
+    genesis_witness_path = genesis_witness_path or PEER_GENESIS_WITNESS_PATH
+    return {
+        "schema": PEER_INTENT_SCHEMA,
+        "operation": PEER_OPERATION_KEY,
+        "generation": generation,
+        "folder_digest": _core.sha256_hex(folder_id),
+        "anchor_profile_digest": _core.sha256_hex(anchor_profile_id),
         "browser_type": _PEER_BROWSER_TYPE,
         "os_type": _PEER_OS_TYPE,
+        "peer_name": peer_name,
+        "state_dev": state_dev,
+        "state_ino": state_ino,
+        "genesis_witness_coordinate_digest": _core.sha256_hex(
+            os.fspath(_normalized_private_path(genesis_witness_path))
+        ),
+        "genesis_witness_dev": genesis_witness_dev,
+        "genesis_witness_ino": genesis_witness_ino,
+        "peer_profile_digest": None,
+        "peer_provision_coordinate_digest": _core.sha256_hex(
+            os.fspath(_normalized_private_path(peer_provision_path))
+        ),
+        "peer_provision_digest": None,
+        "peer_provision_dev": None,
+        "peer_provision_ino": None,
+        "phase": phase,
+        "response_profile_digest": None,
+        "ownership_fact_digest": None,
+        "ownership_observed_at": None,
     }
-    try:
-        if target.is_file():
-            existing = json.loads(target.read_text(encoding="utf-8"))
-            return existing == candidate
-    except (OSError, ValueError):
+
+
+def _state_matches_authority(
+    snapshot, *, folder_id: str, anchor_profile_id: str, peer_name: str,
+    peer_provision_path, generation=None,
+) -> bool:
+    if snapshot is None or not _peer_state_shape_exact(snapshot.document):
         return False
+    document = snapshot.document
+    expected = _peer_authority_document(
+        folder_id=folder_id,
+        anchor_profile_id=anchor_profile_id,
+        peer_name=peer_name,
+        peer_provision_path=peer_provision_path,
+        generation=generation or PEER_SOURCE_GENERATION,
+        genesis_witness_path=_peer_genesis_witness_path(snapshot.path),
+        genesis_witness_dev=document.get("genesis_witness_dev"),
+        genesis_witness_ino=document.get("genesis_witness_ino"),
+    )
+    static_keys = (
+        "schema", "operation", "generation", "folder_digest",
+        "anchor_profile_digest", "browser_type", "os_type", "peer_name",
+        "genesis_witness_coordinate_digest", "genesis_witness_dev",
+        "genesis_witness_ino",
+        "peer_provision_coordinate_digest",
+    )
+    return (
+        all(document[key] == expected[key] for key in static_keys)
+        and document["state_dev"] == snapshot.st_dev
+        and document["state_ino"] == snapshot.st_ino
+    )
+
+
+def _canonical_private_bytes(document: dict) -> bytes:
+    return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _create_self_bound_private_record(
+    target: Path, parent_fd: int, document: dict, *, dev_key: str,
+    ino_key: str, validator,
+):
+    """O_EXCL-create one private record whose bytes bind its own inode."""
+    leaf_fd = None
     try:
-        atomic_private_json(candidate, target)
-    except Exception:  # noqa: BLE001 — a write failure is a failed commit
+        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        leaf_fd = os.open(target.name, flags, 0o600, dir_fd=parent_fd)
+        os.fchmod(leaf_fd, 0o600)
+        opened = os.fstat(leaf_fd)
+        candidate = dict(document)
+        candidate[dev_key] = opened.st_dev
+        candidate[ino_key] = opened.st_ino
+        if not validator(candidate):
+            raise _PeerStateRefusal()
+        raw = _canonical_private_bytes(candidate)
+        _write_private_fd(leaf_fd, raw)
+        return _snapshot_created_private_fd(
+            target,
+            parent_fd,
+            leaf_fd,
+            document=candidate,
+            raw=raw,
+        )
+    except (FileExistsError, OSError, _PeerStateRefusal):
+        return None
+    finally:
+        if leaf_fd is not None:
+            os.close(leaf_fd)
+
+
+def _rewrite_private_record_in_parent(
+    target: Path, parent_fd: int, *, expected, next_document: dict, validator,
+):
+    """CAS-rewrite an exact private inode while its parent lock is held."""
+    if not isinstance(expected, _PrivateJsonSnapshot) or not validator(next_document):
+        return None
+    leaf_fd = None
+    try:
+        current = _snapshot_from_parent(target, parent_fd)
+        if not _same_snapshot(current, expected):
+            return None
+        flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        leaf_fd = os.open(target.name, flags, dir_fd=parent_fd)
+        fcntl.flock(leaf_fd, fcntl.LOCK_EX)
+        opened = os.fstat(leaf_fd)
+        if (
+            (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino)
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or opened.st_nlink != 1
+            or _read_private_fd(leaf_fd) != expected.raw
+        ):
+            return None
+        named = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
+            return None
+        next_raw = _canonical_private_bytes(next_document)
+        _write_private_fd(leaf_fd, next_raw)
+        return _snapshot_created_private_fd(
+            target,
+            parent_fd,
+            leaf_fd,
+            document=next_document,
+            raw=next_raw,
+        )
+    except (_PeerStateRefusal, OSError):
+        return None
+    finally:
+        if leaf_fd is not None:
+            os.close(leaf_fd)
+
+
+def initialize_peer_lifecycle_state(
+    path, *, folder_id: str, anchor_profile_id: str, peer_name: str,
+    peer_provision_path=None, generation=None, snapshot_sink=None,
+) -> str:
+    """Create the inert lifecycle genesis before create can be authorized.
+
+    This is a setup operation, not a create-operation fallback.  The runtime
+    create/rollback entrypoints never call it.  Once any exact lifecycle inode
+    exists it may only be accepted while still INITIALIZED; a missing inode is
+    therefore not reinterpreted as virgin state after a dispatch.
+    """
+    peer_provision_path = peer_provision_path or PEER_PROVISION_PATH
+    generation = generation or PEER_SOURCE_GENERATION
+    witness_path = _peer_genesis_witness_path(path)
+    try:
+        target, parent_fd = _open_private_parent(path, exclusive=True)
+    except _PeerStateRefusal:
+        return REFUSED
+    try:
+        provision_target = _normalized_private_path(peer_provision_path)
+        witness_target = _normalized_private_path(witness_path)
+        if (
+            provision_target.parent != target.parent
+            or witness_target.parent != target.parent
+            or witness_target == target
+            or witness_target == provision_target
+        ):
+            return REFUSED
+        try:
+            os.stat(provision_target.name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            # A create/re-arm can never coexist with any provision entry.
+            return REFUSED
+
+        def _named_snapshot_or_none(named_target):
+            try:
+                os.stat(named_target.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return None
+            return _snapshot_from_parent(named_target, parent_fd)
+
+        state = _named_snapshot_or_none(target)
+        witness = _named_snapshot_or_none(witness_target)
+
+        created_state = False
+        if witness is None:
+            # A lifecycle without its older genesis witness is always foreign.
+            if state is not None:
+                return REFUSED
+            pending = _peer_genesis_witness_document(
+                state_path=target,
+                peer_provision_path=provision_target,
+                folder_id=folder_id,
+                anchor_profile_id=anchor_profile_id,
+                peer_name=peer_name,
+                generation=generation,
+            )
+            witness = _create_self_bound_private_record(
+                witness_target,
+                parent_fd,
+                pending,
+                dev_key="witness_dev",
+                ino_key="witness_ino",
+                validator=_peer_genesis_witness_shape_exact,
+            )
+            if witness is None:
+                return REFUSED
+
+        if not _peer_genesis_witness_matches_authority(
+            witness,
+            state_path=target,
+            peer_provision_path=provision_target,
+            folder_id=folder_id,
+            anchor_profile_id=anchor_profile_id,
+            peer_name=peer_name,
+            generation=generation,
+        ):
+            return REFUSED
+
+        if state is None:
+            # Only a never-bound PENDING witness can recover a crash between
+            # witness creation and lifecycle creation.
+            if witness.document.get("phase") != _PEER_GENESIS_WITNESS_PENDING:
+                return REFUSED
+            candidate = _peer_authority_document(
+                folder_id=folder_id,
+                anchor_profile_id=anchor_profile_id,
+                peer_name=peer_name,
+                peer_provision_path=provision_target,
+                generation=generation,
+                genesis_witness_path=witness_target,
+                genesis_witness_dev=witness.st_dev,
+                genesis_witness_ino=witness.st_ino,
+            )
+            state = _create_self_bound_private_record(
+                target,
+                parent_fd,
+                candidate,
+                dev_key="state_dev",
+                ino_key="state_ino",
+                validator=_peer_state_shape_exact,
+            )
+            if state is None:
+                return REFUSED
+            created_state = True
+        elif (
+            not _state_matches_authority(
+                state,
+                folder_id=folder_id,
+                anchor_profile_id=anchor_profile_id,
+                peer_name=peer_name,
+                peer_provision_path=provision_target,
+                generation=generation,
+            )
+            or state.document.get("phase") != PEER_PHASE_INITIALIZED
+            or state.document.get("genesis_witness_dev") != witness.st_dev
+            or state.document.get("genesis_witness_ino") != witness.st_ino
+        ):
+            return REFUSED
+
+        if witness.document.get("phase") == _PEER_GENESIS_WITNESS_PENDING:
+            bound = dict(witness.document)
+            bound["state_dev"] = state.st_dev
+            bound["state_ino"] = state.st_ino
+            bound["phase"] = _PEER_GENESIS_WITNESS_BOUND
+            witness = _rewrite_private_record_in_parent(
+                witness_target,
+                parent_fd,
+                expected=witness,
+                next_document=bound,
+                validator=_peer_genesis_witness_shape_exact,
+            )
+            if witness is None:
+                return REFUSED
+
+        if (
+            witness.document.get("phase") != _PEER_GENESIS_WITNESS_BOUND
+            or witness.document.get("state_dev") != state.st_dev
+            or witness.document.get("state_ino") != state.st_ino
+            or state.document.get("genesis_witness_dev") != witness.st_dev
+            or state.document.get("genesis_witness_ino") != witness.st_ino
+        ):
+            return REFUSED
+        if isinstance(snapshot_sink, list):
+            snapshot_sink.append(state)
+        return CREATED_THIS_CALL if created_state else EXISTING_EXACT
+    except (_PeerStateRefusal, OSError):
+        return REFUSED
+    finally:
+        os.close(parent_fd)
+
+
+def _commit_peer_intent(
+    path, *, folder_id: str, anchor_profile_id: str, peer_name: str,
+    peer_provision_path=None, generation=None, snapshot_sink=None,
+) -> str:
+    """CAS the pre-provisioned genesis inode into the one create claim."""
+    peer_provision_path = peer_provision_path or PEER_PROVISION_PATH
+    generation = generation or PEER_SOURCE_GENERATION
+    try:
+        existing, provision = _preflight_peer_paths(
+            operation="create-peer-profile",
+            state_path=path,
+            provision_path=peer_provision_path,
+            generation=generation,
+        )
+    except _PeerStateRefusal:
+        return REFUSED
+    if provision is not None:
+        return REFUSED
+    if not _state_matches_authority(
+        existing,
+        folder_id=folder_id,
+        anchor_profile_id=anchor_profile_id,
+        peer_name=peer_name,
+        peer_provision_path=peer_provision_path,
+        generation=generation,
+    ):
+        return REFUSED
+    phase = existing.document.get("phase")
+    existing_create_phases = frozenset({
+        PEER_PHASE_CREATE_CLAIMED,
+        PEER_PHASE_CREATE_RESPONSE_OBSERVED,
+        PEER_PHASE_PROFILE_STOPPED,
+        PEER_PHASE_PROVISION_COMMITTED,
+    })
+
+    def _reconcile_existing(snapshot):
+        """Return only one exact, currently valid create lifecycle."""
+        if (
+            snapshot is None
+            or snapshot.document.get("phase") not in existing_create_phases
+            or not _state_matches_authority(
+                snapshot,
+                folder_id=folder_id,
+                anchor_profile_id=anchor_profile_id,
+                peer_name=peer_name,
+                peer_provision_path=peer_provision_path,
+                generation=generation,
+            )
+        ):
+            return REFUSED
+        try:
+            current, _provision = _preflight_peer_paths(
+                operation="create-peer-profile",
+                state_path=path,
+                provision_path=peer_provision_path,
+                generation=generation,
+            )
+        except _PeerStateRefusal:
+            return REFUSED
+        if not _same_snapshot(current, snapshot):
+            return REFUSED
+        if isinstance(snapshot_sink, list):
+            snapshot_sink.append(current)
+        return EXISTING_EXACT
+
+    if phase in existing_create_phases:
+        return _reconcile_existing(existing)
+    if phase not in (PEER_PHASE_INITIALIZED, PEER_PHASE_CREATE_AUTH_REJECTED):
+        return REFUSED
+
+    try:
+        if _optional_private_json_snapshot(peer_provision_path) is not None:
+            return REFUSED
+    except _PeerStateRefusal:
+        return REFUSED
+
+    claimed = _transition_peer_intent(
+        path, expected=existing, phase=PEER_PHASE_CREATE_CLAIMED,
+    )
+    try:
+        current, current_provision = _preflight_peer_paths(
+            operation="create-peer-profile",
+            state_path=path,
+            provision_path=peer_provision_path,
+            generation=generation,
+        )
+    except _PeerStateRefusal:
+        current = None
+        current_provision = object()
+    if (
+        claimed is not None
+        and current is not None
+        and _same_snapshot(current, claimed)
+        and current_provision is None
+    ):
+        if isinstance(snapshot_sink, list):
+            snapshot_sink.append(current)
+        return CREATED_THIS_CALL
+    if current_provision is None and current is not None:
+        reconciled = _reconcile_existing(current)
+        if reconciled == EXISTING_EXACT:
+            return reconciled
+    return REFUSED
+
+
+def _peer_intent_snapshot(path):
+    try:
+        snapshot = _read_private_json_snapshot(path)
+    except _PeerStateRefusal:
+        return None
+    return snapshot if (
+        _peer_state_shape_exact(snapshot.document)
+        and snapshot.document["state_dev"] == snapshot.st_dev
+        and snapshot.document["state_ino"] == snapshot.st_ino
+    ) else None
+
+
+def _peer_provision_snapshot(path):
+    try:
+        return _read_private_json_snapshot(path)
+    except _PeerStateRefusal:
+        return None
+
+
+def _peer_intent_present(
+    path, *, peer_name: str, folder_id=None, anchor_profile_id=None,
+    peer_provision_path=None,
+) -> bool:
+    snapshot = _peer_intent_snapshot(path)
+    if snapshot is None or snapshot.document.get("peer_name") != peer_name:
+        return False
+    if folder_id is None or anchor_profile_id is None:
+        return True
+    return _state_matches_authority(
+        snapshot,
+        folder_id=folder_id,
+        anchor_profile_id=anchor_profile_id,
+        peer_name=peer_name,
+        peer_provision_path=peer_provision_path or PEER_PROVISION_PATH,
+    )
+
+
+def _same_snapshot(current, expected) -> bool:
+    return (
+        isinstance(expected, _PrivateJsonSnapshot)
+        and current.st_dev == expected.st_dev
+        and current.st_ino == expected.st_ino
+        and current.raw == expected.raw
+        and current.sha256 == expected.sha256
+    )
+
+
+def _read_private_fd(leaf_fd: int) -> bytes:
+    os.lseek(leaf_fd, 0, os.SEEK_SET)
+    chunks = []
+    remaining = _MAX_PEER_STATE_BYTES + 1
+    while remaining:
+        chunk = os.read(leaf_fd, min(remaining, 4096))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    raw = b"".join(chunks)
+    if len(raw) > _MAX_PEER_STATE_BYTES:
+        raise _PeerStateRefusal()
+    return raw
+
+
+def _write_private_fd(leaf_fd: int, raw: bytes) -> None:
+    if len(raw) > _MAX_PEER_STATE_BYTES:
+        raise _PeerStateRefusal()
+    os.lseek(leaf_fd, 0, os.SEEK_SET)
+    os.ftruncate(leaf_fd, 0)
+    view = memoryview(raw)
+    while view:
+        written = os.write(leaf_fd, view)
+        if written <= 0:
+            raise OSError()
+        view = view[written:]
+    os.fsync(leaf_fd)
+
+
+def _rewrite_private_json_cas(path, *, expected, next_document):
+    """Rewrite only the already-open exact inode captured by ``expected``.
+
+    A path replacement after validation can make this transition fail, but it
+    cannot make us overwrite the replacement: all bytes are written through
+    the no-follow descriptor for the expected inode.  A crash-torn write is a
+    closed malformed state and therefore cannot authorize a later dispatch.
+    """
+    if not _peer_state_shape_exact(next_document):
+        return None
+    try:
+        target, parent_fd = _open_private_parent(path, exclusive=True)
+    except _PeerStateRefusal:
+        return None
+    leaf_fd = None
+    try:
+        current = _snapshot_from_parent(target, parent_fd)
+        if not _same_snapshot(current, expected):
+            return None
+        flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        leaf_fd = os.open(target.name, flags, dir_fd=parent_fd)
+        fcntl.flock(leaf_fd, fcntl.LOCK_EX)
+        opened = os.fstat(leaf_fd)
+        if (
+            (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino)
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or opened.st_nlink != 1
+            or _read_private_fd(leaf_fd) != expected.raw
+        ):
+            return None
+        named = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
+            return None
+
+        next_raw = _canonical_private_bytes(next_document)
+        try:
+            _write_private_fd(leaf_fd, next_raw)
+        except (OSError, _PeerStateRefusal):
+            # A normal write failure is rolled back through the same exact
+            # descriptor.  A process crash instead leaves a malformed record,
+            # which every preflight refuses without external effect.
+            try:
+                _write_private_fd(leaf_fd, expected.raw)
+            except (OSError, _PeerStateRefusal):
+                pass
+            return None
+
+        return _snapshot_created_private_fd(
+            target,
+            parent_fd,
+            leaf_fd,
+            document=next_document,
+            raw=next_raw,
+        )
+    except (_PeerStateRefusal, OSError):
+        return None
+    finally:
+        if leaf_fd is not None:
+            os.close(leaf_fd)
+        os.close(parent_fd)
+
+
+def _transition_peer_intent(
+    path, *, expected, phase: str, peer_profile_id=None,
+    response_profile_id=None, peer_provision_snapshot=None,
+    ownership_fact=None,
+):
+    if not isinstance(expected, _PrivateJsonSnapshot) or phase not in _PEER_PHASES:
+        return None
+    document = dict(expected.document)
+    current_phase = document.get("phase")
+    allowed_next = {
+        PEER_PHASE_INITIALIZED: {PEER_PHASE_CREATE_CLAIMED},
+        PEER_PHASE_CREATE_CLAIMED: {
+            PEER_PHASE_CREATE_AUTH_REJECTED,
+            PEER_PHASE_CREATE_RESPONSE_OBSERVED,
+            PEER_PHASE_PROFILE_STOPPED,
+        },
+        PEER_PHASE_CREATE_AUTH_REJECTED: {PEER_PHASE_CREATE_CLAIMED},
+        PEER_PHASE_CREATE_RESPONSE_OBSERVED: {PEER_PHASE_PROFILE_STOPPED},
+        PEER_PHASE_PROFILE_STOPPED: {PEER_PHASE_PROVISION_COMMITTED},
+        PEER_PHASE_PROVISION_COMMITTED: {PEER_PHASE_REMOVE_DISPATCHED},
+        PEER_PHASE_REMOVE_DISPATCHED: {PEER_PHASE_ROLLBACK_VERIFIED},
+        PEER_PHASE_ROLLBACK_VERIFIED: set(),
+    }
+    if current_phase not in allowed_next:
+        return None
+    if phase != current_phase and phase not in allowed_next[current_phase]:
+        return None
+    if response_profile_id is not None:
+        digest = _core.sha256_hex(response_profile_id)
+        if document["response_profile_digest"] not in (None, digest):
+            return None
+        document["response_profile_digest"] = digest
+    if peer_profile_id is not None:
+        digest = _core.sha256_hex(peer_profile_id)
+        if document["peer_profile_digest"] not in (None, digest):
+            return None
+        document["peer_profile_digest"] = digest
+    if peer_provision_snapshot is not None:
+        if not isinstance(peer_provision_snapshot, _PrivateJsonSnapshot):
+            return None
+        document["peer_provision_digest"] = peer_provision_snapshot.sha256
+        document["peer_provision_dev"] = peer_provision_snapshot.st_dev
+        document["peer_provision_ino"] = peer_provision_snapshot.st_ino
+    if ownership_fact is not None:
+        document["ownership_fact_digest"] = hashlib.sha256(
+            _canonical_private_bytes(ownership_fact)
+        ).hexdigest()
+        document["ownership_observed_at"] = ownership_fact.get("observed_at")
+    document["phase"] = phase
+    if document == expected.document:
+        current = _peer_intent_snapshot(path)
+        return current if current is not None and _same_snapshot(current, expected) else None
+    if phase == current_phase:
+        return None
+    return _rewrite_private_json_cas(path, expected=expected, next_document=document)
+
+
+def _claim_peer_remove(
+    path, *, expected, peer_profile_id: str, provision_snapshot,
+    ownership_fact=None, now=None,
+) -> str:
+    if not isinstance(expected, _PrivateJsonSnapshot):
+        return REFUSED
+    document = expected.document
+    peer_digest = _core.sha256_hex(peer_profile_id)
+    if document.get("peer_profile_digest") != peer_digest:
+        return REFUSED
+    try:
+        current_state, current_provision = _preflight_peer_paths(
+            operation="rollback-peer-profile",
+            state_path=path,
+            provision_path=provision_snapshot.path,
+            generation=document.get("generation"),
+        )
+    except _PeerStateRefusal:
+        return REFUSED
+    if not _same_optional_snapshot(current_provision, provision_snapshot):
+        return REFUSED
+    if not _validate_peer_ownership_fact(
+        ownership_fact,
+        generation=document.get("generation"),
+        peer_profile_id=peer_profile_id,
+        provision_snapshot=provision_snapshot,
+        now=now or datetime.now(timezone.utc),
+    ):
+        return REFUSED
+    if not _same_optional_snapshot(current_state, expected):
+        expected_after = dict(expected.document)
+        expected_after["phase"] = PEER_PHASE_REMOVE_DISPATCHED
+        expected_after["ownership_fact_digest"] = hashlib.sha256(
+            _canonical_private_bytes(ownership_fact)
+        ).hexdigest()
+        expected_after["ownership_observed_at"] = ownership_fact["observed_at"]
+        current_document = dict(current_state.document)
+        if current_document.get("phase") == PEER_PHASE_ROLLBACK_VERIFIED:
+            current_document["phase"] = PEER_PHASE_REMOVE_DISPATCHED
+        return EXISTING_EXACT if current_document == expected_after else REFUSED
+    if document.get("phase") in (PEER_PHASE_REMOVE_DISPATCHED, PEER_PHASE_ROLLBACK_VERIFIED):
+        return EXISTING_EXACT
+    if document.get("phase") != PEER_PHASE_PROVISION_COMMITTED:
+        return REFUSED
+    transitioned = _transition_peer_intent(
+        path,
+        expected=expected,
+        phase=PEER_PHASE_REMOVE_DISPATCHED,
+        ownership_fact=ownership_fact,
+    )
+    if transitioned is not None:
+        try:
+            current, current_provision = _preflight_peer_paths(
+                operation="rollback-peer-profile",
+                state_path=path,
+                provision_path=provision_snapshot.path,
+                generation=document.get("generation"),
+            )
+        except _PeerStateRefusal:
+            current = None
+            current_provision = None
+        if (
+            current is not None
+            and _same_snapshot(current, transitioned)
+            and _same_optional_snapshot(current_provision, provision_snapshot)
+        ):
+            return CREATED_THIS_CALL
+        # The durable REMOVE_DISPATCHED fence is intentionally retained, but
+        # a raced provision coordinate cannot authorize an external remove.
+        return REFUSED
+
+    # A concurrent exact claimant may have won the CAS after this invocation
+    # captured ``expected``.  Re-read once and accept only the byte-for-byte
+    # state that this exact transition would have produced; every foreign or
+    # partial replacement remains a refusal.
+    current = _peer_intent_snapshot(path)
+    expected_after = dict(expected.document)
+    expected_after["phase"] = PEER_PHASE_REMOVE_DISPATCHED
+    expected_after["ownership_fact_digest"] = hashlib.sha256(
+        _canonical_private_bytes(ownership_fact)
+    ).hexdigest()
+    expected_after["ownership_observed_at"] = ownership_fact["observed_at"]
+    if (
+        current is not None
+        and (current.st_dev, current.st_ino) == (expected.st_dev, expected.st_ino)
+    ):
+        current_document = dict(current.document)
+        if current_document.get("phase") == PEER_PHASE_ROLLBACK_VERIFIED:
+            current_document["phase"] = PEER_PHASE_REMOVE_DISPATCHED
+        if current_document == expected_after:
+            return EXISTING_EXACT
+    return REFUSED
+
+
+def _peer_provision_shape_exact(document) -> bool:
+    return (
+        isinstance(document, dict)
+        and set(document) == {
+            "schema", "vendor", "profile_id", "folder_id", "browser_type",
+            "origin_policy", "disposable_ack",
+        }
+        and document.get("schema") == _core.PROVISION_SCHEMA
+        and document.get("vendor") == "multilogin"
+        and document.get("browser_type") == _PEER_BROWSER_TYPE
+        and document.get("origin_policy") == _port_policy.ORIGIN_POLICY
+        and document.get("disposable_ack") == _core.REQUIRED_ACK
+        and isinstance(document.get("profile_id"), str)
+        and isinstance(document.get("folder_id"), str)
+    )
+
+
+def _preflight_peer_paths(
+    *, operation, state_path, provision_path, generation=PEER_SOURCE_GENERATION,
+):
+    """Validate the cross-bound genesis and both peer coordinates first."""
+    if operation not in ("create-peer-profile", "rollback-peer-profile"):
+        raise _PeerStateRefusal()
+    witness_path = _peer_genesis_witness_path(state_path)
+    witness = _optional_private_json_snapshot(witness_path)
+    state = _optional_private_json_snapshot(state_path)
+    provision = _optional_private_json_snapshot(provision_path)
+    if state is None or witness is None:
+        # Setup owns the one inert INITIALIZED inode.  Runtime create never
+        # interprets absence as virgin state, because absence after a dispatch
+        # is indistinguishable from first use and would reopen the one-shot.
+        raise _PeerStateRefusal()
+    if (
+        not _peer_genesis_witness_shape_exact(witness.document)
+        or witness.document["witness_dev"] != witness.st_dev
+        or witness.document["witness_ino"] != witness.st_ino
+        or witness.document.get("phase") != _PEER_GENESIS_WITNESS_BOUND
+        or witness.document.get("source_generation") != PEER_SOURCE_GENERATION
+        or witness.document.get("lifecycle_generation") != generation
+        or witness.document.get("state_coordinate_digest")
+        != _core.sha256_hex(os.fspath(_normalized_private_path(state_path)))
+        or witness.document.get("peer_provision_coordinate_digest")
+        != _core.sha256_hex(os.fspath(_normalized_private_path(provision_path)))
+    ):
+        raise _PeerStateRefusal()
+    if state is not None and not _peer_state_shape_exact(state.document):
+        raise _PeerStateRefusal()
+    if state is not None and (
+        state.document["state_dev"] != state.st_dev
+        or state.document["state_ino"] != state.st_ino
+    ):
+        # The lifecycle document is self-bound to the one inode created by
+        # the operation.  Byte-identical replacement is still foreign state
+        # and must refuse in the first, pre-anchor/pre-secret path census.
+        raise _PeerStateRefusal()
+    if state is not None and (
+        state.document.get("generation") != generation
+        or state.document.get("peer_provision_coordinate_digest")
+        != _core.sha256_hex(os.fspath(_normalized_private_path(provision_path)))
+        or state.document.get("genesis_witness_coordinate_digest")
+        != _core.sha256_hex(os.fspath(_normalized_private_path(witness_path)))
+        or state.document.get("genesis_witness_dev") != witness.st_dev
+        or state.document.get("genesis_witness_ino") != witness.st_ino
+        or witness.document.get("state_dev") != state.st_dev
+        or witness.document.get("state_ino") != state.st_ino
+        or witness.document.get("folder_digest") != state.document.get("folder_digest")
+        or witness.document.get("anchor_profile_digest")
+        != state.document.get("anchor_profile_digest")
+        or witness.document.get("peer_name_digest")
+        != _core.sha256_hex(state.document.get("peer_name"))
+    ):
+        raise _PeerStateRefusal()
+    if provision is not None and not _peer_provision_shape_exact(provision.document):
+        raise _PeerStateRefusal()
+    phase = state.document.get("phase")
+    if state is not None:
+        if phase in (
+            PEER_PHASE_INITIALIZED,
+            PEER_PHASE_CREATE_CLAIMED,
+            PEER_PHASE_CREATE_AUTH_REJECTED,
+            PEER_PHASE_CREATE_RESPONSE_OBSERVED,
+            PEER_PHASE_PROFILE_STOPPED,
+        ) and provision is not None:
+            raise _PeerStateRefusal()
+        if phase in (
+            PEER_PHASE_PROVISION_COMMITTED,
+            PEER_PHASE_REMOVE_DISPATCHED,
+            PEER_PHASE_ROLLBACK_VERIFIED,
+        ) and provision is None:
+            raise _PeerStateRefusal()
+        if provision is not None:
+            if (
+                state.document.get("peer_profile_digest")
+                != _core.sha256_hex(provision.document["profile_id"])
+                or state.document.get("folder_digest")
+                != _core.sha256_hex(provision.document["folder_id"])
+            ):
+                raise _PeerStateRefusal()
+            if phase in (
+                PEER_PHASE_PROVISION_COMMITTED,
+                PEER_PHASE_REMOVE_DISPATCHED,
+                PEER_PHASE_ROLLBACK_VERIFIED,
+            ) and (
+                state.document.get("peer_provision_digest") != provision.sha256
+                or state.document.get("peer_provision_dev") != provision.st_dev
+                or state.document.get("peer_provision_ino") != provision.st_ino
+            ):
+                raise _PeerStateRefusal()
+    if operation == "rollback-peer-profile":
+        if state is None or provision is None:
+            raise _PeerStateRefusal()
+        if state.document.get("phase") not in (
+            PEER_PHASE_PROVISION_COMMITTED,
+            PEER_PHASE_REMOVE_DISPATCHED,
+            PEER_PHASE_ROLLBACK_VERIFIED,
+        ):
+            raise _PeerStateRefusal()
+    elif state.document.get("phase") in (
+        PEER_PHASE_REMOVE_DISPATCHED, PEER_PHASE_ROLLBACK_VERIFIED,
+    ):
+        raise _PeerStateRefusal()
+    return state, provision
+
+
+def coordinator_peer_paths_safe(operation: str) -> bool:
+    """Pure first-step fixed-path gate for the interactive coordinator."""
+    try:
+        _preflight_peer_paths(
+            operation=operation,
+            state_path=PEER_INTENT_PATH,
+            provision_path=PEER_PROVISION_PATH,
+        )
+    except _PeerStateRefusal:
         return False
     return True
 
 
-def _discard_peer_intent(path, *, peer_name: str) -> bool:
-    """Remove ONLY an intent sidecar that exactly matches this operation and
-    peer name. A foreign, malformed, or mismatched file is never touched."""
-    target = Path(path).expanduser()
-    if not _peer_intent_present(target, peer_name=peer_name):
-        return False
+def _same_optional_snapshot(left, right) -> bool:
+    if left is None or right is None:
+        return left is None and right is None
+    return _same_snapshot(left, right)
+
+
+def _parse_utc_timestamp(value):
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return None
     try:
-        target.unlink()
-    except OSError:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _validate_peer_ownership_fact(
+    fact, *, generation: str, peer_profile_id: str, provision_snapshot, now,
+) -> bool:
+    """Validate one fixed-path producer-expiring PF-1/INSTALL1 release receipt.
+
+    The source wave is reader-only.  A separate #359 host operation owns the
+    writer; caller prose, flags, dictionaries and vendor lock fields never
+    substitute for this receipt.
+    """
+    keys = {
+        "schema", "peer_operation", "source_generation", "lifecycle_generation",
+        "peer_profile_digest", "peer_provision_digest", "peer_provision_dev",
+        "peer_provision_ino", "pf1_operation", "pf1_active",
+        "install1_operation", "install1_active", "observed_at", "valid_until",
+        "release_nonce_digest",
+    }
+    if (
+        not isinstance(fact, dict)
+        or set(fact) != keys
+        or not isinstance(provision_snapshot, _PrivateJsonSnapshot)
+    ):
         return False
-    return True
+    if (
+        fact.get("schema") != PEER_OWNERSHIP_FACT_SCHEMA
+        or fact.get("peer_operation") != PEER_OPERATION_KEY
+        or fact.get("source_generation") != PEER_SOURCE_GENERATION
+        or fact.get("lifecycle_generation") != generation
+        or fact.get("peer_profile_digest") != _core.sha256_hex(peer_profile_id)
+        or fact.get("peer_provision_digest") != provision_snapshot.sha256
+        or fact.get("peer_provision_dev") != provision_snapshot.st_dev
+        or fact.get("peer_provision_ino") != provision_snapshot.st_ino
+        or fact.get("pf1_operation") != PF1_OPERATION_KEY
+        or fact.get("pf1_active") is not False
+        or fact.get("install1_operation") != INSTALL1_OPERATION_KEY
+        or fact.get("install1_active") is not False
+        or not isinstance(fact.get("release_nonce_digest"), str)
+        or not _HEX64_RE.fullmatch(fact["release_nonce_digest"])
+    ):
+        return False
+    observed = _parse_utc_timestamp(fact.get("observed_at"))
+    valid_until = _parse_utc_timestamp(fact.get("valid_until"))
+    if observed is None or valid_until is None or not isinstance(now, datetime):
+        return False
+    current = now.astimezone(timezone.utc)
+    return (
+        observed <= current <= valid_until
+        and observed <= valid_until
+        and valid_until - observed <= _MAX_OWNERSHIP_RECEIPT_AGE
+    )
+
+
+def _load_peer_ownership_receipt(loader=None):
+    try:
+        if loader is None:
+            return _read_private_json_snapshot(PEER_OWNERSHIP_RECEIPT_PATH).document
+        document = loader()
+        return document if isinstance(document, dict) else None
+    except (_PeerStateRefusal, OSError, ValueError, TypeError):
+        return None
+
+
+def coordinator_peer_rollback_receipt_ready(*, now=None, loader=None) -> bool:
+    """Pure production-reader gate; this source wave exposes no receipt writer."""
+    try:
+        state, provision = _preflight_peer_paths(
+            operation="rollback-peer-profile",
+            state_path=PEER_INTENT_PATH,
+            provision_path=PEER_PROVISION_PATH,
+        )
+    except _PeerStateRefusal:
+        return False
+    document = _load_peer_ownership_receipt(loader)
+    return _validate_peer_ownership_fact(
+        document,
+        generation=state.document["generation"],
+        peer_profile_id=provision.document["profile_id"],
+        provision_snapshot=provision,
+        now=now or datetime.now(timezone.utc),
+    )
+
+
+def _exclusive_private_json(path, document):
+    try:
+        target, parent_fd = _open_private_parent(path, exclusive=True)
+    except _PeerStateRefusal:
+        return REFUSED, None
+    leaf_fd = None
+    try:
+        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            leaf_fd = os.open(target.name, flags, 0o600, dir_fd=parent_fd)
+        except FileExistsError:
+            existing = _snapshot_from_parent(target, parent_fd)
+            if existing.document == document:
+                return EXISTING_EXACT, existing
+            return REFUSED, None
+        os.fchmod(leaf_fd, 0o600)
+        raw = _canonical_private_bytes(document)
+        view = memoryview(raw)
+        while view:
+            written = os.write(leaf_fd, view)
+            if written <= 0:
+                raise OSError()
+            view = view[written:]
+        os.fsync(leaf_fd)
+        snapshot = _snapshot_created_private_fd(
+            target,
+            parent_fd,
+            leaf_fd,
+            document=document,
+            raw=raw,
+        )
+        return CREATED_THIS_CALL, snapshot
+    except (_PeerStateRefusal, OSError):
+        return REFUSED, None
+    finally:
+        if leaf_fd is not None:
+            os.close(leaf_fd)
+        os.close(parent_fd)
 
 
 def _write_peer_provision(
     path, *, profile_id: str, folder_id: str, bindings_loader, now,
+    snapshot_sink=None,
 ):
-    """Write (or reconcile) the peer provision, then require it re-validates.
-
-    Returns ``(written, loaded_or_none)``. An already-present, byte-different
-    file refuses rather than overwriting; a written-but-invalid document
-    also reports ``written=False`` — both collapse to the same HOLD/
-    PROVISION_MISSING outcome the caller applies to the receipt.
-    """
-    target = Path(path).expanduser()
+    """Exclusive-write or exact-reconcile the private peer provision."""
+    profile_id = _canonical_multilogin_profile_id(profile_id)
+    folder_id = _canonical_multilogin_profile_id(folder_id)
+    if profile_id is None or folder_id is None:
+        return False, None
     doc = {
         "schema": _core.PROVISION_SCHEMA,
         "vendor": "multilogin",
@@ -1943,58 +3495,199 @@ def _write_peer_provision(
         "origin_policy": _port_policy.ORIGIN_POLICY,
         "disposable_ack": _core.REQUIRED_ACK,
     }
-    try:
-        if target.is_file():
-            existing = json.loads(target.read_text(encoding="utf-8"))
-            if existing != doc:
-                return False, None
-        else:
-            atomic_private_json(doc, target)
-    except Exception:  # noqa: BLE001 — any write/read failure is a failed write
+    outcome, snapshot = _exclusive_private_json(path, doc)
+    if outcome != CREATED_THIS_CALL:
+        # A provision that was not created by this exact invocation is never
+        # adopted here, even when its bytes are identical.  A normal completed
+        # rerun is reconciled through the PROVISION_COMMITTED lifecycle state;
+        # a crash between provision creation and that state transition stays a
+        # fail-closed HOLD rather than acquiring a foreign inode by path.
         return False, None
-    loaded, _code = _core.load_provision(str(target), bindings_loader=bindings_loader, now=now)
+    current = _peer_provision_snapshot(path)
+    if (
+        snapshot is None
+        or snapshot.document != doc
+        or current is None
+        or not _same_snapshot(current, snapshot)
+    ):
+        return False, None
+    loaded, _code = _core._validate_provision_document(
+        snapshot.document, bindings_loader=bindings_loader, now=now,
+    )
+    current = _peer_provision_snapshot(path)
+    if current is None or not _same_snapshot(current, snapshot):
+        return False, None
+    if loaded is not None and isinstance(snapshot_sink, list):
+        snapshot_sink.append(snapshot)
     return (loaded is not None), loaded
 
 
 def _create_peer_profile_cli(
     client: "MultiloginClient", provision: dict, *,
     peer_intent_path, peer_provision_path, bindings_loader, now,
+    initial_state=None,
 ) -> dict:
     """CLI-layer wrapper: owns the intent/provision file I/O that
     :meth:`MultiloginClient.create_peer_profile` deliberately does not."""
     folder_id = provision["folder_id"]
     anchor_profile_id = provision["profile_id"]
     peer_name = peer_profile_name(folder_id, anchor_profile_id)
-    intent_present = _peer_intent_present(peer_intent_path, peer_name=peer_name)
-
+    state = {"snapshot": initial_state or _peer_intent_snapshot(peer_intent_path)}
+    intent_present = (
+        state["snapshot"] is not None
+        and state["snapshot"].document.get("phase")
+        not in (PEER_PHASE_INITIALIZED, PEER_PHASE_CREATE_AUTH_REJECTED)
+    )
     committed_here = {"value": False}
 
     def _commit():
-        ok = _commit_peer_intent(
+        claim_snapshots = []
+        outcome = _commit_peer_intent(
             peer_intent_path, folder_id=folder_id, anchor_profile_id=anchor_profile_id,
-            peer_name=peer_name,
+            peer_name=peer_name, peer_provision_path=peer_provision_path,
+            snapshot_sink=claim_snapshots,
         )
-        committed_here["value"] = committed_here["value"] or ok
-        return ok
+        if outcome == CREATED_THIS_CALL:
+            current = _peer_intent_snapshot(peer_intent_path)
+            if (
+                len(claim_snapshots) != 1
+                or current is None
+                or not _same_snapshot(current, claim_snapshots[0])
+            ):
+                return REFUSED
+            state["snapshot"] = current
+        elif outcome == EXISTING_EXACT:
+            # The losing invocation returns a reconciliation HOLD immediately.
+            # Retain the exact snapshot observed by the claim helper rather
+            # than converting a subsequent lawful phase advance into a false
+            # effect=NONE refusal.
+            if len(claim_snapshots) != 1:
+                return REFUSED
+            state["snapshot"] = claim_snapshots[0]
+        committed_here["value"] = outcome == CREATED_THIS_CALL
+        return outcome
+
+    def _record_response_id(profile_id):
+        current = state["snapshot"] or _peer_intent_snapshot(peer_intent_path)
+        if current is None:
+            return False
+        transitioned = _transition_peer_intent(
+            peer_intent_path,
+            expected=current,
+            phase=PEER_PHASE_CREATE_RESPONSE_OBSERVED,
+            response_profile_id=profile_id,
+        )
+        if transitioned is None:
+            return False
+        state["snapshot"] = transitioned
+        return True
+
+    observed_digest = None
+    if state["snapshot"] is not None:
+        if not _state_matches_authority(
+            state["snapshot"],
+            folder_id=folder_id,
+            anchor_profile_id=anchor_profile_id,
+            peer_name=peer_name,
+            peer_provision_path=peer_provision_path,
+        ):
+            return peer_receipt(
+                effect="NONE", code="PROVISION_MISSING", verdict="REFUSED",
+                digests=client._peer_digests(folder_id, anchor_profile_id, peer_name),
+                **_PEER_BASE_PREDICATES,
+            )
+        observed_digest = state["snapshot"].document["response_profile_digest"]
 
     receipt = client.create_peer_profile(
         folder_id=folder_id, anchor_profile_id=anchor_profile_id,
         intent_present=intent_present, commit_intent=_commit,
+        observed_profile_digest=observed_digest,
+        record_response_id=_record_response_id,
+        intent_reconciliation_ready=(
+            state["snapshot"] is not None
+            and state["snapshot"].document.get("phase")
+            not in (PEER_PHASE_CREATE_CLAIMED, PEER_PHASE_CREATE_AUTH_REJECTED)
+        ),
     )
+    if (
+        not committed_here["value"]
+        and receipt["effect"] == "NONE"
+    ):
+        # The client's first vendor census is an externally observable pause.
+        # Another exact invocation can advance the one lifecycle inode from
+        # INITIALIZED into an effect-bearing create phase during that pause.
+        # The input snapshot may already be effect-bearing, or another exact
+        # invocation may advance it during the census.  A NONE receipt (busy
+        # row, transport/auth failure, malformed census, or identity conflict
+        # alike) is not truthful while that durable claim exists.  Re-read the
+        # complete cross-bound authority before returning.  Never adopt the
+        # concurrent profile or dispatch here: this invocation becomes a
+        # conservative reconciliation HOLD for the existing operation.  The
+        # only excluded case is a claim created by this invocation; its exact
+        # pre-effect AUTH_EXPIRED transition is handled immediately below.
+        initial = state["snapshot"]
+        try:
+            fresh_state, _fresh_provision = _preflight_peer_paths(
+                operation="create-peer-profile",
+                state_path=peer_intent_path,
+                provision_path=peer_provision_path,
+                generation=(
+                    initial.document["generation"]
+                    if initial is not None else PEER_SOURCE_GENERATION
+                ),
+            )
+        except _PeerStateRefusal:
+            fresh_state = None
+        effect_bearing_phases = {
+            PEER_PHASE_CREATE_CLAIMED,
+            PEER_PHASE_CREATE_RESPONSE_OBSERVED,
+            PEER_PHASE_PROFILE_STOPPED,
+            PEER_PHASE_PROVISION_COMMITTED,
+        }
+        if (
+            initial is not None
+            and fresh_state is not None
+            and (fresh_state.st_dev, fresh_state.st_ino)
+            == (initial.st_dev, initial.st_ino)
+            and fresh_state.document.get("phase") in effect_bearing_phases
+        ):
+            state["snapshot"] = fresh_state
+            predicates = dict(receipt["predicates"])
+            predicates.update({
+                "intent_committed": True,
+                "dispatched": False,
+                "reconciled": True,
+                "cleanup_lease_retained": True,
+            })
+            return peer_receipt(
+                effect="CREATE_EFFECT_UNKNOWN",
+                code="VENDOR_ERROR",
+                verdict="HOLD",
+                digests=receipt["digests"],
+                **predicates,
+            )
     if (
         committed_here["value"]
         and receipt["effect"] == "NONE"
         and receipt["code"] == "AUTH_EXPIRED"
     ):
         # #385-9 classifies an explicit 401/403 as preceding any possible
-        # creation, so the preimage this invocation just wrote describes an
-        # effect that provably did not happen. Leaving it behind would wedge
-        # every later invocation into CREATE_EFFECT_UNKNOWN permanently on
-        # the single most common vendor failure -- an expired bearer token.
-        # Only the sidecar THIS call authored is discarded, and only on that
-        # one typed pre-effect code; an ambiguous or lost response always
-        # keeps its preimage.
-        _discard_peer_intent(peer_intent_path, peer_name=peer_name)
+        # creation.  Preserve that proof as an exact-inode state transition
+        # instead of unlinking a path that a same-UID process could race.
+        # The next invocation must win a CAS re-arm before it may dispatch.
+        rejected_state = _transition_peer_intent(
+            peer_intent_path,
+            expected=state["snapshot"],
+            phase=PEER_PHASE_CREATE_AUTH_REJECTED,
+        ) if state["snapshot"] is not None else None
+        if rejected_state is None:
+            predicates = dict(receipt["predicates"])
+            predicates["cleanup_lease_retained"] = True
+            return peer_receipt(
+                effect="CREATE_EFFECT_UNKNOWN", code="VENDOR_ERROR", verdict="HOLD",
+                digests=receipt["digests"], **predicates,
+            )
+        state["snapshot"] = rejected_state
     if receipt["effect"] != "PROFILE_STOPPED_PROVEN":
         # A create whose read-back could not prove the profile stopped is NOT
         # a provisionable profile. Writing profile_B here would publish a
@@ -2003,12 +3696,142 @@ def _create_peer_profile_cli(
         return receipt
 
     peer_profile_id = client._peer_profile_id  # noqa: SLF001 — CLI/client are one unit here
+    current = state["snapshot"] or _peer_intent_snapshot(peer_intent_path)
+    if (
+        current is not None
+        and current.document.get("phase") == PEER_PHASE_PROVISION_COMMITTED
+    ):
+        # A completed create is an immutable, read-only reconciliation.  The
+        # client has just proved the one canonical peer still exists, remains
+        # stopped/unowned, and matches any persisted response-id constraint.
+        # Do not attempt a backwards lifecycle transition or rewrite either
+        # artifact on a normal rerun.
+        provision_snapshot = _peer_provision_snapshot(peer_provision_path)
+        loaded = None
+        if provision_snapshot is not None:
+            loaded, _code = _core._validate_provision_document(
+                provision_snapshot.document,
+                bindings_loader=bindings_loader,
+                now=now,
+            )
+        try:
+            fresh_state, fresh_provision = _preflight_peer_paths(
+                operation="create-peer-profile",
+                state_path=peer_intent_path,
+                provision_path=peer_provision_path,
+                generation=current.document.get("generation"),
+            )
+        except _PeerStateRefusal:
+            fresh_state = None
+            fresh_provision = None
+        if (
+            fresh_state is not None
+            and _same_snapshot(fresh_state, current)
+            and provision_snapshot is not None
+            and fresh_provision is not None
+            and _same_snapshot(fresh_provision, provision_snapshot)
+            and loaded is not None
+            and loaded.get("profile_id") == peer_profile_id
+            and loaded.get("folder_id") == folder_id
+            and current.document.get("peer_profile_digest")
+            == _core.sha256_hex(peer_profile_id)
+            and current.document.get("peer_provision_digest")
+            == provision_snapshot.sha256
+            and current.document.get("peer_provision_dev")
+            == provision_snapshot.st_dev
+            and current.document.get("peer_provision_ino")
+            == provision_snapshot.st_ino
+        ):
+            predicates = dict(receipt["predicates"])
+            predicates["provision_written"] = True
+            predicates["cleanup_lease_retained"] = False
+            return peer_receipt(
+                effect="PROVISION_WRITTEN",
+                code="OK",
+                verdict="PASS",
+                digests=receipt["digests"],
+                **predicates,
+            )
+        predicates = dict(receipt["predicates"])
+        predicates["cleanup_lease_retained"] = True
+        return peer_receipt(
+            effect="CREATE_EFFECT_UNKNOWN",
+            code="PROVISION_MISSING",
+            verdict="HOLD",
+            digests=receipt["digests"],
+            **predicates,
+        )
+    stopped_state = _transition_peer_intent(
+        peer_intent_path,
+        expected=current,
+        phase=PEER_PHASE_PROFILE_STOPPED,
+        peer_profile_id=peer_profile_id,
+    ) if current is not None else None
+    if stopped_state is None:
+        predicates = dict(receipt["predicates"])
+        predicates["cleanup_lease_retained"] = True
+        return peer_receipt(
+            effect="CREATE_EFFECT_UNKNOWN", code="VENDOR_ERROR", verdict="HOLD",
+            digests=receipt["digests"], **predicates,
+        )
+    state["snapshot"] = stopped_state
+    provision_snapshots = []
     written, _loaded = _write_peer_provision(
         peer_provision_path, profile_id=peer_profile_id, folder_id=folder_id,
         bindings_loader=bindings_loader, now=now,
+        snapshot_sink=provision_snapshots,
     )
     predicates = dict(receipt["predicates"])
     if written:
+        provision_snapshot = provision_snapshots[0] if len(provision_snapshots) == 1 else None
+        current_provision = _peer_provision_snapshot(peer_provision_path)
+        if (
+            provision_snapshot is None
+            or current_provision is None
+            or not _same_snapshot(current_provision, provision_snapshot)
+        ):
+            predicates["provision_written"] = True
+            predicates["cleanup_lease_retained"] = True
+            return peer_receipt(
+                effect="PROVISION_WRITTEN", code="VENDOR_ERROR", verdict="HOLD",
+                digests=receipt["digests"], **predicates,
+            )
+        committed_state = _transition_peer_intent(
+            peer_intent_path,
+            expected=state["snapshot"],
+            phase=PEER_PHASE_PROVISION_COMMITTED,
+            peer_profile_id=peer_profile_id,
+            peer_provision_snapshot=provision_snapshot,
+        ) if provision_snapshot is not None else None
+        if committed_state is None:
+            predicates["provision_written"] = True
+            predicates["cleanup_lease_retained"] = True
+            return peer_receipt(
+                effect="PROVISION_WRITTEN", code="VENDOR_ERROR", verdict="HOLD",
+                digests=receipt["digests"], **predicates,
+            )
+        try:
+            final_state, final_provision = _preflight_peer_paths(
+                operation="create-peer-profile",
+                state_path=peer_intent_path,
+                provision_path=peer_provision_path,
+                generation=committed_state.document.get("generation"),
+            )
+        except _PeerStateRefusal:
+            final_state = None
+            final_provision = None
+        if (
+            final_state is None
+            or final_provision is None
+            or not _same_snapshot(final_state, committed_state)
+            or not _same_snapshot(final_provision, provision_snapshot)
+        ):
+            predicates["provision_written"] = True
+            predicates["cleanup_lease_retained"] = True
+            return peer_receipt(
+                effect="CREATE_EFFECT_UNKNOWN", code="VENDOR_ERROR", verdict="HOLD",
+                digests=receipt["digests"], **predicates,
+            )
         predicates["provision_written"] = True
         predicates["cleanup_lease_retained"] = False
         return peer_receipt(
@@ -2027,6 +3850,8 @@ def main(
     argv=None, *, stdout=None, bindings_loader=None, credential_stream_factory=None,
     client_factory=BoundedHttpClient, origin_factory=LoopbackBenignOrigin,
     environment_loader=None, now=None, peer_provision_path=None, peer_intent_path=None,
+    create_authorization=None, rollback_authorization=None,
+    ownership_receipt_loader=None, clock=None,
 ) -> int:
     """Run the operator-only helper.
 
@@ -2046,11 +3871,8 @@ def main(
     )
     parser.add_argument("--vendor", required=True, choices=("gologin", "multilogin"))
     parser.add_argument("--provision-path", required=True)
-    parser.add_argument("--confirmed", action="store_true")
     args = parser.parse_args(argv)
     peer_ops = ("create-peer-profile", "rollback-peer-profile")
-    if args.operation in peer_ops and not args.confirmed:
-        parser.error(f"--confirmed is required for {args.operation}")
     out = stdout if stdout is not None else sys.stdout
 
     # GoLogin stays completely unsupported until a pinned SDK contract is
@@ -2059,7 +3881,62 @@ def main(
     if args.vendor != "multilogin":
         return _emit_refusal(out, args.vendor, "UNSUPPORTED_SURFACE")
 
-    reference_time = now if now is not None else datetime.now(timezone.utc)
+    if clock is not None:
+        reference_time = clock()
+        current_time = clock
+    elif now is not None:
+        reference_time = now
+        current_time = lambda: now
+    else:
+        reference_time = datetime.now(timezone.utc)
+        current_time = lambda: datetime.now(timezone.utc)
+    peer_provision_path = peer_provision_path or PEER_PROVISION_PATH
+    peer_intent_path = peer_intent_path or PEER_INTENT_PATH
+    peer_state_snapshot = None
+    peer_provision_snapshot = None
+    ownership_fact = None
+    if args.operation in peer_ops:
+        expected_authorization = (
+            CREATE_PEER_AUTHORIZATION
+            if args.operation == "create-peer-profile"
+            else ROLLBACK_PEER_AUTHORIZATION
+        )
+        actual_authorization = (
+            create_authorization
+            if args.operation == "create-peer-profile"
+            else rollback_authorization
+        )
+        other_authorization = (
+            rollback_authorization
+            if args.operation == "create-peer-profile"
+            else create_authorization
+        )
+        if actual_authorization is not expected_authorization or other_authorization is not None:
+            return _emit_refusal(out, args.vendor, "DISALLOWED_TARGET")
+        try:
+            peer_state_snapshot, peer_provision_snapshot = _preflight_peer_paths(
+                operation=args.operation,
+                state_path=peer_intent_path,
+                provision_path=peer_provision_path,
+            )
+        except _PeerStateRefusal:
+            return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
+        if args.operation == "rollback-peer-profile":
+            peer_profile_id = peer_provision_snapshot.document["profile_id"]
+            state_document = peer_state_snapshot.document
+            ownership_fact = _load_peer_ownership_receipt(ownership_receipt_loader)
+            if not _validate_peer_ownership_fact(
+                ownership_fact,
+                generation=state_document["generation"],
+                peer_profile_id=peer_profile_id,
+                provision_snapshot=peer_provision_snapshot,
+                now=reference_time,
+            ):
+                # The accepted PF-1/INSTALL1 owner resolver is not yet wired
+                # into these five paths.  The live default therefore refuses
+                # before anchor, bindings, environment, Keychain, or vendor.
+                return _emit_refusal(out, args.vendor, "BINDINGS_UNAVAILABLE")
+
     provision, code = _core.load_provision(
         args.provision_path, bindings_loader=bindings_loader, now=reference_time,
     )
@@ -2073,25 +3950,43 @@ def main(
     if local_code is not None:
         return _emit_refusal(out, args.vendor, local_code)
 
-    peer_provision_path = peer_provision_path or PEER_PROVISION_PATH
-    peer_intent_path = peer_intent_path or PEER_INTENT_PATH
     peer_provision = None
+    if args.operation in peer_ops:
+        try:
+            current_state, current_peer_provision = _preflight_peer_paths(
+                operation=args.operation,
+                state_path=peer_intent_path,
+                provision_path=peer_provision_path,
+            )
+        except _PeerStateRefusal:
+            return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
+        if not (
+            _same_optional_snapshot(current_state, peer_state_snapshot)
+            and _same_optional_snapshot(current_peer_provision, peer_provision_snapshot)
+        ):
+            return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
+    if args.operation in peer_ops and peer_state_snapshot is not None:
+        peer_name = peer_profile_name(provision["folder_id"], provision["profile_id"])
+        if not _state_matches_authority(
+            peer_state_snapshot,
+            folder_id=provision["folder_id"],
+            anchor_profile_id=provision["profile_id"],
+            peer_name=peer_name,
+            peer_provision_path=peer_provision_path,
+        ):
+            return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
     if args.operation == "rollback-peer-profile":
-        # Rollback needs the PEER provision's profile_id before it can even
-        # build a target — a purely local check, so it happens before Keychain.
-        peer_provision, peer_code = _core.load_provision(
-            peer_provision_path, bindings_loader=bindings_loader, now=reference_time,
+        peer_provision, peer_code = _core._validate_provision_document(
+            peer_provision_snapshot.document,
+            bindings_loader=bindings_loader,
+            now=reference_time,
         )
         if peer_provision is None:
-            return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
-        # #385 requires the exact operation-created provision AND the
-        # create-intent receipt to match before one removal is permitted.
-        # The provision alone cannot prove THIS operation created the
-        # profile; without the preimage, a hand-authored or stale provision
-        # would be enough to delete a profile we never made.
-        if not _peer_intent_present(
-            peer_intent_path,
-            peer_name=peer_profile_name(provision["folder_id"], provision["profile_id"]),
+            return _emit_refusal(out, args.vendor, peer_code or "PROVISION_MISSING")
+        if (
+            peer_provision.get("folder_id") != provision.get("folder_id")
+            or peer_state_snapshot.document.get("peer_profile_digest")
+            != _core.sha256_hex(peer_provision["profile_id"])
         ):
             return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
 
@@ -2158,6 +4053,7 @@ def main(
                 vendor_client, provision,
                 peer_intent_path=peer_intent_path, peer_provision_path=peer_provision_path,
                 bindings_loader=bindings_loader, now=reference_time,
+                initial_state=peer_state_snapshot,
             )
             print(json.dumps(receipt, indent=2, sort_keys=True), file=out)
             if receipt.get("verdict") == "PASS":
@@ -2165,10 +4061,119 @@ def main(
             return 3 if receipt.get("verdict") == "HOLD" else 2
 
         if args.operation == "rollback-peer-profile":
+            state_holder = {"snapshot": peer_state_snapshot}
+
+            def _claim_remove_once():
+                # The first fixed-path receipt was a pre-credential gate only.
+                # Re-read the producer's current fact with a fresh clock at the
+                # last possible moment before acquiring the one-shot remove
+                # fence; expiry or replacement is a refusal, never a cached
+                # authorization.
+                current_ownership_fact = _load_peer_ownership_receipt(
+                    ownership_receipt_loader
+                )
+                outcome = _claim_peer_remove(
+                    peer_intent_path,
+                    expected=state_holder["snapshot"],
+                    peer_profile_id=peer_provision["profile_id"],
+                    provision_snapshot=peer_provision_snapshot,
+                    ownership_fact=current_ownership_fact,
+                    now=current_time(),
+                )
+                if outcome in (CREATED_THIS_CALL, EXISTING_EXACT):
+                    state_holder["snapshot"] = _peer_intent_snapshot(peer_intent_path)
+                return outcome
+
+            remove_already_claimed = peer_state_snapshot.document["phase"] in (
+                PEER_PHASE_REMOVE_DISPATCHED,
+                PEER_PHASE_ROLLBACK_VERIFIED,
+            )
             receipt = vendor_client.remove_peer_profile(
                 folder_id=provision["folder_id"], anchor_profile_id=provision["profile_id"],
                 peer_profile_id=peer_provision["profile_id"],
+                remove_already_claimed=remove_already_claimed,
+                claim_remove=_claim_remove_once,
             )
+            if receipt.get("effect") == "NONE":
+                # The first remote census can overlap a different exact
+                # invocation acquiring the durable remove fence (and possibly
+                # dispatching) on the same lifecycle inode.  An already-bound
+                # REMOVE_DISPATCHED/ROLLBACK_VERIFIED re-entry is equally
+                # effect-bearing.  Neither a stale pre-census phase nor a
+                # failed reconciliation census can justify a no-effect result.
+                initial_remove_state = peer_state_snapshot
+                try:
+                    fresh_remove_state, fresh_remove_provision = _preflight_peer_paths(
+                        operation="rollback-peer-profile",
+                        state_path=peer_intent_path,
+                        provision_path=peer_provision_path,
+                        generation=initial_remove_state.document["generation"],
+                    )
+                except _PeerStateRefusal:
+                    fresh_remove_state = None
+                    fresh_remove_provision = None
+                if (
+                    fresh_remove_state is not None
+                    and fresh_remove_provision is not None
+                    and (fresh_remove_state.st_dev, fresh_remove_state.st_ino)
+                    == (initial_remove_state.st_dev, initial_remove_state.st_ino)
+                    and fresh_remove_state.document.get("phase") in (
+                        PEER_PHASE_REMOVE_DISPATCHED,
+                        PEER_PHASE_ROLLBACK_VERIFIED,
+                    )
+                    and _same_snapshot(fresh_remove_provision, peer_provision_snapshot)
+                ):
+                    state_holder["snapshot"] = fresh_remove_state
+                    predicates = dict(receipt["predicates"])
+                    predicates.update({
+                        "intent_committed": True,
+                        "dispatched": False,
+                        "reconciled": True,
+                        "cleanup_lease_retained": True,
+                    })
+                    receipt = peer_receipt(
+                        effect="REMOVE_EFFECT_UNKNOWN",
+                        code="VENDOR_ERROR",
+                        verdict="HOLD",
+                        digests=receipt["digests"],
+                        removal_disposition=receipt["removal_disposition"],
+                        **predicates,
+                    )
+            if receipt.get("effect") == "ROLLBACK_VERIFIED":
+                current_state = state_holder["snapshot"] or _peer_intent_snapshot(peer_intent_path)
+                transitioned = _transition_peer_intent(
+                    peer_intent_path,
+                    expected=current_state,
+                    phase=PEER_PHASE_ROLLBACK_VERIFIED,
+                    peer_profile_id=peer_provision["profile_id"],
+                ) if current_state is not None else None
+                try:
+                    final_state, final_provision = _preflight_peer_paths(
+                        operation="rollback-peer-profile",
+                        state_path=peer_intent_path,
+                        provision_path=peer_provision_path,
+                        generation=(
+                            transitioned.document.get("generation")
+                            if transitioned is not None else PEER_SOURCE_GENERATION
+                        ),
+                    )
+                except _PeerStateRefusal:
+                    final_state = None
+                    final_provision = None
+                if (
+                    transitioned is None
+                    or final_state is None
+                    or final_provision is None
+                    or not _same_snapshot(final_state, transitioned)
+                    or not _same_snapshot(final_provision, peer_provision_snapshot)
+                ):
+                    predicates = dict(receipt["predicates"])
+                    receipt = peer_receipt(
+                        effect="REMOVE_EFFECT_UNKNOWN", code="VENDOR_ERROR", verdict="HOLD",
+                        digests=receipt["digests"],
+                        removal_disposition=receipt["removal_disposition"],
+                        **predicates,
+                    )
             print(json.dumps(receipt, indent=2, sort_keys=True), file=out)
             if receipt.get("verdict") == "PASS":
                 return 0
@@ -2239,6 +4244,24 @@ def main(
 
     print(json.dumps(receipts, indent=2, sort_keys=True), file=out)
     return 0 if receipts.get("verdict") == "PASS" else 1
+
+
+def run_coordinator_peer_create(argv=None, **kwargs) -> int:
+    """In-process create entry owned by the trusted interactive coordinator."""
+    return main(
+        ["create-peer-profile", *(list(argv) if argv is not None else [])],
+        create_authorization=CREATE_PEER_AUTHORIZATION,
+        **kwargs,
+    )
+
+
+def run_coordinator_peer_rollback(argv=None, **kwargs) -> int:
+    """In-process rollback entry; a trusted ownership fact is still required."""
+    return main(
+        ["rollback-peer-profile", *(list(argv) if argv is not None else [])],
+        rollback_authorization=ROLLBACK_PEER_AUTHORIZATION,
+        **kwargs,
+    )
 
 
 if __name__ == "__main__":

@@ -523,6 +523,14 @@ def test_configure_command_refuses_gologin_before_provision_or_vendor(monkeypatc
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_peer_fixed_path_gates(request, monkeypatch):
+    if not request.node.name.startswith("test_peer_setup_"):
+        return
+    monkeypatch.setattr(setup.vendors, "coordinator_peer_paths_safe", lambda _operation: True)
+    monkeypatch.setattr(setup.vendors, "coordinator_peer_rollback_receipt_ready", lambda: True)
+
+
 def _peer_anchor_provision(row: dict) -> dict:
     return {
         "schema": canary.PROVISION_SCHEMA,
@@ -533,6 +541,64 @@ def _peer_anchor_provision(row: dict) -> dict:
         "origin_policy": port_policy.ORIGIN_POLICY,
         "disposable_ack": canary.REQUIRED_ACK,
     }
+
+
+@pytest.mark.parametrize("deleted", ("anchor_and_state", "state_and_witness"))
+def test_peer_setup_loss_fence_never_recreates_a_consumed_genesis(tmp_path, deleted):
+    """Setup does not treat missing runtime records as a fresh installation."""
+    provision = _peer_anchor_provision(_mlx(4, running=False))
+    anchor_path = tmp_path / "anchor.json"
+    state_path = tmp_path / "peer-state.json"
+    peer_provision_path = tmp_path / "peer-provision.json"
+    assert setup._prepare_anchor_with_peer_lifecycle(
+        provision,
+        anchor_path=anchor_path,
+        state_path=state_path,
+        peer_provision_path=peer_provision_path,
+    ) == setup.vendors.CREATED_THIS_CALL
+    witness_path = setup.vendors._peer_genesis_witness_path(state_path)  # noqa: SLF001
+    assert setup.vendors._commit_peer_intent(  # noqa: SLF001
+        state_path,
+        folder_id=provision["folder_id"],
+        anchor_profile_id=provision["profile_id"],
+        peer_name=setup.vendors.peer_profile_name(
+            provision["folder_id"], provision["profile_id"],
+        ),
+        peer_provision_path=peer_provision_path,
+    ) == setup.vendors.CREATED_THIS_CALL
+
+    if deleted == "anchor_and_state":
+        anchor_path.unlink()
+        state_path.unlink()
+        witness_before = witness_path.read_bytes()
+    else:
+        state_path.unlink()
+        witness_path.unlink()
+        anchor_before = anchor_path.read_bytes()
+
+    with pytest.raises(setup.SetupRefusal, match="genesis is unavailable|already consumed"):
+        setup._prepare_anchor_with_peer_lifecycle(
+            provision,
+            anchor_path=anchor_path,
+            state_path=state_path,
+            peer_provision_path=peer_provision_path,
+        )
+
+    assert not state_path.exists()
+    if deleted == "anchor_and_state":
+        assert not anchor_path.exists()
+        assert witness_path.read_bytes() == witness_before
+    else:
+        assert not witness_path.exists()
+        assert anchor_path.read_bytes() == anchor_before
+
+
+def _refuse_any_peer_dispatch(monkeypatch, message):
+    def _raise(*_args, **_kwargs):
+        raise AssertionError(message)
+
+    monkeypatch.setattr(setup.vendors, "run_coordinator_peer_create", _raise)
+    monkeypatch.setattr(setup.vendors, "run_coordinator_peer_rollback", _raise)
 
 
 @pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
@@ -546,10 +612,7 @@ def test_peer_setup_gologin_refuses_before_bindings_or_provision(monkeypatch, co
         setup, "_load_current_provision",
         lambda: (_ for _ in ()).throw(AssertionError("must refuse GoLogin before loading a provision")),
     )
-    monkeypatch.setattr(
-        setup.vendors, "main",
-        lambda argv: (_ for _ in ()).throw(AssertionError("must refuse GoLogin before any dispatch")),
-    )
+    _refuse_any_peer_dispatch(monkeypatch, "must refuse GoLogin before any dispatch")
     assert setup.main([command, "--vendor", "gologin"]) == 2
 
 
@@ -560,10 +623,7 @@ def test_peer_setup_missing_bindings_refuses_before_provision_or_dispatch(monkey
         setup, "_load_current_provision",
         lambda: (_ for _ in ()).throw(AssertionError("must refuse before loading a provision")),
     )
-    monkeypatch.setattr(
-        setup.vendors, "main",
-        lambda argv: (_ for _ in ()).throw(AssertionError("must refuse before any dispatch")),
-    )
+    _refuse_any_peer_dispatch(monkeypatch, "must refuse before any dispatch")
     assert setup.main([command, "--vendor", "multilogin"]) == 2
 
 
@@ -575,10 +635,7 @@ def test_peer_setup_missing_provision_refuses_before_local_census_or_dispatch(mo
         setup.chatgpt, "list_local_environments",
         lambda: (_ for _ in ()).throw(AssertionError("must refuse before reading the local census")),
     )
-    monkeypatch.setattr(
-        setup.vendors, "main",
-        lambda argv: (_ for _ in ()).throw(AssertionError("must refuse before any dispatch")),
-    )
+    _refuse_any_peer_dispatch(monkeypatch, "must refuse before any dispatch")
     assert setup.main([command, "--vendor", "multilogin"]) == 2
 
 
@@ -601,10 +658,7 @@ def test_peer_setup_seat_collision_refuses_before_confirmation_or_dispatch(monke
         "builtins.input",
         lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must refuse before prompting for confirmation")),
     )
-    monkeypatch.setattr(
-        setup.vendors, "main",
-        lambda argv: (_ for _ in ()).throw(AssertionError("must refuse before any dispatch")),
-    )
+    _refuse_any_peer_dispatch(monkeypatch, "must refuse before any dispatch")
     with pytest.raises(setup.SetupRefusal, match="collides"):
         (setup.create_peer_interactive if command == "create-peer-profile" else setup.rollback_peer_interactive)()
 
@@ -628,16 +682,13 @@ def test_peer_setup_confirmation_mismatch_refuses_without_dispatch(monkeypatch, 
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: "the wrong phrase")
-    monkeypatch.setattr(
-        setup.vendors, "main",
-        lambda argv: (_ for _ in ()).throw(AssertionError("a confirmation mismatch must dispatch nothing")),
-    )
+    _refuse_any_peer_dispatch(monkeypatch, "a confirmation mismatch must dispatch nothing")
     handler = setup.create_peer_interactive if command == "create-peer-profile" else setup.rollback_peer_interactive
     with pytest.raises(setup.SetupRefusal, match="confirmation"):
         handler()
 
 
-def test_peer_setup_create_happy_path_delegates_exact_confirmed_argv(monkeypatch):
+def test_peer_setup_create_happy_path_delegates_to_exact_capability(monkeypatch):
     row = _mlx(1, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
@@ -650,17 +701,41 @@ def test_peer_setup_create_happy_path_delegates_exact_confirmed_argv(monkeypatch
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_CREATE_PEER)
     calls = []
-    monkeypatch.setattr(setup.vendors, "main", lambda argv: calls.append(argv) or 0)
+    monkeypatch.setattr(
+        setup.vendors, "run_coordinator_peer_create",
+        lambda argv, **kwargs: calls.append((argv, kwargs)) or 0,
+    )
     assert setup.main(["create-peer-profile", "--vendor", "multilogin"]) == 0
-    assert calls == [[
-        "create-peer-profile",
+    assert calls == [([
         "--vendor", "multilogin",
         "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
-        "--confirmed",
-    ]]
+    ], {})]
 
 
-def test_peer_setup_rollback_happy_path_delegates_exact_confirmed_argv(monkeypatch):
+def test_peer_setup_rollback_without_release_receipt_refuses_before_confirmation(monkeypatch):
+    row = _mlx(1, running=False)
+    provision = _peer_anchor_provision(row)
+    complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
+    monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (provision, None))
+    monkeypatch.setattr(
+        setup.chatgpt, "list_local_environments",
+        lambda: {"multilogin": [row], "gologin": []},
+    )
+    monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
+    monkeypatch.setattr(setup.vendors, "coordinator_peer_rollback_receipt_ready", lambda: False)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("missing downstream ownership proof must refuse before confirmation"),
+        ),
+    )
+    _refuse_any_peer_dispatch(monkeypatch, "missing downstream ownership proof must dispatch nothing")
+    with pytest.raises(setup.SetupRefusal, match="ownership"):
+        setup.rollback_peer_interactive()
+
+
+def test_peer_setup_rollback_with_release_receipt_delegates_to_distinct_capability(monkeypatch):
     row = _mlx(1, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
@@ -673,14 +748,15 @@ def test_peer_setup_rollback_happy_path_delegates_exact_confirmed_argv(monkeypat
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: setup._CONFIRM_ROLLBACK_PEER)
     calls = []
-    monkeypatch.setattr(setup.vendors, "main", lambda argv: calls.append(argv) or 0)
-    assert setup.main(["rollback-peer-profile", "--vendor", "multilogin"]) == 0
-    assert calls == [[
-        "rollback-peer-profile",
+    monkeypatch.setattr(
+        setup.vendors, "run_coordinator_peer_rollback",
+        lambda argv, **kwargs: calls.append((argv, kwargs)) or 0,
+    )
+    assert setup.rollback_peer_interactive() == 0
+    assert calls == [([
         "--vendor", "multilogin",
         "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
-        "--confirmed",
-    ]]
+    ], {})]
 
 
 def test_peer_setup_coordinator_never_touches_credential_or_http(monkeypatch):
@@ -702,7 +778,7 @@ def test_peer_setup_coordinator_never_touches_credential_or_http(monkeypatch):
     for forbidden in ("Credential(", ".expose(", "_open_keychain_credential_pipe", "BoundedHttpClient(", "httpx."):
         assert forbidden not in source
 
-    monkeypatch.setattr(setup.vendors, "main", lambda argv: 0)
+    monkeypatch.setattr(setup.vendors, "run_coordinator_peer_create", lambda argv, **kwargs: 0)
     assert setup.main(["create-peer-profile", "--vendor", "multilogin"]) == 0
 
 
