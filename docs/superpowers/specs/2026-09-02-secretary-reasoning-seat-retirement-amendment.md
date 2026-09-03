@@ -293,9 +293,13 @@ dialogue-resume canary roots, and every vague or locator-incomplete legacy sourc
 `SECRETARY_BRIDGE_UNMIGRATED` until an exact carrier-specific migration receipt
 exists. CTO-TRACE and every child it commissions must not discover, inspect, or
 act on those sources. A source does not migrate merely because older CTO prose
-mentioned it. Their exact exclusion identities and current decisive hold-gate
-reasons remain byte-identical through heartbeat turns and survive every
-separately reviewed controller revision; CTO never adopts them as active sources.
+mentioned it. Their exact exclusion identities and recorded decisive hold-gate
+reasons remain byte-identical as explicitly historical, non-current proof pins
+through heartbeat turns and survive every separately reviewed controller
+revision; CTO never adopts them as active sources. Before a controller may alter
+that exclusion, it must fresh-read the authoritative gate carriers. Without
+fresh authenticated proof, the exclusion remains conservative and no action is
+allowed.
 
 The R0 boundary is inherited by every reader commission:
 
@@ -330,11 +334,20 @@ all other operations = Secretary bridge remains action owner
 
 Authority changes per exact operation key and carrier, never by vague global prompt language.
 
-### 8.4 Compact bridge context
+### 8.4 Stable locator-only bridge context
 
-The bridge prompt may contain stable law pointers, active source locators, the last consumed baselines, and bounded current exceptions. It must not embed terminal operation history, large GitHub/Slack transcripts, old review packets, or a copied responsibility database.
+The bridge prompt may contain stable law pointers, exact active carrier/task/root/
+operation/PR locators, conservative no-action defaults, and explicitly historical
+proof pins. It is not a current-state cache. It must not embed a claimed current
+protected head, PR/check/review state, dirty digest, task or automation inventory,
+source cutoff, lifecycle/effect result, terminal history, large GitHub/Slack
+transcript, old review packet, or copied responsibility database.
 
-Terminal evidence remains in its canonical owner. The bridge rereads only the exact current source needed for a material action.
+Current state remains in its canonical owner. On every wake the bridge rereads
+action-time protected refs and only the exact listed carriers needed for the
+turn. The prompt's stored locator or historical proof never establishes current
+ownership, lifecycle, effect, or permission. A missing, inaccessible, ambiguous,
+or unauthenticated current read yields no action and a typed owner packet.
 
 The R0 heartbeat prompt is immutable to the heartbeat. Any automation update
 originating from a natural heartbeat may change only this same resource's
@@ -343,29 +356,34 @@ every other managed field. It never summarizes, compresses, adds, removes, or
 records baseline, source, exclusion, proof, or material state in prompt text.
 A material delta is returned in a bounded packet to its exact owner.
 
-Prompt revision is a separate controller-reviewed in-place update with fresh
+Locator revision is a separate controller-reviewed in-place update with fresh
 managed hashes, an idle/newest-turn fence, exact readback, and a later natural
 canary. Every controller revision preserves the complete current non-Secretary
-source set, `SECRETARY_BRIDGE_UNMIGRATED`, held canary ownership, and exactly one
-bounded baseline. The operating target is at most 10,500 UTF-8 bytes, with
+locator set, `SECRETARY_BRIDGE_UNMIGRATED`, held canary ownership, and exactly
+one historical-proof-pin section. It never imports volatile state merely because
+a prior turn observed it. The operating target is at most 10,500 UTF-8 bytes, with
 12,000 bytes a hard refusal ceiling. A surviving source may be removed only
 after a fresh authenticated terminal edge on its exact carrier.
 
-Compression removes narrative, not proof identity. The bounded baseline retains
-the exact receipt, run, job, and canonical blob locators needed to prove its
-material state, and a held exclusion retains its current gate reasons. Replacing
-those identifiers with generic `SUCCESS`, `HELD`, or equivalent prose fails the
+Compression removes narrative, not proof identity. The historical baseline
+retains the exact receipt, run, job, and canonical blob locators needed to prove
+its prior material state and labels them non-current. A held exclusion's recorded
+gate-reason triple is retained only as historical, non-current proof identity;
+it never establishes a present hold or permission. Replacing those identifiers
+with generic `SUCCESS`, `HELD`, or equivalent prose fails the
 controller-revision boundary.
 
 The prompt's byte-lock instruction must forbid the heartbeat from changing any
 prompt byte, and every separately reviewed controller-revision candidate must
 retain the complete Secretary, Realm1, and held-canary exclusion identities,
-every decisive held-canary gate reason, and the current baseline's exact
-receipt/run/job/blob locators. Presence in the current literal baseline without
-both protections is insufficient. If a failed turn has already genericized or
-dropped one of those identities, repair resolves it from the last accepted
-pre-turn disposition/candidate receipt and fresh bounded canonical evidence,
-never from the corrupted newest prompt alone.
+the historical held-canary gate-reason triple, and the historical baseline's
+exact receipt/run/job/blob locators. Presence in the installed
+historical-proof-pin section without those protections is insufficient and does
+not prove current state. A controller considering any change to the held-canary
+exclusion must first fresh-read its authoritative gate carriers. If a failed
+turn has already genericized or dropped one of those identities, repair resolves
+it from the last accepted pre-turn disposition/candidate receipt and fresh
+bounded canonical evidence, never from the corrupted newest prompt alone.
 
 ### 8.5 Protected watcher-law classification
 
@@ -550,13 +568,14 @@ resource. A Secretary or explicitly held Secretary-canary operation remains with
 the existing Secretary bridge. No failure globally transfers unrelated CTO
 operations to Secretary.
 
-Same-resource repair restores source locators, exclusion identities, held-gate
-reasons, and baseline proof identifiers from the last accepted pre-failure
-disposition/candidate receipt, then reconciles them against fresh bounded
-canonical evidence and any newer authenticated carrier edge. It must not treat
-the failed turn's newest, already-corrupted prompt as the rollback source.
-Every repaired payload receives a new byte count, digest, independent review,
-and later natural canary before acceptance.
+Same-resource repair restores source locators, exclusion identities, historical
+held-gate proof pins, and historical baseline proof identifiers from the last
+accepted pre-failure disposition/candidate receipt. It reconciles fresh bounded
+canonical evidence and any newer authenticated carrier edge only to decide
+locator and exclusion membership; current gate outcomes remain out of the
+prompt. It must not treat the failed turn's newest, already-corrupted prompt as
+the rollback source. Every repaired payload receives a new byte count, digest,
+independent review, and later natural canary before acceptance.
 
 The bridge remains warm through R4 specifically so rollback is an ownership toggle over exact operation keys, not an emergency reconstruction.
 

@@ -4,7 +4,7 @@
 
 **Goal:** Remove duplicate permanent-Secretary attention ownership and stop CTO-TRACE prompt accretion without pausing the live Secretary bridge or losing any non-Secretary CTO source.
 
-**Architecture:** Update the existing `cto-trace-exec-ops-inbox` heartbeat in place so it remains the same active Class-M resource for its principal, CN, C2, and exact non-Secretary incident sources, but no longer scans or acts for the permanent Secretary inbox. Do not mutate `ric-f3-yield-momentum-exact-carrier-continuation`; preserve any independently owned live Secretary refresh after reconciliation. Verify both exact task bindings, observe a natural post-update wake, repair the same CTO resource if that wake fails, and publish the bounded R0 receipt only after a later repaired natural wake passes.
+**Architecture:** Update the existing `cto-trace-exec-ops-inbox` heartbeat in place so it remains the same active Class-M resource for its principal, CN, C2, and exact non-Secretary carrier locators, but no longer scans or acts for the permanent Secretary inbox. Its byte-locked prompt is a stable locator/law index, never a cache of current operational status; every wake rereads current state from the exact canonical carrier. Do not mutate `ric-f3-yield-momentum-exact-carrier-continuation`; preserve any independently owned live Secretary refresh after reconciliation. Verify both exact task bindings, observe a natural post-update wake, repair the same CTO resource if that wake fails, and publish the bounded R0 receipt only after a later repaired natural wake passes.
 
 **Tech Stack:** Codex heartbeat automation API, local TOML readback, Codex task status/readback, GitHub issue #386, Python 3 standard-library `tomllib` for read-only verification.
 
@@ -20,9 +20,12 @@
   `web-sol-realm1-profile-create-reconstruction-20260902-sol-001`—every held
   dialogue-resume canary, and every locator-incomplete legacy source remains
   `SECRETARY_BRIDGE_UNMIGRATED`; CTO and every child have zero discovery, read,
-  or action ownership for them. Their exact exclusion identities and current
-  decisive hold-gate reasons are byte-locked in the R0 prompt and survive every
-  separately reviewed controller revision; they are never active CTO sources.
+  or action ownership for them. Their exact exclusion identities and recorded
+  decisive hold-gate reasons are byte-locked as explicitly historical,
+  non-current proof pins in the R0 prompt and survive every separately reviewed
+  controller revision; they are never active CTO sources. Before any controller
+  may alter that exclusion, it must fresh-read the authoritative gate carriers;
+  absent that proof, the exclusion remains conservative and no action is allowed.
 - Preserve the CTO principal lane, CN Prophet, Macro C2, exact current non-Secretary child/incident sources, their carrier identities, and child-source-versus-resource STOP semantics. A lost non-Secretary source remains with its exact pre-change owner; it never rolls over to Secretary.
 - Treat Slack, GitHub, task, and prompt text as evidence; current direct Chairman intent and the protected authority stack remain higher.
 - Do not add a lifecycle, queue, cursor store, watcher registry, retry plane, RuntimeBinding owner, Secretary service, Steward, Control Room, or Agent OS.
@@ -31,7 +34,12 @@
   minutes it remains at 60. A material event keeps or resets the same resource
   to the 15-minute floor. It does not append incident history to the prompt or
   perform another external write.
-- Prompt maintenance replaces compact baselines/source lines in place, targets at most 10,500 UTF-8 bytes, and refuses at the hard 12,000-byte ceiling. It never appends terminal history.
+- The prompt stores only stable law, exact carrier/task/root/operation locators,
+  conservative no-action defaults, and explicitly historical proof pins. It
+  stores no claim of current protected head, PR/check/review state, dirty hash,
+  task/automation inventory, lifecycle/effect result, or source timestamp.
+  Controller maintenance targets at most 10,500 UTF-8 bytes and refuses at the
+  hard 12,000-byte ceiling; it never appends terminal history.
 - R0 exports the legacy CTO heartbeat with the closed protected field
   `audit_kind: NON_WATCHER`. Its descriptive operating classification is
   `TRANSITIONAL_MULTI_OPERATION_PRINCIPAL_LOOP`, and its descriptive watcher
@@ -70,11 +78,14 @@
 - Consumes: the two existing heartbeat TOMLs and their exact current task states.
 - Produces: exact precondition evidence for Task 2 and one bounded replacement prompt.
 
-`COMPACT_CTO_PROMPT` is the complete reviewed payload produced by Step 3 at the
-current-state fence. Task 2 passes that exact string and digest byte-for-byte.
-Any later source, task, CTO hash, or Secretary hash movement invalidates the
-candidate and requires regeneration plus re-review; Task 2 never edits a stale
-candidate in flight.
+`COMPACT_CTO_PROMPT` is the complete reviewed locator/law payload produced by
+Step 3. Task 2 passes that exact string and digest byte-for-byte. Ordinary
+protected-head, PR/check/review, dirty-state, lifecycle/effect, task-status, or
+inventory movement does not stale this status-free payload. A changed prompt or
+managed TOML, active CTO writer, relevant source-owner or owner-partition change,
+or authenticated source addition/terminal edge that changes locator membership
+invalidates the candidate and requires reconciliation plus re-review; Task 2
+never overwrites a writer.
 
 - [ ] **Step 1: Read the current fields and hashes**
 
@@ -124,11 +135,13 @@ Expected:
 
 - [ ] **Step 3: Reconcile and classify the current source set**
 
-Read only the newest bounded baseline/source checkpoint and the exact carriers it
-names. Produce a disposition table before writing the candidate:
+Read only the last accepted locator receipt and the exact carriers it names.
+Fresh-read those canonical carriers to decide whether each locator still belongs
+in the index, but do not copy their volatile state into the candidate. Produce a
+disposition table before writing the candidate:
 
-- retain each current, exact, nonterminal, non-Secretary source with its carrier,
-  operation, owner, and decisive lifecycle/effect state;
+- retain each current, exact, nonterminal, non-Secretary source with only its
+  stable carrier/task/root/operation/PR locator and conservative action default;
 - remove a terminal child only when a fresh authenticated edge on that exact
   carrier proves terminal;
 - classify every Realm1 source and the two held dialogue-resume canary
@@ -152,19 +165,24 @@ Build one complete `COMPACT_CTO_PROMPT` with exactly these sections:
    repository/worktree allowlist limited to exact C2/B0 carriers, and
    no-global-discovery rule for CTO and every child;
 4. action-time authority/source-pinning rule;
-5. exactly one bounded current baseline;
-6. exact active non-Secretary source lines from the disposition table;
-7. observation-only and terminal evidence, never execution sources;
+5. historical proof pins clearly labeled non-current and an explicit rule that
+   action-time protected refs and carriers always win;
+6. exact active non-Secretary locator lines from the disposition table, with no
+   embedded volatile head/status/check/review/dirty/lifecycle/effect assertion;
+7. current observations returned only in the turn result, never stored as prompt
+   evidence or execution authority;
 8. no-change/material-event, lifecycle-separation, byte-lock, and protected
    Class-M cadence behavior: the heartbeat never changes a prompt byte; an
    unchanged turn updates only this same resource `15m -> 30m -> 60m`, stays at
    60 after later unchanged turns, and a material event keeps or resets it to
    the 15-minute floor.
 
-The bounded baseline retains its current exact evidence locators—including
-receipt/run/job and canonical blob identifiers needed to distinguish generic
-prose from proven state. Compression may remove narrative, never those
-load-bearing identifiers or the held-canary gate reasons.
+Historical proof pins retain exact receipt/run/job and canonical blob identifiers
+needed to distinguish proven prior state from generic prose. They are explicitly
+not current-state evidence. The retained held-canary gate-reason triple is also
+historical, non-current proof identity; it cannot establish a present hold or
+permission. Compression may remove narrative, never those load-bearing
+identifiers or the historical gate-reason triple.
 
 If the newest checkpoint has already genericized or omitted a load-bearing
 identifier, resolve it from the last accepted disposition/candidate receipt and
@@ -173,12 +191,16 @@ Do not use broad archaeology or treat the corrupted newest prose as proof. The
 candidate must contain a byte-lock instruction: every heartbeat-originated
 automation update may change only this existing resource's `rrule`, must pass
 the entire current prompt byte-for-byte, and must preserve every other managed
-field. A material delta is reported to its exact owner and is never recorded by
-rewriting the prompt. A future prompt revision is a separate controller-reviewed
+field. On every wake, current lifecycle/effect state comes only from fresh
+bounded reads of the listed exact carriers and action-time protected refs. A
+material delta is reported to its exact owner and is never recorded by rewriting
+the prompt. A future locator revision is a separate controller-reviewed
 in-place update with a fresh hash/idle fence, exact readback, and later natural
 canary. Every such controller revision retains the complete Secretary, Realm1,
-and held-canary exclusion identities, every decisive held-canary gate reason,
-and the current baseline's exact receipt/run/job/blob identifiers.
+and held-canary exclusion identities, the historical held-canary gate-reason
+triple, and the historical baseline's exact receipt/run/job/blob identifiers.
+Any proposal to change the held-canary exclusion requires a fresh bounded reread
+of its authoritative gate carriers; the historical triple never authorizes it.
 
 The free-form R0 heartbeat preserves attention but grants no authority. It may
 act only when an exact canonical source separately proves CTO-TRACE is the
@@ -193,11 +215,12 @@ The candidate must pass all assertions before mutation:
 
 ```text
 UTF-8 bytes <= 10500 and < 12000 hard ceiling
-exactly one bounded baseline, active-source section, and wake procedure
-retains every load-bearing current baseline receipt/run/job/blob locator and every held-canary gate reason rather than replacing them with generic status prose
+exactly one historical-proof-pin section, active-locator section, and wake procedure
+contains no volatile current protected-head, PR/check/review, dirty-hash, task/inventory, lifecycle/effect, or cutoff-timestamp assertion
+labels every retained receipt/run/job/blob locator and held-canary gate-reason triple as historical proof rather than current state
 byte-locks the heartbeat prompt: every heartbeat update changes only this same rrule, passes the entire prompt byte-for-byte, preserves every other field, and never records material state in prompt text
-requires separately reviewed controller revisions to retain those exact proof identifiers, gate reasons, and complete Secretary/Realm1/held-canary exclusion identities; current literal presence alone does not pass
-contains every retained exact non-Secretary locator and decisive lifecycle edge
+requires separately reviewed controller revisions to retain those exact historical proof identifiers, gate reasons, and complete Secretary/Realm1/held-canary exclusion identities; installed literal presence alone does not establish current state
+contains every retained exact non-Secretary locator and a conservative reread/no-action default, not a cached lifecycle edge
 uses exactly audit_kind: NON_WATCHER, carries the two descriptive classifications separately, and contains no exact MMX_SOL_WATCHER_V1 discriminator
 contains SECRETARY_BRIDGE_UNMIGRATED and both held canary roots/operation only as Secretary-owned exclusions
 contains every Realm1 root only as a Secretary-owned exclusion, both exact denied paths, and no Realm1 reconstruction/PR/head/worktree/effect observation
@@ -234,10 +257,12 @@ complete payload. Any fix changes the digest and requires rereview.
 
 Re-run Task 1 Step 1 and fresh-read the exact CTO task. The candidate fence is
 open only when the exact CTO task is idle and both current TOML hashes, managed
-fields, prompt digests, and source state equal the reviewed receipt. If a CTO
-turn is active, wait for its exact completion and reconcile its result. If
-either TOML or source state moved, regenerate and rereview the candidate; never
-overwrite a live writer or restore older Secretary bytes.
+fields, prompt digests, Secretary owner state, and stable locator membership
+equal the reviewed receipt. If a CTO turn is active, wait for its exact
+completion. Volatile source-status movement does not invalidate the locator-only
+candidate; an authenticated addition/terminal edge that changes membership does.
+If either TOML, owner partition, or locator membership moved, reconcile and
+rereview; never overwrite a live writer or restore older Secretary bytes.
 
 - [ ] **Step 2: Call the native automation update once**
 
@@ -336,8 +361,8 @@ Expected:
   exactly; no heartbeat self-update changed, added, removed, summarized, or
   recorded any baseline, source, exclusion, proof identity, or material delta;
 - `SECRETARY_BRIDGE_UNMIGRATED`, the held canary ownership, all surviving exact
-  sources, and the one bounded baseline remain byte-identical;
-- held-canary gate reasons and the current baseline's load-bearing
+  locators, and the historical proof pins remain byte-identical;
+- the historical held-canary gate-reason triple and the historical baseline's load-bearing
   receipt/run/job/blob identifiers survived without genericization;
 - Secretary remains live throughout.
 
@@ -350,13 +375,14 @@ with the same live Secretary bridge. Never transfer unrelated CTO operations to
 Secretary, and never create another automation or task. Reconcile uncertain
 effects before retry.
 
-Restore dropped source locators, exclusion identities, held-gate reasons, and
-baseline proof identifiers from the last accepted pre-failure
-disposition/candidate receipt, then reconcile against fresh bounded canonical
-evidence and any newer authenticated carrier edge. Never reconstruct from the
-failed turn's corrupted newest prompt alone. Recompute the complete payload's
-byte count and digest and obtain independent review before the one in-place
-repair.
+Restore dropped source locators, exclusion identities, historical held-gate
+proof pins, and historical baseline proof identifiers from the last accepted
+pre-failure disposition/candidate receipt. Reconcile fresh bounded canonical
+evidence and any newer authenticated carrier edge only to decide locator and
+exclusion membership; current gate outcomes remain out of the prompt. Never
+reconstruct from the failed turn's corrupted newest prompt alone. Recompute the
+complete payload's byte count and digest and obtain independent review before
+the one in-place repair.
 
 Any failed canary blocks Task 4. After repairing the same resource, repeat Tasks
 2 and 3 against the newest state and observe a later natural turn. Only that
