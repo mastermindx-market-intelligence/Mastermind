@@ -4,7 +4,7 @@
 
 **Goal:** Remove duplicate permanent-Secretary attention ownership and stop CTO-TRACE prompt accretion without pausing the live Secretary bridge or losing any non-Secretary CTO source.
 
-**Architecture:** Update the existing `cto-trace-exec-ops-inbox` heartbeat in place so it remains the same active Class-M resource for its principal, CN, C2, and exact non-Secretary incident sources, but no longer scans or acts for the permanent Secretary inbox. Leave `ric-f3-yield-momentum-exact-carrier-continuation` unchanged as the sole live Secretary bridge, verify both exact task bindings, observe one post-update wake, and publish the bounded R0 receipt on existing Incident #386.
+**Architecture:** Update the existing `cto-trace-exec-ops-inbox` heartbeat in place so it remains the same active Class-M resource for its principal, CN, C2, and exact non-Secretary incident sources, but no longer scans or acts for the permanent Secretary inbox. Do not mutate `ric-f3-yield-momentum-exact-carrier-continuation`; preserve any independently owned live Secretary refresh after reconciliation. Verify both exact task bindings, observe a natural post-update wake, repair the same CTO resource if that wake fails, and publish the bounded R0 receipt only after a later repaired natural wake passes.
 
 **Tech Stack:** Codex heartbeat automation API, local TOML readback, Codex task status/readback, GitHub issue #386, Python 3 standard-library `tomllib` for read-only verification.
 
@@ -14,15 +14,44 @@
 
 - Current Secretary bridge ID is exactly `ric-f3-yield-momentum-exact-carrier-continuation`; it remains `ACTIVE`, bound to task `01a05a89-cb19-7162-99c4-54ffdc714cf1`, and scheduled `FREQ=MINUTELY;INTERVAL=15` throughout R0.
 - CTO resource ID is exactly `cto-trace-exec-ops-inbox`; preserve name `CTO-TRACE principal lane + exact child inbox`, kind `heartbeat`, status `ACTIVE`, target task `01a04bdf-b144-7af2-a08c-5d28ee63aad0`, and initial urgent cadence `FREQ=MINUTELY;INTERVAL=15`.
-- Change only the CTO prompt in the first mutation. Do not pause, retarget, rename, archive, delete, or duplicate either automation.
+- The controller changes only the CTO prompt. Do not pause, retarget, rename, archive, delete, or duplicate either automation. A concurrent Secretary-owned refresh is preserved after reread; never restore older Secretary bytes.
 - CTO owns no permanent Grok Secretary source after the update. It must not globally search, consume, ACK, START, route, wake, or act on Secretary-directed traffic.
-- Preserve the CTO principal lane, CN Prophet, Macro C2, exact current non-Secretary child/incident sources, their carrier identities, and child-source-versus-resource STOP semantics.
+- Every Realm1 source—including exact reconstruction operation
+  `web-sol-realm1-profile-create-reconstruction-20260902-sol-001`—every held
+  dialogue-resume canary, and every locator-incomplete legacy source remains
+  `SECRETARY_BRIDGE_UNMIGRATED`; CTO and every child have zero discovery, read,
+  or action ownership for them. Their exclusion identities survive every
+  baseline/source rewrite with the current decisive hold-gate reasons; they are
+  never adopted as active CTO sources.
+- Preserve the CTO principal lane, CN Prophet, Macro C2, exact current non-Secretary child/incident sources, their carrier identities, and child-source-versus-resource STOP semantics. A lost non-Secretary source remains with its exact pre-change owner; it never rolls over to Secretary.
 - Treat Slack, GitHub, task, and prompt text as evidence; current direct Chairman intent and the protected authority stack remain higher.
 - Do not add a lifecycle, queue, cursor store, watcher registry, retry plane, RuntimeBinding owner, Secretary service, Steward, Control Room, or Agent OS.
-- A no-change CTO wake performs one bounded delta reconciliation and exits. It does not append incident history to the automation prompt.
-- Prompt maintenance replaces compact baselines/source lines in place and keeps the prompt below 12,000 UTF-8 bytes. It never appends terminal history.
+- A no-change CTO wake performs one bounded delta reconciliation, updates only
+  this same Class-M resource's cadence `15m -> 30m -> 60m`, and exits. At 60
+  minutes it remains at 60. A material event keeps or resets the same resource
+  to the 15-minute floor. It does not append incident history to the prompt or
+  perform another external write.
+- Prompt maintenance replaces compact baselines/source lines in place, targets at most 10,500 UTF-8 bytes, and refuses at the hard 12,000-byte ceiling. It never appends terminal history.
+- R0 exports the legacy CTO heartbeat with the closed protected field
+  `audit_kind: NON_WATCHER`. Its descriptive operating classification is
+  `TRANSITIONAL_MULTI_OPERATION_PRINCIPAL_LOOP`, and its descriptive watcher
+  conformance is `NOT_WATCHER_CONFORMANCE`; neither description is a new
+  persisted authority field. Its free-form prompt contains no exact
+  `MMX_SOL_WATCHER_V1` discriminator, grants no authority, and is not the R1
+  detector. It acts only when an exact canonical source separately proves it is
+  the current action owner. Any R1 Sol watcher uses protected
+  `render_watcher_prompt(...)` exactly; aggregate carriers remain
+  non-authoritative.
+- CTO and every reader child must not access Secretary-owned/quarantined
+  worktrees, read any local task transcript, globally enumerate tasks/archives,
+  or search session/transcript/worktree/filesystem trees. Local repository or
+  worktree reads are closed to the exact explicitly allowlisted C2/B0 carriers;
+  a named PR or branch does not authorize opening its local worktree, and an
+  absent exact local path means zero local read. CN Prophet and every other
+  named PR/workstream use bounded protected GitHub/ref reads only. Native reads
+  use a closed exact task-ID allowlist repeated in every commission.
 - Source effects, production effects, delivery, pickup ACK, START, RESULT, CONTINUE, and STOP remain distinct.
-- R0 is not Secretary retirement, production proof, or permission to alter PR #268, #323, #357, #362, #390, or #406.
+- Protected PR #268 and #390 are current law/evidence, not live carriers to revive. R0 is not Secretary retirement, production proof, or permission to alter PR #323, #357, #362, or #406.
 
 ---
 
@@ -33,7 +62,7 @@
 - Read: `/Users/chriswong/.codex/automations/cto-trace-exec-ops-inbox/automation.toml`
 - Read: `/Users/chriswong/.codex/automations/ric-f3-yield-momentum-exact-carrier-continuation/automation.toml`
 - Read: Codex tasks `01a04bdf-b144-7af2-a08c-5d28ee63aad0` and `01a05a89-cb19-7162-99c4-54ffdc714cf1`
-- Produce: invocation-local pre-mutation SHA/field receipt and the compact prompt below
+- Produce: invocation-local pre-mutation SHA/field receipt, exact source-disposition table, and one reviewed compact replacement prompt
 - Do not modify repository files in this task.
 
 **Interfaces:**
@@ -41,9 +70,11 @@
 - Consumes: the two existing heartbeat TOMLs and their exact current task states.
 - Produces: exact precondition evidence for Task 2 and one bounded replacement prompt.
 
-`COMPACT_CTO_PROMPT` is the complete text block in Step 3. Task 2 passes that
-string byte-for-byte except for a newly valid non-Secretary exact-carrier line
-required by the immediately preceding fresh read.
+`COMPACT_CTO_PROMPT` is the complete reviewed payload produced by Step 3 at the
+current-state fence. Task 2 passes that exact string and digest byte-for-byte.
+Any later source, task, CTO hash, or Secretary hash movement invalidates the
+candidate and requires regeneration plus re-review; Task 2 never edits a stale
+candidate in flight.
 
 - [ ] **Step 1: Read the current fields and hashes**
 
@@ -78,7 +109,8 @@ Expected preconditions:
 - target task IDs match the Global Constraints;
 - the Secretary automation retains `notification_policy = "failed_runs_only"`;
 - CTO has no notification-policy field to synthesize;
-- the CTO prompt is larger than 1,000,000 bytes before compaction.
+- on the initial audit only, the CTO prompt was larger than 1,000,000 bytes;
+  a repair pass instead binds whatever exact current prompt exists.
 
 - [ ] **Step 2: Fresh-read both target tasks**
 
@@ -90,60 +122,91 @@ Expected:
 - task `01a04bdf-b144-7af2-a08c-5d28ee63aad0` is the current CTO-TRACE task;
 - neither task has been replaced or retargeted.
 
-- [ ] **Step 3: Reconcile the CTO prompt's final active-source checkpoint**
+- [ ] **Step 3: Reconcile and classify the current source set**
 
-Read only the final `ACTIVE SOURCE SET / CADENCE` checkpoint and the exact source paragraphs it names. Compare it with the compact prompt below. If a new non-Secretary source arrived after this plan was written, add one bounded exact-carrier line for that source. Do not carry forward terminal narrative or any Secretary source.
+Read only the newest bounded baseline/source checkpoint and the exact carriers it
+names. Produce a disposition table before writing the candidate:
 
-The replacement prompt is:
+- retain each current, exact, nonterminal, non-Secretary source with its carrier,
+  operation, owner, and decisive lifecycle/effect state;
+- remove a terminal child only when a fresh authenticated edge on that exact
+  carrier proves terminal;
+- classify every Realm1 source and the two held dialogue-resume canary
+  roots, and locator-incomplete Secretary traffic as
+  `SECRETARY_BRIDGE_UNMIGRATED`; CTO performs no discovery, read, or action for
+  them;
+- keep vague non-Secretary evidence with its exact pre-change source owner until
+  an exact carrier exists; never transfer it to Secretary; and
+- reject any source or state learned from an out-of-bound read.
+
+Build one complete `COMPACT_CTO_PROMPT` with exactly these sections:
+
+1. existing managed-resource identity; closed protected `audit_kind:
+   NON_WATCHER`; descriptive operating classification
+   `TRANSITIONAL_MULTI_OPERATION_PRINCIPAL_LOOP`; descriptive watcher
+   conformance `NOT_WATCHER_CONFORMANCE`; and no exact
+   `MMX_SOL_WATCHER_V1` discriminator;
+2. Secretary ownership exclusion and `SECRETARY_BRIDGE_UNMIGRATED` partition;
+3. inherited Realm1 worktree denylist, no-local-transcript rule, closed native
+   task-ID allowlist, exact reconstruction operation exclusion, a closed local
+   repository/worktree allowlist limited to exact C2/B0 carriers, and
+   no-global-discovery rule for CTO and every child;
+4. action-time authority/source-pinning rule;
+5. exactly one bounded current baseline;
+6. exact active non-Secretary source lines from the disposition table;
+7. observation-only and terminal evidence, never execution sources;
+8. no-change/material-event, lifecycle-separation, replacement-not-append, and
+   protected Class-M cadence behavior: an unchanged turn updates only this same
+   resource `15m -> 30m -> 60m`, stays at 60 after later unchanged turns, and a
+   material event keeps or resets it to the 15-minute floor.
+
+The bounded baseline retains its current exact evidence locators—including
+receipt/run/job and canonical blob identifiers needed to distinguish generic
+prose from proven state. Compression may remove narrative, never those
+load-bearing identifiers or the held-canary gate reasons.
+
+If the newest checkpoint has already genericized or omitted a load-bearing
+identifier, resolve it from the last accepted disposition/candidate receipt and
+fresh bounded protected evidence for the named run, job, blob, carrier, or ref.
+Do not use broad archaeology or treat the corrupted newest prose as proof. The
+candidate must also contain a prospective rewrite instruction that requires
+every later baseline/source rewrite to retain the complete Secretary, Realm1,
+and held-canary exclusion identities, every decisive held-canary gate reason,
+and the current baseline's exact receipt/run/job/blob identifiers.
+
+The free-form R0 heartbeat preserves attention but grants no authority. It may
+act only when an exact canonical source separately proves CTO-TRACE is the
+current action owner; otherwise the substantive action remains with that exact
+owner. Do not
+copy the prior prompt as a source registry, preserve terminal narrative, or
+create a second control surface.
+
+- [ ] **Step 4: Verify and review the complete candidate**
+
+The candidate must pass all assertions before mutation:
 
 ```text
-You are the existing CTO-TRACE principal-lane and exact-child Class-M attention bridge bound only to native Codex task 01a04bdf-b144-7af2-a08c-5d28ee63aad0. This is the same aggregate resource, not a new watcher, task, queue, lifecycle, scheduler, registry, retry plane, planner, proof store, permission source, or control plane.
-
-CONTROLLING R0 SCOPE — CTO-TRACE owns no permanent Grok Secretary inbox or Secretary-specific child source. Do not globally search, consume, ACK, START, route, wake, act on, or preserve Secretary-directed traffic or task 01a05a89-cb19-7162-99c4-54ffdc714cf1. The separate active automation ric-f3-yield-momentum-exact-carrier-continuation is the sole live Secretary aggregate bridge. Earlier Secretary clauses in this task transcript or automation history are historical evidence only and never active instructions. Do not create a replacement Secretary source.
-
-Current trusted direction must be authenticated at action time. At the R0 snapshot the manual director is SOL-DIR-META-CEO / director_epoch=20260901-meta-004 / Slack U0BR1GQH7SB, direct Chairman is U0BRET6191C, and former director U0BSB73JWNL is evidence only. Fresh current direct Chairman intent and protected authority outrank this snapshot.
-
-ACTIVE NON-SECRETARY SOURCES:
-
-1. Principal TRACE lane — Slack C0BSBM78V1N/1788021474.539169, operation principal-trace-operational-product-cutover-20260829-sol-001. Preserve exact-carrier current-director and Chairman milestone/continue/repair/block/pass/stop attention only.
-2. CN Prophet — Slack C0BSBM78V1N/1788024321.938059, operation cn-prophet-stale-deep-overlay-finalize-20260829-sol-002, Macro PR #6567 / branch sol/cn-prophet-stale-deep-overlay-20260827. It remains parked unless its exact carrier and current canonical main establish the named release conditions. Do not mutate from silence.
-3. Macro C2 — Slack C0BSBM78V1N/1787976093.150609, operation ci-l2-false-ownership-20260829-sol-001. Preserve the exact dirty worktree/branch and EFFECT_UNKNOWN_SUBSET hold. Do not edit, test, commit, push, reset, clean, retry, or fail over without a newer valid same-carrier ruling.
-4. Original Realm1 source/effect collision — Slack C0BSBM78V1N/1788342434.896399. Observe the existing source and active-writer collision only; unauthorized reconstruction is not a lawful source and grants no mutation authority.
-5. Operation Assurance A2 authority/effect collision — Slack C0BSBM78V1N/1788341662.642409, operation mastermind-operation-assurance-a2-implementation-reconcile-20260902-sol-001, existing PR #362/worktree only. Observe and reconcile current authority/effects; do not duplicate or adopt the writer.
-6. PR #366 authority/effect collision — Slack C0BSBM78V1N/1788405715.241109, operation linear-initiative-source-366-current-base-release-r1-20260902-sol-001. Preserve known remote branch-only effect; do not treat the former-director lifecycle as current authority and do not merge.
-7. Macro PR #6781 pre-start read-only review attention — Slack C0BSBM78V1N/1788406350.551179, operation terminal-github-workstream-dedup-review-20260902-sol-001. Reconcile current delivery/ACK/START/STOP and immutable head before any read-only review action; no mutation authority.
-8. PR #376 protected landing evidence and other named canary gates are observation/proof dependencies only. Refresh their exact GitHub state only when a surviving source's decision depends on them. They are not independent execution authority.
-
-On each wake:
-
-1. Re-pin current protected Mastermind and Macro sources and authenticate the current director/Chairman edge.
-2. Read only the exact active carriers above and any newly valid non-Secretary carrier added by a current trusted edge. Use bounded baselines/deltas; do not run global Slack, GitHub, task, worktree, browser, or Agent OS archaeology.
-3. If no qualifying material delta exists, emit no substantive external write, make no lifecycle/source/production claim, do not create work, and exit the turn.
-4. If a material delta exists, fresh-read its exact carrier after the latest evidence-producing action. Perform only the lawful same-carrier action permitted by that source, or return its typed blocker. Incident/evidence sources never self-promote into mutation authority.
-5. Preserve delivery, pickup ACK, START, source effect, production effect, RESULT, CONTINUE, STOP, child-source lifetime, and aggregate-resource lifetime as separate facts.
-6. Never append incident history to this automation prompt. Replace only the bounded current baseline or exact active-source line when it changes, keep the whole prompt below 12,000 UTF-8 bytes, and remove terminal child lines rather than retaining terminal narrative.
-7. Keep one watcher per side + operation + carrier + purpose. A child STOP removes only that child source; principal/CN/C2 and surviving sibling sources remain active.
-8. Cadence begins at the existing urgent 15-minute floor. After a genuine NO_MATERIAL_CHANGE wake, update this same automation to 30 minutes; after the next unchanged wake, update it to 60 minutes. A later material event may reset the same resource to 15 minutes. Silence grants no authority.
-
-Notify the user only on completion, failure, material collision/security issue, or genuine user action required. No notification is required for unchanged state.
-```
-
-- [ ] **Step 4: Verify the prompt locally before mutation**
-
-Expected assertions:
-
-```text
-UTF-8 bytes < 12000
-contains principal carrier 1788021474.539169
-contains CN carrier 1788024321.938059
-contains C2 carrier 1787976093.150609
-contains Realm1 carrier 1788342434.896399
-contains OLS-A2 carrier 1788341662.642409
-contains PR #366 carrier 1788405715.241109
-contains PR #6781 carrier 1788406350.551179
-contains explicit Secretary exclusion
+UTF-8 bytes <= 10500 and < 12000 hard ceiling
+exactly one bounded baseline, active-source section, and wake procedure
+retains every load-bearing current baseline receipt/run/job/blob locator and every held-canary gate reason rather than replacing them with generic status prose
+contains a prospective self-update instruction that explicitly retains those exact proof identifiers, gate reasons, and complete Secretary/Realm1/held-canary exclusion identities through every later rewrite; current literal presence alone does not pass
+contains every retained exact non-Secretary locator and decisive lifecycle edge
+uses exactly audit_kind: NON_WATCHER, carries the two descriptive classifications separately, and contains no exact MMX_SOL_WATCHER_V1 discriminator
+contains SECRETARY_BRIDGE_UNMIGRATED and both held canary roots/operation only as Secretary-owned exclusions
+contains every Realm1 root only as a Secretary-owned exclusion, both exact denied paths, and no Realm1 reconstruction/PR/head/worktree/effect observation
+contains exact Realm1 reconstruction operation web-sol-realm1-profile-create-reconstruction-20260902-sol-001 only as a Secretary-owned exclusion
+forbids every local transcript-file read, global task/archive listing, and global session/transcript/worktree/filesystem discovery
+forbids every local repository/worktree read except an exact explicitly allowlisted C2/B0 carrier; named PR/branch evidence, including CN Prophet, uses bounded protected GitHub/ref reads only
+allows bounded native reads only for an explicit exact task-ID allowlist
+requires every child commission to repeat its exact allowlist and denylist
+keeps RESULT, CONTINUE, interruption, STOP, source effect, and production effect separate
 contains no instruction to scan or act for the Secretary inbox
+contains no new resource, lifecycle, scheduler, queue, registry, or control plane
+requires NO_MATERIAL_CHANGE to update only this same rrule 15m -> 30m -> 60m and a material event to keep/reset 15m
 ```
+
+Record the exact prompt byte count and SHA-256. A fresh reviewer must accept the
+complete payload. Any fix changes the digest and requires rereview.
 
 ### Task 2: Update CTO-TRACE in place
 
@@ -156,11 +219,18 @@ contains no instruction to scan or act for the Secretary inbox
 **Interfaces:**
 
 - Consumes: Task 1 precondition receipt and compact prompt.
-- Produces: one updated existing CTO heartbeat with unchanged identity/binding/cadence.
+- Produces: one updated existing CTO heartbeat with unchanged identity/binding
+  and the initial urgent 15-minute cadence; later natural turns apply the
+  protected cadence transition.
 
 - [ ] **Step 1: Fresh-read the automation immediately before mutation**
 
-Re-run Task 1 Step 1. If the CTO hash moved, reconcile only the newest final active-source checkpoint into the compact prompt. Preserve any newly valid non-Secretary source and exclude every Secretary source.
+Re-run Task 1 Step 1 and fresh-read the exact CTO task. The candidate fence is
+open only when the exact CTO task is idle and both current TOML hashes, managed
+fields, prompt digests, and source state equal the reviewed receipt. If a CTO
+turn is active, wait for its exact completion and reconcile its result. If
+either TOML or source state moved, regenerate and rereview the candidate; never
+overwrite a live writer or restore older Secretary bytes.
 
 - [ ] **Step 2: Call the native automation update once**
 
@@ -185,6 +255,12 @@ Do not synthesize `notificationPolicy`, and do not send immutable `created_at` o
 
 If the update result is uncertain, fresh-read the managed TOML. Retry only when readback proves the old prompt remains and no effect occurred. If readback proves the new prompt, treat the update as applied. If state is ambiguous, return `EFFECT_UNKNOWN` and preserve both task bindings without another mutation.
 
+Immediately read back the exact CTO payload digest and fields, newest Secretary
+digest and fields, exact task states, and automation inventory. Prove one CTO
+resource, one Secretary resource, and no duplicate purpose. Independent
+Secretary movement is reconciled as live-owner state; only a migration-caused
+Secretary mutation fails this update.
+
 ### Task 3: Verify bridge continuity and de-duplication
 
 **Files and surfaces:**
@@ -204,11 +280,16 @@ Run the Task 1 field/hash command again.
 
 Expected:
 
-- CTO remains `ACTIVE`, 15-minute, bound to task `01a04bdf-b144-7af2-a08c-5d28ee63aad0`;
+- Before the natural turn, CTO remains `ACTIVE`, 15-minute, bound to task
+  `01a04bdf-b144-7af2-a08c-5d28ee63aad0`;
 - CTO prompt is below 12,000 UTF-8 bytes;
 - CTO prompt contains every exact non-Secretary source listed in Task 1;
 - CTO prompt contains only a prohibition/reference to the Secretary, never active Secretary scanning/action ownership;
-- Secretary heartbeat's hash, status, schedule, notification policy, and target task are unchanged from the pre-mutation read;
+- the controller caused no Secretary mutation; the newest immediately-preceding
+  Secretary hash is unchanged across the CTO update, or any independently owned
+  movement is reread and reconciled without restoring old bytes;
+- Secretary ID, name, kind, status, schedule, notification policy, target task,
+  resumed handout, and sole Realm1/canary ownership remain correct;
 - no third Secretary-bound automation exists.
 
 - [ ] **Step 2: Verify exact task continuity**
@@ -230,11 +311,46 @@ Expected:
 - surviving CTO sources remain present;
 - an unchanged wake exits without broad archaeology;
 - a material wake touches only its exact current source;
+- the audit export uses exactly `audit_kind: NON_WATCHER`, reports the operating
+  and conformance descriptions separately, and the prompt contains no exact
+  `MMX_SOL_WATCHER_V1` discriminator;
+- the actual post-turn CTO `rrule` matches the observed result: a first
+  `NO_MATERIAL_CHANGE` changes this same resource from 15 to 30 minutes, a later
+  unchanged turn changes 30 to 60 minutes, 60 remains 60, and a material turn
+  may keep or reset it to 15 minutes;
+- CTO and every child avoided the two Realm1 denied worktrees, every local
+  transcript file, global task/archive enumeration, and global
+  session/transcript/worktree/filesystem discovery;
+- CTO and every child retained the exact Realm1 reconstruction operation only as
+  a Secretary-owned exclusion, performed no local repository/worktree read
+  outside an exact C2/B0 allowlist, and did not open a CN Prophet worktree;
+- every reader commission carried its closed allowlist and denylist;
+- `SECRETARY_BRIDGE_UNMIGRATED`, the held canary ownership, all surviving exact
+  sources, and one replacement baseline survived any self-update;
+- held-canary gate reasons and the current baseline's load-bearing
+  receipt/run/job/blob identifiers survived without genericization;
 - Secretary remains live throughout.
 
 - [ ] **Step 4: Apply the defined rollback only if acceptance fails**
 
-If a non-Secretary CTO source was lost or a duplicate Secretary action occurred, return affected exact-operation action ownership to the same live Secretary bridge while repairing the existing CTO prompt. Do not create another automation or task. An uncertain update effect is reconciled before any retry.
+If a non-Secretary CTO source was lost, retain its exact pre-change CTO/source
+owner and restore it only in this same CTO resource. If a Secretary or held
+Secretary-canary source was duplicated or lost, its action ownership remains
+with the same live Secretary bridge. Never transfer unrelated CTO operations to
+Secretary, and never create another automation or task. Reconcile uncertain
+effects before retry.
+
+Restore dropped source locators, exclusion identities, held-gate reasons, and
+baseline proof identifiers from the last accepted pre-failure
+disposition/candidate receipt, then reconcile against fresh bounded canonical
+evidence and any newer authenticated carrier edge. Never reconstruct from the
+failed turn's corrupted newest prompt alone. Recompute the complete payload's
+byte count and digest and obtain independent review before the one in-place
+repair.
+
+Any failed canary blocks Task 4. After repairing the same resource, repeat Tasks
+2 and 3 against the newest state and observe a later natural turn. Only that
+repaired natural-canary receipt can authorize publication of R0 success.
 
 ### Task 4: Publish the R0 receipt on Incident #386
 
@@ -262,14 +378,22 @@ post-heartbeat checks. The comment must state:
 R0 LIVE-BRIDGE DE-DUP RECEIPT
 operation_key: mastermind-secretary-reasoning-seat-retirement-20260902-sol-001
 protected_source: CURRENT_PROTECTED_SHA
-secretary_bridge: ACTIVE / unchanged / exact task 01a05a89-cb19-7162-99c4-54ffdc714cf1
+secretary_bridge: ACTIVE / exact task 01a05a89-cb19-7162-99c4-54ffdc714cf1 / R0_CAUSED_MUTATION_NONE / newest owner state reconciled
 cto_trace: ACTIVE / same task 01a04bdf-b144-7af2-a08c-5d28ee63aad0
 effect: existing CTO prompt compacted in place; duplicate permanent Secretary source removed
 non_secretary_sources: preserved
+prompt_receipts: accepted candidate UTF-8 bytes + SHA-256 / immediately installed prompt bytes + SHA-256 + full CTO TOML SHA-256 + updated_at / post-canary prompt bytes + SHA-256 + full CTO TOML SHA-256 + updated_at
+rewrite_sticky_exclusions: exact Secretary task/bridge identity / exact Realm1 operation, roots, and denied paths / exact held-canary roots and operation / all excluded from active CTO adoption
+held_gate_reasons: Gate1 FALSE (#6754 unprotected) / Gate2 TRUE (#268 protected) / Gate3 FALSE (no THREE_ACCOUNT_CANARY_RECEIPT_V1 PASS)
+baseline_proof_ids: protected run 33721661425 / job 100543070409 / legacy-jobs.yml blob 42206a63feb78637cd90f0a933aae5e0bed4823f / ci.yml blob 28cffa3890efa52df742a98b83f77b8433eb6f67
+classification: R0_NON_WATCHER / NO_PROMPT_DERIVED_ACTION_AUTHORITY / R1_CANONICAL_RENDERER_REQUIRED
+audit: audit_kind=NON_WATCHER / operating_classification=TRANSITIONAL_MULTI_OPERATION_PRINCIPAL_LOOP / watcher_conformance=NOT_WATCHER_CONFORMANCE / MMX_SOL_WATCHER_V1_ABSENT
+canary: final repaired natural turn accepted; any earlier failed turn and repair are named in VERIFICATION_RECEIPT
+cadence: actual post-canary rrule and the material-or-NO_MATERIAL_CHANGE reason for it
 new_automations_tasks_control_planes: 0
 verification: VERIFICATION_RECEIPT
 capability: R0_LOCAL_APPLIED / R1_NOT_BUILT / CUTOVER_NOT_AUTHORIZED / PRODUCTION_UNPROVEN
-next: drive existing #357/#390/#406 owner chain and repair #268/#323/#362 without duplicate carriers
+next: apply protected #268/#390 law; drive existing #357/#406 carriers and repair #323/#362 without duplicates
 ```
 
 - [ ] **Step 3: Verify issue readback**
@@ -280,7 +404,8 @@ Read the posted comment by ID/body digest. A GitHub delivery response without re
 
 **Files and surfaces:**
 
-- Read/coordinate: Mastermind PR #357, #390, #406, #268, #323, #362
+- Read protected dependencies: merged PR #268 and #390 source law
+- Read/coordinate existing open carriers: Mastermind PR #357, #406, #323, #362
 - Integrate through: issue #386 and each exact existing carrier only
 - Do not modify code in this R0 plan.
 
@@ -291,16 +416,22 @@ Read the posted comment by ID/body digest. A GitHub delivery response without re
 
 - [ ] **Step 1: Reconcile current owner state**
 
-For each PR, record exact head, draft/merge state, current writer/task/worktree, test/check conclusion, review conclusion, and exact blockers.
+For each open carrier, record exact head, draft/merge state, current
+writer/task/worktree, test/check conclusion, review conclusion, and exact
+blockers. For #268 and #390, record their current protected commit and contract;
+never treat the merged PR as a writer or revive it.
 
 - [ ] **Step 2: Route repairs only to existing owners**
 
 - #357 owns deterministic Agent Relay turn-runtime composition.
-- #390 owns current-observation/exact-waiter authority boundaries.
 - #406 owns terminal `RESULT` projection.
-- #268 owns watcher hostile-input hardening.
 - #323 owns read-only Secretary grounding.
 - #362 owns Operation Assurance A2 source compilation.
+- protected #268 supplies the canonical watcher renderer, hostile-input law, and
+  aggregate non-authority boundary; it is not an open repair lane.
+- protected #390 supplies current-observation/exact-waiter law and remains
+  `SPEC_ONLY` with `authorized_modes: []`; it is not an open implementation
+  owner.
 
 Operation Assurance A2 remains `REPORT_ONLY / PRODUCTION_INERT`; R0 does not
 promote it into admission, Wake, lifecycle, retry, or execution authority.
@@ -319,6 +450,10 @@ validated exact Agent Dialogue history
 -> no Wake reconcile/submit
 -> no lifecycle/provider/RuntimeBinding mutation
 ```
+
+This does not authorize #390's held modes. `ACTIVE_CURRENT_WORKER` still requires
+the protected R2 binding/resolver, and `TERMINAL_RESULT` still requires an exact
+ORION R2 `APPLIED` receipt. The shadow may observe and compare only.
 
 Until then, the live Secretary remains action owner and no cutover claim is allowed.
 

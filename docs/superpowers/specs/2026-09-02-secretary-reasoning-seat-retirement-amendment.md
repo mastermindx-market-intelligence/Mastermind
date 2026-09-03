@@ -12,7 +12,7 @@
 
 **Integration carrier:** Mastermind issue #386, `mastermind-worker-dispatch-consumption-assurance-20260902-sol-001`
 
-**Protected source basis:** `mastermindx-market-intelligence/Mastermind@caa47c1e66fe36dc3521299c918f4b9e7b2a47ca`, `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1.
+**Protected source basis at amendment refresh:** `mastermindx-market-intelligence/Mastermind@351402f4f5d5e55e8c0f0b7f973f01c19aa98d97`, including protected watcher hardening `8a985de8`, W3C observation-authority law `793e7563`, and inert placement selection `351402f4`; `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1. Action-time protected source always wins over this snapshot.
 **Capability state:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`. This amendment itself changes no automation cadence, Slack subscription, watcher resource, Job, Attempt, Worker, RuntimeBinding, provider session, credential, deployment, or production behavior.
 
 ---
@@ -272,11 +272,47 @@ The bridge may continue lawful handout, reconciliation, adjudication, and recove
 - no blind retry/failover;
 - no duplicate control plane.
 
+The live bridge is independently maintained while migration work proceeds. A
+Secretary-owned prompt refresh is not an R0 mutation merely because its bytes
+change during the observation window. Immediately before and after any CTO
+mutation, bind the newest Secretary hash and managed fields. If the Secretary
+moves between those reads, reread and reconcile the newest owner state; never
+restore an older prompt. Acceptance proves that the migration caused no
+Secretary write and that the same ID, task, active cadence, notification policy,
+resumed handout, and sole Secretary-source ownership survive.
+
 ### 8.2 One permanent inbox scanner
 
-During migration, exactly one aggregate reasoning resource may own the permanent Secretary inbox. The CTO-TRACE resource must not independently preserve or scan the same permanent Secretary source.
+During migration, exactly one aggregate reasoning resource may own the permanent Secretary inbox. The CTO-TRACE resource must not independently retain that permanent Secretary source as an active CTO source or scan it. It preserves only the exact Secretary-owned exclusion identity needed to prove and carry this boundary through later rewrites.
 
 Removing that duplicate source must not disable distinct valid CTO-TRACE sources, sibling operations, or the Secretary bridge itself. Source lifetime and watcher-resource lifetime remain distinct.
+
+Every Realm1 source—including exact reconstruction operation
+`web-sol-realm1-profile-create-reconstruction-20260902-sol-001`—the two held
+dialogue-resume canary roots, and every vague or locator-incomplete legacy source remain
+`SECRETARY_BRIDGE_UNMIGRATED` until an exact carrier-specific migration receipt
+exists. CTO-TRACE and every child it commissions must not discover, inspect, or
+act on those sources. A source does not migrate merely because older CTO prose
+mentioned it. Their exact exclusion identities survive every baseline/source
+rewrite together with the current decisive hold-gate reasons; CTO never adopts
+them as active sources.
+
+The R0 boundary is inherited by every reader commission:
+
+- never open, read, diff, stat, search, copy, adopt, or delete a
+  Secretary-owned or quarantined worktree;
+- never read a local task transcript by any command, even from a known path;
+- never globally enumerate tasks or archives, or search session, transcript,
+  worktree, or filesystem trees;
+- never read a local repository/worktree outside an exact explicitly named
+  C2/B0 carrier; a named PR or branch is not a local-read grant, an absent exact
+  path means zero local read, and CN Prophet plus other named PR/workstream
+  evidence uses bounded protected GitHub/ref reads only;
+- use bounded native reads only for an explicit exact task-ID allowlist; and
+- carry the exact allowlist and denylist into every child commission.
+
+Out-of-bound evidence is rejected and must not be retained in a prompt,
+checkpoint, or conclusion.
 
 ### 8.3 Dual-run dedupe
 
@@ -299,6 +335,48 @@ Authority changes per exact operation key and carrier, never by vague global pro
 The bridge prompt may contain stable law pointers, active source locators, the last consumed baselines, and bounded current exceptions. It must not embed terminal operation history, large GitHub/Slack transcripts, old review packets, or a copied responsibility database.
 
 Terminal evidence remains in its canonical owner. The bridge rereads only the exact current source needed for a material action.
+
+Every self-update preserves the complete current non-Secretary source set,
+`SECRETARY_BRIDGE_UNMIGRATED`, held canary ownership, exactly one bounded
+baseline, and replacement-not-append structure. The operating target is at most
+10,500 UTF-8 bytes, with 12,000 bytes a hard refusal ceiling. A surviving source
+may be removed only after a fresh authenticated terminal edge on its exact
+carrier.
+
+Compression removes narrative, not proof identity. The bounded baseline retains
+the exact receipt, run, job, and canonical blob locators needed to prove its
+material state, and a held exclusion retains its current gate reasons. Replacing
+those identifiers with generic `SUCCESS`, `HELD`, or equivalent prose fails the
+self-update boundary.
+
+The prompt's prospective self-update instruction must itself require every
+later rewrite to retain the complete Secretary, Realm1, and held-canary
+exclusion identities, every decisive held-canary gate reason, and the current
+baseline's exact receipt/run/job/blob locators. Presence in the current literal
+baseline without that forward retention instruction is insufficient. If a
+failed turn has already genericized or dropped one of those identities, repair
+resolves it from the last accepted pre-turn disposition/candidate receipt and
+fresh bounded canonical evidence, never from the corrupted newest prompt alone.
+
+### 8.5 Protected watcher-law classification
+
+The existing multi-operation CTO-TRACE heartbeat uses the closed protected audit
+field `audit_kind: NON_WATCHER` for R0. Its descriptive operating classification
+is `TRANSITIONAL_MULTI_OPERATION_PRINCIPAL_LOOP`, and its descriptive watcher
+conformance is `NOT_WATCHER_CONFORMANCE`; those descriptions are explanatory
+receipt text, not new persisted authority fields. Its free-form aggregate prompt
+contains no exact `MMX_SOL_WATCHER_V1` discriminator, is not a canonical Sol
+watcher, cannot derive action authority from its role label, and is not the R1
+replacement detector. It may preserve existing source attention and perform a
+substantive same-carrier act only when that exact canonical source proves
+CTO-TRACE is the current action owner; otherwise it returns a typed packet to the
+existing exact owner.
+
+Any R1 Task, Automation, or condition-watch that performs Sol watcher behavior
+must use protected `render_watcher_prompt(...)` byte-for-byte. One
+action-authoritative watcher binds one closed role, operation, and exact carrier.
+An aggregate carrier is lawful only for a non-authoritative canonical role and
+never grants child action authority. R0 creates no exception to protected #268.
 
 ## 9. Sol exception contract
 
@@ -341,8 +419,18 @@ NO_MATERIAL_CHANGE
 - Capture bounded counters: material events, unchanged scans, model wakes, handouts, ACK latency, START latency, duplicate suppressions, carrier mismatches, manual rescues, and missed fires.
 - Remove only the duplicated permanent Secretary source from CTO-TRACE.
 - Preserve every unrelated watcher source and current lawful carrier.
+- Fence both managed bytes and the exact CTO turn/writer state before mutation;
+  an active or moved writer is reconciled, never overwritten.
+- If a natural canary fails, repair only the same resource and require a later
+  natural canary before any R0 receipt.
+- Enforce protected Class-M cadence from the natural result itself: a first
+  `NO_MATERIAL_CHANGE` updates this same resource from 15 to 30 minutes, the next
+  unchanged turn updates 30 to 60, later unchanged turns stay at 60, and a
+  material event may keep or reset the same resource to the 15-minute floor.
+- Verify the actual post-turn `rrule`; an external canary-acceptance signal is
+  not a substitute for the source-law cadence transition.
 
-Exit evidence: Secretary handout continuity remains intact; duplicate source ownership is absent; no operation is lost or double-dispatched by the change.
+Exit evidence: Secretary handout continuity remains intact; duplicate source ownership is absent; no operation is lost or double-dispatched by the change; the final repaired prompt and its first later natural turn both satisfy the inherited read, ownership, and self-update boundaries.
 
 ### R1 — Deterministic detector shadow
 
@@ -358,9 +446,15 @@ Exit evidence: the detector sees all qualifying events in the canary corpus, pro
 Reuse existing carriers rather than creating replacements:
 
 - PR #383 exact Slack thread-root fence: protected source dependency;
+- protected PR #268 watcher renderer and hostile-input law: canonical source
+  dependency, not a carrier to revive or repair;
+- protected PR #390 current-observation/exact-waiter law: `SPEC_ONLY`, with
+  `authorized_modes: []`; `ACTIVE_CURRENT_WORKER` remains held on the protected
+  R2 binding/resolver and `TERMINAL_RESULT` on an exact ORION R2 `APPLIED`
+  receipt;
+- PR #406: repair terminal `RESULT` projection on its exact existing carrier;
 - PR #362 Operation Assurance A2: repair current reviewed carrier, then shadow source compilation;
 - PR #323 Secretary grounding: repair the current RuntimeBinding-attempt and per-subject schema blockers;
-- PR #268 structured watcher hardening: finish the current direct-source repair and exact-head review;
 - issue #346 remote checkpoint;
 - issue #343 remote-complete writer release;
 - issue #345 exact wake and missed-fire handling.
@@ -436,7 +530,24 @@ Any of these conditions blocks or reverses cutover:
 - inability to explain current state from canonical owners;
 - material increase in Chairman manual intervention.
 
-Rollback reactivates or returns action ownership to the **same existing Secretary bridge** for the affected exact operations. It does not mint a successor Secretary, new watcher resource, new queue, or alternate control plane.
+For a Secretary-owned or explicitly migrated canary operation, rollback returns
+action ownership to the **same existing Secretary bridge**. It does not mint a
+successor Secretary, new watcher resource, new queue, or alternate control
+plane.
+
+Rollback is ownership-partitioned. A lost non-Secretary CTO source remains with
+its exact pre-change CTO/source owner and is restored only inside the same CTO
+resource. A Secretary or explicitly held Secretary-canary operation remains with
+the existing Secretary bridge. No failure globally transfers unrelated CTO
+operations to Secretary.
+
+Same-resource repair restores source locators, exclusion identities, held-gate
+reasons, and baseline proof identifiers from the last accepted pre-failure
+disposition/candidate receipt, then reconciles them against fresh bounded
+canonical evidence and any newer authenticated carrier edge. It must not treat
+the failed turn's newest, already-corrupted prompt as the rollback source.
+Every repaired payload receives a new byte count, digest, independent review,
+and later natural canary before acceptance.
 
 The bridge remains warm through R4 specifically so rollback is an ownership toggle over exact operation keys, not an emergency reconstruction.
 
@@ -468,6 +579,12 @@ Before R5, automated tests or controlled canaries must cover:
 22. Slack unavailable while Executive state remains available;
 23. replacement path unavailable while the Secretary bridge remains healthy;
 24. Secretary bridge unavailable after accepted cutover.
+25. CTO mutation races an already active scheduled turn;
+26. Secretary independently refreshes its prompt during the CTO update window;
+27. a delegated reader touches Secretary-owned worktree content or metadata;
+28. a reader globally enumerates tasks/archives or reads local transcripts;
+29. a self-update drops an exact source, canary hold, or ownership partition;
+30. a failed canary is repaired but no later natural canary is observed.
 
 Each case must state expected lifecycle effect, source effect, production effect, model-wake behavior, and rollback owner.
 
