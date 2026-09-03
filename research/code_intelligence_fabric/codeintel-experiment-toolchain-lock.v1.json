@@ -1,0 +1,169 @@
+{
+  "$schema": "codeintel-experiment-toolchain-lock.schema.json",
+  "schema_version": "mastermind.codeintel_experiment_toolchain_lock.v1",
+  "mode": "Z0",
+  "platform": {
+    "id": "linux-x86_64",
+    "os": "linux",
+    "arch": "amd64",
+    "runner_label": "ubuntu-24.04"
+  },
+  "acquisition": {
+    "network_enabled_phase": "P",
+    "network_sealed_phase": "E",
+    "allowed_hosts": [
+      "api.github.com",
+      "github.com",
+      "go.dev",
+      "proxy.golang.org",
+      "sum.golang.org"
+    ],
+    "fresh_empty_caches": true,
+    "floating_resolution": false,
+    "github_cache": false
+  },
+  "zoekt": {
+    "repository": "sourcegraph/zoekt",
+    "source_url": "https://github.com/sourcegraph/zoekt.git",
+    "commit": "5f833dde1bc4b1a8f99007617b4b721e44506c4f",
+    "tree": "8135ec1d7329e7f8de43714ac5c7a2bad14bd7b5",
+    "go_mod": {
+      "path": "go.mod",
+      "git_blob_sha1": "db33117af57ea746dff8064e70ce56e3721e44ba",
+      "sha256": "c125539d727350ae76fcc7b37da0c4a091eeb50f1e623ed4aa2455a8ef2fc607",
+      "size": 7104,
+      "go_directive": "1.25.9",
+      "toolchain_directive": "go1.26.5"
+    },
+    "go_sum": {
+      "path": "go.sum",
+      "git_blob_sha1": "6f54532eef8a9628275d1aa870c1b26f89987dd0",
+      "sha256": "a1a6672855e89ef9a30780de23de96d81e5e7ee23ed87eef2d190cd31cb4b2b0",
+      "size": 51863
+    },
+    "license": {
+      "path": "LICENSE",
+      "spdx": "Apache-2.0",
+      "git_blob_sha1": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "size": 11357
+    },
+    "binaries": {
+      "zoekt-git-index": "./cmd/zoekt-git-index",
+      "zoekt-webserver": "./cmd/zoekt-webserver"
+    }
+  },
+  "go": {
+    "version": "1.26.5",
+    "archive": {
+      "filename": "go1.26.5.linux-amd64.tar.gz",
+      "url": "https://go.dev/dl/go1.26.5.linux-amd64.tar.gz",
+      "sha256": "5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053",
+      "size": 66879095,
+      "kind": "archive",
+      "os": "linux",
+      "arch": "amd64"
+    },
+    "source": {
+      "repository": "golang/go",
+      "tag": "go1.26.5",
+      "commit": "c19862e5f8415b4f24b189d065ed739517c548ba",
+      "tree": "0bb2fb1cc06c334c36a2a92d2f0b07fea7236d74",
+      "license_blob_sha1": "2a7cf70da6e498df9c11ab6a5eaa2ddd7af34da4",
+      "license_sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "license_spdx": "BSD-3-Clause"
+    }
+  },
+  "build": {
+    "recipe": {
+      "environment": {
+        "CGO_ENABLED": "0",
+        "GOARCH": "amd64",
+        "GONOSUMDB": "off",
+        "GOOS": "linux",
+        "GOPRIVATE": "",
+        "GOPROXY": "https://proxy.golang.org",
+        "GOSUMDB": "sum.golang.org",
+        "GOTOOLCHAIN": "local"
+      },
+      "go_build_flags": [
+        "-trimpath",
+        "-buildvcs=false",
+        "-ldflags=-buildid="
+      ],
+      "packages": {
+        "zoekt-git-index": "./cmd/zoekt-git-index",
+        "zoekt-webserver": "./cmd/zoekt-webserver"
+      },
+      "repeat_builds": 2
+    },
+    "recipe_sha256": "fa55671482185857a29795df77b0bd5a15898bbd5dac7e993172273f1cf51335"
+  },
+  "universal_ctags": {
+    "enabled": false,
+    "reason": "disabled_until_separately_content_addressed_and_admitted"
+  },
+  "consumer": {
+    "repository": "mastermindx-market-intelligence/Mastermind",
+    "operation_key": "mastermind-codeintel-z0-discovery-falsifier-20260830-sol-001",
+    "module": "experiments.code_discovery.z0_runner",
+    "local_branch": "codeintel-z0-consumer",
+    "path_policy": "research/code_intelligence_fabric/z0-path-policy.json",
+    "index_includes": [
+      "experiments/code_discovery/*"
+    ],
+    "index_excludes": [],
+    "path_ceiling": [
+      "experiments/code_discovery/",
+      "tests/code_discovery/",
+      "tests/fixtures/code_discovery/",
+      "research/code_intelligence_fabric/Z0_GLOBAL_DISCOVERY_FALSIFIER_RESULT.md",
+      "research/code_intelligence_fabric/z0-path-policy.json",
+      "research/code_intelligence_fabric/z0-result.schema.json"
+    ]
+  },
+  "actions": {
+    "checkout": {
+      "repository": "actions/checkout",
+      "commit": "11bd71901bbe5b1630ceea73d27597364c9af683"
+    },
+    "download_artifact": {
+      "repository": "actions/download-artifact",
+      "commit": "d3f86a106a0bac45b974a628896c90dbdf5c8093"
+    },
+    "upload_artifact": {
+      "repository": "actions/upload-artifact",
+      "commit": "ea165f8d65b6e75b540449e92b4886f43607fa02"
+    }
+  },
+  "host_utility_confounds": [
+    "/bin/bash",
+    "/usr/bin/curl",
+    "/usr/bin/env",
+    "/usr/bin/git",
+    "/usr/bin/gh",
+    "/usr/bin/python3",
+    "/usr/bin/tar",
+    "/usr/bin/unshare",
+    "/usr/sbin/ip"
+  ],
+  "receipt": {
+    "schema_version": "mastermind.codeintel_experiment_bundle.v1",
+    "effects": [
+      "NOT_APPLIED",
+      "APPLIED",
+      "EFFECT_UNKNOWN"
+    ],
+    "secret_free": true,
+    "absolute_private_paths": false
+  },
+  "limits": {
+    "archive_bytes": 134217728,
+    "archive_member_bytes": 100663296,
+    "archive_total_bytes": 536870912,
+    "bundle_bytes": 268435456,
+    "log_bytes_each": 1048576,
+    "receipt_bytes": 1048576,
+    "consumer_seconds": 900
+  }
+}
