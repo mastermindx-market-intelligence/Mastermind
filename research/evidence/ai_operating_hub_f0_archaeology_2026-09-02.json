@@ -5,7 +5,7 @@
       "owner": "Project Workroom architecture",
       "path": "docs/superpowers/specs/2026-08-29-project-workroom-fabric-design.md",
       "repository": "mastermindx-market-intelligence/Mastermind",
-      "revision": "e7d91bfe0f6ef176878a6a281afd459c0905e5aa",
+      "revision": "c7fa5b43de6ca702f942fbf20cbe3ac45a02b0f6",
       "state": "SPEC_ONLY / PROTECTED"
     },
     {
@@ -20,20 +20,42 @@
       "owner": "Linear portfolio source",
       "path": "docs/superpowers/specs/2026-09-02-linear-initiative-portfolio-v1-current-epoch-source-consolidation.md",
       "repository": "mastermindx-market-intelligence/Mastermind",
-      "revision": "e7d91bfe0f6ef176878a6a281afd459c0905e5aa",
+      "revision": "c7fa5b43de6ca702f942fbf20cbe3ac45a02b0f6",
       "state": "PROVEN_LIVE"
     },
     {
-      "owner": "Chairman Control Room implementation",
-      "paths": [
-        "control_plane/chairman_control_room.py",
-        "scripts/chairman_control_room.py",
-        "control_plane/static/control_room.js",
-        "control_plane/static/control_room.css"
+      "compositor": "control_plane/chairman_control_room.py",
+      "contract_schema": "mastermind.chairman_control_room.v1",
+      "owner": "Chairman Control Room local P0A",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "revision": "c7fa5b43de6ca702f942fbf20cbe3ac45a02b0f6",
+      "server_entrypoint": "scripts/chairman_control_room.py",
+      "shared_static_paths": [
+        "app/static/chairman_control/control_room.js",
+        "app/static/chairman_control/control_room.css"
+      ],
+      "state": "existing loopback/private presentation owner; exact Hub extension seam requires H0",
+      "ui_entry": "app/static/chairman_control/index.html"
+    },
+    {
+      "compositor": "control_plane/chairman_control_room.py",
+      "contract_schema": "mastermind.chairman_control_room_remote.v1",
+      "owner": "Chairman Control Room remote X1",
+      "projection": "control_plane/chairman_control_room_remote.py",
+      "release_paths": [
+        "ops/control_room_remote/install.sh",
+        "ops/control_room_remote/mastermind-control-room-remote.service"
       ],
       "repository": "mastermindx-market-intelligence/Mastermind",
-      "revision": "e7d91bfe0f6ef176878a6a281afd459c0905e5aa",
-      "state": "existing owner; exact Hub extension seam requires H0"
+      "required_runtime_paths_owner": "control_plane/chairman_control_room_remote.py:REQUIRED_RUNTIME_PATHS",
+      "revision": "c7fa5b43de6ca702f942fbf20cbe3ac45a02b0f6",
+      "server_entrypoint": "scripts/chairman_control_room_remote.py",
+      "shared_static_paths": [
+        "app/static/chairman_control/control_room.js",
+        "app/static/chairman_control/control_room.css"
+      ],
+      "state": "existing closed read-only remote projection/release owner; exact Hub extension seam requires H0",
+      "ui_entry": "app/static/chairman_control/remote.html"
     },
     {
       "owner": "Organizational workstream",
@@ -55,11 +77,15 @@
     ],
     "owned_paths_present_on_protected_master_before_start": []
   },
+  "current_protected_at_repair": "c7fa5b43de6ca702f942fbf20cbe3ac45a02b0f6",
+  "current_protected_tree_at_repair": "e7db03cfd2b4054ab871c52bbff120ec8a56e8ac",
   "dialogue_reconciliation": {
     "current_source_carrier": "C0BSBM78V1N/1788422678.812859",
     "current_start": "1788422733.803969",
     "prior_review_carrier": "C0BSBM78V1N/1788341210.101979",
     "prior_review_operation": "ai-operating-hub-f0-independent-review-20260902-sol-001",
+    "r2_review_return": "1788425374.507589 / CHANGES_REQUESTED / review 5099789781 / exact head 2f61c1780f22efcb7436869e839ffc32f7d1b6e7",
+    "r2_review_terminal_edge": "1788427904.496139 / SOL CLOSED / STOP",
     "sol_terminal_edge": "1788422588.766839 / SOL CLOSED / STOP",
     "worker_return": "1788341580.485129 / BLOCKED SOURCE_NOT_FOUND / effect=NONE"
   },
@@ -116,11 +142,20 @@
   "operation_key": "mastermind-ai-operating-hub-f0-architecture-freeze-20260902-sol-001",
   "protected_master": "e7d91bfe0f6ef176878a6a281afd459c0905e5aa",
   "protected_master_tree": "5ee4bdb27c24a98c92a3d1e8fe6104f4b10ecb83",
-  "ruling": "No canonical AI Hub source carrier existed. Create exactly one F0 records-only carrier as an UMBRELLA_EXTENSION; admit H0 only after independent review and protected merge. H1 remains held.",
+  "repair_observed_at": "2026-09-03T09:35:55Z",
+  "ruling": "No canonical AI Hub source carrier existed. Create exactly one F0 records-only carrier as an UMBRELLA_EXTENSION; preserve the distinct local P0A and remote X1 Control Room owners; admit H0 only after independent review and protected merge. H1 remains held.",
   "schema": "mastermind.ai_operating_hub_f0_archaeology.v2",
   "skillpack": {
     "minimum_bootstrap_major": 1,
     "schema": "mastermind.sol_skillpack.v1",
     "version": "1.0.1"
+  },
+  "source_repair": {
+    "disposition": "REPAIRED_IN_SAME_CARRIER",
+    "finding": "The original source named absent control_plane/static paths and failed to preserve the local P0A versus remote X1 contract/release split.",
+    "protected_basis": "c7fa5b43de6ca702f942fbf20cbe3ac45a02b0f6",
+    "protected_basis_tree": "e7db03cfd2b4054ab871c52bbff120ec8a56e8ac",
+    "review_id": 5099789781,
+    "reviewed_head": "2f61c1780f22efcb7436869e839ffc32f7d1b6e7"
   }
 }
