@@ -8,6 +8,7 @@ ESTATE = ROOT / "research/sol_capability_fabric/GITHUB_CURRENT_ESTATE_LEDGER_202
 REUSE = ROOT / "research/sol_capability_fabric/GITHUB_NATIVE_CUSTOM_REUSE_MATRIX_2026-08-30.md"
 SEMANTICS = ROOT / "research/sol_capability_fabric/GITHUB_SEMANTIC_CONTRACT_2026-08-30.md"
 GH1_PLAN = ROOT / "docs/superpowers/plans/2026-08-30-sol-capability-fabric-gh1.md"
+COGNITION_LAW = ROOT / "docs/EXECUTIVE_CHAT_NATIVE_SOL_HIERARCHY_LAW.md"
 
 OPERATION = "mastermind-sol-capability-fabric-gh0-20260830-sol-001"
 PROTECTED_SHA = "98bc7a71dcd70947c7a18eb5af7493a2f62a2571"
@@ -31,8 +32,14 @@ def test_gh0_records_pin_current_protected_source_and_honest_state() -> None:
     assert OPERATION in combined
     assert PROTECTED_SHA in combined
     assert "SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT" in combined
+    # This is a frozen historical label, not current authorization to spend Pro turns.
     assert "COGNITION_ROUTE: CHAT_PRO_DEFAULT" in combined
     assert "no runtime implementation or GitHub mutation" in combined
+
+    current_law = " ".join(_text(COGNITION_LAW).split())
+    assert "COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT" in current_law
+    assert "CHAT_REASONING_MODE: NON_PRO_DEFAULT" in current_law
+    assert "grants no Pro-mode authorization" in current_law
 
 
 def test_estate_ledger_uses_company_capability_vocabulary_and_source_limits() -> None:
