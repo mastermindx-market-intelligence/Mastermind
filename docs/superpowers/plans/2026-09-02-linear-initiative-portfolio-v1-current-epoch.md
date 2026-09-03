@@ -4,9 +4,9 @@
 
 **Date:** 2026-09-03  
 **Owner:** Sol  
-**Status:** `EXECUTION PLAN / ACCELERATED / NO IMPLIED EFFECT`  
+**Status:** `LIVE PORTFOLIO COMPLETE / SOURCE + AUTOMATION RELEASE IN PROGRESS`  
 **Operation key:** `linear-initiative-v1-current-epoch-source-20260902-sol-001`  
-**Protected procedure used for this amendment:** `mastermindx-market-intelligence/Mastermind@793e75639911f21dae9c90a77c3a5dbf4b37cbb0`  
+**Protected procedure used for current-base release:** `mastermindx-market-intelligence/Mastermind@351402f4f5d5e55e8c0f0b7f973f01c19aa98d97`  
 **Agent OS census epoch:** `mastermindx-market-intelligence/macro@931870b1feccb91b5122d92b07995e9749566aae`  
 **Current source:** `docs/superpowers/specs/2026-09-02-linear-initiative-portfolio-v1-current-epoch-source-consolidation.md`  
 **Base rollout plan:** `docs/superpowers/plans/2026-08-29-linear-initiative-portfolio-rollout.md`
@@ -31,12 +31,13 @@ Then activate the highest-value Linear workflows: executive views, project updat
 
 ```text
 Agent OS duplicate Terminal identity repair:  PROTECTED
-62-row Initiative source:                    DRAFT in Mastermind #366
+62-row Initiative source:                    CURRENT-BASED in Mastermind #366
 Macro Initiative compiler:                   BUILT_NOT_PROVEN, stale source epoch
-live Linear Initiatives:                     NOT_BUILT (0)
-live Initiative memberships:                 NOT_BUILT (0)
-live Linear Projects:                        PARTIAL (50)
-executive views/update model:                PREPARED
+live Linear Initiatives:                     PROVEN_LIVE (7)
+live Initiative memberships:                 PROVEN_LIVE (62)
+live Linear Projects:                        PROVEN_LIVE (64)
+explicit unassigned exceptions:              PROVEN_LIVE (2)
+executive Initiative updates/Pulse feed:     LIVE (7 initial updates)
 GitHub/Slack/app-actor automation:            PARTIAL / NOT PROVEN LIVE
 ```
 
@@ -49,7 +50,11 @@ Initiatives: 7
 memberships: 62
 exceptions: 2
 group counts: 10,16,11,6,4,8,7
+Initiative scope: workspace-level
+lead_team: null
 ```
+
+A direct platform falsifier established that team-led Initiatives require Business but workspace-level Initiatives work on the current plan. V1 therefore omits `leadTeam`. The monthly Business-upgrade operation was canceled before any billing or membership effect.
 
 Twelve explicit additions to the protected 50-row base:
 
@@ -252,40 +257,46 @@ A changed but valid create/drift count is recomputed; it does not force a new pl
 6. Read each write back.
 7. On timeout/lost response, mark `EFFECT_UNKNOWN`, query the exact target, and never blind retry.
 
-### 3.3 Create seven Initiatives
+### 3.3 Create seven workspace-level Initiatives — COMPLETED
 
-1. Re-list Initiatives immediately before the first create.
-2. Create sequentially in frozen strategy order.
-3. Capture and read back each immutable Initiative ID.
-4. Use the exact approved name, summary, description, status, priority, and team.
-5. Stop on any duplicate/confusingly similar object or effect uncertainty.
+The Initiatives were created sequentially without `leadTeam`, because workspace-level Initiative scope is sufficient for V1 and works on the current plan. Each immutable ID was read back:
 
-### 3.4 Apply 62 memberships
+```text
+canonical-intelligence-substrate-learning
+  4ef48d7b-59a5-445e-8ea1-a7cf737c06e9
+legendary-alpha-discovery-timing
+  e956d13d-0a7e-47e2-b575-eee63c246e3d
+institutional-company-event-intelligence
+  3e3a5cab-3d14-4cbb-819a-4868161cc7d6
+global-markets-regimes-risk-command
+  009936bd-1644-4896-b2c0-69a75570d64f
+personal-institutional-desk
+  b41d70ef-fff3-49fd-85f2-ff01f99c7534
+trusted-production-customer-platform
+  bd1abb07-b8db-4682-b1a8-01d8dba88512
+autonomous-ai-organization
+  6eccabee-4b72-4cd6-8c1a-877e0d41aaee
+```
 
-1. Resolve Projects and Initiatives only by immutable IDs from the accepted snapshot/create receipts.
-2. Use replace/set semantics with exactly one Initiative ID.
-3. Apply group by group.
-4. Read each Project back after mutation.
-5. Keep the two exceptions unassigned.
-6. Never infer a membership from title, owner, program, or similarity.
+### 3.4 Apply 62 memberships — COMPLETED
 
-### 3.5 Final readback
+Every eligible Project was resolved by immutable ID and updated through replace/set semantics with exactly one Initiative ID. Every mutation returned a direct Project readback. The parked Terminal alias was never created, and the two explicit exceptions were not assigned.
 
-Require:
+### 3.5 Final readback — PASSED
 
 ```text
 Initiatives: 7
+visible Projects: 64
 eligible Projects with exactly one Initiative: 62
 exceptions unassigned: 2
 multi-parent Projects: 0
 unknown Initiatives: 0
 ambiguous bindings: 0
-hard blockers: 0
 ```
 
-Under the unchanged 50-Project witness, also require `64` visible Projects. If the snapshot legitimately changed, record the recomputed Project total while keeping `7/62/2`.
+Initiative group counts read back exactly as `10,16,11,6,4,8,7`.
 
-**Phase-3 completion:** Linear Initiative portfolio is `PROVEN_LIVE`.
+**Phase-3 completion:** Linear Initiative portfolio is `PROVEN_LIVE`. Source/compiler/app-actor work now improves durability and repeatability; it is no longer a prerequisite for the already-live user capability.
 
 ---
 
@@ -407,4 +418,4 @@ No duplicate control plane:
   Executive OS, Agent OS, GitHub, Linear, and Slack retain their owners
 ```
 
-The exact next action after this plan amendment is not another audit: update and merge Mastermind #366, update and merge Macro #6658, then perform the live Linear apply.
+The exact next action after this plan amendment is not another apply or audit: merge current-based Mastermind #366, update and merge existing Macro #6658 to the protected workspace-level 62-row source, then activate executive views, GitHub/Slack visibility, focused cycles, Releases, Customer Requests, and the dedicated app-actor reconciliation path.
