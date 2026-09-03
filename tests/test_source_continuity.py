@@ -1167,3 +1167,246 @@ def test_review_return_remote_complete_preserves_review_reuse_and_release_mainta
     assert "fresh maintenance-only release operation on the same PR/branch" in text
     assert "must not edit feature semantics" in text
     assert "Step 2A review-reuse classification remains controlling" in text
+
+
+def test_checkpoint_allows_required_open_known_effect_without_authority() -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        external=_external(
+            module,
+            state=module.ExternalEffectState.OPEN_KNOWN_EFFECT,
+            branch_dependency=module.BranchEffectDependency.REQUIRED,
+        ),
+    )
+
+    assert isinstance(result, module.SourceContinuityReceipt)
+    payload = result.to_dict()
+    assert payload["receipt_kind"] == "CHECKPOINT_VERIFIED"
+    assert payload["external_effect_state"] == "OPEN_KNOWN_EFFECT"
+    assert payload["branch_effect_dependency"] == "REQUIRED"
+    assert payload["authority_effect"] == "NONE"
+    assert payload["writer_release_authorized"] is False
+    assert payload["merge_authorized"] is False
+    assert payload["receiver_transfer_authorized"] is False
+
+
+def test_remote_complete_still_refuses_the_same_required_open_effect() -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        request=_request(module, kind=module.ReceiptKind.REMOTE_COMPLETE_VERIFIED),
+        local=_complete_local(module),
+        external=_external(
+            module,
+            state=module.ExternalEffectState.OPEN_KNOWN_EFFECT,
+            branch_dependency=module.BranchEffectDependency.REQUIRED,
+        ),
+    )
+    _assert_refusal(module, result, "BRANCH_EFFECT_REQUIRED", exit_code=1)
+
+
+@pytest.mark.parametrize(
+    ("state_name", "dependency_name"),
+    [
+        ("NONE", "REQUIRED"),
+        ("NONE", "SEPARABLE"),
+        ("RECONCILED_NO_OPEN_EFFECT", "REQUIRED"),
+        ("RECONCILED_NO_OPEN_EFFECT", "SEPARABLE"),
+        ("OPEN_KNOWN_EFFECT", "NONE"),
+    ],
+)
+def test_incoherent_effect_dependency_pairs_refuse(
+    state_name: str,
+    dependency_name: str,
+) -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        external=_external(
+            module,
+            state=module.ExternalEffectState(state_name),
+            branch_dependency=module.BranchEffectDependency(dependency_name),
+        ),
+    )
+    _assert_refusal(module, result, "EXTERNAL_EFFECT_INVALID", exit_code=2)
+
+
+@pytest.mark.parametrize(
+    "kind_name", ["CHECKPOINT_VERIFIED", "REMOTE_COMPLETE_VERIFIED"]
+)
+def test_unknown_branch_dependency_refuses_both_receipt_kinds(kind_name: str) -> None:
+    module = _contract()
+    kind = module.ReceiptKind(kind_name)
+    result = _verify(
+        module,
+        request=_request(module, kind=kind),
+        local=(
+            _complete_local(module)
+            if kind is module.ReceiptKind.REMOTE_COMPLETE_VERIFIED
+            else _checkpoint_local(module)
+        ),
+        external=_external(
+            module,
+            state=module.ExternalEffectState.OPEN_KNOWN_EFFECT,
+            branch_dependency=module.BranchEffectDependency.UNKNOWN,
+        ),
+    )
+    _assert_refusal(module, result, "BRANCH_EFFECT_UNKNOWN", exit_code=1)
+
+
+def _cli_argv_with_effect(kind: str, state: str, dependency: str) -> list[str]:
+    args = _cli_argv(kind)
+    args[args.index("--external-effect-state") + 1] = state
+    args[args.index("--branch-effect-dependency") + 1] = dependency
+    return args
+
+
+def test_cli_checkpoint_allows_required_open_known_effect_and_remote_complete_refuses(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _cli_module()
+
+    checkpoint_exit = _run_cli(
+        module,
+        _cli_argv_with_effect("checkpoint", "OPEN_KNOWN_EFFECT", "REQUIRED"),
+    )
+    checkpoint_output = capsys.readouterr()
+    assert checkpoint_exit == 0
+    checkpoint = json.loads(checkpoint_output.out)
+    assert checkpoint["receipt_kind"] == "CHECKPOINT_VERIFIED"
+    assert checkpoint["branch_effect_dependency"] == "REQUIRED"
+    assert checkpoint["authority_effect"] == "NONE"
+    assert checkpoint["writer_release_authorized"] is False
+    assert checkpoint["merge_authorized"] is False
+    assert checkpoint["receiver_transfer_authorized"] is False
+
+    complete_exit = _run_cli(
+        module,
+        _cli_argv_with_effect("remote-complete", "OPEN_KNOWN_EFFECT", "REQUIRED"),
+    )
+    complete_output = capsys.readouterr()
+    assert complete_exit == 1
+    assert json.loads(complete_output.out)["code"] == "BRANCH_EFFECT_REQUIRED"
+
+
+class _CollisionFenceHTTP(_ProbeHTTP):
+    OTHER_PR = 999
+
+    def __init__(
+        self,
+        *,
+        initial_other_path: str | None = None,
+        final_other_path: str | None = None,
+        final_incomplete: bool = False,
+    ) -> None:
+        super().__init__()
+        self.initial_other_path = initial_other_path
+        self.final_other_path = final_other_path
+        self.final_incomplete = final_incomplete
+        self.census_reads = 0
+
+    def __call__(self, url: str, *, token: str, timeout: float):
+        assert url.startswith(API_ROOT + "/")
+        endpoint = url.removeprefix(API_ROOT + "/")
+        open_prefix = f"repos/{REPOSITORY}/pulls?state=open&per_page=100&page="
+        if endpoint.startswith(open_prefix):
+            self.calls.append((url, token, timeout))
+            assert token == TOKEN
+            page = int(endpoint.removeprefix(open_prefix))
+            if page == 1:
+                self.census_reads += 1
+                if self.final_incomplete and self.census_reads == 2:
+                    return [{"number": PR_NUMBER}] + [
+                        {"number": 1000 + index} for index in range(99)
+                    ]
+                selected = (
+                    self.initial_other_path
+                    if self.census_reads == 1
+                    else self.final_other_path
+                )
+                pulls = [{"number": PR_NUMBER}]
+                if selected is not None:
+                    pulls.append({"number": self.OTHER_PR})
+                return pulls
+            if self.final_incomplete and self.census_reads == 2:
+                return [{"number": 9999}]
+            return []
+
+        other_files = (
+            f"repos/{REPOSITORY}/pulls/{self.OTHER_PR}/files?per_page=100&page=1"
+        )
+        if endpoint == other_files:
+            self.calls.append((url, token, timeout))
+            assert token == TOKEN
+            selected = (
+                self.initial_other_path
+                if self.census_reads == 1
+                else self.final_other_path
+            )
+            assert selected is not None
+            return [{"filename": selected}]
+
+        return super().__call__(url, token=token, timeout=timeout)
+
+
+def test_cli_refuses_if_collision_census_changes_while_target_identity_stays_fixed(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _cli_module()
+    http = _CollisionFenceHTTP(
+        initial_other_path=None,
+        final_other_path=FINAL_OWNED_PATHS[0],
+    )
+
+    exit_code = _run_cli(module, _cli_argv(), http=http)
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.out)
+    assert payload["code"] == "REMOTE_PROOF_CHANGED"
+    assert payload["schema"] == "mastermind.source_continuity_refusal/v1"
+    assert http.pr_reads == 2
+    assert http.census_reads == 2
+
+
+def test_cli_refuses_incomplete_final_collision_census_without_a_receipt(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _cli_module()
+    http = _CollisionFenceHTTP(final_incomplete=True)
+
+    exit_code = _run_cli(module, _cli_argv(), http=http)
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    payload = json.loads(captured.out)
+    assert payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+    assert payload["schema"] == "mastermind.source_continuity_refusal/v1"
+    assert http.census_reads == 2
+
+
+@pytest.mark.parametrize(
+    ("other_path", "expected_state", "expected_numbers"),
+    [
+        ("docs/unrelated.md", "DISJOINT", []),
+        (FINAL_OWNED_PATHS[0], "OVERLAP", [_CollisionFenceHTTP.OTHER_PR]),
+    ],
+)
+def test_cli_repeats_stable_collision_census_deterministically(
+    other_path: str,
+    expected_state: str,
+    expected_numbers: list[int],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _cli_module()
+    http = _CollisionFenceHTTP(
+        initial_other_path=other_path,
+        final_other_path=other_path,
+    )
+
+    exit_code = _run_cli(module, _cli_argv(), http=http)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["collision_state"] == expected_state
+    assert payload["colliding_pr_numbers"] == expected_numbers
+    assert http.census_reads == 2
