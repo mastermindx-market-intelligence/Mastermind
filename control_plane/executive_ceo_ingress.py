@@ -50,7 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -58,7 +58,10 @@ from control_plane import ceo_intent
 from control_plane import ceo_request
 from control_plane import executive_hot_state as hot_state
 from control_plane.executive_authority import AuthorityPolicyError
-from control_plane.executive_runtime import StateConflict
+from control_plane.executive_runtime import (
+    StateConflict,
+    normalize_executive_dialogue_source,
+)
 
 __all__ = [
     "BOOT_PACKET_SCHEMA",
@@ -111,6 +114,9 @@ _SUBMIT_TOP_KEYS = frozenset({"schema", "observed_grounding", "request"})
 _STATUS_TOP_KEYS = frozenset({"schema", "intent_id"})
 _SUBMIT_V2_TOP_KEYS = frozenset(
     {"schema", "request_ref", "observed_grounding", "request"}
+)
+_SUBMIT_V2_TOP_KEYS_WITH_SOURCE = _SUBMIT_V2_TOP_KEYS | frozenset(
+    {"dialogue_source"}
 )
 _STATUS_V2_TOP_KEYS = frozenset({"schema", "request_ref"})
 _STATE_TOP_KEYS = frozenset({"schema"})
@@ -341,14 +347,28 @@ def _finalize_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
 
 
 async def _submit(
-    runtime: Any, envelope: Mapping[str, Any], workspace_root: "Path | str"
+    runtime: Any,
+    envelope: Mapping[str, Any],
+    workspace_root: "Path | str",
+    submitter: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Call the one v1 mutation sink; classify a raised refusal per §11.3/§12.1."""
 
     try:
+        if submitter is not None:
+            return dict(await asyncio.to_thread(submitter, envelope))
         return await asyncio.to_thread(
-            ceo_intent.submit_intent, runtime, envelope, workspace_root=str(workspace_root)
+            ceo_intent.submit_intent,
+            runtime,
+            envelope,
+            workspace_root=str(workspace_root),
         )
+    except ceo_intent.CeoIntentConflict as exc:
+        # A durable sibling with the same request fingerprint may still carry
+        # different immutable admission provenance.  That is a real identity
+        # conflict, never a concurrency winner that can be reconciled by the
+        # envelope fingerprint alone.
+        raise _classification_failure("operation_conflict") from exc
     except ceo_intent.CeoIntentError as exc:
         # §11.3 concurrent winner: repeat the exact command-id lookup and
         # canonical resolve; classify from the DURABLE fingerprint, never from
@@ -375,14 +395,26 @@ def _build_envelope(
     intent_id: str,
     workspace_root: "Path | str",
     grounding: Mapping[str, str],
+    strict_v2: bool = False,
+    dialogue_source: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
-        return ceo_request.build_trusted_envelope(
+        strict_v2 = strict_v2 or dialogue_source is not None
+        envelope = ceo_request.build_trusted_envelope(
             normalized,
             intent_id=intent_id,
             workspace_root=str(workspace_root),
             grounding=grounding,
         )
+        if strict_v2:
+            envelope["schema"] = ceo_intent.INTENT_SCHEMA_V2
+            envelope["intent_kind"] = "executive_coo_cycle"
+            envelope["business_impact"] = "routine"
+            if dialogue_source is not None:
+                envelope["dialogue_source"] = dict(dialogue_source)
+        return ceo_intent.validate_intent(envelope)
+    except ceo_intent.CeoIntentError as exc:
+        raise CeoIngressError("invalid_input", str(exc)) from exc
     except ceo_request.CeoRequestError as exc:
         # Input was already normalized/validated above; reaching here is a
         # defect in trusted derivation itself, never the caller's fault.
@@ -400,6 +432,7 @@ async def _handle_submit(
     runtime: Any,
     grounding_provider: GroundingProvider,
     workspace_root: "Path | str",
+    submitter: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """§11.2 submit pre-reconciliation — this order is load-bearing."""
 
@@ -426,6 +459,7 @@ async def _handle_submit(
         runtime=runtime,
         grounding_provider=grounding_provider,
         workspace_root=workspace_root,
+        submitter=submitter,
     )
 
 
@@ -435,6 +469,7 @@ async def _handle_submit_v2(
     runtime: Any,
     grounding_provider: GroundingProvider,
     workspace_root: "Path | str",
+    submitter: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """AD-ID1 automated submit with the same load-bearing v1 order."""
 
@@ -449,6 +484,16 @@ async def _handle_submit_v2(
     except ceo_request.CeoRequestInternalError as exc:
         raise _dependency_failure("internal_error") from exc
 
+    dialogue_source = None
+    if "dialogue_source" in parsed:
+        try:
+            dialogue_source = normalize_executive_dialogue_source(
+                parsed["dialogue_source"],
+                work_ref=str(normalized.get("workstream") or ""),
+            ).to_dict()
+        except StateConflict as exc:
+            raise CeoIngressError("invalid_input", str(exc)) from exc
+
     return await _handle_normalized_submit(
         normalized,
         observed=observed,
@@ -456,6 +501,12 @@ async def _handle_submit_v2(
         runtime=runtime,
         grounding_provider=grounding_provider,
         workspace_root=workspace_root,
+        submitter=submitter,
+        # The automated ingress schema predates strict-v2 COO admission.
+        # Preserve its existing v1 sink unless an admission-owned dialogue
+        # source explicitly opts this request into the strict-v2 root.
+        strict_v2=dialogue_source is not None,
+        dialogue_source=dialogue_source,
     )
 
 
@@ -467,13 +518,21 @@ async def _handle_normalized_submit(
     runtime: Any,
     grounding_provider: GroundingProvider,
     workspace_root: "Path | str",
+    submitter: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+    strict_v2: bool = False,
+    dialogue_source: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Shared replay/grounding/sink law after version-specific validation."""
 
     # 3. construct the candidate envelope/fingerprint using the CALLER's
     #    observed_grounding claim ONLY for comparison (never for submission).
     candidate_envelope = _build_envelope(
-        normalized, intent_id=intent_id, workspace_root=workspace_root, grounding=observed
+        normalized,
+        intent_id=intent_id,
+        workspace_root=workspace_root,
+        grounding=observed,
+        strict_v2=strict_v2,
+        dialogue_source=dialogue_source,
     )
     candidate_fingerprint = ceo_intent.intent_fingerprint(candidate_envelope)
 
@@ -490,7 +549,12 @@ async def _handle_normalized_submit(
         # Durable fingerprint matches: this is a reconciliation, not a new
         # grounding-authorized creation.  Call the existing sink again to
         # obtain the normal canonical duplicate receipt.
-        receipt = await _submit(runtime, candidate_envelope, workspace_root)
+        receipt = await _submit(
+            runtime,
+            candidate_envelope,
+            workspace_root,
+            submitter,
+        )
         return _finalize_receipt(receipt)
 
     # 6. only when no canonical event exists, observe current trusted grounding.
@@ -503,7 +567,12 @@ async def _handle_normalized_submit(
     # 8. derive/revalidate the canonical envelope from TRUSTED grounding (never
     #    silently reuse the caller's claimed envelope for the actual submit).
     trusted_envelope = _build_envelope(
-        normalized, intent_id=intent_id, workspace_root=workspace_root, grounding=trusted
+        normalized,
+        intent_id=intent_id,
+        workspace_root=workspace_root,
+        grounding=trusted,
+        strict_v2=strict_v2,
+        dialogue_source=dialogue_source,
     )
 
     # 9. call the SAME provider again immediately before the first canonical
@@ -513,7 +582,7 @@ async def _handle_normalized_submit(
         raise _classification_failure("grounding_changed")
 
     # 11. call the existing v1 mutation sink.
-    receipt = await _submit(runtime, trusted_envelope, workspace_root)
+    receipt = await _submit(runtime, trusted_envelope, workspace_root, submitter)
     return _finalize_receipt(receipt)
 
 
@@ -600,6 +669,7 @@ async def handle_frame(
     workspace_root: "Path | str",
     service_state: Any = None,
     ceo_ingress_armed: bool = False,
+    submitter: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Validate and dispatch one already-parsed JSON frame (§7).
 
@@ -626,6 +696,7 @@ async def handle_frame(
             runtime=runtime,
             grounding_provider=grounding_provider,
             workspace_root=workspace_root,
+            submitter=submitter,
         )
     if schema == STATUS_SCHEMA:
         _exact_top_keys(parsed, "status frame", _STATUS_TOP_KEYS)
@@ -634,12 +705,23 @@ async def handle_frame(
         _require_v2_admission(
             service_state=service_state, ceo_ingress_armed=ceo_ingress_armed
         )
-        _exact_top_keys(parsed, "submit v2 frame", _SUBMIT_V2_TOP_KEYS)
+        parsed_keys = frozenset(parsed)
+        if parsed_keys not in {
+            _SUBMIT_V2_TOP_KEYS,
+            _SUBMIT_V2_TOP_KEYS_WITH_SOURCE,
+        }:
+            allowed = (
+                _SUBMIT_V2_TOP_KEYS_WITH_SOURCE
+                if "dialogue_source" in parsed
+                else _SUBMIT_V2_TOP_KEYS
+            )
+            _exact_top_keys(parsed, "submit v2 frame", allowed)
         return await _handle_submit_v2(
             parsed,
             runtime=runtime,
             grounding_provider=grounding_provider,
             workspace_root=workspace_root,
+            submitter=submitter,
         )
     if schema == STATUS_SCHEMA_V2:
         _require_v2_admission(

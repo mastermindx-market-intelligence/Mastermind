@@ -79,7 +79,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from control_plane.executive_runtime import Job, StateConflict
+from control_plane.executive_runtime import (
+    Job,
+    StateConflict,
+    normalize_executive_dialogue_source,
+)
 
 #: Schema of the envelope this module accepts.  A bump means a migration.
 INTENT_SCHEMA = "mastermind.ceo_intent.v1"
@@ -88,6 +92,7 @@ INTENT_SCHEMA_V2 = "mastermind.ceo_intent.v2"
 #: Schema of the receipt this module returns.
 RECEIPT_SCHEMA = "mastermind.ceo_intent_receipt.v1"
 RECEIPT_SCHEMA_V2 = "mastermind.ceo_intent_receipt.v2"
+_DIALOGUE_SOURCE_UNSET = object()
 
 #: Namespace for the durable event ``command_id``.  The prefix keeps CEO intent
 #: ids from colliding with the runtime's own ``uuid4().hex`` command ids, which
@@ -128,6 +133,7 @@ _REQUIRED_KEYS = frozenset(
 )
 _OPTIONAL_KEYS = frozenset({"workstream"})
 _V2_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"intent_kind", "business_impact"})
+_V2_OPTIONAL_KEYS = _OPTIONAL_KEYS | frozenset({"dialogue_source"})
 _V2_INTENT_KIND = "executive_coo_cycle"
 _V2_BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
 
@@ -272,6 +278,10 @@ class CeoIntentError(ValueError):
     ``ValueError`` onto the ``request_failed`` error code, so a refusal reaches
     the caller as a legible bounded message instead of ``internal_error``.
     """
+
+
+class CeoIntentConflict(CeoIntentError):
+    """An immutable accepted intent disagrees with the submitted identity."""
 
 
 # ---------------------------------------------------------------------------
@@ -551,7 +561,7 @@ def validate_intent(payload: Any) -> dict[str, Any]:
     if schema == INTENT_SCHEMA:
         _exact_keys(raw, "intent", _REQUIRED_KEYS, _OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_V2:
-        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _OPTIONAL_KEYS)
+        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _V2_OPTIONAL_KEYS)
     else:
         raise CeoIntentError(
             f"intent.schema must be {INTENT_SCHEMA!r} or {INTENT_SCHEMA_V2!r}; "
@@ -607,6 +617,18 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         intent["workstream"] = _text(
             raw["workstream"], "intent.workstream", pattern=_WORKSTREAM_RE, max_chars=72
         )
+    if "dialogue_source" in raw:
+        if schema != INTENT_SCHEMA_V2 or "workstream" not in intent:
+            raise CeoIntentError(
+                "intent.dialogue_source requires a strict v2 workstream admission"
+            )
+        try:
+            intent["dialogue_source"] = normalize_executive_dialogue_source(
+                raw["dialogue_source"],
+                work_ref=intent["workstream"],
+            ).to_dict()
+        except StateConflict as exc:
+            raise CeoIntentError(str(exc)) from exc
     size = len(canonical_bytes(intent))
     if size > MAX_ENVELOPE_BYTES:
         raise CeoIntentError(
@@ -730,6 +752,12 @@ def _provenance(intent: Mapping[str, Any], fingerprint: str) -> dict[str, Any]:
     }
     if "workstream" in intent:
         value["workstream"] = intent["workstream"]
+    if "dialogue_source" in intent:
+        source = dict(intent["dialogue_source"])
+        value["dialogue_source"] = source
+        value["dialogue_source_digest"] = hashlib.sha256(
+            canonical_bytes(source)
+        ).hexdigest()
     return value
 
 
@@ -739,6 +767,7 @@ def _receipt_from_event(
     *,
     intent_id: str,
     fingerprint: str | None,
+    dialogue_source: Any = _DIALOGUE_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """Reconcile an already-accepted intent into the receipt it first produced."""
 
@@ -772,7 +801,7 @@ def _receipt_from_event(
             f"intent {intent_id!r} has no well-formed fingerprint in its durable record"
         )
     if fingerprint is not None and recorded != fingerprint:
-        raise CeoIntentError(
+        raise CeoIntentConflict(
             f"intent_id {intent_id!r} was already accepted with a different envelope: "
             f"recorded fingerprint {recorded} != submitted fingerprint {fingerprint}. "
             "Submit a new intent_id; an accepted intent is never rewritten."
@@ -803,6 +832,33 @@ def _receipt_from_event(
             raise CeoIntentError(
                 f"intent {intent_id!r} does not resolve to its strict v2 aggregation root"
             )
+        if dialogue_source is not _DIALOGUE_SOURCE_UNSET:
+            durable_source = provenance.get("dialogue_source")
+            if dialogue_source is None:
+                if durable_source is not None:
+                    raise CeoIntentConflict(
+                        f"intent {intent_id!r} was accepted with a different "
+                        "host dialogue source"
+                    )
+            else:
+                work_ref = provenance.get("workstream")
+                if not isinstance(work_ref, str):
+                    raise CeoIntentError(
+                        f"intent {intent_id!r} has no durable workstream for its "
+                        "host dialogue source"
+                    )
+                try:
+                    expected_source = normalize_executive_dialogue_source(
+                        dialogue_source,
+                        work_ref=work_ref,
+                    ).to_dict()
+                except StateConflict as exc:
+                    raise CeoIntentError(str(exc)) from exc
+                if durable_source != expected_source:
+                    raise CeoIntentConflict(
+                        f"intent {intent_id!r} was accepted with a different "
+                        "host dialogue source"
+                    )
     elif job.orchestration_role is not None:
         raise CeoIntentError(
             f"v1 intent {intent_id!r} resolved to a cycle-eligible Job"
@@ -867,6 +923,7 @@ def submit_intent(
     *,
     workspace_root: "Path | str | None" = None,
     execution_binding: "dict[str, Any] | None" = None,
+    dialogue_source: "Mapping[str, Any] | None" = None,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -885,10 +942,30 @@ def submit_intent(
     intent fingerprint.  The runtime validates and persists the exact binding
     in Job constraints, making provider/profile selection host-owned while the
     original CEO operation identity remains the complete normalized envelope.
+
+    Strict-v2 ``dialogue_source`` is admission-owned envelope identity.  The
+    optional keyword is retained only as a compatibility assertion: when both
+    forms are supplied they must normalize to the same source.  The admitted
+    source is stored in immutable root ``JOB_CREATED`` provenance and duplicate
+    submission cannot attach, remove, or rewrite it after admission.
     """
 
     intent = validate_intent(payload)
     _require_workspace(intent, Path(workspace_root) if workspace_root else None)
+    admitted_source = intent.get("dialogue_source")
+    if admitted_source is not None and dialogue_source is not None:
+        try:
+            legacy_source = normalize_executive_dialogue_source(
+                dialogue_source,
+                work_ref=str(intent.get("workstream") or ""),
+            ).to_dict()
+        except StateConflict as exc:
+            raise CeoIntentError(str(exc)) from exc
+        if admitted_source != legacy_source:
+            raise CeoIntentConflict(
+                "v2 dialogue source disagrees with the accepted root admission"
+            )
+    effective_dialogue_source = admitted_source or dialogue_source
     fingerprint = intent_fingerprint(intent)
     intent_id = intent["intent_id"]
     command_id = command_id_for(intent_id)
@@ -896,7 +973,11 @@ def submit_intent(
     existing = runtime.store.find_event_by_command_id(command_id)
     if existing is not None:
         return _receipt_from_event(
-            runtime, existing, intent_id=intent_id, fingerprint=fingerprint
+            runtime,
+            existing,
+            intent_id=intent_id,
+            fingerprint=fingerprint,
+            dialogue_source=effective_dialogue_source,
         )
 
     contract = intent["execution_contract"]
@@ -908,10 +989,13 @@ def submit_intent(
                 command_id=command_id,
                 workspace_root=workspace_root,
                 execution_binding=execution_binding,
+                dialogue_source=effective_dialogue_source,
             )
         else:
             if execution_binding is not None:
                 raise StateConflict("v1 CEO intent cannot carry a host execution binding")
+            if dialogue_source is not None:
+                raise StateConflict("v1 CEO intent cannot carry a host dialogue source")
             job = runtime.jobs.create_job(
                 intent["objective"],
                 department=intent["department"],
@@ -938,7 +1022,11 @@ def submit_intent(
         settled = runtime.store.find_event_by_command_id(command_id)
         if settled is not None:
             return _receipt_from_event(
-                runtime, settled, intent_id=intent_id, fingerprint=fingerprint
+                runtime,
+                settled,
+                intent_id=intent_id,
+                fingerprint=fingerprint,
+                dialogue_source=effective_dialogue_source,
             )
         raise CeoIntentError(str(exc)) from exc
 
@@ -971,6 +1059,7 @@ def resolve_intent(runtime: Any, intent_id: str) -> dict[str, Any]:
 
 __all__ = [
     "COMMAND_ID_PREFIX",
+    "CeoIntentConflict",
     "CeoIntentError",
     "FORBIDDEN_PROGRAMS",
     "INTENT_ID_RE",

@@ -440,6 +440,27 @@ def test_v2_ensure_thread_refuses_legacy_author_and_relay_duplicate() -> None:
     assert client.parent_post_call_count == 0
 
 
+def test_v2_relay_parent_binding_refuses_allowed_sol_parent() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(parent_message(author=SOL1))
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).bind_or_verify_relay_parent_thread(context()))
+
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+    assert client.parent_post_call_count == 0
+
+
+def test_v2_relay_parent_binding_returns_relay_owned_parent() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(parent_message(author=BOT))
+
+    bound = run(make_engine(client).bind_or_verify_relay_parent_thread(context()))
+
+    assert bound.thread_ts == THREAD_TS
+    assert bound.parent_author_user_id == BOT
+
+
 def test_v2_ensure_thread_refuses_exact_parent_from_unknown_transport_author() -> None:
     client = InMemorySlackClient(relay_bot_user_id=BOT)
     client.add_parent(parent_message(author="U0000000001"))
@@ -943,7 +964,97 @@ def test_v2_send_same_key_changed_fingerprint_is_conflict() -> None:
     assert client.post_call_count == 0
 
 
-def test_v2_send_effect_unknown_reconciles_before_retry() -> None:
+def test_v2_prepare_duplicate_with_multiple_transports_is_effect_unknown() -> None:
+    """A duplicate receipt is canonical only when one transport owns the key."""
+
+    client = setup_client()
+    message = v2_message("ACK", message_key="asd-ack-v2-send-duplicate-many")
+    add_v2_reply(client, message, author=BOT, ts="1787471000.000052")
+    add_v2_reply(client, message, author=BOT, ts="1787471000.000053")
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).prepare_send_message(
+                thread_ts=THREAD_TS,
+                context=context(),
+                message=message,
+            )
+        )
+
+    assert code(exc) == "SEND_EFFECT_UNKNOWN"
+    assert client.post_call_count == 0
+
+
+def test_v2_commit_requires_the_exact_prepared_fingerprint_before_post() -> None:
+    client = setup_client()
+    engine = make_engine(client)
+    message = v2_message("ACK", message_key="asd-ack-v2-send-frozen")
+    prepared = run(
+        engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=message,
+        )
+    )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(engine.commit_send_message(prepared, fingerprint="f" * 64))
+
+    assert code(exc) == "MESSAGE_KEY_CONFLICT"
+    assert client.post_call_count == 0
+
+
+def test_v2_concurrent_exact_commits_singleflight_one_post_and_one_receipt() -> None:
+    class HeldPostClient(InMemorySlackClient):
+        def __init__(self) -> None:
+            super().__init__(relay_bot_user_id=BOT)
+            self.post_entered = asyncio.Event()
+            self.release_post = asyncio.Event()
+
+        async def post_reply(self, *, channel_id: str, thread_ts: str, text: str):
+            self.post_entered.set()
+            await self.release_post.wait()
+            return await super().post_reply(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+            )
+
+    async def scenario() -> None:
+        client = HeldPostClient()
+        client.add_parent(parent_message())
+        engine = make_engine(client)
+        message = v2_message("ACK", message_key="asd-ack-v2-send-singleflight")
+        first = await engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=message,
+        )
+        second = await engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=message,
+        )
+
+        first_task = asyncio.create_task(
+            engine.commit_send_message(first, fingerprint=message["fingerprint"])
+        )
+        await asyncio.wait_for(client.post_entered.wait(), timeout=1)
+        second_task = asyncio.create_task(
+            engine.commit_send_message(second, fingerprint=message["fingerprint"])
+        )
+        await asyncio.sleep(0)
+        client.release_post.set()
+
+        first_receipt, second_receipt = await asyncio.gather(first_task, second_task)
+        assert first_receipt == second_receipt
+        assert first_receipt.action == "POSTED"
+        assert client.post_call_count == 1
+
+    run(scenario())
+
+
+def test_v2_send_effect_unknown_reconciles_once_and_never_resends() -> None:
     committed = setup_client()
     committed.post_behaviors = ["commit_unknown"]
     message = v2_message("ACK", message_key="asd-ack-v2-send-recovered")
@@ -957,23 +1068,27 @@ def test_v2_send_effect_unknown_reconciles_before_retry() -> None:
     assert receipt.action == "RECOVERED"
     assert committed.post_call_count == 1
 
-    retry = setup_client()
-    retry.post_behaviors = ["unknown_no_commit", "success"]
-    retry_message = v2_message("ACK", message_key="asd-ack-v2-send-retry")
-    receipt = run(
-        make_engine(retry).send_message(
-            thread_ts=THREAD_TS,
-            context=context(),
-            message=retry_message,
-        )
+    ambiguous = setup_client()
+    ambiguous.post_behaviors = ["unknown_no_commit", "success"]
+    ambiguous_message = v2_message(
+        "ACK",
+        message_key="asd-ack-v2-send-ambiguous",
     )
-    assert receipt.action == "POSTED"
-    assert retry.post_call_count == 2
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(ambiguous).send_message(
+                thread_ts=THREAD_TS,
+                context=context(),
+                message=ambiguous_message,
+            )
+        )
+    assert code(exc) == "SEND_EFFECT_UNKNOWN"
+    assert ambiguous.post_call_count == 1
 
 
-def test_v2_send_second_unknown_stays_effect_unknown() -> None:
+def test_v2_send_ambiguous_no_commit_stays_effect_unknown_without_resend() -> None:
     client = setup_client()
-    client.post_behaviors = ["unknown_no_commit", "unknown_no_commit"]
+    client.post_behaviors = ["unknown_no_commit"]
     with pytest.raises(DialogueEngineError) as exc:
         run(
             make_engine(client).send_message(
@@ -981,9 +1096,9 @@ def test_v2_send_second_unknown_stays_effect_unknown() -> None:
                 context=context(),
                 message=v2_message("ACK", message_key="asd-ack-v2-send-unknown"),
             )
-        )
+    )
     assert code(exc) == "SEND_EFFECT_UNKNOWN"
-    assert client.post_call_count == 2
+    assert client.post_call_count == 1
 
 
 def test_v2_send_definitive_transport_failure_does_not_failover() -> None:

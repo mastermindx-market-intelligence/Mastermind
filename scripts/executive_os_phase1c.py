@@ -97,6 +97,8 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_socket_path",
         "ceo_ingress_launchd_socket_name",
         "ceo_ingress_peer_uid",
+        "terminal_return_armed",
+        "terminal_return_socket_path",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -104,6 +106,12 @@ _CEO_INGRESS_CONFIG_KEYS = frozenset(
         "ceo_ingress_socket_path",
         "ceo_ingress_launchd_socket_name",
         "ceo_ingress_peer_uid",
+    }
+)
+_TERMINAL_RETURN_CONFIG_KEYS = frozenset(
+    {
+        "terminal_return_armed",
+        "terminal_return_socket_path",
     }
 )
 
@@ -226,6 +234,9 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
+    terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
+    if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
+        raise ServiceError("terminal-return control config fields must be supplied together")
     for name in (
         "runtime_root",
         "control_socket_path",
@@ -243,6 +254,11 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     if ceo_ingress_present:
         config["ceo_ingress_socket_path"] = _path(
             config["ceo_ingress_socket_path"], "ceo_ingress_socket_path"
+        )
+    if terminal_return_present:
+        config["terminal_return_socket_path"] = _path(
+            config["terminal_return_socket_path"],
+            "terminal_return_socket_path",
         )
     for name in ("control_uid", "worker_uid", "worker_gid", "shared_run_gid"):
         config[name] = _integer(config[name], name)
@@ -273,6 +289,15 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             raise ServiceError("CeoIngress launchd socket name must differ from Operator")
         if config["ceo_ingress_peer_uid"] == config["control_uid"]:
             raise ServiceError("CeoIngress peer uid must differ from control uid")
+    if terminal_return_present:
+        if config["terminal_return_armed"] is not True:
+            raise ServiceError("complete terminal-return config requires explicit true arming")
+        terminal_socket = config["terminal_return_socket_path"]
+        forbidden_sockets = {config["control_socket_path"]}
+        if ceo_ingress_present:
+            forbidden_sockets.add(config["ceo_ingress_socket_path"])
+        if terminal_socket in forbidden_sockets:
+            raise ServiceError("terminal-return Relay socket must be distinct")
     if "coo_autonomy_armed" in config and not isinstance(
         config["coo_autonomy_armed"], bool
     ):
@@ -715,6 +740,8 @@ def _service_from_config(
         coo_operator_quota_class=str(
             raw.get("coo_operator_quota_class") or "codex-coo-operator"
         ),
+        terminal_return_armed=raw.get("terminal_return_armed", False),
+        terminal_return_socket_path=raw.get("terminal_return_socket_path"),
         operator_harness_binary_digest=binary_digest,
         operator_harness_version=binary_version,
         allowed_peer_uids=tuple(raw["allowed_peer_uids"]),

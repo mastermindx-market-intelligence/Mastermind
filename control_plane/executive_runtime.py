@@ -26,7 +26,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterator, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 from uuid import uuid4
 
 from control_plane.executive_authority import (
@@ -99,6 +99,7 @@ _WORKER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _COMMAND_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _ROUTING_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _SEAT_RE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
+_DIGEST_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 _JOB_SEATS = frozenset({"coo", "ceo", "chairman"})
 _BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
 OPERATOR_HARNESS_BINDING_KEYS = frozenset(
@@ -133,6 +134,15 @@ V2_HOST_EXECUTION_BINDING_KEYS = frozenset(
         "capability_policy_digest",
     }
     | OPERATOR_HARNESS_BINDING_KEYS
+)
+EXECUTIVE_DIALOGUE_SOURCE_SCHEMA = "mastermind.executive_dialogue_source/v1"
+_EXECUTIVE_DIALOGUE_SOURCE_KEYS = frozenset(
+    {
+        "schema_version",
+        "work_ref",
+        "commission_ref",
+        "watch_mode",
+    }
 )
 _ORCHESTRATION_ROLES = frozenset(
     {"plan", "work", "review", "repair", "aggregation"}
@@ -1012,6 +1022,154 @@ class CooRetryMutationOutcome:
 class _RetrySafetyMaterial:
     projection: RetrySafetyProjection
     tx9_material: tuple[sqlite3.Row, dict[str, Any], str, dict[str, Any], str] | None
+
+
+@dataclasses.dataclass(frozen=True)
+class ExecutiveDialogueSource:
+    """Admission-owned immutable source for one strict-v2 dialogue family."""
+
+    schema_version: str
+    work_ref: str
+    commission_ref: dict[str, str]
+    watch_mode: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "work_ref": self.work_ref,
+            "commission_ref": dict(self.commission_ref),
+            "watch_mode": self.watch_mode,
+        }
+
+
+def normalize_executive_dialogue_source(
+    value: Mapping[str, Any], *, work_ref: str | None = None
+) -> ExecutiveDialogueSource:
+    """Validate immutable root-admission dialogue provenance."""
+
+    if not isinstance(value, Mapping) or set(value) != _EXECUTIVE_DIALOGUE_SOURCE_KEYS:
+        raise StateConflict("v2 host dialogue source fields are incomplete or drifted")
+    if value.get("schema_version") != EXECUTIVE_DIALOGUE_SOURCE_SCHEMA:
+        raise StateConflict("v2 host dialogue source schema is invalid")
+    source_work_ref = value.get("work_ref")
+    if not isinstance(source_work_ref, str) or re.fullmatch(
+        r"WS:[A-Z0-9][A-Z0-9-]{1,63}", source_work_ref
+    ) is None:
+        raise StateConflict("v2 dialogue source requires an exact work_ref")
+    if work_ref is not None and source_work_ref != work_ref:
+        raise StateConflict("v2 dialogue source work_ref disagrees with admission")
+    try:
+        from integrations.slack_agent_dialogue.contract import (
+            DialogueContractError,
+            validate_commission_ref,
+        )
+
+        commission = validate_commission_ref(dict(value["commission_ref"]))
+    except (DialogueContractError, KeyError, TypeError, ValueError):
+        raise StateConflict("v2 host dialogue source commission_ref is invalid") from None
+    watch_mode = value.get("watch_mode")
+    if watch_mode not in {None, "turn_watch_v1"}:
+        raise StateConflict("v2 host dialogue source watch_mode is invalid")
+    return ExecutiveDialogueSource(
+        schema_version=EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
+        work_ref=source_work_ref,
+        commission_ref=dict(commission),
+        watch_mode=watch_mode,
+    )
+
+
+def _dialogue_source_from_root_creation(
+    connection: sqlite3.Connection,
+    *,
+    root_job_id: str,
+) -> ExecutiveDialogueSource | None:
+    """Re-read one optional host source from the immutable root creation Event."""
+
+    root_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (root_job_id,)
+    ).fetchone()
+    if root_row is None:
+        raise StateConflict("terminal completion lost its strict v2 root")
+    root_role, root_orchestration, _root_digest = _decode_orchestration_job_fields(
+        root_row
+    )
+    if (
+        root_role != "aggregation"
+        or not isinstance(root_orchestration, dict)
+        or root_row["root_job_id"] != root_job_id
+    ):
+        raise StateConflict("terminal completion root is not a strict v2 root")
+    event_rows = connection.execute(
+        """SELECT * FROM events
+           WHERE event_type='JOB_CREATED' AND job_id=?
+           ORDER BY event_id""",
+        (root_job_id,),
+    ).fetchall()
+    if len(event_rows) != 1:
+        raise StateConflict("terminal completion root creation cardinality is not exact")
+    event_row = event_rows[0]
+    if (
+        event_row["command_id"] != root_orchestration.get("command_id")
+        or event_row["aggregate_type"] != "job"
+        or event_row["aggregate_id"] != root_job_id
+    ):
+        raise StateConflict("terminal completion root creation Event drifted")
+    try:
+        payload = _strict_canonical_json_loads(
+            str(event_row["payload_json"]),
+            name="terminal completion root JOB_CREATED payload",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"terminal completion root creation evidence is invalid: {exc}"
+        ) from exc
+    provenance = payload.get("provenance") if isinstance(payload, dict) else None
+    if not isinstance(provenance, dict):
+        raise StateConflict("terminal completion root lost its host provenance")
+    stored = provenance.get("dialogue_source")
+    if stored is None:
+        return None
+    work_ref = provenance.get("workstream")
+    stored_digest = provenance.get("dialogue_source_digest")
+    if (
+        not isinstance(stored, dict)
+        or set(stored) != _EXECUTIVE_DIALOGUE_SOURCE_KEYS
+        or stored.get("work_ref") != work_ref
+        or not isinstance(stored_digest, str)
+        or _DIGEST_RE.fullmatch(stored_digest) is None
+        or stored_digest
+        != hashlib.sha256(
+            json.dumps(
+                stored,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+    ):
+        raise StateConflict("terminal completion dialogue source drifted")
+    normalized = normalize_executive_dialogue_source(
+        stored,
+        work_ref=str(work_ref),
+    )
+    if normalized.to_dict() != stored:
+        raise StateConflict("terminal completion dialogue source is noncanonical")
+    return normalized
+
+
+@dataclasses.dataclass(frozen=True)
+class ValidatedRoleCompletion:
+    """One canonical Runtime snapshot for a completed orchestration child."""
+
+    job: Job
+    attempt: Attempt
+    result_envelope: dict[str, Any]
+    terminal_receipt: dict[str, Any]
+    result_digest: str
+    role_result_digest: str
+    execution_mode: str
+    dialogue_source: ExecutiveDialogueSource | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -7288,6 +7446,7 @@ class JobRegistry:
         command_id: str,
         workspace_root: str | Path | None,
         execution_binding: dict[str, Any] | None = None,
+        dialogue_source: Mapping[str, Any] | None = None,
     ) -> Job:
         """The sole strict v2 intent -> Phase 1F-C aggregation-root boundary.
 
@@ -7349,6 +7508,35 @@ class JobRegistry:
         }
         if "workstream" in normalized:
             provenance["workstream"] = normalized["workstream"]
+        admitted_source = normalized.get("dialogue_source")
+        if dialogue_source is not None:
+            work_ref = normalized.get("workstream")
+            if not isinstance(work_ref, str):
+                raise StateConflict(
+                    "v2 dialogue source requires the intent's exact workstream"
+                )
+            legacy_source = normalize_executive_dialogue_source(
+                dialogue_source,
+                work_ref=work_ref,
+            ).to_dict()
+            if admitted_source is not None and admitted_source != legacy_source:
+                raise StateConflict("v2 dialogue source disagrees with root admission")
+            admitted_source = legacy_source
+        if admitted_source is not None:
+            normalized_source = normalize_executive_dialogue_source(
+                admitted_source,
+                work_ref=str(normalized.get("workstream") or ""),
+            ).to_dict()
+            provenance["dialogue_source"] = normalized_source
+            provenance["dialogue_source_digest"] = hashlib.sha256(
+                json.dumps(
+                    normalized_source,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
         return self.create_job(
             normalized["objective"],
             department=normalized["department"],
@@ -14825,6 +15013,88 @@ class Runtime:
             )
         )
 
+    def validated_role_completion(
+        self,
+        job_id: str,
+        *,
+        expected_attempt_id: str,
+    ) -> ValidatedRoleCompletion:
+        """Return one canonical terminal role snapshot from one read transaction.
+
+        This is the sole public projection boundary for completed orchestration
+        children.  It consumes both supported Runtime receipt families through
+        the canonical validator and exposes no SQL or private validation law to
+        downstream projectors.
+        """
+
+        job_token = str(job_id or "").strip()
+        attempt_token = str(expected_attempt_id or "").strip()
+        if not job_token or not attempt_token:
+            raise StateConflict("terminal completion requires exact Job and Attempt ids")
+        with self.store.read() as connection:
+            job_row = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (job_token,)
+            ).fetchone()
+            if job_row is None:
+                raise StateConflict(f"terminal completion Job {job_token!r} does not exist")
+            role = str(job_row["orchestration_role"] or "")
+            if (
+                role not in {"plan", "work", "review", "repair"}
+                or job_row["current_attempt_id"] != attempt_token
+            ):
+                raise StateConflict("terminal completion binding is not current")
+            attempt_row, seal, terminal, role_result_digest = (
+                _validated_role_completion_material(
+                    connection,
+                    job_row=job_row,
+                    expected_role=role,
+                    root_job_id=str(job_row["root_job_id"]),
+                )
+            )
+            if attempt_row["attempt_id"] != attempt_token:
+                raise StateConflict("terminal completion validator returned another Attempt")
+            try:
+                job_result = _strict_canonical_json_loads(
+                    str(job_row["result_json"]), name="terminal completion Job result"
+                )
+                attempt_result = _strict_canonical_json_loads(
+                    str(attempt_row["result_json"]),
+                    name="terminal completion Attempt result",
+                )
+                job = _job_from_row(job_row)
+                attempt = _attempt_from_row(attempt_row)
+            except PersistenceError as exc:
+                raise StateConflict(
+                    f"terminal completion durable material is invalid: {exc}"
+                ) from exc
+            if job_result != terminal or attempt_result != terminal:
+                raise StateConflict("terminal completion Job/Attempt receipt drifted")
+            envelope = seal.get("result_envelope")
+            result_envelope_digest = seal.get("result_envelope_digest")
+            if (
+                not isinstance(envelope, dict)
+                or not isinstance(result_envelope_digest, str)
+                or not isinstance(role_result_digest, str)
+            ):
+                raise StateConflict("terminal completion validated material is incomplete")
+            dialogue_source = _dialogue_source_from_root_creation(
+                connection,
+                root_job_id=job.root_job_id,
+            )
+            return ValidatedRoleCompletion(
+                job=job,
+                attempt=attempt,
+                result_envelope=dict(envelope),
+                terminal_receipt=dict(terminal),
+                result_digest=result_envelope_digest,
+                role_result_digest=role_result_digest,
+                execution_mode=str(
+                    attempt_row["execution_mode"]
+                    or AttemptExecutionMode.SEALED_WORKER.value
+                ),
+                dialogue_source=dialogue_source,
+            )
+
     def current_harness_binding_source(
         self,
         attempt_id: str,
@@ -15317,8 +15587,10 @@ __all__ = [
     "AttemptRegistry",
     "AttemptStatus",
     "CooRetryMutationOutcome",
+    "EXECUTIVE_DIALOGUE_SOURCE_SCHEMA",
     "Event",
     "EventRegistry",
+    "ExecutiveDialogueSource",
     "ExecutiveSchemaUpgradeRequired",
     "Job",
     "JobPayload",
@@ -15334,8 +15606,10 @@ __all__ = [
     "SCHEMA_VERSION",
     "StateConflict",
     "V2_HOST_EXECUTION_BINDING_KEYS",
+    "ValidatedRoleCompletion",
     "Worker",
     "WorkerQuotaClass",
     "WorkerRegistry",
     "WorkerStatus",
+    "normalize_executive_dialogue_source",
 ]

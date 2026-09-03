@@ -109,6 +109,26 @@ class _EnsureFlight:
     waiters: int = 0
 
 
+@dataclass(frozen=True)
+class PreparedMessageSend:
+    """One connection-local send frozen after deterministic reconciliation."""
+
+    thread_ts: str
+    context: DialogueContextV2
+    message: Mapping[str, Any]
+    text: str
+    message_key: str
+    fingerprint: str
+
+
+@dataclass
+class _SendFlight:
+    """One transient coalesced commit for an exact logical message."""
+
+    task: asyncio.Task[MessageReceipt]
+    waiters: int = 0
+
+
 def _parent_identity(parent: Mapping[str, Any]) -> tuple[Any, ...]:
     return (
         parent.get("work_ref"),
@@ -457,6 +477,9 @@ class DialogueEngineV2:
         self._ensure_write_lock = asyncio.Lock()
         self._ensure_barrier_generation = 0
         self._ensure_inflight: dict[tuple[str | None, ...], _EnsureFlight] = {}
+        self._send_registry_lock = asyncio.Lock()
+        self._send_write_lock = asyncio.Lock()
+        self._send_inflight: dict[tuple[str, str, str], _SendFlight] = {}
 
     async def _parent_history(self) -> HistoryPage:
         try:
@@ -514,6 +537,16 @@ class DialogueEngineV2:
         if match is None:
             raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
         return self._bound_parent(match)
+
+    async def bind_or_verify_relay_parent_thread(
+        self, context: DialogueContextV2
+    ) -> BoundThread:
+        """Return a binding only when this Relay policy owns the parent author."""
+
+        bound = await self.bind_or_verify_thread(context)
+        if bound.parent_author_user_id != self.policy.relay_bot_user_id:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        return bound
 
     @staticmethod
     def _ensure_flight_key(
@@ -886,13 +919,32 @@ class DialogueEngineV2:
         except DialogueEngineError:
             raise DialogueEngineError("SEND_EFFECT_UNKNOWN") from None
 
-    async def send_message(
+    @staticmethod
+    def _duplicate_receipt(
+        existing: ReadMessage,
+        *,
+        message_key: str,
+        fingerprint: str,
+    ) -> MessageReceipt:
+        if existing.duplicate_timestamps:
+            raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
+        return MessageReceipt(
+            action="DUPLICATE",
+            message_key=message_key,
+            fingerprint=fingerprint,
+            message_ts=existing.primary_ts,
+            duplicate_timestamps=(),
+        )
+
+    async def prepare_send_message(
         self,
         *,
         thread_ts: str,
         context: DialogueContextV2,
         message: Mapping[str, Any],
-    ) -> MessageReceipt:
+    ) -> PreparedMessageSend | MessageReceipt:
+        """Freeze one exact send after every deterministic pre-dispatch check."""
+
         validated = self._validate_outbound(message, context=context)
         text = render_message_v2(validated)
         existing = self._find_key(
@@ -901,23 +953,47 @@ class DialogueEngineV2:
             fingerprint=validated["fingerprint"],
         )
         if existing is not None:
-            return MessageReceipt(
-                action="DUPLICATE",
+            return self._duplicate_receipt(
+                existing,
                 message_key=validated["message_key"],
                 fingerprint=validated["fingerprint"],
-                message_ts=existing.primary_ts,
-                duplicate_timestamps=existing.duplicate_timestamps,
             )
+        return PreparedMessageSend(
+            thread_ts=thread_ts,
+            context=context,
+            message=validated,
+            text=text,
+            message_key=validated["message_key"],
+            fingerprint=validated["fingerprint"],
+        )
 
-        for attempt in range(2):
-            invalid_receipt = False
+    async def _commit_send_once(
+        self,
+        prepared: PreparedMessageSend,
+    ) -> MessageReceipt:
+        async with self._send_write_lock:
+            existing = self._find_key(
+                await self._history(
+                    thread_ts=prepared.thread_ts,
+                    context=prepared.context,
+                ),
+                message_key=prepared.message_key,
+                fingerprint=prepared.fingerprint,
+            )
+            if existing is not None:
+                return self._duplicate_receipt(
+                    existing,
+                    message_key=prepared.message_key,
+                    fingerprint=prepared.fingerprint,
+                )
+
             transport: SlackMessage | None = None
             try:
                 result = await asyncio.wait_for(
                     self.client.post_reply(
                         channel_id=self.policy.channel_id,
-                        thread_ts=thread_ts,
-                        text=text,
+                        thread_ts=prepared.thread_ts,
+                        text=prepared.text,
                     ),
                     timeout=self.policy.method_timeout_seconds,
                 )
@@ -929,40 +1005,115 @@ class DialogueEngineV2:
                 try:
                     transport = self._validate_write_result(
                         result,
-                        thread_ts=thread_ts,
-                        expected_text=text,
+                        thread_ts=prepared.thread_ts,
+                        expected_text=prepared.text,
                         expected_author_user_id=self.policy.relay_bot_user_id,
                     )
                 except DialogueEngineError:
-                    invalid_receipt = True
+                    pass
 
             recovered = await self._reconcile_post_effect(
-                thread_ts=thread_ts,
-                context=context,
-                message_key=validated["message_key"],
-                fingerprint=validated["fingerprint"],
+                thread_ts=prepared.thread_ts,
+                context=prepared.context,
+                message_key=prepared.message_key,
+                fingerprint=prepared.fingerprint,
             )
-            if recovered is not None:
-                action = (
-                    "POSTED"
-                    if transport is not None
-                    and transport.ts
-                    in {recovered.primary_ts, *recovered.duplicate_timestamps}
-                    else "RECOVERED"
+            if recovered is None or recovered.duplicate_timestamps:
+                raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
+            action = (
+                "POSTED"
+                if transport is not None and transport.ts == recovered.primary_ts
+                else "RECOVERED"
+            )
+            return MessageReceipt(
+                action=action,
+                message_key=prepared.message_key,
+                fingerprint=prepared.fingerprint,
+                message_ts=recovered.primary_ts,
+                duplicate_timestamps=(),
+            )
+
+    async def _retire_send_flight(
+        self,
+        key: tuple[str, str, str],
+        flight: _SendFlight,
+    ) -> None:
+        async with self._send_registry_lock:
+            if (
+                flight.waiters == 0
+                and flight.task.done()
+                and self._send_inflight.get(key) is flight
+            ):
+                del self._send_inflight[key]
+
+    def _send_flight_done(
+        self,
+        key: tuple[str, str, str],
+        flight: _SendFlight,
+    ) -> None:
+        try:
+            flight.task.exception()
+        except asyncio.CancelledError:
+            pass
+        asyncio.create_task(self._retire_send_flight(key, flight))
+
+    async def commit_send_message(
+        self,
+        prepared: PreparedMessageSend | MessageReceipt,
+        *,
+        fingerprint: str,
+    ) -> MessageReceipt:
+        """Commit only the exact frozen fingerprint, coalescing concurrent peers."""
+
+        if not isinstance(prepared, PreparedMessageSend):
+            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+        if fingerprint != prepared.fingerprint:
+            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+        key = (prepared.thread_ts, prepared.message_key, prepared.fingerprint)
+        async with self._send_registry_lock:
+            flight = self._send_inflight.get(key)
+            if flight is None:
+                flight = _SendFlight(
+                    task=asyncio.create_task(self._commit_send_once(prepared))
                 )
-                return MessageReceipt(
-                    action=action,
-                    message_key=validated["message_key"],
-                    fingerprint=validated["fingerprint"],
-                    message_ts=recovered.primary_ts,
-                    duplicate_timestamps=recovered.duplicate_timestamps,
+                self._send_inflight[key] = flight
+                flight.task.add_done_callback(
+                    lambda _task: self._send_flight_done(key, flight)
                 )
-            if attempt == 0:
-                continue
-            if invalid_receipt:
-                raise DialogueEngineError("WRITE_RESULT_INVALID")
-            raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
-        raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
+            flight.waiters += 1
+
+        try:
+            return await asyncio.shield(flight.task)
+        finally:
+            async with self._send_registry_lock:
+                flight.waiters -= 1
+                if (
+                    flight.waiters == 0
+                    and flight.task.done()
+                    and self._send_inflight.get(key) is flight
+                ):
+                    del self._send_inflight[key]
+
+    async def send_message(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        message: Mapping[str, Any],
+    ) -> MessageReceipt:
+        """Preserve the legacy one-call API over the exact prepare/commit path."""
+
+        prepared = await self.prepare_send_message(
+            thread_ts=thread_ts,
+            context=context,
+            message=message,
+        )
+        if isinstance(prepared, MessageReceipt):
+            return prepared
+        return await self.commit_send_message(
+            prepared,
+            fingerprint=prepared.fingerprint,
+        )
 
     async def wait_for_reply(
         self,
@@ -1041,4 +1192,4 @@ class DialogueEngineV2:
         }
 
 
-__all__ = ["DialogueContextV2", "DialogueEngineV2"]
+__all__ = ["DialogueContextV2", "DialogueEngineV2", "PreparedMessageSend"]
