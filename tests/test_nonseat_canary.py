@@ -6391,27 +6391,34 @@ def test_peer_bootstrap_complete_never_rearms_missing_or_foreign_genesis(
     witness_path = vendors._peer_genesis_witness_path(state_path)
     target = state_path if target_name == "state" else witness_path
     original = target.read_bytes()
-    target.unlink()
-    if mutation == "replace":
-        target.write_bytes(original)
-        target.chmod(0o600)
-    elif mutation == "hardlink":
-        source = tmp_path / "foreign-hardlink.json"
-        source.write_bytes(original)
-        source.chmod(0o600)
-        os.link(source, target)
-    elif mutation == "symlink":
-        source = tmp_path / "foreign-symlink.json"
-        source.write_bytes(original)
-        source.chmod(0o600)
-        target.symlink_to(source)
+    # Keep the unlinked inode alive while constructing the replacement. Linux
+    # may otherwise immediately reuse the same inode number, accidentally
+    # recreating the exact (dev, ino, digest) tuple this test means to falsify.
+    held_fd = os.open(target, os.O_RDONLY)
+    try:
+        target.unlink()
+        if mutation == "replace":
+            target.write_bytes(original)
+            target.chmod(0o600)
+        elif mutation == "hardlink":
+            source = tmp_path / "foreign-hardlink.json"
+            source.write_bytes(original)
+            source.chmod(0o600)
+            os.link(source, target)
+        elif mutation == "symlink":
+            source = tmp_path / "foreign-symlink.json"
+            source.write_bytes(original)
+            source.chmod(0o600)
+            target.symlink_to(source)
 
-    assert _bootstrap_existing_peer(
-        anchor_path, state_path, peer_path, fence_path,
-    ) == vendors.REFUSED
-    assert fence_path.read_bytes() == fence_before
-    if mutation == "unlink":
-        assert not target.exists()
+        assert _bootstrap_existing_peer(
+            anchor_path, state_path, peer_path, fence_path,
+        ) == vendors.REFUSED
+        assert fence_path.read_bytes() == fence_before
+        if mutation == "unlink":
+            assert not target.exists()
+    finally:
+        os.close(held_fd)
 
 
 @pytest.mark.parametrize("mutation", ("replace", "rewrite", "generation"))
@@ -6569,29 +6576,33 @@ def test_peer_bootstrap_complete_fence_itself_is_never_recreated_or_adopted(
         provision, anchor_path, state_path, peer_path, fence_path,
     )
     original = fence_path.read_bytes()
-    fence_path.unlink()
-    if mutation == "replace":
-        fence_path.write_bytes(original)
-        fence_path.chmod(0o600)
-    elif mutation == "malformed":
-        fence_path.write_text("{}\n", encoding="utf-8")
-        fence_path.chmod(0o600)
-    elif mutation == "hardlink":
-        source = tmp_path / "foreign-fence-hardlink.json"
-        source.write_bytes(original)
-        source.chmod(0o600)
-        os.link(source, fence_path)
-    elif mutation == "symlink":
-        source = tmp_path / "foreign-fence-symlink.json"
-        source.write_bytes(original)
-        source.chmod(0o600)
-        fence_path.symlink_to(source)
+    held_fd = os.open(fence_path, os.O_RDONLY)
+    try:
+        fence_path.unlink()
+        if mutation == "replace":
+            fence_path.write_bytes(original)
+            fence_path.chmod(0o600)
+        elif mutation == "malformed":
+            fence_path.write_text("{}\n", encoding="utf-8")
+            fence_path.chmod(0o600)
+        elif mutation == "hardlink":
+            source = tmp_path / "foreign-fence-hardlink.json"
+            source.write_bytes(original)
+            source.chmod(0o600)
+            os.link(source, fence_path)
+        elif mutation == "symlink":
+            source = tmp_path / "foreign-fence-symlink.json"
+            source.write_bytes(original)
+            source.chmod(0o600)
+            fence_path.symlink_to(source)
 
-    assert _bootstrap_existing_peer(
-        anchor_path, state_path, peer_path, fence_path,
-    ) == vendors.REFUSED
-    if mutation == "unlink":
-        assert not fence_path.exists()
+        assert _bootstrap_existing_peer(
+            anchor_path, state_path, peer_path, fence_path,
+        ) == vendors.REFUSED
+        if mutation == "unlink":
+            assert not fence_path.exists()
+    finally:
+        os.close(held_fd)
 
 
 def test_peer_bootstrap_holds_one_parent_lock_without_reentry(tmp_path, monkeypatch):
