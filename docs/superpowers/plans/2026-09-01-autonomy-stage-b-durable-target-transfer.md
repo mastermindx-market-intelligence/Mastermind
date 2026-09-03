@@ -1,485 +1,216 @@
-# Autonomy Stage-B0 / Stage-B1 — Durable Sol Action-Target Transfer Implementation Plan
+---
+schema: mastermind.autonomy_stage_b1_plan.v5
+architecture_revision: v5.2-claim-then-materialize-binding
+operation: stage-b0-r1-real-owner-gap-repair-20260902-sol-001
+capability: SPEC_ONLY
+production_effect: NONE
+---
 
-**Date:** 2026-09-01  
-**Owner:** Sol, AI CEO  
-**Chairman:** Chris  
-**Operation:** `autonomy-stage-b-durable-target-transfer-f0-20260901-sol-001`  
-**Protected source and Skillpack basis:** `mastermindx-market-intelligence/Mastermind@c6af57d1ce96ed3f5ca8237099f4a5ecfa01d3cf`, `mastermind.sol_skillpack.v1` 1.0.1, bootstrap major 1  
-**Governing design:** `docs/superpowers/specs/2026-09-01-autonomy-stage-b-durable-target-transfer-design.md`  
-**State:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`
+# Stage-B0-R1 V5.2 - Claim, Materialize, Then Assign
 
-## 1. Observable mission
+## Mission
 
-Deliver one deterministic, command-reconcilable Executive capability where an existing root Job’s
-current Sol target can be initially assigned, advanced to a successor RuntimeBinding generation, or
-transferred to another lawful Sol alias through one immutable Runtime event—and the unchanged Stage-A
-resolver immediately consumes that folded assignment without a second target store or provider action.
+Freeze the exact predecessor and implementation sequence for the first CEO Codex action-target assignment without creating a destination-selection or assignment authority beside Executive Runtime, Capacity C2, Operator Harness, SessionTargetRegistry, RuntimeBinding or Stage A.
 
-## 2. Why this is the next dependency
+The key timing law is explicit: the Capacity C2 transaction can atomically claim the Worker and Attempt and persist their placement snapshot, but the RuntimeBinding is projected only after the existing Operator Harness has separately materialized an accepted SessionEpoch, ProcessGeneration and current provider writer. Stage B therefore assigns after current-writer materialization, not inside C2.
 
-Mastermind now has separate pieces for logical SessionTargets, RuntimeBinding projection, exact action
-authority, Capacity selection, ACK, terminal return, and context-rotation law. The missing seam is the
-durable handoff between “the successor exists and acknowledged” and “this exact successor is now the
-one Sol allowed to act for the root responsibility.”
+<!-- STAGE_B1_CORRECTION_GATE_BEGIN -->
+```json
+{
+  "schema": "mastermind.autonomy_stage_b1_correction_gate.v5",
+  "architecture_revision": "v5.2-claim-then-materialize-binding",
+  "protected_source_sha": "0d5c80bba8c69b5d1ed86aa3d32c9003a4252c73",
+  "architecture_operation": "stage-b0-r1-real-owner-gap-repair-20260902-sol-001",
+  "carrier": {
+    "repository": "mastermindx-market-intelligence/Mastermind",
+    "pull_request": 368,
+    "branch": "sol/stage-b0-protected-source-correction-r1-20260902"
+  },
+  "records_paths": [
+    "docs/superpowers/specs/2026-09-01-autonomy-stage-b-durable-target-transfer-design.md",
+    "docs/superpowers/plans/2026-09-01-autonomy-stage-b-durable-target-transfer.md",
+    "tests/test_autonomy_stage_b_durable_target_transfer_source_law.py"
+  ],
+  "records_only": true,
+  "architecture_state": "FROZEN",
+  "stage_b1_state": "HELD_PREDECESSORS",
+  "predecessors": [
+    "CAPACITY_C1_PROTECTED",
+    "CAPACITY_C2_ROOT_BOUND_CLAIM_COMMITMENT_PROTECTED",
+    "EXECUTIVE_CEO_CODEX_A_TARGET_PROTECTED",
+    "EXACT_CURRENT_OHF_WRITER_MATERIALIZED"
+  ],
+  "next_program_wave": "CAPACITY_C2_TRANSACTIONAL_CLAIM_COMMITMENT_VERTICAL",
+  "stage_b1_after_predecessors": "STAGE_B1_CEO_CODEX_INITIAL_ASSIGNMENT_VERTICAL",
+  "authorized_mode_after_predecessors": "INITIAL_ASSIGNMENT",
+  "authorized_surface_after_predecessors": "codex",
+  "production_root_call_path": [
+    "CeoIngress v2",
+    "ExecutiveControlService._submit_service_intent",
+    "ceo_intent.submit_intent",
+    "Runtime.jobs.create_v2_orchestration_root"
+  ],
+  "placement_commitment_owner": "Capacity C2 through existing Executive Runtime transaction and claim owners",
+  "writer_materialization_owner": "existing Operator Harness and RuntimeBinding projection",
+  "assignment_owner": "first SOL_ACTION_TARGET_ASSIGNED Event on responsibility root Job",
+  "production_assignment_caller": "ExecutiveControlService exact current-writer materialization/replay path after C2 commitment",
+  "c2_contains_runtime_binding": false,
+  "destination_session_self_authority": false,
+  "caller_destination_authority": false,
+  "trusted_replay_revalidates_current_truth": true,
+  "requires_exact_binding_generation_fence": true,
+  "requires_complete_root_map_preservation": true,
+  "requires_unchanged_stage_a": true,
+  "runtime_effect": false,
+  "provider_effect": false,
+  "production_armed": false
+}
+```
+<!-- STAGE_B1_CORRECTION_GATE_END -->
 
-Without Stage B:
+## Verified current source
 
-- a fresh session may exist but remain observer-only;
-- a stale root binding may survive context rotation;
-- a UI or operator may be tempted to choose the newest visible tab;
-- lost transfer responses cannot be reconciled safely;
-- responsibility transfer remains manual Slack archaeology rather than a canonical Executive fact.
+- The production CEO v2 admission chain is real: `_submit_service_intent` calls the canonical `ceo_intent.submit_intent`, which calls `Runtime.jobs.create_v2_orchestration_root`.
+- `ceo_intent.submit_intent` owns stable command replay and strict durable root reconstruction.
+- checked-in `root_job_bindings` is empty and test-overlay-only; it is not assignment authority.
+- current target policy has no `target_seat=ceo` plus `reasoning_surface=codex` entry.
+- `AttemptRegistry.claim_job` already owns one `BEGIN IMMEDIATE` transaction over quota CAS, Attempt creation, Job transition, placement snapshot persistence and the `JOB_CLAIMED` Event.
+- `runtime_binding_projection.py` does not persist a binding. It projects one only from `Runtime.current_harness_binding_source`, which requires an accepted SessionEpoch, current ProcessGeneration and provider session.
+- Stage A resolves only the exact root/CEO alias, never defaults, and grants action authority only to the exact RuntimeBinding identity.
+- Capacity C1 is selection evidence, not commitment. Capacity C2 remains the required modifying claim owner.
 
-Stage B closes only this seam. Provider materialization, capacity selection, ACK, terminal return,
-Control Room deployment, and production canaries remain independent capabilities.
-
-## 3. Authority and document precedence
-
-Highest specificity first:
-
-1. current explicit Chairman directive to continue the Autonomy completion program;
-2. current protected Skillpack and universal source laws at the action-time protected SHA;
-3. `docs/superpowers/specs/2026-09-01-autonomy-stage-b-durable-target-transfer-design.md`;
-4. `docs/EXECUTIVE_WEB_SOL_CONTEXT_ROTATION_LAW.md`;
-5. `docs/superpowers/specs/2026-08-29-organizational-continuity-sol-action-authority-amendment.md`;
-6. current `control_plane/sol_action_target.py`, `session_targets.py`,
-   `runtime_binding_projection.py`, and `executive_runtime.py`;
-7. this implementation plan;
-8. worker PR prose and transport messages as evidence only.
-
-A newer protected source that changes Runtime transaction, target authority, RuntimeBinding, ACK,
-terminal-return, or context-rotation semantics must be reconciled before implementation. Path-disjoint
-data, research, evaluation, or publication movement may be joined history-preservingly without
-regenerating accepted Stage-B source.
-
-## 4. Verified current state
-
-### `PROVEN_LIVE`
-
-None of the Stage-B transfer capability is production-proven.
-
-### `BUILT_NOT_PROVEN`
-
-- exact action-target Stage-A deterministic resolver;
-- Executive Runtime immutable event/transaction primitives;
-- Runtime current-harness binding facts;
-- SessionTarget and RuntimeBinding contracts.
-
-### `SPEC_ONLY`
-
-- Web-Sol context-rotation succession law;
-- this Stage-B records wave until protected.
-
-### `NOT_BUILT`
-
-- durable root-job target assignment/transfer event family;
-- command-first transfer transaction;
-- Stage-B projector into the Stage-A consumer;
-- real successor-session transfer canary.
-
-### Material disagreement repaired by this records wave
-
-Earlier local reports described Stage-B0 and Stage-B1 as built or staged, but canonical GitHub had no
-branch, PR, or operation-key carrier. The correct pre-wave state is `NOT_BUILT`. This plan creates the
-first real records carrier and does not reuse those failed reports as implementation evidence.
-
-## 5. Exact Stage-B0 records scope
-
-This records wave changes exactly:
+## Ordered program sequence
 
 ```text
-docs/superpowers/specs/2026-09-01-autonomy-stage-b-durable-target-transfer-design.md
-docs/superpowers/plans/2026-09-01-autonomy-stage-b-durable-target-transfer.md
+1. PROTECT_STAGE_B0_V5_2_ARCHITECTURE
+2. PROTECT_CAPACITY_C1_SELECTION
+3. BUILD_CAPACITY_C2_ROOT_BOUND_CLAIM_COMMITMENT
+4. ADD_DISABLED_EXECUTIVE_CEO_CODEX_A_TARGET
+5. MATERIALIZE_EXACT_CURRENT_OHF_WRITER
+6. RED_STAGE_B1_PRODUCTION_ROOT_COMMITMENT_AND_BINDING_CHAIN
+7. IMPLEMENT_CLOSED_INITIAL_ASSIGNMENT_COMMAND_AND_EVENT
+8. IMPLEMENT_TRUSTED_REPLAY_CURRENT_TRUTH_REVALIDATION
+9. IMPLEMENT_COMPLETE_MAP_CURRENT_BINDING_PROJECTOR
+10. INTEGRATE_EXECUTIVE_SERVICE_CURRENT_WRITER_CALLER
+11. PROVE_UNCHANGED_STAGE_A_AND_EXACT_ACTOR_FENCE
+12. RUN_ROW_INTEGRITY_MUTATION_REPOSITORY_AND_SECURITY_PROOF
+13. INDEPENDENT_IMMUTABLE_HEAD_REVIEW
+14. SOL_EXPECTED_HEAD_SOURCE_RELEASE
+15. SEPARATE_DISPOSABLE_CANARY
+```
+
+The architecture source is protected first so predecessor and ownership law is durable before code waves begin. Steps 2-5 are separate dependency work. They are not permission to hide C2, target creation or provider/OHF materialization inside Stage-B1. Stage-B1 source does not START before all four predecessors are true.
+
+## Capacity C2 handoff requirement
+
+The already-assigned Capacity/Fleet principal owns the next program wave after C1 protects. C2 must:
+
+- consume the exact recomputable C1 selection document as comparison evidence, not authority;
+- initially support only a selected existing Worker lane that the current claim owner can verify and claim without provider I/O;
+- in one existing Executive Runtime `BEGIN IMMEDIATE` transaction reread the root Job, workstream identity, selected Worker, quota row, occupancy/fence and effect facts;
+- invoke or extend the existing canonical claim mutation rather than duplicating its SQL;
+- claim only canonical Worker and Attempt rows;
+- preserve the canonical placement snapshot on the Attempt;
+- append one immutable `CAPACITY_PLACEMENT_COMMITTED` root Event in the same transaction;
+- bind root, selection/evidence digests, selected worker/quota, committed Attempt and placement-snapshot digest;
+- exclude RuntimeBinding id/generation, native handle and provider session because they do not exist yet;
+- abort on drift, duplicate identity, conflict, stale evidence or effect uncertainty;
+- never choose a second candidate in the same modifying operation;
+- create no placement database, reservation service, queue, router, lease or second scheduler.
+
+The C2 commitment authorizes later materialization of only the exact claimed Attempt under the existing provider/OHF owners. It is not Sol action-target authority by itself.
+
+## SessionTarget predecessor requirement
+
+The SessionTargetRegistry owner must add exactly one disabled, production-unarmed `EXECUTIVE-CEO-CODEX-A` definition on a separate bounded carrier before Stage-B1 starts. That carrier owns `config/wake_session_targets.json` and the target-definition tests. Stage-B1 consumes and fingerprints the protected target; it never edits or recreates it.
+
+This separation preserves one owner for target vocabulary and one owner for root assignment.
+
+## Current-writer materialization requirement
+
+After C2 commits the root/Attempt claim, the existing Operator Harness/provider path may start or resume that exact Attempt under its own authority, effect and reconciliation laws. Stage B does not start the provider and does not add a materialization queue.
+
+The assignment precondition is one exact current writer projected from:
+
+```text
+committed Attempt
+-> accepted SessionEpoch
+-> accepted current ProcessGeneration
+-> exact provider session
+-> runtime_binding_projection
+```
+
+No current writer yields `TARGET_RUNTIME_NOT_MATERIALIZED`. Ambiguous or effect-unknown materialization yields `EFFECT_UNKNOWN_RECONCILE_FIRST`. Neither case causes another Worker selection, Attempt claim, provider start or target assignment.
+
+## Stage-B1 exact source ceiling
+
+After predecessors protect, use at most six paths:
+
+```text
+control_plane/executive_runtime.py
+control_plane/runtime_binding_projection.py
+control_plane/sol_action_target_assignment.py
+control_plane/executive_service.py
+tests/test_autonomy_stage_b_initial_assignment.py
 tests/test_autonomy_stage_b_durable_target_transfer_source_law.py
 ```
 
-It creates no code path, service, migration, configuration, route, provider process, Runtime row, or
-production effect.
-
-## 6. Stage-B1 operator handoff
-
-### Routing receipt
-
-```text
-COGNITION_ROUTE: CHAT_PRO_DEFAULT
-PREFERRED_AVENUE: CTO Sol
-ROUTE: Codex-backed bounded architecture-sensitive engineering worker
-WHY: the transaction, event, replay, projection and concurrency boundaries are frozen and require disciplined repository implementation and adversarial tests
-WHY NOT FABLE: no unresolved product thesis or cross-repository principal ambiguity remains after STAGE-B0; scarce principal capacity is unnecessary
-RECEIVER_BINDING_MODE: CAPACITY_SELECTABLE
-PLACEMENT_STATE: WAITING_CAPACITY / needs_placement
-```
-
-No worker-facing open pickup is emitted merely because automated placement is incomplete. Once a
-concrete eligible receiver is lawfully assigned, delivery is the assignment edge and the worker must
-ACK, read current source, arm continuation, and separately START when gates are clear.
-
-### Exact expected implementation paths
-
-```text
-control_plane/sol_action_target_transfer.py
-control_plane/executive_runtime.py
-tests/test_sol_action_target_transfer.py
-tests/test_sol_action_target.py
-tests/test_executive_runtime.py
-```
-
-A fresh collision census may narrow these paths. A required sixth authority/production path, new
-migration, new table, provider adapter, or common worker-wire change requires a finite
-`DECISION_REQUEST` before edit.
-
-### Explicit non-goals
-
-- no provider process/session creation, resume, wake, stop, or cleanup;
-- no Capacity selection or placement commitment;
-- no mutation of Job, Attempt, Worker, RuntimeBinding, ACK, or source-resolution rows;
-- no target pointer/current-target table;
-- no second SessionTargetRegistry or RuntimeBinding registry;
-- no Slack/Linear/Agent OS lifecycle state;
-- no Control Room UI work;
-- no automatic context rollover;
-- no production route, installer, service, credential, or deployment;
-- no generic retry/failover policy;
-- no CAP-S1, ACK1, terminal-return, or materialization implementation absorbed into this PR.
-
-## 7. Data and contract behavior
-
-### Identity
-
-The root Job is the durable responsibility. Target identity is the tuple:
-
-```text
-session_alias
-binding_id
-binding_generation
-attempt_id
-session_epoch_id
-reasoning_surface
-```
-
-Provider-native handles, provider session IDs, account labels, Slack principals, raw model text, and
-filesystem paths are excluded from Stage-B persistence.
-
-### Time and freshness
-
-Stage B does not read wall-clock time to elect a target. Currentness comes from canonical source state
-inside the Runtime transaction and current authority/evidence events. Timestamps may be retained by
-the existing Event owner but never rank candidates or choose the latest session.
-
-### Nulls
-
-- `previous_target` is null only for `INITIAL_ASSIGNMENT`;
-- source terminal/release evidence is null only where the mode explicitly permits it;
-- missing destination materialization or ACK is a typed wait/refusal, never a guessed positive;
-- missing current binding is unavailable, not zero-generation or default alias.
-
-### Replay
-
-The stable command ID is derived from canonical semantics. Identical replay returns the existing event
-before mutable-state reads. Changed semantics conflict. A lost response never authorizes a second
-operation key, carrier, target, or transfer.
-
-### Correction
-
-Events are immutable. Correction is a new transfer at the next expected assignment revision after
-current-state reconciliation. No update/delete/rewrite path is introduced.
-
-## 8. Deterministic versus model-generated behavior
-
-Deterministic first-party code owns:
-
-- command normalization and digest;
-- transaction and command lookup;
-- event-history fold;
-- revision and source/destination comparison;
-- RuntimeBinding read and validation;
-- evidence-event identity checks;
-- event append;
-- snapshot projection;
-- Stage-A consumer invocation;
-- error mapping and secret-safe output.
-
-Model output has zero authority to select a target, claim an ACK/release, choose a revision, construct
-a binding, resolve a replay, or widen scope. A model may help write code or propose a transfer, but the
-Runtime transaction independently re-derives and validates every privileged fact.
-
-## 9. Ordered implementation sequence
-
-<!-- STAGE_B1_IMPLEMENTATION_ORDER_BEGIN -->
-```text
-1. RE-PIN_AND_COLLISION_FREEZE
-2. RED_COMMAND_EVENT_AND_FOLD_TESTS
-3. IMPLEMENT_CLOSED_TYPES_CANONICALIZATION_AND_PROJECTOR
-4. RED_RUNTIME_TRANSACTION_AND_REPLAY_TESTS
-5. IMPLEMENT_EXISTING_RUNTIMESTORE_TRANSACTION_SEAM
-6. RED_STAGE_A_REAL_CONSUMER_TESTS
-7. INTEGRATE_ROOT_BINDING_OVERLAY_WITH_UNCHANGED_STAGE_A_RESOLVER
-8. RED_CONCURRENCY_EFFECT_UNKNOWN_AND_SECRET_TESTS
-9. RUN_MUTATION_AND_FORBIDDEN_PLANE_PROOF
-10. RUN_FOCUSED_ADJACENT_FULL_FEASIBLE_AND_STATIC_GATES
-11. PUBLISH_ONE_DRAFT_HOLD_CARRIER
-12. INDEPENDENT_EXACT_HEAD_REVIEW_AND_HOSTED_CI
-13. SOL_RELEASE_ADJUDICATION
-```
-<!-- STAGE_B1_IMPLEMENTATION_ORDER_END -->
-
-### Step 1 — Re-pin and freeze
-
-- load current protected Skillpack and governing sources at one SHA;
-- read the complete commission carrier;
-- inspect all open PRs and branches touching the expected five paths;
-- verify STAGE-B0 is protected;
-- identify exact current Runtime transaction, binding, ACK, terminal-return, and materialization event
-  owners;
-- return `PATH_FREEZE` before source edits;
-- emit separate `START` only when no duplicate owner/effect exists.
-
-### Step 2 — RED command/event/fold tests
-
-Write failing tests for strict fields, canonical key ordering, deterministic command identity,
-initial assignment, valid succession/transfer, history gaps, duplicate revisions, wrong previous
-links, unsupported modes, forbidden persisted fields, and immutable correction behavior.
-
-### Step 3 — Closed types and projector
-
-Implement one Python-stdlib-only module with immutable dataclasses/enums, exact wire parsing,
-canonical JSON, stable digest, event fold, root-binding overlay, and snapshot projection. It owns no
-I/O except through explicitly injected current source rows.
-
-### Step 4 — RED Runtime transaction tests
-
-Prove command lookup occurs before mutable assignment and binding reads, same-command replay survives
-later session movement, changed replay conflicts, stale expected revision refuses, and all evidence is
-read on the same connection.
-
-### Step 5 — RuntimeStore composition
-
-Add the smallest Runtime method that:
-
-- opens `RuntimeStore.transaction()`;
-- checks `get_event_by_command_id()` first;
-- folds the root Job’s target events;
-- calls `current_harness_binding_source(..., connection=tx)`;
-- validates exact evidence events;
-- appends one event with `append_event(..., connection=tx)`.
-
-Do not add a table, migration, cursor, cache, transaction owner, or provider call.
-
-### Step 6 — RED Stage-A consumer tests
-
-Use the real `resolve_sol_action_target()` API. Prove the destination actor becomes authoritative only
-after the folded root binding and exact RuntimeBinding snapshot agree, while source/sister/stale actors
-remain observer-only.
-
-### Step 7 — Integration
-
-Create the registry overlay through `SessionTargetRegistry.with_root_job_bindings()` and feed a
-complete RuntimeBinding snapshot to Stage A. Preserve the exact Stage-A public signature and all prior
-negative behavior.
-
-### Step 8 — Concurrency and failure law
-
-Prove concurrent revision-N transfers serialize; one append wins and the other refuses without
-rebasing. Prove effect-unknown evidence, response loss, missing ACK/materialization/release/terminal
-records, stale authority, Runtime conflict, and transaction unavailability all fail closed.
-
-### Step 9 — Mutation and forbidden-plane proof
-
-Individually remove or bypass:
-
-- command-first lookup;
-- expected revision compare;
-- previous-target compare;
-- same-transaction binding read;
-- source release gate;
-- source terminal gate;
-- destination materialization gate;
-- destination ACK gate;
-- actor check in Stage A;
-- forbidden-field filter.
-
-Each mutation must make its intended discriminator fail. Census source for forbidden table/migration,
-provider/network/Slack/Agent OS writes, and secret/native-handle leakage.
-
-### Step 10 — Repository proof
-
-Run focused and adjacent tests, all feasible repository tests, compile, diff check, secret scan, and
-static ownership census. Local environment gaps must be named; hosted CI is the release receipt.
-
-### Step 11 — One carrier
-
-Publish one Draft/HOLD PR from one branch and one operation key. Never replace it because protected
-master moves. Join path-disjoint current source history-preservingly, preserve implementation blobs,
-and rerun only the proof invalidated by movement.
-
-### Step 12 — Independent review
-
-Reviewer must evaluate the original capability, not merely syntax. Required questions:
-
-- does the real Stage-A consumer see exactly one current target?
-- can an identical replay succeed after the old writer is gone?
-- can changed payload or stale revision create a second event?
-- did any path mutate RuntimeBinding or provider state?
-- can a caller/model smuggle privileged binding data?
-- is a source law/spec being called production proof?
-
-### Step 13 — Sol adjudication
-
-Merge only an exact current-base head with green hosted checks, empty blocking threads, bounded path
-surface, accepted independent review, and truthful `BUILT_NOT_PROVEN / PRODUCTION_DISARMED` state.
-
-## 10. Acceptance matrix
-
-### Truth
-
-- exact root Job and assignment revision;
-- exact SessionTarget alias and target seat;
-- exact current RuntimeBinding ID/generation;
-- exact materialization, ACK, source terminal/release, and authority evidence references;
-- command-first replay and immutable event history;
-- correction-safe next-revision behavior.
-
-### Intelligence and authority
-
-- deterministic mode/precondition classification;
-- no newest-tab/account/title/timestamp election;
-- caller/model claims independently re-derived;
-- effect uncertainty blocks transfer;
-- no transfer before successor readiness.
-
-### Product/machine capability
-
-- one real Stage-A resolver call changes from source-authoritative to destination-authoritative after
-  the event fold;
-- source/sister actors remain observer-only;
-- absent/conflict/unknown state is visible and typed;
-- restart/replay produces no second transfer.
-
-### Learning/evidence
-
-- exact immutable head and path set;
-- focused/adjacent/full feasible counts;
-- mutation kills bound to named laws;
-- hosted CI/security receipts;
-- explicit zero-row-mutation and zero-provider-action proof;
-- next production canary gate recoverable without chat history.
-
-## 11. Required adverse cases
-
-At minimum:
-
-```text
-no prior assignment
-valid initial assignment
-initial static-root mismatch
-valid same-alias succession
-same generation or lower generation
-source release missing
-valid cross-alias transfer
-source terminal missing
-source alias equals destination in cross-alias mode
-missing destination materialization
-missing destination ACK
-missing destination RuntimeBinding
-two destination bindings
-surface mismatch
-stale authority
-EFFECT_UNKNOWN
-stale expected revision
-wrong previous target
-identical command replay
-changed semantic replay
-lost response after commit
-concurrent same-revision commands
-history revision gap
-history duplicate revision
-history wrong previous link
-unsupported mode
-forbidden persisted field injection
-actor/source/sister authority separation
-key/list/input permutation determinism
-```
-
-## 12. Stop states
-
-Return to Sol without widening on:
-
-```text
-STAGE_B0_NOT_PROTECTED
-ACTIVE_WRITER_COLLISION
-CURRENT_SOURCE_MOVED_MATERIALLY
-RUNTIME_TRANSACTION_OWNER_UNRESOLVED
-ACK_EVIDENCE_OWNER_UNRESOLVED
-MATERIALIZATION_EVIDENCE_OWNER_UNRESOLVED
-TARGET_EVENT_AGGREGATE_CONFLICT
-NEW_TABLE_OR_MIGRATION_REQUIRED
-SIXTH_AUTHORITY_PATH_REQUIRED
-COMMON_WIRE_SCOPE_COLLISION
-EFFECT_UNKNOWN
-PROVIDER_ACTION_REQUIRED
-```
-
-A deterministic pre-effect defect inside the frozen five paths may be repaired on the same carrier.
-A response ambiguity or possible modifying effect must be reconciled on that carrier before any
-retry or receiver change.
-
-## 13. Release and completion boundary
-
-### STAGE-B0 release
-
-One exact-current-base records PR, source-law tests, hosted CI/security, independent review, and
-expected-head merge. Result only:
-
-```text
-SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT / PROTECTED
-```
-
-### STAGE-B1 release
-
-One exact-current-base implementation PR, all blockers closed, real Stage-A consumer proof, hosted
-CI/security, independent review, expected-head merge. Result only:
-
-```text
-BUILT_NOT_PROVEN / TRANSFER_SOURCE_PRODUCTION_DISARMED / PROTECTED
-```
-
-### Production proof later
-
-A separate bounded canary must prove:
-
-```text
-existing source target
--> terminal/continuity and release evidence
--> successor materialization
--> successor RuntimeBinding
--> successor ACK1
--> Stage-B event
--> Stage-A destination authority
--> bounded useful turn
--> predecessor cleanup
--> restart replay
--> Control Room visibility
-```
-
-Only that real path can promote the capability toward `PROVEN_LIVE`.
-
-## 14. Continuation handoff required from Stage-B1 worker
-
-Return on the exact carrier with:
-
-- protected base, exact head, tree, parents, branch and PR;
-- exact changed paths and active-writer census;
-- command/event/snapshot field sets;
-- transaction ordering and owner methods;
-- RED-to-GREEN counts and named mutation kills;
-- concurrent/replay/effect-unknown proof;
-- real Stage-A consumer result;
-- Job/Attempt/Worker/RuntimeBinding/ACK/source-resolution/provider zero-mutation evidence;
-- compile/diff/secret/forbidden-plane results;
-- hosted CI/security and independent review status;
-- local, remote, runtime, provider and production effects;
-- exact live-canary predecessor and next action;
-- watcher state.
-
-After a worker `RESULT`, Sol must issue one explicit same-carrier `STOP` or repair continuation. Silence
-is not terminal.
+No seventh path without a finite decision request. Do not modify `control_plane/sol_action_target.py`. Do not modify `config/wake_session_targets.json`, common provider identity, Wake ledger, Slack, Agent OS, Linear, deployment, credentials or production arming.
+
+## Complete implementation journey
+
+1. Capacity C2 atomically validates/recomputes C1, claims the exact Worker/Attempt and appends the root claim commitment without any RuntimeBinding field.
+2. The existing Operator Harness later materializes the exact current writer for the committed Attempt and reconciles any provider-side uncertainty under its own laws.
+3. The existing Executive service current-writer completion/replay path derives the Stage-B command from root, C2 commitment, protected target and current binding comparisons; caller cannot supply command id or destination identity.
+4. Start `BEGIN IMMEDIATE`; lookup the derived assignment command before mutable reads.
+5. Revalidate the existing assignment Event if present. Replay is successful only while root, C2 commitment, target fingerprint and current binding still match.
+6. Freshly validate the CEO v2 root through the existing durable provenance and `JOB_CREATED` owner.
+7. Resolve the exact root-bound C2 commitment and canonical claimed Worker/Attempt.
+8. Resolve the unique protected disabled `EXECUTIVE-CEO-CODEX-A` definition and project the current RuntimeBinding from the committed Attempt on the same Runtime connection.
+9. Compare all command claims; append revision-one `SOL_ACTION_TARGET_ASSIGNED` once.
+10. At action time, fold the root assignment, revalidate C2 and current binding, preserve the complete root/seat map and call unchanged Stage A with the actual actor RuntimeBinding.
+11. Wrong, sister, stale or replacement-generation actors are observer-only/refused. A future succession architecture is required before a new generation may act.
+
+## Replay, time, null and correction law
+
+- C2 commitment ID derives from the root and exact C1 semantics; Stage-B command ID derives from current assignment semantics. Neither is caller supplied.
+- Identical replay looks up first but then revalidates current truth; historical success is not a reusable capability.
+- Same ID with changed semantics is `COMMAND_REPLAY_CONFLICT`.
+- Same-root concurrent commands serialize to one append and one `EXPECTED_REVISION_MISMATCH`.
+- A response loss reconciles only by the same derived ID. No carrier, alias, provider or worker failover.
+- Timestamps are audit-only and never elect a destination.
+- Missing root, C2 commitment, target, Worker, Attempt, current writer or binding evidence fails closed.
+- V5.2 has no correction, reassignment or generation succession. Drift yields `STALE_ASSIGNED_BINDING` or a commitment conflict.
+
+## Deterministic versus model behavior
+
+All root/commitment lookup, schema validation, command identity, replay, transaction, Event fold, target fingerprint, RuntimeBinding projection, map preservation and Stage-A enforcement are deterministic. Model output may explain or request work but cannot select a root, worker, Attempt, alias, writer, binding, command, retry or arming state.
+
+## Acceptance
+
+Tests must prove:
+
+- exact protected production root call path and v2 provenance;
+- C1 selection cannot substitute for C2 claim commitment;
+- C2 commitment is atomic with canonical Worker/Attempt claim and placement-snapshot persistence;
+- C2 commitment contains no RuntimeBinding id/generation, native handle or provider session;
+- caller/destination cannot supply carrier, Worker, Attempt, RuntimeBinding or actor authority;
+- missing/foreign/cross-root/effect-unknown C2 commitment refuses;
+- missing or multiple Codex CEO target definitions refuse;
+- Stage-B1 never modifies or recreates the separately protected target definition;
+- missing current writer returns `TARGET_RUNTIME_NOT_MATERIALIZED` with zero retry/start/assignment effect;
+- command replay revalidates current root, C2 commitment, target and binding;
+- moved binding/generation refuses after historical success;
+- one Event under concurrency and exact changed-payload conflict;
+- same alias may be shared only by roots bound to one identical RuntimeBinding;
+- complete map and sibling seats are preserved;
+- unchanged Stage A grants only the exact actor and refuses stale/sister actors;
+- Event contains no native/provider/account/process/Slack/model data;
+- Job/Attempt/Worker/OHF/Wake rows change only under their existing owners;
+- source release remains default-disabled and production-disarmed.
+
+Green CI and merge are not production proof. The later canary must use a real admitted CEO root, real C2 claim commitment and real current writer; append one assignment, authorize the exact Codex actor, refuse wrong/stale actors, restart, replay the same command, then prove Wake delivery/acknowledgement without any implicit succession.
+
+## Stop condition
+
+The records carrier stops at a current-compatible, three-path, reviewed V5.2 architecture. The C2 source wave stops at `BUILT_NOT_PROVEN / CLAIM_COMMITMENT_ONLY / PRODUCTION_DISARMED`. The Stage-B1 source wave stops at `BUILT_NOT_PROVEN / INITIAL_ASSIGNMENT_ONLY / PRODUCTION_DISARMED`. Production acceptance remains a separate canary and explicit Sol/Chairman gate.
