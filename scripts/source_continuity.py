@@ -174,6 +174,7 @@ def _invoke_git(
     command = [_GIT, "--no-pager", "--no-replace-objects"]
     for setting in _GIT_CONFIG_OVERRIDES:
         command.extend(("-c", setting))
+    command.append("--work-tree=.")
     command.extend(arguments)
     runner_kwargs = {
         "cwd": workspace,
