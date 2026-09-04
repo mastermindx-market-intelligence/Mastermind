@@ -7285,7 +7285,9 @@ def test_realm1_strict_producer_refuses_cross_workspace_authority_duplicate(tmp_
         )
 
 
-@pytest.mark.parametrize("mutation", ("unmatched", "wrong_depth", "multiple", "quoted"))
+@pytest.mark.parametrize(
+    "mutation", ("unmatched", "wrong_depth", "multiple", "quoted", "double_slash"),
+)
 def test_realm1_strict_producer_refuses_managed_process_ambiguity(tmp_path, mutation):
     mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
     profile = "a" * 24
@@ -7299,8 +7301,10 @@ def test_realm1_strict_producer_refuses_managed_process_ambiguity(tmp_path, muta
             f"browser --user-data-dir={gologin_root / profile} "
             f"--user-data-dir={gologin_root / profile}"
         )
-    else:
+    elif mutation == "quoted":
         line = f'browser --user-data-dir="{gologin_root / profile}"'
+    else:
+        line = f"browser --user-data-dir=/{gologin_root / profile}"
     with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
         chatgpt._strict_list_local_environments(  # noqa: SLF001
             mlx_profiles_root=os.fspath(mlx_root),

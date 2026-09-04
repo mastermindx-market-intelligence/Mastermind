@@ -322,7 +322,11 @@ def _strict_scan_gologin(root: str, counter: list[int]) -> list[dict]:
 
 
 def _strict_managed_identity(value: str, mlx_root: str, gologin_root: str):
-    if not os.path.isabs(value) or os.path.normpath(value) != value:
+    if (
+        not os.path.isabs(value)
+        or value.startswith(os.sep * 2)
+        or os.path.normpath(value) != value
+    ):
         for root in (mlx_root, gologin_root):
             if root in value:
                 _strict_refuse()
