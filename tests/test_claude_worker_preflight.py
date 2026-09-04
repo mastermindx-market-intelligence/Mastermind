@@ -810,7 +810,12 @@ def test_f1_private_cwd_artifact_is_refused_and_removed(tmp_path: Path):
             f"capture = Path({str(capture)!r})\n"
             "cwd = Path.cwd()\n"
             "capture.write_text(str(cwd))\n"
-            "(cwd / 'unexpected-artifact').write_text('unexpected')\n"
+            "cwd.chmod(0o700)\n"
+            "nested = cwd / 'nested'\n"
+            "nested.mkdir()\n"
+            "(nested / 'unexpected-artifact').write_text('unexpected')\n"
+            "for index in range(40):\n"
+            "    (cwd / f'unexpected-{index}').write_text('unexpected')\n"
             "print('2.1.259')\n"
         ).encode(),
     )
@@ -829,9 +834,16 @@ def test_f1_private_cwd_artifact_is_refused_and_removed(tmp_path: Path):
             observation_directory = Path(capture.read_text())
         if observation_directory is not None and observation_directory.parent.exists():
             observation_directory.parent.chmod(0o700)
-            artifact = observation_directory / "unexpected-artifact"
-            if artifact.exists() or artifact.is_symlink():
-                artifact.unlink()
+            if observation_directory.exists():
+                observation_directory.chmod(0o700)
+                nested = observation_directory / "nested"
+                artifact = nested / "unexpected-artifact"
+                if artifact.exists() or artifact.is_symlink():
+                    artifact.unlink()
+                if nested.exists():
+                    nested.rmdir()
+                for child in observation_directory.iterdir():
+                    child.unlink()
             if observation_directory.exists():
                 observation_directory.rmdir()
             copied_binary = observation_directory.parent / "claude"
