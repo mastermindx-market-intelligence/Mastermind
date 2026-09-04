@@ -2140,6 +2140,68 @@ def test_v2_real_unix_status_uses_same_one_shot_boundary(socket_root: Path) -> N
     run(scenario())
 
 
+def test_v2_active_waiter_conflict_is_explicit_at_service_boundary(
+    socket_root: Path,
+) -> None:
+    from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+        ActiveWaiterConflict,
+    )
+
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+
+        async def conflict(**_kwargs):
+            raise ActiveWaiterConflict()
+
+        fake.wait_for_reply = conflict
+        await srv.start()
+        try:
+            response = await call_service(
+                srv.config.socket_path,
+                request_envelope_v2(
+                    "wait_for_reply",
+                    {
+                        "context": context_v2_dict(),
+                        "thread_ts": THREAD_TS,
+                        "request_message_key": "asd-request-v2-service-wait",
+                        "expected_types": ["STOP"],
+                        "max_attempts": 1,
+                    },
+                ),
+            )
+            assert response == {
+                "ok": False,
+                "error": {"code": "ACTIVE_WAITER_CONFLICT"},
+            }
+
+            async def unknown(**_kwargs):
+                raise RuntimeError("private waiter detail")
+
+            fake.wait_for_reply = unknown
+            unknown_response = await call_service(
+                srv.config.socket_path,
+                request_envelope_v2(
+                    "wait_for_reply",
+                    {
+                        "context": context_v2_dict(),
+                        "thread_ts": THREAD_TS,
+                        "request_message_key": "asd-request-v2-service-wait",
+                        "expected_types": ["STOP"],
+                        "max_attempts": 1,
+                    },
+                ),
+            )
+            assert unknown_response == {
+                "ok": False,
+                "error": {"code": "INTERNAL_ERROR"},
+            }
+            assert "private waiter detail" not in repr(unknown_response)
+        finally:
+            await srv.close()
+
+    run(scenario())
+
+
 def test_v2_control_version_constant_is_explicit() -> None:
     assert service_module.CONTROL_VERSION_V2 == CONTROL_VERSION_V2_TEXT
 

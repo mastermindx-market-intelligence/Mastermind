@@ -34,6 +34,9 @@ from integrations.slack_agent_dialogue.engine_v2 import (
     DialogueEngineV2,
     PreparedMessageSend,
 )
+from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+    ActiveWaiterConflict,
+)
 
 CONTROL_VERSION = "mastermind.agent_dialogue_control.v1"
 CONTROL_VERSION_V2 = "mastermind.agent_dialogue_control.v2"
@@ -44,6 +47,7 @@ DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024
 
 ERROR_CODES = frozenset(
     {
+        "ACTIVE_WAITER_CONFLICT",
         "INTERNAL_ERROR",
         "PEER_CREDENTIALS_UNAVAILABLE",
         "PEER_DENIED",
@@ -667,6 +671,9 @@ class AgentDialogueService:
                 await self._error(writer, exc.code)
                 return
             except DialogueEngineError as exc:
+                await self._error(writer, exc.code)
+                return
+            except ActiveWaiterConflict as exc:
                 await self._error(writer, exc.code)
                 return
             except Exception:
