@@ -4,6 +4,7 @@ import dataclasses
 import json
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -36,7 +37,7 @@ from control_plane.executive_dialogue_observation import (
     wake_response_bytes,
 )
 from control_plane.session_targets import WakeRoute
-from control_plane.executive_runtime import Runtime
+from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.wake_events import mint_obligation
 from control_plane.wake_ledger import (
     LedgerPhase,
@@ -578,6 +579,8 @@ def _persist_dialogue_wake(
     *,
     candidate: CanonicalTerminalWakeCandidate,
     seed: str,
+    root_job_id: str | None = None,
+    source_workstream: str = "WS:CHAIRMAN-CONTROL-ROOM",
 ):
     obligation = mint_obligation(
         wake_kind="dialogue_turn_pending",
@@ -586,8 +589,8 @@ def _persist_dialogue_wake(
         declared_target_seat="ceo",
         job_id=candidate.job_id,
         attempt_id=candidate.attempt_id,
-        root_job_id=candidate.root_job_id,
-        source_workstream="WS:CHAIRMAN-CONTROL-ROOM",
+        root_job_id=root_job_id or candidate.root_job_id,
+        source_workstream=source_workstream,
         source_created_at="2026-09-03T01:00:00Z",
         emitted_at="2026-09-03T01:00:01Z",
     )
@@ -681,6 +684,159 @@ def test_runtime_canonical_terminal_wake_facade_owns_one_fixed_snapshot(
     assert event_count_after == event_count_before
 
 
+def test_extracted_terminal_history_owner_rejects_order_material_and_receipt_mutations(
+) -> None:
+    candidate = terminal_candidate()
+    command_base, material = observation_mod.terminal_return_event_material(candidate)
+    phase_spec = observation_mod.terminal_return_phase_spec(command_base)
+    phase_by_name = {
+        phase: (event_type, command_id)
+        for phase, event_type, command_id in phase_spec
+    }
+    valid_receipt = {
+        "action": "POSTED",
+        "message_key": candidate.message_key,
+        "fingerprint": "f" * 64,
+        "message_ts": "1787961600.000002",
+        "duplicate_timestamps": [],
+        "thread_ts": "1787961600.000001",
+        "parent_author_user_id": "U0RELAY001",
+        "parent_fingerprint": "a" * 64,
+    }
+
+    def event(
+        phase: str,
+        *,
+        payload: dict[str, object] | None = None,
+    ) -> SimpleNamespace:
+        event_type, command_id = phase_by_name[phase]
+        event_payload = dict(material)
+        if phase == "APPLIED":
+            event_payload["projection_receipt"] = dict(valid_receipt)
+        if payload is not None:
+            event_payload = payload
+        return SimpleNamespace(
+            event_type=event_type,
+            command_id=command_id,
+            aggregate_type="terminal_return_projection",
+            aggregate_id=candidate.attempt_id,
+            job_id=candidate.job_id,
+            attempt_id=candidate.attempt_id,
+            worker_id=candidate.worker_id,
+            payload=event_payload,
+        )
+
+    def inspect(
+        phases: list[str],
+        *,
+        overrides: dict[str, SimpleNamespace] | None = None,
+        row_command_overrides: dict[int, str] | None = None,
+    ) -> str | None:
+        events = {phase_by_name[phase][1]: event(phase) for phase in phases}
+        events.update(overrides or {})
+        rows = []
+        for index, phase in enumerate(phases, start=1):
+            event_type, command_id = phase_by_name[phase]
+            rows.append(
+                {
+                    "command_id": (row_command_overrides or {}).get(
+                        index - 1,
+                        command_id,
+                    ),
+                    "event_type": event_type,
+                    "event_id": index,
+                }
+            )
+
+        class Cursor:
+            def fetchall(self):
+                return rows
+
+        class Connection:
+            def execute(self, _sql, _parameters):
+                return Cursor()
+
+        runtime = SimpleNamespace(
+            store=SimpleNamespace(
+                get_event_by_command_id=lambda command_id, **_kwargs: events.get(
+                    command_id
+                )
+            )
+        )
+        return observation_mod.inspect_terminal_return_history(
+            runtime,
+            Connection(),
+            candidate=candidate,
+            material=material,
+        )
+
+    assert inspect([]) is None
+    assert inspect(["PREPARED"]) == "PREPARED"
+    assert inspect(["PREPARED", "ATTEMPTED", "APPLIED"]) == "APPLIED"
+
+    prepared_command = phase_by_name["PREPARED"][1]
+    applied_command = phase_by_name["APPLIED"][1]
+    material_drift = dict(material)
+    material_drift["job_id"] = "JOB-DRIFTED"
+    malformed_receipt = event("APPLIED")
+    malformed_receipt.payload = {
+        **material,
+        "projection_receipt": {
+            **valid_receipt,
+            "duplicate_timestamps": ["1787961600.000003"],
+        },
+    }
+    mutations = (
+        lambda: inspect(["PREPARED", "PREPARED"]),
+        lambda: inspect(["ATTEMPTED", "PREPARED"]),
+        lambda: inspect(["PREPARED", "APPLIED"]),
+        lambda: inspect(
+            ["PREPARED", "ATTEMPTED", "APPLIED"],
+            overrides={applied_command: malformed_receipt},
+        ),
+        lambda: inspect(
+            ["PREPARED"],
+            overrides={prepared_command: event("PREPARED", payload=material_drift)},
+        ),
+        lambda: inspect(
+            ["PREPARED"],
+            row_command_overrides={0: "terminal-return:unknown:prepared"},
+        ),
+    )
+    for mutation in mutations:
+        with pytest.raises(StateConflict):
+            mutation()
+
+
+@pytest.mark.parametrize(
+    ("row_count", "complete"),
+    ((0, True), (2, False)),
+)
+def test_runtime_terminal_owner_closes_zero_or_multiple_candidate_jobs(
+    row_count: int,
+    complete: bool,
+) -> None:
+    candidate = _terminal_wake_candidate(valid_parent())
+
+    class Cursor:
+        def fetchall(self):
+            return [{} for _ in range(row_count)]
+
+    class Connection:
+        def execute(self, _sql, _parameters):
+            return Cursor()
+
+    facts = observation_mod.runtime_canonical_terminal_facts(
+        SimpleNamespace(),
+        candidate,
+        Connection(),
+    )
+
+    assert facts.complete is complete
+    assert facts.active == ()
+    assert facts.terminal == ()
+
+
 def test_canonical_terminal_wake_read_is_exact_public_and_unambiguous(
     tmp_path: Path,
 ) -> None:
@@ -738,6 +894,7 @@ def test_canonical_terminal_wake_read_is_exact_public_and_unambiguous(
     assert result.terminal.source_owner == "executive_terminal_return"
     assert result.wake.source_owner == "wake_ledger"
     assert result.source_receipt.freshness == "SOURCE_EVIDENCE_TIME"
+    assert result.source_receipt.observed_at == result.terminal.terminal_at
     assert caller_snapshot_result.to_dict() == result.to_dict()
     assert replay.to_dict() == result.to_dict()
     assert event_count_after == event_count_before
@@ -790,6 +947,28 @@ def test_canonical_terminal_wake_read_is_exact_public_and_unambiguous(
             payload=event_payload_for(foreign_record),
             command_id=foreign_record.command_id,
         )
+    still_exact = read_canonical_terminal_wake(
+        runtime=runtime,
+        source_root_job_id=candidate.root_job_id,
+        candidate=candidate,
+        facts_provider=facts_provider,
+    )
+    assert still_exact.state == "RESOLVED"
+    assert still_exact.wake is not None
+    assert still_exact.wake.obligation_id == obligation.obligation_id
+
+    _persist_dialogue_wake(
+        runtime,
+        candidate=candidate,
+        seed="0",
+        root_job_id="JOB-998",
+    )
+    _persist_dialogue_wake(
+        runtime,
+        candidate=candidate,
+        seed="1",
+        source_workstream="WS:FOREIGN-WORKSTREAM",
+    )
     still_exact = read_canonical_terminal_wake(
         runtime=runtime,
         source_root_job_id=candidate.root_job_id,
