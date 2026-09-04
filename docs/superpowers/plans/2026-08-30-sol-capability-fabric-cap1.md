@@ -4,8 +4,8 @@
 **Hardening children:** `mastermind-sol-capability-fabric-cap1-r1-20260830-sol-001`, `mastermind-sol-capability-fabric-cap1-r2-20260830-sol-001`  
 **Parent:** `mastermind-sol-capability-fabric-20260830-sol-001`  
 **Protected pickup:** `mastermindx-market-intelligence/Mastermind@98bc7a71dcd70947c7a18eb5af7493a2f62a2571`  
-**Current compatible procedure at R2:** `mastermindx-market-intelligence/Mastermind@eccf0a3fae8b8597c2ad0bc4f830e31b220415d2`  
-**Cognition:** `COGNITION_ROUTE: CHAT_PRO_DEFAULT`  
+**Action-time compatible procedure for R2 repair:** `mastermindx-market-intelligence/Mastermind@3055b499b87db19730e9a724e34f07f0d0af8755`  
+**Cognition:** `COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT / CHAT_REASONING_MODE: NON_PRO_DEFAULT`  
 **State at candidate source:** `BUILT_NOT_PROVEN / PRODUCTION_INERT`
 
 ## 1. Observable mission
@@ -82,6 +82,7 @@ scopes per set   <= 128
 dependencies     <= 64
 source refs      <= 32
 issue codes      <= 64
+timestamp text   <= 32 ASCII characters
 ```
 
 The capability iterable is consumed incrementally and stops with a typed refusal as soon as the
@@ -130,7 +131,9 @@ issues
 capability. `EXCESS_SCOPE_PRESENT` is load-bearing in the canonical digest so a widened observed
 scope set cannot disappear from an otherwise identical packet.
 
-The digest is SHA-256 over canonical sorted JSON excluding the digest field itself.
+The digest is SHA-256 over canonical sorted JSON excluding the digest field itself. Timestamp text is
+normalized before projection, so offset spelling cannot create a second output or digest identity for
+the same instant.
 
 ## 6. Deterministic projection law
 
@@ -154,7 +157,16 @@ The digest is SHA-256 over canonical sorted JSON excluding the digest field itse
 - a **required** dependency in `REJECTED_BY_DESIGN` makes the top-level capability
   `REJECTED_BY_DESIGN / REFUSED`; it may not be laundered into generic `BROKEN` or availability;
 - an optional rejected dependency remains visible but does not refuse the parent capability;
-- `NOT_BUILT`, `SPEC_ONLY` and `BROKEN` cannot become available from OAuth scope or model prose;
+- required dependency adjudication preserves the fail-closed severity order
+  `REJECTED_BY_DESIGN > BROKEN > NOT_BUILT/DARK_OR_DISCONNECTED/SPEC_ONLY > PARTIAL/BUILT_NOT_PROVEN > availability unknown`;
+- required `SPEC_ONLY` is never serviceable, even when a contradictory `available=true` bit is present;
+  the parent remains `SPEC_ONLY / UNAVAILABLE` with both read and write serviceability false;
+- required `NOT_BUILT` or `DARK_OR_DISCONNECTED` remains definitively unavailable when its redundant
+  availability observation is null; unknown observation cannot mask known nonexistence/disconnection;
+- partial or built-not-proven dependency state remains visible as `PARTIAL` when availability is null,
+  while technical availability stays `UNKNOWN` and both serviceability flags remain false;
+- `NOT_BUILT`, `SPEC_ONLY`, `DARK_OR_DISCONNECTED` and `BROKEN` cannot become available from OAuth
+  scope or model prose;
 - source code without current live proof remains `BUILT_NOT_PROVEN`;
 - a read-only capability may become `PROVEN_LIVE` only from an explicit current live-proof fact whose
   `last_proven_at` is present and no later than envelope `observed_at`;
@@ -171,8 +183,8 @@ The digest is SHA-256 over canonical sorted JSON excluding the digest field itse
 - `required_write_scopes` outside `required_scopes`, or any nonempty write-only set on a read-only
   capability, is invalid input and fails closed;
 - excess ambient scopes are reported but never counted toward required-scope authority;
-- missing, broken, disconnected, partial or unknown required dependencies remain explicit and fail
-  closed;
+- missing, broken, disconnected, specification-only, partial or unknown required dependencies remain
+  explicit and fail closed at the precision supported by their source state;
 - unavailable observation never becomes a false-green empty default;
 - duplicate capability names or dependency names are input conflicts;
 - output order and digest are permutation-stable.
@@ -182,11 +194,26 @@ No score, probability, model ranking or inferred authority is used.
 ## 7. Data, time, null and correction law
 
 The caller supplies `observed_at`; the projector never calls the clock. Both `observed_at` and
-`last_proven_at`, when present, must be RFC3339 timestamps with timezones. Timestamp comparison uses
-their timezone-aware instants, not lexical order.
+`last_proven_at`, when present, must satisfy the same closed RFC3339 boundary:
 
-`observed_available=null` means unknown, not false or available. Missing facts remain typed missing.
-A future proof timestamp remains visible in output for diagnosis but cannot authorize promotion.
+```text
+YYYY-MM-DDTHH:MM:SS[.1-6 ASCII fractional digits](Z|+HH:MM|-HH:MM)
+```
+
+The exact input must be nonempty, contain no leading/trailing whitespace, use uppercase `T`/`Z`, and
+fit the 32-character ceiling. Basic dates/times, ISO week dates, space/lowercase separators, comma
+fractions, colonless or second-bearing offsets, over-precision fractions, invalid calendar/time values,
+and timezone-free values are rejected with one fixed payload-free `CapabilityProjectionError`; the
+raw untrusted timestamp is absent from the complete exception chain.
+
+Accepted timestamps are converted to UTC at the projector boundary and serialized as one canonical
+`...Z` representation, with either whole seconds or exactly six fractional digits. Timestamp
+comparison uses timezone-aware instants, not lexical order. Semantically equal offsets therefore yield
+byte-identical output and canonical digests.
+
+`observed_available=null` means unknown, not false or available. A null dependency availability bit
+cannot weaken a stronger owner-authored dependency state. Missing facts remain typed missing. A future
+proof timestamp remains visible in normalized output for diagnosis but cannot authorize promotion.
 
 A later corrected owner observation produces a new packet and digest. CAP1 keeps no history and
 rewrites no owner truth. Cross-session durability belongs to the owner’s existing records, not this
@@ -196,13 +223,26 @@ projector.
 
 Input identifiers, scopes, source references and issue codes are bounded. Known access-token,
 authorization-header, password, private-key and bearer-token shapes are rejected before projection.
-The result contains no raw exception, log, environment, OAuth token, provider account or credential.
+Timestamp grammar is ASCII-closed and cannot carry arbitrary payload text. The result contains no raw
+exception, log, environment, OAuth token, provider account or credential.
 
 A capability status is evidence, not organizational permission. `write_serviceable=true` still does
 not replace current Chairman intent, exact action target, prepared-action and current-source gates,
 or owner-native effect reconciliation.
 
 ## 9. RED→GREEN acceptance matrix
+
+The R2 repair used tests-first source identity:
+
+```text
+RED tests-only head: f8008f9aa3d736d0de15fa7c4f92672afdb62c53
+old source blob:     6daafc39fe51d37365eba61880a9f93750c5a441
+RED result:          13/13 new discriminators failed for the intended semantic reasons
+GREEN source head:   92ce8993ac44ce05bc3cfc9ad8612ad9fcd15c85
+GREEN source blob:   aba0f77e9a1faee194ef337469f78d424886c575
+```
+
+Acceptance includes:
 
 - built source without live proof remains `BUILT_NOT_PROVEN`;
 - current live read can project `PROVEN_LIVE` without implying write arming;
@@ -224,11 +264,19 @@ or owner-native effect reconciliation.
 - missing required dependency becomes `DARK_OR_DISCONNECTED`;
 - required rejected dependency becomes `REJECTED_BY_DESIGN / REFUSED`;
 - optional rejected dependency remains visible without refusing the parent;
-- partial dependency remains `PARTIAL / DEGRADED`;
-- unknown availability remains `UNKNOWN`;
+- partial dependency remains `PARTIAL / DEGRADED` only when technical availability is affirmatively
+  present;
+- required `SPEC_ONLY + available=true` remains non-serviceable `SPEC_ONLY / UNAVAILABLE`;
+- required `NOT_BUILT + available=null` and `DARK_OR_DISCONNECTED + available=null` remain definitive
+  `DARK_OR_DISCONNECTED / UNAVAILABLE`, not top-level `UNKNOWN`;
+- unknown availability remains `UNKNOWN` when no stronger state is known;
 - rejected surface remains `REJECTED_BY_DESIGN / REFUSED`;
 - duplicate capability generation and duplicate dependency fail closed;
 - permutation-stable output and digest;
+- seven permissive non-RFC3339 forms are rejected;
+- over-bound timestamp text is rejected before parsing;
+- malformed opaque timestamp text is absent from the full exception chain;
+- equivalent UTC/offset timestamps produce identical normalized output and digest;
 - secret-shaped source or issue refusal;
 - current `ExecutionCapabilityRegistry` remains the source owner and its production-disarmed write
   profile projects honestly;
@@ -242,6 +290,7 @@ Required exact-head proof:
 python -m pytest -q tests/test_sol_capability_status.py
 python -m pytest -q tests/test_executive_agent_capabilities.py
 python -m py_compile control_plane/sol_capability_status.py tests/test_sol_capability_status.py
+strict dependency/timestamp mutation controls
 full protected repository test and security checks
 exact three-path census
 independent exact-head review
@@ -254,5 +303,7 @@ and a real Chat call before this can become `PROVEN_LIVE` as a user capability.
 
 ## 11. Stop and successor boundary
 
-Stop after exact-head review and guarded source merge. Do not start S1, GH2, UI1 or any write
-capability arm from this carrier. No successor inherits START.
+Stop after exact-head review and guarded source merge. This carrier does not start, mutate or accept
+CAP-S1, GH2, GHP2, GHP3, RUN1, UI1 or any write-capability arm. No successor inherits START. Every
+final release decision must fresh-read protected source and the current exact branch/head/path census;
+this plan’s action-time SHA is evidence, not a permanent release pin.
