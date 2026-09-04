@@ -43,6 +43,7 @@
     paletteItems: [],
     paletteResults: [],
     paletteIndex: 0,
+    autonomy: null,
   };
 
   var LAST_DRAWER_OPENER = null;
@@ -1196,6 +1197,825 @@
     return locator;
   }
 
+  // autonomy --------------------------------------------------------------
+  // Presentation law for this section:
+  // - owed action and gate lead; event volume is never the headline;
+  // - a stale card is drawn as history and never as a live state;
+  // - a placement the projection marked not_observable is drawn as an absence,
+  //   never as an available capability;
+  // - every seat, gate and freshness word is source-owned; nothing is inferred.
+  var AU_SEAT_ORDER = ["chairman", "ceo", "coo", "worker", "unknown"];
+  var AU_SEAT_SHORT = { chairman: "You", ceo: "Sol", coo: "Fable", worker: "Worker", unknown: "None" };
+  var AU_TURN_HEADLINE = {
+    chairman: "Your turn",
+    ceo: "Sol's turn",
+    coo: "Fable's turn",
+    worker: "Worker's turn",
+    unknown: "No turn recorded",
+  };
+  var AU_TURN_REASON = {
+    blocker_targets_seat: "A recorded gate names this seat.",
+    agent_os_declared_blocker_targets_seat: "Agent OS declared this workstream blocked, naming this seat.",
+    attention_targets_seat: "A canonical attention fact names this seat.",
+    // Repair D (Sol addendum, 2026-09-03): the backend reason token is
+    // `worker_runtime_present` and names PRESENCE, never activity — this
+    // map keyed `worker_runtime_active`, which the backend never emits, so
+    // the row silently fell through to its default. The wording follows the
+    // token: a runtime is attached; its liveness is not provable here.
+    worker_runtime_present: "A worker runtime is attached to this work.",
+    no_owed_turn_signal: "No canonical source records whose move comes next.",
+  };
+  var AU_ACTIONABILITY = {
+    actionable: "Live — this can be acted on now.",
+    stale_history: "History — every contributing source is stale.",
+    freshness_unknown: "Freshness unknown — not shown as live.",
+    query_refused: "A canonical read was refused.",
+    no_owed_turn_signal: "Nobody is recorded as owing the next move.",
+    source_failure: "A contributing source failed.",
+  };
+  var AU_PLACEMENT = {
+    EFFECT_UNKNOWN: "Effect not confirmed",
+    DELIVERED_UNACKNOWLEDGED: "Delivered, not acknowledged",
+    TARGET_ACKNOWLEDGED: "Target acknowledged",
+    SOURCE_RESOLVED: "Source resolved",
+    WAITING_CAPACITY: "Waiting for capacity",
+    ELIGIBLE_CANDIDATE_OBSERVED: "Eligible candidate observed",
+    ATTEMPT_WORKER_RUNTIMEBINDING_COMMITTED: "Attempt binding committed",
+    ACTIVATION_REQUESTED: "Activation requested",
+    ACTIVATION_CONFIRMED: "Activation confirmed",
+    ACTIVATION_REFUSED_PRE_SUBMIT: "Activation refused before submit",
+  };
+  var AU_PLACEMENT_VARIANT = {
+    EFFECT_UNKNOWN: "is-danger",
+    ACTIVATION_REFUSED_PRE_SUBMIT: "is-danger",
+    DELIVERED_UNACKNOWLEDGED: "is-brass",
+    TARGET_ACKNOWLEDGED: "is-slate",
+    SOURCE_RESOLVED: "is-slate",
+    ACTIVATION_CONFIRMED: "is-slate",
+    ACTIVATION_REQUESTED: "is-slate",
+    ATTEMPT_WORKER_RUNTIMEBINDING_COMMITTED: "is-slate",
+    ELIGIBLE_CANDIDATE_OBSERVED: "is-slate",
+    WAITING_CAPACITY: "is-dim",
+  };
+  var AU_WAKE = {
+    DELIVERED_UNACKNOWLEDGED: "Delivered, not acknowledged",
+    TARGET_ACKNOWLEDGED: "Target acknowledged",
+    SOURCE_RESOLVED: "Source resolved",
+  };
+  var AU_QUERY_CHIP = {
+    degraded: { text: "READ DEGRADED", variant: "is-danger" },
+    refused: { text: "READ REFUSED", variant: "is-danger" },
+    unknown: { text: "READ UNKNOWN", variant: "is-dim" },
+  };
+  var AU_FRESHNESS_CHIP = {
+    stale: { text: "STALE SOURCES", variant: "is-dim" },
+    unknown: { text: "FRESHNESS UNKNOWN", variant: "is-dim" },
+  };
+
+  // Dispatch-consumption groundwork (AD-CR1A commissioning packet,
+  // 2026-09-03). Mirrors control_plane.autonomy_control_room_projection.
+  // DISPATCH_STATES exactly, one entry per closed-vocabulary token —
+  // read-only, additive. `card.dispatch` IS populated: the compositor calls
+  // attach_dispatch_consumption, so every card carries a dispatch row. (An
+  // earlier revision of this comment said the opposite; it was written while
+  // the compositor was out of scope and was left standing after the wiring
+  // landed, which is exactly the kind of stale comment that tells a reviewer
+  // a live behaviour cannot happen.)
+  //
+  // The proof chain remains visible as three independent readings. The
+  // responsibility mapper owns the Runtime root, C2 owns the exact carrier,
+  // and W3C owns canonical terminal/Wake truth. On the current protected base
+  // C2's positive reader is owner-held, which keeps W3C unavailable rather
+  // than letting this surface infer a carrier from job-tree shape. Any unsafe
+  // state suppresses the owed-action Open control; Detail stays reachable.
+  // Every function below remains undefined-safe.
+  var AU_DISPATCH = {
+    WAITING_CAPACITY: "Waiting for capacity",
+    RECEIVER_SELECTED: "Receiver selected",
+    DELIVERY_SENT: "Delivery sent",
+    PICKUP_ACKNOWLEDGED: "Pickup acknowledged",
+    STARTED: "Started",
+    RETURNED: "Returned — awaiting Sol",
+    CONTINUED: "Continued",
+    STOPPED: "Stopped",
+    DELIVERY_UNCONSUMED: "Delivered, never picked up",
+    WATCH_UNPROVEN: "Watch not proven",
+    RUNTIME_BINDING_RECONCILIATION_REQUIRED: "Binding needs reconciliation",
+    EFFECT_UNKNOWN: "Effect not confirmed",
+    UNKNOWN: "Dispatch state unknown",
+  };
+  var AU_DISPATCH_VARIANT = {
+    WAITING_CAPACITY: "is-dim",
+    RECEIVER_SELECTED: "is-slate",
+    DELIVERY_SENT: "is-slate",
+    PICKUP_ACKNOWLEDGED: "is-slate",
+    STARTED: "is-slate",
+    RETURNED: "is-brass",
+    CONTINUED: "is-ok",
+    STOPPED: "is-slate",
+    DELIVERY_UNCONSUMED: "is-danger",
+    WATCH_UNPROVEN: "is-danger",
+    RUNTIME_BINDING_RECONCILIATION_REQUIRED: "is-danger",
+    EFFECT_UNKNOWN: "is-danger",
+    UNKNOWN: "is-dim",
+  };
+  // The five states the FROZEN SPEC names verbatim: "No owed-action Open
+  // control may render for a stale, unacknowledged, watch-unproven,
+  // binding-reconciliation or effect-unknown state." UNKNOWN is included
+  // defensively — the same "never fabricate a success" law this whole
+  // surface exists to enforce.
+  var AU_DISPATCH_UNSAFE = {
+    DELIVERY_UNCONSUMED: true,
+    WATCH_UNPROVEN: true,
+    RUNTIME_BINDING_RECONCILIATION_REQUIRED: true,
+    EFFECT_UNKNOWN: true,
+    UNKNOWN: true,
+  };
+  var AU_RUNTIME_ROOT = {
+    RESOLVED: { text: "ROOT RESOLVED", variant: "is-ok" },
+    UNKNOWN: { text: "ROOT UNKNOWN", variant: "is-dim" },
+    CONFLICT: { text: "ROOT CONFLICT", variant: "is-danger" },
+  };
+  var AU_CARRIER = {
+    RESOLVED: { text: "C2 CARRIER RESOLVED", variant: "is-ok" },
+    OWNER_HELD: { text: "C2 OWNER HELD", variant: "is-dim" },
+    UNKNOWN: { text: "C2 CARRIER UNKNOWN", variant: "is-dim" },
+  };
+  var AU_W3C = {
+    RESOLVED: { text: "W3C RESOLVED", variant: "is-ok" },
+    ABSENT: { text: "W3C ABSENT", variant: "is-dim" },
+    UNAVAILABLE: { text: "W3C UNAVAILABLE", variant: "is-dim" },
+    CONFLICT: { text: "W3C CONFLICT", variant: "is-danger" },
+    AMBIGUOUS: { text: "W3C AMBIGUOUS", variant: "is-danger" },
+    EFFECT_UNKNOWN: { text: "W3C EFFECT UNKNOWN", variant: "is-danger" },
+  };
+
+  function auRuntimeRootChip(card) {
+    var spec = AU_RUNTIME_ROOT[card.runtime_root_state];
+    return spec ? chip(spec.text, spec.variant) : null;
+  }
+
+  function auCarrierChip(card) {
+    var carrier = (card.dispatch || {}).carrier;
+    var spec = carrier && AU_CARRIER[carrier.state];
+    return spec ? chip(spec.text, spec.variant) : null;
+  }
+
+  function auW3cChip(card) {
+    var w3c = (card.dispatch || {}).w3c;
+    var spec = w3c && AU_W3C[w3c.state];
+    return spec ? chip(spec.text, spec.variant) : null;
+  }
+
+  // True when this card's dispatch read is one of the five named-unsafe
+  // states, or when Law 9's "stale/unknown contributing source" made the
+  // read historical. False (never suppresses anything) when `card.dispatch`
+  // is absent — a card with no dispatch evidence supplied is unaffected by
+  // this gate until the projection is actually wired in.
+  function auDispatchUnsafe(card) {
+    var dispatch = card.dispatch;
+    if (!dispatch) return false;
+    if (AU_DISPATCH_UNSAFE[dispatch.dispatch_state] === true) return true;
+    return dispatch.historical === true;
+  }
+
+  // Visible dispatch-state chip — the whole point of this projection: make
+  // "was this actually picked up" a fact the Chairman can SEE, not infer.
+  // Returns null (renders nothing) when no dispatch evidence exists yet.
+  function auDispatchChip(card) {
+    var dispatch = card.dispatch;
+    if (!dispatch || isBlank(dispatch.dispatch_state)) return null;
+    var value = String(dispatch.dispatch_state);
+    var text = AU_DISPATCH[value] || value.replace(/_/g, " ");
+    return chip(text.toUpperCase(), AU_DISPATCH_VARIANT[value] || "is-dim");
+  }
+
+  function auWords(map, code, fallback) {
+    if (isBlank(code)) return fallback;
+    return map[code] || String(code).replace(/_/g, " ");
+  }
+
+  function auIsHistory(card) {
+    return card.actionability_reason === "stale_history" || card.freshness === "stale";
+  }
+
+  function auIsHold(card) {
+    var placement = card.placement_state || {};
+    var worker = card.current_worker || {};
+    return placement.value === "EFFECT_UNKNOWN" || worker.effect_state === "effect_unknown";
+  }
+
+  function auOwedSeat(card) {
+    var seat = (card.owed_turn || {}).seat;
+    return AU_SEAT_SHORT[seat] ? seat : "unknown";
+  }
+
+  // Reuses the address-book law exactly: one unambiguous, openable destination
+  // for the seat that owes the move, or nothing at all. A hold card (see
+  // auIsHold) never yields a binding: the gate already tells the Chairman
+  // the effect is unconfirmed, so no provider-actuating control may render
+  // here either, regardless of who owes the turn.
+  function auOwedBinding(card) {
+    if (REMOTE_READ_ONLY) return null;
+    if (auIsHold(card)) return null;
+    // AD-CR1A dispatch-consumption groundwork, 2026-09-03: the FROZEN SPEC
+    // names the same law auIsHold already enforces for EFFECT_UNKNOWN
+    // placement, extended to the dispatch read — "No owed-action Open
+    // control may render for a stale, unacknowledged, watch-unproven,
+    // binding-reconciliation or effect-unknown state." A no-op today
+    // (dispatch is populated by the compositor; an UNKNOWN state is
+    // unsafe and suppresses the control by design)
+    if (auDispatchUnsafe(card)) return null;
+    // Repair B (Sol addendum 2, 2026-09-03): this suppressed only the
+    // EFFECT_UNKNOWN hold, so a stale/history card still offered
+    // "Open Sol/Fable/Worker" built from stale routing evidence while the
+    // same card read HISTORY / NOT ACTIONABLE. An owed-action jump is a
+    // present-tense instruction; only a currently actionable card may make
+    // one. Detail stays available for forensic inspection, and the global
+    // Surfaces address book is untouched.
+    if (card.is_actionable !== true) return null;
+    var seat = auOwedSeat(card);
+    if (seat === "unknown") return null;
+    var work = STATE.workByRef[card.responsibility_ref];
+    var binding = uniqueBinding(work, seat);
+    if (!binding) return null;
+    return bindingConfidence(binding).openable ? binding : null;
+  }
+
+  function auTurnTrack(seat) {
+    var track = el("div", { className: "ccr-au-track" });
+    AU_SEAT_ORDER.forEach(function (name) {
+      var cls = "ccr-au-seat";
+      if (name === "unknown") cls += " is-open";
+      if (name === seat) cls += " is-owed";
+      var node = el("div", { className: cls });
+      node.appendChild(el("span", { text: AU_SEAT_SHORT[name], className: "ccr-au-seat-name" }));
+      track.appendChild(node);
+    });
+    return track;
+  }
+
+  function auReceiptLine(card) {
+    var rows = card.source_receipts || [];
+    if (!rows.length) return "No contributing source recorded";
+    return rows.length + (rows.length === 1 ? " source · weakest " : " sources · weakest ") + safeText(card.freshness);
+  }
+
+  function auRuntimeWords(runtime, absent) {
+    if (!runtime) return absent;
+    var parts = [safeText(runtime.worker_id, "worker unnamed")];
+    if (!isBlank(runtime.status)) parts.push(String(runtime.status));
+    if (!isBlank(runtime.attempt_id)) parts.push("attempt " + runtime.attempt_id);
+    if (!isBlank(runtime.capacity_state)) parts.push("capacity " + runtime.capacity_state);
+    return parts.join(" · ");
+  }
+
+  function auPlacementChip(card) {
+    var placement = card.placement_state || {};
+    if (placement.observable !== true || placement.value === "not_observable" || isBlank(placement.value)) {
+      return chip("PLACEMENT NOT OBSERVABLE", "is-dim");
+    }
+    var value = String(placement.value);
+    return chip((AU_PLACEMENT[value] || value.replace(/_/g, " ")).toUpperCase(), AU_PLACEMENT_VARIANT[value] || "is-slate");
+  }
+
+  function auMarks(card) {
+    var marks = el("div", { className: "ccr-au-marks" });
+    if (card.chairman_decision_required === true) marks.appendChild(chip("YOUR CALL", "is-brass"));
+    if (card.is_actionable === true && !auIsHistory(card)) marks.appendChild(chip("LIVE", "is-slate"));
+    else if (auIsHistory(card)) marks.appendChild(chip("HISTORY", "is-dim"));
+    else marks.appendChild(chip("NOT ACTIONABLE", "is-dim"));
+    marks.appendChild(auPlacementChip(card));
+    var dispatchChip = auDispatchChip(card);
+    if (dispatchChip) marks.appendChild(dispatchChip);
+    var rootChip = auRuntimeRootChip(card);
+    if (rootChip) marks.appendChild(rootChip);
+    var carrierChip = auCarrierChip(card);
+    if (carrierChip) marks.appendChild(carrierChip);
+    var w3cChip = auW3cChip(card);
+    if (w3cChip) marks.appendChild(w3cChip);
+    var freshness = AU_FRESHNESS_CHIP[card.freshness];
+    if (freshness) marks.appendChild(chip(freshness.text, freshness.variant));
+    var status = AU_QUERY_CHIP[card.query_status];
+    if (status) marks.appendChild(chip(status.text, status.variant));
+    if ((card.disagreements || []).length) marks.appendChild(chip("SOURCE DRIFT", "is-danger"));
+    return marks;
+  }
+
+  // A declared_blocker is plain data Agent OS itself recorded — never a
+  // Steward-owned gate (card.blocker) and never merged with one. It is
+  // rendered as its own, distinctly labelled note so the Chairman can
+  // always tell which system is making the claim.
+  function auDeclaredBlockerNote(declared) {
+    var note = el("div", { className: "ccr-au-declared" });
+    note.appendChild(el("span", { text: "Agent OS declared", className: "ccr-au-declared-label" }));
+    note.appendChild(el("p", {
+      text: safeText(declared.explanation, "Agent OS recorded a blocker without an explanation."),
+      className: "ccr-au-declared-text",
+    }));
+    var seatWords = declared.target_seat
+      ? safeText(AU_SEAT_SHORT[declared.target_seat], safeText(declared.target_seat))
+      : "no seat named";
+    note.appendChild(el("p", {
+      text: safeText(declared.code) + " · holds " + seatWords,
+      className: "ccr-au-declared-code",
+    }));
+    return note;
+  }
+
+  function auRow(card) {
+    var seat = auOwedSeat(card);
+    var cls = "ccr-au-row";
+    if (card.chairman_decision_required === true) cls += " is-decision";
+    else if (seat === "ceo" || seat === "coo") cls += " is-owed-person";
+    else if (seat === "worker") cls += " is-owed-machine";
+    if (auIsHistory(card)) cls += " is-history";
+    if (auIsHold(card)) cls += " is-hold";
+    var row = el("article", { className: cls, attrs: { tabindex: "0" } });
+
+    var id = el("div", { className: "ccr-au-id" });
+    id.appendChild(el("div", { text: safeText(card.title, "Untitled responsibility"), className: "ccr-au-title" }));
+    id.appendChild(el("div", { text: safeText(card.responsibility_ref), className: "ccr-au-ref" }));
+    var stateWords = [
+      AU_SEAT_SHORT[card.accountable_seat] ? "accountable " + AU_SEAT_SHORT[card.accountable_seat] : "",
+      isBlank(card.state) ? "no recorded state" : String(card.state),
+    ].filter(function (part) { return part !== ""; }).join(" · ");
+    id.appendChild(el("div", { text: stateWords, className: "ccr-au-state" }));
+    row.appendChild(id);
+
+    var turn = el("div", { className: "ccr-au-turn" });
+    turn.appendChild(el("span", { text: "Whose turn", className: "ccr-au-label" }));
+    turn.appendChild(el("p", {
+      text: AU_TURN_HEADLINE[seat],
+      className: seat === "unknown" ? "ccr-au-turn-name is-unknown" : "ccr-au-turn-name",
+    }));
+    turn.appendChild(auTurnTrack(seat));
+    turn.appendChild(el("p", {
+      text: auWords(AU_TURN_REASON, (card.owed_turn || {}).reason, "No reason recorded."),
+      className: "ccr-au-turn-reason",
+    }));
+    row.appendChild(turn);
+
+    var read = el("div", { className: "ccr-au-read" });
+    var blocker = card.blocker || null;
+    var gate = el("div", { className: "ccr-au-gate" });
+    gate.appendChild(el("span", { text: "Gate", className: "ccr-au-label" }));
+    if (blocker) {
+      gate.appendChild(el("p", { text: safeText(blocker.explanation, "A gate is recorded without an explanation."), className: "ccr-au-gate-text" }));
+      gate.appendChild(el("p", {
+        text: safeText(blocker.code) + " · holds " + safeText(AU_SEAT_SHORT[blocker.target_seat], safeText(blocker.target_seat)),
+        className: "ccr-au-gate-code",
+      }));
+    } else {
+      gate.appendChild(el("p", { text: "No recorded gate. Conditions are still being watched.", className: "ccr-au-gate-text is-quiet" }));
+    }
+    if (card.declared_blocker) gate.appendChild(auDeclaredBlockerNote(card.declared_blocker));
+    if (auIsHold(card)) {
+      gate.appendChild(el("p", {
+        text: "Effect not confirmed — retry and failover are not permitted until a canonical source reads the effect.",
+        className: "ccr-au-hold",
+      }));
+    }
+    read.appendChild(gate);
+
+    var onit = el("div", { className: "ccr-au-onit" });
+    onit.appendChild(el("span", { text: "On it", className: "ccr-au-label" }));
+    onit.appendChild(el("p", {
+      text: "worker · " + auRuntimeWords(card.current_worker, "no worker runtime recorded"),
+      className: card.current_worker ? "ccr-au-mono" : "ccr-au-mono is-quiet",
+    }));
+    onit.appendChild(el("p", {
+      text: "sol target · " + auRuntimeWords(card.current_sol_target, "no Sol target recorded"),
+      className: card.current_sol_target ? "ccr-au-mono" : "ccr-au-mono is-quiet",
+    }));
+    onit.appendChild(el("p", { text: auReceiptLine(card), className: "ccr-au-mono is-quiet" }));
+    read.appendChild(onit);
+    row.appendChild(read);
+
+    var right = el("div", { className: "ccr-au-right" });
+    right.appendChild(auMarks(card));
+    var actions = el("div", { className: "ccr-au-actions" });
+    var openBtn = button("Detail", "ccr-open-button", function (event) {
+      event.stopPropagation();
+      openAutonomyDetail(card, openBtn);
+    });
+    actions.appendChild(openBtn);
+    var binding = auOwedBinding(card);
+    if (binding) actions.appendChild(openBindingButton(binding, "Open " + AU_SEAT_SHORT[auOwedSeat(card)]));
+    right.appendChild(actions);
+    row.appendChild(right);
+
+    row.addEventListener("click", function () { openAutonomyDetail(card, row); });
+    row.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openAutonomyDetail(card, row);
+      }
+    });
+    return row;
+  }
+
+  function auLedger(projection) {
+    // Repair C (Sol addendum 3, 2026-09-03): `owed_by_seat` counts EVERY
+    // recorded responsibility, including pure history. On the real all-stale
+    // packet the ledger therefore showed seat counts and lit the Chairman
+    // cell "is-yours" while the reading beside it said history 40 / live 0.
+    // The ledger is a CURRENT-ACTION surface, so its per-seat turns are
+    // derived from actionable cards only. Nothing is erased: counts.stale,
+    // counts.total and each card's historical owed turn and receipts are
+    // unchanged and still inspectable on the cards themselves.
+    var counts = projection.counts || {};
+    var owed = {};
+    (projection.responsibilities || []).forEach(function (card) {
+      if (!card || card.is_actionable !== true) return;
+      var seat = card.owed_turn && card.owed_turn.seat ? card.owed_turn.seat : "unknown";
+      owed[seat] = (typeof owed[seat] === "number" ? owed[seat] : 0) + 1;
+    });
+    var ledger = el("section", { className: "ccr-au-ledger" });
+
+    var track = el("div", { className: "ccr-au-ledger-track" });
+    AU_SEAT_ORDER.forEach(function (seat) {
+      var value = typeof owed[seat] === "number" ? owed[seat] : 0;
+      var cls = "ccr-au-ledger-cell";
+      if (seat === "chairman" && value > 0) cls += " is-yours";
+      if (seat === "unknown") cls += " is-open";
+      if (value === 0) cls += " is-zero";
+      var cell = el("div", { className: cls });
+      cell.appendChild(el("div", { text: String(value), className: "ccr-au-ledger-count" }));
+      cell.appendChild(el("div", { text: seat === "unknown" ? "No seat" : AU_SEAT_SHORT[seat], className: "ccr-au-ledger-name" }));
+      track.appendChild(cell);
+    });
+    ledger.appendChild(track);
+
+    var reading = el("div", { className: "ccr-au-reading" });
+    [
+      // "gated" stays the Steward-owned block count (card.blocker !=
+      // null) exactly as before.  "declared" is a SEPARATE count of
+      // Agent-OS-declared blocks (card.declared_blocker plus a declared
+      // block on an unmapped row) — never merged into "gated" — so the
+      // Chairman can never read "0 gated" while a declared block is
+      // visible on a card or unmapped row directly beneath the ledger.
+      ["live", counts.actionable],
+      ["history", counts.stale],
+      ["gated", counts.blocked],
+      ["declared", counts.declared_blocked],
+      ["carried", counts.total],
+    ].forEach(function (pair) {
+      var isDeclared = pair[0] === "declared" && typeof pair[1] === "number" && pair[1] > 0;
+      var item = el("span", { className: "ccr-au-reading-item" + (isDeclared ? " is-declared" : "") });
+      item.appendChild(el("strong", { text: typeof pair[1] === "number" ? String(pair[1]) : "—" }));
+      item.appendChild(el("span", { text: pair[0] }));
+      reading.appendChild(item);
+    });
+    ledger.appendChild(reading);
+    return ledger;
+  }
+
+  function auDecisions(projection, byRef) {
+    var refs = projection.chairman_decisions || [];
+    var band = el("section", { className: refs.length ? "ccr-au-decisions ccr-has-items" : "ccr-au-decisions" });
+    var head = el("div", { className: "ccr-au-decisions-head" });
+    head.appendChild(el("p", { text: "Chairman", className: "ccr-section-eyebrow" }));
+    head.appendChild(el("h3", { text: "Only you can decide" }));
+    head.appendChild(el("span", { text: String(refs.length), className: "ccr-count" }));
+    band.appendChild(head);
+
+    if (!refs.length) {
+      band.appendChild(el("p", { text: "Nothing here needs your decision. Every recorded turn belongs to an actor that can proceed on its own.", className: "ccr-empty-line" }));
+      return band;
+    }
+    var list = el("ul", { className: "ccr-au-decision-list" });
+    refs.forEach(function (ref) {
+      var card = byRef[ref] || null;
+      var li = el("li", { className: "ccr-au-decision" });
+      var copy = el("div");
+      copy.appendChild(el("div", { text: card ? safeText(card.title, ref) : String(ref), className: "ccr-au-decision-title" }));
+      copy.appendChild(el("div", {
+        text: card ? safeText(card.chairman_decision_reason, "Reason not recorded.") : "This reference is not in the loaded responsibility list.",
+        className: "ccr-au-decision-reason",
+      }));
+      copy.appendChild(el("div", { text: String(ref), className: "ccr-au-ref" }));
+      li.appendChild(copy);
+      if (card) {
+        var review = button("Review", "ccr-open-button", function (event) {
+          event.stopPropagation();
+          openAutonomyDetail(card, review);
+        });
+        li.appendChild(review);
+      }
+      list.appendChild(li);
+    });
+    band.appendChild(list);
+    return band;
+  }
+
+  function auGapFold(projection) {
+    var failures = projection.source_failures || [];
+    var issues = projection.issues || [];
+    var unmapped = projection.unmapped_responsibilities || [];
+    // readGaps counts sources that failed to answer at all. total additionally
+    // counts suppressed (unmapped-owner) workstreams, because a surface
+    // carrying hidden workstreams must never summarise itself as zero and
+    // must never claim every source answered — that would be false even
+    // though no read literally failed.
+    var readGaps = failures.length + issues.length;
+    var total = readGaps + unmapped.length;
+    var fold = el("details", { className: "ccr-fold ccr-au-gaps" });
+    // When the only anomaly is suppressed workstreams (no read failures or
+    // issues), the fold must not stay collapsed-by-default: that is exactly
+    // the state that must never read as silence.
+    if (!readGaps && unmapped.length) fold.open = true;
+    var summary = el("summary");
+    summary.appendChild(el("span", { text: "What could not be read" }));
+    summary.appendChild(el("span", { text: String(total), className: "ccr-count" }));
+    fold.appendChild(summary);
+    var wrap = el("div");
+    wrap.appendChild(el("p", {
+      text: total
+        ? "These reads did not answer, or workstreams were hidden below. Losing a source removes detail; it never changes what the canonical sources above already recorded."
+        : "Every contributing source answered.",
+      className: "ccr-au-gap-note",
+    }));
+    if (readGaps) {
+      var list = el("ul", { className: "ccr-au-gap-list" });
+      failures.forEach(function (row) {
+        var li = el("li", { className: "ccr-row" });
+        li.appendChild(el("span", {
+          text: safeText(row.owner) + " · " + safeText(row.code) + " · " + safeText(row.explanation, "no explanation") + " · " + safeText(row.source_ref),
+          className: "ccr-row-title ccr-row-id",
+        }));
+        li.appendChild(chip("SOURCE FAILED", "is-danger"));
+        list.appendChild(li);
+      });
+      issues.forEach(function (row) {
+        var li = el("li", { className: "ccr-row" });
+        li.appendChild(el("span", {
+          text: safeText(row.responsibility_ref, "snapshot-wide") + " · " + safeText(row.code) + " · " + safeText(row.message, "no message"),
+          className: "ccr-row-title ccr-row-id",
+        }));
+        li.appendChild(chip("ISSUE", "is-dim"));
+        list.appendChild(li);
+      });
+      wrap.appendChild(list);
+    }
+    // Not a source failure and not an alarm: a workstream whose recorded
+    // owner is not a recognized seat is simply not shown as a card. Render
+    // nothing when there are none.
+    if (unmapped.length) {
+      wrap.appendChild(el("p", {
+        text: "These workstreams are not shown as responsibility cards because their recorded owner is not a recognized seat. This does not affect any responsibility shown above.",
+        className: "ccr-au-gap-note",
+      }));
+      var unmappedList = el("ul", { className: "ccr-au-gap-list" });
+      unmapped.forEach(function (row) {
+        var li = el("li", { className: "ccr-row" });
+        li.appendChild(el("span", {
+          text: safeText(row.responsibility_ref, "snapshot-wide") + " · " + safeText(row.reason, "owner_not_a_recognized_seat"),
+          className: "ccr-row-title ccr-row-id",
+        }));
+        li.appendChild(chip("NOT MAPPED", "is-dim"));
+        unmappedList.appendChild(li);
+      });
+      wrap.appendChild(unmappedList);
+    }
+    fold.appendChild(wrap);
+    return fold;
+  }
+
+  function auReceiptFold(name, rows) {
+    if (!rows || !rows.length) return null;
+    var fold = el("details", { className: "ccr-fold" });
+    var summary = el("summary");
+    summary.appendChild(el("span", { text: name }));
+    summary.appendChild(el("span", { text: String(rows.length), className: "ccr-count" }));
+    fold.appendChild(summary);
+    var list = el("ul");
+    rows.forEach(function (row) {
+      list.appendChild(el("li", {
+        text: safeText(row.owner) + " · " + safeText(row.ref) + " · " + safeText(row.observed_at, "no observed time") + " · " + safeText(row.freshness),
+        className: "ccr-row ccr-row-id",
+      }));
+    });
+    fold.appendChild(list);
+    return fold;
+  }
+
+  function auRuntimeRail(node, runtime, absent) {
+    if (!runtime) { detailLine(node, absent, true); return; }
+    [
+      ["worker", runtime.worker_id], ["attempt", runtime.attempt_id], ["status", runtime.status],
+      ["session alias", runtime.session_alias], ["runtime binding", runtime.runtime_binding_id],
+      ["binding generation", runtime.binding_generation], ["continuation", runtime.continuation_state],
+      ["effect", runtime.effect_state], ["capacity", runtime.capacity_state],
+      ["previous attempt", runtime.previous_attempt_id], ["movement reason", runtime.movement_reason_code],
+    ].forEach(function (pair) {
+      if (!isBlank(pair[1])) detailLine(node, pair[0] + " " + pair[1], true);
+    });
+  }
+
+  function renderAutonomyDetail(card) {
+    var seat = auOwedSeat(card);
+    document.getElementById("ccr-detail-ref").textContent = "RESPONSIBILITY · " + safeText(card.responsibility_ref).toUpperCase();
+    document.getElementById("ccr-detail-title").textContent = safeText(card.title, "Untitled responsibility");
+    var body = document.getElementById("ccr-detail-body");
+    clear(body);
+
+    var summary = el("section", { className: "ccr-detail-summary" });
+    summary.appendChild(el("span", { text: "Whose turn", className: "ccr-detail-next-label" }));
+    summary.appendChild(el("p", { text: AU_TURN_HEADLINE[seat], className: "ccr-detail-next" }));
+    summary.appendChild(el("p", {
+      text: auWords(AU_TURN_REASON, (card.owed_turn || {}).reason, "No reason recorded."),
+      className: "ccr-au-detail-sub",
+    }));
+    body.appendChild(summary);
+
+    if (auIsHold(card)) {
+      body.appendChild(el("p", {
+        text: "Effect not confirmed — retry and failover are not permitted until a canonical source reads the effect.",
+        className: "ccr-au-hold",
+      }));
+    }
+
+    var rails = el("div", { className: "ccr-detail-rails" });
+    detailRail(rails, "Reading", function (node) {
+      detailLine(node, auWords(AU_ACTIONABILITY, card.actionability_reason, "No actionability reason recorded."), false);
+      detailLine(node, "freshness " + safeText(card.freshness) + " · read " + safeText(card.query_status), true);
+      if (card.chairman_decision_required === true) {
+        detailLine(node, safeText(card.chairman_decision_reason, "Chairman decision required; reason not recorded."), false);
+      }
+    });
+    detailRail(rails, "Gate", function (node) {
+      var blocker = card.blocker || null;
+      if (blocker) {
+        detailLine(node, safeText(blocker.explanation, "A gate is recorded without an explanation."), false);
+        detailLine(node, "code " + safeText(blocker.code) + " · holds " + safeText(AU_SEAT_SHORT[blocker.target_seat], safeText(blocker.target_seat)) + " · effect " + safeText(blocker.effect_state), true);
+      } else if (!card.declared_blocker) {
+        detailLine(node, "No recorded gate. Conditions are still being watched.", false);
+      }
+      var declaredBlocker = card.declared_blocker || null;
+      if (declaredBlocker) {
+        detailLine(node, "Agent OS declared: " + safeText(declaredBlocker.explanation, "no explanation recorded"), false);
+        var seatWords = declaredBlocker.target_seat
+          ? safeText(AU_SEAT_SHORT[declaredBlocker.target_seat], safeText(declaredBlocker.target_seat))
+          : "no seat named";
+        detailLine(node, "code " + safeText(declaredBlocker.code) + " · holds " + seatWords, true);
+      }
+    });
+    detailRail(rails, "Placement", function (node) {
+      var placement = card.placement_state || {};
+      if (placement.observable !== true || placement.value === "not_observable" || isBlank(placement.value)) {
+        detailLine(node, "Not observable from canonical sources.", false);
+        detailLine(node, "reason " + safeText(placement.reason, "not recorded"), true);
+      } else {
+        detailLine(node, AU_PLACEMENT[placement.value] || String(placement.value).replace(/_/g, " "), false);
+        detailLine(node, "token " + safeText(placement.value) + " · reason " + safeText(placement.reason, "not recorded"), true);
+      }
+      detailLine(node, "wake " + (AU_WAKE[card.wake_outcome] || "not observable"), true);
+    });
+    detailRail(rails, "Dispatch proof", function (node) {
+      var dispatch = card.dispatch || {};
+      var carrier = dispatch.carrier || null;
+      var w3c = dispatch.w3c || null;
+      var evidence = dispatch.evidence || {};
+      detailLine(node, "Runtime root " + safeText(card.runtime_root_state, "UNKNOWN"), false);
+      detailLine(node, "dispatch " + safeText(dispatch.dispatch_state, "UNKNOWN") + " · " + safeText(dispatch.reason, "reason not recorded"), true);
+      if (!isBlank(evidence.runtime_generation_state)) {
+        detailLine(node, "Runtime generation " + safeText(evidence.runtime_generation_state, "UNKNOWN"), true);
+        detailLine(node, "before " + safeText(evidence.runtime_generation_before, "not recorded"), true);
+        detailLine(node, "after " + safeText(evidence.runtime_generation_after, "not recorded"), true);
+      }
+      if (carrier) {
+        detailLine(node, "C2 carrier " + safeText(carrier.state, "UNKNOWN") + " · " + safeText(carrier.reason, "reason not recorded"), true);
+      } else {
+        detailLine(node, "C2 carrier not observed", true);
+      }
+      if (w3c) {
+        detailLine(node, "W3C " + safeText(w3c.state, "UNKNOWN") + " · terminal " + safeText(w3c.terminal_state, "UNKNOWN") + " · wake " + safeText(w3c.wake_state, "UNKNOWN"), true);
+        var receipt = dispatch.w3c.source_receipt;
+        if (receipt) {
+          detailLine(node, "source time " + safeText(receipt.observed_at, "not recorded") + " · " + safeText(receipt.freshness, "freshness unknown"), true);
+          detailLine(node, "snapshot " + safeText(receipt.snapshot_digest, "not recorded"), true);
+          detailLine(node, "terminal owner " + safeText(receipt.terminal_source_owner, "not recorded"), true);
+          detailLine(node, "wake owner " + safeText(receipt.wake_source_owner, "not recorded"), true);
+        } else {
+          detailLine(node, "No canonical W3C source receipt.", true);
+        }
+      } else {
+        detailLine(node, "W3C not observed", true);
+      }
+    });
+    detailRail(rails, "Worker", function (node) { auRuntimeRail(node, card.current_worker, "silent — no worker runtime is recorded"); });
+    detailRail(rails, "Sol target", function (node) { auRuntimeRail(node, card.current_sol_target, "silent — no Sol target runtime is recorded"); });
+    detailRail(rails, "Identity", function (node) {
+      detailLine(node, "responsibility " + safeText(card.responsibility_ref), true);
+      detailLine(node, "accountable " + safeText(card.accountable_seat) + " · state " + safeText(card.state, "not recorded"), true);
+      detailLine(node, "root job " + safeText(card.root_job_id, "not recorded"), true);
+      if (card.root_job_ambiguous === true) {
+        var candidates = card.root_job_candidates || [];
+        detailLine(node, "root job ambiguous — " + candidates.length + " distinct Runtime roots cite this workstream, reconciliation required (never picked)", false);
+      }
+    });
+    body.appendChild(rails);
+
+    if ((card.disagreements || []).length) {
+      var drift = el("section", { className: "ccr-detail-section" });
+      drift.appendChild(el("h3", { text: "Source drift — both readings kept" }));
+      card.disagreements.forEach(function (entry) {
+        var block = el("div", { className: "ccr-disagreement" });
+        block.appendChild(el("div", { text: safeText(entry.field) + " · " + (entry.values || []).join("  |  ") }));
+        (entry.sources || []).forEach(function (source) {
+          block.appendChild(el("div", { text: safeText(source.owner) + " · " + safeText(source.ref) + " · " + safeText(source.freshness) }));
+        });
+        drift.appendChild(block);
+      });
+      body.appendChild(drift);
+    }
+
+    var receiptSection = el("section", { className: "ccr-detail-section" });
+    receiptSection.appendChild(el("h3", { text: "Source receipts" }));
+    var receipts = auReceiptFold("Contributing sources", card.source_receipts);
+    if (receipts) receiptSection.appendChild(receipts);
+    else receiptSection.appendChild(el("p", { text: "No contributing source is recorded for this responsibility.", className: "ccr-empty-line" }));
+    var turnRefs = auReceiptFold("Turn evidence", (card.owed_turn || {}).source_refs);
+    if (turnRefs) receiptSection.appendChild(turnRefs);
+    if (card.declared_blocker) {
+      var declaredReceipt = auReceiptFold("Agent OS declared blocker", [card.declared_blocker.source]);
+      if (declaredReceipt) receiptSection.appendChild(declaredReceipt);
+    }
+    var cardIssues = ((STATE.autonomy || {}).issues || []).filter(function (row) {
+      return row && row.responsibility_ref === card.responsibility_ref;
+    });
+    if (cardIssues.length) {
+      var issueFold = el("details", { className: "ccr-fold" });
+      var issueSummary = el("summary");
+      issueSummary.appendChild(el("span", { text: "Read issues" }));
+      issueSummary.appendChild(el("span", { text: String(cardIssues.length), className: "ccr-count" }));
+      issueFold.appendChild(issueSummary);
+      var issueList = el("ul");
+      cardIssues.forEach(function (row) {
+        issueList.appendChild(el("li", { text: safeText(row.code) + " · " + safeText(row.message), className: "ccr-row ccr-row-id" }));
+      });
+      issueFold.appendChild(issueList);
+      receiptSection.appendChild(issueFold);
+    }
+    body.appendChild(receiptSection);
+  }
+
+  function openAutonomyDetail(card, opener) {
+    LAST_DRAWER_OPENER = openerCandidate(opener);
+    STATE.selectedWork = null;
+    renderAutonomyDetail(card);
+    var drawer = document.getElementById("ccr-detail-drawer");
+    drawer.classList.add("is-open");
+    drawer.setAttribute("aria-hidden", "false");
+    document.getElementById("ccr-drawer-scrim").hidden = false;
+    document.getElementById("ccr-drawer-close").focus();
+  }
+
+  function auNotWired(mount) {
+    var panel = el("section", { className: "ccr-au-quiet" });
+    panel.appendChild(el("p", { text: "Not wired yet", className: "ccr-au-quiet-title" }));
+    panel.appendChild(el("p", {
+      text: "The Control Room is not serving an autonomy projection on this state document. Nothing is hidden and nothing has failed — this surface stays blank until the server publishes it.",
+      className: "ccr-au-quiet-text",
+    }));
+    mount.appendChild(panel);
+  }
+
+  function renderAutonomy(projection) {
+    var mount = document.getElementById("ccr-autonomy");
+    if (!mount) return;
+    clear(mount);
+    var count = document.getElementById("nav-autonomy-count");
+    STATE.autonomy = projection && typeof projection === "object" ? projection : null;
+
+    if (!STATE.autonomy) {
+      auNotWired(mount);
+      if (count) count.textContent = "—";
+      return;
+    }
+
+    var cards = STATE.autonomy.responsibilities || [];
+    var byRef = {};
+    cards.forEach(function (card) { if (card && card.responsibility_ref) byRef[card.responsibility_ref] = card; });
+
+    mount.appendChild(auDecisions(STATE.autonomy, byRef));
+    mount.appendChild(auLedger(STATE.autonomy));
+
+    var list = el("div", { className: "ccr-au-list" });
+    if (!cards.length) {
+      list.appendChild(el("p", {
+        text: "No responsibility is being carried right now. The projection answered and returned an empty list.",
+        className: "ccr-au-list-empty",
+      }));
+    } else {
+      cards.forEach(function (card) { list.appendChild(auRow(card)); });
+    }
+    mount.appendChild(list);
+    mount.appendChild(auGapFold(STATE.autonomy));
+    if (count) count.textContent = String(cards.length);
+  }
+
   // state -----------------------------------------------------------------
   function indexState(doc) {
     STATE.work = doc.work || [];
@@ -1243,6 +2063,7 @@
     setTally("coo", coo.length);
     document.getElementById("nav-today-count").textContent = String(chairman.length);
 
+    renderAutonomy(doc.autonomy);
     renderWork();
     if (!REMOTE_READ_ONLY) renderSurfaces();
     var loose = renderLooseEnds(doc);
