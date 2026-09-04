@@ -1,245 +1,96 @@
 # Autonomy Closure Spine v1 — Architecture Freeze
 
-**Date:** 2026-09-03  
-**Owner:** Sol, AI CEO of Mastermind-X  
-**Chairman:** Chris  
+**Status:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`  
 **Operation:** `autonomy-closure-spine-f0-20260903-sol-001`  
-**Canonical Git carrier:** Mastermind issue #437  
-**Parent incident:** Mastermind issue #386  
-**Protected pickup:** `mastermindx-market-intelligence/Mastermind@7022e70640637a4fa07f073442dc693301290e2a`  
-**Status:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`
+**Protected pickup:** `7022e70640637a4fa07f073442dc693301290e2a`
 
-This is a **records-only** architecture freeze. It creates no implementation worker, Runtime Event, provider action, deployment, canary, or fleet effect. There is **no implementation START**. Source protection is not production proof.
+## Outcome
 
-## 1. Executive ruling
-
-Mastermind already has the correct autonomy owners. It does not need another orchestrator, database, queue, retry service, watcher registry, target registry, or Slack command bus.
-
-One contract is missing:
+Close one concrete autonomy gap without building another autonomy platform:
 
 ```text
-one exact terminal return
-+ one exact current action-authoritative Sol target
--> one machine-authoritative semantic decision
--> one downstream same-root transition
+canonical terminal return
+→ exact action-authoritative Sol is notified
+→ one Runtime-owned semantic directive is committed
+→ the existing COO cycle consumes it exactly once
+→ one same-root continuation, repair, stop, or escalation transition
 ```
 
-Stage A, Stage B and RuntimeBinding answer **who may act**. Wake, W3C, Agent Relay and Agent Dialogue answer **what was transported**. Neither currently establishes **which `CONTINUE | REPAIR | STOP | ESCALATE` decision became effective** for one exact return and which transition consumed it.
+Today the transport, target, terminal-return, Wake, dialogue, Runtime, and COO owners already exist. The missing capability is a single compare-and-swap semantic directive in the existing Executive Event plane. ACF-1 is therefore the only pre-fleet implementation authorized by this architecture.
 
-That is the permitted exception to protected `NO_NEW_AUTONOMY_ARCHITECTURE`. It closes an observed golden-path blocker rather than starting a generalized platform.
+## Authority ruling
 
-## 2. Observed failure class
+Runtime v1 recognizes exactly one directive actor class: `ACTION_TARGET`. It reuses `control_plane.sol_action_target.require_sol_action_authority(...)` and stores the resulting `SolActionTargetResolution.evidence_digest`. The resolution is evidence, never a reusable token, so authority is re-resolved inside the Runtime transaction immediately before append.
 
-The W3C carrier accumulated conflicting 14-, 16-, 19- and 25-path action-looking directives before a later Chairman correction established precedence. The C2 carrier received a stale retreat after a valid `START_RESUMED` and required a later Chairman correction.
+There is **no machine-authenticated `CHAIRMAN` actor in v1**. Chris remains constitutional Chairman and can direct the current action-target Sol through the human/session layer. A changed Chairman decision becomes revision N+1 submitted by the then-current exact action target. This preserves Chairman control without inventing a Chairman credential, authority registry, Slack command bus, or browser identity inside Runtime.
 
-Human procedure recovered both cases. Runtime could not reject the stale semantic decision because no canonical directive revision and conflict domain existed. A fleet must not depend on Chairman archaeology to recover this class.
+## Decision body
 
-## 3. Existing owners
+The directive body is not prose and not a generic action map. It is one exact closed `mastermind.executive_semantic_directive_body/v1` union:
 
-| Fact | Canonical owner |
-|---|---|
-| Job, Attempt, Worker, Event and atomic command commit | Executive Runtime |
-| exact current Sol target and generation | SessionTargetRegistry / RuntimeBinding / Stage B |
-| exact terminal return | existing Executive terminal-return owner |
-| attention, delivery and acknowledgement | Wake / W3C / Agent Relay |
-| dialogue and Slack transport | Agent Dialogue |
-| next deterministic orchestration mutation | existing COO cycle |
-| operational display | existing Control Room |
-| durable organizational memory | Agent OS |
-| code, review, CI and immutable evidence | GitHub |
+- `CONTINUE`: no payload beyond schema and decision.
+- `REPAIR`: one immutable `CommissionRef`, validated by `common.commission_ref.normalize_commission_ref`.
+- `STOP`: one closed terminal reason.
+- `ESCALATE`: one closed external-decision reason.
 
-Transport text never grants directive authority. `carrier_reference` is provenance only.
+The outer decision and body decision must match. Canonical JSON is owned by `control_plane.ceo_intent.canonical_json_bytes`. The payload digest binds both decision and body. Nulls, lists, subclasses, arbitrary prose, extra keys, cross-decision fields, malformed source references, and bodies above 4096 canonical UTF-8 bytes fail closed.
 
-## 4. Current collision map
+## Existing-owner architecture
 
-- W3C-I1 source is protected through PR #427 / merge `a945e76befb34d15d0ab0e369b4197901883bb16`; it remains default-disarmed and is consumed, not rebuilt.
-- C2-R1A PR #415 remains the active `control_plane/executive_runtime.py` writer. ACF-1 implementation waits for protection or explicit path release.
-- MAT-S1 issue #430 remains predecessor-held and owns CEO carrier materialization/current-writer evidence.
-- Stage-B V6.1 remains the target-assignment owner.
-- Control Room PR #326 remains the active projection/UI writer.
-- issue #386 remains the canonical integration and production-acceptance incident; issue #400 remains a closed duplicate.
+- **Executive Runtime** owns the atomic command comparison, Event append, readback, and downstream COO transaction.
+- **SessionTargetRegistry / RuntimeBindingSnapshot / sol_action_target** own exact current Sol authority.
+- **Executive terminal-return** owns the consumed terminal identity.
+- **Wake / W3C / Agent Relay** own attention and acknowledgement, not semantic decision authority.
+- **Agent Dialogue** remains transport only.
+- **Existing COO cycle** maps the closed decision to one existing same-root transition.
+- **Control Room** remains a read-only projection.
+- **Agent OS** and **GitHub** remain organizational and implementation truth.
 
-ACF-1 is therefore `WAITING_ARCHITECTURE_PROTECTION / WAITING_RUNTIME_PATH_RELEASE / needs_placement`.
+No new database, queue, scheduler, retry plane, watcher registry, target registry, RuntimeBinding store, transcript store, or Control Room truth store is allowed.
 
-## 5. Canonical directive family
+## Atomic behavior
 
-The first implementation vertical will extend the existing Executive Event plane with:
+One command identity binds the exact root, terminal Event identity/digest, predecessor directive, and revision. Decision fields are deliberately excluded so conflicting `CONTINUE` and `STOP` attempts collide rather than create parallel directives.
 
-```text
-command schema: mastermind.executive_semantic_directive_command/v1
-event schema:   mastermind.executive_semantic_directive/v1
-event type:     EXECUTIVE_SEMANTIC_DIRECTIVE_COMMITTED
-```
+Within one existing Runtime transaction:
 
-The Runtime generates `directive_id` and `created_at`. The caller supplies no reusable authority token.
+1. Re-read and validate the terminal Event and source identity.
+2. Resolve the exact current action target from current registry and complete RuntimeBinding evidence.
+3. Validate the exact body variant and canonical payload digest.
+4. Compare predecessor/revision/supersession state.
+5. Append at most one `EXECUTIVE_SEMANTIC_DIRECTIVE_COMMITTED` Event.
+6. Re-read the committed Event for lost-response reconciliation.
+7. Let the existing COO cycle consume the Event and perform one existing downstream mutation in its own accepted atomic boundary.
 
-The closed directive binds the root, source Job/Attempt/Worker, terminal-return Event id/digest, current target binding, actor receipt, carrier provenance, predecessor/revision, decision, Runtime-derived body/digest and explicit supersession identity.
+Exact replay is idempotent only after current authority and return facts are revalidated. Changed payload is conflict. Observer, stale generation, superseded revision, malformed body, consumed directive, or effect uncertainty is zero-effect refusal/hold.
 
-Raw prompts, model output, transcript text, arbitrary Slack prose, credentials, emails, provider secrets, browser content and raw URLs are forbidden.
+## Supersession and terminality
 
-## 6. Runtime-derived decision body
+History is immutable. The current action target may supersede its own unconsumed directive only in the same binding generation and only while downstream effect is known `NONE`. Target rotation alone never supersedes. Once consumed, applied, or effect-unknown, reversal requires explicit reconciliation rather than another directive.
 
-The caller supplies the closed decision enum. Runtime constructs the machine body from the decision and current canonical state:
+`REPAIR`, `STOP`, and `ESCALATE` do not originate successor work. `REPAIR` can only amend/resume an existing same-root child identified by immutable source. `STOP` terminates the current boundary. `ESCALATE` holds the root for external decision without creating a Job, queue, watcher, or provider call.
 
-```text
-CONTINUE -> {action: RUN_COO_ONCE}
-REPAIR   -> {action: RUN_COO_REPAIR, subject: source_job_id}
-STOP     -> {action: CLOSE_SOURCE_CHILD, subject: source_job_id}
-ESCALATE -> {action: RECORD_EXISTING_ESCALATION, target: root_escalation_target}
-```
+## Capability boundary
 
-The body has no caller free-form fields. Runtime canonicalizes it and records `decision_payload_digest`. Model rationale may be projected separately but cannot alter the machine body, target, authority, revision, or command identity.
+Protecting these records does **not** create the Event family, modify Runtime, assign a worker, call a provider, change Wake/Relay, modify Control Room, deploy, or prove production autonomy. ACF-1 implementation remains held until this architecture is protected and the current Runtime writer releases `control_plane/executive_runtime.py`.
 
-## 7. One conflict domain per return revision
-
-The idempotency command key is derived only from:
-
-```text
-root_job_id
-consumed_terminal_event_id
-consumed_terminal_event_digest
-predecessor_directive_id
-revision
-```
-
-It deliberately excludes decision, body/digest, actor identity, target binding/generation and wall-clock time.
-
-This is load-bearing. `CONTINUE` and `STOP`, observer and target, or old and current target attempts must collide in **one command domain**. They may not mint parallel commands merely because their proposed payloads or actor observations differ.
-
-The transaction then re-resolves current target and actor and validates the complete payload. Exact same command and semantics replays idempotently. Same command with changed semantics is `COMMAND_REPLAY_CONFLICT`.
-
-## 8. Commit law
-
-Inside one existing Runtime transaction:
-
-1. validate the closed command and derive its return-revision command identity;
-2. read the exact terminal-return source and prove its Job/Attempt/Worker remains canonical;
-3. re-resolve the current target and actor identity at the effect boundary;
-4. read the predecessor directive and its consumption/effect state;
-5. prove no effective directive already exists for the same return revision;
-6. construct the closed decision body from canonical state;
-7. append exactly one directive Event or return the exact existing replay;
-8. expose no authority-bearing object outside the transaction.
-
-Required refusals include missing/conflicting return, stale Attempt, missing/conflicting target, stale generation, observer actor, invalid actor receipt, predecessor conflict, command replay conflict, effect uncertainty, consumption conflict and already-applied downstream work.
-
-## 9. Safe autonomous correction and supersession
-
-Directive history is immutable.
-
-The **current target may supersede** its own unconsumed directive only when:
-
-- the target binding generation is unchanged;
-- the predecessor directive is exact;
-- no downstream consumption Event exists;
-- downstream effect is proven `NONE`.
-
-This lets Sol correct a pre-effect mistake without routine Chairman labor.
-
-The Chairman may supersede any unconsumed directive only with a current Chairman authority receipt and downstream effect proven `NONE`.
-
-Every supersession appends a new revision binding `predecessor_directive_id` and `supersedes_directive_id`. A race between target correction and Chairman correction shares the same next-revision command domain; only one wins.
-
-A consumed directive, applied downstream mutation, or downstream `EFFECT_UNKNOWN` cannot be reversed by later prose. That is a **post-consumption reversal** and must return `DIRECTIVE_RECONCILIATION_REQUIRED` until the existing downstream owner proves what occurred and supplies a lawful correction path.
-
-Target rotation alone never supersedes. Slack timestamp ordering never supersedes.
-
-## 10. Consumer and consumption receipt
-
-The existing COO cycle is the first machine consumer. It reads the effective directive Event, never Slack prose.
-
-Directive consumption and the downstream Runtime mutation share one existing transaction. The downstream command binds directive Event id, digest and revision. The ordinary downstream Event is the consumption receipt. No separate consumption table or lifecycle is created.
-
-The consumer rechecks the latest effective revision inside the transaction. Restart or replay may reconstruct the consumed state but cannot apply the mutation twice.
-
-A directive does not itself start a provider, retry an uncertain effect, merge a PR, deploy production, grant authority, or accept the root.
-
-## 11. Transport uncertainty
-
-```text
-request proven not submitted -> NOT_APPLIED
-exact Runtime Event found -> APPLIED
-submission may have crossed boundary and readback unavailable -> EFFECT_UNKNOWN
-```
-
-Response loss after a committed Event is reconciled by Event readback. It never authorizes a resend, alternate Sol, alternate carrier, or fallback transport. Successful Slack delivery without a Runtime Event is not an effective directive.
-
-## 12. Product projection
-
-After the active Control Room carrier releases its paths, the existing Control Room may project:
-
-```text
-AWAITING_SEMANTIC_DIRECTIVE
-DIRECTIVE_COMMITTED
-DIRECTIVE_CONSUMED
-STALE_DIRECTIVE_REJECTED
-CONFLICTING_DIRECTIVE_REJECTED
-CHAIRMAN_SUPERSEDED
-DIRECTIVE_EFFECT_UNKNOWN
-DIRECTIVE_RECONCILIATION_REQUIRED
-```
-
-The projection remains read-only and non-authoritative.
-
-## 13. Follow-on layers
-
-Only ACF-1 is authorized before first-fleet proof.
-
-- **ACF-2 mission-envelope enforcement:** starts only after a golden root proves an admission/accounting gap; reuse DelegationPacket and Executive admission.
-- **ACF-3 useful progress versus heartbeat:** starts only after the stall falsifier cannot close through current checkpoints/Events.
-- **ACF-4 truthful production acceptance:** starts only after one real result exposes a missing acceptance receipt.
-- **ACF-5 resource finalization:** starts only from resources actually created by the installed golden root and extends each current owner.
-- **ACF-6 compatibility receipt:** starts only after an installed producer/consumer mismatch is reproduced and extends release/capability owners.
-
-Naming these layers grants no implementation authority.
-
-## 14. ACF-1 acceptance
-
-The deterministic source vertical must prove:
-
-- two observers, one current target, observer refused;
-- old target generation refused after rotation;
-- exact replay returns one Event;
-- `CONTINUE`/`STOP` race yields one effective directive;
-- changed semantics conflict in one command domain;
-- Runtime, not the model, constructs the closed body;
-- stale/late terminal evidence refuses;
-- current target can correct its own unconsumed directive safely;
-- Chairman pre-consumption supersession preserves history;
-- post-consumption reversal is reconciliation-required;
-- response loss after commit uses readback;
-- Slack delivery without Runtime commit is ineffective;
-- COO consumption and downstream mutation are atomic and apply once after restart;
-- no new store, queue, lifecycle, retry plane, watcher owner or target registry exists.
-
-Production proof requires one real terminal return observed by at least two Sol-capable surfaces, one current action target, one effective directive, one downstream transition, and **zero Chairman message shuttle**.
-
-ACF-1 must ship as one independently useful vertical, but source merge remains `BUILT_NOT_PROVEN / DEFAULT_DISARMED` until the real canary.
-
-## 15. Routing and stop
-
-```text
-future operation: autonomy-semantic-directive-convergence-acf1-20260903-sol-001
-PREFERRED_AVENUE: CTO Sol
-WHY NOT FABLE: Chairman outcome, owner map, command identity, body derivation, supersession law, failure matrix and acceptance are frozen
-RECEIVER_BINDING_MODE: CAPACITY_SELECTABLE
-PLACEMENT_STATE: WAITING_ARCHITECTURE_PROTECTION / WAITING_RUNTIME_PATH_RELEASE / needs_placement
-COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
-CHAT_REASONING_MODE: NON_PRO_DEFAULT
-```
-
-No worker-facing commission, implementation branch, watcher or START exists.
-
-F0 stops at one exact three-path Draft/HOLD PR with source-law proof, terminal hosted repository/security checks and one independent exact-head review. It creates no Runtime, worker, provider, deployment, canary or fleet effect.
-
-## 16. Durable contract
+## Canonical closed contract
 
 <!-- AUTONOMY_CLOSURE_SPINE_V1_CONTRACT_BEGIN -->
 ```json
-{"schema":"mastermind.autonomy_closure_spine.v1","operation":"autonomy-closure-spine-f0-20260903-sol-001","parent_incident":"Mastermind#386","closed_duplicate_not_owner":"Mastermind#400","protected_pickup":"7022e70640637a4fa07f073442dc693301290e2a","current_state":{"capability":"SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT","implementation_started":false,"runtime_effect":false,"provider_effect":false,"production_armed":false,"worker_assigned":false},"architecture_exception":{"default_preserved":"NO_NEW_AUTONOMY_ARCHITECTURE","concrete_blocker":"the exact action-authoritative Sol target exists, but no Runtime-owned compare-and-swap semantic directive binds one exact return to one effective CONTINUE, REPAIR, STOP, or ESCALATE decision","golden_path_edge_unlocked":"terminal return -> exact Sol attention -> one effective Sol decision -> one next same-root transition","observed_incident_class":["conflicting W3C scope directives","stale C2 retreat after START_RESUMED"]},"authorized_pre_fleet_layers":["ACF-1"],"owners":{"lifecycle_and_atomic_commit":"Executive Runtime","current_sol_target":"SessionTargetRegistry / RuntimeBinding / Stage B","terminal_return":"existing Executive terminal-return owner","attention_delivery_ack":"Wake / W3C / Agent Relay","dialogue_transport":"Agent Dialogue","next_orchestration_mutation":"existing COO cycle","operational_projection":"existing Control Room","organizational_memory":"Agent OS","implementation_evidence":"GitHub"},"no_rebuild":{"new_lifecycles":[],"new_databases":[],"new_queues":[],"new_schedulers":[],"new_retry_planes":[],"new_watcher_registries":[],"new_runtime_binding_stores":[],"new_authority_registries":[],"new_transcript_stores":[],"new_control_room_truth_stores":[],"slack_as_runtime_authority":false},"acf1_semantic_directive_convergence":{"command_schema":"mastermind.executive_semantic_directive_command/v1","event_schema":"mastermind.executive_semantic_directive/v1","event_type":"EXECUTIVE_SEMANTIC_DIRECTIVE_COMMITTED","decisions":["CONTINUE","REPAIR","STOP","ESCALATE"],"actor_classes":["ACTION_TARGET","CHAIRMAN"],"runtime_generated_fields":["directive_id","created_at"],"required_fields":["directive_id","root_job_id","source_job_id","source_attempt_id","source_worker_id","consumed_terminal_event_id","consumed_terminal_event_digest","current_target_alias","current_target_binding_id","current_target_binding_generation","current_target_reasoning_surface","actor_class","actor_identity_receipt_digest","carrier_reference","predecessor_directive_id","revision","decision","decision_body","decision_payload_digest","supersedes_directive_id","created_at"],"forbidden_fields":["prompt","model_output","transcript","arbitrary_slack_prose","credential","account_email","provider_secret","browser_content","raw_url","reusable_authority_token"],"command_identity":{"scope":"one terminal-return revision","fields":["root_job_id","consumed_terminal_event_id","consumed_terminal_event_digest","predecessor_directive_id","revision"],"excludes":["decision","decision_body","decision_payload_digest","actor_class","actor_identity_receipt_digest","current_target_binding_id","current_target_binding_generation","created_at"],"reason":"CONTINUE and STOP, observer and target, or old and current target attempts must collide in one command domain instead of minting parallel directives"},"authority_semantics":{"carrier_reference_is_provenance_only":true,"runtime_reresolves_current_target_and_actor":true,"model_slack_browser_and_provider_labels_grant_no_authority":true},"commit_semantics":{"compare_root_return_and_predecessor_revision":true,"one_effective_directive_per_return_revision":true,"exact_replay_is_idempotent_after_current_revalidation":true,"changed_payload_is_command_replay_conflict":true,"observer_sol_is_zero_effect_refusal":true,"stale_target_generation_is_zero_effect_refusal":true,"late_superseded_attempt_is_zero_effect_refusal":true,"transport_loss_after_commit_uses_event_readback":true,"transport_success_without_runtime_commit_is_not_effective":true,"continue_and_stop_cannot_both_be_effective":true},"supersession_semantics":{"history_is_immutable":true,"current_target_may_supersede_own_unconsumed_directive_with_same_generation_and_effect_none":true,"chairman_may_supersede_any_unconsumed_directive_with_effect_none":true,"consumed_applied_or_effect_unknown_requires_reconciliation":true,"normal_target_rotation_never_supersedes":true,"new_revision_binds_predecessor_and_supersedes_ids":true},"consumer":{"owner":"existing COO cycle","reads_slack_prose":false,"consumes_effective_event_once":true,"consumption_and_downstream_mutation_share_one_existing_transaction":true,"downstream_command_binds_directive_event_id_digest_and_revision":true,"downstream_event_is_consumption_receipt":true,"separate_consumption_table_created":false,"directive_is_not_provider_start_retry_merge_or_deploy":true},"decision_body_semantics":{"constructed_by_runtime_from_decision_and_current_state":true,"caller_free_form_fields":[],"shapes":{"CONTINUE":{"action":"RUN_COO_ONCE"},"REPAIR":{"action":"RUN_COO_REPAIR","subject":"source_job_id"},"STOP":{"action":"CLOSE_SOURCE_CHILD","subject":"source_job_id"},"ESCALATE":{"action":"RECORD_EXISTING_ESCALATION","target":"root_escalation_target"}}}},"conditional_follow_on_layers":{"ACF-2":{"name":"mission-envelope enforcement","start_gate":"post-golden-root evidence of admission/accounting gap","reuse_owner":"existing DelegationPacket and Executive admission"},"ACF-3":{"name":"useful-progress versus heartbeat","start_gate":"post-golden-root stall falsifier cannot close through checkpoints","reuse_owner":"existing Attempt checkpoint and Event plane"},"ACF-4":{"name":"truthful production acceptance","start_gate":"one real golden-root result exists","reuse_owner":"existing root Event and production-proof owners"},"ACF-5":{"name":"resource finalization","start_gate":"installed golden root exposes concrete required resources","reuse_owner":"the existing owner of each created resource"},"ACF-6":{"name":"producer-consumer compatibility receipt","start_gate":"an installed-generation incompatibility is reproduced","reuse_owner":"existing release and capability owners"}},"acf1_routing":{"future_operation_key":"autonomy-semantic-directive-convergence-acf1-20260903-sol-001","preferred_avenue":"CTO Sol","why_not_fable":"the Chairman outcome, owner map, event semantics, failure matrix, no-rebuild boundaries, and acceptance are frozen","receiver_binding_mode":"CAPACITY_SELECTABLE","placement_state":"WAITING_ARCHITECTURE_PROTECTION / WAITING_RUNTIME_PATH_RELEASE / needs_placement","cognition_route":"CHAT_INCLUDED_DEFAULT","chat_reasoning_mode":"NON_PRO_DEFAULT","worker_facing_commission_created":false,"implementation_branch_created":false,"implementation_started":false},"record_paths":["docs/superpowers/specs/2026-09-03-autonomy-closure-spine-v1-design.md","docs/superpowers/plans/2026-09-03-autonomy-closure-spine-v1.md","tests/test_autonomy_closure_spine_source_law.py"],"f0_stop_condition":"one current-base three-path Draft/HOLD PR with source-law proof, terminal hosted repository/security checks, and one independent exact-head review; no Runtime Event, worker, provider call, deployment, canary, or fleet promotion"}
+{"schema":"mastermind.autonomy_closure_spine.v1","operation":"autonomy-closure-spine-f0-20260903-sol-001","parent_incident":"Mastermind#386","closed_duplicate_not_owner":"Mastermind#400","protected_pickup":"7022e70640637a4fa07f073442dc693301290e2a","record_paths":["docs/superpowers/specs/2026-09-03-autonomy-closure-spine-v1-design.md","docs/superpowers/plans/2026-09-03-autonomy-closure-spine-v1.md","tests/test_autonomy_closure_spine_source_law.py"],"current_state":{"capability":"SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT","implementation_started":false,"runtime_effect":false,"provider_effect":false,"production_armed":false,"worker_assigned":false},"architecture_exception":{"default_preserved":"NO_NEW_AUTONOMY_ARCHITECTURE","concrete_blocker":"the exact action-authoritative Sol target exists, but no Runtime-owned compare-and-swap semantic directive binds one exact terminal return to one effective CONTINUE, REPAIR, STOP, or ESCALATE decision","golden_path_edge_unlocked":"terminal return -> exact Sol attention -> one effective Sol decision -> one next same-root transition","observed_incident_class":["conflicting W3C scope directives","stale C2 retreat after START_RESUMED"]},"authorized_pre_fleet_layers":["ACF-1"],"owners":{"lifecycle_and_atomic_commit":"Executive Runtime","current_sol_target":"control_plane.sol_action_target / SessionTargetRegistry / RuntimeBindingSnapshot","terminal_return":"existing Executive terminal-return owner","attention_delivery_ack":"Wake / W3C / Agent Relay","dialogue_transport":"Agent Dialogue","next_orchestration_mutation":"existing COO cycle","operational_projection":"existing Control Room","organizational_memory":"Agent OS","implementation_evidence":"GitHub"},"no_rebuild":{"new_lifecycles":[],"new_databases":[],"new_queues":[],"new_schedulers":[],"new_retry_planes":[],"new_watcher_registries":[],"new_runtime_binding_stores":[],"new_authority_registries":[],"new_transcript_stores":[],"new_control_room_truth_stores":[],"slack_as_runtime_authority":false},"acf1_semantic_directive_convergence":{"command_schema":"mastermind.executive_semantic_directive_command/v1","event_schema":"mastermind.executive_semantic_directive/v1","event_type":"EXECUTIVE_SEMANTIC_DIRECTIVE_COMMITTED","body_schema":"mastermind.executive_semantic_directive_body/v1","decisions":["CONTINUE","REPAIR","STOP","ESCALATE"],"actor_classes":["ACTION_TARGET"],"actor_authority_owner":{"module":"control_plane.sol_action_target","schema":"mastermind.sol_action_target.v1","resolver":"require_sol_action_authority","resolution_type":"SolActionTargetResolution","receipt_field":"evidence_digest","inputs":["root_job_id","SessionTargetRegistry","RuntimeBindingSnapshot","actor_binding"],"transaction_law":["resolve from current canonical inputs inside the Runtime write transaction","require state RESOLVED and action_authoritative true","bind alias, binding id, generation and reasoning surface from the same resolution","re-resolve immediately before append because the resolution is evidence, not a reusable authority token"],"non_authorities":["Slack sender or prose","browser session label","model output","provider account","carrier_reference","current Chairman chat text as a Runtime principal"]},"runtime_generated_fields":["directive_id","created_at"],"required_fields":["directive_id","root_job_id","source_job_id","source_attempt_id","source_worker_id","consumed_terminal_event_id","consumed_terminal_event_digest","current_target_alias","current_target_binding_id","current_target_binding_generation","current_target_reasoning_surface","actor_class","actor_identity_receipt_digest","carrier_reference","predecessor_directive_id","revision","decision","decision_body","decision_payload_digest","supersedes_directive_id","created_at"],"forbidden_fields":["prompt","model_output","transcript","arbitrary_slack_prose","credential","account_email","provider_secret","browser_content","raw_url","reusable_authority_token","argv","shell_command","provider_session","successor_operation_key"],"command_identity":{"scope":"one terminal-return revision","fields":["root_job_id","consumed_terminal_event_id","consumed_terminal_event_digest","predecessor_directive_id","revision"],"excludes":["decision","decision_body","decision_payload_digest","actor_class","actor_identity_receipt_digest","current_target_binding_id","current_target_binding_generation","created_at"],"reason":"CONTINUE and STOP, observer and target, or old and current target attempts must collide in one command domain instead of minting parallel directives"},"decision_body_contract":{"python_type":"built-in dict","max_canonical_utf8_bytes":4096,"canonicalizer":"control_plane.ceo_intent.canonical_json_bytes","payload_digest":"sha256(canonical_json_bytes({'decision': decision, 'decision_body': body}))","null_allowed":false,"list_allowed":false,"extension_keys_allowed":false,"outer_and_body_decision_must_match":true,"shapes":{"CONTINUE":{"schema":"mastermind.executive_semantic_directive_body/v1","decision":"CONTINUE"},"REPAIR":{"schema":"mastermind.executive_semantic_directive_body/v1","decision":"REPAIR","repair_ref":{"owner":"common.commission_ref.normalize_commission_ref","shape":{"repository":"owner/repo","commit":"40 lowercase hexadecimal characters","path":"canonical repository-relative path","content_sha256":"64 lowercase hexadecimal characters"},"authority":"immutable source identity only"}},"STOP":{"schema":"mastermind.executive_semantic_directive_body/v1","decision":"STOP","reason_code":["MISSION_COMPLETE","WORK_CANCELLED","NONRECOVERABLE_CONFLICT","SUPERSEDED_CHILD"]},"ESCALATE":{"schema":"mastermind.executive_semantic_directive_body/v1","decision":"ESCALATE","reason_code":["CHAIRMAN_DECISION_REQUIRED","EFFECT_RECONCILIATION_REQUIRED","AUTHORITY_BOUNDARY_REQUIRED","PRODUCTION_ACCEPTANCE_REQUIRED"]}},"refuses":["missing or extra keys","duplicate JSON keys","subclass values","nulls and lists","arbitrary prose or generic action maps","cross-decision fields","noncanonical repair_ref","payload over 4096 canonical UTF-8 bytes"]},"commit_semantics":{"compare_root_return_and_predecessor_revision":true,"one_effective_directive_per_return_revision":true,"exact_replay_is_idempotent_after_current_revalidation":true,"changed_payload_is_command_replay_conflict":true,"observer_sol_is_zero_effect_refusal":true,"stale_target_generation_is_zero_effect_refusal":true,"late_superseded_attempt_is_zero_effect_refusal":true,"transport_loss_after_commit_uses_event_readback":true,"transport_success_without_runtime_commit_is_not_effective":true,"continue_and_stop_cannot_both_be_effective":true},"supersession_semantics":{"history_is_immutable":true,"current_action_target_may_supersede_own_unconsumed_directive_with_same_generation_and_effect_none":true,"fresh_chairman_intervention_is_submitted_by_then_current_action_target_as_revision_n_plus_1":true,"direct_machine_authenticated_chairman_actor_in_v1":false,"consumed_applied_or_effect_unknown_requires_reconciliation":true,"normal_target_rotation_never_supersedes":true,"new_revision_binds_predecessor_and_supersedes_ids":true,"projection_reason":"DIRECTIVE_SUPERSEDED"},"consumer":{"owner":"existing COO cycle","reads_slack_prose":false,"consumes_effective_event_once":true,"consumption_and_downstream_mutation_share_one_existing_transaction":true,"downstream_command_binds_directive_event_id_digest_and_revision":true,"downstream_event_is_consumption_receipt":true,"separate_consumption_table_created":false,"directive_is_not_provider_start_retry_merge_or_deploy":true,"fixed_meanings":{"CONTINUE":"run the already-lawful next transition for the same root","REPAIR":"resume or amend only the existing same-root child identified by repair_ref","STOP":"terminalize the current child or root boundary without originating a successor","ESCALATE":"hold the root for external decision without creating a Job, queue, watcher, or provider effect"}},"closed_results":["COMMITTED","IDEMPOTENT_REPLAY","DIRECTIVE_REPLAY_CONFLICT","RETURN_NOT_TERMINAL","TERMINAL_EVENT_MISMATCH","ACTION_TARGET_AUTHORITY_INVALID","STALE_TARGET_GENERATION","DIRECTIVE_SUPERSEDED","DIRECTIVE_ALREADY_CONSUMED","DOWNSTREAM_EFFECT_UNKNOWN","INVALID_COMMAND"],"proof_requirements":["all four exact body variants and canonical payload digests","unknown, missing, extra, oversized and decision-mismatched bodies fail closed","observer, stale generation and actor receipt mismatch are zero-effect refusals","CONTINUE and STOP collide under one command identity","unconsumed same-generation supersession is immutable and deterministic","consumed, applied or effect-unknown directives cannot be reversed","REPAIR cannot originate a successor and ESCALATE creates no queue or Job","no direct CHAIRMAN actor or CHAIRMAN_SUPERSEDED projection exists in v1","restart and transport loss reconcile from the existing Event plane"]},"conditional_layers":{"ACF-2":"mission-envelope enforcement only after a golden-root falsifier proves the existing owner insufficient","ACF-3":"useful-progress semantics only after deterministic evidence proves a real gap","ACF-4":"truthful production acceptance only through existing proof owners","ACF-5":"resource finalization only through existing lifecycle owners","ACF-6":"generation compatibility only after current binding evidence requires it"},"stop_condition":{"architecture_release":"three protected records only","implementation_state_after_release":"WAITING_RUNTIME_PATH_RELEASE / needs_placement","runtime_owner_gate":"C2-R1A releases control_plane/executive_runtime.py","no_effect_claims":["no Runtime Event","no worker assignment","no provider call","no Wake or Agent Relay change","no Control Room change","no deployment","no production proof"]}}
 ```
 <!-- AUTONOMY_CLOSURE_SPINE_V1_CONTRACT_END -->
 
-## 17. Exact next action
+## Release proof
 
-Protect this F0 source after exact-head tests and independent review. Then keep ACF-1 held until C2-R1A releases the Runtime path; perform a fresh collision census and create one separately commissioned, capacity-placed ACF-1 child.
+The records carrier is releasable only when:
+
+1. design and plan publish byte-semantic identical JSON;
+2. the source-law test verifies every owner, body variant, conflict identity, supersession boundary, and non-goal;
+3. the effective delta remains exactly these three paths;
+4. repository and security checks pass on the immutable current-base head;
+5. one independent non-author review approves;
+6. expected-head protection is used.
+
+No implementation worker or successor wave may start from these records alone.
