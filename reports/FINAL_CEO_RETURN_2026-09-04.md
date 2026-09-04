@@ -132,8 +132,16 @@ records-first sequencing; (2) a new packet record doc vs reconciling the #6801 r
   the checker's own instruction (declare `bake_landing_preview_fix` before each lane's sync-heal
   entry — +1 additive file, PR now 13 files +754/−53), local checker green
   ("DAG conformance OK — 27 lanes"; the 2 SUSPECT drifts are pre-existing W5a inheritances),
-  amended + force-pushed, round-2 watch armed. The checker's base-replay also surfaced an unrelated
-  runner-side interpreter defect on `pc-ci-3` — noted for the CI owner.
+  amended + force-pushed. Rounds 2–3: dag-conformance green (repair held); the one remaining
+  non-foreign red is **inherited from main, not this PR** — `unrun-import-hygiene` fails because
+  `scripts/build_macro_suite_pages.py` (landed on main 2026-09-04 via merged #6848/#6851/#6852)
+  imports repo packages with no repo-root pin and is absent from the T2 baseline, so the gate reds
+  the merge ref of EVERY open PR until repaired on main (proof: the file is not in this PR's diff;
+  the pin suite passes 11/11 locally at this PR's tree). A repair task for that estate-wide red was
+  flagged to the Chairman; the checker's base-replay defect on the `pc-ci-3` runner family (broken
+  interpreter prefix) is also noted for the CI owner.
+  **Final #6842 CI state: 28/28 terminal; fails = foreign merge-queue-pilot + its ci-gate
+  aggregator + the inherited import-hygiene red above. Zero PR-caused failures.**
 
 The check `ci-authority/codex/merge-queue-pilot` fails estate-wide on all fresh draft PRs (verified
 identically red on #6830/#6831/#6832, none of which touch our paths) — an inherited foreign red,
