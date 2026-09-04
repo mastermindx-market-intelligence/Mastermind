@@ -333,10 +333,14 @@ Phase E downloads only the Phase P content-addressed artifact and then:
     absent; and records result/report names, sizes, and digests. A zero return
     code is accepted only when both bounded regular files decode as strict
     UTF-8, contain no secrets or private paths, and exactly satisfy the pinned
-    Z0 result schema, manifest/path/tool/binary identities, production-inert
-    observations, repository status, non-acceptance decision, and byte-exact
-    rendered report. A known nonzero return remains an `APPLIED` experiment
-    outcome and is not misreported as a successful Z0 result.
+    Z0 result schema, canonical request digest, toolchain-lock digest, exact
+    bundle and bundle-manifest digests, manifest/path/tool/binary identities,
+    production-inert observations, repository status, non-acceptance decision,
+    and byte-exact rendered report. Both the JSON result and Markdown report
+    carry those request/bundle identities, so preserved output from another
+    forge, workflow, lock, bundle, or manifest cannot be relabeled as the
+    current run. A known nonzero return remains an `APPLIED` experiment outcome
+    and is not misreported as a successful Z0 result.
 
 If the sealed child ends without a durable receipt, the outer boundary records
 `RECONCILIATION_REQUIRED / EFFECT_UNKNOWN` and fails. It never substitutes a

@@ -156,6 +156,8 @@ def _write_valid_success_artifacts(
     output: Path,
     *,
     request: runner.ExperimentRequest,
+    bundle_sha256: str,
+    bundle_manifest_sha256: str,
     manifest_payload: Mapping[str, object],
     path_policy: Path,
     source_digest: str,
@@ -193,6 +195,8 @@ def _write_valid_success_artifacts(
         "generated_at": generated_at,
         "request_digest": request.digest,
         "toolchain_lock_sha256": request.lock_sha256,
+        "bundle_sha256": bundle_sha256,
+        "bundle_manifest_sha256": bundle_manifest_sha256,
         "manifest_digest": manifest_digest,
         "path_policy_digest": hashlib.sha256(path_policy.read_bytes()).hexdigest(),
         "tool_schema_digest": tool_schema_digest,
@@ -234,6 +238,8 @@ def _write_valid_success_artifacts(
         f"Generated at: {generated_at}\n\n"
         f"Request digest: {request.digest}\n\n"
         f"Toolchain lock SHA-256: {request.lock_sha256}\n\n"
+        f"Bundle SHA-256: {bundle_sha256}\n\n"
+        f"Bundle manifest SHA-256: {bundle_manifest_sha256}\n\n"
         "## Repository/ref status\n\n"
         f"- mastermind/{runner.FIXED_CONSUMER_BRANCH}: health=healthy; "
         f"coverage=covered; indexed_sha={request.consumer_sha}\n\n"
@@ -2961,6 +2967,8 @@ def _success_artifact_contract(tmp_path: Path) -> dict[str, object]:
     _write_valid_success_artifacts(
         output,
         request=request,
+        bundle_sha256=bundle_sha256,
+        bundle_manifest_sha256=bundle_manifest_sha256,
         manifest_payload=manifest_payload,
         path_policy=path_policy,
         source_digest=source_digest,
@@ -3284,6 +3292,8 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
         _write_valid_success_artifacts(
             tmp_path / "result",
             request=request,
+            bundle_sha256=verified.sha256,
+            bundle_manifest_sha256=verified.manifest_sha256,
             manifest_payload=manifest_payload,
             path_policy=policy,
             source_digest="7" * 64,

@@ -738,6 +738,8 @@ _Z0_RESULT_FIELDS: Final = frozenset(
         "generated_at",
         "request_digest",
         "toolchain_lock_sha256",
+        "bundle_sha256",
+        "bundle_manifest_sha256",
         "manifest_digest",
         "path_policy_digest",
         "tool_schema_digest",
@@ -4640,6 +4642,8 @@ def _validate_success_artifacts(
         or payload.get("decision") != _Z0_NON_ACCEPTANCE_DECISION
         or payload.get("request_digest") != request.digest
         or payload.get("toolchain_lock_sha256") != request.lock_sha256
+        or payload.get("bundle_sha256") != bundle_sha256
+        or payload.get("bundle_manifest_sha256") != bundle_manifest_sha256
         or payload.get("manifest_digest") != expected_manifest_digest
         or payload.get("path_policy_digest")
         != locks.sha256_file(path_policy, max_bytes=1_048_576)
@@ -4649,7 +4653,8 @@ def _validate_success_artifacts(
         or payload.get("resource_observations") != expected_resource_observations
     ):
         raise HostedRunnerError(
-            "RESULT_IDENTITY_MISMATCH", "result request/source/tool identity differs"
+            "RESULT_IDENTITY_MISMATCH",
+            "result request/bundle/source/tool identity differs",
         )
 
     def require_utc_timestamp(value: object) -> str:
@@ -4714,6 +4719,8 @@ def _validate_success_artifacts(
         f"Generated at: {generated_at}\n\n"
         f"Request digest: {request.digest}\n\n"
         f"Toolchain lock SHA-256: {request.lock_sha256}\n\n"
+        f"Bundle SHA-256: {bundle_sha256}\n\n"
+        f"Bundle manifest SHA-256: {bundle_manifest_sha256}\n\n"
         "## Repository/ref status\n\n"
         f"- mastermind/{FIXED_CONSUMER_BRANCH}: health=healthy; "
         f"coverage=covered; indexed_sha={request.consumer_sha}\n\n"
