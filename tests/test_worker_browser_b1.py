@@ -13,7 +13,7 @@ import sys
 import textwrap
 import threading
 import zlib
-from dataclasses import replace
+from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -358,6 +358,45 @@ def _runtime_install_fixture(
     return runtime, manifest_path, manifest
 
 
+def _bind_mcp_refusal_context(
+    environment: dict[str, str],
+) -> dict[str, str]:
+    artifact = Path(environment["MASTERMIND_BROWSER_ARTIFACT_DIR"])
+    artifact.mkdir(mode=0o700, parents=True, exist_ok=True)
+    artifact.chmod(0o700)
+    identity = browser.BrowserMcpRefusalIdentity(
+        attempt_id="attempt-mcp-refusal",
+        session_epoch_id="epoch-mcp-refusal",
+        process_generation_id="generation-mcp-refusal",
+        worker_id="worker-browser-b1",
+        worker_uid=os.geteuid(),
+        workspace_identity_sha256="1" * 64,
+        requested_profile_sha256="5" * 64,
+        capability_manifest_sha256="6" * 64,
+        profile_id="operator.browser.local-review.v1",
+        profile_sha256="2" * 64,
+        runtime_manifest_sha256=environment[
+            "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256"
+        ],
+        mcp_identity="playwright",
+        mcp_version="1.63.0-alpha-2026-08-05",
+        tool_schema_sha256="4" * 64,
+    )
+    raw = browser._canonical_bytes(identity.to_wire()) + b"\n"
+    context = artifact / browser._MCP_REFUSAL_CONTEXT_FILE
+    context.write_bytes(raw)
+    context.chmod(0o600)
+    digest = hashlib.sha256(raw).hexdigest()
+    origin = environment["MASTERMIND_BROWSER_ORIGIN"]
+    environment["MASTERMIND_BROWSER_FIXTURE_A_URL"] = (
+        f"{origin}/__mastermind_browser_visual_fixture__/{digest[:32]}"
+    )
+    environment["MASTERMIND_BROWSER_FIXTURE_B_URL"] = (
+        f"{origin}/__mastermind_browser_visual_fixture__/{digest[32:]}"
+    )
+    return environment
+
+
 def _attempt_launch_environment(
     *,
     workspace: Path,
@@ -389,7 +428,7 @@ def _attempt_launch_environment(
     }
     if container_fd is not None:
         environment["MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD"] = str(container_fd)
-    return environment
+    return _bind_mcp_refusal_context(environment)
 
 
 def _add_loaded_runtime_closure(runtime: Path) -> dict[str, Path]:
@@ -2185,7 +2224,7 @@ def test_attempt_env_wrapper_runs_argument_guard_with_credential_free_child_env(
     os.set_inheritable(container_fd, True)
     try:
         assert browser.launch_mcp_from_attempt_env(
-            {
+            _bind_mcp_refusal_context({
                 "MASTERMIND_BROWSER_ARTIFACT_DIR": os.fspath(artifact),
                 "MASTERMIND_BROWSER_FIXTURE_A_URL": "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "MASTERMIND_BROWSER_FIXTURE_B_URL": "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -2199,7 +2238,7 @@ def test_attempt_env_wrapper_runs_argument_guard_with_credential_free_child_env(
                 "MASTERMIND_BROWSER_WORKSPACE_PATH": os.fspath(tmp_path),
                 "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers",
                 "OPENAI_API_KEY": "must-not-cross-wrapper",
-            },
+            }),
             bridge_runner=capture,
         ) == 0
     finally:
@@ -2230,6 +2269,8 @@ def test_attempt_env_wrapper_runs_argument_guard_with_credential_free_child_env(
     }
     assert observed["pass_fds"] == (container_fd,)
     assert isinstance(observed["guard"], browser.BrowserMcpToolGuard)
+    assert observed["guard"].refusal_identity.worker_uid == os.geteuid()
+    assert not (artifact / browser._MCP_REFUSAL_CONTEXT_FILE).exists()
 
 
 def test_attempt_env_wrapper_executes_inner_anchor_not_outer_bootstrap(
@@ -2272,7 +2313,7 @@ def test_attempt_env_wrapper_executes_inner_anchor_not_outer_bootstrap(
 
     try:
         return_code = browser.launch_mcp_from_attempt_env(
-            {
+            _bind_mcp_refusal_context({
                 "MASTERMIND_BROWSER_ARTIFACT_DIR": os.fspath(artifact),
                 "MASTERMIND_BROWSER_FIXTURE_A_URL": "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "MASTERMIND_BROWSER_FIXTURE_B_URL": "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -2287,7 +2328,7 @@ def test_attempt_env_wrapper_executes_inner_anchor_not_outer_bootstrap(
                 "MASTERMIND_BROWSER_RUNTIME_ROOT": os.fspath(runtime),
                 "MASTERMIND_BROWSER_WORKSPACE_PATH": os.fspath(tmp_path),
                 "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers",
-            },
+            }),
             bridge_runner=execute_selected_envelope,
         )
     finally:
@@ -2966,7 +3007,8 @@ def test_guard_refuses_wrong_size_full_viewport_artifact(tmp_path):
             },
         )
 
-    assert raised.value.state == "BROWSER_SCREENSHOT_FAILED"
+    assert raised.value.state == "BROWSER_MCP_TOOL_REFUSED"
+    assert raised.value.refusal_code == "SCREENSHOT_BINDING_MISMATCH"
     assert upstream.exists()
     assert not (artifact / "desktop.png").exists()
 
@@ -3151,6 +3193,1463 @@ def test_guard_refuses_artifact_root_swap_after_descriptor_write(
     assert (displaced / "mobile.png").read_bytes() == pixels
 
 
+def _mcp_refusal_identity(**overrides) -> browser.BrowserMcpRefusalIdentity:
+    values = {
+        "attempt_id": "attempt-mcp-refusal",
+        "session_epoch_id": "epoch-mcp-refusal",
+        "process_generation_id": "generation-mcp-refusal",
+        "worker_id": "worker-browser-b1",
+        "worker_uid": os.geteuid(),
+        "workspace_identity_sha256": "1" * 64,
+        "requested_profile_sha256": "5" * 64,
+        "capability_manifest_sha256": "6" * 64,
+        "profile_id": "operator.browser.local-review.v1",
+        "profile_sha256": "2" * 64,
+        "runtime_manifest_sha256": "3" * 64,
+        "mcp_identity": "playwright",
+        "mcp_version": "1.63.0-alpha-2026-08-05",
+        "tool_schema_sha256": "4" * 64,
+    }
+    values.update(overrides)
+    return browser.BrowserMcpRefusalIdentity(**values)
+
+
+def _mcp_initialize_request(
+    *, request_id: int = 1, protocol_version: str = "2025-06-18"
+) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "initialize",
+        "params": {
+            "capabilities": {"elicitation": {}},
+            "clientInfo": {
+                "name": "codex-mcp-client",
+                "title": "Codex",
+                "version": "0.147.0",
+            },
+            "protocolVersion": protocol_version,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"jsonrpc":"2.0","id":1,"id":2,"method":"initialize","params":{}}\n',
+        b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"capabilities":{}}}\n',
+    ],
+)
+def test_mcp_frame_rejects_duplicate_keys_before_shape_validation(raw):
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser._GuardedMcpBridge._decode_line(raw)
+    assert raised.value.state == "BROWSER_MCP_PROTOCOL_FAILED"
+
+
+class _InitializeAwareOutput(io.BytesIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self.initialize_response = threading.Event()
+
+    def write(self, payload: bytes) -> int:
+        written = super().write(payload)
+        try:
+            response = json.loads(payload)
+        except (TypeError, ValueError):
+            return written
+        if response.get("id") == 1:
+            self.initialize_response.set()
+        return written
+
+
+def _run_scripted_mcp_bridge(
+    tmp_path: Path,
+    requests: list[dict],
+    *,
+    selected_protocol_version: str = "2025-06-18",
+    initialize_result_mode: str = "exact",
+    response_id_mode: str = "exact",
+    server_notification_mode: str = "none",
+    cancellation_mode: str = "none",
+    refusal_identity: browser.BrowserMcpRefusalIdentity | None = None,
+    preseed_refusal_payload: bytes | None = None,
+) -> tuple[int, list[dict], Path]:
+    fake = tmp_path / "scripted_mcp.py"
+    fake.write_text(
+        textwrap.dedent(
+            """
+            import json
+            import os
+            import sys
+
+            selected = os.environ['TEST_SELECTED_PROTOCOL_VERSION']
+            mode = os.environ['TEST_INITIALIZE_RESULT_MODE']
+            response_id_mode = os.environ['TEST_RESPONSE_ID_MODE']
+            server_notification_mode = os.environ['TEST_SERVER_NOTIFICATION_MODE']
+            cancellation_mode = os.environ['TEST_CANCELLATION_MODE']
+            pending_ping = None
+            for raw in sys.stdin.buffer:
+                request = json.loads(raw)
+                method = request.get('method')
+                if method == 'notifications/initialized':
+                    if server_notification_mode == 'after-initialized':
+                        notification = {
+                            'jsonrpc': '2.0',
+                            'method': 'notifications/tools/list_changed',
+                            'params': {},
+                        }
+                        sys.stdout.write(json.dumps(notification, separators=(',', ':')) + '\\n')
+                        sys.stdout.flush()
+                    continue
+                if method == 'notifications/cancelled':
+                    if cancellation_mode == 'hold-ping-until-cancelled' and pending_ping is not None:
+                        response = {
+                            'jsonrpc': '2.0',
+                            'id': pending_ping,
+                            'error': {'code': -32800, 'message': 'cancelled'},
+                        }
+                        sys.stdout.write(json.dumps(response, separators=(',', ':')) + '\\n')
+                        sys.stdout.flush()
+                        pending_ping = None
+                    continue
+                if method == 'ping' and cancellation_mode == 'hold-ping-until-cancelled':
+                    pending_ping = request.get('id')
+                    continue
+                if method == 'initialize':
+                    result = {
+                        'capabilities': {'tools': {}},
+                        'protocolVersion': selected,
+                        'serverInfo': {
+                            'name': 'Playwright',
+                            'version': '1.63.0-alpha-2026-08-05',
+                        },
+                    }
+                    if mode == 'extra-key':
+                        result['instructions'] = 'unreviewed'
+                    elif mode == 'missing-protocol':
+                        result.pop('protocolVersion')
+                elif method == 'tools/call':
+                    assert set(request['params']) == {'arguments', 'name'}
+                    assert request['params'] == {
+                        'arguments': {'url': 'http://127.0.0.1:48101/'},
+                        'name': 'browser_navigate',
+                    }
+                    result = {'content': [{'type': 'text', 'text': 'ok'}]}
+                else:
+                    result = {}
+                if server_notification_mode == 'before-initialize-response' and method == 'initialize':
+                    notification = {
+                        'jsonrpc': '2.0',
+                        'method': 'notifications/tools/list_changed',
+                        'params': {},
+                    }
+                    sys.stdout.write(json.dumps(notification, separators=(',', ':')) + '\\n')
+                    sys.stdout.flush()
+                response_id = request.get('id')
+                if response_id_mode == 'bool':
+                    response_id = True
+                elif response_id_mode == 'float':
+                    response_id = 1.0
+                response = {
+                    'jsonrpc': '2.0',
+                    'id': response_id,
+                    'result': result,
+                }
+                sys.stdout.write(json.dumps(response, separators=(',', ':')) + '\\n')
+                sys.stdout.flush()
+            """
+        ),
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    if preseed_refusal_payload is not None:
+        (artifact / browser._MCP_REFUSAL_FILE).write_bytes(
+            preseed_refusal_payload
+        )
+        (artifact / browser._MCP_REFUSAL_FILE).chmod(0o600)
+    origin = "http://127.0.0.1:48101"
+    output = _InitializeAwareOutput()
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin,
+        artifact_dir=artifact,
+        fixture_urls=_fixture_urls(origin),
+        refusal_identity=refusal_identity or _mcp_refusal_identity(),
+    )
+
+    def client_input():
+        for index, request in enumerate(requests):
+            if index and requests[index - 1].get("method") == "initialize":
+                assert output.initialize_response.wait(2)
+            yield browser._canonical_bytes(request) + b"\n"
+
+    return_code = browser.run_guarded_mcp_bridge(
+        argv=(sys.executable, os.fspath(fake)),
+        environment={
+            "LC_ALL": "C",
+            "PATH": "/usr/bin:/bin",
+            "TEST_INITIALIZE_RESULT_MODE": initialize_result_mode,
+            "TEST_CANCELLATION_MODE": cancellation_mode,
+            "TEST_RESPONSE_ID_MODE": response_id_mode,
+            "TEST_SERVER_NOTIFICATION_MODE": server_notification_mode,
+            "TEST_SELECTED_PROTOCOL_VERSION": selected_protocol_version,
+        },
+        guard=guard,
+        stdin=client_input(),
+        stdout=output,
+        stderr=subprocess.DEVNULL,
+    )
+    return (
+        return_code,
+        [json.loads(line) for line in output.getvalue().splitlines()],
+        artifact,
+    )
+
+
+def test_current_codex_tools_call_meta_is_admitted_only_after_exact_handshake(
+    tmp_path,
+):
+    origin = "http://127.0.0.1:48101"
+    request = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "_meta": {
+                "threadId": "01a0694f-5783-7181-8ba5-a5144cfe2bf3",
+                "x-codex-turn-metadata": {"call_id": "call-current-shape"},
+            },
+            "arguments": {"url": f"{origin}/"},
+            "name": "browser_navigate",
+        },
+    }
+    code, responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [
+            _mcp_initialize_request(),
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            request,
+        ],
+    )
+
+    assert code == 0
+    assert responses[-1]["id"] == 2
+    assert "result" in responses[-1]
+    assert not (artifact / browser._MCP_REFUSAL_FILE).exists()
+
+
+@pytest.mark.parametrize(
+    ("meta", "accepted"),
+    [
+        ({"threadId": "thread-1"}, True),
+        ({"progressToken": 7}, False),
+        ({"progressToken": "progress-1", "threadId": "thread-1"}, True),
+        ({"x-codex-turn-metadata": {"call_id": "call-1"}}, False),
+        ({"traceparent": "unreviewed"}, False),
+        ({"threadId": ""}, False),
+        ({"progressToken": True}, False),
+        ({"x-codex-turn-metadata": {"prompt": "unreviewed"}}, False),
+    ],
+)
+def test_selected_protocol_binds_closed_meta_policy(tmp_path, meta, accepted):
+    origin = "http://127.0.0.1:48101"
+    code, responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [
+            _mcp_initialize_request(),
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "_meta": meta,
+                    "arguments": {"url": f"{origin}/"},
+                    "name": "browser_navigate",
+                },
+            },
+        ],
+    )
+
+    assert code == 0
+    if accepted:
+        assert "result" in responses[-1]
+        assert not (artifact / browser._MCP_REFUSAL_FILE).exists()
+    else:
+        assert responses[-1]["error"] == {
+            "code": -32602,
+            "message": "browser MCP call refused by attempt policy",
+        }
+        refusal = json.loads(
+            (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+        )
+        assert (
+            refusal["first_refusal"]["refusal_code"]
+            == "TOOL_CALL_PARAMS_SHAPE_MISMATCH"
+        )
+
+
+def test_selected_protocol_requires_exact_current_codex_tools_call_shape(tmp_path):
+    origin = "http://127.0.0.1:48101"
+    _code, responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [
+            _mcp_initialize_request(),
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "arguments": {"url": f"{origin}/"},
+                    "name": "browser_navigate",
+                },
+            },
+        ],
+    )
+
+    assert responses[-1]["error"] == {
+        "code": -32602,
+        "message": "browser MCP call refused by attempt policy",
+    }
+    refusal = json.loads(
+        (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+    )
+    assert (
+        refusal["first_refusal"]["refusal_code"]
+        == "TOOL_CALL_PARAMS_SHAPE_MISMATCH"
+    )
+
+
+def test_valid_meta_cannot_bypass_inner_navigation_guard(tmp_path):
+    _code, responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [
+            _mcp_initialize_request(),
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "_meta": {"threadId": "thread-1"},
+                    "arguments": {"url": "http://127.0.0.1:48101/private"},
+                    "name": "browser_navigate",
+                },
+            },
+        ],
+    )
+    assert responses[-1]["error"]["code"] == -32602
+    refusal = json.loads(
+        (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+    )
+    assert (
+        refusal["first_refusal"]["refusal_code"]
+        == "NAVIGATION_TARGET_MISMATCH"
+    )
+
+
+@pytest.mark.parametrize(
+    ("requests", "selected", "expected_code"),
+    [
+        (
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "arguments": {"url": "http://127.0.0.1:48101/"},
+                        "name": "browser_navigate",
+                    },
+                }
+            ],
+            "2025-06-18",
+            "TOOL_CALL_BEFORE_INITIALIZED",
+        ),
+        (
+            [
+                _mcp_initialize_request(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "arguments": {"url": "http://127.0.0.1:48101/"},
+                        "name": "browser_navigate",
+                    },
+                },
+            ],
+            "2025-06-18",
+            "TOOL_CALL_BEFORE_INITIALIZED",
+        ),
+        (
+            [_mcp_initialize_request(protocol_version="2024-11-05")],
+            "2025-06-18",
+            "PROTOCOL_VERSION_UNSUPPORTED",
+        ),
+        (
+            [
+                _mcp_initialize_request(),
+                {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            ],
+            "2024-11-05",
+            "PROTOCOL_VERSION_MISMATCH",
+        ),
+    ],
+)
+def test_mcp_handshake_order_and_version_refusals_are_distinct(
+    tmp_path, requests, selected, expected_code
+):
+    _code, _responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path, requests, selected_protocol_version=selected
+    )
+    refusal = json.loads(
+        (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+    )
+    assert refusal["first_refusal"]["refusal_code"] == expected_code
+
+
+@pytest.mark.parametrize(
+    "requests",
+    [
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": {},
+            }
+        ],
+        [
+            _mcp_initialize_request(),
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": {},
+            },
+        ],
+    ],
+)
+def test_tools_list_requires_the_complete_negotiated_handshake(tmp_path, requests):
+    _code, responses, artifact = _run_scripted_mcp_bridge(tmp_path, requests)
+
+    assert responses[-1]["error"] == {
+        "code": -32602,
+        "message": "browser MCP call refused by attempt policy",
+    }
+    refusal = json.loads(
+        (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+    )
+    assert (
+        refusal["first_refusal"]["refusal_code"]
+        == "CLIENT_REQUEST_BEFORE_INITIALIZED"
+    )
+
+
+def test_ping_is_the_only_request_allowed_before_initialization(tmp_path):
+    code, responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [{"jsonrpc": "2.0", "id": 9, "method": "ping", "params": {}}],
+    )
+
+    assert code == 0
+    assert responses == [{"id": 9, "jsonrpc": "2.0", "result": {}}]
+    assert not (artifact / browser._MCP_REFUSAL_FILE).exists()
+
+
+@pytest.mark.parametrize(
+    "requests",
+    [
+        [
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": 99},
+            }
+        ],
+        [
+            _mcp_initialize_request(),
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": 99},
+            },
+        ],
+    ],
+)
+def test_cancel_notification_requires_initialized_exact_pending_request(
+    tmp_path, requests
+):
+    code, _responses, artifact = _run_scripted_mcp_bridge(tmp_path, requests)
+
+    assert code == 1
+    refusal = json.loads(
+        (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+    )
+    assert refusal["first_refusal"]["refusal_code"] in {
+        "CLIENT_REQUEST_BEFORE_INITIALIZED",
+        "CLIENT_REQUEST_SHAPE_MISMATCH",
+    }
+
+
+def test_cancel_notification_forwards_only_for_exact_pending_request(tmp_path):
+    code, responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [
+            _mcp_initialize_request(),
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            {"jsonrpc": "2.0", "id": 9, "method": "ping", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"reason": "caller cancelled", "requestId": 9},
+            },
+        ],
+        cancellation_mode="hold-ping-until-cancelled",
+    )
+
+    assert code == 0
+    assert responses[-1] == {
+        "error": {"code": -32800, "message": "cancelled"},
+        "id": 9,
+        "jsonrpc": "2.0",
+    }
+    assert not (artifact / browser._MCP_REFUSAL_FILE).exists()
+
+
+def test_server_notifications_are_refused_before_completed_handshake(tmp_path):
+    code, _responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [_mcp_initialize_request()],
+        server_notification_mode="before-initialize-response",
+    )
+
+    assert code == 1
+    refusal = json.loads(
+        (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+    )
+    assert (
+        refusal["first_refusal"]["refusal_code"]
+        == "MCP_RESPONSE_BEFORE_INITIALIZED"
+    )
+
+
+def test_server_notifications_require_an_exact_negotiated_capability(tmp_path):
+    code, _responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [
+            _mcp_initialize_request(),
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+        ],
+        server_notification_mode="after-initialized",
+    )
+
+    assert code == 1
+    refusal = json.loads(
+        (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+    )
+    assert refusal["first_refusal"]["refusal_code"] == "MCP_RESPONSE_INVALID"
+
+
+@pytest.mark.parametrize("digest", ["A" * 64, int("1" * 64)])
+def test_refusal_seal_requires_exact_lowercase_string_sha256(digest):
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.browser_mcp_refusal_seal(
+            {
+                "artifact_sha256": digest,
+                "attempt_id": "attempt",
+                "process_generation_id": "generation",
+                "refusal_code": "MCP_RESPONSE_INVALID",
+                "session_epoch_id": "epoch",
+            }
+        )
+
+    assert raised.value.state == "BROWSER_DIAGNOSTIC_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("digest", ["A" * 64, int("1" * 64)])
+def test_guard_rows_require_exact_lowercase_string_sha256(digest):
+    calls = {
+        "browser_console_messages": 1,
+        "browser_hover": 1,
+        "browser_navigate": 3,
+        "browser_network_requests": 1,
+        "browser_resize": 3,
+        "browser_snapshot": 1,
+        "browser_take_screenshot": 4,
+    }
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser._closed_mcp_guard_observations(
+            calls,
+            console_rows=[
+                {
+                    "bytes": 2,
+                    "content_sha256": digest,
+                    "tool": "browser_console_messages",
+                }
+            ],
+            interaction={"page_class": "product", "tool": "browser_hover"},
+            network_rows=[
+                {
+                    "bytes": 2,
+                    "content_sha256": "b" * 64,
+                    "tool": "browser_network_requests",
+                }
+            ],
+        )
+
+    assert raised.value.state == "BROWSER_RECEIPT_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_code"),
+    [
+        ("extra-key", "MCP_RESPONSE_INVALID"),
+        ("missing-protocol", "PROTOCOL_VERSION_MISMATCH"),
+    ],
+)
+def test_initialize_result_must_be_exact_and_protocol_bound(
+    tmp_path, mode, expected_code
+):
+    _code, responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [_mcp_initialize_request()],
+        initialize_result_mode=mode,
+    )
+    assert responses[-1]["error"] == {
+        "code": -32602,
+        "message": "browser MCP call refused by attempt policy",
+    }
+    refusal = json.loads(
+        (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+    )
+    assert refusal["first_refusal"]["refusal_code"] == expected_code
+
+
+@pytest.mark.parametrize("response_id_mode", ["bool", "float"])
+def test_server_response_id_type_cannot_alias_pending_integer_request(
+    tmp_path, response_id_mode
+):
+    code, _responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [_mcp_initialize_request()],
+        response_id_mode=response_id_mode,
+    )
+
+    assert code == 1
+    refusal = json.loads(
+        (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+    )
+    assert refusal["first_refusal"]["refusal_code"] == "MCP_RESPONSE_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("requested", "selected", "secret", "expected_requested", "expected_selected"),
+    [
+        (
+            "secret-client-token",
+            "2025-06-18",
+            b"secret-client-token",
+            "UNSUPPORTED",
+            None,
+        ),
+        (
+            "2025-06-18",
+            "secret-server-token",
+            b"secret-server-token",
+            "2025-06-18",
+            "UNSUPPORTED",
+        ),
+    ],
+)
+def test_unrecognized_protocol_version_value_is_never_persisted(
+    tmp_path,
+    requested,
+    selected,
+    secret,
+    expected_requested,
+    expected_selected,
+):
+    _code, _responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [_mcp_initialize_request(protocol_version=requested)],
+        selected_protocol_version=selected,
+    )
+
+    raw = (artifact / browser._MCP_REFUSAL_FILE).read_bytes()
+    refusal = json.loads(raw)
+    assert secret not in raw
+    assert (
+        refusal["negotiation"]["requested_protocol_version"]
+        == expected_requested
+    )
+    assert (
+        refusal["negotiation"]["selected_protocol_version"]
+        == expected_selected
+    )
+
+
+def test_refusal_artifact_preserves_first_code_and_never_persists_raw_inputs(tmp_path):
+    origin = "http://127.0.0.1:48101"
+    secret_url = f"{origin}/private?credential=do-not-persist#prompt"
+    requests = [
+        _mcp_initialize_request(),
+        {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "_meta": {"traceparent": "secret-trace"},
+                "arguments": {"url": f"{origin}/"},
+                "name": "browser_navigate",
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "_meta": {"threadId": "thread-1"},
+                "arguments": {"url": secret_url},
+                "name": "browser_navigate",
+            },
+        },
+    ]
+    code, responses, artifact = _run_scripted_mcp_bridge(tmp_path, requests)
+
+    assert code == 0
+    assert [row["error"]["code"] for row in responses[-2:]] == [-32602, -32602]
+    refusal_path = artifact / browser._MCP_REFUSAL_FILE
+    raw = refusal_path.read_bytes()
+    refusal = json.loads(raw)
+    assert refusal["schema_version"] == "mastermind.browser_mcp_refusal.v1"
+    assert refusal["attempt_id"] == "attempt-mcp-refusal"
+    assert (
+        refusal["first_refusal"]["refusal_code"]
+        == "TOOL_CALL_PARAMS_SHAPE_MISMATCH"
+    )
+    assert refusal["later_refusals"]["count"] == 1
+    assert refusal["later_refusals"]["codes_sha256"] == hashlib.sha256(
+        browser._canonical_bytes(["NAVIGATION_TARGET_MISMATCH"])
+    ).hexdigest()
+    assert stat.S_IMODE(refusal_path.stat().st_mode) == 0o600
+    assert b"do-not-persist" not in raw
+    assert b"secret-trace" not in raw
+    assert b"private" not in raw
+    assert not (artifact / browser._RECEIPT_FILE).exists()
+
+
+def test_expected_file_url_falsifier_keeps_success_path_diagnostic_free(tmp_path):
+    requests = [
+        _mcp_initialize_request(),
+        {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "_meta": {"threadId": "thread-1"},
+                "arguments": {"url": "file:///etc/passwd"},
+                "name": "browser_navigate",
+            },
+        },
+    ]
+    code, responses, artifact = _run_scripted_mcp_bridge(tmp_path, requests)
+
+    assert code == 0
+    assert responses[-1]["error"]["code"] == -32602
+    assert not (artifact / browser._MCP_REFUSAL_FILE).exists()
+
+
+def test_only_exact_passwd_file_url_is_the_non_diagnostic_egress_falsifier(
+    tmp_path,
+):
+    requests = [
+        _mcp_initialize_request(),
+        {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "_meta": {"threadId": "thread-1"},
+                "arguments": {"url": "file:///etc/shadow"},
+                "name": "browser_navigate",
+            },
+        },
+    ]
+    code, responses, artifact = _run_scripted_mcp_bridge(tmp_path, requests)
+
+    assert code == 0
+    assert responses[-1]["error"] == {
+        "code": -32602,
+        "message": "browser MCP call refused by attempt policy",
+    }
+    refusal = json.loads(
+        (artifact / browser._MCP_REFUSAL_FILE).read_text(encoding="utf-8")
+    )
+    assert (
+        refusal["first_refusal"]["refusal_code"]
+        == "NAVIGATION_TARGET_MISMATCH"
+    )
+
+
+def test_refusal_recorder_fails_closed_instead_of_truncating_at_bound(tmp_path):
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin,
+        artifact_dir=artifact,
+        fixture_urls=_fixture_urls(origin),
+        refusal_identity=_mcp_refusal_identity(),
+    )
+    recorder = browser._BrowserMcpRefusalRecorder(guard)
+    request = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "arguments": {"url": f"{origin}/"},
+            "name": "browser_navigate",
+        },
+    }
+    recorder.record("TOOL_CALL_PARAMS_SHAPE_MISMATCH", request, "browser_navigate")
+    recorder.record("NAVIGATION_TARGET_MISMATCH", request, "browser_navigate")
+    artifact_value = recorder.artifact(
+        requested_protocol_version=None,
+        selected_protocol_version=None,
+        initialize_request_shape_sha256=None,
+        initialize_response_shape_sha256=None,
+    )
+    assert artifact_value is not None
+    assert (
+        artifact_value["first_refusal"]["refusal_code"]
+        == "TOOL_CALL_PARAMS_SHAPE_MISMATCH"
+    )
+    assert artifact_value["later_refusals"]["count"] == 1
+
+    for _index in range(browser._MAX_MCP_REFUSALS - 2):
+        recorder.record("NAVIGATION_TARGET_MISMATCH", request, "browser_navigate")
+    recorder.record("NAVIGATION_TARGET_MISMATCH", request, "browser_navigate")
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        recorder.artifact(
+            requested_protocol_version=None,
+            selected_protocol_version=None,
+            initialize_request_shape_sha256=None,
+            initialize_response_shape_sha256=None,
+        )
+    assert raised.value.state == "BROWSER_DIAGNOSTIC_UNAVAILABLE"
+
+
+def _refusal_workspace() -> WorkspaceIdentity:
+    return WorkspaceIdentity(
+        workspace_path="/opaque/workspace-not-written-to-artifact",
+        base_sha="a" * 40,
+        device=11,
+        inode=22,
+        uid=os.geteuid(),
+        gid=os.getegid(),
+    )
+
+
+def _refusal_identity_for_workspace(
+    workspace: WorkspaceIdentity,
+) -> browser.BrowserMcpRefusalIdentity:
+    capabilities_manifest = CapabilityManifest()
+    return _mcp_refusal_identity(
+        workspace_identity_sha256=browser._canonical_digest(asdict(workspace)),
+        requested_profile_sha256=browser._canonical_digest(
+            browser._identity_json(
+                {"capabilities": capabilities_manifest, "workspace": workspace}
+            )
+        ),
+        capability_manifest_sha256=browser._canonical_digest(
+            asdict(capabilities_manifest)
+        ),
+    )
+
+
+def _refusal_resource(
+    artifact: Path,
+    monkeypatch,
+) -> tuple[browser.BrowserGenerationResource, browser.BrowserMcpRefusalIdentity]:
+    workspace = _refusal_workspace()
+    capabilities_manifest = CapabilityManifest()
+    requested = SimpleNamespace(
+        workspace=workspace, capabilities=capabilities_manifest
+    )
+    identity = _refusal_identity_for_workspace(workspace)
+    resource = object.__new__(browser.BrowserGenerationResource)
+    resource.workspace = Path(workspace.workspace_path)
+    resource._artifact_dir = artifact
+    resource._artifact_dir_identity = browser.BrowserMcpToolGuard._directory_identity(
+        artifact.lstat()
+    )
+    resource._stopped = True
+    resource._workspace_before = {"tracked": "same"}
+    resource._workspace_after = {"tracked": "same"}
+    resource._workspace_integrity_plan = object()
+    resource._workspace_integrity_before = "same"
+    resource._workspace_integrity_after = "same"
+    resource.attempt_id = identity.attempt_id
+    resource.session_epoch_id = identity.session_epoch_id
+    resource.process_generation_id = identity.process_generation_id
+    resource.epoch = SimpleNamespace(worker_id=identity.worker_id)
+    resource.generation = SimpleNamespace(
+        worker_id=identity.worker_id,
+        process_generation_id=identity.process_generation_id,
+        session_epoch_id=identity.session_epoch_id,
+    )
+    resource.requested = requested
+    resource.profile = SimpleNamespace(
+        profile_id=identity.profile_id,
+        profile_digest=identity.profile_sha256,
+    )
+    attestation = object()
+    resource._runtime_attestation = attestation
+    resource.resource_grant = SimpleNamespace(
+        runtime_manifest_digest=identity.runtime_manifest_sha256,
+        runtime_manifest_path="/opaque/runtime-manifest.json",
+        runtime_root="/opaque/runtime",
+    )
+    resource.mcp_grant = SimpleNamespace(
+        server_identity=identity.mcp_identity,
+        server_version=identity.mcp_version,
+        tool_schema_digest=identity.tool_schema_sha256,
+    )
+    monkeypatch.setattr(
+        browser,
+        "load_runtime_install_attestation",
+        lambda *_args, **_kwargs: attestation,
+    )
+    monkeypatch.setattr(
+        browser,
+        "_validate_workspace_stat_identity",
+        lambda *_args, **_kwargs: Path(workspace.workspace_path),
+    )
+    monkeypatch.setattr(
+        browser,
+        "_tracked_workspace_integrity_digest",
+        lambda _plan: "same",
+    )
+    return resource, identity
+
+
+def _terminal_sweep(
+    *,
+    passing: bool = True,
+    reason: str = "operator_terminal",
+    worker_uid: int | None = None,
+) -> UIDSweepReceipt:
+    return UIDSweepReceipt(
+        schema_version=UID_SWEEP_SCHEMA_VERSION,
+        observed_at="2026-09-03T00:00:00+00:00",
+        reason=reason,
+        worker_uid=os.geteuid() if worker_uid is None else worker_uid,
+        broker_pid=os.getpid(),
+        residual_pids_before=(),
+        residual_pids_after=() if passing else (999_999,),
+        signal_name="SIGKILL",
+        signal_sent=not passing,
+        quiescent_observations=2 if passing else 0,
+    )
+
+
+def test_refusal_artifact_becomes_trusted_only_after_passing_uid_sweep(
+    tmp_path, monkeypatch
+):
+    identity = _refusal_identity_for_workspace(_refusal_workspace())
+    _code, _responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "arguments": {"url": "http://127.0.0.1:48101/"},
+                    "name": "browser_navigate",
+                },
+            }
+        ],
+        refusal_identity=identity,
+    )
+    resource, _expected = _refusal_resource(artifact, monkeypatch)
+    refusal_path = artifact / browser._MCP_REFUSAL_FILE
+    original = refusal_path.read_bytes()
+
+    with pytest.raises(browser.BrowserReviewError) as untrusted:
+        resource.seal_after_uid_sweep(_terminal_sweep(passing=False))
+    assert untrusted.value.state == "BROWSER_ORPHAN_PROCESS_UNCERTAIN"
+    assert refusal_path.read_bytes() == original
+    assert not (artifact / browser._RECEIPT_FILE).exists()
+
+    for invalid_sweep in (
+        _terminal_sweep(reason="run_terminal"),
+        _terminal_sweep(worker_uid=os.geteuid() + 1),
+    ):
+        with pytest.raises(browser.BrowserReviewError) as untrusted_identity:
+            resource.seal_after_uid_sweep(invalid_sweep)
+        assert (
+            untrusted_identity.value.state
+            == "BROWSER_ORPHAN_PROCESS_UNCERTAIN"
+        )
+        assert refusal_path.read_bytes() == original
+
+    with pytest.raises(browser.BrowserReviewError) as trusted:
+        resource.seal_after_uid_sweep(_terminal_sweep())
+    assert trusted.value.state == "BROWSER_MCP_REFUSED"
+    assert trusted.value.refusal_code == "TOOL_CALL_BEFORE_INITIALIZED"
+    assert trusted.value.artifact_sha256 == hashlib.sha256(original).hexdigest()
+    assert not (artifact / browser._RECEIPT_FILE).exists()
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "profile",
+        "runtime",
+        "worker_uid",
+        "extra_field",
+        "duplicate_key",
+        "noncanonical",
+        "mode",
+        "hardlink",
+        "symlink",
+        "deeply_nested",
+    ],
+)
+def test_refusal_artifact_tamper_fails_closed_without_raw_detail(
+    tmp_path, monkeypatch, tamper
+):
+    identity = _refusal_identity_for_workspace(_refusal_workspace())
+    _code, _responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "arguments": {"url": "http://127.0.0.1:48101/"},
+                    "name": "browser_navigate",
+                },
+            }
+        ],
+        refusal_identity=identity,
+    )
+    resource, _expected = _refusal_resource(artifact, monkeypatch)
+    refusal_path = artifact / browser._MCP_REFUSAL_FILE
+    hostile = json.loads(refusal_path.read_text(encoding="utf-8"))
+    if tamper == "profile":
+        hostile["execution_profile"]["profile_sha256"] = "f" * 64
+    elif tamper == "runtime":
+        hostile["runtime"]["manifest_sha256"] = "f" * 64
+    elif tamper == "worker_uid":
+        hostile["worker_uid"] = os.geteuid() + 1
+    elif tamper == "extra_field":
+        hostile["raw_url"] = "must-not-cross"
+    if tamper in {"profile", "runtime", "worker_uid", "extra_field"}:
+        refusal_path.write_bytes(browser._canonical_bytes(hostile) + b"\n")
+        refusal_path.chmod(0o600)
+    elif tamper == "duplicate_key":
+        original = refusal_path.read_bytes()
+        refusal_path.write_bytes(b'{"attempt_id":"hostile",' + original[1:])
+        refusal_path.chmod(0o600)
+    elif tamper == "noncanonical":
+        refusal_path.write_bytes(json.dumps(hostile).encode("utf-8") + b"\n")
+        refusal_path.chmod(0o600)
+    elif tamper == "mode":
+        refusal_path.chmod(0o644)
+    elif tamper == "hardlink":
+        os.link(refusal_path, artifact / "refusal-hardlink")
+    elif tamper == "deeply_nested":
+        refusal_path.write_bytes(b"[" * 1500 + b"]" * 1500)
+        refusal_path.chmod(0o600)
+    else:
+        replacement = artifact / "refusal-replacement"
+        replacement.write_bytes(refusal_path.read_bytes())
+        replacement.chmod(0o600)
+        refusal_path.unlink()
+        refusal_path.symlink_to(replacement.name)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        resource.seal_after_uid_sweep(_terminal_sweep())
+    assert raised.value.state == "BROWSER_DIAGNOSTIC_UNAVAILABLE"
+    assert raised.value.refusal_code is None
+    assert raised.value.artifact_sha256 is None
+    assert "opaque" not in str(raised.value)
+    assert not (artifact / browser._RECEIPT_FILE).exists()
+
+
+def test_refusal_seal_reattests_runtime_after_uid_sweep(tmp_path, monkeypatch):
+    identity = _refusal_identity_for_workspace(_refusal_workspace())
+    _code, _responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "arguments": {"url": "http://127.0.0.1:48101/"},
+                    "name": "browser_navigate",
+                },
+            }
+        ],
+        refusal_identity=identity,
+    )
+    resource, _expected = _refusal_resource(artifact, monkeypatch)
+    monkeypatch.setattr(
+        browser,
+        "load_runtime_install_attestation",
+        lambda *_args, **_kwargs: object(),
+    )
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        resource.seal_refusal_after_uid_sweep(_terminal_sweep())
+    assert raised.value.state == "BROWSER_DIAGNOSTIC_UNAVAILABLE"
+    assert raised.value.refusal_code is None
+    assert raised.value.artifact_sha256 is None
+
+
+def test_refusal_seal_rechecks_workspace_after_stop_and_uid_sweep(
+    tmp_path, monkeypatch
+):
+    identity = _refusal_identity_for_workspace(_refusal_workspace())
+    _code, _responses, artifact = _run_scripted_mcp_bridge(
+        tmp_path,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "arguments": {"url": "http://127.0.0.1:48101/"},
+                    "name": "browser_navigate",
+                },
+            }
+        ],
+        refusal_identity=identity,
+    )
+    resource, _expected = _refusal_resource(artifact, monkeypatch)
+
+    def refuse_workspace_drift(*_args, **_kwargs):
+        raise browser.BrowserReviewError(
+            "BROWSER_WORKSPACE_MUTATION",
+            "workspace identity differs from the Attempt",
+        )
+
+    monkeypatch.setattr(
+        browser,
+        "_validate_workspace_stat_identity",
+        refuse_workspace_drift,
+    )
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        resource.seal_refusal_after_uid_sweep(_terminal_sweep())
+    assert raised.value.state == "BROWSER_ORPHAN_PROCESS_UNCERTAIN"
+
+
+def test_terminal_sweep_rechecks_tracked_bytes_without_spawning_git(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tracked_parent = workspace / "tracked"
+    tracked_parent.mkdir()
+    tracked = tracked_parent / "tracked.txt"
+    tracked.write_text("before\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", "-b", "fixture"], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "fixture@example.invalid"],
+        cwd=workspace,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Fixture"], cwd=workspace, check=True
+    )
+    subprocess.run(["git", "add", "tracked/tracked.txt"], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "fixture"], cwd=workspace, check=True
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    info = workspace.stat()
+    workspace_identity = WorkspaceIdentity(
+        os.fspath(workspace.resolve()),
+        head,
+        info.st_dev,
+        info.st_ino,
+        info.st_uid,
+        info.st_gid,
+    )
+    plan = browser._prepare_tracked_workspace_integrity(workspace)
+    baseline = browser._tracked_workspace_integrity_digest(plan)
+
+    resource = object.__new__(browser.BrowserGenerationResource)
+    resource.workspace = workspace
+    resource.requested = SimpleNamespace(workspace=workspace_identity)
+    resource._stopped = True
+    resource._workspace_before = {"tracked": "same"}
+    resource._workspace_after = {"tracked": "same"}
+    resource._workspace_integrity_plan = plan
+    resource._workspace_integrity_before = baseline
+    resource._workspace_integrity_after = baseline
+    resource._mcp_refusal_identity = lambda: _mcp_refusal_identity(
+        worker_uid=os.geteuid()
+    )
+
+    # This is the precise stop/sweep race: the stop-time snapshots are already
+    # cached, then a residual worker mutates one tracked file before the passing
+    # sweep returns to the broker.
+    tracked.write_text("mutated-by-residual-worker\n", encoding="utf-8")
+
+    def forbid_post_sweep_process(*_args, **_kwargs):
+        raise AssertionError("post-sweep workspace proof must be in-process")
+
+    monkeypatch.setattr(browser.subprocess, "run", forbid_post_sweep_process)
+    monkeypatch.setattr(browser.subprocess, "Popen", forbid_post_sweep_process)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        resource._require_terminal_uid_sweep(_terminal_sweep())
+    assert raised.value.state == "BROWSER_ORPHAN_PROCESS_UNCERTAIN"
+
+    tracked.write_text("before\n", encoding="utf-8")
+    displaced = workspace / "tracked-displaced"
+    tracked_parent.rename(displaced)
+    tracked_parent.symlink_to(displaced.name, target_is_directory=True)
+
+    with pytest.raises(browser.BrowserReviewError) as symlinked:
+        resource._require_terminal_uid_sweep(_terminal_sweep())
+    assert symlinked.value.state == "BROWSER_ORPHAN_PROCESS_UNCERTAIN"
+
+
+def test_clean_never_launched_context_does_not_forge_refusal_on_cancel(
+    tmp_path, monkeypatch
+):
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    resource, identity = _refusal_resource(artifact, monkeypatch)
+    context_path = artifact / browser._MCP_REFUSAL_CONTEXT_FILE
+    context_path.write_bytes(browser._canonical_bytes(identity.to_wire()) + b"\n")
+    context_path.chmod(0o600)
+
+    assert resource.seal_refusal_after_uid_sweep(_terminal_sweep()) is None
+    assert not (artifact / browser._MCP_REFUSAL_FILE).exists()
+    assert not (artifact / browser._RECEIPT_FILE).exists()
+
+
+def test_deep_refusal_context_is_one_fixed_diagnostic_error(tmp_path):
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    context = artifact / browser._MCP_REFUSAL_CONTEXT_FILE
+    context.write_bytes(b"[" * 1500 + b"]" * 1500)
+    context.chmod(0o600)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser._consume_mcp_refusal_identity(
+            artifact,
+            fixture_a_url="http://127.0.0.1:48101/a",
+            fixture_b_url="http://127.0.0.1:48101/b",
+        )
+    assert raised.value.state == "BROWSER_DIAGNOSTIC_UNAVAILABLE"
+    assert str(raised.value) == "browser MCP refusal diagnostic is unavailable"
+
+
+def test_preexisting_refusal_cannot_be_trusted_after_bridge_write_failure(
+    tmp_path, monkeypatch
+):
+    seed_root = tmp_path / "seed"
+    seed_root.mkdir()
+    request = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "arguments": {"url": "http://127.0.0.1:48101/"},
+            "name": "browser_navigate",
+        },
+    }
+    _code, _responses, seed_artifact = _run_scripted_mcp_bridge(
+        seed_root, [request]
+    )
+    seeded = (seed_artifact / browser._MCP_REFUSAL_FILE).read_bytes()
+
+    target_root = tmp_path / "target"
+    target_root.mkdir()
+    with pytest.raises(browser.BrowserReviewError) as bridge_error:
+        _run_scripted_mcp_bridge(
+            target_root,
+            [request],
+            preseed_refusal_payload=seeded,
+        )
+    assert bridge_error.value.state == "BROWSER_DIAGNOSTIC_UNAVAILABLE"
+
+    artifact = target_root / "attempt"
+    resource, _identity = _refusal_resource(artifact, monkeypatch)
+    with pytest.raises(browser.BrowserReviewError) as seal_error:
+        resource.seal_refusal_after_uid_sweep(_terminal_sweep())
+    assert seal_error.value.state == "BROWSER_DIAGNOSTIC_UNAVAILABLE"
+
+
+def test_refusal_artifact_write_failure_is_one_fixed_diagnostic_error(
+    tmp_path, monkeypatch
+):
+    original = browser._write_private_bytes_once_at
+
+    def fail_refusal(directory_fd, name, payload):
+        if name == browser._MCP_REFUSAL_FILE:
+            raise browser.BrowserReviewError(
+                "BROWSER_RECEIPT_INVALID", "secret low-level write detail"
+            )
+        return original(directory_fd, name, payload)
+
+    monkeypatch.setattr(browser, "_write_private_bytes_once_at", fail_refusal)
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        _run_scripted_mcp_bridge(
+            tmp_path,
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "arguments": {"url": "http://127.0.0.1:48101/"},
+                        "name": "browser_navigate",
+                    },
+                }
+            ],
+        )
+    assert raised.value.state == "BROWSER_DIAGNOSTIC_UNAVAILABLE"
+    assert str(raised.value) == "browser MCP refusal diagnostic is unavailable"
+
+
+def test_guard_distinguishes_inner_argument_navigation_and_pending_refusals(tmp_path):
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    with pytest.raises(browser.BrowserReviewError) as argument_error:
+        guard.rewrite_call(
+            "browser_navigate", {"url": f"{origin}/", "trace": "unreviewed"}
+        )
+    assert argument_error.value.refusal_code == "TOOL_ARGUMENT_SHAPE_MISMATCH"
+
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    with pytest.raises(browser.BrowserReviewError) as navigation_error:
+        guard.rewrite_call("browser_navigate", {"url": f"{origin}/wrong"})
+    assert navigation_error.value.refusal_code == "NAVIGATION_TARGET_MISMATCH"
+
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    guard.rewrite_call("browser_navigate", {"url": f"{origin}/"})
+    with pytest.raises(browser.BrowserReviewError) as pending_error:
+        guard.rewrite_call("browser_resize", {"width": 1440, "height": 900})
+    assert pending_error.value.refusal_code == "STATE_TRANSITION_PENDING"
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments", "expected_code"),
+    [
+        ("browser_evaluate", {}, "TOOL_OUTSIDE_ALLOWLIST"),
+        (
+            "browser_navigate",
+            {"url": "http://127.0.0.1:48101/", "unknown": True},
+            "TOOL_ARGUMENT_SHAPE_MISMATCH",
+        ),
+        ("browser_navigate", {"url": "x" * 5000}, "ARGUMENT_OVERSIZE"),
+        ("browser_navigate", {"url": ""}, "NAVIGATION_URL_INVALID"),
+        ("browser_resize", {"width": 800, "height": 600}, "VIEWPORT_MISMATCH"),
+        (
+            "browser_take_screenshot",
+            {
+                "filename": "desktop.png",
+                "fullPage": False,
+                "scale": "css",
+                "type": "png",
+            },
+            "SCREENSHOT_BINDING_MISMATCH",
+        ),
+        ("browser_snapshot", {}, "SNAPSHOT_BINDING_MISSING"),
+        ("browser_click", {"target": "x"}, "INTERACTION_BINDING_MISMATCH"),
+    ],
+)
+def test_guard_refusal_families_have_one_closed_code(
+    tmp_path, name, arguments, expected_code
+):
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        guard.rewrite_call(name, arguments)
+    assert raised.value.refusal_code == expected_code
+
+
+def test_guard_invalid_tool_result_has_closed_response_code(tmp_path):
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    arguments = guard.rewrite_call("browser_navigate", {"url": f"{origin}/"})
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        guard.record_result(
+            "browser_navigate",
+            arguments,
+            {"jsonrpc": "2.0", "id": 1, "error": {"code": -1}},
+        )
+    assert raised.value.refusal_code == "MCP_RESPONSE_INVALID"
+
+
+def test_root_trailing_slash_forms_are_distinguished_narrowly(tmp_path):
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    hostile = (
+        origin,
+        "http://localhost:48101/",
+        "http://user@127.0.0.1:48101/",
+        "http://127.0.0.1:48102/",
+        f"{origin}/other",
+        f"{origin}/?query=1",
+        f"{origin}/#fragment",
+    )
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    assert guard.rewrite_call("browser_navigate", {"url": f"{origin}/"}) == {
+        "url": f"{origin}/"
+    }
+    for candidate in hostile:
+        guard = browser.BrowserMcpToolGuard(
+            origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+        )
+        with pytest.raises(browser.BrowserReviewError) as raised:
+            guard.rewrite_call("browser_navigate", {"url": candidate})
+        assert raised.value.refusal_code == "NAVIGATION_TARGET_MISMATCH"
+
+
 def test_stdio_bridge_interposes_before_official_mcp_and_persists_control_plane_evidence(
     tmp_path,
 ):
@@ -3176,7 +4675,18 @@ def test_stdio_bridge_interposes_before_official_mcp_and_persists_control_plane_
             message_pixels = png(1389, 868)
             for raw in sys.stdin.buffer:
                 request = json.loads(raw)
-                if request.get('method') == 'tools/call':
+                if request.get('method') == 'notifications/initialized':
+                    continue
+                if request.get('method') == 'initialize':
+                    result = {
+                        'capabilities': {'tools': {}},
+                        'protocolVersion': '2025-06-18',
+                        'serverInfo': {
+                            'name': 'Playwright',
+                            'version': '1.63.0-alpha-2026-08-05',
+                        },
+                    }
+                elif request.get('method') == 'tools/call':
                     params = request['params']
                     if params['name'] == 'browser_take_screenshot':
                         assert 'filename' not in params['arguments']
@@ -3199,17 +4709,17 @@ def test_stdio_bridge_interposes_before_official_mcp_and_persists_control_plane_
     artifact = tmp_path / "attempt"
     artifact.mkdir(mode=0o700)
     origin = "http://127.0.0.1:48101"
-    requests = [
-        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "browser_navigate", "arguments": {"url": f"{origin}/"}}},
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "browser_resize", "arguments": {"width": 1440, "height": 900}}},
-        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "browser_take_screenshot", "arguments": {"filename": "desktop.png", "fullPage": False, "scale": "css", "type": "png"}}},
+    tool_requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"_meta": {"threadId": "thread-1"}, "name": "browser_navigate", "arguments": {"url": f"{origin}/"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"_meta": {"threadId": "thread-1"}, "name": "browser_resize", "arguments": {"width": 1440, "height": 900}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"_meta": {"threadId": "thread-1"}, "name": "browser_take_screenshot", "arguments": {"filename": "desktop.png", "fullPage": False, "scale": "css", "type": "png"}}},
     ]
-    client_output = io.BytesIO()
+    client_output = _InitializeAwareOutput()
     guard = browser.BrowserMcpToolGuard(
         origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
     )
     completed = {
-        request["params"]["name"]: threading.Event() for request in requests
+        request["params"]["name"]: threading.Event() for request in tool_requests
     }
     original_record_result = guard.record_result
 
@@ -3220,7 +4730,12 @@ def test_stdio_bridge_interposes_before_official_mcp_and_persists_control_plane_
     guard.record_result = record_result_and_release
 
     def sequential_client_input():
-        for request in requests:
+        yield browser._canonical_bytes(_mcp_initialize_request()) + b"\n"
+        assert client_output.initialize_response.wait(2)
+        yield browser._canonical_bytes(
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
+        ) + b"\n"
+        for request in tool_requests:
             yield browser._canonical_bytes(request) + b"\n"
             assert completed[request["params"]["name"]].wait(2)
 
@@ -4124,6 +5639,13 @@ def test_generation_resource_owns_devserver_proxy_artifacts_and_post_sweep_recei
     proxy = browser.LoopbackEnforcingProxy  # explicit positive ownership control
     assert proxy is not None
     artifact_dir = Path(environment["MASTERMIND_BROWSER_ARTIFACT_DIR"])
+    consumed_identity = browser._consume_mcp_refusal_identity(
+        artifact_dir,
+        fixture_a_url=environment["MASTERMIND_BROWSER_FIXTURE_A_URL"],
+        fixture_b_url=environment["MASTERMIND_BROWSER_FIXTURE_B_URL"],
+    )
+    assert consumed_identity == resource._mcp_refusal_identity()
+    assert not (artifact_dir / browser._MCP_REFUSAL_CONTEXT_FILE).exists()
     pngs = {
         "desktop.png": _png(1440, 900),
         "mobile.png": _png(390, 844, color=b"\x01\x02\x03\xff"),

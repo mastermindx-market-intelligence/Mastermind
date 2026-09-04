@@ -9,6 +9,7 @@ does not report success until the process group is proven absent.
 from __future__ import annotations
 
 import base64
+import enum
 import hashlib
 import http.client
 import http.server
@@ -26,7 +27,7 @@ import subprocess
 import threading
 import time
 import zlib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
@@ -160,6 +161,47 @@ MAX_PROXY_RESPONSE_BYTES = MAX_TEXT_EVIDENCE_BYTES + MAX_SCREENSHOT_BYTES
 MAX_RUNTIME_INSTALL_MANIFEST_BYTES = 4 * 1024 * 1024
 _CLEANUP_GRACE_SECONDS = 3.0
 _CLEANUP_PROOF_SECONDS = 3.0
+_SUPPORTED_MCP_PROTOCOL_VERSION = "2025-06-18"
+_UNSUPPORTED_MCP_PROTOCOL_VERSION = "UNSUPPORTED"
+_MCP_CLIENT_INFO = {
+    "name": "codex-mcp-client",
+    "title": "Codex",
+    "version": "0.147.0",
+}
+_MCP_CLIENT_CAPABILITIES = {"elicitation": {}}
+_MCP_SERVER_CAPABILITIES = {"tools": {}}
+_MCP_REFUSAL_CONTEXT_FILE = "browser-mcp-refusal-context.json"
+_MCP_REFUSAL_FILE = "browser-mcp-refusal.json"
+_MCP_REFUSAL_SCHEMA = "mastermind.browser_mcp_refusal.v1"
+_MAX_MCP_REFUSALS = 64
+_MCP_REFUSAL_CODES = frozenset(
+    {
+        "ARGUMENT_OVERSIZE",
+        "CLIENT_REQUEST_BEFORE_INITIALIZED",
+        "CLIENT_REQUEST_SHAPE_MISMATCH",
+        "INITIALIZE_REQUEST_SHAPE_MISMATCH",
+        "INTERACTION_BINDING_MISMATCH",
+        "MCP_RESPONSE_INVALID",
+        "MCP_RESPONSE_BEFORE_INITIALIZED",
+        "NAVIGATION_URL_INVALID",
+        "NAVIGATION_TARGET_MISMATCH",
+        "PROFILE_IDENTITY_MISMATCH",
+        "PROTOCOL_VERSION_MISMATCH",
+        "PROTOCOL_VERSION_UNSUPPORTED",
+        "RUNTIME_IDENTITY_MISMATCH",
+        "SCREENSHOT_BINDING_MISMATCH",
+        "SNAPSHOT_BINDING_MISSING",
+        "STATE_TRANSITION_PENDING",
+        "TOOL_ARGUMENT_SHAPE_MISMATCH",
+        "TOOL_CALL_BEFORE_INITIALIZED",
+        "TOOL_CALL_PARAMS_SHAPE_MISMATCH",
+        "TOOL_OUTSIDE_ALLOWLIST",
+        "UNKNOWN_CLOSED_REFUSAL",
+        "VIEWPORT_MISMATCH",
+        "WORKER_UID_MISMATCH",
+    }
+)
+_EXPECTED_MCP_REFUSAL_CODES = frozenset({"EXPECTED_FILE_URL_FALSIFIER"})
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _HTTP_FIELD_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
@@ -211,10 +253,79 @@ _EGRESS_PROBE_HOSTS = {
 class BrowserReviewError(RuntimeError):
     """A typed, sanitized B1 failure."""
 
-    def __init__(self, state: str, detail: str):
+    def __init__(
+        self,
+        state: str,
+        detail: str,
+        *,
+        refusal_code: str | None = None,
+        artifact_sha256: str | None = None,
+        diagnostic_refusal: bool = True,
+    ):
         super().__init__(detail)
         self.state = state
         self.detail = detail
+        self.refusal_code = refusal_code
+        self.artifact_sha256 = artifact_sha256
+        self.diagnostic_refusal = diagnostic_refusal
+
+
+@dataclass(frozen=True)
+class BrowserMcpRefusalIdentity:
+    """Secret-free generation identity transported to the attempt-local bridge."""
+
+    attempt_id: str
+    session_epoch_id: str
+    process_generation_id: str
+    worker_id: str
+    worker_uid: int
+    workspace_identity_sha256: str
+    requested_profile_sha256: str
+    capability_manifest_sha256: str
+    profile_id: str
+    profile_sha256: str
+    runtime_manifest_sha256: str
+    mcp_identity: str
+    mcp_version: str
+    tool_schema_sha256: str
+
+    def to_wire(self) -> dict[str, str]:
+        return {
+            "attempt_id": self.attempt_id,
+            "capability_manifest_sha256": self.capability_manifest_sha256,
+            "mcp_identity": self.mcp_identity,
+            "mcp_version": self.mcp_version,
+            "process_generation_id": self.process_generation_id,
+            "profile_id": self.profile_id,
+            "profile_sha256": self.profile_sha256,
+            "requested_profile_sha256": self.requested_profile_sha256,
+            "runtime_manifest_sha256": self.runtime_manifest_sha256,
+            "session_epoch_id": self.session_epoch_id,
+            "tool_schema_sha256": self.tool_schema_sha256,
+            "worker_id": self.worker_id,
+            "worker_uid": self.worker_uid,
+            "workspace_identity_sha256": self.workspace_identity_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class BrowserMcpRefusalSeal:
+    """Post-sweep, exact-generation failure reference carried by the broker."""
+
+    attempt_id: str
+    session_epoch_id: str
+    process_generation_id: str
+    refusal_code: str
+    artifact_sha256: str
+
+    def to_wire(self) -> dict[str, str]:
+        return {
+            "artifact_sha256": self.artifact_sha256,
+            "attempt_id": self.attempt_id,
+            "process_generation_id": self.process_generation_id,
+            "refusal_code": self.refusal_code,
+            "session_epoch_id": self.session_epoch_id,
+        }
 
 
 @dataclass(frozen=True)
@@ -659,12 +770,34 @@ class _AttemptVisualFixture:
     routes: Mapping[str, tuple[int, Mapping[str, str], bytes]]
 
     @classmethod
-    def create(cls, origin: str) -> "_AttemptVisualFixture":
+    def create(
+        cls, origin: str, *, binding_digest: str | None = None
+    ) -> "_AttemptVisualFixture":
         _validate_origin(origin)
+        if binding_digest is not None and _SHA256_RE.fullmatch(binding_digest) is None:
+            raise BrowserReviewError(
+                "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+                "browser MCP refusal diagnostic is unavailable",
+            )
         nonce = secrets.token_hex(16)
-        path_a = f"/__mastermind_browser_visual_fixture__/{secrets.token_hex(16)}"
-        path_b = f"/__mastermind_browser_visual_fixture__/{secrets.token_hex(16)}"
-        while path_b == path_a:
+        path_a_token = (
+            binding_digest[:32]
+            if binding_digest is not None
+            else secrets.token_hex(16)
+        )
+        path_a = f"/__mastermind_browser_visual_fixture__/{path_a_token}"
+        path_b_token = (
+            binding_digest[32:]
+            if binding_digest is not None
+            else secrets.token_hex(16)
+        )
+        path_b = f"/__mastermind_browser_visual_fixture__/{path_b_token}"
+        if binding_digest is not None and path_b == path_a:
+            raise BrowserReviewError(
+                "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+                "browser MCP refusal diagnostic is unavailable",
+            )
+        while binding_digest is None and path_b == path_a:
             path_b = f"/__mastermind_browser_visual_fixture__/{secrets.token_hex(16)}"
         defective = "A" if secrets.randbits(1) == 0 else "B"
 
@@ -795,11 +928,203 @@ def _canonical_digest(value: object) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
-def _require_sha256(value: Any, *, field: str) -> str:
-    token = str(value or "").strip().lower()
-    if _SHA256_RE.fullmatch(token) is None:
-        raise BrowserReviewError("BROWSER_RECEIPT_INVALID", f"{field} must be a SHA-256 digest")
+def _identity_json(value: Any) -> Any:
+    """Project parent-owned typed identity into deterministic JSON values."""
+
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _identity_json(getattr(value, field.name))
+            for field in fields(value)
+        }
+    if isinstance(value, enum.Enum):
+        return _identity_json(value.value)
+    if isinstance(value, Mapping):
+        return {str(key): _identity_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_identity_json(item) for item in value]
+    if isinstance(value, Path):
+        return os.fspath(value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    raise BrowserReviewError(
+        "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+        "browser MCP refusal diagnostic is unavailable",
+    )
+
+
+def _canonical_mcp_shape_digest(value: Any) -> str:
+    """Digest key/type/presence structure without retaining request values."""
+
+    nodes = 0
+
+    def shape(item: Any, depth: int = 0) -> Any:
+        nonlocal nodes
+        nodes += 1
+        if depth > 12 or nodes > 2048:
+            raise BrowserReviewError(
+                "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+                "browser MCP refusal diagnostic is unavailable",
+            )
+        if isinstance(item, Mapping):
+            if len(item) > 128 or any(
+                not isinstance(key, str)
+                or len(key.encode("utf-8")) > 256
+                for key in item
+            ):
+                raise BrowserReviewError(
+                    "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+                    "browser MCP refusal diagnostic is unavailable",
+                )
+            return {
+                "object": {
+                    key: shape(child, depth + 1)
+                    for key, child in sorted(item.items())
+                }
+            }
+        if isinstance(item, (list, tuple)):
+            if len(item) > 128:
+                raise BrowserReviewError(
+                    "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+                    "browser MCP refusal diagnostic is unavailable",
+                )
+            return {
+                "array": [shape(child, depth + 1) for child in item],
+                "length": len(item),
+            }
+        if item is None:
+            return "null"
+        if type(item) is bool:
+            return "boolean"
+        if type(item) is int:
+            return "integer"
+        if type(item) is float:
+            return "number"
+        if isinstance(item, str):
+            return "string"
+        raise BrowserReviewError(
+            "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+            "browser MCP refusal diagnostic is unavailable",
+        )
+
+    return _canonical_digest(shape(value))
+
+
+def _bounded_identity_token(value: Any, *, maximum: int = 256) -> str:
+    token = value if isinstance(value, str) else ""
+    if (
+        not token
+        or token != token.strip()
+        or "\x00" in token
+        or "\n" in token
+        or "\r" in token
+        or len(token.encode("utf-8")) > maximum
+    ):
+        raise BrowserReviewError(
+            "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+            "browser MCP refusal diagnostic is unavailable",
+        )
     return token
+
+
+def browser_mcp_refusal_identity(value: Any) -> BrowserMcpRefusalIdentity:
+    """Parse the one closed, secret-free bridge identity envelope."""
+
+    expected = {
+        "attempt_id",
+        "capability_manifest_sha256",
+        "mcp_identity",
+        "mcp_version",
+        "process_generation_id",
+        "profile_id",
+        "profile_sha256",
+        "requested_profile_sha256",
+        "runtime_manifest_sha256",
+        "session_epoch_id",
+        "tool_schema_sha256",
+        "worker_id",
+        "worker_uid",
+        "workspace_identity_sha256",
+    }
+    try:
+        if not isinstance(value, Mapping) or set(value) != expected:
+            raise ValueError("identity shape")
+        if type(value.get("worker_uid")) is not int or value["worker_uid"] < 0:
+            raise ValueError("worker UID")
+        return BrowserMcpRefusalIdentity(
+            attempt_id=_bounded_identity_token(value["attempt_id"]),
+            session_epoch_id=_bounded_identity_token(value["session_epoch_id"]),
+            process_generation_id=_bounded_identity_token(
+                value["process_generation_id"]
+            ),
+            worker_id=_bounded_identity_token(value["worker_id"]),
+            worker_uid=value["worker_uid"],
+            workspace_identity_sha256=_require_sha256(
+                value["workspace_identity_sha256"], field="workspace identity"
+            ),
+            requested_profile_sha256=_require_sha256(
+                value["requested_profile_sha256"], field="requested profile"
+            ),
+            capability_manifest_sha256=_require_sha256(
+                value["capability_manifest_sha256"], field="capability manifest"
+            ),
+            profile_id=_bounded_identity_token(value["profile_id"]),
+            profile_sha256=_require_sha256(
+                value["profile_sha256"], field="browser profile"
+            ),
+            runtime_manifest_sha256=_require_sha256(
+                value["runtime_manifest_sha256"], field="browser runtime"
+            ),
+            mcp_identity=_bounded_identity_token(value["mcp_identity"]),
+            mcp_version=_bounded_identity_token(value["mcp_version"]),
+            tool_schema_sha256=_require_sha256(
+                value["tool_schema_sha256"], field="MCP tool schema"
+            ),
+        )
+    except (BrowserReviewError, KeyError, TypeError, ValueError) as exc:
+        raise BrowserReviewError(
+            "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+            "browser MCP refusal diagnostic is unavailable",
+        ) from exc
+
+
+def browser_mcp_refusal_seal(value: Any) -> BrowserMcpRefusalSeal:
+    """Parse the only closed post-sweep refusal reference."""
+
+    expected = {
+        "artifact_sha256",
+        "attempt_id",
+        "process_generation_id",
+        "refusal_code",
+        "session_epoch_id",
+    }
+    try:
+        if not isinstance(value, Mapping) or set(value) != expected:
+            raise ValueError("seal shape")
+        refusal_code = value["refusal_code"]
+        if not isinstance(refusal_code, str) or refusal_code not in _MCP_REFUSAL_CODES:
+            raise ValueError("refusal code")
+        return BrowserMcpRefusalSeal(
+            attempt_id=_bounded_identity_token(value["attempt_id"]),
+            session_epoch_id=_bounded_identity_token(value["session_epoch_id"]),
+            process_generation_id=_bounded_identity_token(
+                value["process_generation_id"]
+            ),
+            refusal_code=refusal_code,
+            artifact_sha256=_require_sha256(
+                value["artifact_sha256"], field="MCP refusal artifact"
+            ),
+        )
+    except (BrowserReviewError, KeyError, TypeError, ValueError) as exc:
+        raise BrowserReviewError(
+            "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+            "browser MCP refusal diagnostic is unavailable",
+        ) from exc
+
+
+def _require_sha256(value: Any, *, field: str) -> str:
+    if type(value) is not str or _SHA256_RE.fullmatch(value) is None:
+        raise BrowserReviewError("BROWSER_RECEIPT_INVALID", f"{field} must be a SHA-256 digest")
+    return value
 
 
 def load_devserver_manifest(path: Path, workspace: Path) -> DevserverManifest:
@@ -1315,6 +1640,131 @@ def _write_private_bytes_once(path: Path, payload: bytes) -> None:
             os.close(parent_fd)
 
 
+def _consume_mcp_refusal_identity(
+    artifact_dir: Path,
+    *,
+    fixture_a_url: str,
+    fixture_b_url: str,
+) -> BrowserMcpRefusalIdentity:
+    """Stable-read and remove the one-shot bridge identity sidecar."""
+
+    directory_fd = -1
+    context_fd = -1
+    try:
+        directory_fd = os.open(
+            artifact_dir,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        directory_before = os.fstat(directory_fd)
+        named_directory = artifact_dir.lstat()
+        if (
+            not stat.S_ISDIR(directory_before.st_mode)
+            or directory_before.st_uid != os.geteuid()
+            or stat.S_IMODE(directory_before.st_mode) != 0o700
+            or BrowserMcpToolGuard._directory_identity(directory_before)
+            != BrowserMcpToolGuard._directory_identity(named_directory)
+        ):
+            raise OSError("context directory")
+        named_before = os.stat(
+            _MCP_REFUSAL_CONTEXT_FILE,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+        context_fd = os.open(
+            _MCP_REFUSAL_CONTEXT_FILE,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_fd,
+        )
+        opened = os.fstat(context_fd)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or opened.st_nlink != 1
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or not 0 < opened.st_size <= MAX_TEXT_EVIDENCE_BYTES
+            or BrowserMcpToolGuard._stat_fingerprint(opened)
+            != BrowserMcpToolGuard._stat_fingerprint(named_before)
+        ):
+            raise OSError("context file")
+        chunks: list[bytes] = []
+        remaining = MAX_TEXT_EVIDENCE_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(context_fd, min(remaining, 65536))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        after = os.fstat(context_fd)
+        named_after = os.stat(
+            _MCP_REFUSAL_CONTEXT_FILE,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+        if (
+            len(raw) != opened.st_size
+            or len(raw) > MAX_TEXT_EVIDENCE_BYTES
+            or BrowserMcpToolGuard._stat_fingerprint(opened)
+            != BrowserMcpToolGuard._stat_fingerprint(after)
+            or BrowserMcpToolGuard._stat_fingerprint(opened)
+            != BrowserMcpToolGuard._stat_fingerprint(named_after)
+        ):
+            raise OSError("context changed")
+        value = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_json_object,
+        )
+        if raw != _canonical_bytes(value) + b"\n":
+            raise ValueError("context is not canonical")
+        identity = browser_mcp_refusal_identity(value)
+        binding = hashlib.sha256(raw).hexdigest()
+        fixture_a_token = PurePosixPath(urlsplit(fixture_a_url).path).name
+        fixture_b_token = PurePosixPath(urlsplit(fixture_b_url).path).name
+        if fixture_a_token + fixture_b_token != binding:
+            raise ValueError("context binding")
+        os.unlink(_MCP_REFUSAL_CONTEXT_FILE, dir_fd=directory_fd)
+        os.fsync(directory_fd)
+        try:
+            os.stat(
+                _MCP_REFUSAL_CONTEXT_FILE,
+                dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            pass
+        else:
+            raise OSError("context survived consumption")
+        directory_after = os.fstat(directory_fd)
+        named_directory_after = artifact_dir.lstat()
+        if (
+            BrowserMcpToolGuard._directory_identity(directory_before)
+            != BrowserMcpToolGuard._directory_identity(directory_after)
+            or BrowserMcpToolGuard._directory_identity(directory_before)
+            != BrowserMcpToolGuard._directory_identity(named_directory_after)
+        ):
+            raise OSError("context directory changed")
+        return identity
+    except (
+        BrowserReviewError,
+        OSError,
+        RecursionError,
+        TypeError,
+        UnicodeError,
+        ValueError,
+    ) as exc:
+        raise BrowserReviewError(
+            "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+            "browser MCP refusal diagnostic is unavailable",
+        ) from exc
+    finally:
+        if context_fd >= 0:
+            os.close(context_fd)
+        if directory_fd >= 0:
+            os.close(directory_fd)
+
+
 class BrowserMcpToolGuard:
     """Call-time authority guard in front of the pinned official MCP server."""
 
@@ -1338,6 +1788,7 @@ class BrowserMcpToolGuard:
         origin: str,
         artifact_dir: Path,
         fixture_urls: Mapping[str, str],
+        refusal_identity: BrowserMcpRefusalIdentity | None = None,
     ):
         _validate_origin(origin)
         if not isinstance(fixture_urls, Mapping) or set(fixture_urls) != {"A", "B"}:
@@ -1383,6 +1834,7 @@ class BrowserMcpToolGuard:
             )
         self.origin = origin
         self.artifact_dir = resolved
+        self.refusal_identity = refusal_identity
         self._artifact_dir_identity = (
             observed.st_dev,
             observed.st_ino,
@@ -1415,19 +1867,40 @@ class BrowserMcpToolGuard:
         self._egress_falsifiers = {"proxy_override": "REFUSED"}
 
     @staticmethod
-    def _refuse(detail: str) -> None:
-        raise BrowserReviewError("BROWSER_MCP_TOOL_REFUSED", detail)
+    def _refuse(
+        detail: str,
+        *,
+        code: str = "UNKNOWN_CLOSED_REFUSAL",
+        diagnostic: bool = True,
+    ) -> None:
+        if code not in _MCP_REFUSAL_CODES | _EXPECTED_MCP_REFUSAL_CODES:
+            code = "UNKNOWN_CLOSED_REFUSAL"
+        raise BrowserReviewError(
+            "BROWSER_MCP_TOOL_REFUSED",
+            detail,
+            refusal_code=code,
+            diagnostic_refusal=diagnostic,
+        )
 
     @staticmethod
     def _closed(arguments: Mapping[str, Any], *, allowed: set[str]) -> dict[str, Any]:
         if not isinstance(arguments, Mapping) or not set(arguments).issubset(allowed):
-            BrowserMcpToolGuard._refuse("MCP tool arguments are outside the closed shape")
+            BrowserMcpToolGuard._refuse(
+                "MCP tool arguments are outside the closed shape",
+                code="TOOL_ARGUMENT_SHAPE_MISMATCH",
+            )
         try:
             encoded = _canonical_bytes(dict(arguments))
         except (TypeError, ValueError, UnicodeError):
-            BrowserMcpToolGuard._refuse("MCP tool arguments are not canonical JSON")
+            BrowserMcpToolGuard._refuse(
+                "MCP tool arguments are not canonical JSON",
+                code="TOOL_ARGUMENT_SHAPE_MISMATCH",
+            )
         if len(encoded) > 4096:
-            BrowserMcpToolGuard._refuse("MCP tool arguments exceed the reviewed bound")
+            BrowserMcpToolGuard._refuse(
+                "MCP tool arguments exceed the reviewed bound",
+                code="ARGUMENT_OVERSIZE",
+            )
         return dict(arguments)
 
     @staticmethod
@@ -1462,7 +1935,10 @@ class BrowserMcpToolGuard:
             or self._pending_snapshot_binding is not None
             or self._pending_interaction_binding is not None
         ):
-            self._refuse("browser state transition is already pending")
+            self._refuse(
+                "browser state transition is already pending",
+                code="STATE_TRANSITION_PENDING",
+            )
         call_name, encoded = self._state_call_key(name, arguments)
         self._pending_state_call = (call_name, encoded, dict(transition))
         self._snapshot_binding = None
@@ -1552,14 +2028,20 @@ class BrowserMcpToolGuard:
             or not link.startswith("./")
             or PurePosixPath(link).parts != (link[2:],)
         ):
-            self._refuse("screenshot result link is outside the direct artifact root")
+            self._refuse(
+                "screenshot result link is outside the direct artifact root",
+                code="SCREENSHOT_BINDING_MISMATCH",
+            )
         leaf = link[2:]
         if re.fullmatch(
             r"page-[0-9]{4}-[0-9]{2}-[0-9]{2}T"
             r"[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}Z\.png",
             leaf,
         ) is None:
-            self._refuse("screenshot result link is not the pinned MCP filename")
+            self._refuse(
+                "screenshot result link is not the pinned MCP filename",
+                code="SCREENSHOT_BINDING_MISMATCH",
+            )
 
         root_fd = -1
         source_fd = -1
@@ -1595,7 +2077,10 @@ class BrowserMcpToolGuard:
                 or self._stat_fingerprint(named_before)
                 != self._stat_fingerprint(opened)
             ):
-                self._refuse("upstream screenshot artifact identity is not exact")
+                self._refuse(
+                    "upstream screenshot artifact identity is not exact",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
 
             chunks: list[bytes] = []
             observed_bytes = 0
@@ -1606,7 +2091,10 @@ class BrowserMcpToolGuard:
                 chunks.append(chunk)
                 observed_bytes += len(chunk)
                 if observed_bytes > MAX_SCREENSHOT_BYTES:
-                    self._refuse("upstream screenshot artifact exceeds the reviewed bound")
+                    self._refuse(
+                        "upstream screenshot artifact exceeds the reviewed bound",
+                        code="SCREENSHOT_BINDING_MISMATCH",
+                    )
             payload = b"".join(chunks)
             opened_after = os.fstat(source_fd)
             named_after = os.stat(leaf, dir_fd=root_fd, follow_symlinks=False)
@@ -1620,15 +2108,31 @@ class BrowserMcpToolGuard:
                 or self._stat_fingerprint(root_before)
                 != self._stat_fingerprint(root_after)
             ):
-                self._refuse("upstream screenshot artifact changed during read")
+                self._refuse(
+                    "upstream screenshot artifact changed during read",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
 
-            _validate_png_dimensions(payload, viewport=viewport)
+            try:
+                _validate_png_dimensions(payload, viewport=viewport)
+            except BrowserReviewError as exc:
+                raise BrowserReviewError(
+                    "BROWSER_MCP_TOOL_REFUSED",
+                    "full screenshot content does not match the bound viewport",
+                    refusal_code="SCREENSHOT_BINDING_MISMATCH",
+                ) from exc
             if dict(model_viewport) == dict(viewport) and model_pixels != payload:
-                self._refuse("unscaled model image differs from the full screenshot")
+                self._refuse(
+                    "unscaled model image differs from the full screenshot",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             if self._stat_fingerprint(opened) != self._stat_fingerprint(
                 os.stat(leaf, dir_fd=root_fd, follow_symlinks=False)
             ):
-                self._refuse("upstream screenshot name changed before cleanup")
+                self._refuse(
+                    "upstream screenshot name changed before cleanup",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
 
             tombstone = f".mcp-consume-{secrets.token_hex(16)}"
             try:
@@ -1636,7 +2140,10 @@ class BrowserMcpToolGuard:
             except FileNotFoundError:
                 pass
             else:  # pragma: no cover - collision-resistant fail-closed guard
-                self._refuse("upstream screenshot cleanup tombstone already exists")
+                self._refuse(
+                    "upstream screenshot cleanup tombstone already exists",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             os.rename(
                 leaf,
                 tombstone,
@@ -1645,16 +2152,25 @@ class BrowserMcpToolGuard:
             )
             moved = os.stat(tombstone, dir_fd=root_fd, follow_symlinks=False)
             if self._file_identity(opened) != self._file_identity(moved):
-                self._refuse("upstream screenshot name was replaced before cleanup")
+                self._refuse(
+                    "upstream screenshot name was replaced before cleanup",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             os.unlink(tombstone, dir_fd=root_fd)
             if os.fstat(source_fd).st_nlink != 0:
-                self._refuse("upstream screenshot inode survived cleanup")
+                self._refuse(
+                    "upstream screenshot inode survived cleanup",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             for consumed_name in (leaf, tombstone):
                 try:
                     os.stat(consumed_name, dir_fd=root_fd, follow_symlinks=False)
                 except FileNotFoundError:
                     continue
-                self._refuse("upstream screenshot name survived cleanup")
+                self._refuse(
+                    "upstream screenshot name survived cleanup",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             os.fsync(root_fd)
 
             destination_fd = -1
@@ -1697,13 +2213,19 @@ class BrowserMcpToolGuard:
                     or self._stat_fingerprint(destination)
                     != self._stat_fingerprint(destination_named)
                 ):
-                    self._refuse("sealed screenshot artifact identity is not exact")
+                    self._refuse(
+                        "sealed screenshot artifact identity is not exact",
+                        code="SCREENSHOT_BINDING_MISMATCH",
+                    )
             finally:
                 if destination_fd >= 0:
                     os.close(destination_fd)
             os.fsync(root_fd)
             if destination is None:
-                self._refuse("sealed screenshot artifact identity is unavailable")
+                self._refuse(
+                    "sealed screenshot artifact identity is unavailable",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             root_final = os.fstat(root_fd)
             root_named_final = self.artifact_dir.lstat()
             destination_final = os.stat(
@@ -1717,7 +2239,10 @@ class BrowserMcpToolGuard:
                 or self._stat_fingerprint(destination)
                 != self._stat_fingerprint(destination_final)
             ):
-                self._refuse("sealed screenshot artifact root changed before completion")
+                self._refuse(
+                    "sealed screenshot artifact root changed before completion",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             return payload
         except BrowserReviewError:
             raise
@@ -1725,6 +2250,7 @@ class BrowserMcpToolGuard:
             raise BrowserReviewError(
                 "BROWSER_MCP_TOOL_REFUSED",
                 "upstream screenshot artifact could not be consumed safely",
+                refusal_code="SCREENSHOT_BINDING_MISMATCH",
             ) from exc
         finally:
             if source_fd >= 0:
@@ -1736,24 +2262,40 @@ class BrowserMcpToolGuard:
         """Validate one model-authored call and rewrite only confined filenames."""
 
         if name not in ALLOWED_TOOLS:
-            self._refuse("MCP tool is outside the browser review allowlist")
+            self._refuse(
+                "MCP tool is outside the browser review allowlist",
+                code="TOOL_OUTSIDE_ALLOWLIST",
+            )
         self._calls[name] = self._calls.get(name, 0) + 1
         if self._calls[name] > 16:
-            self._refuse("MCP tool call count exceeds the reviewed bound")
+            self._refuse(
+                "MCP tool call count exceeds the reviewed bound",
+                code="ARGUMENT_OVERSIZE",
+            )
 
         if name == "browser_navigate":
             values = self._closed(arguments, allowed={"url"})
             if set(values) != {"url"} or not self._bounded_token(
                 values.get("url"), maximum=2048
             ):
-                self._refuse("browser navigation URL is invalid")
+                self._refuse(
+                    "browser navigation URL is invalid",
+                    code="NAVIGATION_URL_INVALID",
+                )
             url = str(values["url"])
-            if urlsplit(url).scheme == "file":
+            if url == "file:///etc/passwd":
                 self._egress_falsifiers["file_url"] = "REFUSED"
-                self._refuse("file URL navigation is refused")
+                self._refuse(
+                    "file URL navigation is refused",
+                    code="EXPECTED_FILE_URL_FALSIFIER",
+                    diagnostic=False,
+                )
             page_class = self._page_class(url)
             if page_class is None:
-                self._refuse("browser navigation is outside the exact review origin")
+                self._refuse(
+                    "browser navigation is outside the exact review origin",
+                    code="NAVIGATION_TARGET_MISMATCH",
+                )
             self._reserve_state_call(
                 name, values, {"current_page": page_class}
             )
@@ -1766,7 +2308,10 @@ class BrowserMcpToolGuard:
                 _MOBILE,
                 self._VISUAL_VIEWPORT,
             ):
-                self._refuse("browser viewport is outside the reviewed proof set")
+                self._refuse(
+                    "browser viewport is outside the reviewed proof set",
+                    code="VIEWPORT_MISMATCH",
+                )
             self._reserve_state_call(
                 name,
                 values,
@@ -1785,7 +2330,10 @@ class BrowserMcpToolGuard:
                 allowed={"element", "filename", "fullPage", "scale", "target", "type"},
             )
             if set(values) != {"filename", "fullPage", "scale", "type"}:
-                self._refuse("screenshot arguments are not the exact page proof shape")
+                self._refuse(
+                    "screenshot arguments are not the exact page proof shape",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             filename = values.get("filename")
             binding = self._SCREENSHOT_BINDINGS.get(str(filename))
             if (
@@ -1797,7 +2345,10 @@ class BrowserMcpToolGuard:
                 or self._current_page != binding[0]
                 or self._viewport != binding[1]
             ):
-                self._refuse("screenshot is not bound to its exact page and viewport")
+                self._refuse(
+                    "screenshot is not bound to its exact page and viewport",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             self._screenshots.add(str(filename))
             rewritten = dict(values)
             # Omitting the upstream filename is deliberate: the pinned MCP then
@@ -1814,19 +2365,28 @@ class BrowserMcpToolGuard:
                 or values.get("all") is not True
                 or values.get("level") not in {"error", "warning", "info"}
             ):
-                self._refuse("console capture is outside the bounded in-memory shape")
+                self._refuse(
+                    "console capture is outside the bounded in-memory shape",
+                    code="TOOL_ARGUMENT_SHAPE_MISMATCH",
+                )
             return values
 
         if name == "browser_network_requests":
             values = self._closed(arguments, allowed={"static"})
             if values != {"static": True}:
-                self._refuse("network capture is outside the bounded in-memory shape")
+                self._refuse(
+                    "network capture is outside the bounded in-memory shape",
+                    code="TOOL_ARGUMENT_SHAPE_MISMATCH",
+                )
             return values
 
         if name in {"browser_close", "browser_snapshot"}:
             values = self._closed(arguments, allowed=set())
             if values:
-                self._refuse("parameterless browser tool received arguments")
+                self._refuse(
+                    "parameterless browser tool received arguments",
+                    code="TOOL_ARGUMENT_SHAPE_MISMATCH",
+                )
             if name == "browser_close":
                 self._reserve_state_call(name, values, {"closed": True})
             else:
@@ -1836,7 +2396,8 @@ class BrowserMcpToolGuard:
                     or self._current_page is None
                 ):
                     self._refuse(
-                        "structured snapshot requires one successfully established page"
+                        "structured snapshot requires one successfully established page",
+                        code="SNAPSHOT_BINDING_MISSING",
                     )
                 self._pending_snapshot_binding = (
                     self._current_page,
@@ -1847,13 +2408,22 @@ class BrowserMcpToolGuard:
         if name == "browser_wait_for":
             values = self._closed(arguments, allowed={"text", "textGone", "time"})
             if len(values) != 1:
-                self._refuse("browser wait must use one bounded condition")
+                self._refuse(
+                    "browser wait must use one bounded condition",
+                    code="TOOL_ARGUMENT_SHAPE_MISMATCH",
+                )
             if "time" in values:
                 seconds = values["time"]
                 if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 0 < seconds <= 2:
-                    self._refuse("browser wait exceeds two seconds")
+                    self._refuse(
+                        "browser wait exceeds two seconds",
+                        code="TOOL_ARGUMENT_SHAPE_MISMATCH",
+                    )
             elif not self._bounded_token(next(iter(values.values())), maximum=128):
-                self._refuse("browser wait text is invalid")
+                self._refuse(
+                    "browser wait text is invalid",
+                    code="TOOL_ARGUMENT_SHAPE_MISMATCH",
+                )
             return values
 
         if name == "browser_tabs":
@@ -1868,12 +2438,16 @@ class BrowserMcpToolGuard:
             ):
                 self._reserve_state_call(name, values, {"selected_tab": True})
                 return values
-            self._refuse("browser tab operation is outside list/select")
+            self._refuse(
+                "browser tab operation is outside list/select",
+                code="TOOL_ARGUMENT_SHAPE_MISMATCH",
+            )
 
         if name in {"browser_click", "browser_hover", "browser_fill_form"}:
             if name != "browser_hover" or self._current_page != "product":
                 self._refuse(
-                    "bounded browser interaction is product-page-only harmless hover"
+                    "bounded browser interaction is product-page-only harmless hover",
+                    code="INTERACTION_BINDING_MISMATCH",
                 )
             if (
                 self._pending_state_call is not None
@@ -1883,13 +2457,20 @@ class BrowserMcpToolGuard:
                 != (self._current_page, self._navigation_epoch)
             ):
                 self._refuse(
-                    "structured snapshot must succeed before the bounded interaction"
+                    "structured snapshot must succeed before the bounded interaction",
+                    code="SNAPSHOT_BINDING_MISSING",
                 )
             if self._bounded_interaction_forwarded:
-                self._refuse("bounded browser interaction is already exhausted")
+                self._refuse(
+                    "bounded browser interaction is already exhausted",
+                    code="INTERACTION_BINDING_MISMATCH",
+                )
             values = self._closed(arguments, allowed={"element", "target"})
             if set(values) not in ({"target"}, {"element", "target"}) or not self._bounded_token(values.get("target")):
-                self._refuse("hover target is invalid")
+                self._refuse(
+                    "hover target is invalid",
+                    code="INTERACTION_BINDING_MISMATCH",
+                )
             self._bounded_interaction_forwarded = True
             self._pending_interaction_binding = (
                 self._current_page,
@@ -1909,7 +2490,10 @@ class BrowserMcpToolGuard:
         """Bind observed tool output to the already-authorized call."""
 
         if name not in ALLOWED_TOOLS or not isinstance(response, Mapping):
-            self._refuse("MCP tool response lacks an authorized call")
+            self._refuse(
+                "MCP tool response lacks an authorized call",
+                code="MCP_RESPONSE_INVALID",
+            )
         transition = self._pending_transition(name, original_arguments)
         stateful_response = name in {
             "browser_close",
@@ -1921,7 +2505,8 @@ class BrowserMcpToolGuard:
         )
         if stateful_response and transition is None:
             self._refuse(
-                "MCP state response lacks its exact pending transition"
+                "MCP state response lacks its exact pending transition",
+                code="STATE_TRANSITION_PENDING",
             )
         snapshot_binding = (
             self._pending_snapshot_binding if name == "browser_snapshot" else None
@@ -1933,7 +2518,8 @@ class BrowserMcpToolGuard:
         )
         if name in _BOUNDED_INTERACTION_TOOLS and interaction_binding is None:
             self._refuse(
-                "MCP interaction response lacks its exact pending product binding"
+                "MCP interaction response lacks its exact pending product binding",
+                code="INTERACTION_BINDING_MISMATCH",
             )
         result = response.get("result")
         if (
@@ -1947,13 +2533,22 @@ class BrowserMcpToolGuard:
                 self._pending_snapshot_binding = None
             if name in _BOUNDED_INTERACTION_TOOLS:
                 self._pending_interaction_binding = None
-            self._refuse("MCP tool response is not a successful result")
+            self._refuse(
+                "MCP tool response is not a successful result",
+                code="MCP_RESPONSE_INVALID",
+            )
         content = result.get("content")
         if not isinstance(content, list):
-            self._refuse("MCP tool response content is not an array")
+            self._refuse(
+                "MCP tool response content is not an array",
+                code="MCP_RESPONSE_INVALID",
+            )
         encoded = _canonical_bytes(content)
         if len(encoded) > MAX_TEXT_EVIDENCE_BYTES + (2 * MAX_SCREENSHOT_BYTES):
-            self._refuse("MCP tool response exceeds the reviewed bound")
+            self._refuse(
+                "MCP tool response exceeds the reviewed bound",
+                code="MCP_RESPONSE_INVALID",
+            )
 
         if name == "browser_snapshot":
             if (
@@ -1967,7 +2562,10 @@ class BrowserMcpToolGuard:
                 )
             ):
                 self._pending_snapshot_binding = None
-                self._refuse("structured snapshot result is empty")
+                self._refuse(
+                    "structured snapshot result is empty",
+                    code="SNAPSHOT_BINDING_MISSING",
+                )
             if (
                 snapshot_binding is None
                 or self._pending_state_call is not None
@@ -1976,7 +2574,8 @@ class BrowserMcpToolGuard:
             ):
                 self._pending_snapshot_binding = None
                 self._refuse(
-                    "structured snapshot result is not bound to the current page"
+                    "structured snapshot result is not bound to the current page",
+                    code="SNAPSHOT_BINDING_MISSING",
                 )
             self._pending_snapshot_binding = None
             self._snapshot_binding = snapshot_binding
@@ -1990,7 +2589,8 @@ class BrowserMcpToolGuard:
             ):
                 self._pending_interaction_binding = None
                 self._refuse(
-                    "successful interaction is not bound to the product snapshot"
+                    "successful interaction is not bound to the product snapshot",
+                    code="INTERACTION_BINDING_MISMATCH",
                 )
             self._pending_interaction_binding = None
             self._interaction = {
@@ -2029,33 +2629,52 @@ class BrowserMcpToolGuard:
                 or set(texts[0]) != {"text", "type"}
                 or not isinstance(texts[0].get("text"), str)
             ):
-                self._refuse("screenshot response lacks one bound file and image result")
+                self._refuse(
+                    "screenshot response lacks one bound file and image result",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             links = self._SCREENSHOT_LINK_RE.findall(texts[0]["text"])
             if len(links) != 1 or texts[0]["text"].count("](") != 1:
-                self._refuse("screenshot response lacks one exact upstream artifact link")
+                self._refuse(
+                    "screenshot response lacks one exact upstream artifact link",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             image = images[0]
             if (
                 set(image) != {"data", "mimeType", "type"}
                 or image.get("mimeType") != "image/png"
                 or not isinstance(image.get("data"), str)
             ):
-                self._refuse("screenshot response image content is not PNG")
+                self._refuse(
+                    "screenshot response image content is not PNG",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             try:
                 pixels = base64.b64decode(image["data"], validate=True)
             except (ValueError, UnicodeError) as exc:
                 raise BrowserReviewError(
-                    "BROWSER_MCP_TOOL_REFUSED", "screenshot image content is malformed"
+                    "BROWSER_MCP_TOOL_REFUSED",
+                    "screenshot image content is malformed",
+                    refusal_code="SCREENSHOT_BINDING_MISMATCH",
                 ) from exc
             if (
                 not pixels.startswith(b"\x89PNG\r\n\x1a\n")
                 or not 0 < len(pixels) <= MAX_SCREENSHOT_BYTES
             ):
-                self._refuse("screenshot image content is outside the reviewed bound")
+                self._refuse(
+                    "screenshot image content is outside the reviewed bound",
+                    code="SCREENSHOT_BINDING_MISMATCH",
+                )
             viewport = self._SCREENSHOT_BINDINGS[filename][1]
             model_viewport = self._model_message_viewport(viewport)
-            _validate_png_dimensions(
-                pixels, viewport=model_viewport
-            )
+            try:
+                _validate_png_dimensions(pixels, viewport=model_viewport)
+            except BrowserReviewError as exc:
+                raise BrowserReviewError(
+                    "BROWSER_MCP_TOOL_REFUSED",
+                    "screenshot image content does not match the bound viewport",
+                    refusal_code="SCREENSHOT_BINDING_MISMATCH",
+                ) from exc
             full_viewport = self._consume_full_viewport_artifact(
                 link=links[0],
                 filename=filename,
@@ -2085,7 +2704,10 @@ class BrowserMcpToolGuard:
             )
             maximum = MAX_CONSOLE_ROWS if name == "browser_console_messages" else MAX_NETWORK_ROWS
             if len(target) >= maximum:
-                self._refuse("MCP evidence row count exceeds the reviewed bound")
+                self._refuse(
+                    "MCP evidence row count exceeds the reviewed bound",
+                    code="MCP_RESPONSE_INVALID",
+                )
             target.append(row)
         self._successful_calls[name] = self._successful_calls.get(name, 0) + 1
 
@@ -2106,6 +2728,408 @@ class BrowserMcpToolGuard:
         }
 
 
+class _BrowserMcpRefusalRecorder:
+    """Bounded in-memory first-refusal recorder; raw request values never escape."""
+
+    _NAVIGATION_CLASSES = frozenset(
+        {
+            "FILE_URL",
+            "FIXTURE_A",
+            "FIXTURE_B",
+            "MALFORMED",
+            "NOT_APPLICABLE",
+            "OUTSIDE_EXACT_ORIGIN",
+            "PRODUCT",
+        }
+    )
+    _PENDING_CLASSES = frozenset(
+        {"INTERACTION", "NONE", "SNAPSHOT", "STATE_TRANSITION", "TOOL_CALL"}
+    )
+
+    def __init__(self, guard: BrowserMcpToolGuard) -> None:
+        self._identity = guard.refusal_identity
+        self._guard = guard
+        self._lock = threading.Lock()
+        self._first: dict[str, str] | None = None
+        self._later_codes: list[str] = []
+        self._unavailable = False
+
+    def _navigation_class(
+        self, request: Mapping[str, Any], tool_name: Any
+    ) -> str:
+        if tool_name != "browser_navigate":
+            return "NOT_APPLICABLE"
+        params = request.get("params")
+        arguments = params.get("arguments") if isinstance(params, Mapping) else None
+        url = arguments.get("url") if isinstance(arguments, Mapping) else None
+        if not BrowserMcpToolGuard._bounded_token(url, maximum=2048):
+            return "MALFORMED"
+        if urlsplit(url).scheme == "file":
+            return "FILE_URL"
+        page_class = self._guard._page_class(url)
+        return {
+            "product": "PRODUCT",
+            "fixture-a": "FIXTURE_A",
+            "fixture-b": "FIXTURE_B",
+        }.get(page_class, "OUTSIDE_EXACT_ORIGIN")
+
+    def _pending_class(self, code: str) -> str:
+        if code == "SNAPSHOT_BINDING_MISSING":
+            return "SNAPSHOT"
+        if code == "INTERACTION_BINDING_MISMATCH":
+            return "INTERACTION"
+        if code != "STATE_TRANSITION_PENDING":
+            return "NONE"
+        if self._guard._pending_state_call is not None:
+            return "STATE_TRANSITION"
+        if self._guard._pending_snapshot_binding is not None:
+            return "SNAPSHOT"
+        if self._guard._pending_interaction_binding is not None:
+            return "INTERACTION"
+        return "TOOL_CALL"
+
+    def record(self, code: str, request: Mapping[str, Any], tool_name: Any) -> None:
+        if self._identity is None or code in _EXPECTED_MCP_REFUSAL_CODES:
+            return
+        if code not in _MCP_REFUSAL_CODES:
+            code = "UNKNOWN_CLOSED_REFUSAL"
+        with self._lock:
+            if self._unavailable:
+                return
+            if self._first is not None and len(self._later_codes) >= (
+                _MAX_MCP_REFUSALS - 1
+            ):
+                self._unavailable = True
+                return
+            try:
+                request_shape_sha256 = _canonical_mcp_shape_digest(request)
+                safe_tool = (
+                    tool_name
+                    if isinstance(tool_name, str) and tool_name in ALLOWED_TOOLS
+                    else "UNRECOGNIZED_TOOL"
+                )
+                navigation_class = self._navigation_class(request, tool_name)
+                pending_class = self._pending_class(code)
+            except (BrowserReviewError, TypeError, ValueError):
+                self._unavailable = True
+                return
+            if self._first is None:
+                self._first = {
+                    "navigation_target_class": navigation_class,
+                    "pending_state_class": pending_class,
+                    "refusal_code": code,
+                    "request_shape_sha256": request_shape_sha256,
+                    "tool_name": safe_tool,
+                }
+            else:
+                self._later_codes.append(code)
+
+    def artifact(
+        self,
+        *,
+        requested_protocol_version: str | None,
+        selected_protocol_version: str | None,
+        initialize_request_shape_sha256: str | None,
+        initialize_response_shape_sha256: str | None,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            if self._unavailable:
+                raise BrowserReviewError(
+                    "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+                    "browser MCP refusal diagnostic is unavailable",
+                )
+            if self._identity is None or self._first is None:
+                return None
+            identity = self._identity
+            return {
+                "attempt_id": identity.attempt_id,
+                "execution_profile": {
+                    "capability_manifest_sha256": (
+                        identity.capability_manifest_sha256
+                    ),
+                    "profile_id": identity.profile_id,
+                    "profile_sha256": identity.profile_sha256,
+                    "requested_profile_sha256": (
+                        identity.requested_profile_sha256
+                    ),
+                },
+                "first_refusal": dict(self._first),
+                "later_refusals": {
+                    "codes_sha256": _canonical_digest(self._later_codes),
+                    "count": len(self._later_codes),
+                },
+                "playwright_mcp": {
+                    "identity": identity.mcp_identity,
+                    "tool_schema_sha256": identity.tool_schema_sha256,
+                    "version": identity.mcp_version,
+                },
+                "negotiation": {
+                    "initialize_request_shape_sha256": (
+                        initialize_request_shape_sha256
+                    ),
+                    "initialize_response_shape_sha256": (
+                        initialize_response_shape_sha256
+                    ),
+                    "requested_protocol_version": requested_protocol_version,
+                    "selected_protocol_version": selected_protocol_version,
+                },
+                "process_generation_id": identity.process_generation_id,
+                "runtime": {
+                    "manifest_sha256": identity.runtime_manifest_sha256,
+                },
+                "schema_version": _MCP_REFUSAL_SCHEMA,
+                "session_epoch_id": identity.session_epoch_id,
+                "worker_id": identity.worker_id,
+                "worker_uid": identity.worker_uid,
+                "workspace_identity_sha256": identity.workspace_identity_sha256,
+            }
+
+    def has_diagnostic_refusal(self) -> bool:
+        with self._lock:
+            return self._first is not None or self._unavailable
+
+
+def _closed_mcp_refusal_artifact(
+    value: Any, *, expected_identity: BrowserMcpRefusalIdentity
+) -> str:
+    """Validate one canonical child artifact against parent-owned identity."""
+
+    top_level = {
+        "attempt_id",
+        "execution_profile",
+        "first_refusal",
+        "later_refusals",
+        "negotiation",
+        "playwright_mcp",
+        "process_generation_id",
+        "runtime",
+        "schema_version",
+        "session_epoch_id",
+        "worker_id",
+        "worker_uid",
+        "workspace_identity_sha256",
+    }
+    try:
+        if (
+            not isinstance(value, Mapping)
+            or set(value) != top_level
+            or value.get("schema_version") != _MCP_REFUSAL_SCHEMA
+        ):
+            raise ValueError("artifact shape")
+        identity_fields = {
+            "attempt_id": expected_identity.attempt_id,
+            "process_generation_id": expected_identity.process_generation_id,
+            "session_epoch_id": expected_identity.session_epoch_id,
+            "worker_id": expected_identity.worker_id,
+            "worker_uid": expected_identity.worker_uid,
+            "workspace_identity_sha256": (
+                expected_identity.workspace_identity_sha256
+            ),
+        }
+        if any(value.get(key) != expected for key, expected in identity_fields.items()):
+            raise ValueError("artifact identity")
+        if value.get("execution_profile") != {
+            "capability_manifest_sha256": (
+                expected_identity.capability_manifest_sha256
+            ),
+            "profile_id": expected_identity.profile_id,
+            "profile_sha256": expected_identity.profile_sha256,
+            "requested_profile_sha256": (
+                expected_identity.requested_profile_sha256
+            ),
+        }:
+            raise ValueError("profile identity")
+        if value.get("runtime") != {
+            "manifest_sha256": expected_identity.runtime_manifest_sha256
+        }:
+            raise ValueError("runtime identity")
+        if value.get("playwright_mcp") != {
+            "identity": expected_identity.mcp_identity,
+            "tool_schema_sha256": expected_identity.tool_schema_sha256,
+            "version": expected_identity.mcp_version,
+        }:
+            raise ValueError("MCP identity")
+
+        first = value.get("first_refusal")
+        if not isinstance(first, Mapping) or set(first) != {
+            "navigation_target_class",
+            "pending_state_class",
+            "refusal_code",
+            "request_shape_sha256",
+            "tool_name",
+        }:
+            raise ValueError("first refusal shape")
+        refusal_code = first.get("refusal_code")
+        if refusal_code not in _MCP_REFUSAL_CODES:
+            raise ValueError("first refusal code")
+        tool_name = first.get("tool_name")
+        if tool_name not in ALLOWED_TOOLS | {"UNRECOGNIZED_TOOL"}:
+            raise ValueError("tool name")
+        if first.get("navigation_target_class") not in (
+            _BrowserMcpRefusalRecorder._NAVIGATION_CLASSES
+        ):
+            raise ValueError("navigation class")
+        if first.get("pending_state_class") not in (
+            _BrowserMcpRefusalRecorder._PENDING_CLASSES
+        ):
+            raise ValueError("pending class")
+        _require_sha256(
+            first.get("request_shape_sha256"), field="MCP refusal request shape"
+        )
+
+        later = value.get("later_refusals")
+        if (
+            not isinstance(later, Mapping)
+            or set(later) != {"codes_sha256", "count"}
+            or type(later.get("count")) is not int
+            or not 0 <= later["count"] < _MAX_MCP_REFUSALS
+        ):
+            raise ValueError("later refusal shape")
+        _require_sha256(
+            later.get("codes_sha256"), field="later MCP refusal codes"
+        )
+
+        negotiation = value.get("negotiation")
+        if not isinstance(negotiation, Mapping) or set(negotiation) != {
+            "initialize_request_shape_sha256",
+            "initialize_response_shape_sha256",
+            "requested_protocol_version",
+            "selected_protocol_version",
+        }:
+            raise ValueError("negotiation shape")
+        for key in (
+            "initialize_request_shape_sha256",
+            "initialize_response_shape_sha256",
+        ):
+            digest = negotiation.get(key)
+            if digest is not None:
+                _require_sha256(digest, field=key)
+        for key in ("requested_protocol_version", "selected_protocol_version"):
+            version = negotiation.get(key)
+            if version not in {
+                None,
+                _SUPPORTED_MCP_PROTOCOL_VERSION,
+                _UNSUPPORTED_MCP_PROTOCOL_VERSION,
+            }:
+                raise ValueError("protocol version")
+        return str(refusal_code)
+    except (BrowserReviewError, KeyError, TypeError, ValueError) as exc:
+        raise BrowserReviewError(
+            "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+            "browser MCP refusal diagnostic is unavailable",
+        ) from exc
+
+
+def _closed_refusal_guard_evidence(
+    value: Any, *, refusal_sha256: str
+) -> None:
+    """Validate failure-only guard taint without accepting raw observations."""
+
+    expected = {
+        "bridge_exit_code",
+        "calls",
+        "cleanup_proven",
+        "console_rows",
+        "diagnostic_refusal_expected",
+        "diagnostic_refusal_sha256",
+        "egress_falsifiers",
+        "image_content_sha256",
+        "interaction",
+        "model_image_content_sha256",
+        "network_rows",
+        "schema_version",
+        "screenshots",
+    }
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != expected
+        or value.get("schema_version") != _MCP_GUARD_EVIDENCE_SCHEMA
+        or type(value.get("bridge_exit_code")) is not int
+        or value.get("cleanup_proven") is not True
+        or value.get("diagnostic_refusal_expected") is not True
+        or value.get("diagnostic_refusal_sha256") != refusal_sha256
+    ):
+        raise ValueError("refusal guard evidence")
+
+    calls = value.get("calls")
+    if not isinstance(calls, Mapping) or any(
+        name not in ALLOWED_TOOLS
+        or type(count) is not int
+        or not 1 <= count <= 16
+        for name, count in calls.items()
+    ):
+        raise ValueError("refusal guard calls")
+
+    for rows, tool, maximum in (
+        (value.get("console_rows"), "browser_console_messages", MAX_CONSOLE_ROWS),
+        (value.get("network_rows"), "browser_network_requests", MAX_NETWORK_ROWS),
+    ):
+        if not isinstance(rows, list) or len(rows) > maximum:
+            raise ValueError("refusal guard rows")
+        for row in rows:
+            if (
+                not isinstance(row, Mapping)
+                or set(row) != {"bytes", "content_sha256", "tool"}
+                or row.get("tool") != tool
+                or type(row.get("bytes")) is not int
+                or not 0 < row["bytes"] <= MAX_TEXT_EVIDENCE_BYTES
+            ):
+                raise ValueError("refusal guard row")
+            _require_sha256(row.get("content_sha256"), field="refusal guard row")
+
+    egress = value.get("egress_falsifiers")
+    if not isinstance(egress, Mapping) or dict(egress) not in (
+        {"proxy_override": "REFUSED"},
+        {"file_url": "REFUSED", "proxy_override": "REFUSED"},
+    ):
+        raise ValueError("refusal guard egress")
+    interaction = value.get("interaction")
+    if interaction is not None and interaction != {
+        "page_class": "product",
+        "tool": "browser_hover",
+    }:
+        raise ValueError("refusal guard interaction")
+
+    allowed_screenshots = {
+        "desktop.png",
+        "mobile.png",
+        "visual-a.png",
+        "visual-b.png",
+    }
+    screenshots = value.get("screenshots")
+    if (
+        not isinstance(screenshots, list)
+        or screenshots != sorted(set(screenshots))
+        or not set(screenshots).issubset(allowed_screenshots)
+    ):
+        raise ValueError("refusal guard screenshots")
+    image_keys: set[str] | None = None
+    for key in ("image_content_sha256", "model_image_content_sha256"):
+        images = value.get(key)
+        if (
+            not isinstance(images, Mapping)
+            or not set(images).issubset(allowed_screenshots)
+        ):
+            raise ValueError("refusal guard images")
+        for digest in images.values():
+            _require_sha256(digest, field="refusal guard image")
+        if image_keys is None:
+            image_keys = set(images)
+        elif set(images) != image_keys:
+            raise ValueError("refusal guard image pairing")
+    if image_keys is None or not image_keys.issubset(set(screenshots)):
+        raise ValueError("refusal guard image binding")
+
+
+def _reject_duplicate_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
 class _GuardedMcpBridge:
     """Transparent JSON-lines MCP interposer with one fixed child process group."""
 
@@ -2122,14 +3146,10 @@ class _GuardedMcpBridge:
     _CLIENT_NOTIFICATIONS = frozenset(
         {"notifications/cancelled", "notifications/initialized"}
     )
-    _SERVER_NOTIFICATIONS = frozenset(
-        {
-            "notifications/message",
-            "notifications/progress",
-            "notifications/resources/list_changed",
-            "notifications/tools/list_changed",
-        }
-    )
+    # The exact selected server capabilities are {"tools": {}} and the client
+    # strips progress metadata before forwarding.  No server notification is
+    # therefore negotiated for this closed profile.
+    _SERVER_NOTIFICATIONS: frozenset[str] = frozenset()
 
     def __init__(
         self,
@@ -2154,6 +3174,13 @@ class _GuardedMcpBridge:
         self._output_lock = threading.Lock()
         self._client_error: Exception | None = None
         self._tool_call_in_flight = False
+        self._requested_protocol_version: str | None = None
+        self._selected_protocol_version: str | None = None
+        self._initialize_request_shape_sha256: str | None = None
+        self._initialize_response_shape_sha256: str | None = None
+        self._initialize_response_complete = False
+        self._initialized_notification_received = False
+        self._refusals = _BrowserMcpRefusalRecorder(guard)
 
     def _write_client(self, payload: Mapping[str, Any]) -> None:
         encoded = _canonical_bytes(dict(payload)) + b"\n"
@@ -2161,7 +3188,17 @@ class _GuardedMcpBridge:
             self.client_output.write(encoded)
             self.client_output.flush()
 
-    def _refusal(self, request_id: Any) -> None:
+    def _refusal(
+        self,
+        request_id: Any,
+        *,
+        code: str,
+        request: Mapping[str, Any],
+        tool_name: Any = None,
+        diagnostic: bool = True,
+    ) -> None:
+        if diagnostic:
+            self._refusals.record(code, request, tool_name)
         self._write_client(
             {
                 "error": {
@@ -2174,14 +3211,70 @@ class _GuardedMcpBridge:
         )
 
     @staticmethod
+    def _valid_meta(value: Any) -> bool:
+        if not isinstance(value, Mapping) or not value:
+            return False
+        allowed = {"progressToken", "threadId", "x-codex-turn-metadata"}
+        if not set(value).issubset(allowed):
+            return False
+        thread_id = value.get("threadId")
+        if not BrowserMcpToolGuard._bounded_token(thread_id, maximum=256):
+            return False
+        progress = value.get("progressToken")
+        if "progressToken" in value and not (
+            (type(progress) is int and -(2**53) < progress < 2**53)
+            or BrowserMcpToolGuard._bounded_token(progress, maximum=256)
+        ):
+            return False
+        turn = value.get("x-codex-turn-metadata")
+        if "x-codex-turn-metadata" in value and (
+            not isinstance(turn, Mapping)
+            or set(turn) != {"call_id"}
+            or not BrowserMcpToolGuard._bounded_token(
+                turn.get("call_id"), maximum=256
+            )
+        ):
+            return False
+        try:
+            return len(_canonical_bytes(dict(value))) <= 2048
+        except (TypeError, ValueError, UnicodeError):
+            return False
+
+    @staticmethod
+    def _valid_initialize_params(value: Any) -> bool:
+        return (
+            isinstance(value, Mapping)
+            and set(value) == {"capabilities", "clientInfo", "protocolVersion"}
+            and value.get("capabilities") == _MCP_CLIENT_CAPABILITIES
+            and value.get("clientInfo") == _MCP_CLIENT_INFO
+            and BrowserMcpToolGuard._bounded_token(
+                value.get("protocolVersion"), maximum=32
+            )
+        )
+
+    def refusal_artifact(self) -> dict[str, Any] | None:
+        return self._refusals.artifact(
+            requested_protocol_version=self._requested_protocol_version,
+            selected_protocol_version=self._selected_protocol_version,
+            initialize_request_shape_sha256=self._initialize_request_shape_sha256,
+            initialize_response_shape_sha256=self._initialize_response_shape_sha256,
+        )
+
+    def has_diagnostic_refusal(self) -> bool:
+        return self._refusals.has_diagnostic_refusal()
+
+    @staticmethod
     def _decode_line(raw: bytes) -> dict[str, Any]:
         if not raw.endswith(b"\n") or not 1 <= len(raw) <= _MAX_PROTOCOL_LINE_BYTES:
             raise BrowserReviewError(
                 "BROWSER_MCP_PROTOCOL_FAILED", "MCP frame is outside the reviewed bound"
             )
         try:
-            value = json.loads(raw.decode("utf-8"))
-        except (UnicodeError, ValueError) as exc:
+            value = json.loads(
+                raw.decode("utf-8"),
+                object_pairs_hook=_reject_duplicate_json_object,
+            )
+        except (RecursionError, UnicodeError, ValueError) as exc:
             raise BrowserReviewError(
                 "BROWSER_MCP_PROTOCOL_FAILED", "MCP frame is not valid JSON"
             ) from exc
@@ -2198,6 +3291,7 @@ class _GuardedMcpBridge:
                 request = self._decode_line(raw)
                 method = request.get("method")
                 request_id = request.get("id")
+                request_has_id = "id" in request
                 if (
                     not isinstance(method, str)
                     or method not in self._CLIENT_METHODS
@@ -2206,22 +3300,194 @@ class _GuardedMcpBridge:
                         {"id", "jsonrpc", "method", "params"},
                         {"jsonrpc", "method", "params"},
                     )
-                    or (method in self._CLIENT_NOTIFICATIONS) != (request_id is None)
-                    or (method not in self._CLIENT_NOTIFICATIONS and request_id is None)
+                    or (method in self._CLIENT_NOTIFICATIONS) != (not request_has_id)
+                    or (method not in self._CLIENT_NOTIFICATIONS and not request_has_id)
+                    or (
+                        request_has_id
+                        and (
+                            type(request_id) not in {int, str}
+                            or (isinstance(request_id, str) and not request_id)
+                        )
+                    )
                 ):
+                    if request_has_id and type(request_id) in {int, str}:
+                        self._refusal(
+                            request_id,
+                            code="CLIENT_REQUEST_SHAPE_MISMATCH",
+                            request=request,
+                        )
+                        continue
+                    self._refusals.record(
+                        "CLIENT_REQUEST_SHAPE_MISMATCH", request, None
+                    )
                     raise BrowserReviewError(
                         "BROWSER_MCP_PROTOCOL_FAILED",
                         "client MCP method or request shape is outside the reviewed protocol",
                     )
+
+                if method == "initialize":
+                    params = request.get("params")
+                    with self._pending_lock:
+                        already_started = self._requested_protocol_version is not None
+                    if already_started or not self._valid_initialize_params(params):
+                        self._refusal(
+                            request_id,
+                            code="INITIALIZE_REQUEST_SHAPE_MISMATCH",
+                            request=request,
+                        )
+                        continue
+                    requested_version = str(params["protocolVersion"])
+                    with self._pending_lock:
+                        self._requested_protocol_version = (
+                            requested_version
+                            if requested_version == _SUPPORTED_MCP_PROTOCOL_VERSION
+                            else _UNSUPPORTED_MCP_PROTOCOL_VERSION
+                        )
+                        self._initialize_request_shape_sha256 = (
+                            _canonical_mcp_shape_digest(request)
+                        )
+                    if requested_version != _SUPPORTED_MCP_PROTOCOL_VERSION:
+                        self._refusal(
+                            request_id,
+                            code="PROTOCOL_VERSION_UNSUPPORTED",
+                            request=request,
+                        )
+                        continue
+                    with self._pending_lock:
+                        if request_id in self._pending:
+                            raise BrowserReviewError(
+                                "BROWSER_MCP_PROTOCOL_FAILED",
+                                "MCP request id was reused while pending",
+                            )
+                        self._pending[request_id] = (method, None, None)
+                    encoded = _canonical_bytes(request) + b"\n"
+                    self.process.stdin.write(encoded)
+                    self.process.stdin.flush()
+                    continue
+
+                if method == "notifications/initialized":
+                    params = request.get("params")
+                    with self._pending_lock:
+                        ready = self._initialize_response_complete
+                        duplicated = self._initialized_notification_received
+                    if not isinstance(params, Mapping) or params or not ready or duplicated:
+                        self._refusals.record(
+                            "CLIENT_REQUEST_SHAPE_MISMATCH", request, None
+                        )
+                        raise BrowserReviewError(
+                            "BROWSER_MCP_PROTOCOL_FAILED",
+                            "initialized notification is outside the negotiated state",
+                        )
+                    with self._pending_lock:
+                        self._initialized_notification_received = True
+                    encoded = _canonical_bytes(request) + b"\n"
+                    self.process.stdin.write(encoded)
+                    self.process.stdin.flush()
+                    continue
+
+                with self._pending_lock:
+                    initialized = (
+                        self._initialize_response_complete
+                        and self._initialized_notification_received
+                        and self._selected_protocol_version
+                        == _SUPPORTED_MCP_PROTOCOL_VERSION
+                    )
+                if method != "ping" and not initialized:
+                    refusal_code = (
+                        "TOOL_CALL_BEFORE_INITIALIZED"
+                        if method == "tools/call"
+                        else "CLIENT_REQUEST_BEFORE_INITIALIZED"
+                    )
+                    if request_has_id:
+                        self._refusal(
+                            request_id,
+                            code=refusal_code,
+                            request=request,
+                            tool_name=(
+                                request.get("params", {}).get("name")
+                                if method == "tools/call"
+                                and isinstance(request.get("params"), Mapping)
+                                else None
+                            ),
+                        )
+                        continue
+                    self._refusals.record(
+                        refusal_code, request, None
+                    )
+                    raise BrowserReviewError(
+                        "BROWSER_MCP_PROTOCOL_FAILED",
+                        "client MCP traffic preceded the completed handshake",
+                    )
+
+                if method == "notifications/cancelled":
+                    params = request.get("params")
+                    request_to_cancel = (
+                        params.get("requestId")
+                        if isinstance(params, Mapping)
+                        else None
+                    )
+                    reason = (
+                        params.get("reason")
+                        if isinstance(params, Mapping)
+                        else None
+                    )
+                    with self._pending_lock:
+                        target_is_pending = (
+                            type(request_to_cancel) in {int, str}
+                            and not (
+                                isinstance(request_to_cancel, str)
+                                and not request_to_cancel
+                            )
+                            and request_to_cancel in self._pending
+                        )
+                    valid_reason = False
+                    if isinstance(params, Mapping):
+                        valid_reason = "reason" not in params or (
+                            isinstance(reason, str)
+                            and bool(reason)
+                            and reason == reason.strip()
+                            and len(reason.encode("utf-8")) <= 500
+                        )
+                    if (
+                        not isinstance(params, Mapping)
+                        or set(params) not in (
+                            {"requestId"},
+                            {"reason", "requestId"},
+                        )
+                        or not target_is_pending
+                        or not valid_reason
+                    ):
+                        self._refusals.record(
+                            "CLIENT_REQUEST_SHAPE_MISMATCH", request, None
+                        )
+                        raise BrowserReviewError(
+                            "BROWSER_MCP_PROTOCOL_FAILED",
+                            "cancelled notification is not bound to a pending request",
+                        )
+                    encoded = _canonical_bytes(request) + b"\n"
+                    self.process.stdin.write(encoded)
+                    self.process.stdin.flush()
+                    continue
+
                 if method == "tools/call":
                     params = request.get("params")
                     if (
                         not isinstance(params, Mapping)
-                        or set(params) != {"arguments", "name"}
+                        or set(params) != {"_meta", "arguments", "name"}
                         or not isinstance(params.get("name"), str)
                         or not isinstance(params.get("arguments"), Mapping)
+                        or not self._valid_meta(params.get("_meta"))
                     ):
-                        self._refusal(request_id)
+                        self._refusal(
+                            request_id,
+                            code="TOOL_CALL_PARAMS_SHAPE_MISMATCH",
+                            request=request,
+                            tool_name=(
+                                params.get("name")
+                                if isinstance(params, Mapping)
+                                else None
+                            ),
+                        )
                         continue
                     name = str(params["name"])
                     original = dict(params["arguments"])
@@ -2232,14 +3498,25 @@ class _GuardedMcpBridge:
                             self._tool_call_in_flight = True
                             busy = False
                     if busy:
-                        self._refusal(request_id)
+                        self._refusal(
+                            request_id,
+                            code="STATE_TRANSITION_PENDING",
+                            request=request,
+                            tool_name=name,
+                        )
                         continue
                     try:
                         rewritten = self.guard.rewrite_call(name, original)
-                    except BrowserReviewError:
+                    except BrowserReviewError as exc:
                         with self._pending_lock:
                             self._tool_call_in_flight = False
-                        self._refusal(request_id)
+                        self._refusal(
+                            request_id,
+                            code=exc.refusal_code or "UNKNOWN_CLOSED_REFUSAL",
+                            request=request,
+                            tool_name=name,
+                            diagnostic=exc.diagnostic_refusal,
+                        )
                         continue
                     forwarded = dict(request)
                     forwarded["params"] = {"arguments": rewritten, "name": name}
@@ -2254,15 +3531,19 @@ class _GuardedMcpBridge:
                 else:
                     params = request.get("params")
                     if not isinstance(params, Mapping):
-                        raise BrowserReviewError(
-                            "BROWSER_MCP_PROTOCOL_FAILED",
-                            "client MCP control params are not an object",
+                        self._refusal(
+                            request_id,
+                            code="CLIENT_REQUEST_SHAPE_MISMATCH",
+                            request=request,
                         )
-                    if method in {"ping", "tools/list", "notifications/initialized"} and params:
-                        raise BrowserReviewError(
-                            "BROWSER_MCP_PROTOCOL_FAILED",
-                            "client MCP control params are not the exact empty shape",
+                        continue
+                    if method in {"ping", "tools/list"} and params:
+                        self._refusal(
+                            request_id,
+                            code="CLIENT_REQUEST_SHAPE_MISMATCH",
+                            request=request,
                         )
+                        continue
                     if request_id is not None:
                         with self._pending_lock:
                             if request_id in self._pending:
@@ -2300,12 +3581,30 @@ class _GuardedMcpBridge:
                 response = self._decode_line(raw)
                 server_method = response.get("method")
                 if server_method is not None:
+                    with self._pending_lock:
+                        initialized = (
+                            self._initialize_response_complete
+                            and self._initialized_notification_received
+                            and self._selected_protocol_version
+                            == _SUPPORTED_MCP_PROTOCOL_VERSION
+                        )
+                    if not initialized:
+                        self._refusals.record(
+                            "MCP_RESPONSE_BEFORE_INITIALIZED", response, None
+                        )
+                        raise BrowserReviewError(
+                            "BROWSER_MCP_PROTOCOL_FAILED",
+                            "server MCP traffic preceded the completed handshake",
+                        )
                     if (
                         response.get("id") is not None
                         or server_method not in self._SERVER_NOTIFICATIONS
                         or set(response) != {"jsonrpc", "method", "params"}
                         or not isinstance(response.get("params"), Mapping)
                     ):
+                        self._refusals.record(
+                            "MCP_RESPONSE_INVALID", response, None
+                        )
                         raise BrowserReviewError(
                             "BROWSER_MCP_PROTOCOL_FAILED",
                             "server initiated an unreviewed MCP request",
@@ -2314,13 +3613,15 @@ class _GuardedMcpBridge:
                     continue
                 request_id = response.get("id")
                 if (
-                    request_id is None
+                    type(request_id) not in {int, str}
+                    or (isinstance(request_id, str) and not request_id)
                     or set(response)
                     not in (
                         {"id", "jsonrpc", "result"},
                         {"error", "id", "jsonrpc"},
                     )
                 ):
+                    self._refusals.record("MCP_RESPONSE_INVALID", response, None)
                     raise BrowserReviewError(
                         "BROWSER_MCP_PROTOCOL_FAILED",
                         "server MCP response shape is not closed",
@@ -2328,6 +3629,7 @@ class _GuardedMcpBridge:
                 with self._pending_lock:
                     pending = self._pending.pop(request_id, None)
                 if pending is None:
+                    self._refusals.record("MCP_RESPONSE_INVALID", response, None)
                     raise BrowserReviewError(
                         "BROWSER_MCP_PROTOCOL_FAILED",
                         "server MCP response id has no pending request",
@@ -2335,24 +3637,78 @@ class _GuardedMcpBridge:
                 method, tool_name, original = pending
                 if method == "initialize":
                     result = response.get("result")
-                    server_info = (
-                        result.get("serverInfo") if isinstance(result, Mapping) else None
+                    selected_version = (
+                        result.get("protocolVersion")
+                        if isinstance(result, Mapping)
+                        else None
                     )
-                    if (
-                        not isinstance(server_info, Mapping)
-                        or str(server_info.get("name") or "").strip().lower()
-                        != "playwright"
-                        or server_info.get("version")
-                        != "1.63.0-alpha-2026-08-05"
-                    ):
+                    with self._pending_lock:
+                        requested_version = self._requested_protocol_version
+                        if BrowserMcpToolGuard._bounded_token(
+                            selected_version, maximum=32
+                        ):
+                            self._selected_protocol_version = (
+                                str(selected_version)
+                                if selected_version
+                                == _SUPPORTED_MCP_PROTOCOL_VERSION
+                                else _UNSUPPORTED_MCP_PROTOCOL_VERSION
+                            )
+                    try:
+                        response_shape_sha256 = _canonical_mcp_shape_digest(
+                            response
+                        )
+                    except BrowserReviewError:
+                        self._refusal(
+                            request_id,
+                            code="MCP_RESPONSE_INVALID",
+                            request=response,
+                        )
+                        raise
+                    with self._pending_lock:
+                        self._initialize_response_shape_sha256 = (
+                            response_shape_sha256
+                        )
+                    version_mismatch = (
+                        selected_version != _SUPPORTED_MCP_PROTOCOL_VERSION
+                        or requested_version != _SUPPORTED_MCP_PROTOCOL_VERSION
+                    )
+                    exact_result = (
+                        isinstance(result, Mapping)
+                        and set(result)
+                        == {"capabilities", "protocolVersion", "serverInfo"}
+                        and result.get("capabilities") == _MCP_SERVER_CAPABILITIES
+                        and result.get("serverInfo")
+                        == {
+                            "name": "Playwright",
+                            "version": "1.63.0-alpha-2026-08-05",
+                        }
+                    )
+                    if version_mismatch or not exact_result:
+                        code = (
+                            "PROTOCOL_VERSION_MISMATCH"
+                            if version_mismatch
+                            else "MCP_RESPONSE_INVALID"
+                        )
+                        self._refusal(
+                            request_id,
+                            code=code,
+                            request=response,
+                        )
                         raise BrowserReviewError(
                             "BROWSER_MCP_PROTOCOL_FAILED",
-                            "pinned MCP server identity or version drifted",
+                            "pinned MCP initialize response drifted",
                         )
+                    with self._pending_lock:
+                        self._initialize_response_complete = True
                 if method == "tools/list":
                     result = response.get("result")
                     tools = result.get("tools") if isinstance(result, Mapping) else None
                     if not isinstance(tools, list):
+                        self._refusal(
+                            request_id,
+                            code="MCP_RESPONSE_INVALID",
+                            request=response,
+                        )
                         raise BrowserReviewError(
                             "BROWSER_MCP_PROTOCOL_FAILED", "MCP tool list is malformed"
                         )
@@ -2366,6 +3722,11 @@ class _GuardedMcpBridge:
                         len(selected) != len(ALLOWED_TOOLS)
                         or {item.get("name") for item in selected} != ALLOWED_TOOLS
                     ):
+                        self._refusal(
+                            request_id,
+                            code="MCP_RESPONSE_INVALID",
+                            request=response,
+                        )
                         raise BrowserReviewError(
                             "BROWSER_MCP_PROTOCOL_FAILED",
                             "pinned MCP effective tool surface drifted",
@@ -2378,8 +3739,14 @@ class _GuardedMcpBridge:
                     assert tool_name is not None and original is not None
                     try:
                         self.guard.record_result(tool_name, original, response)
-                    except BrowserReviewError:
-                        self._refusal(request_id)
+                    except BrowserReviewError as exc:
+                        self._refusal(
+                            request_id,
+                            code=exc.refusal_code or "UNKNOWN_CLOSED_REFUSAL",
+                            request=response,
+                            tool_name=tool_name,
+                            diagnostic=exc.diagnostic_refusal,
+                        )
                         with self._pending_lock:
                             self._tool_call_in_flight = False
                         continue
@@ -2478,13 +3845,15 @@ def _closed_mcp_guard_observations(
                 or row.get("tool") != tool
                 or type(row.get("bytes")) is not int
                 or not 0 < row["bytes"] <= MAX_TEXT_EVIDENCE_BYTES
-                or _SHA256_RE.fullmatch(str(row.get("content_sha256") or ""))
-                is None
             ):
                 raise BrowserReviewError(
                     "BROWSER_RECEIPT_INVALID",
                     "MCP guard evidence result row is invalid",
                 )
+            _require_sha256(
+                row.get("content_sha256"),
+                field="MCP guard evidence result row content",
+            )
     return dict(sorted(normalized.items()))
 
 
@@ -2503,7 +3872,23 @@ def run_guarded_mcp_bridge(
     input_stream = stdin if stdin is not None else os.sys.stdin.buffer
     output_stream = stdout if stdout is not None else os.sys.stdout.buffer
     error_stream = stderr if stderr is not None else os.sys.stderr.buffer
+    artifact_fd = -1
     try:
+        artifact_fd = os.open(
+            guard.artifact_dir,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        held_artifact = os.fstat(artifact_fd)
+        named_artifact = guard.artifact_dir.lstat()
+        if (
+            BrowserMcpToolGuard._directory_identity(held_artifact)
+            != guard._artifact_dir_identity
+            or BrowserMcpToolGuard._directory_identity(named_artifact)
+            != guard._artifact_dir_identity
+        ):
+            raise OSError("artifact directory identity")
         process = subprocess.Popen(
             list(argv),
             cwd=guard.artifact_dir,
@@ -2518,6 +3903,8 @@ def run_guarded_mcp_bridge(
         )
         process_group = os.getpgid(process.pid)
     except OSError as exc:
+        if artifact_fd >= 0:
+            os.close(artifact_fd)
         raise BrowserReviewError(
             "BROWSER_MCP_START_FAILED", "pinned Playwright MCP could not start"
         ) from exc
@@ -2529,11 +3916,46 @@ def run_guarded_mcp_bridge(
     )
     return_code = 1
     cleanup_proven = False
+    diagnostic_unavailable = False
+    refusal_artifact_sha256: str | None = None
     try:
         return_code = bridge.run()
     finally:
         cleanup_proven = _finish_process_group(process, process_group)
-        evidence = guard.evidence()
+        refusal_expected = bridge.has_diagnostic_refusal()
+        refusal: dict[str, Any] | None = None
+        try:
+            refusal = bridge.refusal_artifact()
+        except Exception:  # noqa: BLE001 - one fixed sanitized diagnostic state
+            diagnostic_unavailable = True
+        if refusal is not None:
+            try:
+                refusal_payload = _canonical_bytes(refusal) + b"\n"
+                if len(refusal_payload) > MAX_TEXT_EVIDENCE_BYTES:
+                    raise BrowserReviewError(
+                        "BROWSER_ARTIFACT_OVERSIZE",
+                        "MCP refusal evidence exceeds the reviewed bound",
+                    )
+                _write_private_bytes_once_at(
+                    artifact_fd, _MCP_REFUSAL_FILE, refusal_payload
+                )
+                refusal_artifact_sha256 = hashlib.sha256(
+                    refusal_payload
+                ).hexdigest()
+            except Exception:  # noqa: BLE001 - one fixed sanitized diagnostic state
+                diagnostic_unavailable = True
+        try:
+            evidence = guard.evidence()
+        except Exception:
+            if not refusal_expected:
+                os.close(artifact_fd)
+                artifact_fd = -1
+                raise
+            diagnostic_unavailable = True
+            evidence = {}
+        if refusal_expected:
+            evidence["diagnostic_refusal_expected"] = True
+            evidence["diagnostic_refusal_sha256"] = refusal_artifact_sha256
         evidence.update(
             {
                 "bridge_exit_code": return_code,
@@ -2541,13 +3963,27 @@ def run_guarded_mcp_bridge(
                 "schema_version": _MCP_GUARD_EVIDENCE_SCHEMA,
             }
         )
-        payload = _canonical_bytes(evidence)
-        if len(payload) > MAX_TEXT_EVIDENCE_BYTES:
-            raise BrowserReviewError(
-                "BROWSER_ARTIFACT_OVERSIZE", "MCP guard evidence exceeds the reviewed bound"
+        try:
+            payload = _canonical_bytes(evidence)
+            if len(payload) > MAX_TEXT_EVIDENCE_BYTES:
+                raise BrowserReviewError(
+                    "BROWSER_ARTIFACT_OVERSIZE",
+                    "MCP guard evidence exceeds the reviewed bound",
+                )
+            _write_private_bytes_once(
+                guard.artifact_dir / _MCP_GUARD_EVIDENCE_FILE, payload
             )
-        _write_private_bytes_once(
-            guard.artifact_dir / _MCP_GUARD_EVIDENCE_FILE, payload
+        except Exception:
+            if not refusal_expected:
+                raise
+            diagnostic_unavailable = True
+        finally:
+            os.close(artifact_fd)
+            artifact_fd = -1
+    if diagnostic_unavailable:
+        raise BrowserReviewError(
+            "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+            "browser MCP refusal diagnostic is unavailable",
         )
     if not cleanup_proven:
         raise BrowserReviewError(
@@ -4815,6 +6251,7 @@ def _tracked_workspace_snapshot(workspace: Path) -> dict[str, str]:
     env = {
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
         "LC_ALL": "C",
         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
     }
@@ -4858,7 +6295,531 @@ def _tracked_workspace_snapshot(workspace: Path) -> dict[str, str]:
     }
 
 
-def _validate_workspace_identity(workspace: Path, identity: WorkspaceIdentity) -> Path:
+@dataclass(frozen=True)
+class _TrackedWorkspaceIntegrityPlan:
+    """Parent-memory plan for a process-free terminal workspace recheck."""
+
+    workspace: Path
+    tracked_entries: tuple[tuple[str, str], ...]
+    control_paths: tuple[Path, ...]
+
+
+def _prepare_tracked_workspace_integrity(
+    workspace: Path,
+) -> _TrackedWorkspaceIntegrityPlan:
+    """Resolve tracked paths and Git controls before the terminal UID sweep."""
+
+    env = {
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+    }
+
+    def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            ["git", "-C", os.fspath(workspace), *args],
+            check=check,
+            capture_output=True,
+            env=env,
+            timeout=30,
+        )
+
+    try:
+        listing = git("ls-files", "--cached", "--stage", "-z").stdout
+        git_dir = Path(
+            git("rev-parse", "--absolute-git-dir").stdout.decode("utf-8").strip()
+        ).resolve(strict=True)
+        common_dir = Path(
+            git(
+                "rev-parse", "--path-format=absolute", "--git-common-dir"
+            ).stdout.decode("utf-8").strip()
+        ).resolve(strict=True)
+        index_path = Path(
+            git(
+                "rev-parse", "--path-format=absolute", "--git-path", "index"
+            ).stdout.decode("utf-8").strip()
+        )
+        symbolic = git("symbolic-ref", "-q", "HEAD", check=False)
+        if symbolic.returncode not in {0, 1}:
+            raise OSError("symbolic HEAD")
+        head_ref = (
+            symbolic.stdout.decode("utf-8").strip()
+            if symbolic.returncode == 0
+            else None
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError) as exc:
+        raise BrowserReviewError(
+            "BROWSER_WORKSPACE_MUTATION",
+            "tracked workspace integrity plan is unavailable",
+        ) from exc
+
+    entries: list[tuple[str, str]] = []
+    observed_paths: set[str] = set()
+    try:
+        for raw_entry in listing.split(b"\0"):
+            if not raw_entry:
+                continue
+            prefix, raw_path = raw_entry.split(b"\t", 1)
+            mode, _object_id, stage = prefix.split(b" ")
+            path = raw_path.decode("utf-8")
+            pure = PurePosixPath(path)
+            if (
+                mode.decode("ascii")
+                not in {"100644", "100755", "120000", "160000"}
+                or stage != b"0"
+                or not path
+                or pure.is_absolute()
+                or ".." in pure.parts
+                or str(pure) != path
+                or path in observed_paths
+            ):
+                raise ValueError("tracked entry")
+            observed_paths.add(path)
+            entries.append((mode.decode("ascii"), path))
+        if len(entries) > 200_000:
+            raise ValueError("tracked entry bound")
+        if head_ref is not None:
+            pure_ref = PurePosixPath(head_ref)
+            if (
+                not head_ref.startswith("refs/")
+                or pure_ref.is_absolute()
+                or ".." in pure_ref.parts
+                or str(pure_ref) != head_ref
+            ):
+                raise ValueError("symbolic HEAD")
+    except (UnicodeError, ValueError) as exc:
+        raise BrowserReviewError(
+            "BROWSER_WORKSPACE_MUTATION",
+            "tracked workspace integrity plan is invalid",
+        ) from exc
+
+    controls = [
+        Path(workspace) / ".git",
+        git_dir,
+        common_dir,
+        git_dir / "HEAD",
+        index_path,
+        index_path.with_name(index_path.name + ".lock"),
+        common_dir / "packed-refs",
+        common_dir / "packed-refs.lock",
+    ]
+    if head_ref is not None:
+        loose_ref = common_dir.joinpath(*PurePosixPath(head_ref).parts)
+        controls.extend(
+            [loose_ref, loose_ref.with_name(loose_ref.name + ".lock")]
+        )
+    unique_controls = tuple(dict.fromkeys(controls))
+    return _TrackedWorkspaceIntegrityPlan(
+        workspace=Path(workspace).resolve(strict=True),
+        tracked_entries=tuple(entries),
+        control_paths=unique_controls,
+    )
+
+
+def _stable_workspace_path_state(
+    path: Path, *, recursive_directory: bool = False
+) -> dict[str, Any]:
+    """Hash one path while rejecting type swaps and concurrent rewrites."""
+
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return {"kind": "missing"}
+    except OSError as exc:
+        raise BrowserReviewError(
+            "BROWSER_WORKSPACE_MUTATION",
+            "tracked workspace bytes are unavailable",
+        ) from exc
+
+    fingerprint = BrowserMcpToolGuard._stat_fingerprint
+    common = {
+        "device": before.st_dev,
+        "gid": before.st_gid,
+        "inode": before.st_ino,
+        "mode": stat.S_IMODE(before.st_mode),
+        "nlink": before.st_nlink,
+        "uid": before.st_uid,
+    }
+    try:
+        if stat.S_ISLNK(before.st_mode):
+            target = os.readlink(path)
+            after = path.lstat()
+            if fingerprint(before) != fingerprint(after):
+                raise OSError("symlink changed")
+            return {**common, "kind": "symlink", "target": target}
+        if stat.S_ISREG(before.st_mode):
+            descriptor = os.open(
+                path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            )
+            try:
+                opened = os.fstat(descriptor)
+                if fingerprint(before) != fingerprint(opened):
+                    raise OSError("file changed before open")
+                digest = hashlib.sha256()
+                observed = 0
+                while True:
+                    chunk = os.read(descriptor, 1024 * 1024)
+                    if not chunk:
+                        break
+                    observed += len(chunk)
+                    if observed > 1024 * 1024 * 1024:
+                        raise OSError("file exceeds integrity bound")
+                    digest.update(chunk)
+                opened_after = os.fstat(descriptor)
+            finally:
+                os.close(descriptor)
+            named_after = path.lstat()
+            if (
+                observed != before.st_size
+                or fingerprint(before) != fingerprint(opened_after)
+                or fingerprint(before) != fingerprint(named_after)
+            ):
+                raise OSError("file changed during read")
+            return {
+                **common,
+                "bytes": observed,
+                "kind": "file",
+                "sha256": digest.hexdigest(),
+            }
+        if stat.S_ISDIR(before.st_mode):
+            tree_sha256: str | None = None
+            if recursive_directory:
+                tree = hashlib.sha256()
+                entries = 0
+                stack: list[tuple[Path, PurePosixPath]] = [
+                    (path, PurePosixPath("."))
+                ]
+                while stack:
+                    directory, relative = stack.pop()
+                    children = sorted(
+                        directory.iterdir(), key=lambda child: child.name
+                    )
+                    for child in children:
+                        child_relative = relative / child.name
+                        entries += 1
+                        if entries > 200_000:
+                            raise OSError("directory exceeds integrity bound")
+                        child_info = child.lstat()
+                        if (
+                            child.name == ".git"
+                            and stat.S_ISDIR(child_info.st_mode)
+                        ):
+                            child_state = _stable_workspace_path_state(child)
+                            for control_name in ("HEAD", "index", "packed-refs"):
+                                control = child / control_name
+                                control_state = _stable_workspace_path_state(
+                                    control
+                                )
+                                tree.update(
+                                    _canonical_bytes(
+                                        {
+                                            "path": os.fspath(
+                                                child_relative / control_name
+                                            ),
+                                            "state": control_state,
+                                        }
+                                    )
+                                )
+                        elif stat.S_ISDIR(child_info.st_mode):
+                            child_state = _stable_workspace_path_state(child)
+                            stack.append((child, child_relative))
+                        else:
+                            child_state = _stable_workspace_path_state(child)
+                        tree.update(
+                            _canonical_bytes(
+                                {
+                                    "path": os.fspath(child_relative),
+                                    "state": child_state,
+                                }
+                            )
+                        )
+                tree_sha256 = tree.hexdigest()
+            after = path.lstat()
+            if fingerprint(before) != fingerprint(after):
+                raise OSError("directory changed during read")
+            result: dict[str, Any] = {**common, "kind": "directory"}
+            if tree_sha256 is not None:
+                result["tree_sha256"] = tree_sha256
+            return result
+        raise OSError("unsupported tracked path type")
+    except (OSError, UnicodeError) as exc:
+        raise BrowserReviewError(
+            "BROWSER_WORKSPACE_MUTATION",
+            "tracked workspace bytes are unavailable",
+        ) from exc
+
+
+def _stable_workspace_entry_state_at(
+    parent_fd: int,
+    name: str,
+    *,
+    recursive_directory: bool = False,
+    tree_counter: list[int] | None = None,
+    depth: int = 0,
+) -> dict[str, Any]:
+    """Stable-read one workspace entry through an already anchored parent."""
+
+    descriptor = -1
+    fingerprint = BrowserMcpToolGuard._stat_fingerprint
+    try:
+        before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return {"kind": "missing"}
+    except OSError as exc:
+        raise BrowserReviewError(
+            "BROWSER_WORKSPACE_MUTATION",
+            "tracked workspace bytes are unavailable",
+        ) from exc
+    common = {
+        "device": before.st_dev,
+        "gid": before.st_gid,
+        "inode": before.st_ino,
+        "mode": stat.S_IMODE(before.st_mode),
+        "nlink": before.st_nlink,
+        "uid": before.st_uid,
+    }
+    try:
+        if stat.S_ISLNK(before.st_mode):
+            target = os.readlink(name, dir_fd=parent_fd)
+            after = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if fingerprint(before) != fingerprint(after):
+                raise OSError("symlink changed")
+            return {**common, "kind": "symlink", "target": target}
+        if stat.S_ISREG(before.st_mode):
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
+            )
+            opened = os.fstat(descriptor)
+            if fingerprint(before) != fingerprint(opened):
+                raise OSError("file changed before open")
+            content = hashlib.sha256()
+            observed = 0
+            while True:
+                chunk = os.read(descriptor, 1024 * 1024)
+                if not chunk:
+                    break
+                observed += len(chunk)
+                if observed > 1024 * 1024 * 1024:
+                    raise OSError("file exceeds integrity bound")
+                content.update(chunk)
+            opened_after = os.fstat(descriptor)
+            named_after = os.stat(
+                name, dir_fd=parent_fd, follow_symlinks=False
+            )
+            if (
+                observed != before.st_size
+                or fingerprint(before) != fingerprint(opened_after)
+                or fingerprint(before) != fingerprint(named_after)
+            ):
+                raise OSError("file changed during read")
+            return {
+                **common,
+                "bytes": observed,
+                "kind": "file",
+                "sha256": content.hexdigest(),
+            }
+        if stat.S_ISDIR(before.st_mode):
+            descriptor = os.open(
+                name,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
+            )
+            opened = os.fstat(descriptor)
+            if fingerprint(before) != fingerprint(opened):
+                raise OSError("directory changed before open")
+            result: dict[str, Any] = {**common, "kind": "directory"}
+            if recursive_directory:
+                if depth > 64:
+                    raise OSError("directory depth exceeds integrity bound")
+                counter = tree_counter if tree_counter is not None else [0]
+                tree = hashlib.sha256()
+                for child_name in sorted(os.listdir(descriptor)):
+                    if not child_name or "/" in child_name or "\x00" in child_name:
+                        raise OSError("directory child name is invalid")
+                    counter[0] += 1
+                    if counter[0] > 200_000:
+                        raise OSError("directory exceeds integrity bound")
+                    child_info = os.stat(
+                        child_name,
+                        dir_fd=descriptor,
+                        follow_symlinks=False,
+                    )
+                    if child_name == ".git" and stat.S_ISDIR(
+                        child_info.st_mode
+                    ):
+                        raise OSError("embedded git directory is not closed")
+                    child_state = _stable_workspace_entry_state_at(
+                        descriptor,
+                        child_name,
+                        recursive_directory=stat.S_ISDIR(child_info.st_mode),
+                        tree_counter=counter,
+                        depth=depth + 1,
+                    )
+                    tree.update(
+                        _canonical_bytes(
+                            {"path": child_name, "state": child_state}
+                        )
+                    )
+                result["tree_sha256"] = tree.hexdigest()
+            opened_after = os.fstat(descriptor)
+            named_after = os.stat(
+                name, dir_fd=parent_fd, follow_symlinks=False
+            )
+            if (
+                fingerprint(before) != fingerprint(opened_after)
+                or fingerprint(before) != fingerprint(named_after)
+            ):
+                raise OSError("directory changed during read")
+            return result
+        raise OSError("unsupported tracked path type")
+    except (OSError, UnicodeError) as exc:
+        raise BrowserReviewError(
+            "BROWSER_WORKSPACE_MUTATION",
+            "tracked workspace bytes are unavailable",
+        ) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _stable_workspace_relative_state(
+    root_fd: int,
+    relative: str,
+    *,
+    recursive_directory: bool,
+) -> dict[str, Any]:
+    """Descend every tracked parent with O_NOFOLLOW and hold the full chain."""
+
+    parts = PurePosixPath(relative).parts
+    if not parts:
+        raise BrowserReviewError(
+            "BROWSER_WORKSPACE_MUTATION", "tracked workspace path is invalid"
+        )
+    descriptors = [os.dup(root_fd)]
+    bindings: list[tuple[int, str, tuple[int, ...]]] = []
+    fingerprint = BrowserMcpToolGuard._stat_fingerprint
+    try:
+        for component in parts[:-1]:
+            parent_fd = descriptors[-1]
+            named = os.stat(
+                component, dir_fd=parent_fd, follow_symlinks=False
+            )
+            child_fd = os.open(
+                component,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
+            )
+            opened = os.fstat(child_fd)
+            if (
+                not stat.S_ISDIR(opened.st_mode)
+                or fingerprint(named) != fingerprint(opened)
+            ):
+                os.close(child_fd)
+                raise OSError("tracked parent is not anchored")
+            bindings.append((parent_fd, component, fingerprint(opened)))
+            descriptors.append(child_fd)
+        state = _stable_workspace_entry_state_at(
+            descriptors[-1],
+            parts[-1],
+            recursive_directory=recursive_directory,
+        )
+        for parent_fd, component, expected in reversed(bindings):
+            named_after = os.stat(
+                component, dir_fd=parent_fd, follow_symlinks=False
+            )
+            if fingerprint(named_after) != expected:
+                raise OSError("tracked parent changed during read")
+        return state
+    except (BrowserReviewError, OSError) as exc:
+        if isinstance(exc, BrowserReviewError):
+            raise
+        raise BrowserReviewError(
+            "BROWSER_WORKSPACE_MUTATION",
+            "tracked workspace path is not anchored",
+        ) from exc
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _tracked_workspace_integrity_digest(
+    plan: _TrackedWorkspaceIntegrityPlan,
+) -> str:
+    """Recompute tracked bytes and Git controls without spawning a process."""
+
+    digest = hashlib.sha256()
+    digest.update(b"mastermind.tracked_workspace_integrity/v1\0")
+    root_fd = -1
+    try:
+        root_fd = os.open(
+            plan.workspace,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        root_before = os.fstat(root_fd)
+        root_named_before = plan.workspace.lstat()
+        if (
+            not stat.S_ISDIR(root_before.st_mode)
+            or BrowserMcpToolGuard._stat_fingerprint(root_before)
+            != BrowserMcpToolGuard._stat_fingerprint(root_named_before)
+        ):
+            raise OSError("workspace root is not anchored")
+        for mode, relative in plan.tracked_entries:
+            state = _stable_workspace_relative_state(
+                root_fd,
+                relative,
+                recursive_directory=mode == "160000",
+            )
+            digest.update(
+                _canonical_bytes(
+                    {"mode": mode, "path": relative, "state": state}
+                )
+            )
+        root_after = os.fstat(root_fd)
+        root_named_after = plan.workspace.lstat()
+        if (
+            BrowserMcpToolGuard._stat_fingerprint(root_before)
+            != BrowserMcpToolGuard._stat_fingerprint(root_after)
+            or BrowserMcpToolGuard._stat_fingerprint(root_before)
+            != BrowserMcpToolGuard._stat_fingerprint(root_named_after)
+        ):
+            raise OSError("workspace root changed during integrity read")
+    except (OSError, BrowserReviewError) as exc:
+        if isinstance(exc, BrowserReviewError):
+            raise
+        raise BrowserReviewError(
+            "BROWSER_WORKSPACE_MUTATION",
+            "tracked workspace root is not anchored",
+        ) from exc
+    finally:
+        if root_fd >= 0:
+            os.close(root_fd)
+    for control in plan.control_paths:
+        digest.update(
+            _canonical_bytes(
+                {
+                    "path": os.fspath(control),
+                    "state": _stable_workspace_path_state(control),
+                }
+            )
+        )
+    return digest.hexdigest()
+
+
+def _validate_workspace_stat_identity(
+    workspace: Path, identity: WorkspaceIdentity
+) -> Path:
+    """Revalidate workspace naming and inode identity without spawning a process."""
+
     try:
         root = Path(workspace).resolve(strict=True)
         expected = Path(identity.workspace_path).resolve(strict=True)
@@ -4879,6 +6840,11 @@ def _validate_workspace_identity(workspace: Path, identity: WorkspaceIdentity) -
         raise BrowserReviewError(
             "BROWSER_WORKSPACE_MUTATION", "workspace identity differs from the Attempt"
         )
+    return root
+
+
+def _validate_workspace_identity(workspace: Path, identity: WorkspaceIdentity) -> Path:
+    root = _validate_workspace_stat_identity(workspace, identity)
     snapshot = _tracked_workspace_snapshot(root)
     if snapshot["head"] != identity.base_sha:
         raise BrowserReviewError(
@@ -4969,6 +6935,9 @@ class BrowserGenerationResource:
         self._runtime_attestation: RuntimeInstallAttestation | None = None
         self._workspace_before: dict[str, str] | None = None
         self._workspace_after: dict[str, str] | None = None
+        self._workspace_integrity_plan: _TrackedWorkspaceIntegrityPlan | None = None
+        self._workspace_integrity_before: str | None = None
+        self._workspace_integrity_after: str | None = None
         self._stopped = False
 
     @property
@@ -4978,6 +6947,47 @@ class BrowserGenerationResource:
                 "BROWSER_MCP_START_FAILED", "browser resource is not ready"
             )
         return dict(self._environment)
+
+    def _mcp_refusal_identity(self) -> BrowserMcpRefusalIdentity:
+        worker_id = str(getattr(self.epoch, "worker_id", "") or "")
+        if worker_id != str(getattr(self.generation, "worker_id", "") or ""):
+            raise BrowserReviewError(
+                "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+                "browser MCP refusal diagnostic is unavailable",
+            )
+        return browser_mcp_refusal_identity(
+            {
+                "attempt_id": self.attempt_id,
+                "capability_manifest_sha256": _canonical_digest(
+                    asdict(self.requested.capabilities)
+                ),
+                "mcp_identity": self.mcp_grant.server_identity,
+                "mcp_version": self.mcp_grant.server_version,
+                "process_generation_id": self.process_generation_id,
+                "profile_id": self.profile.profile_id,
+                "profile_sha256": self.profile.profile_digest,
+                "requested_profile_sha256": _canonical_digest(
+                    _identity_json(
+                        self.requested
+                        if is_dataclass(self.requested)
+                        else {
+                            "capabilities": self.requested.capabilities,
+                            "workspace": self.requested.workspace,
+                        }
+                    )
+                ),
+                "runtime_manifest_sha256": (
+                    self.resource_grant.runtime_manifest_digest
+                ),
+                "session_epoch_id": self.session_epoch_id,
+                "tool_schema_sha256": self.mcp_grant.tool_schema_digest,
+                "worker_id": worker_id,
+                "worker_uid": os.geteuid(),
+                "workspace_identity_sha256": _canonical_digest(
+                    asdict(self.requested.workspace)
+                ),
+            }
+        )
 
     def _require_artifact_root_descriptor(self, descriptor: int) -> os.stat_result:
         try:
@@ -5017,6 +7027,90 @@ class BrowserGenerationResource:
             if descriptor >= 0:
                 os.close(descriptor)
             raise
+
+    def _stable_private_json_at(
+        self,
+        root_fd: int,
+        name: str,
+        *,
+        canonical_newline: bool | None,
+    ) -> tuple[bytes, Any] | None:
+        """Stable-read one direct, private child through the held generation root."""
+
+        descriptor = -1
+        try:
+            root_before = self._require_artifact_root_descriptor(root_fd)
+            try:
+                named_before = os.stat(
+                    name, dir_fd=root_fd, follow_symlinks=False
+                )
+            except FileNotFoundError:
+                root_after = self._require_artifact_root_descriptor(root_fd)
+                if BrowserMcpToolGuard._stat_fingerprint(
+                    root_before
+                ) != BrowserMcpToolGuard._stat_fingerprint(root_after):
+                    raise OSError("artifact root changed during absence check")
+                return None
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=root_fd,
+            )
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != os.geteuid()
+                or opened.st_nlink != 1
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or not 0 < opened.st_size <= MAX_TEXT_EVIDENCE_BYTES
+                or BrowserMcpToolGuard._stat_fingerprint(opened)
+                != BrowserMcpToolGuard._stat_fingerprint(named_before)
+            ):
+                raise OSError("unsafe private artifact")
+            chunks: list[bytes] = []
+            observed = 0
+            while True:
+                chunk = os.read(
+                    descriptor,
+                    min(65536, MAX_TEXT_EVIDENCE_BYTES + 1 - observed),
+                )
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                observed += len(chunk)
+                if observed > MAX_TEXT_EVIDENCE_BYTES:
+                    raise OSError("private artifact exceeds bound")
+            raw = b"".join(chunks)
+            opened_after = os.fstat(descriptor)
+            named_after = os.stat(
+                name, dir_fd=root_fd, follow_symlinks=False
+            )
+            root_after = os.fstat(root_fd)
+            self._require_artifact_root_descriptor(root_fd)
+            if (
+                len(raw) != opened.st_size
+                or BrowserMcpToolGuard._stat_fingerprint(opened)
+                != BrowserMcpToolGuard._stat_fingerprint(opened_after)
+                or BrowserMcpToolGuard._stat_fingerprint(opened)
+                != BrowserMcpToolGuard._stat_fingerprint(named_after)
+                or BrowserMcpToolGuard._stat_fingerprint(root_before)
+                != BrowserMcpToolGuard._stat_fingerprint(root_after)
+            ):
+                raise OSError("private artifact changed during read")
+            value = json.loads(
+                raw.decode("utf-8"),
+                object_pairs_hook=_reject_duplicate_json_object,
+            )
+            if canonical_newline is not None:
+                expected = _canonical_bytes(value) + (
+                    b"\n" if canonical_newline else b""
+                )
+                if raw != expected:
+                    raise ValueError("private artifact is not canonical")
+            return raw, value
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
 
     def _candidate_ports(self) -> tuple[int, ...]:
         span = 65535 - 49152 - 16
@@ -5189,6 +7283,12 @@ class BrowserGenerationResource:
         private_home = self._artifact_dir / "home"
         _secure_directory(private_home)
         self._workspace_before = _tracked_workspace_snapshot(root)
+        self._workspace_integrity_plan = _prepare_tracked_workspace_integrity(
+            root
+        )
+        self._workspace_integrity_before = _tracked_workspace_integrity_digest(
+            self._workspace_integrity_plan
+        )
         self._manifest = manifest
         self._browser_executable = executable
         self._browser_executable_digest = attestation.browser_executable_sha256
@@ -5243,7 +7343,18 @@ class BrowserGenerationResource:
             ):
                 self._process = process
                 self._process_group = pgid
-                fixture = _AttemptVisualFixture.create(origin)
+                refusal_identity = self._mcp_refusal_identity()
+                refusal_context = (
+                    _canonical_bytes(refusal_identity.to_wire()) + b"\n"
+                )
+                _write_private_bytes_once(
+                    self._artifact_dir / _MCP_REFUSAL_CONTEXT_FILE,
+                    refusal_context,
+                )
+                fixture = _AttemptVisualFixture.create(
+                    origin,
+                    binding_digest=hashlib.sha256(refusal_context).hexdigest(),
+                )
                 proxy = LoopbackEnforcingProxy(
                     origin, fixture_routes=fixture.routes
                 )
@@ -5300,6 +7411,12 @@ class BrowserGenerationResource:
         if self._workspace_before is not None:
             self._workspace_after = _tracked_workspace_snapshot(
                 Path(self.requested.workspace.workspace_path)
+            )
+        if self._workspace_integrity_plan is not None:
+            self._workspace_integrity_after = (
+                _tracked_workspace_integrity_digest(
+                    self._workspace_integrity_plan
+                )
             )
         self._stopped = not errors
         if errors:
@@ -5508,9 +7625,171 @@ class BrowserGenerationResource:
         }
         return value, summary
 
+    def _require_terminal_uid_sweep(
+        self, sweep: Any
+    ) -> BrowserMcpRefusalIdentity:
+        from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+
+        if (
+            not self._stopped
+            or self._workspace_before is None
+            or self._workspace_after != self._workspace_before
+            or self._workspace_integrity_plan is None
+            or self._workspace_integrity_before is None
+            or self._workspace_integrity_after
+            != self._workspace_integrity_before
+            or getattr(sweep, "reason", None) != "operator_terminal"
+            or getattr(sweep, "worker_uid", None) != os.geteuid()
+            or not callable(getattr(sweep, "to_dict", None))
+            or not uid_sweep_receipt_is_passing(sweep.to_dict())
+        ):
+            raise BrowserReviewError(
+                "BROWSER_ORPHAN_PROCESS_UNCERTAIN",
+                "post-generation cleanup is not exact",
+            )
+        try:
+            _validate_workspace_stat_identity(
+                self.workspace, self.requested.workspace
+            )
+            if (
+                _tracked_workspace_integrity_digest(
+                    self._workspace_integrity_plan
+                )
+                != self._workspace_integrity_before
+            ):
+                raise BrowserReviewError(
+                    "BROWSER_WORKSPACE_MUTATION",
+                    "tracked workspace bytes changed after resource stop",
+                )
+        except BrowserReviewError as exc:
+            raise BrowserReviewError(
+                "BROWSER_ORPHAN_PROCESS_UNCERTAIN",
+                "post-generation cleanup is not exact",
+            ) from exc
+        identity = self._mcp_refusal_identity()
+        if identity.worker_uid != getattr(sweep, "worker_uid", None):
+            raise BrowserReviewError(
+                "BROWSER_ORPHAN_PROCESS_UNCERTAIN",
+                "post-generation cleanup is not exact",
+            )
+        return identity
+
+    def seal_refusal_after_uid_sweep(
+        self, sweep: Any
+    ) -> BrowserMcpRefusalSeal | None:
+        """Trust a closed failure only after exact cleanup; never mint success."""
+
+        root_fd = self._open_artifact_root_descriptor()
+        try:
+            return self._seal_refusal_after_uid_sweep_bound(sweep, root_fd)
+        finally:
+            os.close(root_fd)
+
+    def _seal_refusal_after_uid_sweep_bound(
+        self, sweep: Any, root_fd: int
+    ) -> BrowserMcpRefusalSeal | None:
+        identity = self._require_terminal_uid_sweep(sweep)
+        try:
+            context = self._stable_private_json_at(
+                root_fd,
+                _MCP_REFUSAL_CONTEXT_FILE,
+                canonical_newline=True,
+            )
+            refusal = self._stable_private_json_at(
+                root_fd, _MCP_REFUSAL_FILE, canonical_newline=True
+            )
+            if context is not None or refusal is not None:
+                if self._runtime_attestation is None:
+                    raise ValueError("runtime attestation is absent")
+                seal_attestation = load_runtime_install_attestation(
+                    Path(self.resource_grant.runtime_root),
+                    manifest_path=Path(self.resource_grant.runtime_manifest_path),
+                    expected_manifest_digest=(
+                        self.resource_grant.runtime_manifest_digest
+                    ),
+                )
+                if seal_attestation != self._runtime_attestation:
+                    raise ValueError("runtime attestation changed")
+            if context is not None:
+                guard_evidence = self._stable_private_json_at(
+                    root_fd,
+                    _MCP_GUARD_EVIDENCE_FILE,
+                    canonical_newline=None,
+                )
+                if refusal is not None or guard_evidence is not None:
+                    raise ValueError("one-shot context survived launcher")
+                _raw_context, context_value = context
+                if browser_mcp_refusal_identity(context_value) != identity:
+                    raise ValueError("never-launched context identity drifted")
+                return None
+            if refusal is None:
+                guard_evidence = self._stable_private_json_at(
+                    root_fd,
+                    _MCP_GUARD_EVIDENCE_FILE,
+                    canonical_newline=None,
+                )
+                refusal_expected = (
+                    guard_evidence is not None
+                    and isinstance(guard_evidence[1], Mapping)
+                    and guard_evidence[1].get("diagnostic_refusal_expected")
+                    is True
+                )
+                if refusal_expected:
+                    raise ValueError("expected refusal artifact is absent")
+                return None
+            guard_evidence = self._stable_private_json_at(
+                root_fd,
+                _MCP_GUARD_EVIDENCE_FILE,
+                canonical_newline=False,
+            )
+            refusal_expected = (
+                guard_evidence is not None
+                and isinstance(guard_evidence[1], Mapping)
+                and guard_evidence[1].get("diagnostic_refusal_expected") is True
+            )
+            if not refusal_expected:
+                raise ValueError("refusal artifact lacks bridge taint")
+            raw, value = refusal
+            _closed_refusal_guard_evidence(
+                guard_evidence[1],
+                refusal_sha256=hashlib.sha256(raw).hexdigest(),
+            )
+            refusal_code = _closed_mcp_refusal_artifact(
+                value, expected_identity=identity
+            )
+            return browser_mcp_refusal_seal(
+                {
+                    "artifact_sha256": hashlib.sha256(raw).hexdigest(),
+                    "attempt_id": identity.attempt_id,
+                    "process_generation_id": identity.process_generation_id,
+                    "refusal_code": refusal_code,
+                    "session_epoch_id": identity.session_epoch_id,
+                }
+            )
+        except BrowserReviewError as exc:
+            if exc.state == "BROWSER_ORPHAN_PROCESS_UNCERTAIN":
+                raise
+            raise BrowserReviewError(
+                "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+                "browser MCP refusal diagnostic is unavailable",
+            ) from exc
+        except (OSError, RecursionError, TypeError, UnicodeError, ValueError) as exc:
+            raise BrowserReviewError(
+                "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+                "browser MCP refusal diagnostic is unavailable",
+            ) from exc
+
     def seal_after_uid_sweep(self, sweep: Any) -> BrowserReviewReceipt:
         root_fd = self._open_artifact_root_descriptor()
         try:
+            refusal = self._seal_refusal_after_uid_sweep_bound(sweep, root_fd)
+            if refusal is not None:
+                raise BrowserReviewError(
+                    "BROWSER_MCP_REFUSED",
+                    "browser MCP refusal artifact sealed",
+                    refusal_code=refusal.refusal_code,
+                    artifact_sha256=refusal.artifact_sha256,
+                )
             return self._seal_after_uid_sweep_bound(sweep, root_fd)
         finally:
             os.close(root_fd)
@@ -5518,16 +7797,9 @@ class BrowserGenerationResource:
     def _seal_after_uid_sweep_bound(
         self, sweep: Any, root_fd: int
     ) -> BrowserReviewReceipt:
-        from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
-
+        self._require_terminal_uid_sweep(sweep)
         if (
-            not self._stopped
-            or self._workspace_before is None
-            or self._workspace_after != self._workspace_before
-            or getattr(sweep, "reason", None) != "operator_terminal"
-            or getattr(sweep, "worker_uid", None) != os.geteuid()
-            or not uid_sweep_receipt_is_passing(sweep.to_dict())
-            or self._manifest is None
+            self._manifest is None
             or self._browser_executable is None
             or self._browser_executable_digest is None
             or self._runtime_attestation is None
@@ -5890,6 +8162,21 @@ def launch_mcp_from_attempt_env(
         manifest=anchored_manifest,
         runtime_root=runtime_root,
     )
+    refusal_identity = _consume_mcp_refusal_identity(
+        artifact,
+        fixture_a_url=values["MASTERMIND_BROWSER_FIXTURE_A_URL"],
+        fixture_b_url=values["MASTERMIND_BROWSER_FIXTURE_B_URL"],
+    )
+    if (
+        refusal_identity.worker_uid != os.geteuid()
+        or refusal_identity.runtime_manifest_sha256 != runtime_manifest_digest
+        or refusal_identity.mcp_identity != "playwright"
+        or refusal_identity.mcp_version != "1.63.0-alpha-2026-08-05"
+    ):
+        raise BrowserReviewError(
+            "BROWSER_DIAGNOSTIC_UNAVAILABLE",
+            "browser MCP refusal diagnostic is unavailable",
+        )
     private_home = artifact / "home"
     _secure_directory(private_home)
     config = BrowserRunConfig(
@@ -5939,6 +8226,7 @@ def launch_mcp_from_attempt_env(
             "A": values["MASTERMIND_BROWSER_FIXTURE_A_URL"],
             "B": values["MASTERMIND_BROWSER_FIXTURE_B_URL"],
         },
+        refusal_identity=refusal_identity,
     )
     return int(
         bridge_runner(

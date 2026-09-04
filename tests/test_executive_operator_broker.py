@@ -18,13 +18,17 @@ from control_plane.executive_orchestration_principal import (
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.executive_worker_broker import (
     BROKER_REQUEST_SCHEMA_VERSION,
+    BROKER_RESPONSE_SCHEMA_VERSION,
+    BrowserMcpRefusalBrokerError,
     BrokerPolicy,
     BrokerProtocolError,
     BrokerStateError,
     ExecutiveWorkerBroker,
     PeerCredentials,
+    RemoteBrokerError,
     UIDSweepReceipt,
     UID_SWEEP_SCHEMA_VERSION,
+    WorkerBrokerClient,
     WorkerBrokerError,
 )
 from control_plane.operator_harness_contract import (
@@ -53,7 +57,7 @@ from control_plane.operator_harness_contract import (
     compare_launch,
 )
 from control_plane.operator_harness_wire import to_wire
-from control_plane.worker_browser_b1 import BrowserReviewReceipt
+from control_plane.worker_browser_b1 import BrowserMcpRefusalSeal, BrowserReviewReceipt
 
 
 class _Sweeper:
@@ -261,6 +265,43 @@ def _request(operation: str, payload: dict, suffix: str) -> dict:
     }
 
 
+def _stub_client_error_transport(monkeypatch, error: dict) -> None:
+    async def open_unix_connection(_path, *, limit):
+        assert limit == 4 * 1024 * 1024
+        reader = asyncio.StreamReader()
+
+        class Writer:
+            def write(self, payload):
+                request = json.loads(payload)
+                response = {
+                    "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
+                    "request_id": request["request_id"],
+                    "operation": request["operation"],
+                    "ok": False,
+                    "error": dict(error),
+                }
+                reader.feed_data(
+                    (
+                        json.dumps(response, sort_keys=True, separators=(",", ":"))
+                        + "\n"
+                    ).encode("utf-8")
+                )
+                reader.feed_eof()
+
+            async def drain(self):
+                return None
+
+            def close(self):
+                return None
+
+            async def wait_closed(self):
+                return None
+
+        return reader, Writer()
+
+    monkeypatch.setattr(asyncio, "open_unix_connection", open_unix_connection)
+
+
 def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "job-1"
@@ -431,6 +472,11 @@ def test_browser_resource_is_generation_bound_and_sealed_only_after_uid_sweep(
         def stop(self) -> None:
             lifecycle.append("resource_stop")
 
+        def seal_refusal_after_uid_sweep(self, sweep):
+            assert sweep.passed is True
+            lifecycle.append("refusal_probe")
+            return None
+
         def seal_after_uid_sweep(self, sweep):
             assert sweep.passed is True
             lifecycle.append("receipt_seal")
@@ -538,11 +584,354 @@ def test_browser_resource_is_generation_bound_and_sealed_only_after_uid_sweep(
             "provider_stop",
             "resource_stop",
             "uid_sweep:operator_terminal",
+            "refusal_probe",
             "receipt_seal",
         ]
         assert sweeper.calls == ["operator_terminal"]
+        assert set(stopped["result"]) == {
+            "artifact_receipt",
+            "observation",
+            "uid_sweep",
+        }
         assert stopped["result"]["artifact_receipt"]["attempt_id"] == "ATT-BROWSER"
         assert "receipt_digest" not in stopped["result"]["artifact_receipt"]
+        success_receipt_bytes = json.dumps(
+            stopped["result"]["artifact_receipt"],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        assert len(success_receipt_bytes) == 2768
+        assert hashlib.sha256(success_receipt_bytes).hexdigest() == (
+            "3c1d505dd4a8df293493f7476fdf874cf1b52e8346ad7086f14f99dfc9389cd2"
+        )
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("terminal_operation", ["ohf-stop", "ohf-cancel"])
+def test_browser_refusal_is_propagated_only_after_cleanup_without_success_receipt(
+    tmp_path: Path,
+    terminal_operation: str,
+) -> None:
+    lifecycle: list[str] = []
+    refusal_sha256 = "9" * 64
+
+    class Resource:
+        def __init__(self, epoch, generation) -> None:
+            self.epoch = epoch
+            self.generation = generation
+
+        def start(self) -> None:
+            lifecycle.append("resource_start")
+
+        def stop(self) -> None:
+            lifecycle.append("resource_stop")
+
+        def seal_refusal_after_uid_sweep(self, sweep):
+            assert sweep.passed is True
+            lifecycle.append("refusal_seal")
+            return BrowserMcpRefusalSeal(
+                attempt_id=self.epoch.attempt_id,
+                session_epoch_id=self.epoch.session_epoch_id,
+                process_generation_id=self.generation.process_generation_id,
+                refusal_code="TOOL_CALL_PARAMS_SHAPE_MISMATCH",
+                artifact_sha256=refusal_sha256,
+            )
+
+        def seal_after_uid_sweep(self, _sweep):
+            lifecycle.append("success_receipt_seal")
+            raise AssertionError("a refusal must never mint a success receipt")
+
+    class Writer:
+        def __init__(self) -> None:
+            self.payload = bytearray()
+
+        def get_extra_info(self, name):
+            return object() if name == "socket" else None
+
+        def write(self, payload):
+            self.payload.extend(payload)
+
+        async def drain(self):
+            return None
+
+        def close(self):
+            return None
+
+        async def wait_closed(self):
+            return None
+
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+        sweeper.lifecycle = lifecycle
+
+        def resource_factory(_workspace, _requested, epoch, generation):
+            adapters[-1].lifecycle = lifecycle
+            return Resource(epoch, generation)
+
+        broker.operator_resource_factory = resource_factory
+        epoch = SessionEpochRef("epoch-refusal", "ATT-REFUSAL", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-refusal", "epoch-refusal", 1, "codex-01"
+        )
+        await broker.execute(
+            _request(
+                "ohf-start",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:start-refusal")),
+                    "requested": to_wire(profile),
+                    "epoch": to_wire(epoch),
+                    "generation": to_wire(generation),
+                },
+                "start-refusal",
+            ),
+            peer=peer,
+        )
+        broker.peer_resolver = lambda _socket: peer
+
+        async def framed(request: dict) -> dict:
+            reader = asyncio.StreamReader()
+            reader.feed_data(
+                (
+                    json.dumps(request, sort_keys=True, separators=(",", ":"))
+                    + "\n"
+                ).encode("utf-8")
+            )
+            reader.feed_eof()
+            writer = Writer()
+            await broker.handle_connection(reader, writer)  # type: ignore[arg-type]
+            return json.loads(writer.payload)
+
+        terminal_payload = {
+            "operation_id": to_wire(
+                OperationId(f"ohf-op:{terminal_operation}-refusal")
+            ),
+            "generation": to_wire(generation),
+        }
+        if terminal_operation == "ohf-cancel":
+            terminal_payload["reason"] = "closed MCP refusal"
+        response = await framed(
+            _request(
+                terminal_operation,
+                terminal_payload,
+                f"{terminal_operation}-refusal",
+            )
+        )
+
+        assert response["ok"] is False
+        assert response["error"] == {
+            "artifact_sha256": refusal_sha256,
+            "code": "BrowserMcpRefusalBrokerError",
+            "message": "browser MCP refusal artifact sealed",
+            "refusal_code": "TOOL_CALL_PARAMS_SHAPE_MISMATCH",
+        }
+        assert lifecycle == [
+            "resource_start",
+            "resource_bind",
+            "provider_start",
+            "provider_stop",
+            "resource_stop",
+            "uid_sweep:operator_terminal",
+            "refusal_seal",
+        ]
+        assert broker._operator_run is None
+        replay = await framed(
+            _request(
+                "ohf-reconcile",
+                {"generation": to_wire(generation)},
+                "reconcile-refusal",
+            )
+        )
+        assert replay["ok"] is True
+        assert set(replay["result"]) == {
+            "artifact_receipt",
+            "observation",
+            "refusal",
+            "terminal",
+        }
+        assert replay["result"]["terminal"] is True
+        assert replay["result"]["artifact_receipt"] is None
+        assert replay["result"]["refusal"] == {
+            "artifact_sha256": refusal_sha256,
+            "attempt_id": epoch.attempt_id,
+            "process_generation_id": generation.process_generation_id,
+            "refusal_code": "TOOL_CALL_PARAMS_SHAPE_MISMATCH",
+            "session_epoch_id": epoch.session_epoch_id,
+        }
+        assert replay["result"]["observation"]["process_liveness"] == "PROVEN_DEAD"
+        assert replay["result"]["observation"]["provider_writer_state"] == "RELEASED"
+        assert "result" not in response
+        assert "error" not in replay
+        assert "success_receipt_seal" not in lifecycle
+        assert sweeper.calls == ["operator_terminal"]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "drift_field",
+    ["attempt_id", "session_epoch_id", "process_generation_id"],
+)
+def test_browser_refusal_generation_drift_is_not_propagated_as_trusted(
+    tmp_path: Path,
+    drift_field: str,
+) -> None:
+    lifecycle: list[str] = []
+
+    class Resource:
+        def start(self) -> None:
+            lifecycle.append("resource_start")
+
+        def stop(self) -> None:
+            lifecycle.append("resource_stop")
+
+        def seal_refusal_after_uid_sweep(self, sweep):
+            assert sweep.passed is True
+            lifecycle.append("refusal_seal")
+            identity = {
+                "attempt_id": "ATT-REFUSAL",
+                "session_epoch_id": "epoch-refusal-drift",
+                "process_generation_id": "generation-refusal-drift",
+            }
+            identity[drift_field] = f"{drift_field}-different"
+            return BrowserMcpRefusalSeal(
+                attempt_id=identity["attempt_id"],
+                session_epoch_id=identity["session_epoch_id"],
+                process_generation_id=identity["process_generation_id"],
+                refusal_code="TOOL_CALL_PARAMS_SHAPE_MISMATCH",
+                artifact_sha256="9" * 64,
+            )
+
+        def seal_after_uid_sweep(self, _sweep):
+            lifecycle.append("success_receipt_seal")
+            raise AssertionError("an identity-drifted refusal must not mint a receipt")
+
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+        sweeper.lifecycle = lifecycle
+
+        def resource_factory(_workspace, _requested, _epoch, _generation):
+            adapters[-1].lifecycle = lifecycle
+            return Resource()
+
+        broker.operator_resource_factory = resource_factory
+        epoch = SessionEpochRef(
+            "epoch-refusal-drift", "ATT-REFUSAL", "codex-01", 1
+        )
+        generation = ProcessGenerationRef(
+            "generation-refusal-drift", "epoch-refusal-drift", 1, "codex-01"
+        )
+        await broker.execute(
+            _request(
+                "ohf-start",
+                {
+                    "operation_id": to_wire(
+                        OperationId("ohf-op:start-refusal-drift")
+                    ),
+                    "requested": to_wire(profile),
+                    "epoch": to_wire(epoch),
+                    "generation": to_wire(generation),
+                },
+                "start-refusal-drift",
+            ),
+            peer=peer,
+        )
+        with pytest.raises(BrokerStateError, match="generation identity drifted"):
+            await broker.execute(
+                _request(
+                    "ohf-stop",
+                    {
+                        "operation_id": to_wire(
+                            OperationId("ohf-op:stop-refusal-drift")
+                        ),
+                        "generation": to_wire(generation),
+                    },
+                    "stop-refusal-drift",
+                ),
+                peer=peer,
+            )
+        assert lifecycle == [
+            "resource_start",
+            "resource_bind",
+            "provider_start",
+            "provider_stop",
+            "resource_stop",
+            "uid_sweep:operator_terminal",
+            "refusal_seal",
+        ]
+        assert "success_receipt_seal" not in lifecycle
+
+    asyncio.run(scenario())
+
+
+def test_worker_broker_client_preserves_closed_browser_refusal_fields(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    refusal_sha256 = "9" * 64
+    _stub_client_error_transport(
+        monkeypatch,
+        {
+            "artifact_sha256": refusal_sha256,
+            "code": "BrowserMcpRefusalBrokerError",
+            "message": "browser MCP refusal artifact sealed",
+            "refusal_code": "TOOL_CALL_PARAMS_SHAPE_MISMATCH",
+        },
+    )
+
+    async def scenario() -> None:
+        client = WorkerBrokerClient(tmp_path / "worker.sock")
+        with pytest.raises(RemoteBrokerError) as raised:
+            await client.request("ohf-reconcile", {})
+        assert raised.value.code == "BrowserMcpRefusalBrokerError"
+        assert raised.value.refusal_code == "TOOL_CALL_PARAMS_SHAPE_MISMATCH"
+        assert raised.value.artifact_sha256 == refusal_sha256
+        assert str(raised.value) == "browser MCP refusal artifact sealed"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        {
+            "artifact_sha256": "not-a-sha256",
+            "code": "BrowserMcpRefusalBrokerError",
+            "message": "browser MCP refusal artifact sealed",
+            "refusal_code": "TOOL_CALL_PARAMS_SHAPE_MISMATCH",
+        },
+        {
+            "artifact_sha256": "9" * 64,
+            "code": "BrowserMcpRefusalBrokerError",
+            "message": "browser MCP refusal artifact sealed",
+            "refusal_code": "NOT_A_CLOSED_REFUSAL",
+        },
+        {
+            "artifact_sha256": "9" * 64,
+            "code": "BrowserMcpRefusalBrokerError",
+            "message": "private remote detail",
+            "refusal_code": "TOOL_CALL_PARAMS_SHAPE_MISMATCH",
+        },
+        {
+            "artifact_sha256": "9" * 64,
+            "code": "BrowserMcpRefusalBrokerError",
+            "extra": "not closed",
+            "message": "browser MCP refusal artifact sealed",
+            "refusal_code": "TOOL_CALL_PARAMS_SHAPE_MISMATCH",
+        },
+    ],
+)
+def test_worker_broker_client_rejects_malformed_browser_refusal_error(
+    tmp_path: Path,
+    monkeypatch,
+    error: dict,
+) -> None:
+    _stub_client_error_transport(monkeypatch, error)
+
+    async def scenario() -> None:
+        client = WorkerBrokerClient(tmp_path / "worker.sock")
+        with pytest.raises(BrokerProtocolError, match="typed error response"):
+            await client.request("ohf-reconcile", {})
 
     asyncio.run(scenario())
 
@@ -558,6 +947,10 @@ def test_browser_receipt_is_not_sealed_when_uid_sweep_is_not_passing(
 
         def stop(self) -> None:
             lifecycle.append("resource_stop")
+
+        def seal_refusal_after_uid_sweep(self, _sweep):
+            lifecycle.append("refusal_seal")
+            raise AssertionError("a nonpassing UID sweep must never seal refusal evidence")
 
         def seal_after_uid_sweep(self, _sweep):
             lifecycle.append("receipt_seal")

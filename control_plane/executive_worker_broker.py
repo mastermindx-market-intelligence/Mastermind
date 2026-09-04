@@ -104,8 +104,11 @@ from control_plane.operator_harness_wire import (
     turn_ref as wire_turn_ref,
 )
 from control_plane.worker_browser_b1 import (
+    _MCP_REFUSAL_CODES,
+    BrowserMcpRefusalSeal,
     BrowserReviewReceipt,
     BrowserReviewError,
+    browser_mcp_refusal_seal,
     browser_review_receipt,
 )
 
@@ -142,6 +145,7 @@ BROKER_UNAVAILABLE_ERROR_CODE = "BrokerUnavailableError"
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _OHF_OPERATIONS = frozenset(
     {
         "ohf-validate",
@@ -208,6 +212,22 @@ class BrokerEffectUnknownError(WorkerBrokerError):
 
 class DedicatedUIDError(WorkerBrokerError):
     """The dedicated-worker-UID cleanup invariant could not be proven."""
+
+
+class BrowserMcpRefusalBrokerError(WorkerBrokerError):
+    """One post-sweep, generation-bound browser MCP refusal was sealed."""
+
+    def __init__(self, refusal_code: str, artifact_sha256: str) -> None:
+        if (
+            not isinstance(refusal_code, str)
+            or refusal_code not in _MCP_REFUSAL_CODES
+            or not isinstance(artifact_sha256, str)
+            or _SHA256_RE.fullmatch(artifact_sha256) is None
+        ):
+            raise ValueError("browser MCP refusal fields are invalid")
+        self.refusal_code = refusal_code
+        self.artifact_sha256 = artifact_sha256
+        super().__init__("browser MCP refusal artifact sealed")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -426,6 +446,10 @@ class OperatorAttemptResource(Protocol):
     def start(self) -> None: ...
 
     def stop(self) -> None: ...
+
+    def seal_refusal_after_uid_sweep(
+        self, sweep: UIDSweepReceipt
+    ) -> BrowserMcpRefusalSeal | None: ...
 
     def seal_after_uid_sweep(self, sweep: UIDSweepReceipt) -> BrowserReviewReceipt: ...
 
@@ -901,6 +925,20 @@ class _BrokerOperatorRun:
     busy: bool = False
 
 
+@dataclasses.dataclass(frozen=True)
+class _BrokerOperatorTerminal:
+    """Terminal OHF state retained for same-broker response-loss recovery."""
+
+    generation: ProcessGenerationRef
+    observation: ReconcileObservation
+    artifact_receipt: BrowserReviewReceipt | None = None
+    refusal_seal: BrowserMcpRefusalSeal | None = None
+
+    def __post_init__(self) -> None:
+        if self.artifact_receipt is not None and self.refusal_seal is not None:
+            raise ValueError("terminal result cannot carry success and refusal artifacts")
+
+
 def _is_within(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
@@ -1300,11 +1338,7 @@ class ExecutiveWorkerBroker:
         self._operator_run: _BrokerOperatorRun | None = None
         self._operator_terminal: OrderedDict[
             str,
-            tuple[
-                ProcessGenerationRef,
-                ReconcileObservation,
-                BrowserReviewReceipt | None,
-            ],
+            _BrokerOperatorTerminal,
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
         self._state_lock = asyncio.Lock()
@@ -2060,13 +2094,19 @@ class ExecutiveWorkerBroker:
         state: _BrokerOperatorRun,
         observation: ReconcileObservation,
         artifact_receipt: BrowserReviewReceipt | None = None,
+        refusal_seal: BrowserMcpRefusalSeal | None = None,
     ) -> None:
-        async with self._state_lock:
-            self._operator_terminal[state.generation.process_generation_id] = (
-                state.generation,
-                observation,
-                artifact_receipt,
+        try:
+            terminal = _BrokerOperatorTerminal(
+                generation=state.generation,
+                observation=observation,
+                artifact_receipt=artifact_receipt,
+                refusal_seal=refusal_seal,
             )
+        except ValueError as exc:
+            raise BrokerStateError("operator terminal artifact state is invalid") from exc
+        async with self._state_lock:
+            self._operator_terminal[state.generation.process_generation_id] = terminal
             self._operator_terminal.move_to_end(
                 state.generation.process_generation_id
             )
@@ -2074,6 +2114,39 @@ class ExecutiveWorkerBroker:
                 self._operator_terminal.popitem(last=False)
             if self._operator_run is state:
                 self._operator_run = None
+
+    async def _seal_operator_refusal(
+        self,
+        state: _BrokerOperatorRun,
+        sweep: UIDSweepReceipt,
+    ) -> BrowserMcpRefusalSeal | None:
+        if state.resource is None:
+            return None
+        candidate = await self._operator_call(
+            "resource refusal seal",
+            state.resource.seal_refusal_after_uid_sweep,
+            sweep,
+        )
+        if candidate is None:
+            return None
+        if not isinstance(candidate, BrowserMcpRefusalSeal):
+            raise BrokerStateError(
+                "browser resource returned an untyped refusal seal"
+            )
+        try:
+            sealed = browser_mcp_refusal_seal(candidate.to_wire())
+        except BrowserReviewError as exc:
+            raise BrokerStateError(
+                "browser resource returned an invalid closed refusal seal"
+            ) from exc
+        if (
+            sealed.attempt_id != state.epoch.attempt_id
+            or sealed.session_epoch_id != state.epoch.session_epoch_id
+            or sealed.process_generation_id
+            != state.generation.process_generation_id
+        ):
+            raise BrokerStateError("browser refusal generation identity drifted")
+        return sealed
 
     async def _ohf_stop(self, payload: dict[str, Any]) -> dict[str, Any]:
         if set(payload) != {"operation_id", "generation"}:
@@ -2125,6 +2198,17 @@ class ExecutiveWorkerBroker:
                     )
                 raise BrokerStateError(
                     "operator graceful stop lacked exact dead/released evidence"
+                )
+            refusal_seal = await self._seal_operator_refusal(state, sweep)
+            if refusal_seal is not None:
+                await self._remember_operator_terminal(
+                    state,
+                    observation,
+                    refusal_seal=refusal_seal,
+                )
+                raise BrowserMcpRefusalBrokerError(
+                    refusal_seal.refusal_code,
+                    refusal_seal.artifact_sha256,
                 )
             artifact_receipt: BrowserReviewReceipt | None = None
             if state.resource is not None:
@@ -2225,6 +2309,17 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator cancellation lacked exact dead/released evidence"
                 )
+            refusal_seal = await self._seal_operator_refusal(state, sweep)
+            if refusal_seal is not None:
+                await self._remember_operator_terminal(
+                    state,
+                    observation,
+                    refusal_seal=refusal_seal,
+                )
+                raise BrowserMcpRefusalBrokerError(
+                    refusal_seal.refusal_code,
+                    refusal_seal.artifact_sha256,
+                )
             await self._remember_operator_terminal(state, observation)
             return {
                 "observation": operator_to_wire(observation),
@@ -2242,21 +2337,29 @@ class ExecutiveWorkerBroker:
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError(str(exc)) from exc
         async with self._state_lock:
-            terminal_receipt = self._operator_terminal.get(
+            terminal_state = self._operator_terminal.get(
                 generation.process_generation_id
             )
-        if terminal_receipt is not None:
-            terminal_generation, terminal, artifact_receipt = terminal_receipt
-            if terminal_generation != generation:
+        if terminal_state is not None:
+            if terminal_state.generation != generation:
                 raise BrokerProtocolError(
                     "operator terminal generation identity drifted"
                 )
+            if terminal_state.refusal_seal is not None:
+                return {
+                    "observation": operator_to_wire(
+                        terminal_state.observation
+                    ),
+                    "terminal": True,
+                    "artifact_receipt": None,
+                    "refusal": terminal_state.refusal_seal.to_wire(),
+                }
             return {
-                "observation": operator_to_wire(terminal),
+                "observation": operator_to_wire(terminal_state.observation),
                 "terminal": True,
                 "artifact_receipt": (
-                    artifact_receipt.to_wire()
-                    if artifact_receipt is not None
+                    terminal_state.artifact_receipt.to_wire()
+                    if terminal_state.artifact_receipt is not None
                     else None
                 ),
             }
@@ -2839,6 +2942,19 @@ class ExecutiveWorkerBroker:
                         "timeout_seconds": exc.timeout_seconds,
                     },
                 }
+            except BrowserMcpRefusalBrokerError as exc:
+                response = {
+                    "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
+                    "request_id": request_id,
+                    "operation": operation,
+                    "ok": False,
+                    "error": {
+                        "artifact_sha256": exc.artifact_sha256,
+                        "code": type(exc).__name__,
+                        "message": str(exc),
+                        "refusal_code": exc.refusal_code,
+                    },
+                }
             except WorkerBrokerError as exc:
                 response = {
                     "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
@@ -2901,12 +3017,16 @@ class RemoteBrokerError(WorkerBrokerError):
         operation: str | None = None,
         exit_code: int | None = None,
         timeout_seconds: float | None = None,
+        refusal_code: str | None = None,
+        artifact_sha256: str | None = None,
     ) -> None:
         self.code = str(code)
         self.stage = stage
         self.operation = operation
         self.exit_code = exit_code
         self.timeout_seconds = timeout_seconds
+        self.refusal_code = refusal_code
+        self.artifact_sha256 = artifact_sha256
         super().__init__(str(message))
 
 
@@ -3009,6 +3129,26 @@ class WorkerBrokerClient:
                 raise BrokerProtocolError("broker error response is malformed")
             code = str(error.get("code") or "RemoteBrokerError")
             try:
+                if code == BrowserMcpRefusalBrokerError.__name__:
+                    if set(error) != {
+                        "artifact_sha256",
+                        "code",
+                        "message",
+                        "refusal_code",
+                    }:
+                        raise ValueError("refusal error shape is not exact")
+                    classified = BrowserMcpRefusalBrokerError(
+                        error.get("refusal_code"),
+                        error.get("artifact_sha256"),
+                    )
+                    if error.get("message") != str(classified):
+                        raise ValueError("refusal error message is not fixed")
+                    raise RemoteBrokerError(
+                        code,
+                        str(classified),
+                        refusal_code=classified.refusal_code,
+                        artifact_sha256=classified.artifact_sha256,
+                    )
                 if code == LaunchValidationStageError.code:
                     stage = error.get("stage")
                     if not isinstance(stage, str):
@@ -3489,6 +3629,7 @@ __all__ = [
     "UID_SWEEP_SCHEMA_VERSION",
     "uid_sweep_receipt_is_passing",
     "BrokerPolicy",
+    "BrowserMcpRefusalBrokerError",
     "BrokerEffectUnknownError",
     "BrokerPreSubmitError",
     "BrokerProtocolError",
