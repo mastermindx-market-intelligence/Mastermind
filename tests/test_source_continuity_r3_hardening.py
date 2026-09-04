@@ -366,6 +366,7 @@ class CaptureRunner:
             ("symbolic-ref", "--short", "HEAD"): BRANCH + "\n",
             ("rev-parse", "HEAD^{commit}"): HEAD + "\n",
             ("rev-parse", "HEAD^{tree}"): TREE + "\n",
+            ("rev-parse", "--git-common-dir"): self.workspace + "/.git\n",
         }
         if tail in outputs:
             return SimpleNamespace(returncode=0, stdout=outputs[tail])
@@ -531,6 +532,144 @@ def repo_request(module: Any, repo: Path, head: str):
         owned_paths=("value.txt",),
         verified_at="2026-09-04T04:00:00Z",
     )
+
+
+def request_with_owned_paths(module: Any, repo: Path, head: str, *paths: str):
+    return module.SourceContinuityRequest(
+        receipt_kind=module.ReceiptKind.CHECKPOINT_VERIFIED,
+        operation_key="source-continuity-r3-local-path-hardening-20260904-sol-001",
+        repository=REPOSITORY,
+        pr_number=448,
+        branch=git(repo, "symbolic-ref", "--short", "HEAD"),
+        base_ref="master",
+        pinned_base_sha=head,
+        owned_paths=paths,
+        verified_at="2026-09-04T04:00:00Z",
+    )
+
+
+def git_common_dir(repo: Path) -> Path:
+    raw = Path(git(repo, "rev-parse", "--git-common-dir"))
+    return raw if raw.is_absolute() else repo / raw
+
+
+@pytest.mark.parametrize(
+    ("exclude_source", "owned", "expected_field"),
+    [
+        ("gitignore", True, "untracked_in_scope_count"),
+        ("common-info-exclude", False, "untracked_out_of_scope_count"),
+    ],
+)
+def test_real_probe_counts_ignored_untracked_paths(
+    tmp_path,
+    exclude_source: str,
+    owned: bool,
+    expected_field: str,
+) -> None:
+    repo = tmp_path / exclude_source
+    head = init_repo(repo, "base")
+    if exclude_source == "gitignore":
+        (repo / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+        git(repo, "add", ".gitignore")
+        git(repo, "commit", "-q", "-m", "ignore path")
+        head = git(repo, "rev-parse", "HEAD^{commit}")
+    else:
+        (git_common_dir(repo) / "info" / "exclude").write_text(
+            "ignored.txt\n", encoding="utf-8"
+        )
+    (repo / "ignored.txt").write_text("untracked", encoding="utf-8")
+    module = _module()
+    paths = ("ignored.txt",) if owned else ("value.txt",)
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        request_with_owned_paths(module, repo, head, *paths),
+        head,
+        head,
+        (),
+    )
+    assert not isinstance(result, module.SourceContinuityRefusal)
+    local_facts, _ = result
+    assert getattr(local_facts, expected_field) == 1
+
+
+def unrelated_commit(repo: Path, message: str) -> str:
+    tree = git(repo, "rev-parse", "HEAD^{tree}")
+    return git(repo, "commit-tree", tree, "-m", message)
+
+
+def test_real_probe_refuses_nonempty_graft_before_ancestry_is_trusted(tmp_path) -> None:
+    repo = tmp_path / "grafted-history"
+    local_head = init_repo(repo, "local")
+    remote_head = unrelated_commit(repo, "unrelated remote")
+    grafts = git_common_dir(repo) / "info" / "grafts"
+    grafts.write_text(f"{local_head} {remote_head}\n", encoding="ascii")
+    assert git(repo, "merge-base", "--is-ancestor", remote_head, local_head) == ""
+
+    module = _module()
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        repo_request(module, repo, remote_head),
+        remote_head,
+        remote_head,
+        (),
+    )
+    assert isinstance(result, module.SourceContinuityRefusal)
+    assert result.code.value == "LOCAL_PROBE_FAILED"
+
+
+@pytest.mark.parametrize("unsafe_kind", ["symlink", "directory"])
+def test_real_probe_refuses_special_grafts_path(tmp_path, unsafe_kind: str) -> None:
+    repo = tmp_path / f"grafts-{unsafe_kind}"
+    head = init_repo(repo, "base")
+    grafts = git_common_dir(repo) / "info" / "grafts"
+    if unsafe_kind == "symlink":
+        target = tmp_path / "empty-grafts-target"
+        target.write_text("", encoding="ascii")
+        grafts.symlink_to(target)
+    else:
+        grafts.mkdir()
+
+    module = _module()
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        repo_request(module, repo, head),
+        head,
+        head,
+        (),
+    )
+    assert isinstance(result, module.SourceContinuityRefusal)
+    assert result.code.value == "LOCAL_PROBE_FAILED"
+
+
+class GraftAfterTreeRunner:
+    def __init__(self, grafts: Path) -> None:
+        self.grafts = grafts
+
+    def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        completed = subprocess.run(command, **kwargs)
+        if git_tail(tuple(command))[0] == "ls-tree":
+            self.grafts.write_text("f" * 40 + " " + "e" * 40 + "\n", encoding="ascii")
+        return completed
+
+
+def test_real_probe_rechecks_graft_state_at_final_local_fence(tmp_path) -> None:
+    repo = tmp_path / "graft-toctou"
+    head = init_repo(repo, "base")
+    grafts = git_common_dir(repo) / "info" / "grafts"
+    module = _module()
+    result = module._probe_local_and_entries(
+        GraftAfterTreeRunner(grafts),
+        str(repo),
+        repo_request(module, repo, head),
+        head,
+        head,
+        (),
+    )
+    assert isinstance(result, module.SourceContinuityRefusal)
+    assert result.code.value == "LOCAL_PROBE_FAILED"
 
 
 def test_real_probe_observes_mode_change_despite_local_core_filemode_false(tmp_path) -> None:

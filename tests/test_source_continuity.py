@@ -937,6 +937,8 @@ class _ProbeRunner:
             return self._done(stdout=f"{HEAD_SHA}\n")
         if call == ("rev-parse", "HEAD^{tree}"):
             return self._done(stdout=f"{TREE_SHA}\n")
+        if call == ("rev-parse", "--git-common-dir"):
+            return self._done(stdout=f"{WORKSPACE}/.git\n")
         if call in {
             ("cat-file", "-e", f"{HEAD_SHA}^{{commit}}"),
             ("cat-file", "-e", f"{BASE_SHA}^{{commit}}"),
@@ -965,7 +967,7 @@ class _ProbeRunner:
             return self._done(
                 stdout="".join(f"H {path}\0" for path in FINAL_OWNED_PATHS)
             )
-        if call == ("ls-files", "--others", "--exclude-standard", "-z"):
+        if call == ("ls-files", "--others", "-z", "--"):
             return self._done()
         if call == (
             "diff",
