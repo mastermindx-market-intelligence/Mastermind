@@ -267,6 +267,18 @@ def test_command_identity_forces_competing_decisions_to_collide() -> None:
     assert "must collide in one command domain" in identity["reason"]
 
 
+def test_replay_is_readback_first_and_survives_target_rotation() -> None:
+    replay = _contract(DESIGN)["acf1_semantic_directive_convergence"]["replay_semantics"]
+    assert replay == {
+        "lookup_by_command_id_precedes_actor_revalidation": True,
+        "exact_existing_event_returns_without_new_actor_authority": True,
+        "existing_event_bytes_and_recorded_authority_receipt_are_revalidated": True,
+        "changed_command_payload_conflicts": True,
+        "current_target_revalidation_required_only_for_new_append_or_superseding_revision": True,
+        "target_rotation_after_commit_does_not_block_no_effect_readback": True,
+    }
+
+
 def test_commit_supersession_consumer_and_results_are_closed() -> None:
     acf1 = _contract(DESIGN)["acf1_semantic_directive_convergence"]
     assert acf1["commit_semantics"] == {
@@ -297,6 +309,11 @@ def test_commit_supersession_consumer_and_results_are_closed() -> None:
     ] is True
     assert consumer["downstream_event_is_consumption_receipt"] is True
     assert consumer["separate_consumption_table_created"] is False
+    assert consumer["root_terminalization_owner"] == "existing COO cycle / Executive Runtime"
+    assert consumer["fixed_meanings"]["STOP"] == (
+        "close only the returned source-child boundary identified by source_job_id; "
+        "root terminalization remains existing COO/Runtime law"
+    )
     assert set(acf1["closed_results"]) == {
         "COMMITTED",
         "IDEMPOTENT_REPLAY",
