@@ -6,14 +6,9 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DESIGN = (
-    ROOT
-    / "docs/superpowers/specs/2026-09-03-autonomy-closure-spine-v1-design.md"
-)
+DESIGN = ROOT / "docs/superpowers/specs/2026-09-03-autonomy-closure-spine-v1-design.md"
 PLAN = ROOT / "docs/superpowers/plans/2026-09-03-autonomy-closure-spine-v1.md"
-COMPLETION_MODE = (
-    ROOT / "docs/superpowers/plans/2026-09-02-autonomy-completion-mode.md"
-)
+COMPLETION_MODE = ROOT / "docs/superpowers/plans/2026-09-02-autonomy-completion-mode.md"
 
 BEGIN = "<!-- AUTONOMY_CLOSURE_SPINE_V1_CONTRACT_BEGIN -->"
 END = "<!-- AUTONOMY_CLOSURE_SPINE_V1_CONTRACT_END -->"
@@ -62,22 +57,17 @@ def test_design_and_plan_publish_one_identical_closed_contract() -> None:
     }
 
 
-def test_architecture_exception_is_one_concrete_golden_path_blocker() -> None:
+def test_architecture_exception_is_one_observed_golden_path_blocker() -> None:
     completion = _read(COMPLETION_MODE)
     assert "NO_NEW_AUTONOMY_ARCHITECTURE" in completion
-    assert (
-        "A new architecture/source-law wave may start only when it closes a concrete "
-        "blocker" in completion
-    )
-
-    contract = _contract(DESIGN)
-    exception = contract["architecture_exception"]
+    assert "closes a concrete blocker" in completion
+    exception = _contract(DESIGN)["architecture_exception"]
     assert exception == {
         "default_preserved": "NO_NEW_AUTONOMY_ARCHITECTURE",
         "concrete_blocker": (
             "the exact action-authoritative Sol target exists, but no Runtime-owned "
-            "compare-and-swap semantic directive binds one exact return to one "
-            "effective CONTINUE, REPAIR, STOP, or ESCALATE decision"
+            "compare-and-swap semantic directive binds one exact return to one effective "
+            "CONTINUE, REPAIR, STOP, or ESCALATE decision"
         ),
         "golden_path_edge_unlocked": (
             "terminal return -> exact Sol attention -> one effective Sol decision -> "
@@ -88,10 +78,10 @@ def test_architecture_exception_is_one_concrete_golden_path_blocker() -> None:
             "stale C2 retreat after START_RESUMED",
         ],
     }
-    assert contract["authorized_pre_fleet_layers"] == ["ACF-1"]
+    assert _contract(DESIGN)["authorized_pre_fleet_layers"] == ["ACF-1"]
 
 
-def test_existing_owner_map_and_no_rebuild_boundary_are_closed() -> None:
+def test_existing_owners_and_no_rebuild_boundary_are_closed() -> None:
     contract = _contract(DESIGN)
     assert contract["owners"] == {
         "lifecycle_and_atomic_commit": "Executive Runtime",
@@ -119,16 +109,14 @@ def test_existing_owner_map_and_no_rebuild_boundary_are_closed() -> None:
     }
 
 
-def test_acf1_directive_contract_binds_return_target_actor_and_revision() -> None:
-    contract = _contract(DESIGN)
-    acf1 = contract["acf1_semantic_directive_convergence"]
-    assert acf1["command_schema"] == (
-        "mastermind.executive_semantic_directive_command/v1"
-    )
+def test_directive_wire_binds_return_target_actor_revision_and_closed_body() -> None:
+    acf1 = _contract(DESIGN)["acf1_semantic_directive_convergence"]
+    assert acf1["command_schema"] == "mastermind.executive_semantic_directive_command/v1"
     assert acf1["event_schema"] == "mastermind.executive_semantic_directive/v1"
     assert acf1["event_type"] == "EXECUTIVE_SEMANTIC_DIRECTIVE_COMMITTED"
     assert acf1["decisions"] == ["CONTINUE", "REPAIR", "STOP", "ESCALATE"]
     assert acf1["actor_classes"] == ["ACTION_TARGET", "CHAIRMAN"]
+    assert acf1["runtime_generated_fields"] == ["directive_id", "created_at"]
     assert acf1["required_fields"] == [
         "directive_id",
         "root_job_id",
@@ -147,6 +135,7 @@ def test_acf1_directive_contract_binds_return_target_actor_and_revision() -> Non
         "predecessor_directive_id",
         "revision",
         "decision",
+        "decision_body",
         "decision_payload_digest",
         "supersedes_directive_id",
         "created_at",
@@ -165,34 +154,69 @@ def test_acf1_directive_contract_binds_return_target_actor_and_revision() -> Non
     ]
 
 
-def test_acf1_convergence_and_consumer_semantics_fail_closed() -> None:
+def test_command_identity_forces_competing_decisions_into_one_conflict_domain() -> None:
+    identity = _contract(DESIGN)["acf1_semantic_directive_convergence"]["command_identity"]
+    assert identity["scope"] == "one terminal-return revision"
+    assert identity["fields"] == [
+        "root_job_id",
+        "consumed_terminal_event_id",
+        "consumed_terminal_event_digest",
+        "predecessor_directive_id",
+        "revision",
+    ]
+    assert identity["excludes"] == [
+        "decision",
+        "decision_body",
+        "decision_payload_digest",
+        "actor_class",
+        "actor_identity_receipt_digest",
+        "current_target_binding_id",
+        "current_target_binding_generation",
+        "created_at",
+    ]
+    assert "CONTINUE and STOP" in identity["reason"]
+    assert "parallel directives" in identity["reason"]
+
+
+def test_authority_commit_supersession_and_consumption_fail_closed() -> None:
     acf1 = _contract(DESIGN)["acf1_semantic_directive_convergence"]
+    assert acf1["authority_semantics"] == {
+        "carrier_reference_is_provenance_only": True,
+        "runtime_reresolves_current_target_and_actor": True,
+        "model_slack_browser_and_provider_labels_grant_no_authority": True,
+    }
     assert acf1["commit_semantics"] == {
-        "runtime_reresolves_current_target": True,
-        "compare_root_return_target_generation_and_predecessor_revision": True,
+        "compare_root_return_and_predecessor_revision": True,
         "one_effective_directive_per_return_revision": True,
         "exact_replay_is_idempotent_after_current_revalidation": True,
         "changed_payload_is_command_replay_conflict": True,
         "observer_sol_is_zero_effect_refusal": True,
         "stale_target_generation_is_zero_effect_refusal": True,
         "late_superseded_attempt_is_zero_effect_refusal": True,
-        "chairman_supersession_is_explicit_and_history_preserving": True,
         "transport_loss_after_commit_uses_event_readback": True,
         "transport_success_without_runtime_commit_is_not_effective": True,
         "continue_and_stop_cannot_both_be_effective": True,
+    }
+    assert acf1["supersession_semantics"] == {
+        "history_is_immutable": True,
+        "chairman_may_supersede_only_before_consumption_with_downstream_effect_none": True,
+        "consumed_applied_or_effect_unknown_requires_reconciliation": True,
+        "normal_target_rotation_never_supersedes": True,
+        "new_revision_binds_predecessor_and_supersedes_ids": True,
     }
     assert acf1["consumer"] == {
         "owner": "existing COO cycle",
         "reads_slack_prose": False,
         "consumes_effective_event_once": True,
-        "downstream_mutation_is_bound_to_directive_event": True,
+        "downstream_command_binds_directive_event_id_digest_and_revision": True,
+        "downstream_event_is_consumption_receipt": True,
+        "separate_consumption_table_created": False,
         "directive_is_not_provider_start_retry_merge_or_deploy": True,
     }
 
 
 def test_only_acf1_is_pre_fleet_and_later_layers_are_evidence_gated() -> None:
-    contract = _contract(DESIGN)
-    layers = contract["conditional_follow_on_layers"]
+    layers = _contract(DESIGN)["conditional_follow_on_layers"]
     assert list(layers) == ["ACF-2", "ACF-3", "ACF-4", "ACF-5", "ACF-6"]
     assert layers == {
         "ACF-2": {
@@ -223,12 +247,9 @@ def test_only_acf1_is_pre_fleet_and_later_layers_are_evidence_gated() -> None:
     }
 
 
-def test_acf1_routing_is_waiting_not_a_false_worker_assignment() -> None:
-    routing = _contract(DESIGN)["acf1_routing"]
-    assert routing == {
-        "future_operation_key": (
-            "autonomy-semantic-directive-convergence-acf1-20260903-sol-001"
-        ),
+def test_acf1_routing_is_waiting_not_a_false_assignment() -> None:
+    assert _contract(DESIGN)["acf1_routing"] == {
+        "future_operation_key": "autonomy-semantic-directive-convergence-acf1-20260903-sol-001",
         "preferred_avenue": "CTO Sol",
         "why_not_fable": (
             "the Chairman outcome, owner map, event semantics, failure matrix, "
@@ -236,8 +257,7 @@ def test_acf1_routing_is_waiting_not_a_false_worker_assignment() -> None:
         ),
         "receiver_binding_mode": "CAPACITY_SELECTABLE",
         "placement_state": (
-            "WAITING_ARCHITECTURE_PROTECTION / WAITING_RUNTIME_PATH_RELEASE / "
-            "needs_placement"
+            "WAITING_ARCHITECTURE_PROTECTION / WAITING_RUNTIME_PATH_RELEASE / needs_placement"
         ),
         "cognition_route": "CHAT_INCLUDED_DEFAULT",
         "chat_reasoning_mode": "NON_PRO_DEFAULT",
@@ -247,7 +267,7 @@ def test_acf1_routing_is_waiting_not_a_false_worker_assignment() -> None:
     }
 
 
-def test_architecture_records_do_not_claim_runtime_or_production_completion() -> None:
+def test_records_remain_honest_about_source_and_production_state() -> None:
     for path in (DESIGN, PLAN):
         text = _read(path)
         for phrase in (
@@ -256,11 +276,10 @@ def test_architecture_records_do_not_claim_runtime_or_production_completion() ->
             "zero Chairman message shuttle",
             "one independently useful vertical",
             "no implementation START",
+            "post-consumption reversal",
         ):
             assert phrase in text, f"{path} must preserve {phrase!r}"
-
-    contract = _contract(DESIGN)
-    assert contract["f0_stop_condition"] == (
+    assert _contract(DESIGN)["f0_stop_condition"] == (
         "one current-base three-path Draft/HOLD PR with source-law proof, terminal "
         "hosted repository/security checks, and one independent exact-head review; "
         "no Runtime Event, worker, provider call, deployment, canary, or fleet promotion"
