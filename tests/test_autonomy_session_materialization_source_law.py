@@ -371,8 +371,15 @@ def test_existing_provider_chain_records_uncertainty_and_remains_single_owner() 
     resume = definition(ORCHESTRATOR, "OperatorHarnessOrchestrator.resume")
     marker = definition(ORCHESTRATOR, "OperatorHarnessOrchestrator._mark_effect_unknown")
     port = text(PORT)
-    broker = text(BROKER)
+    broker_dispatch = definition(BROKER, "ExecutiveWorkerBroker._dispatch")
+    broker_start = definition(BROKER, "ExecutiveWorkerBroker._ohf_start")
+    broker_status = definition(
+        BROKER, "ExecutiveWorkerBroker._ohf_materialization_status"
+    )
     remote = definition(REMOTE, "RemoteCodexOperatorAdapter.describe_capabilities")
+    remote_status = definition(
+        REMOTE, "RemoteCodexOperatorAdapter.materialization_status"
+    )
     restart = definition(SUPERVISOR, "ExecutiveOperatorSupervisor.reconcile_restart")
     binding_facts = definition(BINDING, "active_operator_binding_facts")
     projection = definition(BINDING, "project_runtime_binding")
@@ -386,7 +393,28 @@ def test_existing_provider_chain_records_uncertainty_and_remains_single_owner() 
     assert "record_operator_effect_unknown" in marker
     assert "def reconcile_operator_start_result" not in port
     assert "def reconcile_operator_resume_result" not in port
-    assert "ohf-materialization-status" not in broker
+    assert 'operation == "ohf-materialization-status"' in broker_dispatch
+    assert "return await self._ohf_materialization_status(payload)" in broker_dispatch
+    assert "read_operator_materialization_receipt" in broker_status
+    assert "self._receipt_matches_request" in broker_status
+    assert 'status = "RECEIPT_CURRENT_IN_LIVE_BROKER"' in broker_status
+    assert 'status = "RECEIPT_ONLY_AFTER_RESTART"' in broker_status
+    assert broker_status.count("read_operator_materialization_receipt") == 1
+    assert '"ohf-materialization-status", payload, timeout_seconds=30' in remote_status
+    assert "operator_materialization_status(result)" in remote_status
+    assert "receipt.operation_command_id == operation_id.command_id" in remote_status
+    assert remote_status.count("request_sync(") == 1
+    assert broker_start.count("adapter.start_session") == 1
+    assert broker_start.count("adapter.resume_session") == 1
+    assert broker_start.index("if existing is not None:") < broker_start.index(
+        "provider_dispatch_committed = True"
+    )
+    assert broker_start.index("provider_dispatch_committed = True") < broker_start.index(
+        "adapter.start_session"
+    )
+    assert "if provider_dispatch_committed and state is None:" in broker_start
+    assert broker_start.count('"operator materialization effect unknown"') == 2
+    assert "provider dispatch has no durable" in broker_start
     assert "supports_provider_native_idempotency=False" in remote
     assert "Generic automatic requeue is intentionally not" in restart
     assert "runtime.current_harness_binding_source" in binding_facts
