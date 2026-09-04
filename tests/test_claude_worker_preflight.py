@@ -86,10 +86,16 @@ def test_command_builder_allows_only_provider_work_free_observations(tmp_path: P
     with module._retain_binary(binary) as retained:
         assert module.build_allowed_argv(retained, "version") == (
             retained.execution_path,
+            "--safe-mode",
+            "--setting-sources",
+            "",
             "--version",
         )
         assert module.build_allowed_argv(retained, "auth_status") == (
             retained.execution_path,
+            "--safe-mode",
+            "--setting-sources",
+            "",
             "auth",
             "status",
         )
@@ -629,6 +635,168 @@ def test_f1_secret_shaped_allowed_path_value_is_not_forwarded():
         module._closed_child_environment({"HOME": secret})
 
     assert secret not in str(exc.value)
+
+
+def test_f1_settings_and_customizations_are_fenced_in_one_private_empty_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    user_home = tmp_path / "user-home"
+    project = tmp_path / "ambient-project"
+    capture = tmp_path / "fake-cli-observations.jsonl"
+    user_claude = user_home / ".claude"
+    project_claude = project / ".claude"
+
+    for claude_dir, provider_value in (
+        (user_claude, "https://user-settings.invalid"),
+        (project_claude, "https://project-settings.invalid"),
+    ):
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "settings.json").write_text(
+            json.dumps(
+                {
+                    "env": {"ANTHROPIC_BASE_URL": provider_value},
+                    "apiKeyHelper": "/bin/false",
+                    "hooks": {"SessionStart": [{"hooks": []}]},
+                }
+            )
+        )
+        (claude_dir / "CLAUDE.md").write_text("ambient instructions")
+        (claude_dir / "skills").mkdir()
+        (claude_dir / "skills" / "ambient.md").write_text("ambient skill")
+        (claude_dir / "plugins").mkdir()
+        (claude_dir / "plugins" / "ambient.json").write_text("{}")
+
+    (project_claude / "settings.local.json").write_text(
+        json.dumps({"env": {"CLAUDE_CODE_API_KEY_HELPER": "/bin/false"}})
+    )
+    (project / "CLAUDE.md").write_text("ambient project instructions")
+    (project / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "ambient": {"command": "/bin/false", "args": []}
+                }
+            }
+        )
+    )
+
+    binary_dir = tmp_path / "bin"
+    binary_dir.mkdir()
+    fake_cli = _executable(
+        binary_dir,
+        (
+            f"#!{sys.executable}\n"
+            "import json\n"
+            "import os\n"
+            "import sys\n"
+            "from pathlib import Path\n"
+            f"project = Path({str(project)!r})\n"
+            f"capture = Path({str(capture)!r})\n"
+            "args = sys.argv[1:]\n"
+            "sources = {'user', 'project', 'local'}\n"
+            "if '--setting-sources' in args:\n"
+            "    index = args.index('--setting-sources')\n"
+            "    raw_sources = args[index + 1]\n"
+            "    sources = {item for item in raw_sources.split(',') if item}\n"
+            "settings_paths = []\n"
+            "if 'user' in sources:\n"
+            "    settings_paths.append(Path(os.environ['HOME']) / '.claude' / 'settings.json')\n"
+            "if 'project' in sources:\n"
+            "    settings_paths.append(project / '.claude' / 'settings.json')\n"
+            "if 'local' in sources:\n"
+            "    settings_paths.append(project / '.claude' / 'settings.local.json')\n"
+            "effective_env = {}\n"
+            "helper = None\n"
+            "consulted = []\n"
+            "for settings_path in settings_paths:\n"
+            "    if settings_path.exists():\n"
+            "        consulted.append(str(settings_path))\n"
+            "        settings = json.loads(settings_path.read_text())\n"
+            "        effective_env.update(settings.get('env', {}))\n"
+            "        helper = settings.get('apiKeyHelper', helper)\n"
+            "if '--safe-mode' not in args:\n"
+            "    customization_paths = [\n"
+            "        Path(os.environ['HOME']) / '.claude' / 'CLAUDE.md',\n"
+            "        Path(os.environ['HOME']) / '.claude' / 'skills',\n"
+            "        Path(os.environ['HOME']) / '.claude' / 'plugins',\n"
+            "        project / 'CLAUDE.md',\n"
+            "        project / '.mcp.json',\n"
+            "    ]\n"
+            "    consulted.extend(str(path) for path in customization_paths if path.exists())\n"
+            "cwd = Path.cwd()\n"
+            "record = {\n"
+            "    'argv': args,\n"
+            "    'consulted': consulted,\n"
+            "    'cwd': str(cwd),\n"
+            "    'cwd_entries': sorted(path.name for path in cwd.iterdir()),\n"
+            "    'effective_env': effective_env,\n"
+            "    'helper': helper,\n"
+            "}\n"
+            "with capture.open('a') as stream:\n"
+            "    stream.write(json.dumps(record, sort_keys=True) + '\\n')\n"
+            "if '--version' in args:\n"
+            "    print('2.1.259')\n"
+            "elif args[-2:] == ['auth', 'status']:\n"
+            "    if effective_env or helper is not None:\n"
+            "        print(json.dumps({'loggedIn': True, 'authMethod': 'api_key', 'apiProvider': 'other'}))\n"
+            "    else:\n"
+            "        print(json.dumps({'loggedIn': True, 'authMethod': 'claude.ai', 'apiProvider': 'firstParty'}))\n"
+            "else:\n"
+            "    raise SystemExit(2)\n"
+        ).encode(),
+    )
+
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(user_claude))
+    monkeypatch.chdir(project)
+
+    with module._retain_binary(fake_cli) as retained:
+        _, version = module.observe_binary(retained)
+        auth = module.observe_auth(retained)
+
+    observations = [json.loads(line) for line in capture.read_text().splitlines()]
+    assert version == "2.1.259"
+    assert auth == module.AuthObservation(
+        auth_ready=True,
+        auth_method="claudeai",
+        api_provider="first_party",
+        reason_codes=(),
+    )
+    assert [item["argv"] for item in observations] == [
+        ["--safe-mode", "--setting-sources", "", "--version"],
+        ["--safe-mode", "--setting-sources", "", "auth", "status"],
+    ]
+    assert observations[0]["cwd"] == observations[1]["cwd"]
+    assert Path(observations[0]["cwd"]) != project
+    assert observations[0]["cwd_entries"] == observations[1]["cwd_entries"] == []
+    assert observations[0]["consulted"] == observations[1]["consulted"] == []
+    assert observations[0]["effective_env"] == observations[1]["effective_env"] == {}
+    assert observations[0]["helper"] is observations[1]["helper"] is None
+    assert not Path(observations[0]["cwd"]).exists()
+
+
+def test_f1_unavoidable_managed_policy_auth_selection_is_observed_and_refused(
+    tmp_path: Path,
+):
+    module = _load()
+    binary = _executable(
+        tmp_path,
+        (
+            "#!/bin/sh\n"
+            "printf '%s\\n' "
+            "'{\"loggedIn\":true,\"authMethod\":\"api_key\",\"apiProvider\":\"other\"}'\n"
+        ).encode(),
+    )
+
+    observed = module.observe_auth(binary)
+
+    assert observed == module.AuthObservation(
+        auth_ready=False,
+        auth_method="non_native",
+        api_provider="non_native",
+        reason_codes=("NATIVE_AUTH_NOT_SELECTED",),
+    )
 
 
 def test_f2_stdout_is_rejected_at_the_byte_ceiling(
