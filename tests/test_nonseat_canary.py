@@ -7219,6 +7219,23 @@ def test_realm1_strict_producer_refuses_malformed_process_envelopes_without_leak
     assert "secret" not in repr(exc_info.value)
 
 
+def test_realm1_strict_producer_refuses_process_envelope_dict_subclass(tmp_path):
+    class HostileEnvelope(dict):
+        pass
+
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    result = HostileEnvelope(_strict_ps())
+    with pytest.raises(RuntimeError) as exc_info:
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: result,
+        )
+    assert str(exc_info.value) == "strict local environment inventory unavailable"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
 def test_realm1_strict_producer_refuses_runner_exception_without_raw_context(tmp_path):
     mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
 
@@ -7272,6 +7289,114 @@ def test_realm1_strict_producer_refuses_ambiguous_filesystem_identities(tmp_path
             gologin_profiles_root=os.fspath(gologin_root),
             process_runner=lambda *_args, **_kwargs: _strict_ps(),
         )
+
+
+@pytest.mark.parametrize(
+    "unreadable_level", ("root", "workspace", "folder", "profile"),
+)
+def test_realm1_strict_producer_refuses_unreadable_nested_path_without_leakage(
+    tmp_path, monkeypatch, unreadable_level,
+):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    workspace = mlx_root / _REALM1_WORKSPACE
+    folder = workspace / "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    profile = folder / "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    profile.mkdir(parents=True)
+    target = {
+        "root": mlx_root,
+        "workspace": workspace,
+        "folder": folder,
+        "profile": folder,
+    }[unreadable_level]
+    target_identity = target.stat()
+    original_scandir = os.scandir
+    original_strict_entries = chatgpt._strict_entries  # noqa: SLF001
+
+    class _UnreadableProfileEntry:
+        name = profile.name
+
+        @staticmethod
+        def stat(*, follow_symlinks):
+            assert follow_symlinks is False
+            raise PermissionError("SECRET unreadable inventory path")
+
+    def _is_target_fd(fd):
+        try:
+            observed = os.fstat(fd)
+        except OSError:
+            return False
+        return (observed.st_dev, observed.st_ino) == (
+            target_identity.st_dev,
+            target_identity.st_ino,
+        )
+
+    def _scandir(fd):
+        if unreadable_level != "profile" and _is_target_fd(fd):
+            raise PermissionError("SECRET unreadable inventory path")
+        return original_scandir(fd)
+
+    def _strict_entries(fd):
+        if unreadable_level == "profile" and _is_target_fd(fd):
+            return [_UnreadableProfileEntry()]
+        return original_strict_entries(fd)
+
+    monkeypatch.setattr(chatgpt.os, "scandir", _scandir)
+    monkeypatch.setattr(chatgpt, "_strict_entries", _strict_entries)
+    with pytest.raises(RuntimeError) as exc_info:
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: _strict_ps(),
+        )
+    assert str(exc_info.value) == "strict local environment inventory unavailable"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert "SECRET" not in repr(exc_info.value)
+
+
+@pytest.mark.parametrize("disappearance_phase", ("before_open", "before_revalidation"))
+def test_realm1_strict_producer_refuses_nested_disappearance_race_without_leakage(
+    tmp_path, monkeypatch, disappearance_phase,
+):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    workspace = mlx_root / _REALM1_WORKSPACE
+    folder = workspace / "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    profile = folder / "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    profile.mkdir(parents=True)
+    tombstone = folder / "removed-profile"
+    original_open = os.open
+    original_stat = os.stat
+    profile_stats = 0
+
+    def _open(path, flags, *args, **kwargs):
+        if (
+            disappearance_phase == "before_open"
+            and path == profile.name
+            and kwargs.get("dir_fd") is not None
+            and profile.exists()
+        ):
+            profile.rename(tombstone)
+        return original_open(path, flags, *args, **kwargs)
+
+    def _stat(path, *args, **kwargs):
+        nonlocal profile_stats
+        if path == profile.name and kwargs.get("dir_fd") is not None:
+            profile_stats += 1
+            if disappearance_phase == "before_revalidation" and profile_stats == 2:
+                profile.rename(tombstone)
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(chatgpt.os, "open", _open)
+    monkeypatch.setattr(chatgpt.os, "stat", _stat)
+    with pytest.raises(RuntimeError) as exc_info:
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: _strict_ps(),
+        )
+    assert str(exc_info.value) == "strict local environment inventory unavailable"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 def test_realm1_strict_producer_refuses_cross_workspace_authority_duplicate(tmp_path):

@@ -396,7 +396,7 @@ def _strict_list_local_environments_impl(
         max_bytes=_PS_SNAPSHOT_MAX_BYTES + 4,
     )
     if (
-        not isinstance(result, dict)
+        type(result) is not dict
         or set(result) != {"code", "stdout", "stderr", "timed_out"}
         or type(result["code"]) is not int
         or result["code"] != 0
