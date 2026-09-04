@@ -9,7 +9,7 @@ import dataclasses
 import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Iterable
 
@@ -19,12 +19,17 @@ MAX_SCOPES = 128
 MAX_DEPENDENCIES = 64
 MAX_SOURCE_REFS = 32
 MAX_ISSUES = 64
+MAX_TIMESTAMP_LENGTH = 32
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _SCOPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/*-]{0,127}$")
 _SOURCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/@-]{0,255}$")
 _ISSUE = re.compile(r"^[A-Z0-9][A-Z0-9_.:-]{0,127}$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_RFC3339 = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+)
 _SECRET = tuple(
     re.compile(pattern, re.I)
     for pattern in (
@@ -118,26 +123,30 @@ def _digest_value(value: object, field: str) -> str:
 def _timestamp(value: object, field: str, *, optional: bool = False) -> str | None:
     if value is None and optional:
         return None
-    if not isinstance(value, str) or not value.strip():
-        raise CapabilityProjectionError(f"{field} must be an RFC3339 timestamp")
-    result = value.strip()
-    _secret(result, field)
+    error = CapabilityProjectionError(f"{field} must be an RFC3339 timestamp")
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > MAX_TIMESTAMP_LENGTH
+        or value != value.strip()
+        or _RFC3339.fullmatch(value) is None
+    ):
+        raise error
     try:
-        parsed = datetime.fromisoformat(result.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise CapabilityProjectionError(
-            f"{field} must be an RFC3339 timestamp"
-        ) from exc
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, OverflowError):
+        raise error from None
     if parsed.tzinfo is None:
-        raise CapabilityProjectionError(f"{field} must include a timezone")
-    return result
+        raise error
+    canonical = parsed.astimezone(timezone.utc)
+    timespec = "microseconds" if canonical.microsecond else "seconds"
+    return canonical.isoformat(timespec=timespec).replace("+00:00", "Z")
 
 
 def _instant(value: str, field: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        raise CapabilityProjectionError(f"{field} must include a timezone")
-    return parsed
+    canonical = _timestamp(value, field)
+    assert canonical is not None
+    return datetime.fromisoformat(canonical.replace("Z", "+00:00"))
 
 
 def _tuple_tokens(
@@ -510,6 +519,7 @@ def _project(fact: CapabilityFact, observed: datetime) -> CapabilityStatus:
     rejected = False
     broken = False
     disconnected = False
+    spec_only = False
     partial = False
     unknown = False
     for dependency in dependencies:
@@ -533,10 +543,12 @@ def _project(fact: CapabilityFact, observed: datetime) -> CapabilityStatus:
         ):
             disconnected = True
             issues.add(f"DEPENDENCY_{dependency.state.value}")
+        elif dependency.state is CapabilityState.SPEC_ONLY:
+            spec_only = True
+            issues.add("DEPENDENCY_SPEC_ONLY")
         elif dependency.state in (
             CapabilityState.PARTIAL,
             CapabilityState.BUILT_NOT_PROVEN,
-            CapabilityState.SPEC_ONLY,
         ):
             partial = True
             issues.add(f"DEPENDENCY_{dependency.state.value}")
@@ -567,12 +579,23 @@ def _project(fact: CapabilityFact, observed: datetime) -> CapabilityStatus:
         issues.add(f"CAPABILITY_{fact.source_state.value}")
     elif broken:
         proof = CapabilityState.BROKEN
+    elif spec_only:
+        proof = CapabilityState.SPEC_ONLY
+        issues.add("CAPABILITY_UNAVAILABLE")
+    elif (
+        disconnected
+        or fact.source_state is CapabilityState.DARK_OR_DISCONNECTED
+    ):
+        proof = CapabilityState.DARK_OR_DISCONNECTED
+        issues.add("CAPABILITY_UNAVAILABLE")
     elif fact.observed_available is None or unknown:
         availability = Availability.UNKNOWN
         issues.add("AVAILABILITY_UNKNOWN")
-        if proof is CapabilityState.PROVEN_LIVE:
+        if partial or fact.source_state is CapabilityState.PARTIAL:
+            proof = CapabilityState.PARTIAL
+        elif proof is CapabilityState.PROVEN_LIVE:
             proof = CapabilityState.BUILT_NOT_PROVEN
-    elif fact.observed_available is False or disconnected:
+    elif fact.observed_available is False:
         proof = CapabilityState.DARK_OR_DISCONNECTED
         issues.add("CAPABILITY_UNAVAILABLE")
     elif missing_reads:
@@ -741,6 +764,7 @@ __all__ = [
     "MAX_ISSUES",
     "MAX_SCOPES",
     "MAX_SOURCE_REFS",
+    "MAX_TIMESTAMP_LENGTH",
     "Availability",
     "CapabilityFact",
     "CapabilityProjectionError",
