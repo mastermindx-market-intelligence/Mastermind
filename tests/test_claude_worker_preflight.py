@@ -799,6 +799,47 @@ def test_f1_unavoidable_managed_policy_auth_selection_is_observed_and_refused(
     )
 
 
+def test_f1_private_cwd_artifact_is_refused_and_removed(tmp_path: Path):
+    module = _load()
+    capture = tmp_path / "observation-cwd.txt"
+    binary = _executable(
+        tmp_path,
+        (
+            f"#!{sys.executable}\n"
+            "from pathlib import Path\n"
+            f"capture = Path({str(capture)!r})\n"
+            "cwd = Path.cwd()\n"
+            "capture.write_text(str(cwd))\n"
+            "(cwd / 'unexpected-artifact').write_text('unexpected')\n"
+            "print('2.1.259')\n"
+        ).encode(),
+    )
+    observation_directory: Path | None = None
+
+    try:
+        with pytest.raises(
+            module.PreflightError, match="^BINARY_CHANGED_DURING_PREFLIGHT$"
+        ):
+            module.observe_binary(binary)
+        observation_directory = Path(capture.read_text())
+        assert not observation_directory.exists()
+        assert not observation_directory.parent.exists()
+    finally:
+        if observation_directory is None and capture.exists():
+            observation_directory = Path(capture.read_text())
+        if observation_directory is not None and observation_directory.parent.exists():
+            observation_directory.parent.chmod(0o700)
+            artifact = observation_directory / "unexpected-artifact"
+            if artifact.exists() or artifact.is_symlink():
+                artifact.unlink()
+            if observation_directory.exists():
+                observation_directory.rmdir()
+            copied_binary = observation_directory.parent / "claude"
+            if copied_binary.exists() or copied_binary.is_symlink():
+                copied_binary.unlink()
+            observation_directory.parent.rmdir()
+
+
 def test_f2_stdout_is_rejected_at_the_byte_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ):
