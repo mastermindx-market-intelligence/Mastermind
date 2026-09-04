@@ -238,17 +238,24 @@ class _RetainedExecutable:
     execution_fd: int
     execution_identity: _BinaryIdentity
     closed: bool = False
+    cleanup_failed: bool = False
 
     @property
     def execution_path(self) -> str:
         if self.closed or self.execution_fd < 0:
             _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        # Darwin has no public fexecve/execveat equivalent. This private-copy
+        # coordinate is therefore valid only inside the canonical OS-principal
+        # trust boundary enforced by F6; it is not a hostile-same-EUID sandbox.
         return str(self.execution_directory / self.execution_name)
 
     def close(self) -> None:
         if self.closed:
+            if self.cleanup_failed:
+                _raise("BINARY_CHANGED_DURING_PREFLIGHT")
             return
         self.closed = True
+        cleanup_ok = True
         cleanup_directory_fd = self.execution_directory_fd
         cleanup_execution_fd = self.execution_fd
         self.execution_directory_fd = -1
@@ -257,27 +264,27 @@ class _RetainedExecutable:
             try:
                 os.close(cleanup_execution_fd)
             except OSError:
-                pass
+                cleanup_ok = False
         if cleanup_directory_fd >= 0:
             try:
                 os.fchmod(cleanup_directory_fd, 0o700)
-                os.unlink(self.execution_name, dir_fd=cleanup_directory_fd)
             except OSError:
                 pass
+            cleanup_ok = (
+                _remove_execution_file(cleanup_directory_fd, self.execution_name)
+                and cleanup_ok
+            )
             try:
                 os.close(cleanup_directory_fd)
             except OSError:
-                pass
-        try:
-            directory = self.execution_directory.lstat()
-            if (
-                int(directory.st_dev) == self.execution_directory_identity.device
-                and int(directory.st_ino) == self.execution_directory_identity.inode
-                and stat.S_ISDIR(directory.st_mode)
-            ):
-                os.rmdir(self.execution_directory)
-        except OSError:
-            pass
+                cleanup_ok = False
+        cleanup_ok = (
+            _remove_execution_directory(
+                self.execution_directory,
+                self.execution_directory_identity,
+            )
+            and cleanup_ok
+        )
 
         descriptors = (self.fd, *reversed(self.directory_fds))
         self.fd = -1
@@ -287,7 +294,10 @@ class _RetainedExecutable:
             try:
                 os.close(descriptor)
             except OSError:
-                pass
+                cleanup_ok = False
+        self.cleanup_failed = not cleanup_ok
+        if self.cleanup_failed:
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
 
     def __enter__(self) -> _RetainedExecutable:
         return self
@@ -499,6 +509,46 @@ def _same_binary(info: os.stat_result, expected: _BinaryIdentity) -> bool:
     )
 
 
+def _remove_execution_file(directory_fd: int, execution_name: str) -> bool:
+    for _ in range(2):
+        try:
+            os.unlink(execution_name, dir_fd=directory_fd)
+        except FileNotFoundError:
+            return True
+        except OSError:
+            continue
+        return True
+    return False
+
+
+def _remove_execution_directory(
+    directory: Path,
+    expected: _DirectoryIdentity | None,
+) -> bool:
+    for _ in range(2):
+        try:
+            current = directory.lstat()
+        except FileNotFoundError:
+            return True
+        except OSError:
+            continue
+        if (
+            not stat.S_ISDIR(current.st_mode)
+            or (expected is not None and int(current.st_dev) != expected.device)
+            or (expected is not None and int(current.st_ino) != expected.inode)
+            or (expected is None and int(current.st_uid) != os.geteuid())
+        ):
+            return False
+        try:
+            os.rmdir(directory)
+        except FileNotFoundError:
+            return True
+        except OSError:
+            continue
+        return True
+    return False
+
+
 def _safe_scratch_root() -> Path:
     try:
         root = Path("/tmp").resolve(strict=True)
@@ -524,6 +574,7 @@ def _create_execution_copy(
     execution_fd = -1
     execution_name = "claude"
     complete = False
+    cleanup_directory_identity: _DirectoryIdentity | None = None
     try:
         directory_fd = os.open(
             directory,
@@ -536,6 +587,7 @@ def _create_execution_copy(
             or stat.S_IMODE(initial_directory.st_mode) != 0o700
         ):
             _raise("BINARY_INVALID")
+        cleanup_directory_identity = _directory_identity(initial_directory)
 
         writer_fd = os.open(
             execution_name,
@@ -608,31 +660,37 @@ def _create_execution_copy(
     except (OSError, ValueError, TypeError):
         _raise("BINARY_INVALID")
     finally:
+        cleanup_ok = True
         if writer_fd >= 0:
             try:
                 os.close(writer_fd)
             except OSError:
-                pass
+                cleanup_ok = False
         if not complete:
             if execution_fd >= 0:
                 try:
                     os.close(execution_fd)
                 except OSError:
-                    pass
+                    cleanup_ok = False
             if directory_fd >= 0:
                 try:
                     os.fchmod(directory_fd, 0o700)
-                    os.unlink(execution_name, dir_fd=directory_fd)
                 except OSError:
                     pass
+                cleanup_ok = (
+                    _remove_execution_file(directory_fd, execution_name)
+                    and cleanup_ok
+                )
                 try:
                     os.close(directory_fd)
                 except OSError:
-                    pass
-            try:
-                os.rmdir(directory)
-            except OSError:
-                pass
+                    cleanup_ok = False
+            cleanup_ok = (
+                _remove_execution_directory(directory, cleanup_directory_identity)
+                and cleanup_ok
+            )
+            if not cleanup_ok:
+                _raise("BINARY_CHANGED_DURING_PREFLIGHT")
 
 
 def _assert_retained_binary(
@@ -700,6 +758,15 @@ def _assert_retained_binary(
         ) or not _same_binary(
             named_execution, retained.execution_identity
         ) or not _same_binary(opened_execution, retained.execution_identity):
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        execution_digest = _sha256_descriptor(
+            retained.execution_fd,
+            expected_size=retained.execution_identity.size,
+            error_code="BINARY_CHANGED_DURING_PREFLIGHT",
+        )
+        if execution_digest != retained.sha256 or not _same_binary(
+            os.fstat(retained.execution_fd), retained.execution_identity
+        ):
             _raise("BINARY_CHANGED_DURING_PREFLIGHT")
     except PreflightError:
         raise
@@ -1031,7 +1098,8 @@ def _cleanup_owned_process(proc: subprocess.Popen[bytes], group_id: int) -> bool
     try:
         proc.wait(timeout=_PROCESS_TERMINATE_GRACE_SECONDS)
     except subprocess.TimeoutExpired:
-        cleanup_ok = False
+        # An owned child may ignore TERM; reaching the KILL phase is expected.
+        pass
     except OSError:
         cleanup_ok = False
 
@@ -1148,6 +1216,7 @@ def _run(
     accepted_returncodes: frozenset[int] = frozenset({0}),
     timeout_seconds: float = _PROVIDER_TIMEOUT_SECONDS,
     pass_fds: tuple[int, ...] = (),
+    launch_guard: _RetainedExecutable | None = None,
 ) -> CommandObservation:
     if (
         os.name != "posix"
@@ -1156,9 +1225,14 @@ def _run(
         or not argv
         or any(not isinstance(item, str) or not item for item in argv)
         or any(type(descriptor) is not int or descriptor < 0 for descriptor in pass_fds)
+        or (launch_guard is not None and not isinstance(launch_guard, _RetainedExecutable))
     ):
         _raise("PROVIDER_COMMAND_FAILED")
     environment = _closed_child_environment()
+    if launch_guard is not None:
+        _assert_retained_binary(launch_guard, verify_source_digest=False)
+        if argv[0] != launch_guard.execution_path:
+            _raise("PROVIDER_COMMAND_FAILED")
     try:
         proc = subprocess.Popen(
             argv,
@@ -1190,9 +1264,11 @@ def _run(
         failure = PreflightError("PROVIDER_COMMAND_FAILED")
 
     cleanup_ok = _cleanup_owned_process(proc, proc.pid)
+    if not cleanup_ok:
+        _raise("PROVIDER_COMMAND_FAILED")
     if failure is not None:
         raise failure from None
-    if not cleanup_ok or observation is None:
+    if observation is None:
         _raise("PROVIDER_COMMAND_FAILED")
     return observation
 
@@ -1218,6 +1294,7 @@ def observe_binary(
         _assert_retained_binary(retained)
         observed = _run(
             build_allowed_argv(retained, "version"),
+            launch_guard=retained,
         )
         _assert_retained_binary(retained)
         version = _normalize_claude_version(observed.stdout)
@@ -1272,14 +1349,18 @@ def _parse_auth_status(raw: bytes | str) -> dict[str, Any]:
             continue
         if value is not None and not isinstance(value, str):
             _raise("AUTH_STATUS_UNSUPPORTED")
-        if isinstance(value, str) and (
-            len(value.encode("utf-8", "strict")) > MAX_AUTH_STRING_BYTES
-            or _CONTROL_RE.search(value)
-        ):
-            _raise("AUTH_STATUS_UNSUPPORTED")
-        if key in {"authMethod", "apiProvider", "subscriptionType"} and isinstance(
-            value, str
-        ) and _SECRET_RE.search(value):
+        if isinstance(value, str):
+            try:
+                encoded_length = len(value.encode("utf-8", "strict"))
+            except UnicodeError:
+                _raise("AUTH_STATUS_UNSUPPORTED")
+            if (
+                encoded_length > MAX_AUTH_STRING_BYTES
+                or _CONTROL_RE.search(value)
+                or _SECRET_RE.search(value)
+            ):
+                _raise("AUTH_STATUS_UNSUPPORTED")
+        if key == "apiKeySource" and value not in {None, "/login managed key"}:
             _raise("AUTH_STATUS_UNSUPPORTED")
     return parsed
 
@@ -1291,6 +1372,7 @@ def observe_auth(binary: Path | _RetainedExecutable) -> AuthObservation:
         observed = _run(
             build_allowed_argv(retained, "auth_status"),
             accepted_returncodes=frozenset({0, 1}),
+            launch_guard=retained,
         )
         _assert_retained_binary(retained)
         parsed = _parse_auth_status(observed.stdout)

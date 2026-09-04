@@ -732,6 +732,27 @@ def test_f2_timeout_kills_owned_descendant_and_reaps(
                 pass
 
 
+def test_f2_cleanup_failure_takes_precedence_over_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load()
+
+    class FakeProcess:
+        pid = 43210
+
+    monkeypatch.setattr(module, "_closed_child_environment", lambda: {})
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+
+    def timeout(*args, **kwargs):
+        raise module.PreflightError("PROVIDER_TIMEOUT")
+
+    monkeypatch.setattr(module, "_collect_bounded_output", timeout)
+    monkeypatch.setattr(module, "_cleanup_owned_process", lambda *args: False)
+
+    with pytest.raises(module.PreflightError, match="^PROVIDER_COMMAND_FAILED$"):
+        module._run(("/safe/provider", "--version"))
+
+
 def test_f3_symlinked_parent_is_refused_before_leaf_acceptance(tmp_path: Path):
     module = _load()
     real_parent = tmp_path.resolve() / "real" / "bin"
@@ -848,6 +869,8 @@ def test_f4_observation_executes_private_exact_copy_not_source_path(
     def report_version(argv, **kwargs):
         invocation["argv"] = argv
         invocation["pass_fds"] = kwargs.get("pass_fds")
+        invocation["launch_guard"] = kwargs.get("launch_guard")
+        invocation["guard_path"] = Path(kwargs["launch_guard"].execution_path)
         return module.CommandObservation(0, "2.1.0")
 
     monkeypatch.setattr(module, "_run", report_version)
@@ -861,7 +884,32 @@ def test_f4_observation_executes_private_exact_copy_not_source_path(
     assert execution_path.name == "claude"
     assert execution_path.parent.name.startswith("mastermind-claude-preflight-")
     assert invocation["pass_fds"] is None
+    launch_guard = invocation["launch_guard"]
+    assert isinstance(launch_guard, module._RetainedExecutable)
+    assert invocation["guard_path"] == execution_path
     assert not execution_path.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="private executable copies are POSIX-only")
+def test_f4_private_copy_launches_a_real_native_executable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load()
+    native_executable = Path("/usr/bin/true")
+    if not native_executable.is_file():
+        pytest.skip("no stable native true executable")
+    for key in tuple(os.environ):
+        if module._provider_environment_key_is_denied(key):
+            monkeypatch.delenv(key, raising=False)
+
+    with module._retain_binary(native_executable) as retained:
+        execution_path = Path(retained.execution_path)
+        observed = module._run((retained.execution_path,), launch_guard=retained)
+        assert observed == module.CommandObservation(0, b"")
+        assert execution_path != native_executable
+
+    assert not execution_path.exists()
+    assert not execution_path.parent.exists()
 
 
 def test_f4_main_reuses_one_retained_object_for_version_and_auth(
@@ -869,11 +917,19 @@ def test_f4_main_reuses_one_retained_object_for_version_and_auth(
 ):
     module = _load()
     binary = _executable(tmp_path)
-    invocations: list[tuple[tuple[str, ...], tuple[int, ...] | None]] = []
+    invocations: list[
+        tuple[
+            tuple[str, ...],
+            tuple[int, ...] | None,
+            object,
+        ]
+    ] = []
     monkeypatch.setattr(module, "require_current_identity_owner", lambda *args: None)
 
     def observe(argv, **kwargs):
-        invocations.append((argv, kwargs.get("pass_fds")))
+        invocations.append(
+            (argv, kwargs.get("pass_fds"), kwargs.get("launch_guard"))
+        )
         if argv[-1] == "--version":
             return module.CommandObservation(0, "2.1.0")
         return module.CommandObservation(
@@ -907,6 +963,8 @@ def test_f4_main_reuses_one_retained_object_for_version_and_auth(
     assert execution_path != binary
     assert execution_path.parent.name.startswith("mastermind-claude-preflight-")
     assert invocations[0][1] == invocations[1][1]
+    assert isinstance(invocations[0][2], module._RetainedExecutable)
+    assert invocations[0][2] is invocations[1][2]
     assert not execution_path.exists()
 
 
@@ -977,6 +1035,146 @@ def test_f4_private_copy_creation_failure_is_a_fixed_refusal(
         module._require_binary(binary)
 
     assert private_detail not in str(exc.value)
+
+
+def test_f4_partial_private_copy_cleanup_retries_transient_unlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    real_mkdtemp = module.tempfile.mkdtemp
+    real_unlink = module.os.unlink
+    created_directory: Path | None = None
+    attempts = 0
+
+    def capture_mkdtemp(*args, **kwargs):
+        nonlocal created_directory
+        created_directory = Path(real_mkdtemp(*args, **kwargs))
+        return str(created_directory)
+
+    def refuse_fsync(descriptor: int):
+        raise OSError("synthetic copy failure")
+
+    def fail_once(path, *, dir_fd=None):
+        nonlocal attempts
+        if path == "claude" and dir_fd is not None:
+            attempts += 1
+            if attempts == 1:
+                raise OSError("private@example.com")
+        return real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(module.tempfile, "mkdtemp", capture_mkdtemp)
+    monkeypatch.setattr(module.os, "fsync", refuse_fsync)
+    monkeypatch.setattr(module.os, "unlink", fail_once)
+    try:
+        with pytest.raises(module.PreflightError, match="^BINARY_INVALID$"):
+            module._require_binary(binary)
+        assert attempts == 2
+        assert created_directory is not None
+        assert not created_directory.exists()
+    finally:
+        monkeypatch.setattr(module.os, "unlink", real_unlink)
+        if created_directory is not None and created_directory.exists():
+            created_directory.chmod(0o700)
+            execution_path = created_directory / "claude"
+            if execution_path.exists() or execution_path.is_symlink():
+                execution_path.unlink()
+            created_directory.rmdir()
+
+
+def test_f4_private_copy_cleanup_continues_after_chmod_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    retained = module._retain_binary(binary)
+    execution_path = Path(retained.execution_path)
+    execution_directory_fd = retained.execution_directory_fd
+    real_fchmod = module.os.fchmod
+
+    def chmod_then_fail(descriptor: int, mode: int):
+        real_fchmod(descriptor, mode)
+        if descriptor == execution_directory_fd and mode == 0o700:
+            raise OSError("synthetic cleanup failure")
+
+    monkeypatch.setattr(module.os, "fchmod", chmod_then_fail)
+    try:
+        retained.close()
+        assert not execution_path.exists()
+        assert not execution_path.parent.exists()
+    finally:
+        monkeypatch.setattr(module.os, "fchmod", real_fchmod)
+        if execution_path.parent.exists():
+            execution_path.parent.chmod(0o700)
+            if execution_path.exists() or execution_path.is_symlink():
+                execution_path.unlink()
+            execution_path.parent.rmdir()
+
+
+def test_f4_private_copy_cleanup_retries_a_transient_unlink_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    retained = module._retain_binary(binary)
+    execution_path = Path(retained.execution_path)
+    execution_directory_fd = retained.execution_directory_fd
+    real_unlink = module.os.unlink
+    attempts = 0
+
+    def fail_once(path, *, dir_fd=None):
+        nonlocal attempts
+        if path == retained.execution_name and dir_fd == execution_directory_fd:
+            attempts += 1
+            if attempts == 1:
+                raise OSError("private@example.com")
+        return real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(module.os, "unlink", fail_once)
+    try:
+        retained.close()
+        assert attempts == 2
+        assert not execution_path.exists()
+        assert not execution_path.parent.exists()
+    finally:
+        monkeypatch.setattr(module.os, "unlink", real_unlink)
+        if execution_path.parent.exists():
+            execution_path.parent.chmod(0o700)
+            if execution_path.exists() or execution_path.is_symlink():
+                execution_path.unlink()
+            execution_path.parent.rmdir()
+
+
+def test_f4_private_copy_cleanup_failure_is_fixed_and_non_echoing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    retained = module._retain_binary(binary)
+    execution_path = Path(retained.execution_path)
+    execution_directory_fd = retained.execution_directory_fd
+    real_unlink = module.os.unlink
+    private_detail = "private@example.com"
+
+    def refuse_unlink(path, *, dir_fd=None):
+        if path == retained.execution_name and dir_fd == execution_directory_fd:
+            raise OSError(private_detail)
+        return real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(module.os, "unlink", refuse_unlink)
+    try:
+        with pytest.raises(
+            module.PreflightError, match="^BINARY_CHANGED_DURING_PREFLIGHT$"
+        ) as exc:
+            retained.close()
+        assert private_detail not in str(exc.value)
+    finally:
+        monkeypatch.setattr(module.os, "unlink", real_unlink)
+        if execution_path.parent.exists():
+            execution_path.parent.chmod(0o700)
+            if execution_path.exists() or execution_path.is_symlink():
+                execution_path.unlink()
+            execution_path.parent.rmdir()
 
 
 @pytest.mark.parametrize(
@@ -1060,6 +1258,40 @@ def test_f5_auth_json_rejects_nonprimitive_private_fields(
         module.observe_auth(binary)
 
 
+@pytest.mark.parametrize(
+    ("field", "private_value"),
+    [
+        ("apiKeySource", "/Users/private/.claude/credentials.json"),
+        ("email", "sk-" + "x" * 30),
+    ],
+)
+def test_f5_auth_json_rejects_private_locators_and_secret_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    private_value: str,
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    raw = json.dumps(
+        {
+            "loggedIn": True,
+            "authMethod": "claude.ai",
+            "apiProvider": "firstParty",
+            field: private_value,
+        }
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(0, raw),
+    )
+
+    with pytest.raises(module.PreflightError, match="^AUTH_STATUS_UNSUPPORTED$") as exc:
+        module.observe_auth(binary)
+    assert private_value not in str(exc.value)
+
+
 def test_f5_auth_json_rejects_malformed_utf8_without_echo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1075,6 +1307,25 @@ def test_f5_auth_json_rejects_malformed_utf8_without_echo(
     with pytest.raises(module.PreflightError, match="^AUTH_STATUS_UNSUPPORTED$") as exc:
         module.observe_auth(binary)
     assert "\\xff" not in str(exc.value)
+
+
+def test_f5_auth_json_rejects_lone_surrogate_as_fixed_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    raw = (
+        b'{"loggedIn":true,"authMethod":"claude.ai",'
+        b'"apiProvider":"firstParty","email":"\\ud800"}'
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(0, raw),
+    )
+
+    with pytest.raises(module.PreflightError, match="^AUTH_STATUS_UNSUPPORTED$"):
+        module.observe_auth(binary)
 
 
 def test_f5_auth_json_rejects_a_second_frame(
