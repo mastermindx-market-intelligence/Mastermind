@@ -201,10 +201,12 @@ YYYY-MM-DDTHH:MM:SS[.1-6 ASCII fractional digits](Z|+HH:MM|-HH:MM)
 ```
 
 The exact input must be nonempty, contain no leading/trailing whitespace, use uppercase `T`/`Z`, and
-fit the 32-character ceiling. Basic dates/times, ISO week dates, space/lowercase separators, comma
-fractions, colonless or second-bearing offsets, over-precision fractions, invalid calendar/time values,
-and timezone-free values are rejected with one fixed payload-free `CapabilityProjectionError`; the
-raw untrusted timestamp is absent from the complete exception chain.
+fit the 32-character ceiling. The ceiling is evaluated before the timestamp grammar. Basic
+dates/times, ISO week dates, space/lowercase separators, comma fractions, colonless or
+second-bearing offsets, over-precision fractions, invalid calendar/time values, and timezone-free
+values are rejected with one fixed payload-free `CapabilityProjectionError`. Parser exceptions are
+contained before the typed refusal is raised, so neither the raw untrusted timestamp nor a hidden
+parser exception survives in the complete `__cause__`/`__context__` chain.
 
 Accepted timestamps are converted to UTC at the projector boundary and serialized as one canonical
 `...Z` representation, with either whole seconds or exactly six fractional digits. Timestamp
@@ -235,11 +237,18 @@ or owner-native effect reconciliation.
 The R2 repair used tests-first source identity:
 
 ```text
-RED tests-only head: f8008f9aa3d736d0de15fa7c4f92672afdb62c53
-old source blob:     6daafc39fe51d37365eba61880a9f93750c5a441
-RED result:          13/13 new discriminators failed for the intended semantic reasons
-GREEN source head:   92ce8993ac44ce05bc3cfc9ad8612ad9fcd15c85
-GREEN source blob:   aba0f77e9a1faee194ef337469f78d424886c575
+semantic RED tests-only head: f8008f9aa3d736d0de15fa7c4f92672afdb62c53
+old source blob:                6daafc39fe51d37365eba61880a9f93750c5a441
+semantic RED result:            13/13 discriminators failed for intended reasons
+first GREEN source head:        92ce8993ac44ce05bc3cfc9ad8612ad9fcd15c85
+first GREEN source blob:        aba0f77e9a1faee194ef337469f78d424886c575
+proof-hardening RED head:       c8640ccc170813adebf1c9b132033dddaf0f1f9f
+proof-hardening test blob:      b0d318d66a257a4916fa5812f241ea38a149b421
+proof-hardening RED result:     bound-order trap green; hidden parser context red
+final GREEN source head:        e50095b6935ce4f6ca7e9fa1ad2038764496f88c
+final GREEN source blob:        ebfebcfa737c66aad39f86703aeeb549dcceed2d
+final source SHA-256:            a86a5929b7243eb89dccc3ac659afdaf6e703499cf7018db2cda9e06446e4f08
+local focused/property result:   46 passed
 ```
 
 Acceptance includes:
@@ -274,13 +283,29 @@ Acceptance includes:
 - duplicate capability generation and duplicate dependency fail closed;
 - permutation-stable output and digest;
 - seven permissive non-RFC3339 forms are rejected;
+- a grammar trap proves the timestamp length ceiling executes before grammar evaluation;
 - over-bound timestamp text is rejected before parsing;
 - malformed opaque timestamp text is absent from the full exception chain;
+- a grammar-valid but semantically invalid calendar timestamp produces no hidden parser cause or
+  context;
 - equivalent UTC/offset timestamps produce identical normalized output and digest;
 - secret-shaped source or issue refusal;
 - current `ExecutionCapabilityRegistry` remains the source owner and its production-disarmed write
   profile projects honestly;
 - output includes every catalog-required field and is secret-free.
+
+The final eight-mutation control matrix killed every targeted guard removal:
+
+```text
+SPEC_ONLY collapsed into PARTIAL                  2 failed / 44 passed
+required disconnection precedence removed        5 failed / 41 passed
+RFC3339 grammar disabled                         10 failed / 36 passed
+timestamp length ceiling disabled                 1 failed / 45 passed
+parser exception context restored                 1 failed / 45 passed
+UTC canonicalization disabled                     6 failed / 40 passed
+PARTIAL proof erased under nullable availability  2 failed / 44 passed
+own DARK source masked by unknown                 1 failed / 45 passed
+```
 
 ## 10. Proof and promotion
 
