@@ -329,6 +329,19 @@ def test_protocol_dataclasses_are_deeply_immutable(tmp_path: Path) -> None:
     assert isinstance(command.environment, tuple)
 
 
+def test_compiler_binds_the_reviewed_fake_bytes_and_filesystem_identity(tmp_path: Path) -> None:
+    policy, _, _, _ = _policy(tmp_path)
+
+    command = compile_claude_cli_command(policy)
+    binary_info = FAKE.stat()
+
+    assert command.binary_sha256 == hashlib.sha256(FAKE.read_bytes()).hexdigest()
+    assert command.binary_device == binary_info.st_dev
+    assert command.binary_inode == binary_info.st_ino
+    assert command.binary_size == binary_info.st_size
+    assert command.binary_mtime_ns == binary_info.st_mtime_ns
+
+
 def test_compiler_refuses_the_native_home_even_with_an_isolated_temp(tmp_path: Path) -> None:
     policy, _, _, _ = _policy(tmp_path)
     with pytest.raises(ClaudeCliProtocolError) as captured:
@@ -394,6 +407,81 @@ def test_spawn_boundary_revalidates_evidence_prompt_and_result_as_one_identity(t
     assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
     assert captured.value.cleanup is None
     assert not (tmp_path / "fake-state.json").exists()
+
+
+def test_runner_executes_opened_reviewed_bytes_after_same_path_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    copied_fake = tmp_path / "bound-fake.py"
+    copied_fake.write_bytes(FAKE.read_bytes())
+    copied_fake.chmod(0o700)
+    command = compile_claude_cli_command(dataclasses.replace(policy, binary=copied_fake))
+    monkeypatch.setattr(protocol, "_committed_fake_path", lambda: copied_fake.resolve(), raising=False)
+    real_popen = subprocess.Popen
+    replaced = False
+
+    def replace_path_then_spawn(*args: object, **kwargs: object):
+        nonlocal replaced
+        if not replaced:
+            replacement = copied_fake.with_name("replacement.py")
+            replacement.write_text("#!/usr/bin/env python3\nraise SystemExit(97)\n", encoding="utf-8")
+            replacement.chmod(0o700)
+            os.replace(replacement, copied_fake)
+            replaced = True
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(protocol.subprocess, "Popen", replace_path_then_spawn)
+
+    receipt = ClaudeCliRunner().run(command, fake_controls=_fake_controls(tmp_path))
+
+    assert replaced is True
+    assert receipt.observation is ClaudeCliObservation.TERMINAL_RESULT_OBSERVED
+    assert receipt.binary_sha256 == command.binary_sha256
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_preexisting_fake_state_is_refused_before_spawn_without_signalling_a_pgid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    state_path = tmp_path / "fake-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "children": [],
+                "escaped_children": [os.getpgrp()],
+                "mcp_calls": 0,
+                "network_attempts": 0,
+                "reads": 0,
+                "shells": 0,
+                "starts": 0,
+                "subagents": 0,
+                "submissions": 0,
+                "writes": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    signalled: list[tuple[int, signal.Signals]] = []
+
+    def record_signal(pgid: int, sent_signal: signal.Signals) -> bool:
+        signalled.append((pgid, sent_signal))
+        return False
+
+    monkeypatch.setattr(protocol, "_signal_group", record_signal)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path),
+        )
+
+    assert captured.value.code == "FAKE_STATE_EXISTS"
+    assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
+    assert captured.value.cleanup is None
+    assert signalled == []
+    _assert_workspace_unchanged(workspace, head, status)
 
 
 def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Path) -> None:
@@ -463,11 +551,17 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
         ("init_end_conversation", "TOOL_SET_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("init_mcp", "MCP_OBSERVED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("init_plugin", "PLUGIN_OBSERVED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_required_field_missing", "INIT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_cwd_drift", "WORKING_DIRECTORY_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_version_drift", "VERSION_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("assistant_parent_tool", "SUBAGENT_OBSERVED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("assistant_write_tool", "TOOL_UNAUTHORIZED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("read_wrong_file", "READ_SCOPE_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("duplicate_tool", "READ_COUNT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("tool_result_mismatch", "TOOL_RESULT_MISMATCH", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("tool_result_unnumbered", "TOOL_RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("tool_result_structured_missing", "TOOL_RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("tool_result_structured_mismatch", "TOOL_RESULT_MISMATCH", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("permission_denied", "PERMISSION_DENIED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("missing_result", "TERMINAL_RESULT_MISSING", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("duplicate_result", "TERMINAL_RESULT_DUPLICATE", ClaudeCliObservation.OUTCOME_UNRECONCILED),
@@ -477,6 +571,8 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
         ("result_permission_denial", "PERMISSION_DENIED", ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED),
         ("result_mismatch", "STRUCTURED_RESULT_MISMATCH", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_invalid_cost", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_stop_reason_missing", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_usage_sparse", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("nonzero_after_success", "PROCESS_EXIT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("secret_output", "SENSITIVE_OUTPUT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("private_path_output", "PRIVATE_LOCATOR_OUTPUT", ClaudeCliObservation.OUTCOME_UNRECONCILED),

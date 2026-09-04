@@ -150,7 +150,67 @@ def test_exact_compiled_command_emits_canonical_stream_and_counters(tmp_path: Pa
     assert events[0]["tools"] == ["Read"]
     assert events[0]["mcp_servers"] == []
     assert events[0]["plugins"] == []
+    assert set(events[0]) == {
+        "apiKeySource",
+        "capabilities",
+        "claude_code_version",
+        "cwd",
+        "mcp_servers",
+        "model",
+        "output_style",
+        "permissionMode",
+        "plugins",
+        "session_id",
+        "skills",
+        "slash_commands",
+        "subtype",
+        "tools",
+        "type",
+        "uuid",
+    }
+    assert events[0]["apiKeySource"] == "none"
+    assert events[0]["claude_code_version"] == "2.1.259"
+    assert events[0]["cwd"] == command.working_directory
+    assert events[0]["slash_commands"] == []
+    assert events[0]["output_style"] == "default"
+    assert events[0]["skills"] == []
     assert "EndConversation" not in events[0]["tools"]
+    read_input = events[1]["message"]["content"][0]["input"]
+    expected_path = str(Path(command.working_directory) / "sealed" / "evidence.txt")
+    assert read_input == {"file_path": expected_path}
+    tool_result = events[2]["message"]["content"][0]
+    assert tool_result["content"] == "1\tbounded evidence\n"
+    assert events[2]["tool_use_result"] == {
+        "file": {
+            "content": EVIDENCE,
+            "filePath": expected_path,
+            "numLines": 1,
+            "startLine": 1,
+            "totalLines": 1,
+        },
+        "type": "text",
+    }
+    assert events[1]["message"]["stop_reason"] is None
+    assert events[3]["message"]["stop_reason"] is None
+    assert events[-1]["stop_reason"] == "end_turn"
+    assert events[-1]["usage"] == {
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "input_tokens": 11,
+        "output_tokens": 7,
+    }
+    assert events[-1]["modelUsage"] == {
+        "claude-opus-4-6": {
+            "cacheCreationInputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "contextWindow": 200000,
+            "costUSD": 0.001,
+            "inputTokens": 11,
+            "maxOutputTokens": 32000,
+            "outputTokens": 7,
+            "webSearchRequests": 0,
+        }
+    }
     assert events[-1]["session_id"] == SESSION_ID
     assert events[-1]["result"] == _expected_result()
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
