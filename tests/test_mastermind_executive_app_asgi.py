@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import os
 import shutil
@@ -59,6 +60,8 @@ NOW = 1_800_000_000
 KID = "e1-test-kid"
 ISSUER = "https://issuer.mastermind.example.test"
 RESOURCE = "https://executive-app.mastermind.example.test/mcp"
+METADATA_PATH = "/mcp/.well-known/oauth-protected-resource"
+METADATA_URL = RESOURCE + "/.well-known/oauth-protected-resource"
 SUBJECT = "chairman-opaque-e1"
 
 
@@ -411,8 +414,137 @@ def test_generic_verifier_cannot_widen_host(rsa_key, tmp_path):
 
 
 # ===========================================================================
-# 2. HTTP framing adversarial states
+# 2. protected-resource metadata + HTTP framing adversarial states
 # ===========================================================================
+
+
+def test_metadata_get_serves_the_exact_public_read_policy_projection(rsa_key, tmp_path):
+    """A missing public GET route, a copied projection, or authentication
+    requirement would make this externally observable RFC 9728 contract fail.
+    """
+
+    client, settings = _client(rsa_key, mastermind_root=tmp_path)
+    response = client.get(METADATA_PATH)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "resource": RESOURCE,
+        "authorization_servers": [ISSUER],
+        "scopes_supported": [READ_SCOPE],
+    }
+    assert settings.jwks_cache.calls == []
+
+
+def test_missing_tool_authentication_challenge_points_to_the_served_metadata_route(rsa_key, tmp_path):
+    """A challenge that points at an unserved or different route strands the
+    OAuth client before it can authenticate an otherwise unchanged tool call.
+    """
+
+    client, _ = _client(rsa_key, mastermind_root=tmp_path)
+    tool_response = client.post("/v1/tools/executive_state", json={"arguments": {}})
+    metadata_response = client.get(METADATA_PATH)
+
+    assert tool_response.status_code == 401
+    assert f'resource_metadata="{METADATA_URL}"' in tool_response.headers["WWW-Authenticate"]
+    assert metadata_response.status_code == 200
+
+
+def test_metadata_route_never_proxies_authorization_server_discovery(rsa_key, tmp_path):
+    """Registering an IdP discovery alias here would turn this resource server
+    into an authorization-server proxy and widen the public attack surface.
+    """
+
+    client, _ = _client(rsa_key, mastermind_root=tmp_path)
+    response = client.get("/mcp/.well-known/oauth-authorization-server")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "expected_status"),
+    [
+        ("GET", METADATA_PATH + "/", 404),
+        ("GET", METADATA_PATH + "?unexpected=1", 404),
+        ("GET", METADATA_PATH + "%2Fother", 400),
+        ("GET", METADATA_PATH + "%5Cother", 400),
+        ("GET", METADATA_PATH.replace("/mcp/", "/mcp//"), 400),
+        ("POST", METADATA_PATH, 404),
+        ("HEAD", METADATA_PATH, 404),
+        ("OPTIONS", METADATA_PATH, 404),
+    ],
+)
+def test_metadata_near_matches_and_non_get_requests_never_alias_the_public_document(
+    rsa_key, tmp_path, method, path, expected_status
+):
+    """A route normalizer, query-tolerant handler, or accidental HEAD/POST
+    registration would widen the one intended public configuration document.
+    """
+
+    client, _ = _client(rsa_key, mastermind_root=tmp_path)
+    response = client.request(method, path, follow_redirects=False)
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.parametrize(
+    "submit_overrides",
+    [
+        {"resource": "https://other-resource.mastermind.example.test/mcp"},
+        {"resource_metadata_url": "https://executive-app.mastermind.example.test/other-metadata"},
+        {
+            "issuer": "https://other-issuer.mastermind.example.test",
+            "authorization_servers": ["https://other-issuer.mastermind.example.test"],
+            "jwks_uri": "https://other-issuer.mastermind.example.test/.well-known/jwks.json",
+        },
+    ],
+)
+def test_create_app_refuses_read_submit_policy_identity_drift(rsa_key, tmp_path, submit_overrides):
+    """Two policy instances that identify different resources or authorization
+    realms must not construct one incoherent app generation.
+    """
+
+    policies = AppPolicies(
+        read=_read_policy(),
+        submit=_submit_policy(**submit_overrides),
+    )
+    settings = AppSettings(
+        policies=policies,
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ValueError, match="same resource identity"):
+        create_app(settings)
+
+
+def test_create_app_revalidates_a_forged_policy_before_registering_metadata(rsa_key, tmp_path):
+    """A frozen dataclass can be forged with object.__setattr__; accepting it
+    would let a stale challenge and public metadata disagree at runtime.
+    """
+
+    forged_read = dataclasses.replace(_read_policy())
+    object.__setattr__(
+        forged_read,
+        "resource_metadata_url",
+        RESOURCE + "/not-a-valid metadata path",
+    )
+    policies = AppPolicies(read=forged_read, submit=_submit_policy())
+    settings = AppSettings(
+        policies=policies,
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ValueError, match="metadata policy refused"):
+        create_app(settings)
 
 
 def test_unknown_tool_name_refuses_404(rsa_key, tmp_path):
