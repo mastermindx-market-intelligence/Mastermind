@@ -2982,6 +2982,34 @@ def test_success_artifacts_require_exact_result_and_report_identity(
 
 
 @pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("forge_sha", "1" * 40),
+        ("forge_tree_sha", "2" * 40),
+        ("workflow_sha256", "3" * 64),
+    ],
+)
+def test_success_artifacts_reject_preserved_pair_from_wrong_request(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    contract = _success_artifact_contract(tmp_path)
+    contract["request"] = _request(**{field: value})
+
+    with pytest.raises(runner.HostedRunnerError, match="RESULT_IDENTITY_MISMATCH"):
+        runner._validate_success_artifacts(**contract)  # type: ignore[attr-defined]  # noqa: SLF001
+
+
+def test_success_artifacts_reject_preserved_pair_from_wrong_toolchain(
+    tmp_path: Path,
+) -> None:
+    contract = _success_artifact_contract(tmp_path)
+    contract["request"] = _request(lock_sha256="4" * 64)
+
+    with pytest.raises(runner.HostedRunnerError, match="RESULT_IDENTITY_MISMATCH"):
+        runner._validate_success_artifacts(**contract)  # type: ignore[attr-defined]  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
     "mutation",
     [
         "missing_result",
@@ -3256,6 +3284,16 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
         "_cleanup_candidate_scratch",
         lambda **kwargs: runner.CleanupEvidence(True, ()),
     )
+    validation_inputs: dict[str, object] = {}
+    validate_success_artifacts = runner._validate_success_artifacts  # noqa: SLF001
+
+    def capture_success_artifact_inputs(**kwargs: object) -> Mapping[str, object]:
+        validation_inputs.update(kwargs)
+        return validate_success_artifacts(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        runner, "_validate_success_artifacts", capture_success_artifact_inputs
+    )
     receipt_path = tmp_path / "receipt/semantic-receipt.json"
 
     receipt = runner.run_phase_e(
@@ -3271,6 +3309,8 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
 
     assert receipt["status"] == "COMPLETED"
     assert receipt["effect"] == "APPLIED"
+    assert validation_inputs.get("bundle_sha256") == bundle_sha
+    assert validation_inputs.get("bundle_manifest_sha256") == verified.manifest_sha256
     assert receipt["evidence"]["git_metadata_seal"] == seal_evidence
     assert (
         receipt["evidence"]["consumer_invocation"]["sensitive_environment_inherited"]
