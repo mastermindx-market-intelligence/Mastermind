@@ -24,7 +24,7 @@ def test_control_launchd_uses_dedicated_ceo_ingress_group_not_operator_group():
     )
     sockets = document["Sockets"]
 
-    assert set(sockets) == {"Operator", "CeoIngress"}
+    assert set(sockets) == {"Operator", "CeoIngress", "DialogueObservation"}
     assert sockets["Operator"]["SockPathOwner"] == 450
     assert sockets["Operator"]["SockPathGroup"] == 453
     assert sockets["Operator"]["SockPathMode"] == 0o660
@@ -32,4 +32,12 @@ def test_control_launchd_uses_dedicated_ceo_ingress_group_not_operator_group():
     assert sockets["CeoIngress"]["SockPathGroup"] == 452
     assert sockets["CeoIngress"]["SockPathMode"] == 0o660
     assert sockets["CeoIngress"]["SockPathName"] == "__CEO_INGRESS_SOCKET__"
+    assert sockets["DialogueObservation"]["SockPathOwner"] == 450
+    assert sockets["DialogueObservation"]["SockPathGroup"] == 457
+    assert sockets["DialogueObservation"]["SockPathMode"] == 0o660
+    assert (
+        sockets["DialogueObservation"]["SockPathName"]
+        == "__DIALOGUE_OBSERVATION_SOCKET__"
+    )
     assert sockets["Operator"]["SockPathName"] != sockets["CeoIngress"]["SockPathName"]
+    assert len({value["SockPathName"] for value in sockets.values()}) == 3
