@@ -27,6 +27,8 @@
     <string>__ALLOWED_SOL_USER_ID__</string>
     <string>--allowed-parent-user-id</string>
     <string>__ALLOWED_PARENT_USER_ID__</string>
+    <string>--dialogue-coordination-socket-path</string>
+    <string>__DIALOGUE_COORDINATION_SOCKET_PATH__</string>
   </array>
   <key>WorkingDirectory</key>
   <string>__RELEASE_ROOT__</string>
