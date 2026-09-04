@@ -964,6 +964,12 @@ def _main() -> int:
         del events[2]["tool_use_result"]
     elif scenario == "tool_result_structured_mismatch":
         events[2]["tool_use_result"]["file"]["content"] = "different evidence\n"
+    elif scenario == "tool_result_synthetic_type_invalid":
+        events[2]["isSynthetic"] = 0
+    elif scenario == "tool_result_artifact_read_type_invalid":
+        events[2]["tool_use_result"]["artifactRead"] = 0
+    elif scenario == "tool_result_truncation_type_invalid":
+        events[2]["tool_use_result"]["file"]["truncatedByTokenCap"] = 0
     elif scenario == "tool_result_truncated":
         events[2]["tool_use_result"]["file"]["truncatedByTokenCap"] = True
     elif scenario == "tool_result_private_locator_echo":
@@ -1013,6 +1019,8 @@ def _main() -> int:
         del events[-1]["usage"]["cache_creation_input_tokens"]
     elif scenario == "result_timing_type_invalid":
         events[-1]["ttft_ms"] = "fast"
+    elif scenario == "result_queued_type_invalid":
+        events[-1]["queued_turn_count"] = False
     elif scenario == "secret_output":
         events[0]["capabilities"] = ["sk-" + "ant-" + "FAKE_SENTINEL_NOT_A_SECRET"]
     elif scenario == "private_path_output":
