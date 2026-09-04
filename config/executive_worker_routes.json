@@ -1,6 +1,6 @@
 {
-  "schema_version": "mastermind.executive_worker_routes/v1",
-  "policy_version": "2026-08-24.stage4",
+  "schema_version": "mastermind.executive_worker_routes/v2",
+  "policy_version": "2026-09-03.rf1-v2",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "providers": {
@@ -102,28 +102,78 @@
   "routes": {
     "implementation": {
       "required_capabilities": ["code"],
-      "routine": ["fast.engineering", "standard.engineering"],
-      "elevated": ["standard.engineering"]
+      "routine": [
+        {
+          "tier_id": "implementation.routine.primary",
+          "model_aliases": ["fast.engineering", "standard.engineering"]
+        }
+      ],
+      "elevated": [
+        {
+          "tier_id": "implementation.elevated.primary",
+          "model_aliases": ["standard.engineering"]
+        }
+      ]
     },
     "mechanical": {
       "required_capabilities": ["code"],
-      "routine": ["fast.engineering", "standard.engineering"],
-      "elevated": ["standard.engineering"]
+      "routine": [
+        {
+          "tier_id": "mechanical.routine.primary",
+          "model_aliases": ["fast.engineering", "standard.engineering"]
+        }
+      ],
+      "elevated": [
+        {
+          "tier_id": "mechanical.elevated.primary",
+          "model_aliases": ["standard.engineering"]
+        }
+      ]
     },
     "tests": {
       "required_capabilities": ["tests"],
-      "routine": ["fast.engineering", "standard.engineering"],
-      "elevated": ["standard.engineering"]
+      "routine": [
+        {
+          "tier_id": "tests.routine.primary",
+          "model_aliases": ["fast.engineering", "standard.engineering"]
+        }
+      ],
+      "elevated": [
+        {
+          "tier_id": "tests.elevated.primary",
+          "model_aliases": ["standard.engineering"]
+        }
+      ]
     },
     "research": {
       "required_capabilities": ["research"],
-      "routine": ["fast.research", "standard.research"],
-      "elevated": ["standard.research"]
+      "routine": [
+        {
+          "tier_id": "research.routine.primary",
+          "model_aliases": ["fast.research", "standard.research"]
+        }
+      ],
+      "elevated": [
+        {
+          "tier_id": "research.elevated.primary",
+          "model_aliases": ["standard.research"]
+        }
+      ]
     },
     "review": {
       "required_capabilities": ["review"],
-      "routine": ["standard.review"],
-      "elevated": ["standard.review"]
+      "routine": [
+        {
+          "tier_id": "review.routine.primary",
+          "model_aliases": ["standard.review"]
+        }
+      ],
+      "elevated": [
+        {
+          "tier_id": "review.elevated.primary",
+          "model_aliases": ["standard.review"]
+        }
+      ]
     }
   }
 }

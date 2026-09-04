@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import pytest
@@ -8,8 +9,10 @@ from control_plane.executive_runtime import Runtime
 from control_plane.model_router import (
     DEFAULT_POLICY_PATH,
     ModelRouter,
+    ROUTER_SCHEMA_VERSION,
     RouteMode,
     RoutingPolicyError,
+    SuitabilityTier,
     WorkRequest,
 )
 from control_plane.worker_adapter import (
@@ -17,6 +20,62 @@ from control_plane.worker_adapter import (
     adapter_descriptor,
 )
 from scripts.executive_os_phase1b import main as phase1b_main
+
+
+_V1_EQUIVALENT_FIRST_TIERS = {
+    ("implementation", "routine"): (
+        "fast.engineering",
+        "standard.engineering",
+    ),
+    ("implementation", "elevated"): ("standard.engineering",),
+    ("mechanical", "routine"): ("fast.engineering", "standard.engineering"),
+    ("mechanical", "elevated"): ("standard.engineering",),
+    ("tests", "routine"): ("fast.engineering", "standard.engineering"),
+    ("tests", "elevated"): ("standard.engineering",),
+    ("research", "routine"): ("fast.research", "standard.research"),
+    ("research", "elevated"): ("standard.research",),
+    ("review", "routine"): ("standard.review",),
+    ("review", "elevated"): ("standard.review",),
+}
+
+_JOB_CONSTRAINT_KEYS = {
+    "task_kind",
+    "risk",
+    "ambiguity",
+    "execution_profile_id",
+    "execution_profile_digest",
+    "capability_policy_version",
+    "capability_policy_digest",
+    "preferred_model_aliases",
+    "required_capabilities",
+    "excluded_worker_ids",
+    "routing_policy_version",
+    "routing_reason_codes",
+}
+
+
+def _v2_policy() -> dict:
+    raw = json.loads(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
+    raw["policy_version"] = "2026-09-03.rf1-v2"
+    if raw["schema_version"] == "mastermind.executive_worker_routes/v1":
+        raw["schema_version"] = "mastermind.executive_worker_routes/v2"
+        for task_kind, route in raw["routes"].items():
+            for risk in ("routine", "elevated"):
+                route[risk] = [
+                    {
+                        "tier_id": f"{task_kind}.{risk}.primary",
+                        "model_aliases": route[risk],
+                    }
+                ]
+    else:
+        assert raw["schema_version"] == "mastermind.executive_worker_routes/v2"
+    return raw
+
+
+def _load_policy(tmp_path, raw: dict) -> ModelRouter:
+    path = tmp_path / "executive_worker_routes.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    return ModelRouter.load(path)
 
 
 def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
@@ -164,7 +223,7 @@ def test_runtime_claim_honors_alias_order_before_worker_id_and_records_receipt(t
         "fast.engineering",
         "standard.engineering",
     ]
-    assert event.payload["routing_policy_version"] == "2026-08-24.stage4"
+    assert event.payload["routing_policy_version"] == "2026-09-03.rf1-v2"
     assert event.payload["execution_profile_id"] == "sealed.worker.write.no-extensions.v1"
     assert event.payload["execution_profile_digest"] == decision.execution_profile_digest
     assert event.payload["capability_policy_version"] == decision.capability_policy_version
@@ -355,3 +414,223 @@ def test_common_worker_adapter_protocol_is_provider_neutral():
             return None
 
     assert isinstance(FakeAdapter(), WorkerExecutionAdapter)
+
+
+def _two_tier_implementation_policy() -> dict:
+    raw = _v2_policy()
+    raw["routes"]["implementation"]["routine"] = [
+        {
+            "tier_id": "implementation.routine.primary",
+            "model_aliases": ["fast.engineering", "standard.engineering"],
+        },
+        {
+            "tier_id": "implementation.routine.fallback",
+            "model_aliases": ["coo.sealed"],
+        },
+    ]
+    return raw
+
+
+def test_v2_decision_exposes_ordered_suitability_tiers_and_compatibility_projection(
+    tmp_path,
+):
+    router = _load_policy(tmp_path, _two_tier_implementation_policy())
+
+    decision = router.route(WorkRequest("implementation"))
+    assert decision.suitability_tiers == (
+        SuitabilityTier(
+            "implementation.routine.primary",
+            ("fast.engineering", "standard.engineering"),
+        ),
+        SuitabilityTier("implementation.routine.fallback", ("coo.sealed",)),
+    )
+    assert decision.preferred_model_aliases == (
+        "fast.engineering",
+        "standard.engineering",
+    )
+    assert "preferred_model_aliases" in {
+        field.name for field in dataclasses.fields(type(decision))
+    }
+    assert decision.to_dict()["suitability_tiers"] == [
+        {
+            "tier_id": "implementation.routine.primary",
+            "model_aliases": ["fast.engineering", "standard.engineering"],
+        },
+        {
+            "tier_id": "implementation.routine.fallback",
+            "model_aliases": ["coo.sealed"],
+        },
+    ]
+    assert decision.to_dict()["preferred_model_aliases"] == [
+        "fast.engineering",
+        "standard.engineering",
+    ]
+    constraints = decision.job_constraints()
+    assert set(constraints) == _JOB_CONSTRAINT_KEYS
+    assert constraints["preferred_model_aliases"] == [
+        "fast.engineering",
+        "standard.engineering",
+    ]
+    assert "suitability_tiers" not in constraints
+
+
+def test_current_v2_policy_preserves_the_complete_v1_codex_route_inventory():
+    router = ModelRouter.load()
+
+    assert ROUTER_SCHEMA_VERSION == "mastermind.executive_worker_routes/v2"
+    assert router.policy_version == "2026-09-03.rf1-v2"
+    for (task_kind, risk), aliases in _V1_EQUIVALENT_FIRST_TIERS.items():
+        decision = router.route(WorkRequest(task_kind, risk=risk))
+        assert decision.suitability_tiers == (
+            SuitabilityTier(f"{task_kind}.{risk}.primary", aliases),
+        )
+        assert decision.preferred_model_aliases == aliases
+        assert decision.to_dict()["preferred_model_aliases"] == list(aliases)
+        assert decision.job_constraints()["preferred_model_aliases"] == list(aliases)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [
+        ("duplicate_tier_id", "duplicate tier_id"),
+        ("empty_tier_id", "bounded lowercase identifier"),
+        ("invalid_tier_id", "bounded lowercase identifier"),
+        ("empty_aliases", "cannot be empty"),
+        ("duplicate_alias_inside", "duplicate alias"),
+        ("duplicate_alias_across", "duplicate alias"),
+        ("unknown_alias", "ineligible alias"),
+        ("ineligible_alias", "ineligible alias"),
+        ("unknown_tier_key", "unknown keys"),
+        ("capability_mismatch", "lacks capabilities"),
+        ("unknown_route_key", "unknown keys"),
+    ],
+)
+def test_v2_policy_refuses_closed_tier_grammar_and_unlawful_aliases(
+    tmp_path, mutation, match
+):
+    raw = _v2_policy()
+    tiers = raw["routes"]["implementation"]["routine"]
+
+    if mutation == "duplicate_tier_id":
+        tiers.append(
+            {
+                "tier_id": "implementation.routine.primary",
+                "model_aliases": ["coo.sealed"],
+            }
+        )
+    elif mutation == "empty_tier_id":
+        tiers[0]["tier_id"] = ""
+    elif mutation == "invalid_tier_id":
+        tiers[0]["tier_id"] = "invalid tier"
+    elif mutation == "empty_aliases":
+        tiers[0]["model_aliases"] = []
+    elif mutation == "duplicate_alias_inside":
+        tiers[0]["model_aliases"] = ["fast.engineering", "fast.engineering"]
+    elif mutation == "duplicate_alias_across":
+        tiers.append(
+            {
+                "tier_id": "implementation.routine.fallback",
+                "model_aliases": ["fast.engineering"],
+            }
+        )
+    elif mutation == "unknown_alias":
+        tiers[0]["model_aliases"] = ["unknown.alias"]
+    elif mutation == "ineligible_alias":
+        tiers[0]["model_aliases"] = ["frontier.orchestrator"]
+    elif mutation == "unknown_tier_key":
+        tiers[0]["unexpected"] = True
+    elif mutation == "capability_mismatch":
+        raw["routes"]["implementation"]["required_capabilities"] = ["judgment"]
+    elif mutation == "unknown_route_key":
+        raw["routes"]["implementation"]["unexpected"] = True
+    else:  # pragma: no cover - parameter table is the complete mutation vocabulary.
+        raise AssertionError(f"unknown mutation {mutation!r}")
+
+    with pytest.raises(RoutingPolicyError, match=match):
+        _load_policy(tmp_path, raw)
+
+
+def test_v2_tier_identity_precedes_cost_and_provider_dictionary_order(tmp_path):
+    raw = _two_tier_implementation_policy()
+    raw["model_aliases"]["fast.engineering"]["cost_class"] = "frontier"
+    raw["model_aliases"]["standard.engineering"]["cost_class"] = "frontier"
+    raw["model_aliases"]["coo.sealed"]["cost_class"] = "small"
+    raw["providers"] = dict(reversed(tuple(raw["providers"].items())))
+
+    decision = _load_policy(tmp_path, raw).route(WorkRequest("implementation"))
+    assert decision.suitability_tiers[0].tier_id == "implementation.routine.primary"
+    assert decision.suitability_tiers[1].tier_id == "implementation.routine.fallback"
+    assert decision.preferred_model_aliases == (
+        "fast.engineering",
+        "standard.engineering",
+    )
+
+
+def test_v2_alias_order_is_inside_a_tier_but_tier_order_sets_precedence(tmp_path):
+    baseline = _load_policy(tmp_path, _two_tier_implementation_policy()).route(
+        WorkRequest("implementation")
+    )
+
+    reordered_aliases = _two_tier_implementation_policy()
+    reordered_aliases["routes"]["implementation"]["routine"][0][
+        "model_aliases"
+    ] = ["standard.engineering", "fast.engineering"]
+    same_precedence = _load_policy(tmp_path, reordered_aliases).route(
+        WorkRequest("implementation")
+    )
+    assert tuple(tier.tier_id for tier in same_precedence.suitability_tiers) == tuple(
+        tier.tier_id for tier in baseline.suitability_tiers
+    )
+    assert same_precedence.suitability_tiers[0].tier_id == (
+        baseline.suitability_tiers[0].tier_id
+    )
+
+    reordered_tiers = _two_tier_implementation_policy()
+    reordered_tiers["routes"]["implementation"]["routine"].reverse()
+    changed_precedence = _load_policy(tmp_path, reordered_tiers).route(
+        WorkRequest("implementation")
+    )
+    assert changed_precedence.suitability_tiers[0].tier_id == (
+        "implementation.routine.fallback"
+    )
+    assert changed_precedence.suitability_tiers[0].tier_id != (
+        baseline.suitability_tiers[0].tier_id
+    )
+
+
+def test_v2_model_provider_identity_does_not_grant_authority_or_re_admit_frontier(
+    tmp_path,
+):
+    raw = _v2_policy()
+    raw["model_aliases"]["fast.engineering"]["model"] = "gpt-5.6-sol"
+    raw["model_aliases"]["fast.engineering"]["provider_alias"] = "codex"
+    router = _load_policy(tmp_path, raw)
+
+    worker = router.route(WorkRequest("implementation"))
+    assert worker.mode is RouteMode.WORKER
+    assert "owner_seat" not in worker.to_dict()
+    assert "authority" not in worker.to_dict()
+    assert "owner_seat" not in worker.job_constraints()
+    assert "authority" not in worker.job_constraints()
+
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("frontier.orchestrator")
+    frontier = router.route(WorkRequest("implementation", ambiguity="high"))
+    assert frontier.mode is RouteMode.FRONTIER_LEAD
+    assert not frontier.worker_eligible
+    assert frontier.suitability_tiers == (
+        SuitabilityTier("frontier.lead", ("frontier.orchestrator",)),
+    )
+
+
+def test_v2_review_exclusions_survive_structured_tiers_and_claim_projection():
+    review = ModelRouter.load().route(
+        WorkRequest("review", excluded_worker_ids=("builder-01",))
+    )
+
+    assert review.suitability_tiers == (
+        SuitabilityTier("review.routine.primary", ("standard.review",)),
+    )
+    assert review.excluded_worker_ids == ("builder-01",)
+    assert review.to_dict()["excluded_worker_ids"] == ["builder-01"]
+    assert review.job_constraints()["excluded_worker_ids"] == ["builder-01"]
