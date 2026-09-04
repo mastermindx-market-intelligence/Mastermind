@@ -8,7 +8,7 @@
 
 ## 1. Purpose
 
-Mastermind may expose bounded browser observation and actuation to an authorized ChatGPT Web Sol without creating a second lifecycle, target registry, session database, retry ledger, device database, remote-desktop relay, or authority plane.
+Mastermind may expose bounded browser observation and actuation to an authorized ChatGPT Web Sol without creating a second lifecycle, target registry, browser-session authority, session database, retry ledger, device database, remote-desktop relay, or authority plane.
 
 The canonical composition is:
 
