@@ -3660,6 +3660,10 @@ def test_dispatch_terminal_attempt_alone_without_applied_marker_stays_unproven()
 
 
 def test_dispatch_rate_limited_attempt_is_terminal_history_not_started():
+    assert "RATE_LIMITED" not in proj._ATTEMPT_IN_PROGRESS
+    assert "RATE_LIMITED" in proj._ATTEMPT_TERMINAL
+    assert proj._ATTEMPT_IN_PROGRESS.isdisjoint(proj._ATTEMPT_TERMINAL)
+
     doc = proj.project_dispatch_consumption(
         [_dcard()],
         generated_at=_DISPATCH_GENERATED_AT,

@@ -2687,6 +2687,37 @@ def test_cr1a_real_runtime_keeps_c2_carrier_out_of_w3c(tmp_path, monkeypatch):
     assert rows[0]["w3c_reason"] != "C2_EXACT_CANDIDATE_CONFLICT"
 
 
+def test_cr1a_protected_c2_reader_projects_a_separate_real_carrier(
+    tmp_path, monkeypatch
+):
+    from tests import test_executive_os_sqlite as executive_sqlite_tests
+
+    runtime, source_root, source_revision = (
+        executive_sqlite_tests._c2_r1a_ready_source(tmp_path, monkeypatch)
+    )
+    outcome = runtime.commit_initial_capacity_placement(
+        source_root.job_id,
+        expected_source_root_revision=source_revision,
+    )
+
+    with runtime.store.read() as connection:
+        commitment = runtime.current_capacity_commitment(
+            source_root.job_id, connection=connection
+        )
+
+    assert commitment is not None
+    assert ccr._capacity_commitment_is_exact(
+        commitment,
+        responsibility_ref="WS:C2_R1A",
+        root_job_id=source_root.job_id,
+    )
+    carrier = runtime.jobs.get_job(outcome.carrier_job_id)
+    assert carrier is not None
+    assert carrier.job_id != source_root.job_id
+    assert carrier.root_job_id == carrier.job_id
+    assert carrier.orchestration_role is None
+
+
 def test_cr1a_current_second_root_conflicts_with_precursor_generation(
     tmp_path, monkeypatch
 ):
@@ -2904,9 +2935,13 @@ def test_cr1a_gather_supplies_one_sentinel_connection_to_c2_and_w3c(
     ]
 
 
-def test_cr1a_missing_protected_c2_reader_is_explicit_owner_hold(tmp_path):
+def test_cr1a_compatible_base_without_c2_reader_is_explicit_owner_hold(
+    tmp_path, monkeypatch
+):
     runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    assert not hasattr(type(runtime), "current_capacity_commitment")
+    monkeypatch.delattr(
+        ccr.executive_runtime.Runtime, "current_capacity_commitment"
+    )
 
     rows = ccr._gather_dispatch_evidence(
         tmp_path,
