@@ -191,6 +191,8 @@ def _write_valid_success_artifacts(
         "schema_version": "mastermind.codeintel_z0_result.v1",
         "decision": "ZOEKT_REQUIRES_ARCHITECTURE_REVISION",
         "generated_at": generated_at,
+        "request_digest": request.digest,
+        "toolchain_lock_sha256": request.lock_sha256,
         "manifest_digest": manifest_digest,
         "path_policy_digest": hashlib.sha256(path_policy.read_bytes()).hexdigest(),
         "tool_schema_digest": tool_schema_digest,
@@ -230,6 +232,8 @@ def _write_valid_success_artifacts(
         "# Z0 Global Discovery Falsifier Result\n\n"
         "Decision: ZOEKT_REQUIRES_ARCHITECTURE_REVISION\n\n"
         f"Generated at: {generated_at}\n\n"
+        f"Request digest: {request.digest}\n\n"
+        f"Toolchain lock SHA-256: {request.lock_sha256}\n\n"
         "## Repository/ref status\n\n"
         f"- mastermind/{runner.FIXED_CONSUMER_BRANCH}: health=healthy; "
         f"coverage=covered; indexed_sha={request.consumer_sha}\n\n"
@@ -2928,6 +2932,8 @@ def test_result_artifact_census_rejects_secret_bearing_bytes(tmp_path: Path) -> 
 
 def _success_artifact_contract(tmp_path: Path) -> dict[str, object]:
     request = _request()
+    bundle_sha256 = "5" * 64
+    bundle_manifest_sha256 = "6" * 64
     source_digest = "7" * 64
     tool_schema_digest = "8" * 64
     binary_digests = {
@@ -2964,6 +2970,8 @@ def _success_artifact_contract(tmp_path: Path) -> dict[str, object]:
     return {
         "output": output,
         "request": request,
+        "bundle_sha256": bundle_sha256,
+        "bundle_manifest_sha256": bundle_manifest_sha256,
         "manifest_payload": manifest_payload,
         "path_policy": path_policy,
         "source_digest": source_digest,

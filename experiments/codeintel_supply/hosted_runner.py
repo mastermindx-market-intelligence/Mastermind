@@ -736,6 +736,8 @@ _Z0_RESULT_FIELDS: Final = frozenset(
         "schema_version",
         "decision",
         "generated_at",
+        "request_digest",
+        "toolchain_lock_sha256",
         "manifest_digest",
         "path_policy_digest",
         "tool_schema_digest",
@@ -3519,6 +3521,8 @@ def run_phase_e(
             artifacts = _validate_success_artifacts(
                 output=outputs,
                 request=request,
+                bundle_sha256=verified_after.sha256,
+                bundle_manifest_sha256=verified_after.manifest_sha256,
                 manifest_payload=manifest_payload,
                 path_policy=path_policy,
                 source_digest=source_before,
@@ -4537,6 +4541,8 @@ def _validate_success_artifacts(
     *,
     output: Path,
     request: ExperimentRequest,
+    bundle_sha256: str,
+    bundle_manifest_sha256: str,
     manifest_payload: Mapping[str, object],
     path_policy: Path,
     source_digest: str,
@@ -4632,6 +4638,8 @@ def _validate_success_artifacts(
     if (
         payload.get("schema_version") != "mastermind.codeintel_z0_result.v1"
         or payload.get("decision") != _Z0_NON_ACCEPTANCE_DECISION
+        or payload.get("request_digest") != request.digest
+        or payload.get("toolchain_lock_sha256") != request.lock_sha256
         or payload.get("manifest_digest") != expected_manifest_digest
         or payload.get("path_policy_digest")
         != locks.sha256_file(path_policy, max_bytes=1_048_576)
@@ -4704,6 +4712,8 @@ def _validate_success_artifacts(
         "# Z0 Global Discovery Falsifier Result\n\n"
         f"Decision: {_Z0_NON_ACCEPTANCE_DECISION}\n\n"
         f"Generated at: {generated_at}\n\n"
+        f"Request digest: {request.digest}\n\n"
+        f"Toolchain lock SHA-256: {request.lock_sha256}\n\n"
         "## Repository/ref status\n\n"
         f"- mastermind/{FIXED_CONSUMER_BRANCH}: health=healthy; "
         f"coverage=covered; indexed_sha={request.consumer_sha}\n\n"
