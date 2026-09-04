@@ -961,6 +961,24 @@ def test_f4_mutated_private_copy_is_refused_and_removed(
             execution_path.parent.rmdir()
 
 
+def test_f4_private_copy_creation_failure_is_a_fixed_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    private_detail = "private@example.com"
+
+    def fail_to_create_scratch(*args, **kwargs):
+        raise OSError(private_detail)
+
+    monkeypatch.setattr(module.tempfile, "mkdtemp", fail_to_create_scratch)
+
+    with pytest.raises(module.PreflightError, match="^BINARY_INVALID$") as exc:
+        module._require_binary(binary)
+
+    assert private_detail not in str(exc.value)
+
+
 @pytest.mark.parametrize(
     "raw",
     [
