@@ -195,6 +195,23 @@ def _text(value: Any, name: str, max_len: int = 500) -> str:
     return value
 
 
+#: Sol REQUEST_REPAIR (BLOCKER B, 2026-09-02): no dots, no colons, no path
+#: separators — an operation_key embedded verbatim in a derived journal FILENAME
+#: (``canary_journal.<operation_key>.<hash-slice>.json``) must never be able to
+#: traverse out of --episode-dir or collide with the filename's own delimiters.
+_OPERATION_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,190}$")
+
+
+def _operation_key(value: Any, name: str = "operation_key") -> str:
+    text = _text(value, name, 192)
+    if _OPERATION_KEY_RE.fullmatch(text) is None:
+        raise OutcomeLearningContractError(
+            f"{name} must match ^[a-z0-9][a-z0-9-]{{0,190}}$ (lowercase alphanumeric "
+            "and hyphens only — no dots, colons, or path separators)"
+        )
+    return text
+
+
 def _nullable_text(value: Any, name: str, max_len: int = 500) -> str | None:
     if value is None:
         return None
@@ -570,7 +587,7 @@ def build_expectation(
     unsealed = {
         "schema": EXPECTATION_SCHEMA,
         "decision_ref": dict(decision_ref),
-        "operation_key": _text(operation_key, "operation_key", 192),
+        "operation_key": _operation_key(operation_key),
         "decision_kind": _text(decision_kind, "decision_kind", 128),
         "recorded_at": _text(recorded_at, "recorded_at", 40),
         "context": dict(context),
@@ -596,7 +613,7 @@ def validate_expectation(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     if item["schema"] != EXPECTATION_SCHEMA:
         raise OutcomeLearningContractError("unsupported expectation schema")
     _validate_decision_ref(item["decision_ref"])
-    _text(item["operation_key"], "operation_key", 192)
+    _operation_key(item["operation_key"])
     _text(item["decision_kind"], "decision_kind", 128)
     _text(item["recorded_at"], "recorded_at", 40)
     _validate_context(item["context"])
@@ -655,7 +672,7 @@ def build_canary_request(
 ) -> dict[str, Any]:
     doc = {
         "schema": CANARY_REQUEST_SCHEMA,
-        "operation_key": _text(operation_key, "operation_key", 192),
+        "operation_key": _operation_key(operation_key),
         "expectation_sealed_hash": _sha256_digest(
             expectation_sealed_hash, "expectation_sealed_hash"
         ),
@@ -684,7 +701,7 @@ def validate_canary_request(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     item = _closed_mapping(doc, required=_CANARY_REQUEST_REQUIRED, where="canary_request")
     if item["schema"] != CANARY_REQUEST_SCHEMA:
         raise OutcomeLearningContractError("unsupported canary request schema")
-    _text(item["operation_key"], "operation_key", 192)
+    _operation_key(item["operation_key"])
     _sha256_digest(item["expectation_sealed_hash"], "expectation_sealed_hash")
     if item["effect_class"] != "GITHUB_PR_TITLE_APPEND_RESTORE":
         raise OutcomeLearningContractError("effect_class is frozen for OL-V1")
@@ -776,8 +793,31 @@ _OUTCOME_REQUIRED = {
     "effect_calls",
     "effect_state",
     "restoration",
+    "pre_effect_observation",
+    "effect_edge",
     "recorded_at",
     "privacy_class",
+}
+#: BLOCKER E (Sol REQUEST_REPAIR, 2026-09-02): the exact pre-effect observation that
+#: caused an INVALIDATED_BEFORE_EFFECT refusal. ``None`` for every other effect
+#: state — this block exists precisely because "zero PATCHes" is not equivalent to
+#: "unchanged state", and the observation that proved that must never be discarded.
+_PRE_EFFECT_OBSERVATION_REQUIRED = {
+    "observed_head_sha",
+    "observed_title_sha256",
+    "observed_title_length",
+    "observed_at",
+}
+#: BLOCKER F (Sol REQUEST_REPAIR, 2026-09-02): which of the Blocker B/C effect-edge
+#: revalidations were actually performed for this outcome. The evaluator derives
+#: ``sealed_before_effect``/``effect_owner_revalidated`` from THIS block (all-True),
+#: never from ``preflight.head_equals_sealed_commit`` alone.
+_EFFECT_EDGE_REQUIRED = {
+    "parent_proven",
+    "request_reacquired_from_sealed_commit",
+    "request_digest_matched",
+    "selector_repeated_single_pr",
+    "bindings_verified",
 }
 _EFFECT_CALL_REQUIRED = {
     "seq",
@@ -890,11 +930,13 @@ def build_outcome(
     effect_calls: Sequence[Mapping[str, Any]],
     effect_state: str,
     restoration: Mapping[str, Any],
+    pre_effect_observation: Mapping[str, Any] | None,
+    effect_edge: Mapping[str, Any],
     recorded_at: str,
 ) -> dict[str, Any]:
     doc = {
         "schema": OUTCOME_SCHEMA,
-        "operation_key": _text(operation_key, "operation_key", 192),
+        "operation_key": _operation_key(operation_key),
         "expectation_sealed_hash": _sha256_digest(
             expectation_sealed_hash, "expectation_sealed_hash"
         ),
@@ -903,6 +945,10 @@ def build_outcome(
         "effect_calls": [dict(item) for item in effect_calls],
         "effect_state": _enum(effect_state, EFFECT_STATES, "effect_state"),
         "restoration": dict(restoration),
+        "pre_effect_observation": (
+            dict(pre_effect_observation) if pre_effect_observation is not None else None
+        ),
+        "effect_edge": dict(effect_edge),
         "recorded_at": _text(recorded_at, "recorded_at", 40),
         "privacy_class": PRIVACY_CLASS,
     }
@@ -918,7 +964,7 @@ def validate_outcome(
     item = _closed_mapping(doc, required=_OUTCOME_REQUIRED, where="outcome")
     if item["schema"] != OUTCOME_SCHEMA:
         raise OutcomeLearningContractError("unsupported outcome schema")
-    _text(item["operation_key"], "operation_key", 192)
+    _operation_key(item["operation_key"])
     _sha256_digest(item["expectation_sealed_hash"], "expectation_sealed_hash")
     validate_canary_request(request)
     if item["request_digest"] != canonical_digest(request):
@@ -1005,6 +1051,67 @@ def validate_outcome(
             f"effect_state {effect_state} may not carry effect_calls that do not satisfy "
             "the APPLIED_AND_RESTORED contract"
         )
+
+    # BLOCKER E (Sol REQUEST_REPAIR, 2026-09-02): INVALIDATED_BEFORE_EFFECT must carry
+    # the exact pre-effect observation, and restoration must be DERIVED from it — a
+    # fabricated byte_identical=True that contradicts the observation is rejected.
+    pre_effect_observation = item["pre_effect_observation"]
+    if effect_state == "INVALIDATED_BEFORE_EFFECT":
+        observation = _closed_mapping(
+            pre_effect_observation,
+            required=_PRE_EFFECT_OBSERVATION_REQUIRED,
+            where="pre_effect_observation",
+        )
+        _sha40(observation["observed_head_sha"], "pre_effect_observation.observed_head_sha")
+        _sha256_hex(
+            observation["observed_title_sha256"],
+            "pre_effect_observation.observed_title_sha256",
+        )
+        _int(
+            observation["observed_title_length"],
+            "pre_effect_observation.observed_title_length",
+            minimum=0,
+        )
+        _text(observation["observed_at"], "pre_effect_observation.observed_at", 40)
+        expected_byte_identical = (
+            observation["observed_title_sha256"] == preflight["original_title_sha256"]
+        )
+        expected_head_unchanged = (
+            observation["observed_head_sha"] == preflight["sealed_commit_sha"]
+        )
+        if restoration["byte_identical"] is not expected_byte_identical:
+            raise OutcomeLearningContractError(
+                "INVALIDATED_BEFORE_EFFECT requires restoration.byte_identical to equal "
+                "(pre_effect_observation.observed_title_sha256 == "
+                "preflight.original_title_sha256) — a fabricated claim that contradicts "
+                "the observation is refused"
+            )
+        if restoration["head_unchanged"] is not expected_head_unchanged:
+            raise OutcomeLearningContractError(
+                "INVALIDATED_BEFORE_EFFECT requires restoration.head_unchanged to equal "
+                "(pre_effect_observation.observed_head_sha == preflight.sealed_commit_sha) "
+                "— a fabricated claim that contradicts the observation is refused"
+            )
+        if restoration["poststate_title_sha256"] != observation["observed_title_sha256"]:
+            raise OutcomeLearningContractError(
+                "INVALIDATED_BEFORE_EFFECT requires restoration.poststate_title_sha256 "
+                "to equal pre_effect_observation.observed_title_sha256"
+            )
+    elif pre_effect_observation is not None:
+        raise OutcomeLearningContractError(
+            "pre_effect_observation must be None for every effect_state except "
+            "INVALIDATED_BEFORE_EFFECT"
+        )
+
+    # BLOCKER F: the effect-edge receipt is structurally validated here (booleans);
+    # the evaluator (not this validator) is what refuses to CREDIT process-quality
+    # from anything less than all-True.
+    effect_edge = _closed_mapping(
+        item["effect_edge"], required=_EFFECT_EDGE_REQUIRED, where="effect_edge"
+    )
+    for field in _EFFECT_EDGE_REQUIRED:
+        _bool(effect_edge[field], f"effect_edge.{field}")
+
     return item
 
 
@@ -1232,7 +1339,7 @@ def validate_evaluation(
         raise OutcomeLearningContractError(
             "evaluation.outcome_digest does not match the supplied outcome"
         )
-    _text(item["operation_key"], "operation_key", 192)
+    _operation_key(item["operation_key"])
     _validate_process_quality(item["process_quality"])
     _validate_forecast(item["forecast"], expectation)
     if item["realized_consequence"] not in EFFECT_STATES:
@@ -1299,7 +1406,7 @@ def validate_self_model(
         )
     else:
         _sha256_digest(item["evaluation_digest"], "evaluation_digest")
-    _text(item["operation_key"], "operation_key", 192)
+    _operation_key(item["operation_key"])
     if item["sample_size"] != 1:
         raise OutcomeLearningContractError("self_model.sample_size must be exactly 1")
     if item["sample_state"] != "INSUFFICIENT_SAMPLE":
@@ -1388,7 +1495,7 @@ def validate_agentos_projection(
         )
     else:
         _sha256_digest(item["evaluation_digest"], "evaluation_digest")
-    _text(item["operation_key"], "operation_key", 192)
+    _operation_key(item["operation_key"])
     _false(item["automatic_writes"], "automatic_writes")
     _false(item["grants_authority"], "grants_authority")
     candidates = item["candidates"]

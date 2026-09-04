@@ -25,6 +25,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -43,7 +44,13 @@ from control_plane.outcome_learning_contracts import (  # noqa: E402
     build_outcome,
     canonical_digest,
     scan_public_safe_text,
+    validate_agentos_projection,
+    validate_canary_request,
+    validate_evaluation,
+    validate_expectation,
+    validate_outcome,
     validate_preflight,
+    validate_self_model,
 )
 from control_plane.outcome_learning_evaluator import (  # noqa: E402
     build_agentos_projection,
@@ -65,6 +72,7 @@ _AGENT_OS_SOURCE_REF = "AGENT_OS:ceo_brief"
 _CHAIRMAN_REF = "CHAIRMAN_DIRECTIVE:completion-drive-2026-09-02"
 _OPT_CANARY = "OPT-OLV1-PR-TITLE-CANARY"
 _OPT_HOLD = "OPT-OLV1-PORTFOLIO-HOLD"
+_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 class OutcomeLearningCliError(RuntimeError):
@@ -492,11 +500,146 @@ def _olv1_options(operation_key: str, parent_head: str) -> list[dict[str, Any]]:
     return [canary, hold]
 
 
-def _acquire_mastermind_revision(runner: Runner, mastermind_root: str) -> tuple[str, str]:
-    """Return (sha, branch) of the mastermind checkout HEAD."""
-    sha = _git(runner, ["rev-parse", "HEAD"], cwd=mastermind_root)
-    branch = _git(runner, ["rev-parse", "--abbrev-ref", "HEAD"], cwd=mastermind_root)
-    return sha, branch
+# Sol REQUEST_REPAIR (BLOCKER A, 2026-09-02): canonical identity is resolved against
+# these exact GitHub remotes — never a local checkout's own branch name or working
+# tree, which a dirty/detached/mutated local checkout could otherwise self-attest.
+_CANONICAL_MASTERMIND_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
+_CANONICAL_MASTERMIND_REPO = "mastermindx-market-intelligence/Mastermind"
+_CANONICAL_MACRO_URL = "https://github.com/mastermindx-market-intelligence/macro.git"
+# Sparse-worktree omissions this repo's own CLAUDE.md documents as lawful (never
+# "dirty"): a sparse worktree that never checked out these top-level dirs is not an
+# uncommitted mutation of them.
+_MACRO_SPARSE_OMITTED_PREFIXES = ("data/", "site/", "mockups/", "verify_shots/")
+
+
+def _ls_remote_sha(runner: Runner, url: str, ref: str) -> str:
+    """Resolve ``ref`` (e.g. ``refs/heads/master``) on the canonical remote ``url`` —
+    never the local checkout's own idea of what that ref points to."""
+    result = runner.run(["git", "ls-remote", url, ref])
+    if result.returncode != 0:
+        raise OutcomeLearningCliError(
+            f"git ls-remote {url} {ref} failed: {result.stderr.strip()}"
+        )
+    line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+    sha = line.split()[0] if line.split() else ""
+    if _SHA40_RE.fullmatch(sha) is None:
+        raise OutcomeLearningCliError(
+            f"git ls-remote {url} {ref} returned no resolvable 40-hex sha (got {line!r})"
+        )
+    return sha
+
+
+def _acquire_canonical_strategic_state(
+    runner: Runner, canonical_mastermind_sha: str
+) -> tuple[str, dict[str, Any]]:
+    """Fetch ``config/strategic_state.yml`` — its exact committed BLOB sha and
+    content — at the canonical Mastermind commit via the GitHub Contents API, never
+    from any local working tree. Returns ``(blob_sha, strategic_state_summary)``.
+
+    Narrowly-justified import (six-path ceiling, documented): reuses the
+    already-protected :mod:`control_plane.strategic_state` parser/validator instead
+    of reimplementing YAML strategic-state validation here. The projection into the
+    ``mastermind.strategic_state.v1`` boot-packet summary shape mirrors
+    ``control_plane.ceo_boot_packet.load_strategic_summary`` (a five-line, obviously
+    equivalent transcription — not a second competing implementation)."""
+    result = runner.run(
+        [
+            "gh",
+            "api",
+            f"repos/{_CANONICAL_MASTERMIND_REPO}/contents/config/strategic_state.yml"
+            f"?ref={canonical_mastermind_sha}",
+        ]
+    )
+    if result.returncode != 0:
+        raise OutcomeLearningCliError(
+            "gh api contents config/strategic_state.yml@"
+            f"{canonical_mastermind_sha} failed: {result.stderr.strip()}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OutcomeLearningCliError(
+            "canonical strategic_state.yml contents payload is not valid JSON"
+        ) from exc
+    blob_sha = payload.get("sha")
+    encoded_content = payload.get("content")
+    encoding = payload.get("encoding")
+    if (
+        not isinstance(blob_sha, str)
+        or _SHA40_RE.fullmatch(blob_sha) is None
+        or encoding != "base64"
+        or not isinstance(encoded_content, str)
+    ):
+        raise OutcomeLearningCliError(
+            "canonical strategic_state.yml contents payload is malformed (missing "
+            "blob sha or base64 content)"
+        )
+
+    import base64
+    import tempfile
+
+    from control_plane.strategic_state import StrategicStateError, load_strategic_state
+
+    try:
+        yaml_bytes = base64.b64decode(encoded_content, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:  # noqa: BLE001
+        raise OutcomeLearningCliError(
+            "canonical strategic_state.yml content is not valid base64"
+        ) from exc
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".yml")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(yaml_bytes)
+        state = load_strategic_state(tmp_path)
+    except StrategicStateError as exc:
+        raise OutcomeLearningCliError(
+            f"canonical strategic_state.yml failed validation: {exc}"
+        ) from exc
+    finally:
+        os.unlink(tmp_path)
+
+    summary = {
+        "schema": state["schema"],
+        "company_phase": state["company_phase"],
+        "north_star": list(state["north_star"]),
+        "p0": [
+            {
+                "id": obj["id"],
+                "department": obj["department"],
+                "objective": " ".join(str(obj["objective"]).split()),
+                "status": obj["status"],
+            }
+            for obj in state["p0"]
+        ],
+        "constraints": {name: str(level) for name, level in state["constraints"].items()},
+    }
+    return blob_sha, summary
+
+
+def _macro_checkout_matches_canonical_and_is_clean(
+    runner: Runner, macro_root: str, canonical_macro_sha: str
+) -> tuple[str, bool, list[str]]:
+    """Return ``(local_sha, is_clean, dirty_lines)`` for the LOCAL macro checkout used
+    for this compose run. ``is_clean`` ignores porcelain lines under a known
+    sparse-worktree omission prefix (this repo's own CLAUDE.md: ``data/``, ``site/``,
+    ``mockups/``, ``verify_shots/``) — a sparse tree that never checked those out is
+    not an uncommitted mutation of them."""
+    local_sha = _git(runner, ["rev-parse", "HEAD"], cwd=macro_root)
+    result = runner.run(["git", "status", "--porcelain"], cwd=macro_root)
+    if result.returncode != 0:
+        raise OutcomeLearningCliError(
+            f"git status --porcelain failed in the macro checkout: {result.stderr.strip()}"
+        )
+    dirty_lines = []
+    for raw_line in result.stdout.splitlines():
+        if not raw_line.strip():
+            continue
+        path = raw_line[3:] if len(raw_line) > 3 else raw_line.strip()
+        if any(path.startswith(prefix) for prefix in _MACRO_SPARSE_OMITTED_PREFIXES):
+            continue
+        dirty_lines.append(raw_line)
+    return local_sha, not dirty_lines, dirty_lines
 
 
 def _acquire_boot_packet(runner: Runner, mastermind_root: str, macro_root: str) -> dict[str, Any]:
@@ -519,10 +662,6 @@ def _acquire_boot_packet(runner: Runner, mastermind_root: str, macro_root: str) 
             f"ceo_boot_packet.py failed: {result.stderr.strip()}"
         )
     return json.loads(result.stdout)
-
-
-def _acquire_macro_revision(runner: Runner, macro_root: str) -> str:
-    return _git(runner, ["rev-parse", "HEAD"], cwd=macro_root)
 
 
 _REDACTED_LOCAL_PATH = "REDACTED_LOCAL_PATH"
@@ -604,14 +743,66 @@ def _acquire_agentos_records_digest(
 
 
 def cmd_compose(args: argparse.Namespace, *, runner: Runner | None = None) -> int:
+    """Sol REQUEST_REPAIR (BLOCKER A, 2026-09-02): every identity claim this function
+    embeds is now acquired from a source it cannot itself author. Mastermind's
+    revision and its strategic-state blob come from the canonical GitHub remote (via
+    ``git ls-remote`` + the Contents API), never local ``git rev-parse``/working-tree
+    bytes. Macro's identity is proven by requiring the LOCAL macro checkout used for
+    the boot-packet/brief run to exactly equal, and be clean at, the canonical
+    ``main`` ls-remote sha — a dirty or divergent local checkout can no longer
+    self-attest CURRENT. Any acquisition failure (unreachable remote, missing blob,
+    checkout mismatch, dirty tree) is a typed, named refusal before any bundle is
+    even constructed — see the ``BLOCKER SOURCE_IDENTITY_UNVERIFIED`` handling below.
+    """
     runner = runner or SubprocessRunner()
-    mastermind_sha, mastermind_branch = _acquire_mastermind_revision(
-        runner, args.mastermind_root
-    )
+
+    try:
+        mastermind_sha = _ls_remote_sha(
+            runner, _CANONICAL_MASTERMIND_URL, "refs/heads/master"
+        )
+        strategic_blob_sha, canonical_strategic_state = _acquire_canonical_strategic_state(
+            runner, mastermind_sha
+        )
+        macro_canonical_sha = _ls_remote_sha(runner, _CANONICAL_MACRO_URL, "refs/heads/main")
+        macro_local_sha, macro_clean, macro_dirty_lines = (
+            _macro_checkout_matches_canonical_and_is_clean(
+                runner, args.macro_root, macro_canonical_sha
+            )
+        )
+        if macro_local_sha != macro_canonical_sha:
+            raise OutcomeLearningCliError(
+                "local macro checkout HEAD "
+                f"{macro_local_sha} does not match canonical macro main "
+                f"{macro_canonical_sha}"
+            )
+        if not macro_clean:
+            raise OutcomeLearningCliError(
+                "local macro checkout is not clean (git status --porcelain, "
+                f"excluding known sparse omissions): {macro_dirty_lines[:5]}"
+            )
+    except OutcomeLearningCliError as exc:
+        print(f"BLOCKER SOURCE_IDENTITY_UNVERIFIED {exc}")
+        return 5
+
     boot = _redact_boot_packet(
         _acquire_boot_packet(runner, args.mastermind_root, args.macro_root)
     )
-    macro_sha = _acquire_macro_revision(runner, args.macro_root)
+    # Cross-check: the boot packet's own (independently git-derived) macro sha must
+    # agree with the identity we just proved — a boot packet pointed at a different
+    # macro checkout than --macro-root would otherwise silently smuggle in an
+    # unverified Macro state.
+    boot_macro_sha = ((boot.get("macro") or {}).get("sha"))
+    if boot_macro_sha != macro_local_sha:
+        print(
+            "BLOCKER SOURCE_IDENTITY_UNVERIFIED boot_packet.macro.sha "
+            f"{boot_macro_sha!r} does not match the independently-verified local "
+            f"macro checkout {macro_local_sha!r}"
+        )
+        return 5
+    # The canonical, GitHub-content-API-fetched strategic state REPLACES whatever the
+    # boot packet's own local-working-tree read produced — the whole point of this
+    # repair is that only the canonical read may promote to CURRENT.
+    boot = {**boot, "strategic_state": canonical_strategic_state}
 
     # as_of (principal correction, addendum A, 2026-09-02): a caller-fixed --as-of
     # captured BEFORE acquisition can end up earlier than the receipts' own
@@ -645,19 +836,29 @@ def cmd_compose(args: argparse.Namespace, *, runner: Runner | None = None) -> in
     brief = boot.get("brief") or {}
     strategic_payload_digest = canonical_digest(strategic_state)
     agentos_payload_digest = canonical_digest(brief) if brief else "UNRESOLVED"
-    mastermind_state = "CURRENT" if mastermind_branch == "master" else "UNKNOWN"
+
+    # Sol REQUEST_REPAIR: the two attestations are no longer the SAME copied boolean.
+    # Mastermind's state is CURRENT because we are already past every acquisition
+    # check above (ls-remote + Contents API both succeeded and validated). Agent OS's
+    # state is CURRENT only when the macro identity was independently proven AND no
+    # unverifiable operator override was supplied for its records digest — an
+    # override can never itself participate in a CURRENT claim (BLOCKER A, item 3).
+    mastermind_state = "CURRENT"
+    agentos_state = "UNKNOWN" if args.agentos_records_digest is not None else "CURRENT"
 
     mastermind_revision_attestation = {
         "revision": mastermind_sha,
         "state": mastermind_state,
         "load_bearing": True,
         "observed_at": as_of,
-        "source_blob_sha": mastermind_sha,
+        # The real committed BLOB sha for config/strategic_state.yml — never the
+        # commit sha (BLOCKER A's named defect).
+        "source_blob_sha": strategic_blob_sha,
         "payload_digest": strategic_payload_digest,
     }
     agentos_revision_attestation = {
-        "revision": macro_sha,
-        "state": mastermind_state,
+        "revision": macro_local_sha,
+        "state": agentos_state,
         "load_bearing": True,
         "observed_at": as_of,
         "source_records_digest": agentos_records_digest,
@@ -872,6 +1073,40 @@ def cmd_seal(args: argparse.Namespace) -> int:
             f"{packet['recommended_option_id']})"
         )
 
+    # Sol REQUEST_REPAIR (BLOCKER B, 2026-09-02): operation identity and ancestry are
+    # DERIVED from the adjudicated A1 option, never freely supplied — a caller could
+    # otherwise attach this packet's digest to an unrelated operation/parent/carrier.
+    # --operation-key/--parent-head become optional cross-checks: if supplied, they
+    # must exactly equal what the option already says, or sealing refuses outright.
+    chosen_option = next(item for item in options if item["option_id"] == chosen_action)
+    operation_key = chosen_option["operation_key"]
+    expected_parent_head = chosen_option["expected_head_sha"]
+    option_repositories = chosen_option["repositories"]
+    if len(option_repositories) != 1:
+        raise OutcomeLearningCliError(
+            "refusing to seal: the adjudicated option does not name exactly one "
+            f"repository ({option_repositories!r})"
+        )
+    request_repository = option_repositories[0]
+    carrier_ref = chosen_option["carrier_ref"] or ""
+    carrier_branch_prefix = "github:Mastermind:branch:"
+    if not carrier_ref.startswith(carrier_branch_prefix):
+        raise OutcomeLearningCliError(
+            f"refusing to seal: cannot derive a branch from carrier_ref {carrier_ref!r}"
+        )
+    request_branch = carrier_ref[len(carrier_branch_prefix):]
+
+    if args.operation_key is not None and args.operation_key != operation_key:
+        raise OutcomeLearningCliError(
+            f"--operation-key {args.operation_key!r} does not match the adjudicated "
+            f"option's operation_key {operation_key!r} — refusing"
+        )
+    if args.parent_head is not None and args.parent_head != expected_parent_head:
+        raise OutcomeLearningCliError(
+            f"--parent-head {args.parent_head!r} does not match the adjudicated "
+            f"option's expected_head_sha {expected_parent_head!r} — refusing"
+        )
+
     option_set_digest = canonical_digest(options)
     source_packet_digests = [
         f"sha256:{composition['source_bundle_digest']}",
@@ -886,7 +1121,7 @@ def cmd_seal(args: argparse.Namespace) -> int:
             "type": "a1_decision_packet",
             "id": canonical_digest(packet),
         },
-        operation_key=args.operation_key,
+        operation_key=operation_key,
         decision_kind="organizational_learning_episode",
         recorded_at=args.recorded_at,
         context={
@@ -900,7 +1135,7 @@ def cmd_seal(args: argparse.Namespace) -> int:
             "risk": "routine",
             "ambiguity": "low",
             "program": "organizational-learning",
-            "repository": "mastermindx-market-intelligence/Mastermind",
+            "repository": request_repository,
             "source_cutoff": bundle["as_of"],
             "applicability_cohort": (
                 "supervised reversible GitHub metadata canary, repository-owner PR, "
@@ -1058,7 +1293,7 @@ def cmd_seal(args: argparse.Namespace) -> int:
             "final_option_set_digest": option_set_digest,
             "final_decision_digest": canonical_digest(
                 {
-                    "operation_key": args.operation_key,
+                    "operation_key": operation_key,
                     "recommended_option_id": packet["recommended_option_id"],
                 }
             ),
@@ -1093,11 +1328,11 @@ def cmd_seal(args: argparse.Namespace) -> int:
     )
 
     request = build_canary_request(
-        operation_key=args.operation_key,
+        operation_key=operation_key,
         expectation_sealed_hash=expectation["sealed_hash"],
-        repository="mastermindx-market-intelligence/Mastermind",
-        branch="sol/outcome-learning-v1-complete-vertical-20260902",
-        expected_parent_head=args.parent_head,
+        repository=request_repository,
+        branch=request_branch,
+        expected_parent_head=expected_parent_head,
         recorded_at=args.recorded_at,
     )
 
@@ -1169,20 +1404,12 @@ def cmd_preflight(args: argparse.Namespace, *, runner: Runner | None = None, tra
             "sealed commit)"
         )
 
-    status, prs = transport.get(
-        f"repos/{args.repo}/pulls?head={args.repo.split('/')[0]}:{args.branch}&state=open"
-    )
-    if not isinstance(prs, list) or len(prs) != 1:
-        raise OutcomeLearningCliError(
-            f"expected exactly one open PR for branch {args.branch!r}, found "
-            f"{len(prs) if isinstance(prs, list) else 'a non-list response'}"
-        )
-    pr_summary = prs[0]
-    _, pr = transport.get(f"repos/{args.repo}/pulls/{pr_summary['number']}")
-
-    # Two independent git calls PER artifact (blob-id resolution, then a separate
-    # content read) — see _resolve_committed_blob — proving the supplied file's
-    # canonical content matches what the sealed commit actually contains.
+    # Sol REQUEST_REPAIR (BLOCKER B, 2026-09-02): every local-identity check below
+    # runs BEFORE the first transport call. Two independent git calls PER artifact
+    # (blob-id resolution, then a separate content read) — see
+    # _committed_blob_content_sha256 — prove the supplied file's canonical content
+    # matches what the sealed commit actually contains; only THEN is the sealed
+    # request's own content trusted for the repo/branch/ancestry cross-checks.
     expectation_blob_sha, expectation_content_sha256 = _committed_blob_content_sha256(
         runner,
         args.mastermind_root,
@@ -1199,6 +1426,39 @@ def cmd_preflight(args: argparse.Namespace, *, runner: Runner | None = None, tra
         args.request,
         where="request",
     )
+    request_obj = json.loads(Path(args.request).read_text(encoding="utf-8"))
+
+    if args.repo != request_obj["repository"]:
+        raise OutcomeLearningCliError(
+            f"--repo {args.repo!r} does not match the sealed request's repository "
+            f"{request_obj['repository']!r} — refusing before any transport call"
+        )
+    if args.branch != request_obj["branch"]:
+        raise OutcomeLearningCliError(
+            f"--branch {args.branch!r} does not match the sealed request's branch "
+            f"{request_obj['branch']!r} — refusing before any transport call"
+        )
+
+    sealed_parent = _git(
+        runner, ["rev-parse", f"{args.sealed_commit}^"], cwd=args.mastermind_root
+    )
+    if sealed_parent != request_obj["expected_parent_head"]:
+        raise OutcomeLearningCliError(
+            f"sealed_commit {args.sealed_commit}'s parent {sealed_parent} does not "
+            "equal request.expected_parent_head "
+            f"{request_obj['expected_parent_head']!r} — refusing before any transport call"
+        )
+
+    status, prs = transport.get(
+        f"repos/{args.repo}/pulls?head={args.repo.split('/')[0]}:{args.branch}&state=open"
+    )
+    if not isinstance(prs, list) or len(prs) != 1:
+        raise OutcomeLearningCliError(
+            f"expected exactly one open PR for branch {args.branch!r}, found "
+            f"{len(prs) if isinstance(prs, list) else 'a non-list response'}"
+        )
+    pr_summary = prs[0]
+    _, pr = transport.get(f"repos/{args.repo}/pulls/{pr_summary['number']}")
 
     original_title = pr["title"]
     original_title_sha256 = _sha256_hex_text(original_title)
@@ -1274,32 +1534,107 @@ def _reconcile(
         return {"attempted": True, "observed_title_sha256": None, "observed_head_sha": None}
 
 
-def cmd_canary(args: argparse.Namespace, *, transport: GhTransport | None = None) -> int:
+#: BLOCKER D journal state machine (CLI-internal artifact — not an OL-V1 contract
+#: schema): PREPARED is the atomic reservation; APPLY_SENT/APPLIED_READBACK/
+#: RESTORE_SENT are the only non-terminal in-flight states; the three terminal
+#: states are RESTORED / EFFECT_UNKNOWN / INVALIDATED_BEFORE_EFFECT. Any other value
+#: on disk — including a crash mid-sequence — is fail-closed non-terminal.
+_JOURNAL_TERMINAL_STATES = frozenset(
+    {"RESTORED", "EFFECT_UNKNOWN", "INVALIDATED_BEFORE_EFFECT"}
+)
+
+
+def _reserve_journal(journal_path: Path, record: dict[str, Any]) -> None:
+    """Atomically reserve the single-shot journal (BLOCKER D). ``open(..., 'x')``
+    (exclusive create) is the ENTIRE single-shot guard: whichever of two racing
+    invocations wins this call proceeds, and the other sees ``FileExistsError``
+    unconditionally — regardless of what state a pre-existing reservation is in."""
+    journal_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(journal_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError as exc:
+        raise OutcomeLearningCliError(
+            f"{journal_path} already exists — OL-V1 canary is single-shot per "
+            "operation_key + expectation_sealed_hash within one --episode-dir "
+            "(BLOCKER D: ANY pre-existing reservation, whatever its state, refuses; "
+            "a different --episode-dir can only be stopped operationally by the "
+            "supervised single-operator law — see the runbook)"
+        ) from exc
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
+
+
+def _advance_journal(journal_path: Path, record: dict[str, Any]) -> None:
+    """Atomically advance a reservation already on disk: write a temp file in the
+    SAME directory, then ``os.replace`` over the reservation — a concurrent reader
+    (or a crash) never observes a partially-written state."""
+    tmp_path = journal_path.with_name(journal_path.name + f".tmp{os.getpid()}")
+    tmp_path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(str(tmp_path), str(journal_path))
+
+
+def cmd_canary(
+    args: argparse.Namespace, *, runner: Runner | None = None, transport: GhTransport | None = None
+) -> int:
     """Apply-then-restore, no retry, ever.
 
-    The journal location is DERIVED from ``--episode-dir`` plus the canary request's
-    own ``operation_key``/``expectation_sealed_hash`` (BLOCKER 2) — a caller can no
-    longer bypass the single-shot guard within one episode-dir merely by naming a
-    different output path. A pre-effect freshness gate (MAJOR 5) refuses, with ZERO
-    PATCHes issued, if the live PR has drifted from what preflight observed.
-
-    Any exception mid-sequence gets EXACTLY one read-only reconciliation GET (best
-    effort) and the episode reports EFFECT_UNKNOWN. If the APPLY already completed
-    before the RESTORE raised, the completed apply call is journaled honestly
-    (BLOCKER 1) — the poststate `cmd_outcome` will report comes from what the
-    reconciliation GET actually observed, never from an assumption that nothing
-    changed.
+    Sol REQUEST_REPAIR (BLOCKERS C + D, 2026-09-02): the canary request is REACQUIRED
+    from its committed git blob (never trusted from the local ``--request`` file
+    beyond locating that blob) and independently re-validated before anything else
+    happens; the owner's exact branch selector is re-run to reprove there is still
+    exactly one open PR whose number matches preflight, before the pre-effect
+    freshness read. The derived journal is reserved via an atomic exclusive-create
+    BEFORE any transport call at all — read or write — and advanced through an
+    explicit state machine (PREPARED -> APPLY_SENT -> APPLIED_READBACK ->
+    RESTORE_SENT -> a terminal state) so a crash after APPLY leaves a non-terminal
+    reservation on disk that the next invocation refuses outright rather than
+    replays. Any exception mid-sequence gets EXACTLY one read-only reconciliation GET
+    (best effort) and the episode reports EFFECT_UNKNOWN; a completed apply call is
+    always journaled honestly (BLOCKER 1's poststate law).
     """
     transport = transport or GhCliTransport()
+    runner = runner or SubprocessRunner()
     episode_dir = _refuse_inside_repo(args.episode_dir, where="canary --episode-dir")
 
     preflight = _read_json(args.preflight)
-    request = _read_json(args.request)
     # Sol REQUEST_REPAIR: validate_preflight (including its seal_provenance ==
     # "COMMITTED_BLOBS_VERIFIED" check) runs BEFORE any transport call — a tampered
     # or absent seal_provenance raises here, so the episode never issues a single GET
     # or PATCH against a preflight this CLI cannot prove is committed-seal-verified.
     validate_preflight(preflight)
+
+    # BLOCKER C: reacquire the canary request from its committed blob — a git-only
+    # read, zero transport — and independently re-validate it. The local --request
+    # file is never trusted beyond having pointed us at this preflight/blob in the
+    # first place; every field used from here on is the REACQUIRED document.
+    cat_file = runner.run(
+        ["git", "cat-file", "-p", preflight["request_blob_sha"]], cwd=args.mastermind_root
+    )
+    if cat_file.returncode != 0:
+        raise OutcomeLearningCliError(
+            f"could not reacquire the committed request blob {preflight['request_blob_sha']}: "
+            f"{cat_file.stderr.strip()}"
+        )
+    try:
+        request = json.loads(cat_file.stdout)
+    except json.JSONDecodeError as exc:
+        raise OutcomeLearningCliError(
+            "reacquired committed request blob is not valid JSON"
+        ) from exc
+    validate_canary_request(request)
+    reacquired_digest = canonical_digest(request).removeprefix("sha256:")
+    if reacquired_digest != preflight["request_content_sha256"]:
+        raise OutcomeLearningCliError(
+            "reacquired committed request content does not match "
+            f"preflight.request_content_sha256 (reacquired={reacquired_digest}, "
+            f"preflight={preflight['request_content_sha256']})"
+        )
+    if request["repository"] != preflight["repository"]:
+        raise OutcomeLearningCliError(
+            f"reacquired request.repository {request['repository']!r} does not match "
+            f"preflight.repository {preflight['repository']!r}"
+        )
+
     if preflight["head_equals_sealed_commit"] is not True:
         raise OutcomeLearningCliError(
             "refusing to canary: preflight.head_equals_sealed_commit is not True"
@@ -1310,54 +1645,139 @@ def cmd_canary(args: argparse.Namespace, *, transport: GhTransport | None = None
         f"{request['expectation_sealed_hash'][7:19]}.json"
     )
     journal_path = episode_dir / journal_name
-    if journal_path.exists():
-        raise OutcomeLearningCliError(
-            f"{journal_path} already exists — OL-V1 canary is single-shot per "
-            "operation_key + expectation_sealed_hash within one --episode-dir "
-            "(a different --episode-dir can only be stopped operationally by the "
-            "supervised single-operator law — see the runbook)"
-        )
+    bound_identity = {
+        "repository": request["repository"],
+        "branch": request["branch"],
+        "operation_key": request["operation_key"],
+        "expectation_sealed_hash": request["expectation_sealed_hash"],
+        "sealed_commit_sha": preflight["sealed_commit_sha"],
+        "expected_parent_head": request["expected_parent_head"],
+        "preflight_pr_number": preflight["pr_number"],
+        "canary_token": request["canary_token"],
+        "request_digest": reacquired_digest,
+    }
 
-    def _write_journal(journal: dict[str, Any]) -> None:
-        journal_path.parent.mkdir(parents=True, exist_ok=True)
-        journal_path.write_text(
-            json.dumps(journal, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+    # BLOCKER D: the atomic reservation — before ANY transport call, read or write.
+    _reserve_journal(
+        journal_path,
+        {"state": "PREPARED", "bound_identity": bound_identity, "recorded_at": args.recorded_at},
+    )
 
     endpoint = f"repos/{request['repository']}/pulls/{preflight['pr_number']}"
     original_sha = preflight["original_title_sha256"]
     sealed_head = preflight["sealed_commit_sha"]
 
-    # Pre-effect freshness gate (MAJOR 5): read the live PR once, before issuing any
-    # PATCH, and refuse outright — zero PATCHes — if it has drifted from preflight.
-    _, current = transport.get(endpoint)
-    live_head = current["head"]["sha"]
-    live_title_sha = _sha256_hex_text(current["title"])
-    if live_head != sealed_head or live_title_sha != original_sha:
-        _write_journal(
-            {"effect_calls": [], "effect_state": "INVALIDATED_BEFORE_EFFECT", "reconciliation": None}
+    # BLOCKER C: re-run the EXACT owner branch selector (never merely re-GET the
+    # already-known PR number) — reproving there is still exactly one open PR for
+    # this branch AND that its number agrees with preflight, before trusting
+    # anything else the owner reports.
+    _, prs = transport.get(
+        f"repos/{request['repository']}/pulls?head="
+        f"{request['repository'].split('/')[0]}:{request['branch']}&state=open"
+    )
+    selector_ok = (
+        isinstance(prs, list)
+        and len(prs) == 1
+        and prs[0].get("number") == preflight["pr_number"]
+    )
+    if not selector_ok:
+        _advance_journal(
+            journal_path,
+            {
+                "state": "INVALIDATED_BEFORE_EFFECT",
+                "bound_identity": bound_identity,
+                "effect_calls": [],
+                "reconciliation": None,
+                "pre_effect_observation": None,
+                "recorded_at": args.recorded_at,
+            },
         )
         print(
-            "effect_state=INVALIDATED_BEFORE_EFFECT (drift since preflight: "
-            f"live_head={live_head} live_title_sha256={live_title_sha})"
+            "effect_state=INVALIDATED_BEFORE_EFFECT (owner branch selector no longer "
+            f"matches preflight: {prs!r})"
         )
         return 6
 
-    original_title = current["title"]
+    # Pre-effect freshness gate (MAJOR 5 + BLOCKER E): read the live PR once, before
+    # issuing any PATCH, and refuse outright — zero PATCHes — if it has drifted from
+    # preflight. The exact observation is journaled honestly either way (BLOCKER E).
+    _, current = transport.get(endpoint)
+    live_head = current["head"]["sha"]
+    live_title = current["title"]
+    live_title_sha = _sha256_hex_text(live_title)
+    pre_effect_observation = {
+        "observed_head_sha": live_head,
+        "observed_title_sha256": live_title_sha,
+        "observed_title_length": len(live_title),
+        "observed_at": args.recorded_at,
+    }
+    if live_head != sealed_head or live_title_sha != original_sha:
+        _advance_journal(
+            journal_path,
+            {
+                "state": "INVALIDATED_BEFORE_EFFECT",
+                "bound_identity": bound_identity,
+                "effect_calls": [],
+                "reconciliation": None,
+                "pre_effect_observation": pre_effect_observation,
+                "recorded_at": args.recorded_at,
+            },
+        )
+        print(f"effect_state=INVALIDATED_BEFORE_EFFECT (drift: {pre_effect_observation})")
+        return 6
+
+    original_title = live_title
     applied_title = original_title + " " + request["canary_token"]
     applied_sha = _sha256_hex_text(applied_title)
 
+    _advance_journal(
+        journal_path,
+        {
+            "state": "APPLY_SENT",
+            "bound_identity": bound_identity,
+            "pre_effect_observation": pre_effect_observation,
+            "recorded_at": args.recorded_at,
+        },
+    )
     try:
         status1, applied_doc = transport.patch(endpoint, {"title": applied_title})
         call1 = _make_call(1, "TITLE_APPLY", endpoint, applied_sha, status1, applied_doc, args.recorded_at)
     except Exception:  # noqa: BLE001 - the apply may have crossed the effect boundary
         reconciliation = _reconcile(transport, endpoint)
-        _write_journal(
-            {"effect_calls": [], "effect_state": "EFFECT_UNKNOWN", "reconciliation": reconciliation}
+        _advance_journal(
+            journal_path,
+            {
+                "state": "EFFECT_UNKNOWN",
+                "bound_identity": bound_identity,
+                "effect_calls": [],
+                "reconciliation": reconciliation,
+                "pre_effect_observation": pre_effect_observation,
+                "recorded_at": args.recorded_at,
+            },
         )
         print("effect_state=EFFECT_UNKNOWN (apply raised)")
         return 3
 
+    _advance_journal(
+        journal_path,
+        {
+            "state": "APPLIED_READBACK",
+            "bound_identity": bound_identity,
+            "effect_calls": [call1],
+            "pre_effect_observation": pre_effect_observation,
+            "recorded_at": args.recorded_at,
+        },
+    )
+    _advance_journal(
+        journal_path,
+        {
+            "state": "RESTORE_SENT",
+            "bound_identity": bound_identity,
+            "effect_calls": [call1],
+            "pre_effect_observation": pre_effect_observation,
+            "recorded_at": args.recorded_at,
+        },
+    )
     try:
         # MAJOR 6: the restore payload's digest is computed from the title text
         # ACTUALLY SENT in this PATCH, never fetched indirectly from preflight.
@@ -1373,7 +1793,7 @@ def cmd_canary(args: argparse.Namespace, *, transport: GhTransport | None = None
             and call2["readback"]["head_sha"] == sealed_head
         )
         effect_calls = [call1, call2]
-        effect_state = "APPLIED_AND_RESTORED" if clean else "EFFECT_UNKNOWN"
+        state = "RESTORED" if clean else "EFFECT_UNKNOWN"
         reconciliation = None
     except Exception:  # noqa: BLE001 - the restore may have crossed the effect boundary
         # BLOCKER 1: the apply DID complete — call1 is real evidence and is journaled,
@@ -1382,12 +1802,20 @@ def cmd_canary(args: argparse.Namespace, *, transport: GhTransport | None = None
         # changed" over a PR that may still carry the mutated, unrestored title.
         reconciliation = _reconcile(transport, endpoint)
         effect_calls = [call1]
-        effect_state = "EFFECT_UNKNOWN"
+        state = "EFFECT_UNKNOWN"
 
-    _write_journal(
-        {"effect_calls": effect_calls, "effect_state": effect_state, "reconciliation": reconciliation}
+    _advance_journal(
+        journal_path,
+        {
+            "state": state,
+            "bound_identity": bound_identity,
+            "effect_calls": effect_calls,
+            "reconciliation": reconciliation,
+            "pre_effect_observation": pre_effect_observation,
+            "recorded_at": args.recorded_at,
+        },
     )
-    if effect_state == "EFFECT_UNKNOWN":
+    if state == "EFFECT_UNKNOWN":
         print("effect_state=EFFECT_UNKNOWN")
         return 3
     print("effect_state=APPLIED_AND_RESTORED")
@@ -1397,27 +1825,95 @@ def cmd_canary(args: argparse.Namespace, *, transport: GhTransport | None = None
 # --------------------------------------------------------------------------- outcome
 
 
+#: Journal state-machine terminal state -> outcome.effect_state (contracts) mapping.
+_JOURNAL_STATE_TO_EFFECT_STATE = {
+    "RESTORED": "APPLIED_AND_RESTORED",
+    "EFFECT_UNKNOWN": "EFFECT_UNKNOWN",
+    "INVALIDATED_BEFORE_EFFECT": "INVALIDATED_BEFORE_EFFECT",
+}
+
+
+def _derive_effect_edge(journal: Mapping[str, Any]) -> dict[str, bool]:
+    """BLOCKER F: which Blocker B/C revalidations actually happened for this
+    episode, honestly derived from the journal's own recorded control flow —
+    ``cmd_canary`` raises BEFORE ever reserving a journal if request reacquisition,
+    its digest check, or the repository cross-check fail, so any journal that exists
+    at all proves those three; the owner-selector re-run is the first step that can
+    leave a journal in INVALIDATED_BEFORE_EFFECT with no pre-effect observation."""
+    state = journal["state"]
+    selector_repeated_single_pr = not (
+        state == "INVALIDATED_BEFORE_EFFECT" and journal.get("pre_effect_observation") is None
+    )
+    parent_proven = True
+    request_reacquired_from_sealed_commit = True
+    request_digest_matched = True
+    bindings_verified = (
+        parent_proven
+        and request_reacquired_from_sealed_commit
+        and request_digest_matched
+        and selector_repeated_single_pr
+    )
+    return {
+        "parent_proven": parent_proven,
+        "request_reacquired_from_sealed_commit": request_reacquired_from_sealed_commit,
+        "request_digest_matched": request_digest_matched,
+        "selector_repeated_single_pr": selector_repeated_single_pr,
+        "bindings_verified": bindings_verified,
+    }
+
+
 def cmd_outcome(args: argparse.Namespace) -> int:
     """Restoration is derived in strict priority order, honest evidence first
     (BLOCKER 1): a reconciliation GET that actually observed the live title is ground
     truth over anything else, including the calls' own readbacks — the reconciliation
     runs precisely because the calls could not be trusted. Only when there is truly no
-    observation at all does poststate become the literal "UNOBSERVED"."""
+    observation at all does poststate become the literal "UNOBSERVED".
+
+    Sol REQUEST_REPAIR (BLOCKER D): a journal whose ``state`` is not one of the three
+    terminal states (a crash mid-sequence) is refused outright — never replayed,
+    never silently interpreted as any particular outcome.
+    """
     journal = _read_json(args.journal)
     preflight = _read_json(args.preflight)
     expectation = _read_json(args.expectation)
     request = _read_json(args.request)
 
-    effect_calls = journal["effect_calls"]
-    effect_state = journal["effect_state"]
+    journal_state = journal["state"]
+    if journal_state not in _JOURNAL_TERMINAL_STATES:
+        raise OutcomeLearningCliError(
+            f"journal is in non-terminal state {journal_state!r} — refusing "
+            "(BLOCKER D: a crash mid-sequence is never replayed and never "
+            "interpreted as any particular outcome)"
+        )
+    effect_state = _JOURNAL_STATE_TO_EFFECT_STATE[journal_state]
+    effect_calls = journal.get("effect_calls", [])
     reconciliation = journal.get("reconciliation")
+    pre_effect_observation = journal.get("pre_effect_observation")
     original_sha = preflight["original_title_sha256"]
     sealed_head = preflight["sealed_commit_sha"]
 
-    if effect_state in {"APPLIED_AND_RESTORED", "NOT_ATTEMPTED", "INVALIDATED_BEFORE_EFFECT"}:
-        # Nothing observably differs from the original state in any of these three
-        # shapes: APPLIED_AND_RESTORED closes the loop by definition, and the other
-        # two mean the effect was never reached at all.
+    if effect_state == "INVALIDATED_BEFORE_EFFECT":
+        # BLOCKER E: derive restoration HONESTLY from the exact pre-effect
+        # observation that caused the refusal — never assume "zero PATCHes" means
+        # "unchanged state". A selector-stage refusal (no freshness read reached)
+        # has no observation at all, so poststate is the literal UNOBSERVED.
+        if pre_effect_observation is None:
+            restoration = {
+                "byte_identical": None,
+                "prestate_title_sha256": original_sha,
+                "poststate_title_sha256": "UNOBSERVED",
+                "head_unchanged": False,
+            }
+        else:
+            observed_title = pre_effect_observation["observed_title_sha256"]
+            observed_head = pre_effect_observation["observed_head_sha"]
+            restoration = {
+                "byte_identical": observed_title == original_sha,
+                "prestate_title_sha256": original_sha,
+                "poststate_title_sha256": observed_title,
+                "head_unchanged": observed_head == sealed_head,
+            }
+    elif effect_state in {"APPLIED_AND_RESTORED", "NOT_ATTEMPTED"}:
         restoration = {
             "byte_identical": True,
             "prestate_title_sha256": original_sha,
@@ -1464,6 +1960,13 @@ def cmd_outcome(args: argparse.Namespace) -> int:
             "head_unchanged": False,
         }
 
+    # The journal keeps pre_effect_observation for every state once the freshness
+    # GET has run (audit trail for cmd_canary's own control flow), but the outcome
+    # contract permits it ONLY on the INVALIDATED_BEFORE_EFFECT terminal state — carry
+    # it into the outcome exactly there, never on APPLIED_AND_RESTORED/EFFECT_UNKNOWN.
+    outcome_pre_effect_observation = (
+        pre_effect_observation if effect_state == "INVALIDATED_BEFORE_EFFECT" else None
+    )
     outcome = build_outcome(
         operation_key=expectation["operation_key"],
         expectation_sealed_hash=expectation["sealed_hash"],
@@ -1472,6 +1975,8 @@ def cmd_outcome(args: argparse.Namespace) -> int:
         effect_calls=effect_calls,
         effect_state=effect_state,
         restoration=restoration,
+        pre_effect_observation=outcome_pre_effect_observation,
+        effect_edge=_derive_effect_edge(journal),
         recorded_at=args.recorded_at,
     )
     _write_artifact(args.out, outcome)
@@ -1560,6 +2065,28 @@ def _proof_effect_state_bullets(outcome: Mapping[str, Any]) -> list[str]:
     return ["- No effect was attempted this episode."]  # NOT_ATTEMPTED
 
 
+def _verify_proof_chain(
+    expectation: Mapping[str, Any],
+    request: Mapping[str, Any],
+    outcome: Mapping[str, Any],
+    evaluation: Mapping[str, Any],
+    self_model: Mapping[str, Any],
+    projection: Mapping[str, Any],
+) -> None:
+    """Sol REQUEST_REPAIR (BLOCKER F, 2026-09-02): run every artifact's OWN validator,
+    cross-bound against its neighbors, BEFORE a single proof line is rendered — never
+    render a claim this CLI has not just mechanically re-checked. Each validator
+    raises its own specific, named mismatch (digest mismatch, forbidden key, frozen
+    value violated, ...); nothing here invents a new error message, it only refuses
+    to skip the check."""
+    validate_expectation(expectation)
+    validate_canary_request(request)
+    validate_outcome(outcome, expectation, request)
+    validate_evaluation(evaluation, expectation, outcome)
+    validate_self_model(self_model, evaluation)
+    validate_agentos_projection(projection, evaluation)
+
+
 def cmd_proof(args: argparse.Namespace) -> int:
     expectation = _read_json(args.expectation)
     request = _read_json(args.request)
@@ -1567,6 +2094,8 @@ def cmd_proof(args: argparse.Namespace) -> int:
     evaluation = _read_json(args.evaluation)
     self_model = _read_json(args.self_model)
     projection = _read_json(args.projection)
+
+    _verify_proof_chain(expectation, request, outcome, evaluation, self_model, projection)
 
     lines = [
         "# OL-V1 Production Proof",
@@ -1652,9 +2181,17 @@ def _parser() -> argparse.ArgumentParser:
     p_seal = sub.add_parser("seal", help="seal the expectation receipt + canary request")
     p_seal.add_argument("--composition", required=True)
     p_seal.add_argument("--episode-dir", required=True)
-    p_seal.add_argument("--parent-head", required=True)
+    p_seal.add_argument(
+        "--parent-head",
+        default=None,
+        help="optional cross-check only (BLOCKER B): must exactly equal the adjudicated option's expected_head_sha, which is what is actually used",
+    )
     p_seal.add_argument("--recorded-at", required=True)
-    p_seal.add_argument("--operation-key", required=True)
+    p_seal.add_argument(
+        "--operation-key",
+        default=None,
+        help="optional cross-check only (BLOCKER B): must exactly equal the adjudicated option's operation_key, which is what is actually used",
+    )
     p_seal.add_argument("--out-expectation", required=True)
     p_seal.add_argument("--out-request", required=True)
     p_seal.set_defaults(func=cmd_seal)
@@ -1686,7 +2223,20 @@ def _parser() -> argparse.ArgumentParser:
 
     p_canary = sub.add_parser("canary", help="apply the two-call PR-title canary")
     p_canary.add_argument("--preflight", required=True)
-    p_canary.add_argument("--request", required=True)
+    p_canary.add_argument(
+        "--request",
+        required=True,
+        help=(
+            "kept for operator bookkeeping/consistency only — Sol REQUEST_REPAIR "
+            "(BLOCKER C) reacquires the actual request content from its committed "
+            "blob (preflight.request_blob_sha) and never reads this file's bytes"
+        ),
+    )
+    p_canary.add_argument(
+        "--mastermind-root",
+        default=None,
+        help="explicit cwd for the committed-blob reacquisition git call (BLOCKER C)",
+    )
     p_canary.add_argument("--recorded-at", required=True)
     p_canary.add_argument(
         "--episode-dir",

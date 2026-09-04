@@ -40,6 +40,14 @@ from control_plane.outcome_learning_evaluator import (
 RECORDED_AT = "2026-09-02T12:00:00Z"
 SHA40_A = "a" * 40
 SHA40_B = "b" * 40
+#: Sol REQUEST_REPAIR (BLOCKER F): every Blocker B/C revalidation actually performed.
+FULLY_VERIFIED_EFFECT_EDGE = {
+    "parent_proven": True,
+    "request_reacquired_from_sealed_commit": True,
+    "request_digest_matched": True,
+    "selector_repeated_single_pr": True,
+    "bindings_verified": True,
+}
 
 
 def _digest64() -> str:
@@ -201,6 +209,8 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
         request=request,
         preflight=preflight,
         effect_calls=effect_calls,
+        pre_effect_observation=None,
+        effect_edge=FULLY_VERIFIED_EFFECT_EDGE,
         effect_state="APPLIED_AND_RESTORED",
         restoration=restoration,
         recorded_at=RECORDED_AT,

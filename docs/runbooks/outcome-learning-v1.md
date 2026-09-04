@@ -57,6 +57,20 @@ mkdir -p "$OUT"
 #    OPTIONAL — omit it and the CLI computes it AFTER acquisition as the later of "now"
 #    and boot_packet.generated_at, so a slow acquisition can never produce a receipt
 #    that postdates it (see "Compose's gate" below for the exit-code contract: 0, 4, 5).
+#    Sol REQUEST_REPAIR (2026-09-02, BLOCKER A): before composing anything, compose
+#    resolves BOTH `refs/heads/master` on Mastermind and `refs/heads/main` on Macro via
+#    `git ls-remote` against the CANONICAL GitHub URLs — never a local `git rev-parse
+#    HEAD` and never a branch-name-equals-master assumption. It then fetches
+#    `config/strategic_state.yml`'s exact committed content AND blob sha at that
+#    resolved Mastermind sha via the GitHub Contents API
+#    (`gh api repos/{owner}/{repo}/contents/{path}?ref=<sha>`) and parses strategic
+#    state FROM that canonical content — never from the local working tree. It also
+#    requires the LOCAL Macro checkout at --macro-root to be exactly at the resolved
+#    canonical `main` sha and clean (`git status --porcelain` empty for tracked files;
+#    sparse-worktree omissions are not "dirty"). Any acquisition failure — unreachable
+#    canonical ref, dirty/mismatched local Macro checkout, unresolvable strategic-state
+#    blob — refuses BEFORE any bundle is composed, printing
+#    `BLOCKER SOURCE_IDENTITY_UNVERIFIED <reason>` and exiting `5`.
 python3 scripts/outcome_learning_v1.py compose \
   --mastermind-root /path/to/Mastermind \
   --macro-root "/path/to/Macro Dashboard" \
@@ -70,14 +84,22 @@ python3 scripts/outcome_learning_v1.py compose \
 #    not byte-match $EPISODE/composition.json — composition.json is not trusted
 #    verbatim (BLOCKER 3). sealed_hash is computed with the field itself absent;
 #    assumption_resolutions == [] in the sealed receipt.
+#    Sol REQUEST_REPAIR (2026-09-02, BLOCKER B): `operation_key` and
+#    `expected_parent_head` are DERIVED from the chosen option's own adjudication
+#    (`option.operation_key` / `option.expected_head_sha`) — --operation-key and
+#    --parent-head are now OPTIONAL cross-checks only; if supplied, they must exactly
+#    equal the derived values or seal refuses outright (naming both the flag value and
+#    the derived value). The canary request's `repository`/`branch` are likewise bound
+#    to the adjudicated option's own `repositories`/`carrier_ref`, never typed
+#    separately.
 python3 scripts/outcome_learning_v1.py seal \
   --composition "$EPISODE/composition.json" \
   --episode-dir "$EPISODE" \
-  --parent-head <40-hex current Mastermind HEAD> \
   --recorded-at 2026-09-02T00:05:00Z \
-  --operation-key mastermind-outcome-learning-v1-complete-vertical-20260902-sol-001 \
   --out-expectation "$OUT/OLV1_EXPECTATION_2026-09-02.json" \
   --out-request "$OUT/OLV1_CANARY_REQUEST_2026-09-02.json"
+# --operation-key / --parent-head may still be passed as belt-and-suspenders
+# cross-checks (see the two options' help text) — they are never the source of truth.
 
 # 3. Build the external preflight receipt (refuses to write inside this checkout).
 #    --expectation-repo-path / --request-repo-path are REQUIRED — there is no
@@ -91,6 +113,12 @@ python3 scripts/outcome_learning_v1.py seal \
 #    supplied artifact file. --mastermind-root is an EXPLICIT cwd for both calls,
 #    never an implicit "wherever this shell happens to be". A repo-path is refused
 #    outright (before any git call) if it is absolute or contains a ".." segment.
+#    Sol REQUEST_REPAIR (2026-09-02, BLOCKER B): before the owner-PR-selector
+#    transport call, preflight proves ANCESTRY — `git rev-parse <sealed-commit>^`
+#    must equal the sealed canary request's own `expected_parent_head` — and
+#    cross-checks --repo/--branch against the sealed request's own `repository`/
+#    `branch` fields. Any mismatch refuses BEFORE any transport call, naming both
+#    values.
 python3 scripts/outcome_learning_v1.py preflight \
   --mastermind-root /path/to/Mastermind \
   --repo mastermindx-market-intelligence/Mastermind \
@@ -112,6 +140,8 @@ python3 scripts/outcome_learning_v1.py preflight \
 #   - the sealed commit does not contain the exact artifact path (unresolvable blob)
 #   - the committed blob's canonical content does not match the supplied file
 #     (committed-vs-supplied digest mismatch — a forged pairing)
+#   - the sealed commit's parent does not equal request.expected_parent_head
+#   - --repo/--branch do not equal request.repository/request.branch
 
 # 4. Apply the two-call canary. There is no --out-journal override (BLOCKER 2): the
 #    journal filename is DERIVED as
@@ -124,14 +154,28 @@ python3 scripts/outcome_learning_v1.py preflight \
 #    sealed request from a second location.) Before any PATCH, canary re-reads the
 #    live PR once and refuses — zero PATCHes issued — if it has drifted from what
 #    preflight observed (MAJOR 5).
+#    Sol REQUEST_REPAIR (2026-09-02, BLOCKER C/D): canary no longer trusts --request's
+#    local bytes for anything but locating identities. It REACQUIRES the canary
+#    request from the exact sealed-commit blob (`git show <sealed-commit>:<repo-path>`
+#    via --mastermind-root), validates it, and requires its canonical digest to equal
+#    `preflight.request_content_sha256` — a post-preflight edit to the local
+#    request.json is irrelevant and a forged committed blob is refused with ZERO
+#    transport calls. It then re-runs the OWNER PR selector (open PRs on
+#    request.repository/branch) requiring exactly one match whose number/head/title
+#    all agree with preflight, BEFORE the freshness GET and before any PATCH. Every
+#    one of these local/owner checks happens before ANY modifying call, and the very
+#    first act after they pass is an ATOMIC, exclusive-create reservation of the
+#    derived journal path (`open(path, "x")`) — see "Crash and recovery" below.
 python3 scripts/outcome_learning_v1.py canary \
   --preflight "$OUT/preflight.json" \
   --request "$OUT/OLV1_CANARY_REQUEST_2026-09-02.json" \
+  --mastermind-root /path/to/Mastermind \
   --recorded-at 2026-09-02T00:11:00Z \
   --episode-dir "$OUT"
 # exit 0 -> effect_state APPLIED_AND_RESTORED
 # exit 3 -> effect_state EFFECT_UNKNOWN; STOP — never re-run this command
-# exit 6 -> effect_state INVALIDATED_BEFORE_EFFECT (pre-effect drift); zero PATCHes sent
+# exit 6 -> effect_state INVALIDATED_BEFORE_EFFECT (owner-selector mismatch OR
+#           pre-effect drift); zero PATCHes sent
 JOURNAL="$OUT/canary_journal.mastermind-outcome-learning-v1-complete-vertical-20260902-sol-001.<sealed-hash-slice>.json"
 
 # 5. Assemble + validate the outcome artifact. Restoration is derived from, in priority
@@ -178,6 +222,41 @@ python3 scripts/outcome_learning_v1.py proof \
   --project research/outcome_learning/OLV1_AGENTOS_PROJECTION_2026-09-02.json \
   --out research/outcome_learning/OLV1_PRODUCTION_PROOF_2026-09-02.md
 ```
+
+### Crash and recovery (Sol REQUEST_REPAIR, 2026-09-02, BLOCKER D)
+
+`canary`'s journal is the ONLY store this vertical reuses for crash-safety — it is not
+a new organizational lifecycle or a general-purpose ledger, just the bounded local
+episode receipt for this one supervised operation. The very first act after every
+local/owner check passes (§2 step 4) is `open(journal_path, "x")` — an atomic
+exclusive-create. Every later transition writes a temp file in the same directory and
+`os.replace`s it over the journal, so a reader (or a crash) never observes a
+partially-written state:
+
+| Journal `state` | Meaning | What a NEXT invocation does |
+|---|---|---|
+| *(no file)* | No reservation has ever been made for this `operation_key` + `expectation_sealed_hash[7:19]` in this `--episode-dir`. | `canary` proceeds normally. |
+| `PREPARED` | The reservation was made but nothing was sent yet — either genuinely mid-flight (another process holds it right now) or a crash landed here. | ANY invocation — a genuine race or a crash-recovery attempt — refuses outright (`already exists`, BLOCKER D: whatever state a pre-existing reservation is in, it refuses). There is no way to distinguish "still running" from "crashed here" from the journal alone; that is why the single-operator law (§3) exists. |
+| `APPLY_SENT` | The apply `PATCH` was sent; its outcome (success or exception) had not yet been journaled. | Same refusal as `PREPARED` — a crash here means the apply's actual effect on GitHub is unknown from the journal alone; do not re-run `canary`. Check the PR by hand before doing anything else. |
+| `APPLIED_READBACK` | The apply completed and its readback was recorded; the restore `PATCH` had not yet been sent. | Same refusal. The title canary's mutating half succeeded; a human must complete or verify the restore manually if this state is found frozen. |
+| `RESTORE_SENT` | The restore `PATCH` was sent; its outcome had not yet been journaled. | Same refusal. Check the PR by hand — the restore may have landed. |
+| `RESTORED` (terminal) | Both calls completed and read back byte-identically. | `cmd_outcome` accepts this journal and derives `effect_state=APPLIED_AND_RESTORED`. |
+| `EFFECT_UNKNOWN` (terminal) | The sequence stopped on ambiguity per the no-retry law — a call raised, or a readback disagreed, and reconciliation ran. | `cmd_outcome` accepts this journal and derives `effect_state=EFFECT_UNKNOWN`, with restoration derived from whatever the journal actually recorded (§3). |
+| `INVALIDATED_BEFORE_EFFECT` (terminal) | The owner-selector re-check or the freshness gate refused before any PATCH. | `cmd_outcome` accepts this journal; restoration is derived HONESTLY from `pre_effect_observation` when one was recorded (freshness-gate refusal), or reports the literal `"UNOBSERVED"` when the refusal happened even before that read (owner-selector mismatch — no observation exists at all). See BLOCKER E below. |
+
+Any journal `state` outside the three terminal ones is refused by `cmd_outcome` too —
+"journal is in non-terminal state ... — refusing (BLOCKER D: a crash mid-sequence is
+never replayed and never interpreted as any particular outcome)". A frozen non-terminal
+journal is a stop sign for BOTH `canary` (via the reservation) and `outcome` (via this
+check), never a retry trigger.
+
+**What this does and does not stop (unchanged from BLOCKER 2, restated for D):** the
+exclusive-create makes a SAME-`--episode-dir` race or crash structurally unrepeatable —
+whichever invocation opens the file first wins, the other always sees
+`FileExistsError` regardless of timing. It does **not** stop a caller who points a
+SECOND, different `--episode-dir` (or a fresh journal filename) at the same sealed
+request; that is stopped only by the supervised single-operator law (§3), never by a
+file-system check.
 
 Every JSON write goes through the same law, for EVERY artifact this CLI produces —
 including `bundle.json`/`composition.json` (which have no OL-V1 contracts schema of
@@ -248,13 +327,16 @@ option is refused; the two are never rendered through the same message template
 
 | Case | Exit | Output |
 |---|---|---|
+| canonical source-identity acquisition fails (BLOCKER A: unreachable canonical ref, dirty/stale/mismatched local Macro checkout, unresolvable strategic-state blob) | `5` | `BLOCKER SOURCE_IDENTITY_UNVERIFIED <reason>` — before any bundle is composed |
 | `evaluate_bundle` raised before producing a packet | `5` | `BLOCKER COMPOSITION_INVALID <exception message>` |
 | canary `disposition == "ELIGIBLE_WITHIN_DELEGATION"` | `0` | `COMPOSE_OK canary_disposition=ELIGIBLE_WITHIN_DELEGATION selection_state=<verbatim> recommended_option_id=<verbatim-or-None>` |
 | canary `disposition == "REFUSED"` and `reason == "SOURCE_NOT_CURRENT"` | `4` | `BLOCKER OWNER_SOURCE_NOT_CURRENT <first non-CURRENT load-bearing source_ref>=<state>`, taken from the packet's own `source_summary` |
 | canary disposition/reason is anything else | `5` | `BLOCKER CANARY_NOT_ELIGIBLE <disposition>/<reason>` |
 
-Exit 4 is reserved STRICTLY for the third row — a real, successfully-composed packet
-with a real `ref=state` pair. `bundle.json` and `composition.json` are written to
+Exit 4 is reserved STRICTLY for the fourth row — a real, successfully-composed packet
+with a real `ref=state` pair. Exit `5` is shared by three DISTINCT message classes
+(`SOURCE_IDENTITY_UNVERIFIED`, `COMPOSITION_INVALID`, `CANARY_NOT_ELIGIBLE`) — always
+disambiguate by the printed message prefix, never by the exit code alone. `bundle.json` and `composition.json` are written to
 `--episode-dir` verbatim in every row except the first (there is no packet to write
 when composition itself failed) — the full A1 packet is always on disk for audit
 whenever one exists. A human (the principal, in practice) makes the final selection
@@ -281,6 +363,22 @@ disk between `compose` and `seal` is never trusted verbatim.
 
 ## 3. The laws
 
+- **Compose cannot self-author a CURRENT source attestation (Sol REQUEST_REPAIR,
+  2026-09-02, BLOCKER A).** `mastermind_state`/`agentos_state` in the bundle's source
+  summary must never be set from anything a model wrote or the local working tree
+  happens to contain. `compose` resolves the Mastermind protected ref and the Macro
+  `main` ref independently via `git ls-remote` against their CANONICAL GitHub URLs,
+  fetches `config/strategic_state.yml`'s committed content AND blob sha at that
+  resolved sha via the GitHub Contents API, and requires the local Macro checkout used
+  for the boot packet to be exactly at the resolved canonical sha and clean. Any dirty,
+  stale, unresolved, or mismatched identity refuses BEFORE composing anything —
+  `BLOCKER SOURCE_IDENTITY_UNVERIFIED <reason>`, exit `5`. `--agentos-records-digest`
+  is an override for the Agent OS acquisition step ONLY; supplying it caps
+  `agentos_state` at `UNKNOWN` — it can never participate in a CURRENT claim, because a
+  caller-supplied digest is unverifiable local input by construction. The canonical
+  source identity fields (`mastermind_revision_attestation.source_blob_sha`, the
+  resolved Macro sha) are kept structurally distinct from the OL-V1 carrier's own PR
+  head everywhere in the bundle.
 - **Seal before effect.** `mastermind.decision_expectation_receipt.v2` is sealed
   (`sealed_hash` computed over every other field, that field itself absent) before any
   canary call is made. `assumption_resolutions` is `[]` in the sealed receipt — resolving
@@ -307,6 +405,46 @@ disk between `compose` and `seal` is never trusted verbatim.
   also hard-refuses unless `composition.execution_authority_granted is False`, and
   derives each alternative's `eligible`/`exclusion_reason` from the packet's own
   adjudications — never from a hardcoded `True`.
+- **Sealed operation bound to the adjudicated option's own ancestry (Sol
+  REQUEST_REPAIR, 2026-09-02, BLOCKER B).** `seal` derives `operation_key` and
+  `expected_parent_head` from the CHOSEN option's own adjudication
+  (`option.operation_key` / `option.expected_head_sha`) — `--operation-key` /
+  `--parent-head` are optional cross-checks that refuse on any mismatch, never the
+  source of truth. The canary request's `repository`/`branch` are bound to that same
+  option's `repositories`/`carrier_ref`. `operation_key`'s grammar is tightened to
+  `^[a-z0-9][a-z0-9-]{0,190}$` (no dots, no colons, no path separators) so it can never
+  traverse the derived journal path. `preflight` independently proves ANCESTRY — `git
+  rev-parse <sealed-commit>^ == request.expected_parent_head` — and cross-checks
+  `--repo`/`--branch` against the sealed request's own fields, both BEFORE any
+  transport call.
+- **The effect target and payload are not trusted after preflight (Sol
+  REQUEST_REPAIR, 2026-09-02, BLOCKER C).** `canary` does not trust the local
+  `--request` file's content beyond locating identities. It reacquires the canary
+  request from the exact sealed-commit blob, validates it, and requires its canonical
+  digest to equal `preflight.request_content_sha256` — refusing with ZERO transport
+  calls on any mismatch. It then re-runs the owner PR selector (open PRs on
+  `request.repository`/`branch`) and requires exactly one match whose number/head/
+  title all agree with preflight — before the freshness GET and before the first
+  PATCH. Every local and owner-selector check completes before any modifying call.
+- **Single-shot, atomically reserved, and fail-closed on a crash (BLOCKER 2, extended
+  Sol REQUEST_REPAIR 2026-09-02 BLOCKER D).** The journal reservation is an atomic
+  exclusive-create (`open(path, "x")`) made BEFORE any modifying call — the entire
+  single-shot guard is this one primitive, not a separate exists()-then-create
+  sequence with a race window. ANY pre-existing reservation, whatever its `state`,
+  refuses outright. A crash after `APPLY_SENT`/`APPLIED_READBACK`/`RESTORE_SENT`
+  leaves the journal in a non-terminal state; the NEXT invocation of `canary` refuses
+  via the reservation, and the next invocation of `outcome` refuses via an explicit
+  non-terminal-state check — neither ever replays or guesses. See "Crash and
+  recovery" above for the full state table.
+- **A drift refusal journals the truth, never a fabricated restoration (Sol
+  REQUEST_REPAIR, 2026-09-02, BLOCKER E).** When the freshness gate refuses, the exact
+  observation (`observed_head_sha`, `observed_title_sha256`, `observed_title_length`,
+  `observed_at`) is journaled into the terminal `INVALIDATED_BEFORE_EFFECT` state —
+  never discarded. `outcome` derives `restoration.byte_identical`/`head_unchanged`/
+  `poststate_title_sha256` from that observation, and `validate_outcome` rejects a
+  restoration that contradicts it — a claimed "nothing changed" over a title that was
+  actually observed to have drifted is refused at the contracts layer, not merely
+  discouraged in prose.
 - **Pre-effect freshness gate (MAJOR 5).** Before issuing any PATCH, `canary` reads the
   live PR once and refuses — with ZERO PATCHes sent — unless the live head sha equals
   `preflight.sealed_commit_sha` AND the live title's hash equals
@@ -332,14 +470,27 @@ disk between `compose` and `seal` is never trusted verbatim.
   exposes an HTTP status; the default `GhCliTransport` records the literal
   `"UNOBSERVED"` rather than fabricate a `200`. The field's real type is `int (100-599)
   | "UNOBSERVED"`.
-- **Process-quality is re-derived, never trusted (MAJOR 8).** Every
-  `evaluation.process_quality` field is recomputed by the evaluator from independently
-  checkable evidence — `sealed_before_effect` recomputes the expectation's own
-  canonical-content sha and compares it to what preflight recorded, rather than merely
-  checking the field's shape. A zero-call episode (`NOT_ATTEMPTED` /
-  `INVALIDATED_BEFORE_EFFECT`, or an `EFFECT_UNKNOWN` whose apply never completed)
-  honestly reads `False` on `single_apply_single_restore` and
-  `readback_after_each_call` — there is no call sequence or readback to credit.
+- **Process-quality is re-derived, never trusted (MAJOR 8; extended Sol
+  REQUEST_REPAIR 2026-09-02 BLOCKER F).** Every `evaluation.process_quality` field is
+  recomputed by the evaluator from independently checkable evidence —
+  `sealed_before_effect` recomputes the expectation's own canonical-content sha and
+  compares it to what preflight recorded, rather than merely checking the field's
+  shape. A zero-call episode (`NOT_ATTEMPTED` / `INVALIDATED_BEFORE_EFFECT`, or an
+  `EFFECT_UNKNOWN` whose apply never completed) honestly reads `False` on
+  `single_apply_single_restore` and `readback_after_each_call` — there is no call
+  sequence or readback to credit. `outcome.effect_edge` is a closed receipt of which
+  BLOCKER B/C revalidations actually ran for this episode (`parent_proven`,
+  `request_reacquired_from_sealed_commit`, `request_digest_matched`,
+  `selector_repeated_single_pr`, `bindings_verified`) — `cmd_canary` structurally
+  raises before ever reserving a journal if the first three fail, so their truth is
+  guaranteed by the journal's own existence, while `selector_repeated_single_pr`
+  reflects whether the owner-selector re-check actually completed. `sealed_before_effect`
+  and `effect_owner_revalidated` now ALSO require `effect_edge` to be all-`True` — a
+  `head_equals_sealed_commit=True` preflight alone is no longer sufficient to credit
+  either field. `cmd_proof` runs every artifact's own validator plus the cross-binding
+  checks (expectation↔outcome↔evaluation↔self-model↔projection) before rendering a
+  single line, and refuses — naming the exact mismatch — on any tampered or
+  inconsistent input.
 - **Forecast scoring is kind-specific (MAJOR 4/10).** A probability-kind metric is
   scored with `brier_score = (estimate - realized) ** 2` and never carries
   `within_interval` (always `None`); a count/duration_seconds metric keeps the
@@ -445,6 +596,37 @@ hand-edited); (b) for any `EFFECT_UNKNOWN` outcome, `journal["reconciliation"]`
 canary journal if retained) explains exactly why `restoration.poststate_title_sha256`
 carries the value it does.
 
+**Further checks introduced by the 2026-09-02 Sol REQUEST_REPAIR (BLOCKER A–F),** also
+folded into the mechanism rather than renumbered:
+
+- `outcome.effect_edge` is present and closed (`parent_proven`,
+  `request_reacquired_from_sealed_commit`, `request_digest_matched`,
+  `selector_repeated_single_pr`, `bindings_verified`) — an auditor can only take
+  `evaluation.process_quality.sealed_before_effect`/`effect_owner_revalidated` as
+  meaningful when every one of these is `True`; the evaluator itself refuses to credit
+  either field otherwise.
+- For `effect_state == "INVALIDATED_BEFORE_EFFECT"`, `outcome.pre_effect_observation`
+  is either `None` (a selector-stage refusal — no freshness read was ever reached) or
+  a closed observation block, and `restoration.byte_identical`/`head_unchanged`/
+  `poststate_title_sha256` are each a DERIVED fact of that observation compared
+  against `preflight.original_title_sha256`/`sealed_commit_sha` — `validate_outcome`
+  rejects any restoration that contradicts it. For every OTHER `effect_state`,
+  `pre_effect_observation` must be `None` — an auditor should treat its presence there
+  as a contract violation, not overlook it.
+- The committed-seal-blob proofs (check 6) now additionally require, for any episode
+  that reports an effect, that the sealed commit's PARENT (`git rev-parse
+  <sealed_commit_sha>^`) equals the sealed canary request's own `expected_parent_head`
+  — an auditor re-runs this one extra git call to confirm the sealed operation is
+  bound to the exact ancestry it claims, not merely to *a* commit somewhere.
+- Neither `mastermind_state == "CURRENT"` nor `agentos_state == "CURRENT"` in a
+  composed bundle is by itself auditable evidence after the fact — those fields
+  describe what `compose` verified AT ACQUISITION TIME against the canonical GitHub
+  refs, not a standing fact the auditor can re-derive from the committed artifacts
+  alone (the canonical refs move). An auditor who wants to re-verify source-identity
+  currency for a *specific* episode must independently resolve what `refs/heads/
+  master`/`refs/heads/main` pointed to at `bundle.json`'s recorded acquisition time —
+  this vertical does not, and cannot, freeze that as a self-proving artifact.
+
 ## 5. What this episode proves — and does not
 
 **Proves — conditional on the actual `effect_state`, not asserted uniformly (MAJOR
@@ -469,6 +651,14 @@ universal_score=None; the Agent OS projection carries candidate-only entries
 (automatic_writes=False, grants_authority=False, every candidate
 status=CANDIDATE_ONLY) with the DSC candidate's `so_what` itself conditional on the
 same `effect_state`.
+
+**What compose's `CURRENT` verdict actually claims (BLOCKER A, unchanged by
+effect_state):** `mastermind_state`/`agentos_state == "CURRENT"` in the composed
+bundle means only that, AT ACQUISITION TIME, `compose` independently resolved the
+canonical GitHub refs and confirmed the local Macro checkout matched and was clean —
+it is not a standing property of the committed episode artifacts and an auditor cannot
+re-derive it later without re-resolving those refs themselves (§4). It never means
+"the strategic state or the Agent OS source will still be CURRENT when you read this."
 
 **Does not prove:**
 

@@ -93,20 +93,30 @@ def _process_quality(
     A zero-call episode (``NOT_ATTEMPTED`` / ``INVALIDATED_BEFORE_EFFECT``, or an
     ``EFFECT_UNKNOWN`` that failed before any call completed) honestly reads False on
     ``single_apply_single_restore`` and ``readback_after_each_call`` — there is no
-    call sequence and no readback to credit. ``sealed_before_effect`` and
-    ``effect_owner_revalidated`` are independent of call count: they describe the
-    PRE-effect preflight state, which exists (or doesn't) regardless of what was
-    attempted afterward.
+    call sequence and no readback to credit.
+
+    Sol REQUEST_REPAIR (BLOCKER F, 2026-09-02): ``sealed_before_effect`` and
+    ``effect_owner_revalidated`` are no longer derived from
+    ``preflight.head_equals_sealed_commit`` alone — a single boolean the effect edge
+    could still overclaim from. Both now additionally require EVERY field of
+    ``outcome.effect_edge`` (the Blocker B/C revalidations actually performed —
+    request reacquired from the sealed commit, its digest matched, the owner branch
+    selector re-run, every binding cross-checked) to be True. An episode whose
+    effect-edge receipt is incomplete honestly reads False here, even if
+    ``head_equals_sealed_commit`` was True.
     """
     preflight = outcome["preflight"]
     effect_calls = outcome["effect_calls"]
+    effect_edge = outcome["effect_edge"]
 
     recomputed_expectation_content_sha256 = canonical_digest(expectation).removeprefix(
         "sha256:"
     )
+    effect_edge_fully_verified = all(effect_edge.values())
     sealed_before_effect = bool(
         preflight["head_equals_sealed_commit"] is True
         and preflight["expectation_content_sha256"] == recomputed_expectation_content_sha256
+        and effect_edge_fully_verified
     )
     kinds = [call["kind"] for call in effect_calls]
     single_apply_single_restore = kinds == ["TITLE_APPLY", "TITLE_RESTORE"]
@@ -114,7 +124,9 @@ def _process_quality(
         call.get("readback") is not None for call in effect_calls
     )
     no_retry_used = len(kinds) == len(set(kinds))
-    effect_owner_revalidated = preflight["head_equals_sealed_commit"] is True
+    effect_owner_revalidated = bool(
+        preflight["head_equals_sealed_commit"] is True and effect_edge_fully_verified
+    )
     return {
         "sealed_before_effect": sealed_before_effect,
         "single_apply_single_restore": single_apply_single_restore,
