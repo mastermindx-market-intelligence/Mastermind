@@ -15,7 +15,11 @@ import copy
 import inspect
 import io
 import json
+import os
+import pickle
 import re
+import stat
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -2809,3 +2813,4248 @@ def test_falsifier_binding_result_code_is_closed_and_receipt_safe():
     detail = core.DETAILS["BINDINGS_UNAVAILABLE"]
     assert "://" not in detail
     assert "profile_id" not in detail
+
+
+# ---------------------------------------------------------------------------
+# REALM1-C1 — MAS-115 one-profile Multilogin peer create/reconcile/remove
+#
+# Discriminators reference Mastermind issue #385. Every test here is
+# hermetic: no real network, Keychain, or browser is ever touched.
+# ---------------------------------------------------------------------------
+
+_PEER_FOLDER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+_PEER_ANCHOR = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+
+def _peer_name() -> str:
+    return vendors.peer_profile_name(_PEER_FOLDER, _PEER_ANCHOR)
+
+
+_PEER_CREATED_UUID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+_PEER_ALT_UUID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+_PEER_OTHER_UUID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+
+
+def _peer_record(peer_name, **overrides):
+    record = {
+        "id": _PEER_CREATED_UUID,
+        "folder_id": _PEER_FOLDER,
+        "name": peer_name,
+        "browser_type": "mimic",
+        "os_type": "macos",
+        "in_use_by": "",
+    }
+    record.update(overrides)
+    return record
+
+
+def _peer_create_success(profile_id=_PEER_CREATED_UUID, *, status_code=201):
+    return vendors._BoundedResponse(status_code, {
+        "status": {"error_code": "", "http_code": status_code, "message": "Profile successfully created"},
+        "data": {"ids": [profile_id]},
+    })
+
+
+def _peer_remove_success():
+    return vendors._BoundedResponse(200, {
+        "status": {"error_code": "", "http_code": 200, "message": "Profile successfully removed"},
+        "data": None,
+    })
+
+
+class _PeerTransport:
+    """Fake ``BoundedHttpClient`` surface for peer create/remove tests.
+
+    ``set_candidates_sequence`` takes one full-profiles-list per successive
+    call to :meth:`MultiloginClient.peer_candidates` (the before-census, the
+    after-census, and so on) so a test can express "zero, then one" or
+    "one, then zero" without any real pagination server.
+    """
+
+    def __init__(self):
+        self.calls = []
+        self.search_rounds = [[]]
+        self._search_round = -1
+        self.status_by_id = {}
+        # The launcher status envelope is folder-checked by the client, so the
+        # fake must answer for the folder actually being censused rather than
+        # a hardcoded one -- otherwise a "stopped" proof silently degrades
+        # into a folder mismatch and the happy path passes for the wrong
+        # reason.
+        self.folder_id = _PEER_FOLDER
+        self.create_response = None
+        self.create_raises = False
+        self.remove_response = None
+        self.remove_raises = False
+
+    def set_candidates_sequence(self, *rounds):
+        self.search_rounds = list(rounds)
+
+    def _mlx_profile_search(self, credential, folder_id, *, offset):
+        if offset == 0:
+            self._search_round += 1
+        profiles = self.search_rounds[min(self._search_round, len(self.search_rounds) - 1)]
+        self.folder_id = folder_id
+        self.calls.append(("search", folder_id, offset))
+        page = profiles[offset:offset + vendors._PROFILE_PAGE_SIZE]
+        return vendors._BoundedResponse(200, {
+            "status": {"error_code": "", "http_code": 200, "message": "Search profile successfully result"},
+            "data": {"profiles": page, "total_count": len(profiles)},
+        })
+
+    def _mlx_profile_status(self, credential, profile_id):
+        self.calls.append(("status", profile_id))
+        state = self.status_by_id.get(profile_id, "stopped")
+        if isinstance(state, vendors._BoundedResponse):
+            return state
+        return vendors._BoundedResponse(200, {
+            "status": {"error_code": "", "http_code": 200, "message": ""},
+            "data": {
+                "profile_id": profile_id, "folder_id": self.folder_id, "status": state,
+                "browser_type": "mimic", "core_version": 132,
+                "in_use_by": "" if state == "stopped" else "synthetic-owner",
+                "is_quick": False, "last_launched_at": "2026-08-23T00:00:00Z",
+                "last_launched_by": "op", "last_launched_on": "machine",
+                "message": "", "name": "synthetic", "timestamp": 1787472000000,
+                "workspace_id": "workspace",
+            },
+        })
+
+    def _mlx_profile_create(self, credential, folder_id, name):
+        self.calls.append(("create", folder_id, name))
+        if self.create_raises:
+            raise RuntimeError("synthetic create transport failure")
+        return self.create_response
+
+    def _mlx_profile_remove(self, credential, profile_id):
+        self.calls.append(("remove", profile_id))
+        if self.remove_raises:
+            raise RuntimeError("synthetic remove transport failure")
+        return self.remove_response
+
+    def close(self):
+        self.calls.append(("close",))
+
+
+def _peer_client(transport, *, credential=None):
+    return vendors.MultiloginClient(credential or core.Credential("cred", "stdin"), transport)
+
+
+def _committing_intent():
+    """A ``commit_intent`` fake that always succeeds, like a real first commit."""
+    calls = []
+
+    def _commit():
+        calls.append(True)
+        return vendors.CREATED_THIS_CALL
+
+    _commit.calls = calls
+    return _commit
+
+
+def _refusing_intent():
+    calls = []
+
+    def _commit():
+        calls.append(True)
+        return vendors.REFUSED
+
+    _commit.calls = calls
+    return _commit
+
+
+def _authorized_peer_main(argv, **kwargs):
+    """Exercise the opaque coordinator seam, never the now-inert public CLI."""
+    operation, *rest = argv
+    if "peer_intent_path" not in kwargs or "peer_provision_path" not in kwargs:
+        anchor_index = rest.index("--provision-path") + 1
+        test_parent = Path(rest[anchor_index]).parent
+        kwargs.setdefault("peer_intent_path", test_parent / "peer-state.json")
+        kwargs.setdefault("peer_provision_path", test_parent / "peer-profile.json")
+    if operation == "create-peer-profile":
+        return vendors.run_coordinator_peer_create(rest, **kwargs)
+    if operation == "rollback-peer-profile":
+        return vendors.run_coordinator_peer_rollback(rest, **kwargs)
+    raise AssertionError(f"not a peer operation: {operation}")
+
+
+def _prepare_peer_lifecycle(provision, state_path, peer_provision_path):
+    outcome = vendors.initialize_peer_lifecycle_state(
+        state_path,
+        folder_id=provision["folder_id"],
+        anchor_profile_id=provision["profile_id"],
+        peer_name=vendors.peer_profile_name(
+            provision["folder_id"], provision["profile_id"],
+        ),
+        peer_provision_path=peer_provision_path,
+    )
+    assert outcome in (vendors.CREATED_THIS_CALL, vendors.EXISTING_EXACT)
+
+
+# --- #385-1: the seams exist and are closed --------------------------------
+
+
+def test_peer_d1_create_remove_seams_are_closed_frozen_calls():
+    """#385-1: only fixed folder_id/name (create) or profile_id (remove) ever
+    reach the transport; no caller-supplied URL/method/body/count exists."""
+    seen = []
+
+    def _handler(request):
+        seen.append((
+            request.method, str(request.url),
+            json.loads(request.read()) if request.content else None,
+        ))
+        return httpx.Response(200, json={})
+
+    inner = httpx.Client(
+        transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False,
+    )
+    client = vendors.BoundedHttpClient(client=inner)
+    credential = core.Credential("synthetic-credential", "stdin")
+    try:
+        client._mlx_profile_create(credential, "folder-x", "name-x")
+        client._mlx_profile_remove(credential, "profile-x")
+    finally:
+        client.close()
+    assert [(m, u) for m, u, _ in seen] == [
+        ("POST", "https://api.multilogin.com/profile/create"),
+        ("POST", "https://api.multilogin.com/profile/remove"),
+    ]
+    assert seen[0][2] == {
+        "name": "name-x",
+        "browser_type": "mimic",
+        "os_type": "macos",
+        "folder_id": "folder-x",
+        "times": 1,
+        "parameters": {
+            "flags": {"ports_masking": "mask", "proxy_masking": "disabled"},
+            "storage": {"is_local": True, "save_service_worker": True},
+            "fingerprint": {},
+        },
+    }
+    assert seen[1][2] == {"ids": ["profile-x"], "permanently": False}
+    public = {
+        name for name in dir(vendors.BoundedHttpClient)
+        if not name.startswith("_") and callable(getattr(vendors.BoundedHttpClient, name))
+    }
+    assert public == {"close"}
+
+
+# --- #385-2: pre-secret failures prove Keychain/HTTP never reached ---------
+
+
+@pytest.mark.parametrize("operation", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_d2_bad_anchor_provision_refuses_before_keychain_or_http(tmp_path, operation):
+    path = tmp_path / "missing-provision.json"
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [operation, "--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=lambda: (_ for _ in ()).throw(
+            AssertionError("must not read the local environment before a valid anchor provision"),
+        ),
+        credential_stream_factory=lambda: (_ for _ in ()).throw(
+            AssertionError("must not read Keychain before a valid anchor provision"),
+        ),
+        client_factory=lambda: (_ for _ in ()).throw(AssertionError("must not build a vendor client")),
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "PROVISION_MISSING"
+
+
+@pytest.mark.parametrize("operation", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_d2_running_anchor_profile_refuses_before_keychain_or_http(tmp_path, operation):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    if operation == "create-peer-profile":
+        _prepare_peer_lifecycle(
+            provision, tmp_path / "peer-state.json", tmp_path / "peer-profile.json",
+        )
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [operation, "--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision, running=True),
+        credential_stream_factory=lambda: (_ for _ in ()).throw(AssertionError("must not read Keychain")),
+        client_factory=lambda: (_ for _ in ()).throw(AssertionError("must not build a vendor client")),
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == (
+        "BUSY_PROFILE" if operation == "create-peer-profile" else "PROVISION_MISSING"
+    )
+
+
+@pytest.mark.parametrize("operation", ("create-peer-profile", "rollback-peer-profile"))
+def test_peer_d2_stale_bindings_refuse_before_keychain_or_http(tmp_path, operation):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    if operation == "create-peer-profile":
+        _prepare_peer_lifecycle(
+            provision, tmp_path / "peer-state.json", tmp_path / "peer-profile.json",
+        )
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [operation, "--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=out,
+        bindings_loader=lambda: (None, ["stale"]),
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: (_ for _ in ()).throw(AssertionError("must not read Keychain")),
+        client_factory=lambda: (_ for _ in ()).throw(AssertionError("must not build a vendor client")),
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == (
+        "BINDINGS_UNAVAILABLE" if operation == "create-peer-profile" else "PROVISION_MISSING"
+    )
+
+
+def test_peer_d2_new_operations_never_bind_or_self_test_loopback_origin(tmp_path):
+    """#385-2 (loopback carve-out): these operations never launch a browser,
+    so the fixed-port origin must never be bound or self-tested."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, folder_id=provision["folder_id"])])
+    transport.create_response = _peer_create_success()
+    _prepare_peer_lifecycle(
+        provision, tmp_path / "intent.json", tmp_path / "peer.json",
+    )
+
+    origin_calls = []
+
+    def _tracking_origin(*args, **kwargs):
+        origin_calls.append(1)
+        raise AssertionError("create/rollback must never bind the loopback origin")
+
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [
+            "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
+        ],
+        peer_intent_path=str(tmp_path / "intent.json"),
+        peer_provision_path=str(tmp_path / "peer.json"),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_tracking_origin,
+        now=_NOW,
+    )
+    assert origin_calls == []
+    assert code == 0
+    assert json.loads(out.getvalue())["verdict"] == "PASS"
+
+
+# --- #385-3: caller cannot widen the create body ---------------------------
+
+
+def test_peer_d3_create_body_is_frozen_and_times_is_always_one():
+    observed = []
+
+    def _handler(request):
+        observed.append(json.loads(request.read()))
+        return httpx.Response(201, json={
+            "status": {"error_code": "", "http_code": 201, "message": "Profile successfully created"},
+            "data": {"ids": ["ignored"]},
+        })
+
+    inner = httpx.Client(transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False)
+    bounded = vendors.BoundedHttpClient(client=inner)
+    try:
+        bounded._mlx_profile_create(core.Credential("secret", "stdin"), "attacker-folder", "attacker-name")
+    finally:
+        bounded.close()
+    assert observed == [{
+        "name": "attacker-name",
+        "browser_type": "mimic",
+        "os_type": "macos",
+        "folder_id": "attacker-folder",
+        "times": 1,
+        "parameters": {
+            "flags": {"ports_masking": "mask", "proxy_masking": "disabled"},
+            "storage": {"is_local": True, "save_service_worker": True},
+            "fingerprint": {},
+        },
+    }]
+    # No proxy, custom_start_urls, notes, tags, or fingerprint values exist
+    # anywhere in the emitted body.
+    for forbidden in ("proxy", "custom_start_urls", "notes", "tags", "core_version"):
+        assert forbidden not in observed[0]
+        assert forbidden not in observed[0]["parameters"]
+
+
+# --- #385-4: zero candidates -> one create -> exact readback -> PASS ------
+
+
+def test_peer_d4_zero_candidates_creates_reads_back_and_writes_provision(tmp_path):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, folder_id=provision["folder_id"])])
+    transport.create_response = _peer_create_success()
+    peer_provision_path = tmp_path / "peer_provision.json"
+    peer_intent_path = tmp_path / "peer_intent.json"
+    _prepare_peer_lifecycle(provision, peer_intent_path, peer_provision_path)
+
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [
+            "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
+        ],
+        peer_intent_path=str(peer_intent_path),
+        peer_provision_path=str(peer_provision_path),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 0
+    assert receipt["verdict"] == "PASS"
+    assert receipt["effect"] == "PROVISION_WRITTEN"
+    # profile_B is only publishable once the read-back positively proved the
+    # exact profile stopped; PASS must never be reachable without it.
+    assert receipt["predicates"]["stopped_proven"] is True
+    assert receipt["predicates"]["exact_readback"] is True
+    assert receipt["predicates"]["provision_written"] is True
+    assert receipt["predicates"]["cleanup_lease_retained"] is False
+    assert [c[0] for c in transport.calls].count("create") == 1
+    assert peer_provision_path.exists()
+    written = json.loads(peer_provision_path.read_text(encoding="utf-8"))
+    assert written["vendor"] == "multilogin"
+    assert written["folder_id"] == provision["folder_id"]
+    assert peer_intent_path.exists()
+    intent_doc = json.loads(peer_intent_path.read_text(encoding="utf-8"))
+    assert intent_doc["peer_name"] == peer_name
+    assert intent_doc["schema"] == vendors.PEER_INTENT_SCHEMA
+    # Both private files are owner-only; neither carries a raw vendor id.
+    assert stat.S_IMODE(peer_provision_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(peer_intent_path.stat().st_mode) == 0o600
+    assert provision["folder_id"] not in json.dumps(intent_doc)
+    assert provision["profile_id"] not in json.dumps(intent_doc)
+
+
+# --- #385-5: matching committed intent -> read-only, zero create ----------
+
+
+def test_peer_d5_matching_intent_and_exact_candidate_is_read_only():
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name)],
+        [_peer_record(peer_name)],
+    )
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=True, commit_intent=lambda: (_ for _ in ()).throw(
+            AssertionError("must not attempt to commit a new intent when one already matches"),
+        ),
+        intent_reconciliation_ready=True,
+    )
+    assert receipt["predicates"]["dispatched"] is False
+    assert receipt["predicates"]["reconciled"] is True
+    assert [c[0] for c in transport.calls].count("create") == 0
+    assert receipt["effect"] in ("PROFILE_STOPPED_PROVEN", "CREATE_APPLIED")
+
+
+# --- #385-6: candidate exists WITHOUT matching intent -> conflict ---------
+
+
+def test_peer_d6_colliding_name_without_intent_is_conflict_never_adopted():
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([_peer_record(peer_name)])
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False,
+        commit_intent=lambda: (_ for _ in ()).throw(
+            AssertionError("a name collision without intent must never attempt a commit"),
+        ),
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert receipt["code"] == "BUSY_PROFILE"
+    assert receipt["predicates"]["candidates_before"] == 1
+    assert [c[0] for c in transport.calls].count("create") == 0
+
+
+# --- #385-7: create response lost, exact one candidate on readback -------
+
+
+def test_peer_d7_lost_create_response_with_one_readback_candidate_reconciles():
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name)])
+    transport.create_response = None  # transport returns None: response lost
+    client = _peer_client(transport)
+    commit = _committing_intent()
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=commit,
+    )
+    assert receipt["effect"] in ("CREATE_APPLIED", "PROFILE_STOPPED_PROVEN")
+    assert receipt["predicates"]["reconciled"] is True
+    assert receipt["predicates"]["dispatched"] is True
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+# --- #385-8: create response lost + zero/multiple readback candidates ----
+
+
+@pytest.mark.parametrize("scenario", ("zero", "multiple"))
+def test_peer_d8_lost_create_response_with_zero_or_many_candidates_is_unknown(scenario):
+    peer_name = _peer_name()
+    if scenario == "zero":
+        after_round = []
+    else:
+        # Two distinct vendor records that both happen to carry the exact
+        # deterministic peer name — a vendor-side collision, not something
+        # this actuator could ever cause by construction.
+        after_round = [
+            _peer_record(peer_name, id=_PEER_ALT_UUID),
+            _peer_record(peer_name, id=_PEER_OTHER_UUID),
+        ]
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], after_round)
+    transport.create_response = None
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+# --- #385-9: explicit 401/403 -> typed auth failure, zero pre-dispatch create -
+
+
+@pytest.mark.parametrize("status_code", (401, 403))
+def test_peer_d9_auth_rejection_during_dispatch_is_typed_and_pre_effect(status_code):
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([])
+    transport.create_response = vendors._BoundedResponse(status_code, None)
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert receipt["code"] == "AUTH_EXPIRED"
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+@pytest.mark.parametrize("status_code", (401, 403))
+def test_peer_d9_auth_rejection_during_pre_dispatch_census_emits_zero_creates(status_code):
+    class _AuthBoomTransport(_PeerTransport):
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            self.calls.append(("search", folder_id, offset))
+            return vendors._BoundedResponse(status_code, None)
+
+    transport = _AuthBoomTransport()
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False,
+        commit_intent=lambda: (_ for _ in ()).throw(
+            AssertionError("a census auth failure must never reach commit_intent"),
+        ),
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert receipt["code"] == "AUTH_EXPIRED"
+    assert [c[0] for c in transport.calls].count("create") == 0
+
+
+# --- #385-10: hostile leak scan --------------------------------------------
+
+
+def test_peer_d10_hostile_leak_scan_create_and_remove(tmp_path):
+    secret_folder = "the-secret-folder-id"
+    secret_profile = "the-secret-profile-id"
+    peer_name = vendors.peer_profile_name(secret_folder, _PEER_ANCHOR)
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [], [_peer_record(peer_name, id=secret_profile, folder_id=secret_folder)],
+    )
+    transport.create_response = _peer_create_success(profile_id=secret_profile)
+    client = _peer_client(transport, credential=core.Credential(_SECRET, "stdin"))
+    create_receipt = client.create_peer_profile(
+        folder_id=secret_folder, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    dumped_create = json.dumps(create_receipt)
+    for forbidden in (_SECRET, secret_profile, secret_folder, peer_name):
+        assert forbidden not in dumped_create
+
+    transport2 = _PeerTransport()
+    transport2.set_candidates_sequence(
+        [_peer_record(peer_name, id=secret_profile, folder_id=secret_folder)], [],
+    )
+    transport2.remove_response = _peer_remove_success()
+    client2 = _peer_client(transport2, credential=core.Credential(_SECRET, "stdin"))
+    remove_receipt = client2.remove_peer_profile(
+        folder_id=secret_folder, anchor_profile_id=_PEER_ANCHOR,
+        peer_profile_id=secret_profile,
+        claim_remove=lambda: vendors.CREATED_THIS_CALL,
+    )
+    dumped_remove = json.dumps(remove_receipt)
+    for forbidden in (_SECRET, secret_profile, secret_folder, peer_name):
+        assert forbidden not in dumped_remove
+
+
+def test_peer_d10_hostile_leak_scan_vendor_error_body_never_escapes():
+    class _LeakyTransport(_PeerTransport):
+        def _mlx_profile_create(self, credential, folder_id, name):
+            self.calls.append(("create", folder_id, name))
+            raise RuntimeError(_SECRET)
+
+    transport = _LeakyTransport()
+    transport.set_candidates_sequence([])
+    client = _peer_client(transport, credential=core.Credential(_SECRET, "stdin"))
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    assert _SECRET not in json.dumps(receipt)
+
+
+# --- #385-11: provision-write failure after a known create ----------------
+
+
+def test_peer_d11_foreign_provision_refuses_before_secret_or_create(tmp_path):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, folder_id=provision["folder_id"])])
+    transport.create_response = _peer_create_success()
+    peer_provision_path = tmp_path / "peer_provision.json"
+    # A foreign provision collision must stop before Keychain or vendor I/O.
+    peer_provision_path.write_text(json.dumps({"not": "reconcilable"}), encoding="utf-8")
+    peer_provision_path.chmod(0o600)
+
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [
+            "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
+        ],
+        peer_intent_path=str(tmp_path / "peer_intent.json"),
+        peer_provision_path=str(peer_provision_path),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 2
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["code"] == "PROVISION_MISSING"
+    assert transport.calls == []
+    # The pre-seeded foreign file must not have been silently overwritten.
+    assert json.loads(peer_provision_path.read_text(encoding="utf-8")) == {"not": "reconcilable"}
+
+
+def test_peer_d11_unstopped_create_never_writes_a_peer_provision(tmp_path):
+    """A create whose read-back cannot prove the profile stopped must NOT
+    publish profile_B and must NOT report PASS.
+
+    This is the mutation that turns a HOLD into a false PASS: the search
+    record looks unowned, but the launcher reports the profile running. The
+    provision file must stay absent and the cleanup lease must be retained.
+    """
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, folder_id=provision["folder_id"])])
+    transport.create_response = _peer_create_success()
+    transport.status_by_id = {_PEER_CREATED_UUID: "browser_running"}
+    peer_provision_path = tmp_path / "peer_provision.json"
+    peer_intent_path = tmp_path / "peer_intent.json"
+    _prepare_peer_lifecycle(provision, peer_intent_path, peer_provision_path)
+
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [
+            "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
+        ],
+        peer_intent_path=str(peer_intent_path),
+        peer_provision_path=str(peer_provision_path),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["effect"] == "CREATE_APPLIED"
+    assert receipt["predicates"]["stopped_proven"] is False
+    assert receipt["predicates"]["provision_written"] is False
+    assert receipt["predicates"]["cleanup_lease_retained"] is True
+    # The load-bearing assertion: no profile_B binding was published.
+    assert not peer_provision_path.exists()
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+# --- #385-12: remove exact stopped operation-created peer -> ROLLBACK_VERIFIED -
+
+
+def test_peer_d12_remove_exact_stopped_peer_verifies_absence():
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name, id=_PEER_CREATED_UUID)], [],
+    )
+    transport.remove_response = _peer_remove_success()
+    client = _peer_client(transport)
+    receipt = client.remove_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR, peer_profile_id=_PEER_CREATED_UUID,
+        claim_remove=lambda: vendors.CREATED_THIS_CALL,
+    )
+    assert receipt["verdict"] == "PASS"
+    assert receipt["effect"] == "ROLLBACK_VERIFIED"
+    assert receipt["predicates"]["removed_absent"] is True
+    assert [c[0] for c in transport.calls].count("remove") == 1
+
+
+# --- REVIEW REPAIRS: gaps found by the non-author adversarial review -------
+
+
+def _seed_peer_intent(tmp_path, provision):
+    """Write the create-intent preimage exactly as a real create would."""
+    intent_path = tmp_path / "peer_intent.json"
+    assert vendors.initialize_peer_lifecycle_state(
+        intent_path,
+        folder_id=provision["folder_id"],
+        anchor_profile_id=provision["profile_id"],
+        peer_name=vendors.peer_profile_name(provision["folder_id"], provision["profile_id"]),
+        peer_provision_path=tmp_path / "peer_provision.json",
+    ) == vendors.CREATED_THIS_CALL
+    assert vendors._commit_peer_intent(
+        intent_path,
+        folder_id=provision["folder_id"],
+        anchor_profile_id=provision["profile_id"],
+        peer_name=vendors.peer_profile_name(provision["folder_id"], provision["profile_id"]),
+        peer_provision_path=tmp_path / "peer_provision.json",
+    ) == vendors.CREATED_THIS_CALL
+    return intent_path
+
+
+def _peer_provision_doc(provision, profile_id):
+    return {
+        "schema": core.PROVISION_SCHEMA,
+        "vendor": "multilogin",
+        "profile_id": profile_id,
+        "folder_id": provision["folder_id"],
+        "browser_type": "mimic",
+        "origin_policy": port_policy.ORIGIN_POLICY,
+        "disposable_ack": core.REQUIRED_ACK,
+    }
+
+
+def _peer_ownership_receipt(state, provision_snapshot, **overrides):
+    document = {
+        "schema": vendors.PEER_OWNERSHIP_FACT_SCHEMA,
+        "peer_operation": vendors.PEER_OPERATION_KEY,
+        "source_generation": vendors.PEER_SOURCE_GENERATION,
+        "lifecycle_generation": state.document["generation"],
+        "peer_profile_digest": state.document["peer_profile_digest"],
+        "peer_provision_digest": provision_snapshot.sha256,
+        "peer_provision_dev": provision_snapshot.st_dev,
+        "peer_provision_ino": provision_snapshot.st_ino,
+        "pf1_operation": vendors.PF1_OPERATION_KEY,
+        "pf1_active": False,
+        "install1_operation": vendors.INSTALL1_OPERATION_KEY,
+        "install1_active": False,
+        "observed_at": "2026-08-23T11:59:00Z",
+        "valid_until": "2026-08-23T12:01:00Z",
+        "release_nonce_digest": "9" * 64,
+    }
+    document.update(overrides)
+    return document
+
+
+def _seed_peer_provision_committed(tmp_path, *, profile_id=_PEER_CREATED_UUID):
+    """Materialize the exact durable state left by one successful create."""
+    provision = _valid_provision("multilogin")
+    anchor_path = _write_provision(tmp_path, provision)
+    state_path = tmp_path / "peer-state.json"
+    peer_provision_path = tmp_path / "peer-provision.json"
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    assert vendors.initialize_peer_lifecycle_state(
+        state_path,
+        folder_id=provision["folder_id"],
+        anchor_profile_id=provision["profile_id"],
+        peer_name=peer_name,
+        peer_provision_path=peer_provision_path,
+    ) == vendors.CREATED_THIS_CALL
+    assert vendors._commit_peer_intent(
+        state_path,
+        folder_id=provision["folder_id"],
+        anchor_profile_id=provision["profile_id"],
+        peer_name=peer_name,
+        peer_provision_path=peer_provision_path,
+    ) == vendors.CREATED_THIS_CALL
+    state = vendors._peer_intent_snapshot(state_path)
+    state = vendors._transition_peer_intent(
+        state_path,
+        expected=state,
+        phase=vendors.PEER_PHASE_PROFILE_STOPPED,
+        peer_profile_id=profile_id,
+    )
+    assert state is not None
+    vendors.atomic_private_json(
+        _peer_provision_doc(provision, profile_id), peer_provision_path,
+    )
+    peer_provision = vendors._peer_provision_snapshot(peer_provision_path)
+    state = vendors._transition_peer_intent(
+        state_path,
+        expected=state,
+        phase=vendors.PEER_PHASE_PROVISION_COMMITTED,
+        peer_profile_id=profile_id,
+        peer_provision_snapshot=peer_provision,
+    )
+    assert state is not None
+    return provision, anchor_path, state_path, peer_provision_path, state, peer_provision
+
+
+def _rollback_main(tmp_path, provision, transport, *, intent_path, peer_provision_path, out):
+    ownership_fact = None
+    state = vendors._peer_intent_snapshot(intent_path)
+    peer_snapshot = vendors._peer_provision_snapshot(peer_provision_path)
+    if state is not None and peer_snapshot is not None:
+        if state.document["phase"] == vendors.PEER_PHASE_CREATE_CLAIMED:
+            state = vendors._transition_peer_intent(
+                intent_path,
+                expected=state,
+                phase=vendors.PEER_PHASE_PROFILE_STOPPED,
+                peer_profile_id=peer_snapshot.document["profile_id"],
+            )
+            state = vendors._transition_peer_intent(
+                intent_path,
+                expected=state,
+                phase=vendors.PEER_PHASE_PROVISION_COMMITTED,
+                peer_profile_id=peer_snapshot.document["profile_id"],
+                peer_provision_snapshot=peer_snapshot,
+            )
+        if state is not None:
+            ownership_fact = _peer_ownership_receipt(state, peer_snapshot)
+    return _authorized_peer_main(
+        [
+            "rollback-peer-profile", "--vendor", "multilogin",
+            "--provision-path", str(_write_provision(tmp_path, provision)),
+        ],
+        peer_intent_path=str(intent_path),
+        peer_provision_path=str(peer_provision_path),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+        ownership_receipt_loader=lambda: ownership_fact,
+    )
+
+
+def test_peer_rollback_without_create_intent_receipt_refuses_before_any_remove(tmp_path):
+    """A peer provision ALONE must not authorize a removal.
+
+    #385 requires the exact operation-created provision AND the create-intent
+    receipt to match. Without this gate a hand-authored or stale provision is
+    enough to delete a profile this operation never created -- precisely the
+    state #385-6 calls a conflict on the create side.
+    """
+    provision = _valid_provision("multilogin")
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    peer_provision_path = tmp_path / "peer_provision.json"
+    vendors.atomic_private_json(
+        _peer_provision_doc(provision, _PEER_CREATED_UUID), peer_provision_path,
+    )
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name, folder_id=provision["folder_id"], id=_PEER_CREATED_UUID)], [],
+    )
+    transport.remove_response = _peer_remove_success()
+
+    out = io.StringIO()
+    code = _rollback_main(
+        tmp_path, provision, transport,
+        intent_path=tmp_path / "absent_intent.json",
+        peer_provision_path=peer_provision_path, out=out,
+    )
+    assert code == 2
+    # The load-bearing assertion: nothing was dispatched at all.
+    assert [c[0] for c in transport.calls].count("remove") == 0
+
+
+def test_peer_rollback_with_matching_intent_receipt_verifies_absence(tmp_path):
+    """The same flow WITH the operation's own preimage completes end to end."""
+    provision = _valid_provision("multilogin")
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    intent_path = _seed_peer_intent(tmp_path, provision)
+    peer_provision_path = tmp_path / "peer_provision.json"
+    vendors.atomic_private_json(
+        _peer_provision_doc(provision, _PEER_CREATED_UUID), peer_provision_path,
+    )
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name, folder_id=provision["folder_id"], id=_PEER_CREATED_UUID)], [],
+    )
+    transport.remove_response = _peer_remove_success()
+
+    out = io.StringIO()
+    code = _rollback_main(
+        tmp_path, provision, transport,
+        intent_path=intent_path, peer_provision_path=peer_provision_path, out=out,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 0
+    assert receipt["effect"] == "ROLLBACK_VERIFIED"
+    assert receipt["predicates"]["removed_absent"] is True
+    assert [c[0] for c in transport.calls].count("remove") == 1
+
+
+def test_peer_pre_effect_auth_rejection_does_not_wedge_the_capability(tmp_path):
+    """A 401 becomes an exact CAS-rearmable tombstone, never a path unlink."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    intent_path = tmp_path / "peer_intent.json"
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([])
+    transport.create_response = vendors._BoundedResponse(401, {})
+    peer_provision_path = tmp_path / "peer_provision.json"
+    _prepare_peer_lifecycle(provision, intent_path, peer_provision_path)
+
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        ["create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path)],
+        peer_intent_path=str(intent_path),
+        peer_provision_path=str(peer_provision_path),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 2
+    assert receipt["effect"] == "NONE"
+    assert receipt["code"] == "AUTH_EXPIRED"
+    assert [c[0] for c in transport.calls].count("create") == 1
+    rejected = vendors._peer_intent_snapshot(intent_path)
+    assert rejected.document["phase"] == vendors.PEER_PHASE_CREATE_AUTH_REJECTED
+
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    recovered_transport = _PeerTransport()
+    recovered_transport.set_candidates_sequence(
+        [], [_peer_record(peer_name, folder_id=provision["folder_id"])],
+    )
+    recovered_transport.create_response = _peer_create_success()
+    recovered_out = io.StringIO()
+    recovered_code = _authorized_peer_main(
+        ["create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path)],
+        peer_intent_path=str(intent_path),
+        peer_provision_path=str(peer_provision_path),
+        stdout=recovered_out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"fresh-cred"),
+        client_factory=lambda: recovered_transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert recovered_code == 0
+    assert [c[0] for c in recovered_transport.calls].count("create") == 1
+
+
+def test_peer_ambiguous_response_keeps_its_preimage(tmp_path):
+    """The converse of the pre-effect discard: a LOST response must retain the
+    preimage, because a profile may well have been created."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    intent_path = tmp_path / "peer_intent.json"
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [])
+    transport.create_raises = True
+    peer_provision_path = tmp_path / "peer_provision.json"
+    _prepare_peer_lifecycle(provision, intent_path, peer_provision_path)
+
+    out = io.StringIO()
+    _authorized_peer_main(
+        ["create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path)],
+        peer_intent_path=str(intent_path),
+        peer_provision_path=str(peer_provision_path),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert intent_path.exists()
+
+
+def test_peer_acknowledged_id_must_match_the_read_back_record():
+    """The vendor named one id and the census returned another.
+
+    Adopting the census row would strand the acknowledged profile in the
+    approved folder: untracked, unreachable by rollback, and fatal to every
+    later create (which would then see multiple candidates).
+    """
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, id=_PEER_OTHER_UUID)])
+    transport.create_response = _peer_create_success(profile_id=_PEER_ALT_UUID)
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=lambda: vendors.CREATED_THIS_CALL,
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["predicates"]["exact_readback"] is False
+    assert receipt["digests"]["peer_profile"] is None
+    assert client._peer_profile_id is None
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+def test_peer_read_back_record_must_be_unowned():
+    """Pins ``require_unowned=True`` on the create read-back.
+
+    A census row claiming an owner is not a publishable profile even when the
+    launcher reports it stopped; without this the wave's "stopped AND unowned"
+    claim would be prose only.
+    """
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [], [_peer_record(peer_name, in_use_by="someone@example.com")],
+    )
+    transport.create_response = _peer_create_success()
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=lambda: vendors.CREATED_THIS_CALL,
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["predicates"]["exact_readback"] is False
+    assert client._peer_profile_id is None
+
+
+@pytest.mark.parametrize("status_code", (202, 204, 500))
+def test_peer_create_success_status_set_is_exactly_200_and_201(status_code):
+    """Pins the deliberate two-source decision.
+
+    The help article's prose says 200 and the Postman collection's example
+    shows 201, so both are accepted as *dispatch acknowledged*. Any other code
+    is ambiguous, never exact -- widening this set must fail a test.
+    """
+    ok = vendors._BoundedResponse(status_code, {
+        "status": {"error_code": "", "http_code": status_code, "message": "Profile successfully created"},
+        "data": {"ids": [_PEER_CREATED_UUID]},
+    })
+    assert vendors._is_exact_profile_create_success(ok) is False
+    for accepted in (200, 201):
+        assert vendors._is_exact_profile_create_success(_peer_create_success(status_code=accepted)) is True
+
+
+@pytest.mark.parametrize("after_rows", ("zero", "multiple"))
+def test_peer_committed_intent_with_wrong_candidate_count_never_dispatches(after_rows):
+    """#385-8's committed-intent half: a preimage on disk plus zero or many
+    candidates is uncertainty, and uncertainty is never permission to create."""
+    peer_name = _peer_name()
+    rows = [] if after_rows == "zero" else [
+        _peer_record(peer_name, id=_PEER_ALT_UUID),
+        _peer_record(peer_name, id=_PEER_OTHER_UUID),
+    ]
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(rows)
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=True, commit_intent=lambda: vendors.CREATED_THIS_CALL,
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["predicates"]["dispatched"] is False
+    assert [c[0] for c in transport.calls].count("create") == 0
+
+
+def test_peer_paths_are_not_caller_suppliable_on_the_cli():
+    """#385 requires a FIXED private peer destination, so the argument parser
+    must expose no flag that could redirect the provision or the preimage."""
+    source = inspect.getsource(vendors.main)
+    assert "--peer-provision-path" not in source
+    assert "--peer-intent-path" not in source
+
+
+# --- SOL POST-START CLARIFICATION: trash is not permanent deletion ---------
+
+
+def test_peer_active_search_absence_never_proves_permanent_deletion(tmp_path):
+    """Absence from ``Profile Search(is_removed=False)`` proves the profile left
+    the ACTIVE folder -- nothing more.
+
+    Multilogin deletion is two-stage: an ordinary remove moves the profile to
+    the Trash, where it stays restorable and may still consume a plan slot;
+    permanent deletion is a separate irreversible action from inside the Trash.
+    So a ROLLBACK_VERIFIED receipt built from active-census absence must NOT be
+    readable as permanent deletion or capacity release.
+    """
+    provision = _valid_provision("multilogin")
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    intent_path = _seed_peer_intent(tmp_path, provision)
+    peer_provision_path = tmp_path / "peer_provision.json"
+    vendors.atomic_private_json(
+        _peer_provision_doc(provision, _PEER_CREATED_UUID), peer_provision_path,
+    )
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name, folder_id=provision["folder_id"], id=_PEER_CREATED_UUID)], [],
+    )
+    transport.remove_response = _peer_remove_success()
+
+    out = io.StringIO()
+    code = _rollback_main(
+        tmp_path, provision, transport,
+        intent_path=intent_path, peer_provision_path=peer_provision_path, out=out,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 0
+    assert receipt["effect"] == "ROLLBACK_VERIFIED"
+    assert receipt["predicates"]["removed_absent"] is True
+
+    # The disposition must be carried explicitly, not left to the reader.
+    assert receipt["removal_disposition"] == "TRASHED_RESTORABLE"
+    detail = receipt["removal_disposition_detail"].lower()
+    assert "restorable" in detail
+    assert "may still consume a plan slot" in detail
+    assert "not permanent deletion" in detail
+    assert "no capacity" in detail
+
+    # No effect sentence anywhere may assert permanence or capacity release.
+    vocabulary = " ".join(vendors.PEER_EFFECT_DETAILS.values()).lower()
+    for forbidden in ("permanently deleted", "permanent deletion", "capacity released", "slot freed"):
+        assert forbidden not in vocabulary
+
+    # And the request that produced the absence asked for the reversible form.
+    assert vendors._PEER_REMOVE_PERMANENTLY is False
+
+
+def test_peer_refused_removal_carries_no_removal_disposition():
+    """A refusal that dispatched nothing must not imply a trash move either."""
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([])
+    client = _peer_client(transport)
+    receipt = client.remove_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR, peer_profile_id=_PEER_CREATED_UUID,
+        claim_remove=lambda: vendors.CREATED_THIS_CALL,
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["predicates"]["dispatched"] is False
+    assert receipt["removal_disposition"] == "NOT_APPLICABLE"
+    assert [c[0] for c in transport.calls].count("remove") == 0
+
+
+def test_peer_permanent_delete_is_structurally_unauthorized():
+    """#385 authorizes ONE exact remove request, not an irreversible purge.
+
+    Permanent deletion IS reachable on the same documented endpoint via
+    ``permanently: true``, so the boundary cannot rest on prose. Flipping the
+    constant must stop the module from importing at all, forcing a
+    DECISION_REQUEST / PERMANENT_DELETE_BOUNDARY ruling first.
+    """
+    source = Path(vendors.__file__).read_text(encoding="utf-8")
+    assert "_PEER_REMOVE_PERMANENTLY = False" in source
+    mutated = source.replace("_PEER_REMOVE_PERMANENTLY = False", "_PEER_REMOVE_PERMANENTLY = True", 1)
+    namespace = {
+        "__name__": "mutated_nonseat_canary_vendors",
+        "__file__": vendors.__file__,
+        "__package__": "integrations.chairman_surfaces",
+    }
+    with pytest.raises(RuntimeError) as raised:
+        exec(compile(mutated, vendors.__file__, "exec"), namespace)  # noqa: S102 — boundary probe
+    assert "permanent profile deletion is not authorized" in str(raised.value)
+    assert "PERMANENT_DELETE_BOUNDARY" in str(raised.value)
+
+
+# --- #385-13: wrong id / replaced identity / bound / running / unowned ---
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("wrong_id", "replaced_identity", "folder_mismatch", "still_bound", "running", "unowned"),
+)
+def test_peer_d13_non_exact_target_emits_zero_remove_requests(mutation):
+    peer_name = _peer_name()
+    record = _peer_record(peer_name, id=_PEER_CREATED_UUID)
+    target_id = _PEER_CREATED_UUID
+    status_by_id = {}
+    if mutation == "wrong_id":
+        target_id = _PEER_ALT_UUID
+    elif mutation == "replaced_identity":
+        record["browser_type"] = "stealthfox"
+    elif mutation == "folder_mismatch":
+        record["folder_id"] = "not-the-anchor-folder"
+    elif mutation == "still_bound":
+        record["locked_by"] = "other-session"
+    elif mutation == "running":
+        status_by_id[_PEER_CREATED_UUID] = "browser_running"
+    elif mutation == "unowned":
+        record["in_use_by"] = "someone-else"
+
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([record])
+    transport.status_by_id = status_by_id
+    client = _peer_client(transport)
+    receipt = client.remove_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR, peer_profile_id=target_id,
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert [c[0] for c in transport.calls].count("remove") == 0
+
+
+# --- #385-14: remove response lost -> one reconciliation, one remove call -
+
+
+def test_peer_d14_lost_remove_response_reconciles_once():
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence(
+        [_peer_record(peer_name, id=_PEER_CREATED_UUID)], [],
+    )
+    transport.remove_response = None  # response lost
+    client = _peer_client(transport)
+    receipt = client.remove_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR, peer_profile_id=_PEER_CREATED_UUID,
+        claim_remove=lambda: vendors.CREATED_THIS_CALL,
+    )
+    assert receipt["effect"] in ("ROLLBACK_VERIFIED", "REMOVE_EFFECT_UNKNOWN")
+    assert [c[0] for c in transport.calls].count("remove") == 1
+    assert [c[0] for c in transport.calls].count("search") == 2
+
+
+# --- #385-15: profile_A and Chairman profiles/bindings are untouched ------
+
+
+def test_peer_d15_anchor_profile_and_bindings_are_never_targeted_or_mutated(tmp_path):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    before_bytes = path.read_bytes()
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name, folder_id=provision["folder_id"])])
+    transport.create_response = _peer_create_success()
+
+    out = io.StringIO()
+    _authorized_peer_main(
+        [
+            "create-peer-profile", "--vendor", "multilogin", "--provision-path", str(path),
+        ],
+        peer_intent_path=str(tmp_path / "peer_intent.json"),
+        peer_provision_path=str(tmp_path / "peer_provision.json"),
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert path.read_bytes() == before_bytes
+    for call in transport.calls:
+        if call[0] == "create":
+            assert call[2] != provision["profile_id"]
+        elif call[0] in ("remove", "status"):
+            assert call[1] != provision["profile_id"]
+
+
+# --- #385-16: GoLogin/quick-profile stay unsupported; no new bare httpx ---
+
+
+def test_peer_d16_no_new_generic_endpoint_and_gologin_stays_unsupported():
+    source = VENDORS_PATH.read_text(encoding="utf-8")
+    assert re.search(r"\bhttpx\.(get|put|post|patch|delete|request|stream)\s*\(", source) is None
+    public = {
+        name for name in dir(vendors.BoundedHttpClient)
+        if not name.startswith("_") and callable(getattr(vendors.BoundedHttpClient, name))
+    }
+    assert public == {"close"}
+    # The peer create/remove capability must exist on MultiloginClient...
+    multilogin = vendors.MultiloginClient(core.Credential("x", "stdin"), _PeerTransport())
+    assert callable(getattr(multilogin, "create_peer_profile", None))
+    assert callable(getattr(multilogin, "remove_peer_profile", None))
+    # ...and must never be extended to GoLogin, which stays a hard refusal.
+    gologin = vendors.GoLoginClient(core.Credential("x", "stdin"))
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        gologin.profile_exists({"profile_id": "x"})
+    assert exc_info.value.code == "UNSUPPORTED_SURFACE"
+    assert not hasattr(gologin, "create_peer_profile")
+    assert not hasattr(gologin, "remove_peer_profile")
+
+
+# --- REALM1-C1 reconstruction: accepted eight-blocker RED matrix -----------
+
+
+def _initialize_peer_state(
+    state_path, provision_path, *, generation=vendors.PEER_SOURCE_GENERATION,
+):
+    return vendors.initialize_peer_lifecycle_state(
+        state_path,
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        peer_name=_peer_name(),
+        peer_provision_path=provision_path,
+        generation=generation,
+    )
+
+
+def test_peer_r2_genesis_witness_is_bound_to_the_exact_initialized_state(tmp_path):
+    """Normal setup leaves one mutually inode-bound witness/state genesis."""
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    assert _initialize_peer_state(state_path, provision_path) == vendors.CREATED_THIS_CALL
+
+    state = vendors._peer_intent_snapshot(state_path)
+    witness_path = vendors._peer_genesis_witness_path(state_path)
+    witness = vendors._peer_genesis_witness_snapshot(witness_path)
+    assert state is not None
+    assert witness is not None
+    assert witness.document["phase"] == vendors._PEER_GENESIS_WITNESS_BOUND
+    assert (witness.document["witness_dev"], witness.document["witness_ino"]) == (
+        witness.st_dev,
+        witness.st_ino,
+    )
+    assert (witness.document["state_dev"], witness.document["state_ino"]) == (
+        state.st_dev,
+        state.st_ino,
+    )
+    assert (state.document["genesis_witness_dev"], state.document["genesis_witness_ino"]) == (
+        witness.st_dev,
+        witness.st_ino,
+    )
+    checked_state, checked_provision = vendors._preflight_peer_paths(
+        operation="create-peer-profile",
+        state_path=state_path,
+        provision_path=provision_path,
+    )
+    assert vendors._same_snapshot(checked_state, state)
+    assert checked_provision is None
+
+
+@pytest.mark.parametrize("crash_point", ("before_state", "before_witness_bind"))
+def test_peer_r2_pending_witness_recovers_only_the_two_setup_crash_windows(
+    tmp_path, monkeypatch, crash_point,
+):
+    """Setup resumes only an exact PENDING witness, never a runtime phase."""
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    witness_path = vendors._peer_genesis_witness_path(state_path)
+    real_create = vendors._create_self_bound_private_record
+    real_rewrite = vendors._rewrite_private_record_in_parent
+
+    if crash_point == "before_state":
+        def _fail_state_create(target, *args, **kwargs):
+            if Path(target) == state_path:
+                return None
+            return real_create(target, *args, **kwargs)
+
+        monkeypatch.setattr(vendors, "_create_self_bound_private_record", _fail_state_create)
+    else:
+        def _fail_witness_bind(target, *args, **kwargs):
+            if (
+                Path(target) == witness_path
+                and kwargs.get("next_document", {}).get("phase")
+                == vendors._PEER_GENESIS_WITNESS_BOUND
+            ):
+                return None
+            return real_rewrite(target, *args, **kwargs)
+
+        monkeypatch.setattr(vendors, "_rewrite_private_record_in_parent", _fail_witness_bind)
+
+    assert _initialize_peer_state(state_path, provision_path) == vendors.REFUSED
+    pending = vendors._peer_genesis_witness_snapshot(witness_path)
+    assert pending is not None
+    assert pending.document["phase"] == vendors._PEER_GENESIS_WITNESS_PENDING
+    assert state_path.exists() is (crash_point == "before_witness_bind")
+
+    monkeypatch.setattr(vendors, "_create_self_bound_private_record", real_create)
+    monkeypatch.setattr(vendors, "_rewrite_private_record_in_parent", real_rewrite)
+    recovered = _initialize_peer_state(state_path, provision_path)
+    expected = (
+        vendors.CREATED_THIS_CALL
+        if crash_point == "before_state" else vendors.EXISTING_EXACT
+    )
+    assert recovered == expected
+    state, peer = vendors._preflight_peer_paths(
+        operation="create-peer-profile",
+        state_path=state_path,
+        provision_path=provision_path,
+    )
+    bound = vendors._peer_genesis_witness_snapshot(witness_path)
+    assert state is not None and peer is None and bound is not None
+    assert bound.document["phase"] == vendors._PEER_GENESIS_WITNESS_BOUND
+
+
+@pytest.mark.parametrize(
+    "target_name,mutation",
+    (
+        ("state", "unlink"),
+        ("witness", "unlink"),
+        ("state", "replace"),
+        ("witness", "replace"),
+    ),
+)
+def test_peer_r2_genesis_loss_or_replacement_never_rearms(
+    tmp_path, target_name, mutation,
+):
+    """Either half of the bound genesis is mandatory and inode-specific."""
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    assert _initialize_peer_state(state_path, provision_path) == vendors.CREATED_THIS_CALL
+    witness_path = vendors._peer_genesis_witness_path(state_path)
+    target = state_path if target_name == "state" else witness_path
+
+    if mutation == "unlink":
+        target.unlink()
+    else:
+        replacement = tmp_path / f"foreign-{target.name}"
+        replacement.write_bytes(target.read_bytes())
+        replacement.chmod(0o600)
+        os.replace(replacement, target)
+
+    with pytest.raises(vendors._PeerStateRefusal):
+        vendors._preflight_peer_paths(
+            operation="create-peer-profile",
+            state_path=state_path,
+            provision_path=provision_path,
+        )
+    assert vendors._commit_peer_intent(
+        state_path,
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        peer_name=_peer_name(),
+        peer_provision_path=provision_path,
+    ) == vendors.REFUSED
+    assert _initialize_peer_state(state_path, provision_path) == vendors.REFUSED
+
+
+def test_peer_r2_create_claim_is_exclusive_and_full_authority_bearing(tmp_path):
+    """Only the process that creates the durable lifecycle state may dispatch.
+
+    The state is deliberately strict: a same-name file with a changed
+    generation, anchor, coordinate, phase, profile, or response identity is
+    never an interchangeable intent receipt.
+    """
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    assert _initialize_peer_state(
+        state_path, provision_path, generation="a" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    barrier = threading.Barrier(2)
+    outcomes = []
+
+    def _claim():
+        barrier.wait()
+        outcomes.append(vendors._commit_peer_intent(
+            state_path,
+            folder_id=_PEER_FOLDER,
+            anchor_profile_id=_PEER_ANCHOR,
+            peer_name=_peer_name(),
+            peer_provision_path=provision_path,
+            generation="a" * 32,
+        ))
+
+    threads = [threading.Thread(target=_claim) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert sorted(outcomes) == sorted([
+        vendors.CREATED_THIS_CALL,
+        vendors.EXISTING_EXACT,
+    ])
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert set(state) == {
+        "schema", "operation", "generation", "folder_digest",
+        "anchor_profile_digest", "browser_type", "os_type", "peer_name",
+        "state_dev", "state_ino", "genesis_witness_coordinate_digest",
+        "genesis_witness_dev", "genesis_witness_ino",
+        "peer_profile_digest", "peer_provision_coordinate_digest",
+        "peer_provision_digest", "peer_provision_dev", "peer_provision_ino",
+        "phase", "response_profile_digest", "ownership_fact_digest",
+        "ownership_observed_at",
+    }
+    state_stat = state_path.stat()
+    assert state["state_dev"] == state_stat.st_dev
+    assert state["state_ino"] == state_stat.st_ino
+    assert state["phase"] == vendors.PEER_PHASE_CREATE_CLAIMED
+    assert state["generation"] == "a" * 32
+    assert state["peer_profile_digest"] is None
+    assert state["response_profile_digest"] is None
+    assert stat.S_IMODE(state_path.stat().st_mode) == 0o600
+    assert state_path.stat().st_nlink == 1
+
+
+def test_peer_r2_unsafe_fixed_path_refuses_before_anchor_environment_secret_or_client(tmp_path):
+    """The fixed peer paths are the first input inspected after authority."""
+    victim = tmp_path / "victim.json"
+    victim.write_text("{}", encoding="utf-8")
+    victim.chmod(0o600)
+    state_path = tmp_path / "peer-state.json"
+    state_path.symlink_to(victim)
+    anchor_path = _write_provision(tmp_path, _valid_provision("multilogin"))
+    before = (victim.read_bytes(), victim.stat().st_ino)
+    calls = []
+
+    def _bomb(label):
+        def _raise(*_args, **_kwargs):
+            calls.append(label)
+            raise AssertionError(f"unsafe peer state reached {label}")
+        return _raise
+
+    out = io.StringIO()
+    code = vendors.run_coordinator_peer_create(
+        ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
+        peer_intent_path=state_path,
+        peer_provision_path=tmp_path / "peer-provision.json",
+        stdout=out,
+        bindings_loader=_bomb("anchor/bindings"),
+        environment_loader=_bomb("environment"),
+        credential_stream_factory=_bomb("credential"),
+        client_factory=_bomb("client"),
+        now=_NOW,
+    )
+    assert code == 2
+    assert calls == []
+    assert state_path.is_symlink()
+    assert (victim.read_bytes(), victim.stat().st_ino) == before
+
+
+@pytest.mark.parametrize("status_code", (200, 201, 202, 299))
+def test_peer_r2_ambiguous_response_id_still_binds_readback(status_code):
+    """Usable response identity is evidence even when success prose drifts."""
+    response = vendors._BoundedResponse(status_code, {
+        "status": {
+            "error_code": "",
+            "http_code": status_code,
+            "message": "Created; rollout advisory attached",
+            "advisory": "synthetic",
+        },
+        "data": {"ids": [_PEER_ALT_UUID], "notice": "synthetic"},
+        "meta": {"request": "synthetic"},
+    })
+    assert vendors._exact_profile_create_id(response) is None
+    assert vendors._observed_profile_create_id(response) == _PEER_ALT_UUID
+
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(_peer_name(), id=_PEER_OTHER_UUID)])
+    transport.create_response = response
+    receipt = _peer_client(transport).create_peer_profile(
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False,
+        commit_intent=lambda: vendors.CREATED_THIS_CALL,
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["predicates"]["exact_readback"] is False
+    assert [call[0] for call in transport.calls].count("create") == 1
+
+
+def test_peer_r2_create_claim_refuses_if_created_inode_becomes_hardlinked(
+    tmp_path, monkeypatch,
+):
+    """The exclusive creator cannot dispatch after its private inode gains an alias."""
+    state_path = tmp_path / "peer-state.json"
+    alias_path = tmp_path / "foreign-alias.json"
+    provision_path = tmp_path / "peer-provision.json"
+    real_fsync = vendors.os.fsync
+    injected = False
+
+    def _hardlink_after_leaf_fsync(fd):
+        nonlocal injected
+        real_fsync(fd)
+        if not injected and state_path.exists():
+            os.link(state_path, alias_path)
+            injected = True
+
+    monkeypatch.setattr(vendors.os, "fsync", _hardlink_after_leaf_fsync)
+    outcome = vendors.initialize_peer_lifecycle_state(
+        state_path,
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        peer_name=_peer_name(),
+        peer_provision_path=provision_path,
+        generation="d" * 32,
+    )
+
+    assert injected is True
+    assert outcome == vendors.REFUSED
+    assert state_path.stat().st_nlink == 2
+    assert alias_path.samefile(state_path)
+
+
+def test_peer_r2_create_claim_refuses_parent_swap_during_lock(tmp_path, monkeypatch):
+    """A lock on a renamed directory cannot authorize a claim at the fixed path."""
+    private_parent = tmp_path / "private"
+    moved_parent = tmp_path / "moved-private"
+    private_parent.mkdir(mode=0o700)
+    state_path = private_parent / "peer-state.json"
+    provision_path = private_parent / "peer-provision.json"
+    real_flock = vendors.fcntl.flock
+    injected = False
+
+    def _swap_parent_during_flock(fd, operation):
+        nonlocal injected
+        real_flock(fd, operation)
+        if not injected:
+            private_parent.rename(moved_parent)
+            private_parent.mkdir(mode=0o700)
+            injected = True
+
+    monkeypatch.setattr(vendors.fcntl, "flock", _swap_parent_during_flock)
+    outcome = vendors.initialize_peer_lifecycle_state(
+        state_path,
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        peer_name=_peer_name(),
+        peer_provision_path=provision_path,
+        generation="4" * 32,
+    )
+
+    assert injected is True
+    assert outcome == vendors.REFUSED
+    assert not state_path.exists()
+    assert not (moved_parent / state_path.name).exists()
+
+
+def test_peer_r2_peer_provision_refuses_byte_identical_foreign_replacement(
+    tmp_path, monkeypatch,
+):
+    """A post-write path replacement is not our operation-created provision."""
+    provision_path = tmp_path / "peer-provision.json"
+    replacement_path = tmp_path / "foreign-replacement.json"
+    real_fsync = vendors.os.fsync
+    created_inode = None
+    replacement_inode = None
+    injected = False
+    binding_calls = []
+
+    def _replace_after_leaf_fsync(fd):
+        nonlocal created_inode, replacement_inode, injected
+        real_fsync(fd)
+        if not injected and provision_path.exists():
+            created_inode = provision_path.stat().st_ino
+            replacement_path.write_bytes(provision_path.read_bytes())
+            replacement_path.chmod(0o600)
+            replacement_inode = replacement_path.stat().st_ino
+            os.replace(replacement_path, provision_path)
+            injected = True
+
+    monkeypatch.setattr(vendors.os, "fsync", _replace_after_leaf_fsync)
+    written, loaded = vendors._write_peer_provision(
+        provision_path,
+        profile_id=_PEER_CREATED_UUID,
+        folder_id=_PEER_FOLDER,
+        bindings_loader=lambda: binding_calls.append(True),
+        now=_NOW,
+    )
+
+    assert injected is True
+    assert created_inode != replacement_inode
+    assert provision_path.stat().st_ino == replacement_inode
+    assert (written, loaded) == (False, None)
+    assert binding_calls == []
+
+
+def test_peer_r2_remove_claim_refuses_replacement_during_directory_fsync(
+    tmp_path, monkeypatch,
+):
+    """The remove fence is not acquired if its fixed-path inode is replaced."""
+    (
+        _provision,
+        _anchor_path,
+        state_path,
+        _provision_path,
+        state,
+        provision_snapshot,
+    ) = _seed_peer_provision_committed(tmp_path)
+    ownership_fact = _peer_ownership_receipt(state, provision_snapshot)
+    replacement_path = tmp_path / "foreign-state.json"
+    replacement_path.write_bytes(state.raw)
+    replacement_path.chmod(0o600)
+    foreign_inode = replacement_path.stat().st_ino
+    real_fsync = vendors.os.fsync
+    injected = False
+
+    def _replace_during_parent_fsync(fd):
+        nonlocal injected
+        real_fsync(fd)
+        if not injected and stat.S_ISDIR(os.fstat(fd).st_mode):
+            os.replace(replacement_path, state_path)
+            injected = True
+
+    monkeypatch.setattr(vendors.os, "fsync", _replace_during_parent_fsync)
+    outcome = vendors._claim_peer_remove(
+        state_path,
+        expected=state,
+        peer_profile_id=_PEER_CREATED_UUID,
+        provision_snapshot=provision_snapshot,
+        ownership_fact=ownership_fact,
+        now=_NOW,
+    )
+
+    assert injected is True
+    assert outcome == vendors.REFUSED
+    assert state_path.stat().st_ino == foreign_inode
+    # The replacement bytes survive untouched, but their embedded inode
+    # authority no longer matches the fixed path and therefore cannot be
+    # loaded as lifecycle state on this or any later invocation.
+    assert vendors._peer_intent_snapshot(state_path) is None
+    assert json.loads(state_path.read_text(encoding="utf-8"))["phase"] == (
+        vendors.PEER_PHASE_PROVISION_COMMITTED
+    )
+
+
+def test_peer_r2_ambiguous_response_id_is_durable_across_rerun(tmp_path):
+    """A drifted response id survives the process and constrains every rerun."""
+    provision = _valid_provision("multilogin")
+    anchor_path = _write_provision(tmp_path, provision)
+    state_path = tmp_path / "peer-state.json"
+    peer_provision_path = tmp_path / "peer-provision.json"
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    response_id = _PEER_ALT_UUID
+    census_id = _PEER_OTHER_UUID
+    response = vendors._BoundedResponse(201, {
+        "status": {
+            "error_code": "",
+            "http_code": 201,
+            "message": "Created with advisory prose",
+            "advisory": "synthetic",
+        },
+        "data": {"ids": [response_id], "notice": "synthetic"},
+    })
+    first_transport = _PeerTransport()
+    first_transport.set_candidates_sequence(
+        [], [_peer_record(peer_name, id=census_id, folder_id=provision["folder_id"])],
+    )
+    first_transport.create_response = response
+    _prepare_peer_lifecycle(provision, state_path, peer_provision_path)
+    first_out = io.StringIO()
+    first_code = _authorized_peer_main(
+        ["create-peer-profile", "--vendor", "multilogin", "--provision-path", str(anchor_path)],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        stdout=first_out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: first_transport,
+        now=_NOW,
+    )
+    assert first_code == 3
+    state = vendors._peer_intent_snapshot(state_path)
+    assert state.document["phase"] == vendors.PEER_PHASE_CREATE_RESPONSE_OBSERVED
+    assert state.document["response_profile_digest"] == core.sha256_hex(response_id)
+    assert not peer_provision_path.exists()
+
+    second_transport = _PeerTransport()
+    second_transport.set_candidates_sequence([
+        _peer_record(peer_name, id=census_id, folder_id=provision["folder_id"]),
+    ])
+    second_out = io.StringIO()
+    second_code = _authorized_peer_main(
+        ["create-peer-profile", "--vendor", "multilogin", "--provision-path", str(anchor_path)],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        stdout=second_out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: second_transport,
+        now=_NOW,
+    )
+    assert second_code == 3
+    assert json.loads(second_out.getvalue())["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert [call[0] for call in second_transport.calls].count("create") == 0
+
+
+def test_peer_r2_unsettled_create_claim_cannot_adopt_concurrent_census_id():
+    """A loser cannot provision Y while the owner is still recording response X."""
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([
+        _peer_record(_peer_name(), id=_PEER_OTHER_UUID),
+    ])
+    receipt = _peer_client(transport).create_peer_profile(
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        intent_present=True,
+        commit_intent=lambda: (_ for _ in ()).throw(
+            AssertionError("an existing in-flight claim must not be recommitted")
+        ),
+        observed_profile_digest=None,
+        intent_reconciliation_ready=False,
+    )
+
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["predicates"]["dispatched"] is False
+    assert [call[0] for call in transport.calls].count("create") == 0
+
+
+def test_peer_r2_concurrent_create_has_one_dispatch_and_one_reconciliation_loser(tmp_path):
+    """Two zero-census callers share one durable winner and one read-only loser."""
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    assert _initialize_peer_state(
+        state_path, provision_path, generation="2" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    claim_barrier = threading.Barrier(2)
+    create_lock = threading.Lock()
+    create_calls = []
+    receipts = []
+
+    class _ConcurrentCreateTransport(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.set_candidates_sequence([], [_peer_record(_peer_name())])
+
+        def _mlx_profile_create(self, credential, folder_id, name):
+            with create_lock:
+                create_calls.append((folder_id, name))
+            return _peer_create_success()
+
+    def _run():
+        transport = _ConcurrentCreateTransport()
+
+        def _claim():
+            claim_barrier.wait(timeout=5)
+            return vendors._commit_peer_intent(
+                state_path,
+                folder_id=_PEER_FOLDER,
+                anchor_profile_id=_PEER_ANCHOR,
+                peer_name=_peer_name(),
+                peer_provision_path=provision_path,
+                generation="2" * 32,
+            )
+
+        receipts.append(_peer_client(transport).create_peer_profile(
+            folder_id=_PEER_FOLDER,
+            anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False,
+            commit_intent=_claim,
+        ))
+
+    threads = [threading.Thread(target=_run) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+
+    assert len(create_calls) == 1
+    assert len(receipts) == 2
+    assert {receipt["effect"] for receipt in receipts} == {
+        "PROFILE_STOPPED_PROVEN",
+        "CREATE_EFFECT_UNKNOWN",
+    }
+    assert sorted(receipt["predicates"]["dispatched"] for receipt in receipts) == [False, True]
+
+
+@pytest.mark.parametrize("census_result", ("busy", "transport_error"))
+def test_peer_r2_phase_advance_during_first_census_never_returns_false_none(
+    tmp_path, census_result,
+):
+    """A concurrent effect-bearing claim cannot be hidden by stale intent=False."""
+    provision = _valid_provision("multilogin")
+    anchor_path = _write_provision(tmp_path, provision)
+    state_path = tmp_path / "peer-state.json"
+    peer_provision_path = tmp_path / "peer-provision.json"
+    peer_name = vendors.peer_profile_name(
+        provision["folder_id"], provision["profile_id"],
+    )
+    _prepare_peer_lifecycle(provision, state_path, peer_provision_path)
+
+    class _AdvanceDuringFirstCensus(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.advanced = False
+            self.set_candidates_sequence([
+                _peer_record(
+                    peer_name,
+                    id=_PEER_CREATED_UUID,
+                    folder_id=provision["folder_id"],
+                ),
+            ])
+
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            if offset == 0 and not self.advanced:
+                initialized = vendors._peer_intent_snapshot(state_path)
+                claimed = vendors._transition_peer_intent(
+                    state_path,
+                    expected=initialized,
+                    phase=vendors.PEER_PHASE_CREATE_CLAIMED,
+                )
+                assert claimed is not None
+                observed = vendors._transition_peer_intent(
+                    state_path,
+                    expected=claimed,
+                    phase=vendors.PEER_PHASE_CREATE_RESPONSE_OBSERVED,
+                    response_profile_id=_PEER_CREATED_UUID,
+                )
+                assert observed is not None
+                self.advanced = True
+                if census_result == "transport_error":
+                    raise RuntimeError("synthetic first-census transport loss")
+            return super()._mlx_profile_search(
+                credential, folder_id, offset=offset,
+            )
+
+    transport = _AdvanceDuringFirstCensus()
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [
+            "create-peer-profile",
+            "--vendor",
+            "multilogin",
+            "--provision-path",
+            str(anchor_path),
+        ],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"credential"),
+        client_factory=lambda: transport,
+        now=_NOW,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["predicates"]["intent_committed"] is True
+    assert receipt["predicates"]["dispatched"] is False
+    assert receipt["predicates"]["reconciled"] is True
+    assert sum(call[0] == "create" for call in transport.calls) == 0
+    assert vendors._peer_intent_snapshot(state_path).document["phase"] == (
+        vendors.PEER_PHASE_CREATE_RESPONSE_OBSERVED
+    )
+
+
+@pytest.mark.parametrize(
+    "phase,census_result",
+    (
+        (vendors.PEER_PHASE_CREATE_CLAIMED, "transport_error"),
+        (vendors.PEER_PHASE_CREATE_RESPONSE_OBSERVED, "transport_error"),
+        (vendors.PEER_PHASE_CREATE_RESPONSE_OBSERVED, "wrong_identity"),
+    ),
+)
+def test_peer_r2_effect_bearing_create_reentry_never_returns_false_none(
+    tmp_path, phase, census_result,
+):
+    """A persisted create claim makes every failed census effect-unknown."""
+    provision = _valid_provision("multilogin")
+    anchor_path = _write_provision(tmp_path, provision)
+    state_path = tmp_path / "peer-state.json"
+    peer_provision_path = tmp_path / "peer-provision.json"
+    peer_name = vendors.peer_profile_name(
+        provision["folder_id"], provision["profile_id"],
+    )
+    _prepare_peer_lifecycle(provision, state_path, peer_provision_path)
+    assert vendors._commit_peer_intent(
+        state_path,
+        folder_id=provision["folder_id"],
+        anchor_profile_id=provision["profile_id"],
+        peer_name=peer_name,
+        peer_provision_path=peer_provision_path,
+    ) == vendors.CREATED_THIS_CALL
+    if phase == vendors.PEER_PHASE_CREATE_RESPONSE_OBSERVED:
+        claimed = vendors._peer_intent_snapshot(state_path)
+        assert vendors._transition_peer_intent(
+            state_path,
+            expected=claimed,
+            phase=vendors.PEER_PHASE_CREATE_RESPONSE_OBSERVED,
+            response_profile_id=_PEER_CREATED_UUID,
+        ) is not None
+
+    class _FailedReentryCensus(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.set_candidates_sequence([
+                _peer_record(
+                    peer_name,
+                    id=_PEER_CREATED_UUID,
+                    folder_id=provision["folder_id"],
+                    browser_type="stealthfox",
+                ),
+            ])
+
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            if census_result == "transport_error":
+                raise RuntimeError("synthetic re-entry census loss")
+            return super()._mlx_profile_search(
+                credential, folder_id, offset=offset,
+            )
+
+    transport = _FailedReentryCensus()
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [
+            "create-peer-profile",
+            "--vendor",
+            "multilogin",
+            "--provision-path",
+            str(anchor_path),
+        ],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"credential"),
+        client_factory=lambda: transport,
+        now=_NOW,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["predicates"]["intent_committed"] is True
+    assert receipt["predicates"]["dispatched"] is False
+    assert receipt["predicates"]["reconciled"] is True
+    assert sum(call[0] == "create" for call in transport.calls) == 0
+    assert vendors._peer_intent_snapshot(state_path).document["phase"] == phase
+
+
+def test_peer_r2_remove_claim_is_monotonic_and_single_winner(tmp_path):
+    """A durable remove phase is a one-total-dispatch fence, not a retry bit."""
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    assert _initialize_peer_state(
+        state_path, provision_path, generation="b" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    assert vendors._commit_peer_intent(
+        state_path,
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        peer_name=_peer_name(),
+        peer_provision_path=provision_path,
+        generation="b" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    snapshot = vendors._peer_intent_snapshot(state_path)
+    vendors.atomic_private_json(
+        _peer_provision_doc(
+            {"folder_id": _PEER_FOLDER},
+            _PEER_CREATED_UUID,
+        ),
+        provision_path,
+    )
+    provision_snapshot = vendors._peer_provision_snapshot(provision_path)
+    snapshot = vendors._transition_peer_intent(
+        state_path,
+        expected=snapshot,
+        phase=vendors.PEER_PHASE_PROFILE_STOPPED,
+        peer_profile_id=_PEER_CREATED_UUID,
+    )
+    snapshot = vendors._transition_peer_intent(
+        state_path,
+        expected=snapshot,
+        phase=vendors.PEER_PHASE_PROVISION_COMMITTED,
+        peer_profile_id=_PEER_CREATED_UUID,
+        peer_provision_snapshot=provision_snapshot,
+    )
+    ownership_fact = _peer_ownership_receipt(snapshot, provision_snapshot)
+    first = vendors._claim_peer_remove(
+        state_path,
+        expected=snapshot,
+        peer_profile_id=_PEER_CREATED_UUID,
+        provision_snapshot=provision_snapshot,
+        ownership_fact=ownership_fact,
+        now=_NOW,
+    )
+    second_snapshot = vendors._peer_intent_snapshot(state_path)
+    second = vendors._claim_peer_remove(
+        state_path,
+        expected=second_snapshot,
+        peer_profile_id=_PEER_CREATED_UUID,
+        provision_snapshot=provision_snapshot,
+        ownership_fact=ownership_fact,
+        now=_NOW,
+    )
+    assert first == vendors.CREATED_THIS_CALL
+    assert second == vendors.EXISTING_EXACT
+    assert json.loads(state_path.read_text(encoding="utf-8"))["phase"] == vendors.PEER_PHASE_REMOVE_DISPATCHED
+
+
+def test_peer_r2_remove_phase_advance_during_first_census_never_returns_false_none(
+    tmp_path,
+):
+    """A concurrent remove fence cannot be hidden by a stale pre-census phase."""
+    (
+        provision,
+        _anchor_path,
+        state_path,
+        peer_provision_path,
+        state,
+        peer_snapshot,
+    ) = _seed_peer_provision_committed(tmp_path)
+    ownership_fact = _peer_ownership_receipt(state, peer_snapshot)
+
+    class _AdvanceRemoveDuringFirstCensus(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.advanced = False
+            self.set_candidates_sequence([])
+
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            if offset == 0 and not self.advanced:
+                current = vendors._peer_intent_snapshot(state_path)
+                advanced = vendors._transition_peer_intent(
+                    state_path,
+                    expected=current,
+                    phase=vendors.PEER_PHASE_REMOVE_DISPATCHED,
+                    peer_profile_id=_PEER_CREATED_UUID,
+                    ownership_fact=ownership_fact,
+                )
+                assert advanced is not None
+                self.advanced = True
+            return super()._mlx_profile_search(
+                credential, folder_id, offset=offset,
+            )
+
+    transport = _AdvanceRemoveDuringFirstCensus()
+    out = io.StringIO()
+    code = _rollback_main(
+        tmp_path,
+        provision,
+        transport,
+        intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        out=out,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["effect"] == "REMOVE_EFFECT_UNKNOWN"
+    assert receipt["predicates"]["intent_committed"] is True
+    assert receipt["predicates"]["dispatched"] is False
+    assert receipt["predicates"]["reconciled"] is True
+    assert sum(call[0] == "remove" for call in transport.calls) == 0
+    assert vendors._peer_intent_snapshot(state_path).document["phase"] == (
+        vendors.PEER_PHASE_REMOVE_DISPATCHED
+    )
+
+
+def test_peer_r2_remove_dispatched_reentry_census_error_never_returns_false_none(
+    tmp_path,
+):
+    """A persisted remove fence remains effect-unknown when census is lost."""
+    (
+        provision,
+        _anchor_path,
+        state_path,
+        peer_provision_path,
+        state,
+        peer_snapshot,
+    ) = _seed_peer_provision_committed(tmp_path)
+    ownership_fact = _peer_ownership_receipt(state, peer_snapshot)
+    dispatched = vendors._transition_peer_intent(
+        state_path,
+        expected=state,
+        phase=vendors.PEER_PHASE_REMOVE_DISPATCHED,
+        peer_profile_id=_PEER_CREATED_UUID,
+        ownership_fact=ownership_fact,
+    )
+    assert dispatched is not None
+
+    class _LostReentryCensus(_PeerTransport):
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            raise RuntimeError("synthetic remove re-entry census loss")
+
+    transport = _LostReentryCensus()
+    out = io.StringIO()
+    code = _rollback_main(
+        tmp_path,
+        provision,
+        transport,
+        intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        out=out,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["effect"] == "REMOVE_EFFECT_UNKNOWN"
+    assert receipt["predicates"]["intent_committed"] is True
+    assert receipt["predicates"]["dispatched"] is False
+    assert receipt["predicates"]["reconciled"] is True
+    assert sum(call[0] == "remove" for call in transport.calls) == 0
+    assert vendors._peer_intent_snapshot(state_path).document["phase"] == (
+        vendors.PEER_PHASE_REMOVE_DISPATCHED
+    )
+
+
+def test_peer_r2_remove_claim_requires_fresh_negative_ownership_fact(tmp_path):
+    """No private helper path may bypass the PF-1/INSTALL1 exclusion."""
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    assert _initialize_peer_state(
+        state_path, provision_path, generation="e" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    assert vendors._commit_peer_intent(
+        state_path,
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        peer_name=_peer_name(),
+        peer_provision_path=provision_path,
+        generation="e" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    snapshot = vendors._peer_intent_snapshot(state_path)
+    vendors.atomic_private_json(
+        _peer_provision_doc({"folder_id": _PEER_FOLDER}, _PEER_CREATED_UUID),
+        provision_path,
+    )
+    provision_snapshot = vendors._peer_provision_snapshot(provision_path)
+    snapshot = vendors._transition_peer_intent(
+        state_path,
+        expected=snapshot,
+        phase=vendors.PEER_PHASE_PROFILE_STOPPED,
+        peer_profile_id=_PEER_CREATED_UUID,
+    )
+    snapshot = vendors._transition_peer_intent(
+        state_path,
+        expected=snapshot,
+        phase=vendors.PEER_PHASE_PROVISION_COMMITTED,
+        peer_profile_id=_PEER_CREATED_UUID,
+        peer_provision_snapshot=provision_snapshot,
+    )
+
+    assert vendors._claim_peer_remove(
+        state_path,
+        expected=snapshot,
+        peer_profile_id=_PEER_CREATED_UUID,
+        provision_snapshot=provision_snapshot,
+        ownership_fact=None,
+        now=_NOW,
+    ) == vendors.REFUSED
+    assert vendors._peer_intent_snapshot(state_path).document["phase"] == vendors.PEER_PHASE_PROVISION_COMMITTED
+
+
+def test_peer_r2_stale_concurrent_remove_claim_reconciles_to_existing(tmp_path):
+    """A CAS loser observes the winner's exact remove fence, never a retry cue."""
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    assert _initialize_peer_state(
+        state_path, provision_path, generation="f" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    assert vendors._commit_peer_intent(
+        state_path,
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        peer_name=_peer_name(),
+        peer_provision_path=provision_path,
+        generation="f" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    stale = vendors._peer_intent_snapshot(state_path)
+    vendors.atomic_private_json(
+        _peer_provision_doc({"folder_id": _PEER_FOLDER}, _PEER_CREATED_UUID),
+        provision_path,
+    )
+    provision_snapshot = vendors._peer_provision_snapshot(provision_path)
+    stale = vendors._transition_peer_intent(
+        state_path,
+        expected=stale,
+        phase=vendors.PEER_PHASE_PROFILE_STOPPED,
+        peer_profile_id=_PEER_CREATED_UUID,
+    )
+    stale = vendors._transition_peer_intent(
+        state_path,
+        expected=stale,
+        phase=vendors.PEER_PHASE_PROVISION_COMMITTED,
+        peer_profile_id=_PEER_CREATED_UUID,
+        peer_provision_snapshot=provision_snapshot,
+    )
+    ownership_fact = _peer_ownership_receipt(stale, provision_snapshot)
+
+    first = vendors._claim_peer_remove(
+        state_path,
+        expected=stale,
+        peer_profile_id=_PEER_CREATED_UUID,
+        provision_snapshot=provision_snapshot,
+        ownership_fact=ownership_fact,
+        now=_NOW,
+    )
+    second = vendors._claim_peer_remove(
+        state_path,
+        expected=stale,
+        peer_profile_id=_PEER_CREATED_UUID,
+        provision_snapshot=provision_snapshot,
+        ownership_fact=ownership_fact,
+        now=_NOW,
+    )
+    assert first == vendors.CREATED_THIS_CALL
+    assert second == vendors.EXISTING_EXACT
+
+
+def test_peer_r2_phase_shape_and_transitions_cannot_skip_required_proofs(tmp_path):
+    """Phase labels cannot manufacture evidence missing from earlier phases."""
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    assert _initialize_peer_state(
+        state_path, provision_path, generation="1" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    assert vendors._commit_peer_intent(
+        state_path,
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        peer_name=_peer_name(),
+        peer_provision_path=provision_path,
+        generation="1" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    claimed = vendors._peer_intent_snapshot(state_path)
+    malformed = dict(claimed.document)
+    malformed["phase"] = vendors.PEER_PHASE_CREATE_RESPONSE_OBSERVED
+    assert vendors._peer_state_shape_exact(malformed) is False
+
+    vendors.atomic_private_json(
+        _peer_provision_doc({"folder_id": _PEER_FOLDER}, _PEER_CREATED_UUID),
+        provision_path,
+    )
+    provision_snapshot = vendors._peer_provision_snapshot(provision_path)
+    assert vendors._transition_peer_intent(
+        state_path,
+        expected=claimed,
+        phase=vendors.PEER_PHASE_PROVISION_COMMITTED,
+        peer_profile_id=_PEER_CREATED_UUID,
+        peer_provision_snapshot=provision_snapshot,
+    ) is None
+
+
+def test_peer_r2_stale_snapshot_cannot_transition_replacement(tmp_path):
+    """A byte-identical replacement inode is never rewritten as our state."""
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    assert _initialize_peer_state(
+        state_path, provision_path, generation="c" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    assert vendors._commit_peer_intent(
+        state_path,
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        peer_name=_peer_name(),
+        peer_provision_path=provision_path,
+        generation="c" * 32,
+    ) == vendors.CREATED_THIS_CALL
+    stale = vendors._peer_intent_snapshot(state_path)
+    replacement = tmp_path / "replacement.json"
+    replacement.write_bytes(stale.raw)
+    replacement.chmod(0o600)
+    replacement_bytes = replacement.read_bytes()
+    replacement_ino = replacement.stat().st_ino
+    os.replace(replacement, state_path)
+
+    assert vendors._transition_peer_intent(
+        state_path,
+        expected=stale,
+        phase=vendors.PEER_PHASE_CREATE_AUTH_REJECTED,
+    ) is None
+    assert state_path.read_bytes() == replacement_bytes
+    assert state_path.stat().st_ino == replacement_ino
+
+
+def test_peer_r2_public_confirm_flag_cannot_authorize_peer_effects(tmp_path):
+    """Serialized CLI input cannot manufacture either operation capability."""
+    with pytest.raises(SystemExit) as exc_info:
+        vendors.main([
+            "create-peer-profile", "--vendor", "multilogin",
+            "--provision-path", str(tmp_path / "anchor.json"), "--confirmed",
+        ])
+    assert exc_info.value.code == 2
+
+    calls = []
+    out = io.StringIO()
+    code = vendors.main(
+        [
+            "create-peer-profile", "--vendor", "multilogin",
+            "--provision-path", str(tmp_path / "anchor.json"),
+        ],
+        stdout=out,
+        bindings_loader=lambda: calls.append("bindings"),
+        credential_stream_factory=lambda: calls.append("credential"),
+        client_factory=lambda: calls.append("client"),
+    )
+    assert code == 2
+    assert calls == []
+    assert vendors.CREATE_PEER_AUTHORIZATION is not vendors.ROLLBACK_PEER_AUTHORIZATION
+    assert not isinstance(vendors.CREATE_PEER_AUTHORIZATION, (bool, str, int, bytes))
+    assert not isinstance(vendors.ROLLBACK_PEER_AUTHORIZATION, (bool, str, int, bytes))
+
+
+def test_peer_r2_downstream_ownership_fact_is_exact_current_and_negative(tmp_path):
+    profile_id = _PEER_CREATED_UUID
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    assert _initialize_peer_state(state_path, provision_path) == vendors.CREATED_THIS_CALL
+    assert vendors._commit_peer_intent(
+        state_path,
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        peer_name=_peer_name(),
+        peer_provision_path=provision_path,
+    ) == vendors.CREATED_THIS_CALL
+    state = vendors._peer_intent_snapshot(state_path)
+    state = vendors._transition_peer_intent(
+        state_path,
+        expected=state,
+        phase=vendors.PEER_PHASE_PROFILE_STOPPED,
+        peer_profile_id=profile_id,
+    )
+    vendors.atomic_private_json(
+        _peer_provision_doc({"folder_id": _PEER_FOLDER}, profile_id), provision_path,
+    )
+    provision_snapshot = vendors._peer_provision_snapshot(provision_path)
+    state = vendors._transition_peer_intent(
+        state_path,
+        expected=state,
+        phase=vendors.PEER_PHASE_PROVISION_COMMITTED,
+        peer_profile_id=profile_id,
+        peer_provision_snapshot=provision_snapshot,
+    )
+    base = _peer_ownership_receipt(state, provision_snapshot)
+    assert vendors._validate_peer_ownership_fact(
+        base,
+        generation=state.document["generation"],
+        peer_profile_id=profile_id,
+        provision_snapshot=provision_snapshot,
+        now=_NOW,
+    ) is True
+    for mutation in (
+        {"pf1_active": True},
+        {"install1_active": True},
+        {"valid_until": "2026-08-23T11:59:59Z"},
+        {"observed_at": "2026-08-23T12:00:01Z"},
+        {"valid_until": "2026-08-23T12:10:00Z"},
+        {"lifecycle_generation": "f" * 64},
+        {"source_generation": "f" * 64},
+        {"pf1_operation": "wrong"},
+        {"peer_provision_ino": provision_snapshot.st_ino + 1},
+        {"extra": False},
+    ):
+        candidate = dict(base)
+        candidate.update(mutation)
+        assert vendors._validate_peer_ownership_fact(
+            candidate,
+            generation=state.document["generation"],
+            peer_profile_id=profile_id,
+            provision_snapshot=provision_snapshot,
+            now=_NOW,
+        ) is False
+
+
+def test_peer_r2_completed_create_rerun_is_idempotent_without_second_dispatch(tmp_path):
+    """A committed provision is a completed create, not a new transition request."""
+    (
+        provision,
+        anchor_path,
+        state_path,
+        peer_provision_path,
+        before_state,
+        before_provision,
+    ) = _seed_peer_provision_committed(tmp_path)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    transport = _PeerTransport()
+    exact_peer = _peer_record(
+        peer_name,
+        id=_PEER_CREATED_UUID,
+        folder_id=provision["folder_id"],
+    )
+    transport.set_candidates_sequence([exact_peer], [exact_peer])
+    out = io.StringIO()
+
+    code = _authorized_peer_main(
+        ["create-peer-profile", "--vendor", "multilogin", "--provision-path", str(anchor_path)],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        now=_NOW,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 0
+    assert receipt["verdict"] == "PASS"
+    assert receipt["effect"] == "PROVISION_WRITTEN"
+    assert receipt["predicates"]["dispatched"] is False
+    assert receipt["predicates"]["reconciled"] is True
+    assert [call[0] for call in transport.calls].count("create") == 0
+    assert vendors._same_snapshot(vendors._peer_intent_snapshot(state_path), before_state)
+    assert vendors._same_snapshot(
+        vendors._peer_provision_snapshot(peer_provision_path), before_provision,
+    )
+
+
+def test_peer_r2_lost_remove_response_rerun_reconciles_without_second_dispatch(tmp_path):
+    """REMOVE_DISPATCHED is a durable one-shot fence across coordinator restarts."""
+    (
+        provision,
+        _anchor_path,
+        state_path,
+        peer_provision_path,
+        _state,
+        _peer_provision,
+    ) = _seed_peer_provision_committed(tmp_path)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    exact_peer = _peer_record(
+        peer_name,
+        id=_PEER_CREATED_UUID,
+        folder_id=provision["folder_id"],
+    )
+
+    first_transport = _PeerTransport()
+    first_transport.set_candidates_sequence([exact_peer], [exact_peer])
+    first_transport.remove_response = None
+    first_out = io.StringIO()
+    first_code = _rollback_main(
+        tmp_path,
+        provision,
+        first_transport,
+        intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        out=first_out,
+    )
+    assert first_code == 3
+    assert json.loads(first_out.getvalue())["effect"] == "REMOVE_EFFECT_UNKNOWN"
+    assert [call[0] for call in first_transport.calls].count("remove") == 1
+    assert (
+        vendors._peer_intent_snapshot(state_path).document["phase"]
+        == vendors.PEER_PHASE_REMOVE_DISPATCHED
+    )
+
+    second_transport = _PeerTransport()
+    second_transport.set_candidates_sequence([exact_peer], [])
+    second_transport.remove_response = _peer_remove_success()
+    second_out = io.StringIO()
+    second_code = _rollback_main(
+        tmp_path,
+        provision,
+        second_transport,
+        intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        out=second_out,
+    )
+    second_receipt = json.loads(second_out.getvalue())
+    assert second_code == 0
+    assert second_receipt["effect"] == "ROLLBACK_VERIFIED"
+    assert second_receipt["predicates"]["dispatched"] is False
+    assert second_receipt["predicates"]["reconciled"] is True
+    assert [call[0] for call in second_transport.calls].count("remove") == 0
+    assert (
+        vendors._peer_intent_snapshot(state_path).document["phase"]
+        == vendors.PEER_PHASE_ROLLBACK_VERIFIED
+    )
+
+
+@pytest.mark.parametrize(
+    ("response_id", "census_id"),
+    (
+        (_PEER_CREATED_UUID.upper(), _PEER_CREATED_UUID),
+        (_PEER_CREATED_UUID, _PEER_CREATED_UUID.upper()),
+    ),
+)
+def test_peer_r2_uuid_case_variants_collapse_to_one_canonical_identity(response_id, census_id):
+    """UUID casing cannot create a response/census contradiction or a second identity."""
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(_peer_name(), id=census_id)])
+    transport.create_response = _peer_create_success(profile_id=response_id)
+    client = _peer_client(transport)
+
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER,
+        anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False,
+        commit_intent=lambda: vendors.CREATED_THIS_CALL,
+    )
+
+    assert receipt["effect"] == "PROFILE_STOPPED_PROVEN"
+    assert receipt["predicates"]["exact_readback"] is True
+    assert client._peer_profile_id == _PEER_CREATED_UUID
+    assert receipt["digests"]["peer_profile"] == core.sha256_hex(_PEER_CREATED_UUID)
+    assert [call[0] for call in transport.calls].count("create") == 1
+
+
+@pytest.mark.parametrize(
+    ("case", "mutation"),
+    (
+        ("wrong_source_generation", {"source_generation": "f" * 64}),
+        ("wrong_lifecycle_generation", {"lifecycle_generation": "e" * 64}),
+        ("pf1_active", {"pf1_active": True}),
+        ("install1_active", {"install1_active": True}),
+        ("expired", {"valid_until": "2026-08-23T11:59:59Z"}),
+        ("future_observation", {"observed_at": "2026-08-23T12:00:01Z"}),
+    ),
+)
+def test_peer_r2_invalid_ownership_receipt_refuses_before_secret_or_vendor(
+    tmp_path, case, mutation,
+):
+    """Every stale, positive, or misbound release receipt fails at the first gate."""
+    (
+        provision,
+        anchor_path,
+        state_path,
+        peer_provision_path,
+        state,
+        peer_provision,
+    ) = _seed_peer_provision_committed(tmp_path)
+    invalid_receipt = _peer_ownership_receipt(state, peer_provision, **mutation)
+    calls = []
+
+    def _unexpected(label):
+        def _call(*_args, **_kwargs):
+            calls.append(label)
+            raise AssertionError(f"{case} receipt reached {label}")
+        return _call
+
+    out = io.StringIO()
+    code = vendors.run_coordinator_peer_rollback(
+        ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        stdout=out,
+        ownership_receipt_loader=lambda: invalid_receipt,
+        bindings_loader=_unexpected("anchor/bindings"),
+        environment_loader=_unexpected("environment"),
+        credential_stream_factory=_unexpected("credential"),
+        client_factory=_unexpected("client"),
+        now=_NOW,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 2
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["code"] == "BINDINGS_UNAVAILABLE"
+    assert calls == []
+    assert vendors._peer_intent_snapshot(state_path).document["phase"] == (
+        vendors.PEER_PHASE_PROVISION_COMMITTED
+    )
+
+
+@pytest.mark.parametrize("second_fact", ("expired", "revoked"))
+def test_peer_r2_rollback_reloads_fresh_ownership_receipt_before_remove(
+    tmp_path, second_fact,
+):
+    """A pre-secret receipt cannot authorize a later remove after expiry/revocation."""
+    (
+        provision,
+        anchor_path,
+        state_path,
+        peer_provision_path,
+        state,
+        peer_provision,
+    ) = _seed_peer_provision_committed(tmp_path)
+    peer_name = vendors.peer_profile_name(provision["folder_id"], provision["profile_id"])
+    exact_peer = _peer_record(
+        peer_name,
+        id=_PEER_CREATED_UUID,
+        folder_id=provision["folder_id"],
+    )
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([exact_peer])
+    transport.remove_response = _peer_remove_success()
+    valid = _peer_ownership_receipt(state, peer_provision)
+    refreshed = (
+        dict(valid, pf1_active=True)
+        if second_fact == "revoked"
+        else valid
+    )
+    receipts = iter((valid, refreshed))
+    receipt_calls = []
+
+    def _load_receipt():
+        receipt_calls.append(True)
+        return next(receipts)
+
+    times = iter((
+        _NOW,
+        datetime(2026, 8, 23, 12, 2, tzinfo=timezone.utc)
+        if second_fact == "expired"
+        else _NOW,
+    ))
+    out = io.StringIO()
+    code = vendors.run_coordinator_peer_rollback(
+        ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        stdout=out,
+        ownership_receipt_loader=_load_receipt,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        clock=lambda: next(times),
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 2
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert receipt["code"] == "PROVISION_MISSING"
+    assert len(receipt_calls) == 2
+    assert [call[0] for call in transport.calls].count("remove") == 0
+    assert vendors._peer_intent_snapshot(state_path).document["phase"] == (
+        vendors.PEER_PHASE_PROVISION_COMMITTED
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "authorization_kwargs"),
+    (
+        ("create-peer-profile", {"create_authorization": vendors.ROLLBACK_PEER_AUTHORIZATION}),
+        ("rollback-peer-profile", {"rollback_authorization": vendors.CREATE_PEER_AUTHORIZATION}),
+        ("create-peer-profile", {"create_authorization": vendors._PeerAuthorization()}),
+        ("rollback-peer-profile", {"rollback_authorization": vendors._PeerAuthorization()}),
+        (
+            "create-peer-profile",
+            {
+                "create_authorization": vendors.CREATE_PEER_AUTHORIZATION,
+                "rollback_authorization": vendors.ROLLBACK_PEER_AUTHORIZATION,
+            },
+        ),
+        (
+            "rollback-peer-profile",
+            {
+                "create_authorization": vendors.CREATE_PEER_AUTHORIZATION,
+                "rollback_authorization": vendors.ROLLBACK_PEER_AUTHORIZATION,
+            },
+        ),
+    ),
+)
+def test_peer_r2_wrong_forged_or_cross_operation_authorization_is_inert(
+    tmp_path, operation, authorization_kwargs,
+):
+    """Only the exact one-operation capability may cross the coordinator boundary."""
+    calls = []
+
+    def _unexpected(label):
+        def _call(*_args, **_kwargs):
+            calls.append(label)
+            raise AssertionError(f"bad authorization reached {label}")
+        return _call
+
+    out = io.StringIO()
+    code = vendors.main(
+        [operation, "--vendor", "multilogin", "--provision-path", str(tmp_path / "anchor.json")],
+        peer_intent_path=tmp_path / "peer-state.json",
+        peer_provision_path=tmp_path / "peer-provision.json",
+        stdout=out,
+        bindings_loader=_unexpected("anchor/bindings"),
+        environment_loader=_unexpected("environment"),
+        credential_stream_factory=_unexpected("credential"),
+        client_factory=_unexpected("client"),
+        now=_NOW,
+        **authorization_kwargs,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 2
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["code"] == "DISALLOWED_TARGET"
+    assert calls == []
+    assert not (tmp_path / "peer-state.json").exists()
+    assert not (tmp_path / "peer-provision.json").exists()
+
+
+@pytest.mark.parametrize("coordinate", ("state", "provision"))
+@pytest.mark.parametrize("alias_kind", ("symlink", "hardlink"))
+def test_peer_r2_path_aliases_refuse_before_anchor_secret_or_vendor(
+    tmp_path, coordinate, alias_kind,
+):
+    """Neither lifecycle coordinate may begin as a symlink or multiply-linked inode."""
+    state_path = tmp_path / "peer-state.json"
+    peer_provision_path = tmp_path / "peer-provision.json"
+    selected = state_path if coordinate == "state" else peer_provision_path
+    victim = tmp_path / f"{coordinate}-victim.json"
+    victim.write_text("{}\n", encoding="utf-8")
+    victim.chmod(0o600)
+    before = (victim.read_bytes(), victim.stat().st_ino)
+    if alias_kind == "symlink":
+        selected.symlink_to(victim)
+    else:
+        os.link(victim, selected)
+    anchor_path = _write_provision(tmp_path, _valid_provision("multilogin"))
+    calls = []
+
+    def _unexpected(label):
+        def _call(*_args, **_kwargs):
+            calls.append(label)
+            raise AssertionError(f"{coordinate} {alias_kind} reached {label}")
+        return _call
+
+    out = io.StringIO()
+    code = vendors.run_coordinator_peer_create(
+        ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        stdout=out,
+        bindings_loader=_unexpected("anchor/bindings"),
+        environment_loader=_unexpected("environment"),
+        credential_stream_factory=_unexpected("credential"),
+        client_factory=_unexpected("client"),
+        now=_NOW,
+    )
+
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "PROVISION_MISSING"
+    assert calls == []
+    assert (victim.read_bytes(), victim.stat().st_ino) == before
+
+
+@pytest.mark.parametrize("coordinate", ("state", "provision"))
+def test_peer_r2_foreign_inode_replacement_between_preflights_refuses_presecret(
+    tmp_path, coordinate,
+):
+    """A same-byte path swap after environment census never inherits authority."""
+    (
+        provision,
+        anchor_path,
+        state_path,
+        peer_provision_path,
+        _state,
+        _peer_provision,
+    ) = _seed_peer_provision_committed(tmp_path)
+    selected = state_path if coordinate == "state" else peer_provision_path
+    old_inode = selected.stat().st_ino
+    replacement_inode = {"value": None}
+    calls = []
+    base_environment_loader = _environment_loader_for(provision)
+
+    def _replace_during_environment():
+        calls.append("environment")
+        replacement = tmp_path / f"foreign-{coordinate}.json"
+        replacement.write_bytes(selected.read_bytes())
+        replacement.chmod(0o600)
+        replacement_inode["value"] = replacement.stat().st_ino
+        os.replace(replacement, selected)
+        return base_environment_loader()
+
+    def _unexpected(label):
+        def _call(*_args, **_kwargs):
+            calls.append(label)
+            raise AssertionError(f"foreign {coordinate} replacement reached {label}")
+        return _call
+
+    out = io.StringIO()
+    code = vendors.run_coordinator_peer_create(
+        ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_provision_path,
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_replace_during_environment,
+        credential_stream_factory=_unexpected("credential"),
+        client_factory=_unexpected("client"),
+        now=_NOW,
+    )
+
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "PROVISION_MISSING"
+    assert calls == ["environment"]
+    assert selected.stat().st_ino == replacement_inode["value"]
+    assert selected.stat().st_ino != old_inode
+
+
+def test_peer_r2_remove_fence_replacement_never_allows_second_dispatch(tmp_path):
+    """A path rollback after the durable remove claim cannot erase its fence."""
+    provision, _anchor, state_path, peer_path, _state, _peer = (
+        _seed_peer_provision_committed(tmp_path)
+    )
+    preclaim_raw = state_path.read_bytes()
+    peer_name = vendors.peer_profile_name(
+        provision["folder_id"], provision["profile_id"]
+    )
+    exact = _peer_record(
+        peer_name,
+        id=_PEER_CREATED_UUID,
+        folder_id=provision["folder_id"],
+    )
+
+    class ReplaceAfterClaimTransport(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.set_candidates_sequence([exact], [exact])
+            self.remove_response = None
+
+        def _mlx_profile_remove(self, credential, profile_id):
+            replacement = tmp_path / "foreign-preclaim.json"
+            replacement.write_bytes(preclaim_raw)
+            replacement.chmod(0o600)
+            os.replace(replacement, state_path)
+            return super()._mlx_profile_remove(credential, profile_id)
+
+    first_transport = ReplaceAfterClaimTransport()
+    first_out = io.StringIO()
+    assert _rollback_main(
+        tmp_path,
+        provision,
+        first_transport,
+        intent_path=state_path,
+        peer_provision_path=peer_path,
+        out=first_out,
+    ) == 3
+    assert sum(call[0] == "remove" for call in first_transport.calls) == 1
+
+    second_transport = _PeerTransport()
+    second_transport.set_candidates_sequence([exact], [exact])
+    second_transport.remove_response = None
+    second_out = io.StringIO()
+    assert _rollback_main(
+        tmp_path,
+        provision,
+        second_transport,
+        intent_path=state_path,
+        peer_provision_path=peer_path,
+        out=second_out,
+    ) != 0
+    assert sum(call[0] == "remove" for call in second_transport.calls) == 0
+
+
+def test_peer_r2_create_claim_replacement_never_allows_second_dispatch(tmp_path):
+    """A foreign tombstone cannot replace a dispatched create claim and re-arm."""
+    provision = _valid_provision("multilogin")
+    anchor = _write_provision(tmp_path, provision)
+    state_path = tmp_path / "peer-state.json"
+    peer_path = tmp_path / "peer-provision.json"
+    _prepare_peer_lifecycle(provision, state_path, peer_path)
+
+    class ReplaceAfterClaimTransport(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.set_candidates_sequence([], [])
+            self.create_response = None
+
+        def _mlx_profile_create(self, credential, folder_id, name):
+            claimed = vendors._peer_intent_snapshot(state_path)
+            tombstone = dict(claimed.document)
+            tombstone["phase"] = vendors.PEER_PHASE_CREATE_AUTH_REJECTED
+            replacement = tmp_path / "foreign-tombstone.json"
+            replacement.write_bytes(vendors._canonical_private_bytes(tombstone))
+            replacement.chmod(0o600)
+            os.replace(replacement, state_path)
+            return super()._mlx_profile_create(credential, folder_id, name)
+
+    def _run(transport):
+        out = io.StringIO()
+        rc = _authorized_peer_main(
+            [
+                "create-peer-profile",
+                "--vendor",
+                "multilogin",
+                "--provision-path",
+                str(anchor),
+            ],
+            peer_intent_path=state_path,
+            peer_provision_path=peer_path,
+            stdout=out,
+            bindings_loader=_no_collision_loader,
+            environment_loader=_environment_loader_for(provision),
+            credential_stream_factory=lambda: io.BytesIO(b"credential"),
+            client_factory=lambda: transport,
+            now=_NOW,
+        )
+        return rc, json.loads(out.getvalue())
+
+    first_transport = ReplaceAfterClaimTransport()
+    assert _run(first_transport)[0] == 3
+    assert sum(call[0] == "create" for call in first_transport.calls) == 1
+
+    second_transport = _PeerTransport()
+    second_transport.set_candidates_sequence([], [])
+    second_transport.create_response = None
+    assert _run(second_transport)[0] != 0
+    assert sum(call[0] == "create" for call in second_transport.calls) == 0
+
+
+def test_peer_r2_refused_provision_replacement_is_never_reaccepted(
+    tmp_path, monkeypatch,
+):
+    """A byte-identical foreign provision remains foreign on every later run."""
+    path = tmp_path / "peer-provision.json"
+    replacement = tmp_path / "foreign-provision.json"
+    real_fsync = os.fsync
+    injected = {"value": False}
+
+    def _replace_at_durability_boundary(fd):
+        real_fsync(fd)
+        if not injected["value"] and path.exists():
+            replacement.write_bytes(path.read_bytes())
+            replacement.chmod(0o600)
+            os.replace(replacement, path)
+            injected["value"] = True
+
+    monkeypatch.setattr(vendors.os, "fsync", _replace_at_durability_boundary)
+    first = vendors._write_peer_provision(
+        path,
+        profile_id=_PEER_CREATED_UUID,
+        folder_id=_PEER_FOLDER,
+        bindings_loader=_no_collision_loader,
+        now=_NOW,
+    )
+    assert first[0] is False
+
+    monkeypatch.setattr(vendors.os, "fsync", real_fsync)
+    second = vendors._write_peer_provision(
+        path,
+        profile_id=_PEER_CREATED_UUID,
+        folder_id=_PEER_FOLDER,
+        bindings_loader=_no_collision_loader,
+        now=_NOW,
+    )
+    assert second[0] is False
+
+
+def test_peer_r2_deleted_create_claim_never_allows_second_dispatch(tmp_path):
+    """Deleting the dispatched claim cannot recreate a virgin namespace."""
+    provision = _valid_provision("multilogin")
+    anchor = _write_provision(tmp_path, provision)
+    state_path = tmp_path / "peer-state.json"
+    peer_path = tmp_path / "peer-provision.json"
+    assert vendors.initialize_peer_lifecycle_state(
+        state_path,
+        folder_id=provision["folder_id"],
+        anchor_profile_id=provision["profile_id"],
+        peer_name=vendors.peer_profile_name(
+            provision["folder_id"], provision["profile_id"]
+        ),
+        peer_provision_path=peer_path,
+    ) == vendors.CREATED_THIS_CALL
+
+    class UnlinkAfterClaimTransport(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.set_candidates_sequence([], [])
+            self.create_response = None
+
+        def _mlx_profile_create(self, credential, folder_id, name):
+            claimed = vendors._peer_intent_snapshot(state_path)
+            assert claimed is not None
+            assert claimed.document["phase"] == vendors.PEER_PHASE_CREATE_CLAIMED
+            state_path.unlink()
+            return super()._mlx_profile_create(credential, folder_id, name)
+
+    def _run(transport):
+        out = io.StringIO()
+        code = _authorized_peer_main(
+            [
+                "create-peer-profile",
+                "--vendor",
+                "multilogin",
+                "--provision-path",
+                str(anchor),
+            ],
+            peer_intent_path=state_path,
+            peer_provision_path=peer_path,
+            stdout=out,
+            bindings_loader=_no_collision_loader,
+            environment_loader=_environment_loader_for(provision),
+            credential_stream_factory=lambda: io.BytesIO(b"credential"),
+            client_factory=lambda: transport,
+            now=_NOW,
+        )
+        return code, json.loads(out.getvalue())
+
+    first = UnlinkAfterClaimTransport()
+    assert _run(first)[0] == 3
+    assert sum(call[0] == "create" for call in first.calls) == 1
+    assert not state_path.exists()
+
+    second = _PeerTransport()
+    second.set_candidates_sequence([], [])
+    second.create_response = None
+    assert _run(second)[0] != 0
+    assert sum(call[0] == "create" for call in second.calls) == 0
+
+
+def test_peer_r2_completed_create_refuses_stale_state_after_census(tmp_path):
+    """A completed rerun cannot PASS after its lifecycle path is replaced."""
+    provision, anchor, state_path, peer_path, before_state, _peer = (
+        _seed_peer_provision_committed(tmp_path)
+    )
+    peer_name = vendors.peer_profile_name(
+        provision["folder_id"], provision["profile_id"]
+    )
+    exact = _peer_record(
+        peer_name,
+        id=_PEER_CREATED_UUID,
+        folder_id=provision["folder_id"],
+    )
+
+    class ReplaceDuringCensus(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.set_candidates_sequence([exact], [exact])
+            self.replaced = False
+
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            if offset == 0 and not self.replaced:
+                replacement = tmp_path / "foreign-completed-state.json"
+                replacement.write_bytes(state_path.read_bytes())
+                replacement.chmod(0o600)
+                os.replace(replacement, state_path)
+                self.replaced = True
+            return super()._mlx_profile_search(credential, folder_id, offset=offset)
+
+    transport = ReplaceDuringCensus()
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [
+            "create-peer-profile",
+            "--vendor",
+            "multilogin",
+            "--provision-path",
+            str(anchor),
+        ],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_path,
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"credential"),
+        client_factory=lambda: transport,
+        now=_NOW,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert sum(call[0] == "create" for call in transport.calls) == 0
+    assert state_path.stat().st_ino != before_state.st_ino
+    assert vendors._peer_intent_snapshot(state_path) is None
+
+
+def test_peer_r2_completed_create_holds_if_genesis_witness_vanishes_during_census(
+    tmp_path,
+):
+    """A completed create cannot PASS after losing its cross-bound witness."""
+    provision, anchor, state_path, peer_path, _state, _peer = (
+        _seed_peer_provision_committed(tmp_path)
+    )
+    witness_path = vendors._peer_genesis_witness_path(state_path)
+    peer_name = vendors.peer_profile_name(
+        provision["folder_id"], provision["profile_id"],
+    )
+    exact = _peer_record(
+        peer_name,
+        id=_PEER_CREATED_UUID,
+        folder_id=provision["folder_id"],
+    )
+
+    class _UnlinkWitnessDuringCensus(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.set_candidates_sequence([exact], [exact])
+            self.unlinked = False
+
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            response = super()._mlx_profile_search(
+                credential, folder_id, offset=offset,
+            )
+            if offset == 0 and not self.unlinked:
+                witness_path.unlink()
+                self.unlinked = True
+            return response
+
+    transport = _UnlinkWitnessDuringCensus()
+    out = io.StringIO()
+    code = _authorized_peer_main(
+        [
+            "create-peer-profile",
+            "--vendor",
+            "multilogin",
+            "--provision-path",
+            str(anchor),
+        ],
+        peer_intent_path=state_path,
+        peer_provision_path=peer_path,
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"credential"),
+        client_factory=lambda: transport,
+        now=_NOW,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert sum(call[0] == "create" for call in transport.calls) == 0
+    assert not witness_path.exists()
+
+
+def test_peer_r2_rollback_holds_if_genesis_witness_vanishes_after_dispatch(
+    tmp_path,
+):
+    """Witness loss after remove dispatch prevents a false final PASS."""
+    provision, _anchor, state_path, peer_path, _state, _peer = (
+        _seed_peer_provision_committed(tmp_path)
+    )
+    witness_path = vendors._peer_genesis_witness_path(state_path)
+    peer_name = vendors.peer_profile_name(
+        provision["folder_id"], provision["profile_id"],
+    )
+    exact = _peer_record(
+        peer_name,
+        id=_PEER_CREATED_UUID,
+        folder_id=provision["folder_id"],
+    )
+
+    class _UnlinkWitnessAfterRemoveDispatch(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.set_candidates_sequence([exact], [])
+            self.remove_response = _peer_remove_success()
+
+        def _mlx_profile_remove(self, credential, profile_id):
+            response = super()._mlx_profile_remove(credential, profile_id)
+            witness_path.unlink()
+            return response
+
+    transport = _UnlinkWitnessAfterRemoveDispatch()
+    out = io.StringIO()
+    code = _rollback_main(
+        tmp_path,
+        provision,
+        transport,
+        intent_path=state_path,
+        peer_provision_path=peer_path,
+        out=out,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["effect"] == "REMOVE_EFFECT_UNKNOWN"
+    assert sum(call[0] == "remove" for call in transport.calls) == 1
+    assert not witness_path.exists()
+
+
+def test_peer_r2_completed_rollback_refuses_stale_state_after_census(tmp_path):
+    """An idempotent rollback cannot PASS from a replaced lifecycle inode."""
+    provision, _anchor, state_path, peer_path, state, peer = (
+        _seed_peer_provision_committed(tmp_path)
+    )
+    ownership = _peer_ownership_receipt(state, peer)
+    dispatched = vendors._transition_peer_intent(
+        state_path,
+        expected=state,
+        phase=vendors.PEER_PHASE_REMOVE_DISPATCHED,
+        peer_profile_id=_PEER_CREATED_UUID,
+        ownership_fact=ownership,
+    )
+    rolled_back = vendors._transition_peer_intent(
+        state_path,
+        expected=dispatched,
+        phase=vendors.PEER_PHASE_ROLLBACK_VERIFIED,
+        peer_profile_id=_PEER_CREATED_UUID,
+    )
+    assert rolled_back is not None
+
+    class ReplaceDuringCensus(_PeerTransport):
+        def __init__(self):
+            super().__init__()
+            self.set_candidates_sequence([])
+            self.replaced = False
+
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            if offset == 0 and not self.replaced:
+                replacement = tmp_path / "foreign-rollback-state.json"
+                replacement.write_bytes(state_path.read_bytes())
+                replacement.chmod(0o600)
+                os.replace(replacement, state_path)
+                self.replaced = True
+            return super()._mlx_profile_search(credential, folder_id, offset=offset)
+
+    transport = ReplaceDuringCensus()
+    out = io.StringIO()
+    code = _rollback_main(
+        tmp_path,
+        provision,
+        transport,
+        intent_path=state_path,
+        peer_provision_path=peer_path,
+        out=out,
+    )
+
+    receipt = json.loads(out.getvalue())
+    assert code == 3
+    assert receipt["verdict"] == "HOLD"
+    assert receipt["effect"] == "REMOVE_EFFECT_UNKNOWN"
+    assert sum(call[0] == "remove" for call in transport.calls) == 0
+    assert state_path.stat().st_ino != rolled_back.st_ino
+    assert vendors._peer_intent_snapshot(state_path) is None
+
+
+# --- REALM1-C1 first-rollout existing-v3-anchor bootstrap -----------------
+
+
+def _peer_bootstrap_preimage(tmp_path):
+    """Seed the real first-rollout shape: exact v3 anchor, no peer records."""
+    anchor_path = tmp_path / "anchor.json"
+    state_path = tmp_path / "peer-state.json"
+    provision_path = tmp_path / "peer-provision.json"
+    fence_path = tmp_path / "peer-bootstrap.json"
+    provision = _stored_provision(_valid_provision("multilogin"))
+    outcome, anchor = vendors._exclusive_private_json(  # noqa: SLF001
+        anchor_path, provision,
+    )
+    assert outcome == vendors.CREATED_THIS_CALL
+    assert anchor is not None
+    return provision, anchor_path, state_path, provision_path, fence_path, anchor
+
+
+_DEFAULT_BOOTSTRAP_AUTHORIZATION = object()
+
+
+def _peer_bootstrap_census(provision, *, running=False):
+    return {
+        "multilogin": [{
+            "workspace_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "profile_id": provision["profile_id"],
+            "folder_id": provision["folder_id"],
+            "running": running,
+        }],
+        "gologin": [],
+    }
+
+
+def _peer_bootstrap_bindings_path(anchor_path):
+    path = Path(anchor_path).with_name("surface-bindings.json")
+    if not path.exists():
+        path.write_bytes(vendors._canonical_private_bytes(_binding_doc()))  # noqa: SLF001
+        path.chmod(0o600)
+    return path
+
+
+def _mint_peer_bootstrap_authorization(
+    provision, anchor_path, *, bindings_path=None, census_loader=None,
+):
+    bindings_path = bindings_path or _peer_bootstrap_bindings_path(anchor_path)
+    census_loader = census_loader or (
+        lambda: _peer_bootstrap_census(provision)
+    )
+    mint = getattr(vendors, "_mint_peer_bootstrap_evidence", None)
+    assert callable(mint), "the evidence-bound bootstrap mint is missing"
+    authorization = mint(
+        operation=vendors.PEER_BOOTSTRAP_OPERATION_KEY,
+        anchor_path=anchor_path,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+        now=_NOW,
+    )
+    assert authorization is not None, "the exact bootstrap evidence did not mint"
+    return authorization, bindings_path, census_loader
+
+
+def _bootstrap_existing_peer(
+    anchor_path, state_path, provision_path, fence_path,
+    *, authorization=_DEFAULT_BOOTSTRAP_AUTHORIZATION, bindings_path=None,
+    census_loader=None,
+):
+    bootstrap = getattr(
+        vendors, "_bootstrap_peer_lifecycle_for_existing_anchor", None,
+    )
+    assert callable(bootstrap), "the explicit existing-v3 bootstrap is missing"
+    if authorization is _DEFAULT_BOOTSTRAP_AUTHORIZATION:
+        provision = json.loads(Path(anchor_path).read_text(encoding="utf-8"))
+        authorization, bindings_path, census_loader = (
+            _mint_peer_bootstrap_authorization(
+                provision,
+                anchor_path,
+                bindings_path=bindings_path,
+                census_loader=census_loader,
+            )
+        )
+    else:
+        bindings_path = bindings_path or _peer_bootstrap_bindings_path(anchor_path)
+        census_loader = census_loader or (
+            lambda: _peer_bootstrap_census(
+                json.loads(Path(anchor_path).read_text(encoding="utf-8")),
+            )
+        )
+    return bootstrap(
+        authorization=authorization,
+        anchor_path=anchor_path,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+        now=_NOW,
+        state_path=state_path,
+        peer_provision_path=provision_path,
+        bootstrap_fence_path=fence_path,
+    )
+
+
+@pytest.mark.parametrize("target_name", ("anchor", "bindings"))
+def test_peer_bootstrap_capability_refuses_same_byte_path_replacement(
+    tmp_path, target_name,
+):
+    """Held descriptors make same-byte unlink/recreate a different identity."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    target = anchor_path if target_name == "anchor" else bindings_path
+    original = target.read_bytes()
+    target.unlink()
+    target.write_bytes(original)
+    target.chmod(0o600)
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert not state_path.exists()
+
+
+@pytest.mark.parametrize("target_name", ("anchor", "bindings"))
+def test_peer_bootstrap_capability_refuses_valid_changed_source_after_mint(
+    tmp_path, target_name,
+):
+    """A different valid anchor or bindings document is still unauthorized."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    if target_name == "anchor":
+        replacement_document = dict(provision)
+        replacement_document["profile_id"] = _PEER_ALT_UUID
+        replacement_document["folder_id"] = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        target = anchor_path
+    else:
+        replacement_document = _binding_doc()
+        replacement_document["bindings"][0]["locator"]["url"] = (
+            "https://chatgpt.com/c/replacement-binding"
+        )
+        assert sb.validate_bindings_document(replacement_document) == []
+        target = bindings_path
+    replacement = tmp_path / f"replacement-{target_name}.json"
+    replacement.write_bytes(vendors._canonical_private_bytes(replacement_document))  # noqa: SLF001
+    replacement.chmod(0o600)
+    os.replace(replacement, target)
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert not state_path.exists()
+
+
+def test_peer_bootstrap_capability_refuses_reduced_census_change_after_mint(tmp_path):
+    """A fresh helper-side census must equal the exact coordinator evidence."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    current = [_peer_bootstrap_census(provision)]
+    census_loader = lambda: current[0]
+    authorization, bindings_path, _loader = _mint_peer_bootstrap_authorization(
+        provision, anchor_path, census_loader=census_loader,
+    )
+    current[0] = _peer_bootstrap_census(provision, running=True)
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+
+
+def test_peer_bootstrap_capability_closes_held_fds_when_census_probe_raises(tmp_path):
+    """An unexpected helper-side probe failure cannot leak reusable evidence."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, _census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    held_fds = (authorization._anchor_fd, authorization._bindings_fd)  # noqa: SLF001
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=lambda: (_ for _ in ()).throw(RuntimeError("probe failed")),
+    ) == vendors.REFUSED
+    for held_fd in held_fds:
+        with pytest.raises(OSError):
+            os.fstat(held_fd)
+    assert not fence_path.exists()
+
+
+def test_peer_bootstrap_capability_is_one_use_after_success_and_refusal(tmp_path):
+    """Consumption is monotonic regardless of the first call's outcome."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    kwargs = {
+        "authorization": authorization,
+        "bindings_path": bindings_path,
+        "census_loader": census_loader,
+    }
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path, **kwargs,
+    ) == vendors.CREATED_THIS_CALL
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path, **kwargs,
+    ) == vendors.REFUSED
+
+    refusal_root = tmp_path / "refusal"
+    refusal_root.mkdir(mode=0o700)
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(refusal_root)
+    )
+    current = [_peer_bootstrap_census(provision)]
+    census_loader = lambda: current[0]
+    refusal_authorization, bindings_path, _loader = (
+        _mint_peer_bootstrap_authorization(
+            provision, anchor_path, census_loader=census_loader,
+        )
+    )
+    current[0] = _peer_bootstrap_census(provision, running=True)
+    refusal_kwargs = {
+        "authorization": refusal_authorization,
+        "bindings_path": bindings_path,
+        "census_loader": census_loader,
+    }
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path, **refusal_kwargs,
+    ) == vendors.REFUSED
+    current[0] = _peer_bootstrap_census(provision)
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path, **refusal_kwargs,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert not state_path.exists()
+
+
+def test_peer_bootstrap_capability_same_instance_has_one_atomic_consumer(tmp_path):
+    """Two callers racing one capability cannot both pass its consume edge."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    barrier = threading.Barrier(2)
+    outcomes = []
+
+    def _run():
+        barrier.wait()
+        outcomes.append(_bootstrap_existing_peer(
+            anchor_path,
+            state_path,
+            peer_path,
+            fence_path,
+            authorization=authorization,
+            bindings_path=bindings_path,
+            census_loader=census_loader,
+        ))
+
+    workers = [threading.Thread(target=_run) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+        assert not worker.is_alive()
+
+    assert outcomes.count(vendors.CREATED_THIS_CALL) == 1
+    assert outcomes.count(vendors.REFUSED) == 1
+    _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+
+
+@pytest.mark.parametrize("mutation", ("operation", "generation", "pid", "cross_anchor"))
+def test_peer_bootstrap_capability_refuses_wrong_binding(tmp_path, mutation):
+    """Operation, generation, process and anchor bindings are not transferable."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    if mutation == "operation":
+        authorization._operation = "wrong-operation"  # noqa: SLF001
+    elif mutation == "generation":
+        authorization._generation = "f" * 64  # noqa: SLF001
+    elif mutation == "pid":
+        authorization._mint_pid = os.getpid() + 1  # noqa: SLF001
+    else:
+        replacement = tmp_path / "other-anchor.json"
+        replacement.write_bytes(anchor_path.read_bytes())
+        replacement.chmod(0o600)
+        anchor_path = replacement
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+
+
+def test_peer_bootstrap_capability_is_noncopyable_and_closes_held_fds_once(tmp_path):
+    """The evidence is process-private and releases both kernel identities."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    held_fds = (authorization._anchor_fd, authorization._bindings_fd)  # noqa: SLF001
+    with pytest.raises(TypeError):
+        copy.copy(authorization)
+    with pytest.raises(TypeError):
+        pickle.dumps(authorization)
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.CREATED_THIS_CALL
+    for held_fd in held_fds:
+        with pytest.raises(OSError):
+            os.fstat(held_fd)
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+
+
+def _assert_completed_bootstrap(
+    provision, anchor_path, state_path, provision_path, fence_path,
+):
+    fence_reader = getattr(vendors, "_peer_bootstrap_fence_snapshot", None)
+    assert callable(fence_reader), "the bootstrap fence reader is missing"
+    fence = fence_reader(fence_path)
+    state = vendors._peer_intent_snapshot(state_path)
+    witness = vendors._peer_genesis_witness_snapshot(
+        vendors._peer_genesis_witness_path(state_path),
+    )
+    anchor = vendors._optional_private_json_snapshot(anchor_path)
+    assert fence is not None and state is not None and witness is not None
+    assert anchor is not None
+    assert fence.document["phase"] == vendors.PEER_BOOTSTRAP_PHASE_COMPLETE
+    assert fence.document["anchor_document_digest"] == anchor.sha256
+    assert (fence.document["anchor_dev"], fence.document["anchor_ino"]) == (
+        anchor.st_dev, anchor.st_ino,
+    )
+    assert fence.document["state_document_digest"] == state.sha256
+    assert (fence.document["state_dev"], fence.document["state_ino"]) == (
+        state.st_dev, state.st_ino,
+    )
+    assert fence.document["witness_document_digest"] == witness.sha256
+    assert (fence.document["witness_dev"], fence.document["witness_ino"]) == (
+        witness.st_dev, witness.st_ino,
+    )
+    assert state.document["phase"] == vendors.PEER_PHASE_INITIALIZED
+    checked_state, checked_provision = vendors._preflight_peer_paths(
+        operation="create-peer-profile",
+        state_path=state_path,
+        provision_path=provision_path,
+    )
+    assert vendors._same_snapshot(checked_state, state)
+    assert checked_provision is None
+    return fence, state, witness, anchor
+
+
+def test_peer_bootstrap_red_actual_existing_v3_preimage_reaches_genesis_without_secret_or_vendor(
+    tmp_path, monkeypatch,
+):
+    """The exact old-estate v3 anchor is upgraded only by the new local seam."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    with pytest.raises(vendors._PeerStateRefusal):
+        vendors._preflight_peer_paths(
+            operation="create-peer-profile",
+            state_path=state_path,
+            provision_path=peer_path,
+        )
+
+    monkeypatch.setattr(
+        vendors,
+        "_open_keychain_credential_pipe",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("bootstrap must not open Keychain"),
+        ),
+    )
+    monkeypatch.setattr(
+        vendors,
+        "BoundedHttpClient",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("bootstrap must not construct vendor HTTP"),
+        ),
+    )
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+
+
+def test_peer_bootstrap_complete_replay_is_read_only_and_inode_exact(tmp_path):
+    """A COMPLETE fence reconciles without rewriting any durable record."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    first = _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+    before = tuple((item.st_dev, item.st_ino, item.sha256) for item in first)
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.EXISTING_EXACT
+    second = _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+    assert tuple((item.st_dev, item.st_ino, item.sha256) for item in second) == before
+
+
+@pytest.mark.parametrize(
+    "crash_point",
+    (
+        "after_fence",
+        "after_witness",
+        "after_state",
+        "before_fence_complete",
+        "after_fence_complete",
+    ),
+)
+def test_peer_bootstrap_pending_recovers_each_declared_crash_window(
+    tmp_path, monkeypatch, crash_point,
+):
+    """Every exact PENDING prefix finishes once; no alternate genesis appears."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    witness_path = vendors._peer_genesis_witness_path(state_path)
+    real_create = vendors._create_self_bound_private_record
+    real_rewrite = vendors._rewrite_private_record_in_parent
+
+    def _create(target, *args, **kwargs):
+        target = Path(target)
+        blocked = (
+            crash_point == "after_fence" and target == witness_path
+        ) or (
+            crash_point == "after_witness" and target == state_path
+        )
+        return None if blocked else real_create(target, *args, **kwargs)
+
+    def _rewrite(target, *args, **kwargs):
+        target = Path(target)
+        phase = kwargs.get("next_document", {}).get("phase")
+        if (
+            crash_point == "after_state"
+            and target == witness_path
+            and phase == vendors._PEER_GENESIS_WITNESS_BOUND
+        ):
+            return None
+        if (
+            crash_point in ("before_fence_complete", "after_fence_complete")
+            and target == fence_path
+            and phase == vendors.PEER_BOOTSTRAP_PHASE_COMPLETE
+        ):
+            if crash_point == "before_fence_complete":
+                return None
+            real_rewrite(target, *args, **kwargs)
+            return None
+        return real_rewrite(target, *args, **kwargs)
+
+    monkeypatch.setattr(vendors, "_create_self_bound_private_record", _create)
+    monkeypatch.setattr(vendors, "_rewrite_private_record_in_parent", _rewrite)
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.REFUSED
+
+    monkeypatch.setattr(vendors, "_create_self_bound_private_record", real_create)
+    monkeypatch.setattr(vendors, "_rewrite_private_record_in_parent", real_rewrite)
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.EXISTING_EXACT
+    _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+
+
+def test_peer_bootstrap_concurrent_invocations_leave_one_fence_and_one_genesis(tmp_path):
+    """Concurrent ceremonies converge on one exact durable installation epoch."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    barrier = threading.Barrier(2)
+    outcomes = []
+
+    def _run():
+        barrier.wait()
+        outcomes.append(_bootstrap_existing_peer(
+            anchor_path, state_path, peer_path, fence_path,
+        ))
+
+    workers = [threading.Thread(target=_run) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+        assert not worker.is_alive()
+
+    assert outcomes.count(vendors.CREATED_THIS_CALL) == 1
+    assert set(outcomes) <= {
+        vendors.CREATED_THIS_CALL, vendors.EXISTING_EXACT, vendors.REFUSED,
+    }
+    _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+
+
+@pytest.mark.parametrize(
+    "target_name,mutation",
+    (
+        ("state", "unlink"),
+        ("witness", "unlink"),
+        ("state", "replace"),
+        ("witness", "replace"),
+        ("state", "hardlink"),
+        ("witness", "symlink"),
+    ),
+)
+def test_peer_bootstrap_complete_never_rearms_missing_or_foreign_genesis(
+    tmp_path, target_name, mutation,
+):
+    """COMPLETE is the surviving no-rearm fact for every genesis mutation."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    fence_before = fence_path.read_bytes()
+    witness_path = vendors._peer_genesis_witness_path(state_path)
+    target = state_path if target_name == "state" else witness_path
+    original = target.read_bytes()
+    # Keep the unlinked inode alive while constructing the replacement. Linux
+    # may otherwise immediately reuse the same inode number, accidentally
+    # recreating the exact (dev, ino, digest) tuple this test means to falsify.
+    held_fd = os.open(target, os.O_RDONLY)
+    try:
+        target.unlink()
+        if mutation == "replace":
+            target.write_bytes(original)
+            target.chmod(0o600)
+        elif mutation == "hardlink":
+            source = tmp_path / "foreign-hardlink.json"
+            source.write_bytes(original)
+            source.chmod(0o600)
+            os.link(source, target)
+        elif mutation == "symlink":
+            source = tmp_path / "foreign-symlink.json"
+            source.write_bytes(original)
+            source.chmod(0o600)
+            target.symlink_to(source)
+
+        assert _bootstrap_existing_peer(
+            anchor_path, state_path, peer_path, fence_path,
+        ) == vendors.REFUSED
+        assert fence_path.read_bytes() == fence_before
+        if mutation == "unlink":
+            assert not target.exists()
+    finally:
+        os.close(held_fd)
+
+
+@pytest.mark.parametrize("mutation", ("replace", "rewrite", "generation"))
+def test_peer_bootstrap_binds_exact_anchor_inode_digest_and_source_generation(
+    tmp_path, monkeypatch, mutation,
+):
+    """Changed anchor or source generation never inherits installation authority."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    fence_before = fence_path.read_bytes()
+    if mutation == "replace":
+        replacement = tmp_path / "replacement-anchor.json"
+        replacement.write_bytes(anchor_path.read_bytes())
+        replacement.chmod(0o600)
+        os.replace(replacement, anchor_path)
+    elif mutation == "rewrite":
+        changed = dict(provision)
+        changed["folder_id"] = _PEER_ALT_UUID
+        anchor_path.write_bytes(vendors._canonical_private_bytes(changed))
+    else:
+        monkeypatch.setattr(vendors, "PEER_SOURCE_GENERATION", "f" * 64)
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.REFUSED
+    assert fence_path.read_bytes() == fence_before
+
+
+@pytest.mark.parametrize(
+    "authorization_name",
+    ("none", "create", "rollback", "fresh_object"),
+)
+def test_peer_bootstrap_only_distinct_coordinator_authorization_can_create_fence(
+    tmp_path, authorization_name,
+):
+    """No generic object or existing create/rollback capability can bootstrap."""
+    _provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization = {
+        "none": None,
+        "create": vendors.CREATE_PEER_AUTHORIZATION,
+        "rollback": vendors.ROLLBACK_PEER_AUTHORIZATION,
+        "fresh_object": object(),
+    }[authorization_name]
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert not state_path.exists()
+    assert not vendors._peer_genesis_witness_path(state_path).exists()
+
+
+def test_peer_bootstrap_fence_is_closed_and_contains_no_raw_identity_or_path(tmp_path):
+    """The installation fence exposes only closed phases, digests and inode facts."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    fence = vendors._peer_bootstrap_fence_snapshot(fence_path)
+    assert fence is not None
+    assert set(fence.document) == vendors._PEER_BOOTSTRAP_FENCE_KEYS
+    assert fence.document["schema"] == vendors.PEER_BOOTSTRAP_FENCE_SCHEMA
+    assert fence.document["operation"] == vendors.PEER_BOOTSTRAP_OPERATION_KEY
+    assert fence.document["peer_operation"] == vendors.PEER_OPERATION_KEY
+    serialized = fence.raw.decode("utf-8")
+    for forbidden in (
+        provision["profile_id"], provision["folder_id"],
+        os.fspath(anchor_path), os.fspath(state_path), os.fspath(peer_path),
+        "credential", "account", "vendor response",
+    ):
+        assert forbidden not in serialized
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("missing", "wrong_schema", "gologin", "stealthfox", "noncanonical_id"),
+)
+def test_peer_bootstrap_absent_fence_requires_exact_canonical_v3_mimic_anchor(
+    tmp_path, mutation,
+):
+    """ABSENT is not a migration surface for any approximate anchor shape."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    authorization, bindings_path, census_loader = (
+        _mint_peer_bootstrap_authorization(provision, anchor_path)
+    )
+    if mutation == "missing":
+        anchor_path.unlink()
+    else:
+        document = json.loads(anchor_path.read_text(encoding="utf-8"))
+        if mutation == "wrong_schema":
+            document["schema"] = "mastermind.mas115_nonseat_canary_provision.v2"
+        elif mutation == "gologin":
+            document["vendor"] = "gologin"
+        elif mutation == "stealthfox":
+            document["browser_type"] = "stealthfox"
+        else:
+            document["profile_id"] = document["profile_id"].upper()
+        anchor_path.write_bytes(vendors._canonical_private_bytes(document))
+
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert not state_path.exists()
+    assert not vendors._peer_genesis_witness_path(state_path).exists()
+
+
+@pytest.mark.parametrize("foreign_coordinate", ("state", "witness", "provision"))
+def test_peer_bootstrap_absent_fence_refuses_any_preexisting_peer_coordinate(
+    tmp_path, foreign_coordinate,
+):
+    """No pre-fence bytes can be adopted as a bootstrap crash prefix."""
+    _provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    target = {
+        "state": state_path,
+        "witness": vendors._peer_genesis_witness_path(state_path),
+        "provision": peer_path,
+    }[foreign_coordinate]
+    target.write_text("{}\n", encoding="utf-8")
+    target.chmod(0o600)
+
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.REFUSED
+    assert not fence_path.exists()
+    assert target.exists()
+
+
+@pytest.mark.parametrize(
+    "mutation", ("unlink", "replace", "malformed", "hardlink", "symlink"),
+)
+def test_peer_bootstrap_complete_fence_itself_is_never_recreated_or_adopted(
+    tmp_path, mutation,
+):
+    """A consumed fence coordinate cannot be replaced or treated as ABSENT."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    _assert_completed_bootstrap(
+        provision, anchor_path, state_path, peer_path, fence_path,
+    )
+    original = fence_path.read_bytes()
+    held_fd = os.open(fence_path, os.O_RDONLY)
+    try:
+        fence_path.unlink()
+        if mutation == "replace":
+            fence_path.write_bytes(original)
+            fence_path.chmod(0o600)
+        elif mutation == "malformed":
+            fence_path.write_text("{}\n", encoding="utf-8")
+            fence_path.chmod(0o600)
+        elif mutation == "hardlink":
+            source = tmp_path / "foreign-fence-hardlink.json"
+            source.write_bytes(original)
+            source.chmod(0o600)
+            os.link(source, fence_path)
+        elif mutation == "symlink":
+            source = tmp_path / "foreign-fence-symlink.json"
+            source.write_bytes(original)
+            source.chmod(0o600)
+            fence_path.symlink_to(source)
+
+        assert _bootstrap_existing_peer(
+            anchor_path, state_path, peer_path, fence_path,
+        ) == vendors.REFUSED
+        if mutation == "unlink":
+            assert not fence_path.exists()
+    finally:
+        os.close(held_fd)
+
+
+def test_peer_bootstrap_holds_one_parent_lock_without_reentry(tmp_path, monkeypatch):
+    """The nested genesis helper consumes the already-held bootstrap lock."""
+    _provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    real_open = vendors._open_private_parent
+    calls = []
+
+    def _open(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(vendors, "_open_private_parent", _open)
+    assert _bootstrap_existing_peer(
+        anchor_path, state_path, peer_path, fence_path,
+    ) == vendors.CREATED_THIS_CALL
+    assert len(calls) == 2
+    assert calls[0][1] == {}
+    assert calls[1][1] == {"exclusive": True}
+
+
+# --- mutation-kill discipline ----------------------------------------------
+
+
+def test_mutation_kill_create_dispatch_must_follow_intent_commit():
+    """FAILS if the create dispatch is moved before the intent commit."""
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([])
+    transport.create_response = _peer_create_success()
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_refusing_intent(),
+    )
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["code"] == "PROVISION_MISSING"
+    assert [c[0] for c in transport.calls].count("create") == 0
+
+
+def test_mutation_kill_ambiguous_response_never_dispatches_a_second_create():
+    """FAILS if the ambiguous-response branch is allowed to dispatch twice."""
+    peer_name = _peer_name()
+    transport = _PeerTransport()
+    transport.set_candidates_sequence([], [_peer_record(peer_name)])
+    transport.create_response = None
+    client = _peer_client(transport)
+    client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    assert [c[0] for c in transport.calls].count("create") == 1
+
+
+def test_mutation_kill_readback_alone_decides_never_the_response():
+    """FAILS if a "successful" create response alone is trusted without the
+    read-back census actually proving the profile exists."""
+    transport = _PeerTransport()
+    # Vendor claims success, but the read-back census still shows nothing.
+    transport.set_candidates_sequence([], [])
+    transport.create_response = _peer_create_success()
+    client = _peer_client(transport)
+    receipt = client.create_peer_profile(
+        folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+        intent_present=False, commit_intent=_committing_intent(),
+    )
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["effect"] not in ("CREATE_APPLIED", "PROFILE_STOPPED_PROVEN", "PROVISION_WRITTEN")
+
+
+def test_mutation_kill_os_type_must_be_sent_explicitly():
+    """FAILS if os_type is dropped from the create body (vendor default is
+    "windows"; MAS-115 profiles must always be explicitly "macos")."""
+    observed = []
+
+    def _handler(request):
+        observed.append(json.loads(request.read()))
+        return httpx.Response(201, json={
+            "status": {"error_code": "", "http_code": 201, "message": "Profile successfully created"},
+            "data": {"ids": ["x"]},
+        })
+
+    inner = httpx.Client(transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False)
+    bounded = vendors.BoundedHttpClient(client=inner)
+    try:
+        bounded._mlx_profile_create(core.Credential("secret", "stdin"), "folder", "name")
+    finally:
+        bounded.close()
+    assert observed[0].get("os_type") == "macos"
+    assert observed[0].get("os_type") != "windows"
+
+
+def test_mutation_kill_canary_refusal_exception_chain_stays_severed():
+    """FAILS if CanaryRefusal's severed ``from None`` is replaced by a bare
+    ``raise`` anywhere on the create/remove path."""
+    class _LeakyTransport(_PeerTransport):
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            self.calls.append(("search", folder_id, offset))
+            raise RuntimeError(_SECRET)
+
+    transport = _LeakyTransport()
+    client = _peer_client(transport, credential=core.Credential(_SECRET, "stdin"))
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.peer_candidates(folder_id=_PEER_FOLDER, peer_name=_peer_name())
+    exc = exc_info.value
+    assert exc.code == "VENDOR_ERROR"
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
+    assert _SECRET not in str(exc)
+    assert _SECRET not in repr(exc)
