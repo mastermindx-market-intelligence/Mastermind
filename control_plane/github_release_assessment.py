@@ -44,17 +44,18 @@ _CHECK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._:/()\[\]-]{0,127}$")
 _SOURCE_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/@#?=&,+-]{0,511}$")
 _PATH_RE = re.compile(r"^[A-Za-z0-9._/-]{1,512}$")
 _SOURCE_CREDENTIAL_ASSIGNMENT_RE = re.compile(
-    r"(?:^|[?&#])"
+    r"(?<![A-Za-z0-9])"
     r"(?:access[._-]?token|client[._-]?secret|api[._-]?key|token|"
     r"sig(?:nature)?|secret|credential|passw(?:or)?d|authorization)"
     r"[:=]",
     re.IGNORECASE,
 )
 _SOURCE_PRIVATE_COORDINATE_RE = re.compile(
-    r"^(?:"
+    r"(?:"
     r"[A-Za-z][A-Za-z0-9+.-]*://|"
-    r"[A-Za-z]:[/\\]|"
-    r"/|~/|~\\|\\\\|//|"
+    r"(?<![A-Za-z0-9])[A-Za-z]:[/\\]|"
+    r"(?<![A-Za-z0-9])(?:/|~/|~\\|\\\\|//)|"
+    r"(?<![A-Za-z0-9])"
     r"(?:localhost|internal(?:\.[A-Za-z0-9-]+)*|"
     r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?:internal|localhost|local)|"
     r"127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|"

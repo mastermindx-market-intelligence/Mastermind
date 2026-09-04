@@ -1460,6 +1460,32 @@ def test_source_reference_rejects_generic_credential_assignments_without_echoing
     _assert_unsafe_source_reference_text_is_rejected(field_name, value)
 
 
+@pytest.mark.parametrize("separator", tuple(":._/@#?=&,+-"))
+def test_prefixed_credential_assignment_is_rejected_after_every_source_token_separator(
+    separator: str,
+) -> None:
+    _assert_unsafe_source_reference_text_is_rejected(
+        "resource_id",
+        f"artifact{separator}access_token=SuperSecret123",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("source_kind", "artifact/access_token:SuperSecret123"),
+        ("resource_kind", "artifact-access_token:SuperSecret123"),
+        ("resource_id", "artifact,token=SuperSecret123"),
+        ("revision", "branch@signature:SuperSecret123"),
+        ("continuation", "page+client_secret=SuperSecret123"),
+    ],
+)
+def test_every_assignment_capable_source_reference_field_rejects_prefixed_credentials(
+    field_name: str, value: str
+) -> None:
+    _assert_unsafe_source_reference_text_is_rejected(field_name, value)
+
+
 @pytest.mark.parametrize(
     ("field_name", "value"),
     [
@@ -1480,6 +1506,33 @@ def test_source_reference_rejects_generic_credential_assignments_without_echoing
     ],
 )
 def test_source_reference_rejects_private_coordinates_without_echoing(
+    field_name: str, value: str
+) -> None:
+    _assert_unsafe_source_reference_text_is_rejected(field_name, value)
+
+
+@pytest.mark.parametrize("separator", tuple(":._/@#?=&,+-"))
+def test_prefixed_private_coordinate_is_rejected_after_every_source_token_separator(
+    separator: str,
+) -> None:
+    _assert_unsafe_source_reference_text_is_rejected(
+        "resource_id",
+        f"artifact{separator}https://internal.example/private",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("source_kind", "artifact:https://internal.example/private"),
+        ("repository", "artifact/internal.local"),
+        ("resource_kind", "artifact/file:///Users/chris/private/project"),
+        ("resource_id", "artifact:10.1.2.3/private"),
+        ("revision", "branch:C:/Users/chris/private/project"),
+        ("continuation", "cursor@localhost:8000/private"),
+    ],
+)
+def test_every_coordinate_capable_source_reference_field_rejects_prefixed_coordinates(
     field_name: str, value: str
 ) -> None:
     _assert_unsafe_source_reference_text_is_rejected(field_name, value)
