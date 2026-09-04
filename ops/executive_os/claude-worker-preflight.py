@@ -5,10 +5,11 @@ advanced by Operator Continuity OCR-1 V3. It owns only non-secret binary/auth
 readiness observations. It does not perform login, execute a model turn,
 select capacity, create Executive lifecycle state, or persist provider identity.
 
-V1 intentionally permits only two provider commands:
+V1 intentionally permits only two provider commands, each fenced from ambient
+user/project/local settings and customization discovery:
 
-* ``claude --version``
-* ``claude auth status``
+* ``claude --safe-mode --setting-sources "" --version``
+* ``claude --safe-mode --setting-sources "" auth status``
 
 The public receipt is a closed, secret-free contract. Provider account PII is
 never copied into it. Host/principal references are wire identities supplied by
@@ -24,6 +25,7 @@ import json
 import os
 import re
 import selectors
+import shutil
 import signal
 import stat
 import subprocess
@@ -237,6 +239,9 @@ class _RetainedExecutable:
     execution_name: str
     execution_fd: int
     execution_identity: _BinaryIdentity
+    observation_directory: Path
+    observation_directory_fd: int
+    observation_directory_identity: _DirectoryIdentity
     closed: bool = False
     cleanup_failed: bool = False
 
@@ -249,6 +254,12 @@ class _RetainedExecutable:
         # trust boundary enforced by F6; it is not a hostile-same-EUID sandbox.
         return str(self.execution_directory / self.execution_name)
 
+    @property
+    def observation_path(self) -> str:
+        if self.closed or self.observation_directory_fd < 0:
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        return str(self.observation_directory)
+
     def close(self) -> None:
         if self.closed:
             if self.cleanup_failed:
@@ -258,8 +269,10 @@ class _RetainedExecutable:
         cleanup_ok = True
         cleanup_directory_fd = self.execution_directory_fd
         cleanup_execution_fd = self.execution_fd
+        cleanup_observation_fd = self.observation_directory_fd
         self.execution_directory_fd = -1
         self.execution_fd = -1
+        self.observation_directory_fd = -1
         if cleanup_execution_fd >= 0:
             try:
                 os.close(cleanup_execution_fd)
@@ -270,6 +283,22 @@ class _RetainedExecutable:
                 os.fchmod(cleanup_directory_fd, 0o700)
             except OSError:
                 pass
+        if cleanup_observation_fd >= 0:
+            cleanup_ok = (
+                cleanup_directory_fd >= 0
+                and _remove_observation_tree(
+                    cleanup_directory_fd,
+                    cleanup_observation_fd,
+                    self.observation_directory.name,
+                    self.observation_directory_identity,
+                )
+                and cleanup_ok
+            )
+            try:
+                os.close(cleanup_observation_fd)
+            except OSError:
+                cleanup_ok = False
+        if cleanup_directory_fd >= 0:
             cleanup_ok = (
                 _remove_execution_file(cleanup_directory_fd, self.execution_name)
                 and cleanup_ok
@@ -521,6 +550,66 @@ def _remove_execution_file(directory_fd: int, execution_name: str) -> bool:
     return False
 
 
+def _remove_observation_tree(
+    parent_fd: int,
+    observation_fd: int,
+    observation_name: str,
+    expected: _DirectoryIdentity,
+) -> bool:
+    """Remove only the retained private CWD, recursively and without link chasing."""
+
+    if not getattr(shutil.rmtree, "avoids_symlink_attacks", False):
+        return False
+    try:
+        named = os.stat(observation_name, dir_fd=parent_fd, follow_symlinks=False)
+        opened = os.fstat(observation_fd)
+        # Integrity validation has already refused any mode drift. Cleanup
+        # still removes that same retained inode after a child chmod, but never
+        # a substituted path or a directory owned by another principal.
+        if any(
+            not stat.S_ISDIR(info.st_mode)
+            or int(info.st_dev) != expected.device
+            or int(info.st_ino) != expected.inode
+            or int(info.st_uid) != expected.uid
+            or int(info.st_gid) != expected.gid
+            for info in (named, opened)
+        ):
+            return False
+        os.fchmod(observation_fd, 0o700)
+        cleanup_identity = _directory_identity(os.fstat(observation_fd))
+        if (
+            cleanup_identity.device != expected.device
+            or cleanup_identity.inode != expected.inode
+            or cleanup_identity.uid != expected.uid
+            or cleanup_identity.gid != expected.gid
+        ):
+            return False
+    except (OSError, ValueError):
+        return False
+
+    for _ in range(2):
+        try:
+            named = os.stat(
+                observation_name,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return True
+        except OSError:
+            continue
+        try:
+            if not _same_directory(named, cleanup_identity):
+                return False
+            shutil.rmtree(observation_name, dir_fd=parent_fd)
+        except FileNotFoundError:
+            return True
+        except (OSError, TypeError, ValueError):
+            continue
+        return True
+    return False
+
+
 def _remove_execution_directory(
     directory: Path,
     expected: _DirectoryIdentity | None,
@@ -562,7 +651,17 @@ def _create_execution_copy(
     source_fd: int,
     source_identity: _BinaryIdentity,
     source_sha256: str,
-) -> tuple[Path, int, _DirectoryIdentity, str, int, _BinaryIdentity]:
+) -> tuple[
+    Path,
+    int,
+    _DirectoryIdentity,
+    str,
+    int,
+    _BinaryIdentity,
+    Path,
+    int,
+    _DirectoryIdentity,
+]:
     directory = Path(
         tempfile.mkdtemp(
             prefix="mastermind-claude-preflight-",
@@ -572,9 +671,13 @@ def _create_execution_copy(
     directory_fd = -1
     writer_fd = -1
     execution_fd = -1
+    observation_directory_fd = -1
     execution_name = "claude"
+    observation_directory_name = "observation"
+    observation_directory = directory / observation_directory_name
     complete = False
     cleanup_directory_identity: _DirectoryIdentity | None = None
+    cleanup_observation_identity: _DirectoryIdentity | None = None
     try:
         directory_fd = os.open(
             directory,
@@ -588,6 +691,27 @@ def _create_execution_copy(
         ):
             _raise("BINARY_INVALID")
         cleanup_directory_identity = _directory_identity(initial_directory)
+
+        os.mkdir(observation_directory_name, 0o700, dir_fd=directory_fd)
+        observation_directory_fd = os.open(
+            observation_directory_name,
+            os.O_RDONLY
+            | _required_open_flags("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC"),
+            dir_fd=directory_fd,
+        )
+        # Metadata commands need only search/inspect this directory. Keeping it
+        # owner-readable/executable but non-writable prevents ordinary child
+        # state from turning the CWD into a new settings surface.
+        os.fchmod(observation_directory_fd, 0o500)
+        observation_info = os.fstat(observation_directory_fd)
+        if (
+            not stat.S_ISDIR(observation_info.st_mode)
+            or observation_info.st_uid != os.geteuid()
+            or stat.S_IMODE(observation_info.st_mode) != 0o500
+            or os.listdir(observation_directory_fd)
+        ):
+            _raise("BINARY_INVALID")
+        cleanup_observation_identity = _directory_identity(observation_info)
 
         writer_fd = os.open(
             execution_name,
@@ -654,6 +778,9 @@ def _create_execution_copy(
             execution_name,
             execution_fd,
             execution_identity,
+            observation_directory,
+            observation_directory_fd,
+            cleanup_observation_identity,
         )
     except PreflightError:
         raise
@@ -672,11 +799,23 @@ def _create_execution_copy(
                     os.close(execution_fd)
                 except OSError:
                     cleanup_ok = False
+            if observation_directory_fd >= 0:
+                try:
+                    os.close(observation_directory_fd)
+                except OSError:
+                    cleanup_ok = False
             if directory_fd >= 0:
                 try:
                     os.fchmod(directory_fd, 0o700)
                 except OSError:
                     pass
+                cleanup_ok = (
+                    _remove_execution_directory(
+                        observation_directory,
+                        cleanup_observation_identity,
+                    )
+                    and cleanup_ok
+                )
                 cleanup_ok = (
                     _remove_execution_file(directory_fd, execution_name)
                     and cleanup_ok
@@ -701,6 +840,7 @@ def _assert_retained_binary(
         or retained.fd < 0
         or retained.execution_fd < 0
         or retained.execution_directory_fd < 0
+        or retained.observation_directory_fd < 0
         or not retained.directory_fds
     ):
         _raise("BINARY_CHANGED_DURING_PREFLIGHT")
@@ -768,6 +908,19 @@ def _assert_retained_binary(
             os.fstat(retained.execution_fd), retained.execution_identity
         ):
             _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+
+        observation_directory = os.fstat(retained.observation_directory_fd)
+        named_observation_directory = retained.observation_directory.lstat()
+        if not _same_directory(
+            observation_directory, retained.observation_directory_identity
+        ) or not _same_directory(
+            named_observation_directory, retained.observation_directory_identity
+        ):
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        # Provider metadata never needs a project directory. Any entry here
+        # would reintroduce a filesystem discovery surface, so fail closed.
+        if os.listdir(retained.observation_directory_fd):
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
     except PreflightError:
         raise
     except (OSError, ValueError):
@@ -822,6 +975,9 @@ def _retain_binary(binary: Path) -> _RetainedExecutable:
             execution_name,
             execution_fd,
             execution_identity,
+            observation_directory,
+            observation_directory_fd,
+            observation_directory_identity,
         ) = _create_execution_copy(leaf_fd, identity, digest)
         retained = _RetainedExecutable(
             path=raw,
@@ -838,6 +994,9 @@ def _retain_binary(binary: Path) -> _RetainedExecutable:
             execution_name=execution_name,
             execution_fd=execution_fd,
             execution_identity=execution_identity,
+            observation_directory=observation_directory,
+            observation_directory_fd=observation_directory_fd,
+            observation_directory_identity=observation_directory_identity,
         )
         try:
             _assert_retained_binary(retained, verify_source_digest=False)
@@ -880,10 +1039,17 @@ def build_allowed_argv(
         _raise("BINARY_INVALID")
     _assert_retained_binary(binary, verify_source_digest=False)
     coordinate = binary.execution_path
+    # Action-time Claude Code 2.1.259 grammar was probed provider-work-free:
+    # a literal empty value disables every selectable settings tier, while
+    # safe mode disables CLAUDE.md/hooks/skills/plugins/MCP discovery without
+    # disabling native OAuth/keychain observation. Admin policy deliberately
+    # remains in force; observe_auth binds its effective auth selection and
+    # refuses anything other than the exact native first-party result.
+    fence = ("--safe-mode", "--setting-sources", "")
     if operation == "version":
-        return (coordinate, "--version")
+        return (coordinate, *fence, "--version")
     if operation == "auth_status":
-        return (coordinate, "auth", "status")
+        return (coordinate, *fence, "auth", "status")
     _raise("COMMAND_NOT_ALLOWED")
 
 
@@ -1228,16 +1394,20 @@ def _run(
         or type(timeout_seconds) not in {int, float}
         or timeout_seconds <= 0
         or not argv
-        or any(not isinstance(item, str) or not item for item in argv)
+        or not isinstance(argv[0], str)
+        or not argv[0]
+        or any(not isinstance(item, str) for item in argv[1:])
         or any(type(descriptor) is not int or descriptor < 0 for descriptor in pass_fds)
         or (launch_guard is not None and not isinstance(launch_guard, _RetainedExecutable))
     ):
         _raise("PROVIDER_COMMAND_FAILED")
     environment = _closed_child_environment()
+    child_cwd: str | None = None
     if launch_guard is not None:
         _assert_retained_binary(launch_guard, verify_source_digest=False)
         if argv[0] != launch_guard.execution_path:
             _raise("PROVIDER_COMMAND_FAILED")
+        child_cwd = launch_guard.observation_path
     try:
         proc = subprocess.Popen(
             argv,
@@ -1250,6 +1420,7 @@ def _run(
             pass_fds=pass_fds,
             start_new_session=True,
             env=environment,
+            cwd=child_cwd,
         )
     except (OSError, ValueError, TypeError):
         _raise("PROVIDER_COMMAND_FAILED")
