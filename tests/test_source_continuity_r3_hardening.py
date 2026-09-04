@@ -406,7 +406,9 @@ OVERRIDES = (
 
 def assert_git_prefix(command: tuple[str, ...]) -> None:
     assert command[:3] == ("/usr/bin/git", "--no-pager", "--no-replace-objects")
-    prefix = command[: command.index(git_tail(command)[0])]
+    command_index = command.index(git_tail(command)[0])
+    assert command[command_index - 1] == "--work-tree=."
+    prefix = command[: command_index - 1]
     joined = "\0".join(prefix)
     for setting in OVERRIDES:
         assert f"-c\0{setting}" in joined
@@ -610,6 +612,56 @@ def test_real_probe_ignores_ambient_repo_selectors(tmp_path, monkeypatch) -> Non
     monkeypatch.setenv("GIT_WORK_TREE", str(foreign))
     result = _module()._invoke_git(subprocess.run, str(primary), "rev-parse", "HEAD^{commit}")
     assert result is not None and result.returncode == 0 and result.stdout.strip() == primary_head
+
+
+def test_real_git_child_binds_cwd_despite_local_core_worktree(tmp_path) -> None:
+    repo = tmp_path / "primary-worktree"
+    init_repo(repo, "HEAD")
+    foreign = tmp_path / "foreign-worktree"
+    foreign.mkdir()
+    (foreign / "value.txt").write_text("HEAD", encoding="utf-8")
+    git(repo, "config", "core.worktree", str(foreign))
+    (repo / "value.txt").write_text("DIRTY", encoding="utf-8")
+
+    result = _module()._invoke_git(
+        subprocess.run,
+        str(repo),
+        "diff",
+        "--no-renames",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--ignore-submodules=none",
+        "--name-only",
+        "-z",
+        "HEAD",
+        "--",
+    )
+    assert result is not None and result.returncode == 0
+    assert result.stdout == "value.txt\0"
+
+
+def test_real_git_child_worktree_binding_preserves_linked_worktrees(tmp_path) -> None:
+    primary = tmp_path / "primary"
+    init_repo(primary, "base")
+    linked = tmp_path / "linked"
+    git(primary, "worktree", "add", "-q", "-b", "r3-linked", str(linked))
+    (linked / "value.txt").write_text("dirty", encoding="utf-8")
+
+    result = _module()._invoke_git(
+        subprocess.run,
+        str(linked),
+        "diff",
+        "--no-renames",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--ignore-submodules=none",
+        "--name-only",
+        "-z",
+        "HEAD",
+        "--",
+    )
+    assert result is not None and result.returncode == 0
+    assert result.stdout == "value.txt\0"
 
 
 def test_real_probe_ignores_repository_replace_refs(tmp_path) -> None:

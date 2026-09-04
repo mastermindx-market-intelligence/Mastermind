@@ -908,7 +908,8 @@ class _ProbeRunner:
             index for index, value in enumerate(call) if index and value in commands
         )
         assert call[:3] == ("/usr/bin/git", "--no-pager", "--no-replace-objects")
-        prefix = call[3:command_index]
+        assert call[command_index - 1] == "--work-tree=."
+        prefix = call[3 : command_index - 1]
         assert len(prefix) % 2 == 0
         assert all(prefix[index] == "-c" for index in range(0, len(prefix), 2))
         assert {
