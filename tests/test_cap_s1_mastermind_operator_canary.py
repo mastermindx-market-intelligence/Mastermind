@@ -305,6 +305,103 @@ def test_create_ephemeral_archive_origin_expected_package_tree_sha_mismatch_refu
         )
 
 
+def test_create_ephemeral_archive_origin_rolls_back_on_unexpected_archive_error(
+    tmp_path, monkeypatch
+):
+    """Ownership starts at the exclusive origin-root mkdir, not at receipt return."""
+
+    git_dir = _resolve_repo_git_dir()
+    generation = _load_real_generation()
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+
+    def _unexpected_archive_error(*_args, **_kwargs):
+        raise RuntimeError("synthetic unexpected archive failure")
+
+    monkeypatch.setattr(
+        capability_skill_projection, "_run_git_archive", _unexpected_archive_error
+    )
+
+    with pytest.raises(SkillProjectionError, match="origin_root: creation_failed"):
+        create_ephemeral_archive_origin(
+            repository_git_dir=git_dir,
+            source_commit=REAL_SOURCE_COMMIT,
+            package_root=generation.package_root,
+            scratch_root=scratch_root,
+            expected_package_tree_sha=generation.source_tree_sha,
+        )
+
+    assert list(scratch_root.iterdir()) == []
+
+
+def test_create_ephemeral_archive_origin_bounded_write_survives_short_writes(
+    tmp_path, monkeypatch
+):
+    """Archive extraction must complete, reread and hash every intended post-image."""
+
+    git_dir = _resolve_repo_git_dir()
+    generation = _load_real_generation()
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    real_os_write = os.write
+
+    def _short_os_write(fd, data):
+        return real_os_write(fd, bytes(data)[:5])
+
+    monkeypatch.setattr(capability_skill_projection.os, "write", _short_os_write)
+    receipt = create_ephemeral_archive_origin(
+        repository_git_dir=git_dir,
+        source_commit=REAL_SOURCE_COMMIT,
+        package_root=generation.package_root,
+        scratch_root=scratch_root,
+        expected_package_tree_sha=generation.source_tree_sha,
+    )
+
+    verified = verify_capability_package_source(receipt.origin_root, generation)
+    assert verified.package_generation_digest == EXPECTED_PACKAGE_GENERATION_DIGEST
+    assert receipt.inventory_digest
+    shutil.rmtree(receipt.origin_root)
+
+
+def test_stage_ephemeral_rederives_git_origin_provenance_at_consumption(
+    tmp_path, monkeypatch
+):
+    git_dir = _resolve_repo_git_dir()
+    generation = _load_real_generation()
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    origin_receipt = create_ephemeral_archive_origin(
+        repository_git_dir=git_dir,
+        source_commit=REAL_SOURCE_COMMIT,
+        package_root=generation.package_root,
+        scratch_root=scratch_root,
+        expected_package_tree_sha=generation.source_tree_sha,
+    )
+    attempt_root = tmp_path / "attempt"
+    attempt_root.mkdir()
+
+    real_git_rev = capability_skill_projection._git_rev_or_none
+
+    def _drifted_git_rev(repository_git_dir, *args):
+        if args and args[0] == "rev-parse" and ":" in args[-1]:
+            return "f" * 40
+        return real_git_rev(repository_git_dir, *args)
+
+    monkeypatch.setattr(capability_skill_projection, "_git_rev_or_none", _drifted_git_rev)
+    with pytest.raises(SkillProjectionError, match="git_provenance_mismatch"):
+        stage_skill_projection(
+            generation=generation,
+            origin_mode=ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE,
+            origin_root=Path(origin_receipt.origin_root),
+            attempt_root=attempt_root,
+            owning_operation_id=OPERATION_ID,
+            owning_process_generation="rederived-origin-0001",
+            origin_receipt=origin_receipt,
+        )
+    assert list(attempt_root.iterdir()) == []
+    shutil.rmtree(origin_receipt.origin_root)
+
+
 def test_stage_ephemeral_without_origin_receipt_refuses(tmp_path):
     git_dir = _resolve_repo_git_dir()
     generation = _load_real_generation()
@@ -914,6 +1011,7 @@ from scripts.ohf.cap_s1_mastermind_operator_canary import (
     CANARY_EVIDENCE_SCHEMA_VERSION,
     RESULT_CONTRACT_MARKER,
     RESULT_CONTRACT_SCHEMA,
+    RESULT_RELEASE_STATE,
     CanaryCleanupRecord,
     CanaryEvidence,
     CanaryStop,
@@ -936,30 +1034,77 @@ def _load_canary_profile():
     registry = ExecutionCapabilityRegistry.load(FIXTURE_PATH, source_root=REPO_ROOT)
     return registry.resolve(_CANARY_PROFILE_ID)
 
-_SCHEMA_WITH_SKILL_PATH = {
-    "$defs": {
-        "SkillTurnInputItem": {
-            "type": "object",
-            "properties": {
-                "type": {"const": "skill"},
-                "name": {"type": "string"},
-                "path": {"type": "string"},
-            },
-        }
-    }
+_SKILL_INPUT_WITH_PATH = {
+    "type": "object",
+    "properties": {
+        "type": {"enum": ["skill"], "type": "string"},
+        "name": {"type": "string"},
+        "path": {"type": "string"},
+    },
+    "required": ["name", "path", "type"],
+    "title": "SkillUserInput",
 }
 
-_SCHEMA_WITHOUT_SKILL_PATH = {
-    "$defs": {
-        "SkillTurnInputItem": {
-            "type": "object",
-            "properties": {
-                "type": {"const": "skill"},
-                "name": {"type": "string"},
-            },
+_SKILL_INPUT_WITHOUT_PATH = {
+    "type": "object",
+    "properties": {
+        "type": {"enum": ["skill"], "type": "string"},
+        "name": {"type": "string"},
+    },
+    "required": ["name", "type"],
+    "title": "SkillUserInput",
+}
+
+
+def _turn_start_schema(skill_input: dict, *, unrelated_skill_fragment: bool = False) -> dict:
+    """Hand-built shape of generated ``v2/TurnStartParams.json``.
+
+    The expected path is deliberately literal: the production resolver must
+    enter at ``properties.input.items``, follow the local ``UserInput`` ref,
+    and select the one Skill union member.  An unrelated Skill-shaped object
+    may coexist in the same document without becoming request authority.
+    """
+
+    definitions = {
+        "UserInput": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "type": {"enum": ["text"], "type": "string"},
+                        "text": {"type": "string"},
+                    },
+                    "required": ["text", "type"],
+                    "title": "TextUserInput",
+                },
+                skill_input,
+            ]
         }
     }
-}
+    if unrelated_skill_fragment:
+        definitions["DeprecatedSkillResponse"] = _SKILL_INPUT_WITH_PATH
+    return {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": definitions,
+        "properties": {
+            "input": {
+                "items": {"$ref": "#/definitions/UserInput"},
+                "type": "array",
+            },
+            "threadId": {"type": "string"},
+        },
+        "required": ["input", "threadId"],
+        "title": "TurnStartParams",
+        "type": "object",
+    }
+
+
+_SCHEMA_WITH_SKILL_PATH = _turn_start_schema(_SKILL_INPUT_WITH_PATH)
+_SCHEMA_WITHOUT_SKILL_PATH = _turn_start_schema(_SKILL_INPUT_WITHOUT_PATH)
+_SCHEMA_WITHOUT_SKILL_PATH_PLUS_UNRELATED_FRAGMENT = _turn_start_schema(
+    _SKILL_INPUT_WITHOUT_PATH,
+    unrelated_skill_fragment=True,
+)
 
 _HAPPY_REPLIES = [
     "PICKUP-ACK received for cap-s1-synthetic-op.",
@@ -980,7 +1125,7 @@ def _asserts_never_the_real_codex_binary(argv) -> None:
     )
 
 
-def _fake_schema_run_command(schema_doc):
+def _fake_schema_run_command(schema_doc, *, extra_schema_docs=None):
     """Write ``schema_doc`` to whichever ``--out`` directory is requested.
 
     The written payload embeds ``out_dir.name`` ("stable" or "experimental",
@@ -1008,8 +1153,16 @@ def _fake_schema_run_command(schema_doc):
             return _subprocess.run(argv, **kwargs)
         out_dir = Path(argv[argv.index("--out") + 1])
         out_dir.mkdir(parents=True, exist_ok=True)
-        payload = {"schema": schema_doc, "variant": out_dir.name}
-        (out_dir / "schema.json").write_text(json.dumps(payload), encoding="utf-8")
+        turn_start_path = out_dir / "v2" / "TurnStartParams.json"
+        turn_start_path.parent.mkdir(parents=True, exist_ok=True)
+        turn_start_path.write_text(json.dumps(schema_doc), encoding="utf-8")
+        (out_dir / "inventory-variant.json").write_text(
+            json.dumps({"variant": out_dir.name}), encoding="utf-8"
+        )
+        for relative_path, document in (extra_schema_docs or {}).items():
+            destination = out_dir / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(document), encoding="utf-8")
         return _subprocess.CompletedProcess(argv, 0)
 
     return run_command
@@ -1302,6 +1455,57 @@ def test_attest_protocol_schema_missing_path_evidence_supports_false(tmp_path) -
     assert attestation.skill_input_schema_evidence == ""
 
 
+def test_attest_protocol_schema_ignores_unrelated_skill_shaped_fragment(tmp_path) -> None:
+    """A path on a deprecated/response-like definition is not evidence that
+    the real ``turn/start`` request input accepts a Skill path."""
+
+    scratch = tmp_path / "scratch-unrelated-skill-fragment"
+    scratch.mkdir()
+    binary = tmp_path / "fixture-binary-unrelated-skill-fragment"
+    _write_launchable_single_binary(binary)
+    probe_root = tmp_path / "probe-unrelated-skill-fragment"
+    probe_root.mkdir()
+
+    attestation = attest_protocol_schema(
+        binary_path=binary,
+        scratch_root=scratch,
+        run_command=_fake_schema_run_command(
+            _SCHEMA_WITHOUT_SKILL_PATH_PLUS_UNRELATED_FRAGMENT
+        ),
+        probe_env=_probe_env(probe_root),
+        probe_cwd=probe_root,
+    )
+
+    assert attestation.supports_skill_input_path is False
+    assert attestation.skill_input_schema_evidence == ""
+
+
+def test_attest_protocol_schema_refuses_ambiguous_turn_start_documents(tmp_path) -> None:
+    """Two generated candidates for the request schema fail closed instead
+    of letting arbitrary inventory order choose one."""
+
+    scratch = tmp_path / "scratch-ambiguous-turn-start"
+    scratch.mkdir()
+    binary = tmp_path / "fixture-binary-ambiguous-turn-start"
+    _write_launchable_single_binary(binary)
+    probe_root = tmp_path / "probe-ambiguous-turn-start"
+    probe_root.mkdir()
+
+    attestation = attest_protocol_schema(
+        binary_path=binary,
+        scratch_root=scratch,
+        run_command=_fake_schema_run_command(
+            _SCHEMA_WITH_SKILL_PATH,
+            extra_schema_docs={"legacy/TurnStartParams.json": _SCHEMA_WITH_SKILL_PATH},
+        ),
+        probe_env=_probe_env(probe_root),
+        probe_cwd=probe_root,
+    )
+
+    assert attestation.supports_skill_input_path is False
+    assert attestation.skill_input_schema_evidence == ""
+
+
 def test_canary_stop_only_accepts_a_frozen_code() -> None:
     for code in FROZEN_STOP_CODES:
         stop = CanaryStop(code, "detail")
@@ -1350,6 +1554,26 @@ def test_attest_protocol_schema_unlaunchable_binary_stops_unattested(tmp_path) -
     assert not (scratch / "schema-attestation").exists()
 
 
+def test_attest_protocol_schema_unexpected_error_rolls_back_sealed_root(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "scratch-schema-unexpected"
+    scratch.mkdir()
+    binary = tmp_path / "fixture-binary-schema-unexpected"
+    binary.write_bytes(b"fixture")
+
+    def _unexpected(*_args, **_kwargs):
+        raise RuntimeError("synthetic unexpected schema seam")
+
+    with pytest.raises(RuntimeError, match="synthetic unexpected schema seam"):
+        attest_protocol_schema(
+            binary_path=binary,
+            scratch_root=scratch,
+            run_command=_unexpected,
+        )
+    assert not (scratch / "schema-attestation").exists()
+
+
 # ---------------------------------------------------------------------------
 # build_synthetic_workspace
 # ---------------------------------------------------------------------------
@@ -1380,6 +1604,24 @@ def test_build_synthetic_workspace_refuses_a_preexisting_directory(tmp_path) -> 
     build_synthetic_workspace(scratch, operation_id="test-op-ws-2")
     with pytest.raises(FileExistsError):
         build_synthetic_workspace(scratch, operation_id="test-op-ws-2")
+
+
+def test_build_synthetic_workspace_unexpected_error_rolls_back_workspace(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "scratch-ws-unexpected"
+    scratch.mkdir()
+
+    def _unexpected(*_args, **_kwargs):
+        raise RuntimeError("synthetic unexpected workspace seam")
+
+    with pytest.raises(RuntimeError, match="synthetic unexpected workspace seam"):
+        build_synthetic_workspace(
+            scratch,
+            operation_id="test-op-ws-unexpected",
+            run_command=_unexpected,
+        )
+    assert not (scratch / "synthetic-workspace").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -1434,8 +1676,16 @@ def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
     assert evidence.binary_version == f"{FAKE_HARNESS_VERSION} (mastermind-ohf/p1b)"
     assert evidence.protocol_receipt_digest
     cleanup_map = _cleanup_map(evidence.cleanup)
-    assert set(cleanup_map) == {"schema", "workspace", "archive_origin", "projection", "process"}
-    for kind in ("schema", "workspace", "archive_origin", "projection"):
+    assert set(cleanup_map) == {
+        "schema",
+        "workspace",
+        "origin",
+        "projection",
+        "attempt",
+        "thread",
+        "process",
+    }
+    for kind in ("schema", "workspace", "origin", "projection", "attempt", "thread"):
         assert cleanup_map[kind] == (True, True), (kind, cleanup_map[kind])
     assert evidence.served_model
     assert evidence.terminal_process_state
@@ -1733,7 +1983,7 @@ def test_run_canary_extra_enabled_skill_after_root_add_is_causality_failed(tmp_p
     assert len(turn_start_calls) == 0
 
 
-def test_run_canary_pathless_rows_without_schema_support_is_attestation_unavailable(
+def test_run_canary_pathless_request_with_unrelated_skill_fragment_refuses_before_thread_start(
     tmp_path,
 ) -> None:
     """Pathless post-add rows with an unsupportive schema refuse.
@@ -1741,8 +1991,8 @@ def test_run_canary_pathless_rows_without_schema_support_is_attestation_unavaila
     When the App Server's ``skills/list`` rows carry no ``path`` field at
     all (mode B), the runner can only trust runtime-name identity if the
     attested protocol schema itself declares a ``path`` on the Skill turn
-    input -- ``_SCHEMA_WITHOUT_SKILL_PATH`` (already used elsewhere in this
-    module for the schema-attestation unit tests) does not, so
+    input.  The real request union here omits it while a deprecated schema
+    fragment does carry a Skill-shaped path, so
     ``binding.schema_supports_skill_input_path`` is False and this must map
     to ``SKILL_PATH_ATTESTATION_UNAVAILABLE`` rather than silently trusting
     the name-only rows.
@@ -1777,7 +2027,9 @@ def test_run_canary_pathless_rows_without_schema_support_is_attestation_unavaila
             # The schema fixture WITHOUT the skill input path -- the fake
             # binary is never invoked; this is just the JSON doc the
             # injected run_command writes out for attest_protocol_schema.
-            run_command=_fake_schema_run_command(_SCHEMA_WITHOUT_SKILL_PATH),
+            run_command=_fake_schema_run_command(
+                _SCHEMA_WITHOUT_SKILL_PATH_PLUS_UNRELATED_FRAGMENT
+            ),
         )
     assert excinfo.value.code == "SKILL_PATH_ATTESTATION_UNAVAILABLE"
 
@@ -1787,6 +2039,8 @@ def test_run_canary_pathless_rows_without_schema_support_is_attestation_unavaila
     assert len(skills_list_calls) == 3
     turn_start_calls = [call for call in client.calls if call[0] == "turn/start"]
     assert len(turn_start_calls) == 0
+    thread_start_calls = [call for call in client.calls if call[0] == "thread/start"]
+    assert len(thread_start_calls) == 0
 
 
 def test_run_canary_skills_changed_notification_stops_before_the_next_turn(tmp_path) -> None:
@@ -2024,9 +2278,61 @@ def _assert_scratch_has_no_leaked_resources(scratch: Path) -> None:
     for entry in scratch.iterdir():
         assert not entry.name.startswith("schema-attestation-"), entry
         assert not entry.name.startswith("ephemeral-archive-"), entry
-    attempt_root = scratch / "cap-s1-attempt-root"
-    if attempt_root.exists():
-        assert list(attempt_root.iterdir()) == [], list(attempt_root.iterdir())
+    assert not (scratch / "cap-s1-attempt-root").exists()
+
+
+def test_canary_cleanup_record_requires_exact_closed_zero_survivor_inventory() -> None:
+    exact = CanaryCleanupRecord(
+        artifacts=tuple(
+            (kind, True, True)
+            for kind in (
+                "process",
+                "thread",
+                "projection",
+                "origin",
+                "attempt",
+                "workspace",
+                "schema",
+            )
+        )
+    )
+    assert exact.all_removed is True
+    assert CanaryCleanupRecord(artifacts=exact.artifacts[:-1]).all_removed is False
+    assert CanaryCleanupRecord(
+        artifacts=exact.artifacts + (("schema", True, True),)
+    ).all_removed is False
+    assert CanaryCleanupRecord(
+        artifacts=exact.artifacts[:-1] + (("unknown", True, True),)
+    ).all_removed is False
+
+
+def test_run_canary_unexpected_origin_error_removes_owned_attempt_root(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    scratch = tmp_path / "scratch-unexpected-origin"
+    scratch.mkdir()
+
+    def _unexpected_origin(**_kwargs):
+        raise RuntimeError("synthetic unexpected origin failure")
+
+    monkeypatch.setattr(
+        canary_module, "create_ephemeral_archive_origin", _unexpected_origin
+    )
+    with pytest.raises(RuntimeError, match="synthetic unexpected origin failure"):
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-unexpected-origin",
+            client_factory=_canary_client_factory(),
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert not (scratch / "cap-s1-attempt-root").exists()
+    _assert_scratch_has_no_leaked_resources(scratch)
 
 
 def test_run_canary_schema_attestation_failure_leaves_scratch_clean(tmp_path) -> None:
@@ -2218,7 +2524,9 @@ def test_run_canary_reports_cleanup_failure_honestly(tmp_path, monkeypatch) -> N
     assert cleanup_map["projection"] == (False, False)
     assert cleanup_map["schema"] == (True, True)
     assert cleanup_map["workspace"] == (True, True)
-    assert cleanup_map["archive_origin"] == (True, True)
+    assert cleanup_map["origin"] == (True, True)
+    assert cleanup_map["attempt"] == (True, True)
+    assert cleanup_map["thread"] == (True, True)
     assert evidence.cleanup.all_removed is False
 
     import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
@@ -2253,6 +2561,7 @@ def test_cli_main_prints_evidence_json_and_exits_zero_on_a_clean_journey(
         candidate_commit="a" * 40,
         candidate_tree="b" * 40,
         canary_operation_id="cap-s1-cli-smoke",
+        provider_attempt_id="cap-s1-cli-smoke-attempt",
         workspace_root=str(tmp_path / "workspace"),
         process_generation="cap-s1-cli-smoke-gen1",
         v4_policy_digest="c" * 64,
@@ -2288,8 +2597,10 @@ def test_cli_main_prints_evidence_json_and_exits_zero_on_a_clean_journey(
             artifacts=(
                 ("schema", True, True),
                 ("workspace", True, True),
-                ("archive_origin", True, True),
+                ("attempt", True, True),
+                ("origin", True, True),
                 ("projection", True, True),
+                ("thread", True, True),
                 ("process", True, True),
             )
         ),
@@ -2315,6 +2626,7 @@ def test_cli_main_exits_nonzero_when_a_marker_is_false_or_cleanup_failed(
         candidate_commit="a" * 40,
         candidate_tree="b" * 40,
         canary_operation_id="cap-s1-cli-smoke-2",
+        provider_attempt_id="cap-s1-cli-smoke-2-attempt",
         workspace_root=str(tmp_path / "workspace2"),
         process_generation="cap-s1-cli-smoke-2-gen1",
         v4_policy_digest="c" * 64,
@@ -2350,8 +2662,10 @@ def test_cli_main_exits_nonzero_when_a_marker_is_false_or_cleanup_failed(
             artifacts=(
                 ("schema", True, True),
                 ("workspace", True, True),
-                ("archive_origin", True, True),
+                ("attempt", True, True),
+                ("origin", True, True),
                 ("projection", True, True),
+                ("thread", True, True),
                 ("process", True, True),
             )
         ),
@@ -2397,6 +2711,7 @@ def test_canary_evidence_schema_pins_version_and_full_field_set() -> None:
         "candidate_commit",
         "candidate_tree",
         "canary_operation_id",
+        "provider_attempt_id",
         "workspace_root",
         "process_generation",
         "v4_policy_digest",
@@ -2433,7 +2748,7 @@ def test_canary_cleanup_record_schema_and_fields() -> None:
     assert field_names == {"schema_version", "artifacts"}
     assert CanaryCleanupRecord().schema_version == "mastermind.cap_s1_canary_cleanup/v1"
     assert CanaryCleanupRecord().artifacts == ()
-    assert CanaryCleanupRecord().all_removed is True
+    assert CanaryCleanupRecord().all_removed is False
     assert CanaryCleanupRecord(artifacts=(("schema", True, False),)).all_removed is False
 
 
@@ -2507,8 +2822,10 @@ def test_cli_main_fake_backend_completes_the_real_four_turn_journey_as_a_subproc
     assert {row[0] for row in artifacts} == {
         "schema",
         "workspace",
-        "archive_origin",
+        "origin",
         "projection",
+        "attempt",
+        "thread",
         "process",
     }
     assert all(row[1] and row[2] for row in artifacts)
@@ -2616,29 +2933,130 @@ def test_this_test_module_never_references_the_real_codex_binary_as_an_executabl
 
 
 def _happy_cap_s1_result_kwargs() -> dict:
+    exact_head = "a" * 40
+    exact_tree = "b" * 40
+    protected_join = "c" * 40
+    attempt_id = "cap-s1-provider-attempt-001"
+    bound = {
+        "exact_head": exact_head,
+        "exact_tree": exact_tree,
+        "protected_join": protected_join,
+        "provider_attempt_id": attempt_id,
+    }
     return dict(
         operation="mastermind-cap-s1-complete-vertical-20260901-sol-001",
         receiver="fable-cap-s1",
         carrier="C0BSBM78V1N/1788258398.440699",
-        exact_head="a" * 40,
-        exact_tree="b" * 40,
-        current_protected_join="c" * 40,
-        changed_path_census=("control_plane/x.py", "scripts/ohf/y.py"),
+        exact_head=exact_head,
+        exact_tree=exact_tree,
+        current_protected_join=protected_join,
+        release_state=RESULT_RELEASE_STATE,
+        changed_path_census=(
+            "control_plane/chairman_control_room_remote.py",
+            "control_plane/codex_operator_adapter.py",
+            "control_plane/executive_agent_capabilities.py",
+            "control_plane/executive_capability_packages.py",
+            "control_plane/operator_harness_contract.py",
+            "docs/superpowers/plans/2026-09-01-sol-capability-fabric-cap-s1.md",
+            "ops/control_room_remote/install.sh",
+            "scripts/ohf/cap_s1_mastermind_operator_canary.py",
+            "scripts/ohf/capability_skill_projection.py",
+            "scripts/ohf/fake_app_server.py",
+            "scripts/ohf/fake_codex_binary.py",
+            "scripts/ohf/fixtures/executive_agent_capabilities_v4_mastermind_operator.json",
+            "scripts/ohf/protocol.py",
+            "tests/test_cap_s1_mastermind_operator_canary.py",
+            "tests/test_codex_operator_adapter.py",
+            "tests/test_control_room_remote_install.py",
+            "tests/test_executive_agent_capabilities.py",
+            "tests/test_executive_agent_capabilities_v4.py",
+            "tests/test_executive_capability_packages.py",
+            "tests/test_ohf_p1a_operator_harness_contract.py",
+            "tests/test_ohf_protocol_fidelity.py",
+        ),
         package_identities={
+            "exact_head": exact_head,
+            "exact_tree": exact_tree,
             "package_content_digest": "1" * 64,
             "package_source_digest": "2" * 64,
             "package_generation_digest": "3" * 64,
-            "closures": {"skill.a": "4" * 64, "skill.b": "5" * 64},
+            "closures": {
+                "skill.a": "4" * 64,
+                "skill.b": "5" * 64,
+                "skill.c": "c" * 64,
+                "skill.d": "d" * 64,
+            },
         },
-        canary_evidence={"schema_version": CANARY_EVIDENCE_SCHEMA_VERSION, "launch_decision": "ALLOW"},
-        provider_attempt={"state": "COMPLETED"},
-        local_proof={"tests/test_x.py": {"passed": 12, "skipped": 0}},
-        hosted_proof={"run_id": "123456", "conclusion": "success"},
-        security_proof={"security_review": "clean"},
-        mutation_proof={},
-        cleanup_proof={"all_removed": True},
-        review_state={"sol_review": "5088584089", "status": "CHANGES_REQUESTED"},
-        held_non_goals=("Ready/merge", "CAP-PROMOTE1", "default-V4", "production"),
+        canary_evidence=None,
+        provider_attempt={
+            "state": "HOLD",
+            "attempt_id": attempt_id,
+            "attempt_operation": "historical-cap-s1-provider-attempt",
+            "candidate_head": "d" * 40,
+            "candidate_tree": "e" * 40,
+            "disposition": "CONSUMED_NOT_ACCEPTED_NO_REPLAY_NO_FAILOVER",
+            "hold_code": "GATES_NOT_GREEN",
+        },
+        local_proof={
+            **bound,
+            "suite_count": 4,
+            "passed": 357,
+            "skipped": 2,
+            "evidence_digest": "6" * 64,
+        },
+        hosted_proof={
+            **bound,
+            "run_id": "33741521536",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "jobs_passed": 5,
+            "evidence_digest": "7" * 64,
+        },
+        security_proof={
+            **bound,
+            "status": "CLEAN",
+            "tool_count": 3,
+            "findings": 0,
+            "evidence_digest": "8" * 64,
+        },
+        mutation_proof={
+            **bound,
+            "status": "PASSED",
+            "killed": 12,
+            "survived": 0,
+            "evidence_digest": "9" * 64,
+        },
+        cleanup_proof={
+            **bound,
+            "status": "CLEAN",
+            "all_removed": True,
+            "residue_count": 0,
+            "resource_kinds": [
+                "attempt",
+                "origin",
+                "process",
+                "projection",
+                "schema",
+                "thread",
+                "workspace",
+            ],
+            "evidence_digest": "a" * 64,
+        },
+        review_state={
+            **bound,
+            "author": "chriswong6031-creator",
+            "reviewer": "mastermindx-3",
+            "review_id": "5104652791",
+            "state": "APPROVED",
+            "evidence_digest": "b" * 64,
+        },
+        held_non_goals=(
+            "NO_CAP_PROMOTE1",
+            "NO_DEFAULT_V4_PROMOTION",
+            "NO_MAT_S1_RUNTIMEBINDING_WAKE",
+            "NO_READY_OR_MERGE",
+            "PRODUCTION_UNARMED",
+        ),
     )
 
 
@@ -2699,14 +3117,25 @@ def test_cap_s1_result_package_identities_must_be_nonempty_and_all_hex64() -> No
         build_cap_s1_result(**empty)
 
     bad_leaf = _happy_cap_s1_result_kwargs()
-    bad_leaf["package_identities"] = {"digest": "not-a-digest"}
+    bad_leaf["package_identities"]["package_content_digest"] = "not-a-digest"
     with pytest.raises(CapS1ResultError, match="package_identities_digest_invalid"):
         build_cap_s1_result(**bad_leaf)
 
     nested_bad_leaf = _happy_cap_s1_result_kwargs()
-    nested_bad_leaf["package_identities"] = {"closures": {"skill.a": "short"}}
+    nested_bad_leaf["package_identities"]["closures"]["skill.a"] = "short"
     with pytest.raises(CapS1ResultError, match="package_identities_digest_invalid"):
         build_cap_s1_result(**nested_bad_leaf)
+
+    typed = build_cap_s1_result(**_happy_cap_s1_result_kwargs())
+    wrong_closure_count = dataclasses.replace(
+        typed,
+        package_identities=dataclasses.replace(
+            typed.package_identities,
+            closures=typed.package_identities.closures[:-1],
+        ),
+    )
+    with pytest.raises(CapS1ResultError, match="package_identities_invalid"):
+        validate_cap_s1_result(wrong_closure_count)
 
 
 def test_cap_s1_result_provider_attempt_state_is_closed() -> None:
@@ -2718,31 +3147,19 @@ def test_cap_s1_result_provider_attempt_state_is_closed() -> None:
 
 def test_cap_s1_result_hold_requires_frozen_hold_code_detail_and_empty_evidence() -> None:
     hold_kwargs = _happy_cap_s1_result_kwargs()
-    hold_kwargs["provider_attempt"] = {
-        "state": "HOLD",
-        "hold_code": "AMBIENT_SKILL_SURFACE_NOT_EMPTY",
-        "detail": "synthetic hold detail",
-    }
-    hold_kwargs["canary_evidence"] = {}
     build_cap_s1_result(**hold_kwargs)  # a well-formed HOLD constructs cleanly
 
     unknown_code = dict(hold_kwargs)
-    unknown_code["provider_attempt"] = {
-        "state": "HOLD",
-        "hold_code": "NOT_A_FROZEN_CODE",
-        "detail": "synthetic hold detail",
-    }
+    unknown_code["provider_attempt"] = dict(hold_kwargs["provider_attempt"])
+    unknown_code["provider_attempt"]["hold_code"] = "NOT_A_FROZEN_CODE"
     with pytest.raises(CapS1ResultError, match="provider_attempt_hold_code_invalid"):
         build_cap_s1_result(**unknown_code)
 
-    missing_detail = dict(hold_kwargs)
-    missing_detail["provider_attempt"] = {
-        "state": "HOLD",
-        "hold_code": "GATES_NOT_GREEN",
-        "detail": "",
-    }
-    with pytest.raises(CapS1ResultError, match="provider_attempt_detail_invalid"):
-        build_cap_s1_result(**missing_detail)
+    wrong_disposition = dict(hold_kwargs)
+    wrong_disposition["provider_attempt"] = dict(hold_kwargs["provider_attempt"])
+    wrong_disposition["provider_attempt"]["disposition"] = "ACCEPTED"
+    with pytest.raises(CapS1ResultError, match="provider_attempt_disposition_invalid"):
+        build_cap_s1_result(**wrong_disposition)
 
     evidence_on_hold = dict(hold_kwargs)
     evidence_on_hold["canary_evidence"] = {"schema_version": CANARY_EVIDENCE_SCHEMA_VERSION}
@@ -2752,41 +3169,231 @@ def test_cap_s1_result_hold_requires_frozen_hold_code_detail_and_empty_evidence(
 
 def test_cap_s1_result_completed_requires_nonempty_matching_canary_evidence() -> None:
     empty_evidence = _happy_cap_s1_result_kwargs()
-    empty_evidence["canary_evidence"] = {}
+    empty_evidence["provider_attempt"] = {
+        key: value
+        for key, value in empty_evidence["provider_attempt"].items()
+        if key != "hold_code"
+    }
+    empty_evidence["provider_attempt"].update(state="COMPLETED", disposition="ACCEPTED")
     with pytest.raises(CapS1ResultError, match="canary_evidence_required_on_completed"):
         build_cap_s1_result(**empty_evidence)
 
-    wrong_schema = _happy_cap_s1_result_kwargs()
-    wrong_schema["canary_evidence"] = {"schema_version": "wrong/v1"}
-    with pytest.raises(CapS1ResultError, match="canary_evidence_schema_mismatch"):
-        build_cap_s1_result(**wrong_schema)
+    schema_token_only = dict(empty_evidence)
+    schema_token_only["canary_evidence"] = {"schema_version": CANARY_EVIDENCE_SCHEMA_VERSION}
+    with pytest.raises(CapS1ResultError, match="canary_evidence_type_invalid"):
+        build_cap_s1_result(**schema_token_only)
+
+
+def _completed_canary_evidence(*, head: str, tree: str, attempt_id: str) -> CanaryEvidence:
+    skill_rows = (
+        ("escalate-decision", "1" * 64),
+        ("finish-operation", "2" * 64),
+        ("receive-commission", "3" * 64),
+        ("return-progress", "4" * 64),
+    )
+    return CanaryEvidence(
+        candidate_commit=head,
+        candidate_tree=tree,
+        canary_operation_id="cap-s1-completed-canary",
+        provider_attempt_id=attempt_id,
+        workspace_root="/tmp/cap-s1-workspace",
+        process_generation="cap-s1-generation-1",
+        v4_policy_digest="5" * 64,
+        package_source_digest="6" * 64,
+        package_generation_digest="7" * 64,
+        skill_grant_digests=skill_rows,
+        skill_closure_digests=skill_rows,
+        projection_receipt_digest="8" * 64,
+        binary_digest="9" * 64,
+        binary_version="codex-fixture",
+        origin_mode=ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE,
+        origin_authentication=ORIGIN_AUTHENTICATION_EPHEMERAL_GIT_ARCHIVE,
+        skills_root="/tmp/cap-s1-skills",
+        app_server_config_digest="a" * 64,
+        extra_roots_set_outcomes=("cleared",),
+        skills_list_raw_shape_digest="b" * 64,
+        baseline_enabled_names=tuple(name for name, _digest in skill_rows),
+        after_add_enabled_names=tuple(name for name, _digest in skill_rows),
+        observed_enabled_names=tuple(name for name, _digest in skill_rows),
+        after_clear_enabled_names=(),
+        protocol_receipt_digest="c" * 64,
+        launch_decision="ALLOW",
+        turn_marker_results=(
+            ("receive-commission", True),
+            ("return-progress", True),
+            ("escalate-decision", True),
+            ("finish-operation", True),
+        ),
+        served_model="gpt-5.6-sol",
+        terminal_process_state="PROVEN_DEAD",
+        artifact_inventory=("workspace:README.md",),
+        cleanup=CanaryCleanupRecord(
+            artifacts=(
+                ("process", True, True),
+                ("thread", True, True),
+                ("projection", True, True),
+                ("origin", True, True),
+                ("attempt", True, True),
+                ("workspace", True, True),
+                ("schema", True, True),
+            )
+        ),
+    )
+
+
+def test_cap_s1_result_completed_accepts_only_fully_bound_typed_canary_evidence() -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    raw["provider_attempt"] = {
+        key: value for key, value in raw["provider_attempt"].items() if key != "hold_code"
+    }
+    raw["provider_attempt"].update(
+        state="COMPLETED",
+        disposition="ACCEPTED",
+        candidate_head=raw["exact_head"],
+        candidate_tree=raw["exact_tree"],
+    )
+    raw["canary_evidence"] = _completed_canary_evidence(
+        head=raw["exact_head"],
+        tree=raw["exact_tree"],
+        attempt_id=raw["provider_attempt"]["attempt_id"],
+    )
+    build_cap_s1_result(**raw)
+
+    extra_marker = dict(raw)
+    extra_marker["canary_evidence"] = dataclasses.replace(
+        raw["canary_evidence"],
+        turn_marker_results=raw["canary_evidence"].turn_marker_results
+        + (("unexpected", False),),
+    )
+    with pytest.raises(CapS1ResultError, match="markers_invalid"):
+        build_cap_s1_result(**extra_marker)
+
+    wrong_attempt = dict(raw)
+    wrong_attempt["canary_evidence"] = dataclasses.replace(
+        raw["canary_evidence"], provider_attempt_id="different-attempt"
+    )
+    with pytest.raises(CapS1ResultError, match="binding_mismatch"):
+        build_cap_s1_result(**wrong_attempt)
 
 
 def test_cap_s1_result_local_and_hosted_proof_shapes_are_enforced() -> None:
     empty_local = _happy_cap_s1_result_kwargs()
     empty_local["local_proof"] = {}
-    with pytest.raises(CapS1ResultError, match="local_proof_empty"):
+    with pytest.raises(CapS1ResultError, match="local_proof_invalid"):
         build_cap_s1_result(**empty_local)
 
     malformed_local = _happy_cap_s1_result_kwargs()
-    malformed_local["local_proof"] = {"suite": {"passed": "12", "skipped": 0}}
+    malformed_local["local_proof"]["passed"] = "12"
     with pytest.raises(CapS1ResultError, match="local_proof_invalid"):
         build_cap_s1_result(**malformed_local)
 
     empty_hosted = _happy_cap_s1_result_kwargs()
     empty_hosted["hosted_proof"] = {}
-    with pytest.raises(CapS1ResultError, match="hosted_proof_empty"):
+    with pytest.raises(CapS1ResultError, match="hosted_proof_invalid"):
         build_cap_s1_result(**empty_hosted)
 
     missing_run_id = _happy_cap_s1_result_kwargs()
-    missing_run_id["hosted_proof"] = {"run_id": "", "conclusion": "success"}
-    with pytest.raises(CapS1ResultError, match="hosted_proof_run_id_invalid"):
+    missing_run_id["hosted_proof"]["run_id"] = ""
+    with pytest.raises(CapS1ResultError, match="hosted_proof_invalid"):
         build_cap_s1_result(**missing_run_id)
 
     missing_conclusion = _happy_cap_s1_result_kwargs()
-    missing_conclusion["hosted_proof"] = {"run_id": "123", "conclusion": ""}
-    with pytest.raises(CapS1ResultError, match="hosted_proof_conclusion_invalid"):
+    missing_conclusion["hosted_proof"]["conclusion"] = ""
+    with pytest.raises(CapS1ResultError, match="hosted_proof_invalid"):
         build_cap_s1_result(**missing_conclusion)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "case_name"),
+    [
+        (lambda raw: raw["local_proof"].update(passed=-1), "negative-count"),
+        (lambda raw: raw["local_proof"].update(passed=True), "boolean-count"),
+        (lambda raw: raw["hosted_proof"].update(conclusion="FAILURE"), "failed-hosted"),
+        (lambda raw: raw["hosted_proof"].update(status="IN_PROGRESS"), "nonterminal-hosted"),
+        (lambda raw: raw.update(security_proof={}), "empty-security"),
+        (lambda raw: raw.update(mutation_proof={}), "empty-mutation"),
+        (lambda raw: raw.update(cleanup_proof={}), "empty-cleanup"),
+        (lambda raw: raw.update(review_state={}), "empty-review"),
+        (
+            lambda raw: raw.update(
+                canary_evidence={"schema_version": CANARY_EVIDENCE_SCHEMA_VERSION}
+            ),
+            "schema-token-only-canary",
+        ),
+        (lambda raw: raw["hosted_proof"].update(unexpected="accepted"), "unknown-key"),
+        (
+            lambda raw: raw["security_proof"].update(
+                evidence="/Users/alice/.codex/auth.json?token=secret"
+            ),
+            "secret-path-material",
+        ),
+        (lambda raw: raw["hosted_proof"].update(exact_head="f" * 40), "head-mismatch"),
+        (lambda raw: raw["hosted_proof"].update(exact_tree="f" * 40), "tree-mismatch"),
+        (
+            lambda raw: raw["mutation_proof"].update(
+                provider_attempt_id="different-attempt"
+            ),
+            "provider-attempt-mismatch",
+        ),
+        (
+            lambda raw: raw["review_state"].update(
+                reviewer=raw["review_state"]["author"]
+            ),
+            "self-review",
+        ),
+        (
+            lambda raw: raw["review_state"].update(state="CHANGES_REQUESTED"),
+            "changes-requested-review",
+        ),
+        (
+            lambda raw: raw["cleanup_proof"].update(residue_count=1),
+            "residue",
+        ),
+        (
+            lambda raw: raw["cleanup_proof"].update(
+                resource_kinds=[
+                    "attempt",
+                    "origin",
+                    "process",
+                    "projection",
+                    "schema",
+                    "workspace",
+                ]
+            ),
+            "missing-thread-cleanup-proof",
+        ),
+    ],
+)
+def test_cap_s1_result_hostile_nested_receipts_refuse(mutate, case_name) -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    mutate(raw)
+    with pytest.raises(CapS1ResultError) as excinfo:
+        build_cap_s1_result(**raw)
+    assert "/Users/alice" not in str(excinfo.value), case_name
+    assert "token=secret" not in str(excinfo.value), case_name
+
+
+def test_cap_s1_result_direct_mapping_subreceipts_are_not_proof() -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    result = CapS1Result(
+        schema_version=RESULT_CONTRACT_SCHEMA,
+        marker=RESULT_CONTRACT_MARKER,
+        **raw,
+    )
+    with pytest.raises(CapS1ResultError, match="subreceipt_type_invalid"):
+        validate_cap_s1_result(result)
+
+
+def test_cap_s1_result_release_ceiling_and_exact_path_census_are_closed() -> None:
+    wrong_release = _happy_cap_s1_result_kwargs()
+    wrong_release["release_state"] = "READY"
+    with pytest.raises(CapS1ResultError, match="release_state_invalid"):
+        build_cap_s1_result(**wrong_release)
+
+    wrong_paths = _happy_cap_s1_result_kwargs()
+    wrong_paths["changed_path_census"] = wrong_paths["changed_path_census"][:-1]
+    with pytest.raises(CapS1ResultError, match="changed_path_census_mismatch"):
+        build_cap_s1_result(**wrong_paths)
 
 
 def test_cap_s1_result_held_non_goals_must_be_nonempty() -> None:

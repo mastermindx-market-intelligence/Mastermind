@@ -493,6 +493,9 @@ class CodexProtocolAttestationReceipt:
     receipt_digest: str
 
 
+SKILL_INPUT_SCHEMA_EVIDENCE = "turn_start_request_input_skill_path_attested"
+
+
 def compute_protocol_attestation_receipt_digest(
     *,
     binary_path: str,
@@ -890,6 +893,22 @@ class CodexOperatorAdapter:
                 raise CodexAdapterError(
                     AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
                     "skill canary binding protocol receipt schema evidence is required",
+                )
+            if (
+                receipt.supports_skill_input_path
+                and receipt.skill_input_schema_evidence != SKILL_INPUT_SCHEMA_EVIDENCE
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt schema evidence is invalid",
+                )
+            if (
+                not receipt.supports_skill_input_path
+                and receipt.skill_input_schema_evidence != ""
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt schema evidence is invalid",
                 )
             # Real initialize-probe binding (CAP-S1 protocol-attestation
             # amendment §2 item 4 / Sol review item 1): the runner seals
@@ -3187,4 +3206,5 @@ __all__ = [
     "CodexSkillCanaryBinding",
     "CodexSkillTurnInput",
     "CodexTurnInputEnvelope",
+    "SKILL_INPUT_SCHEMA_EVIDENCE",
 ]

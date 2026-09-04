@@ -435,7 +435,7 @@ def test_installer_exact_extracted_allowlist_boots_under_isolated_python(tmp_pat
     assert sum(
         path.startswith("control_plane/") and path.endswith(".py")
         for path in manifest["files"]
-    ) == 26
+    ) == 27
     assert "config/strategic_state.yml" in manifest["files"]
     assert not any(path.startswith(".git/") for path in manifest["files"])
     for unrelated in (

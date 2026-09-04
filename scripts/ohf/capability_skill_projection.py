@@ -173,10 +173,15 @@ class EphemeralGitOriginReceipt:
 
     schema_version: str
     repository_git_dir: str
+    repository_git_dir_identity: tuple[int, int]
     source_commit: str
     source_tree_sha: str
+    package_root: str
     origin_root: str
+    origin_root_identity: tuple[int, int]
     member_count: int
+    archive_digest: str
+    inventory_digest: str
 
 
 # ---------------------------------------------------------------------------
@@ -388,22 +393,40 @@ def _write_exclusive_file(parent_fd: int, name: str, data: bytes, executable: bo
     except OSError:
         _refuse("projection_root", "projection_root_unavailable")
     try:
-        total = len(data)
-        written = 0
-        view = memoryview(data)
-        while written < total:
-            chunk = view[written : written + _WRITE_CHUNK_BYTES]
-            try:
-                n = os.write(fd, chunk)
-            except OSError:
-                _refuse("projection_root", "projection_root_write_failed")
-            if n <= 0:
-                _refuse("projection_root", "projection_root_write_failed")
-            written += n
-        if written != total:
+        _write_all_bounded(fd, data, "projection_root", "projection_root_write_failed")
+        try:
+            os.fsync(fd)
+        except OSError:
             _refuse("projection_root", "projection_root_write_failed")
     finally:
         os.close(fd)
+
+
+def _write_all_bounded(fd: int, data: bytes, field: str, reason: str) -> None:
+    """Complete one bounded post-image even when the kernel short-writes.
+
+    One-byte progress is the smallest lawful write, so ``len(data)`` calls
+    is a strict upper bound. Zero, negative, over-reported, or non-integer
+    results refuse instead of turning an injected seam into an unbounded
+    loop or a truncated success.
+    """
+
+    total = len(data)
+    written = 0
+    calls = 0
+    view = memoryview(data)
+    while written < total:
+        chunk = view[written : written + _WRITE_CHUNK_BYTES]
+        try:
+            count = os.write(fd, chunk)
+        except OSError:
+            _refuse(field, reason)
+        calls += 1
+        if type(count) is not int or count <= 0 or count > len(chunk) or calls > total:
+            _refuse(field, reason)
+        written += count
+    if written != total:
+        _refuse(field, reason)
 
 
 def _open_chain_nofollow(root_fd: int, parts: list[str], field: str, unavailable_reason: str) -> tuple[int, list[int]]:
@@ -640,6 +663,76 @@ def _rollback_projection_root(projection_root_path: Path) -> str:
     return "rollback_complete" if (rollback_ok and absent) else "rollback_failed"
 
 
+def _archive_inventory_digest(
+    rows: "tuple[tuple[str, str, int, bool], ...] | list[tuple[str, str, int, bool]]",
+) -> str:
+    digest = hashlib.sha256()
+    for relative_path, sha256, byte_length, executable in sorted(rows):
+        digest.update(relative_path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(sha256.encode("ascii"))
+        digest.update(b"\0")
+        digest.update(str(byte_length).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(b"1" if executable else b"0")
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _rederive_ephemeral_git_origin(
+    receipt: EphemeralGitOriginReceipt,
+    generation: CapabilityPackageGeneration,
+    origin_root_path: Path,
+) -> None:
+    """Freshly prove the receipt's object-store provenance at consumption."""
+
+    if (
+        receipt.schema_version != EPHEMERAL_GIT_ORIGIN_SCHEMA_VERSION
+        or receipt.package_root != generation.package_root
+        or receipt.source_commit != generation.source_commit
+        or receipt.source_tree_sha != generation.source_tree_sha
+        or receipt.origin_root != str(origin_root_path)
+        or receipt.member_count != len(generation.files)
+        or not _is_hex64(receipt.archive_digest)
+        or not _is_hex64(receipt.inventory_digest)
+    ):
+        _refuse("origin_receipt", "git_provenance_mismatch")
+
+    git_dir_path = _require_real_directory(
+        receipt.repository_git_dir,
+        "origin_receipt",
+        "git_provenance_mismatch",
+        "git_provenance_mismatch",
+    )
+    if (
+        os.path.realpath(str(git_dir_path)) != receipt.repository_git_dir
+        or _lstat_identity(git_dir_path, "origin_receipt")
+        != receipt.repository_git_dir_identity
+        or _lstat_identity(origin_root_path, "origin_receipt")
+        != receipt.origin_root_identity
+    ):
+        _refuse("origin_receipt", "git_provenance_mismatch")
+
+    resolved_commit = _git_rev_or_none(
+        git_dir_path, "rev-parse", f"{generation.source_commit}^{{commit}}"
+    )
+    resolved_tree = _git_rev_or_none(
+        git_dir_path,
+        "rev-parse",
+        f"{generation.source_commit}:{generation.package_root}",
+    )
+    generation_rows = tuple(
+        (row.relative_path, row.sha256, row.byte_length, row.executable)
+        for row in generation.files
+    )
+    if (
+        resolved_commit != generation.source_commit
+        or resolved_tree != generation.source_tree_sha
+        or _archive_inventory_digest(generation_rows) != receipt.inventory_digest
+    ):
+        _refuse("origin_receipt", "git_provenance_mismatch")
+
+
 # ---------------------------------------------------------------------------
 # stage_skill_projection
 # ---------------------------------------------------------------------------
@@ -655,15 +748,7 @@ def stage_skill_projection(
     owning_process_generation: str,
     origin_receipt: "EphemeralGitOriginReceipt | None" = None,
 ) -> SkillProjectionReceipt:
-    # Law 1: the generation must clear the package module's own trust
-    # boundary against the exact origin root BEFORE anything else -- its
-    # receipt supplies the verified digests bound into the projection
-    # receipt below. A tampered origin byte refuses here, unwrapped, as
-    # ``CapabilityPackageError`` -- nothing below this line has run yet, so
-    # nothing needs rolling back.
-    verified_origin = verify_capability_package_source(origin_root, generation)
-
-    # Law 2.
+    # Law 1.
     if origin_mode not in _ORIGIN_MODES:
         _refuse("origin_mode", "unsupported_value")
 
@@ -680,6 +765,10 @@ def stage_skill_projection(
     # declared mode, not merely present and byte-verified. A plain checkout
     # no longer authenticates as INSTALLED_RELEASE.
     if origin_mode == ORIGIN_INSTALLED_RELEASE:
+        # Preserve the original package trust boundary's error precedence:
+        # malformed bytes refuse as CapabilityPackageError before the
+        # installed-release layout check.
+        verified_origin = verify_capability_package_source(origin_root_path, generation)
         if origin_root_path.name != generation.source_commit:
             _refuse("origin_root", "installed_release_root_unauthenticated")
         origin_authentication = ORIGIN_AUTHENTICATION_INSTALLED_RELEASE
@@ -694,7 +783,11 @@ def stage_skill_projection(
             _refuse("origin_receipt", "ephemeral_origin_receipt_commit_mismatch")
         if origin_receipt.source_tree_sha != generation.source_tree_sha:
             _refuse("origin_receipt", "ephemeral_origin_receipt_tree_mismatch")
+        _rederive_ephemeral_git_origin(origin_receipt, generation, origin_root_path)
         origin_authentication = ORIGIN_AUTHENTICATION_EPHEMERAL_GIT_ARCHIVE
+        # After object-store identity/provenance authentication,
+        # independently re-open and verify the exact package post-image.
+        verified_origin = verify_capability_package_source(origin_root_path, generation)
 
     # Law 3: attempt_root must exist, be a real non-symlink directory; the
     # projection root is created BELOW it with exclusive mkdir semantics.
@@ -839,7 +932,9 @@ def _git_rev_or_none(repository_git_dir: Path, *args: str) -> "str | None":
     return value if value else None
 
 
-def _extract_safe_tar(archive_bytes: bytes, dest_dir: Path, package_root: str) -> int:
+def _extract_safe_tar(
+    archive_bytes: bytes, dest_dir: Path, package_root: str
+) -> tuple[int, str]:
     if len(archive_bytes) > _MAX_ARCHIVE_BYTES:
         _refuse("archive", "archive_too_large")
 
@@ -852,7 +947,7 @@ def _extract_safe_tar(archive_bytes: bytes, dest_dir: Path, package_root: str) -
     except tarfile.TarError:
         _refuse("archive", "unsafe_tar_member")
 
-    member_count = 0
+    inventory_rows: list[tuple[str, str, int, bool]] = []
     try:
         try:
             members = tf.getmembers()
@@ -875,7 +970,7 @@ def _extract_safe_tar(archive_bytes: bytes, dest_dir: Path, package_root: str) -
                 if name_norm not in ancestor_prefixes and not name_norm.startswith(nested_prefix):
                     _refuse("archive", "unsafe_tar_member")
             elif member.isreg():
-                if not (name_norm == package_root or name_norm.startswith(nested_prefix)):
+                if not name_norm.startswith(nested_prefix):
                     _refuse("archive", "unsafe_tar_member")
             else:
                 _refuse("archive", "unsafe_tar_member")
@@ -899,7 +994,11 @@ def _extract_safe_tar(archive_bytes: bytes, dest_dir: Path, package_root: str) -
             except OSError:
                 _refuse("archive", "unsafe_tar_member")
             try:
-                os.write(fd, data)
+                _write_all_bounded(fd, data, "archive", "archive_write_failed")
+                try:
+                    os.fsync(fd)
+                except OSError:
+                    _refuse("archive", "archive_write_failed")
             finally:
                 os.close(fd)
             if member.mode & 0o111:
@@ -907,10 +1006,40 @@ def _extract_safe_tar(archive_bytes: bytes, dest_dir: Path, package_root: str) -
                     os.chmod(target, 0o755)
                 except OSError:
                     pass
-            member_count += 1
+            try:
+                read_fd = os.open(
+                    str(target),
+                    os.O_RDONLY | _O_NOFOLLOW | _O_NONBLOCK | _O_CLOEXEC,
+                )
+            except OSError:
+                _refuse("archive", "archive_postimage_unavailable")
+            try:
+                observed = bytearray()
+                while len(observed) <= len(data):
+                    try:
+                        chunk = os.read(read_fd, _READ_CHUNK_BYTES)
+                    except OSError:
+                        _refuse("archive", "archive_postimage_unavailable")
+                    if not chunk:
+                        break
+                    observed.extend(chunk)
+            finally:
+                os.close(read_fd)
+            observed_bytes = bytes(observed)
+            expected_digest = hashlib.sha256(data).hexdigest()
+            if len(observed_bytes) != len(data) or hashlib.sha256(observed_bytes).hexdigest() != expected_digest:
+                _refuse("archive", "archive_postimage_mismatch")
+            inventory_rows.append(
+                (
+                    member.name[len(nested_prefix) :],
+                    expected_digest,
+                    len(data),
+                    bool(member.mode & 0o111),
+                )
+            )
     finally:
         tf.close()
-    return member_count
+    return len(inventory_rows), _archive_inventory_digest(inventory_rows)
 
 
 def create_ephemeral_archive_origin(
@@ -938,6 +1067,8 @@ def create_ephemeral_archive_origin(
     git_dir_path = _require_real_directory(
         repository_git_dir, "repository_git_dir", "missing_git_dir", "missing_git_dir"
     )
+    git_dir_path = Path(os.path.realpath(str(git_dir_path)))
+    git_dir_identity = _lstat_identity(git_dir_path, "repository_git_dir")
 
     scratch_root_path = _require_real_directory(
         scratch_root, "scratch_root", "scratch_root_unavailable", "scratch_root_unavailable"
@@ -979,17 +1110,32 @@ def create_ephemeral_archive_origin(
     except OSError:
         _refuse("scratch_root", "scratch_root_unavailable")
 
-    archive_bytes = _run_git_archive(git_dir_path, source_commit, package_root)
-    member_count = _extract_safe_tar(archive_bytes, dest_dir, package_root)
-
-    return EphemeralGitOriginReceipt(
-        schema_version=EPHEMERAL_GIT_ORIGIN_SCHEMA_VERSION,
-        repository_git_dir=str(git_dir_path),
-        source_commit=source_commit,
-        source_tree_sha=source_tree_sha,
-        origin_root=str(dest_dir),
-        member_count=member_count,
-    )
+    try:
+        archive_bytes = _run_git_archive(git_dir_path, source_commit, package_root)
+        member_count, inventory_digest = _extract_safe_tar(
+            archive_bytes, dest_dir, package_root
+        )
+        if member_count <= 0 or not _is_hex64(inventory_digest):
+            _refuse("origin_root", "postimage_invalid")
+        return EphemeralGitOriginReceipt(
+            schema_version=EPHEMERAL_GIT_ORIGIN_SCHEMA_VERSION,
+            repository_git_dir=str(git_dir_path),
+            repository_git_dir_identity=git_dir_identity,
+            source_commit=source_commit,
+            source_tree_sha=source_tree_sha,
+            package_root=package_root,
+            origin_root=str(dest_dir),
+            origin_root_identity=_lstat_identity(dest_dir, "origin_root"),
+            member_count=member_count,
+            archive_digest=hashlib.sha256(archive_bytes).hexdigest(),
+            inventory_digest=inventory_digest,
+        )
+    except SkillProjectionError as exc:
+        outcome = _rollback_projection_root(dest_dir)
+        raise SkillProjectionError(f"{exc}; {outcome}") from exc
+    except Exception as exc:  # noqa: BLE001 -- normalize arbitrary seam text
+        outcome = _rollback_projection_root(dest_dir)
+        raise SkillProjectionError(f"origin_root: creation_failed; {outcome}") from exc
 
 
 # ---------------------------------------------------------------------------

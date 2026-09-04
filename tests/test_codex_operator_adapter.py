@@ -20,6 +20,7 @@ from control_plane.codex_operator_adapter import (
     CodexSkillCanaryBinding,
     CodexSkillTurnInput,
     CodexTurnInputEnvelope,
+    SKILL_INPUT_SCHEMA_EVIDENCE,
     build_protocol_attestation_receipt,
     compute_protocol_attestation_receipt_digest,
 )
@@ -149,7 +150,7 @@ def _stage_cap_s1_binding(
             experimental_inventory_digest="d" * 64,
             supports_skill_input_path=schema_supports_skill_input_path,
             skill_input_schema_evidence=(
-                "skill_turn_input_schema_node_detected"
+                SKILL_INPUT_SCHEMA_EVIDENCE
                 if schema_supports_skill_input_path
                 else ""
             ),
@@ -1828,6 +1829,24 @@ def test_skill_canary_binding_constructor_validation_matrix(tmp_path: Path) -> N
     with pytest.raises(CodexAdapterError, match="schema evidence is required"):
         _adapter(missing_schema_evidence)
 
+    arbitrary_schema_evidence_receipt = build_protocol_attestation_receipt(
+        binary_path=good_binding.protocol_receipt.binary_path,
+        binary_digest=good_binding.protocol_receipt.binary_digest,
+        binary_version=good_binding.protocol_receipt.binary_version,
+        stable_inventory_digest=good_binding.protocol_receipt.stable_inventory_digest,
+        experimental_inventory_digest=good_binding.protocol_receipt.experimental_inventory_digest,
+        supports_skill_input_path=True,
+        skill_input_schema_evidence="unrelated_skill_fragment_detected",
+        probe_user_agent=good_binding.protocol_receipt.probe_user_agent,
+    )
+    with pytest.raises(CodexAdapterError, match="schema evidence is invalid"):
+        _adapter(
+            replace(
+                good_binding,
+                protocol_receipt=arbitrary_schema_evidence_receipt,
+            )
+        )
+
     # --- CAP-S1 Sol review item 1: splice-proof, producer-bound receipt ----
     #
     # Every mutant below is refused BEFORE ``thread/start`` -- indeed before
@@ -1851,7 +1870,7 @@ def test_skill_canary_binding_constructor_validation_matrix(tmp_path: Path) -> N
         stable_inventory_digest="c" * 64,
         experimental_inventory_digest="d" * 64,
         supports_skill_input_path=True,
-        skill_input_schema_evidence="skill_turn_input_schema_node_detected",
+        skill_input_schema_evidence=SKILL_INPUT_SCHEMA_EVIDENCE,
         probe_user_agent=CAP_S1_HARNESS_VERSION,
     )
     cross_binary_splice = replace(good_binding, protocol_receipt=cross_binary_receipt)
@@ -1869,7 +1888,7 @@ def test_skill_canary_binding_constructor_validation_matrix(tmp_path: Path) -> N
         stable_inventory_digest="e" * 64,
         experimental_inventory_digest="e" * 64,
         supports_skill_input_path=True,
-        skill_input_schema_evidence="skill_turn_input_schema_node_detected",
+        skill_input_schema_evidence=SKILL_INPUT_SCHEMA_EVIDENCE,
         probe_user_agent=good_binding.protocol_receipt.probe_user_agent,
     )
     non_distinct_inventory = replace(

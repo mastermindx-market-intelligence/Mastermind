@@ -43,6 +43,7 @@ from control_plane.codex_operator_adapter import (
     CodexSkillCanaryBinding,
     CodexSkillTurnInput,
     CodexTurnInputEnvelope,
+    SKILL_INPUT_SCHEMA_EVIDENCE,
     build_protocol_attestation_receipt,
 )
 from control_plane.executive_agent_capabilities import (
@@ -243,6 +244,9 @@ def _seam_probe_client_factory(argv: list, env: Mapping[str, str], cwd: Path):
 
 
 SCHEMA_ATTESTATION_DIR_NAME = "schema-attestation"
+CANARY_CLEANUP_RESOURCE_KINDS = frozenset(
+    {"process", "thread", "schema", "origin", "projection", "attempt", "workspace"}
+)
 
 # One client-info truth: the probe must identify exactly as the launch
 # will, or the sealed and observed userAgents can never match on a real
@@ -267,7 +271,28 @@ class CanaryCleanupRecord:
 
     @property
     def all_removed(self) -> bool:
-        return all(removed and verified_absent for _kind, removed, verified_absent in self.artifacts)
+        if type(self.artifacts) is not tuple or len(self.artifacts) != len(
+            CANARY_CLEANUP_RESOURCE_KINDS
+        ):
+            return False
+        if not all(
+            type(row) is tuple
+            and len(row) == 3
+            and isinstance(row[0], str)
+            and type(row[1]) is bool
+            and type(row[2]) is bool
+            for row in self.artifacts
+        ):
+            return False
+        kinds = tuple(kind for kind, _removed, _verified_absent in self.artifacts)
+        return (
+            len(set(kinds)) == len(kinds)
+            and set(kinds) == CANARY_CLEANUP_RESOURCE_KINDS
+            and all(
+                removed and verified_absent
+                for _kind, removed, verified_absent in self.artifacts
+            )
+        )
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -276,6 +301,7 @@ class CanaryEvidence:
     candidate_commit: str
     candidate_tree: str
     canary_operation_id: str
+    provider_attempt_id: str
     workspace_root: str
     process_generation: str
     v4_policy_digest: str
@@ -330,9 +356,9 @@ def _sha256_file(path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _inventory_digest_and_docs(directory: Path) -> tuple[str, list[Any]]:
+def _inventory_digest_and_docs(directory: Path) -> tuple[str, list[tuple[str, Any]]]:
     rows: list[tuple[str, str]] = []
-    docs: list[Any] = []
+    docs: list[tuple[str, Any]] = []
     for path in sorted(directory.rglob("*")):
         if not path.is_file():
             continue
@@ -341,7 +367,7 @@ def _inventory_digest_and_docs(directory: Path) -> tuple[str, list[Any]]:
         rows.append((rel, hashlib.sha256(data).hexdigest()))
         if path.suffix == ".json":
             try:
-                docs.append(json.loads(data.decode("utf-8")))
+                docs.append((rel, json.loads(data.decode("utf-8"))))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise CanaryStop(
                     "SKILL_PROTOCOL_SCHEMA_UNATTESTED", "schema output is not valid JSON"
@@ -354,29 +380,98 @@ def _inventory_digest_and_docs(directory: Path) -> tuple[str, list[Any]]:
     return digest, docs
 
 
-def _node_declares_skill_input(node: Any) -> bool:
-    if isinstance(node, dict):
-        properties = node.get("properties")
-        if isinstance(properties, dict) and "name" in properties and "path" in properties:
-            type_prop = properties.get("type")
-            if isinstance(type_prop, dict):
-                values: list[str] = []
-                const = type_prop.get("const")
-                if isinstance(const, str):
-                    values.append(const)
-                enum = type_prop.get("enum")
-                if isinstance(enum, list):
-                    values.extend(item for item in enum if isinstance(item, str))
-                if "skill" in values:
-                    return True
-        return any(_node_declares_skill_input(child) for child in node.values())
-    if isinstance(node, list):
-        return any(_node_declares_skill_input(item) for item in node)
-    return False
+def _resolve_local_schema_ref(document: dict[str, Any], ref: Any) -> Any | None:
+    """Resolve one in-document JSON pointer without external/ref fallback."""
+
+    if not isinstance(ref, str) or not ref.startswith("#/"):
+        return None
+    current: Any = document
+    for raw_part in ref[2:].split("/"):
+        part = raw_part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
 
 
-def _schema_supports_skill_input_path(docs: list[Any]) -> bool:
-    return any(_node_declares_skill_input(doc) for doc in docs)
+def _is_exact_skill_discriminator(schema: Any) -> bool:
+    if not isinstance(schema, dict):
+        return False
+    const = schema.get("const")
+    enum = schema.get("enum")
+    return const == "skill" or enum == ["skill"]
+
+
+def _turn_start_document_supports_skill_input_path(document: Any) -> bool:
+    """Follow only the generated TurnStartParams request/input branch.
+
+    No recursive search is permitted: unrelated definitions, response
+    schemas, deprecated nodes, and cross-document references cannot grant
+    Mode-B authority.
+    """
+
+    if not isinstance(document, dict):
+        return False
+    if document.get("title") != "TurnStartParams" or document.get("type") != "object":
+        return False
+    required = document.get("required")
+    if not isinstance(required, list) or not {"input", "threadId"}.issubset(required):
+        return False
+    properties = document.get("properties")
+    if not isinstance(properties, dict):
+        return False
+    input_schema = properties.get("input")
+    if not isinstance(input_schema, dict) or input_schema.get("type") != "array":
+        return False
+    items = input_schema.get("items")
+    if not isinstance(items, dict) or set(items) != {"$ref"}:
+        return False
+    user_input = _resolve_local_schema_ref(document, items.get("$ref"))
+    if not isinstance(user_input, dict):
+        return False
+    union_keys = [key for key in ("oneOf", "anyOf") if key in user_input]
+    if union_keys != ["oneOf"]:
+        return False
+    variants = user_input["oneOf"]
+    if not isinstance(variants, list):
+        return False
+    skill_variants: list[dict[str, Any]] = []
+    for variant in variants:
+        if not isinstance(variant, dict):
+            return False
+        variant_properties = variant.get("properties")
+        if not isinstance(variant_properties, dict):
+            return False
+        if _is_exact_skill_discriminator(variant_properties.get("type")):
+            skill_variants.append(variant)
+    if len(skill_variants) != 1:
+        return False
+    skill_variant = skill_variants[0]
+    skill_properties = skill_variant.get("properties")
+    skill_required = skill_variant.get("required")
+    if not isinstance(skill_properties, dict) or not isinstance(skill_required, list):
+        return False
+    if not {"type", "name", "path"}.issubset(skill_required):
+        return False
+    return all(
+        isinstance(skill_properties.get(field), dict)
+        and skill_properties[field].get("type") == "string"
+        for field in ("name", "path")
+    )
+
+
+def _schema_supports_skill_input_path(docs: list[tuple[str, Any]]) -> bool:
+    candidates = [
+        (relative_path, document)
+        for relative_path, document in docs
+        if isinstance(document, dict) and document.get("title") == "TurnStartParams"
+    ]
+    if len(candidates) != 1:
+        return False
+    relative_path, document = candidates[0]
+    if relative_path != "v2/TurnStartParams.json":
+        return False
+    return _turn_start_document_supports_skill_input_path(document)
 
 
 def attest_protocol_schema(
@@ -467,9 +562,12 @@ def attest_protocol_schema(
 
         stable_digest, stable_docs = _inventory_digest_and_docs(stable_dir)
         experimental_digest, experimental_docs = _inventory_digest_and_docs(experimental_dir)
-        supports = _schema_supports_skill_input_path(
-            stable_docs
-        ) or _schema_supports_skill_input_path(experimental_docs)
+        # The initialize probe below negotiates ``experimentalApi=True``;
+        # therefore only the schema generated with ``--experimental`` may
+        # authorize the request contract used by that exact runtime surface.
+        # Stable inventory remains sealed into the receipt for drift proof,
+        # but cannot substitute for the negotiated request schema.
+        supports = _schema_supports_skill_input_path(experimental_docs)
 
         # --- protocol-attestation amendment §2 item 4: the REAL initialize
         # probe (CAP-S1 Sol review item 1). Launches the SAME binary as an
@@ -514,11 +612,11 @@ def attest_protocol_schema(
             experimental_inventory_digest=experimental_digest,
             supports_skill_input_path=supports,
             skill_input_schema_evidence=(
-                "skill_turn_input_schema_node_detected" if supports else ""
+                SKILL_INPUT_SCHEMA_EVIDENCE if supports else ""
             ),
             probe_user_agent=probe_user_agent,
         )
-    except CanaryStop:
+    except Exception:
         shutil.rmtree(sealed_dir, ignore_errors=True)
         raise
 
@@ -622,7 +720,7 @@ def build_synthetic_workspace(
         base_sha = _init_real_git_repo(workspace, run_command)
         read_only_applied = _apply_workspace_read_only(workspace)
         return workspace, base_sha, read_only_applied
-    except CanaryStop:
+    except Exception:
         _remove_tree(workspace)
         raise
 
@@ -787,6 +885,34 @@ def _teardown_process_action(
     process_result["terminal_process_state"] = stopped.process_liveness.value
     dead = stopped.process_liveness is ProcessLiveness.PROVEN_DEAD
     return dead, dead
+
+
+def _verify_thread_absent_action(
+    adapter: CodexOperatorAdapter,
+    generation_ref: ProcessGenerationRef,
+    process_result: dict,
+) -> "tuple[bool, bool]":
+    """Prove the attempt-local thread has no live owning runtime.
+
+    This runs after the process teardown action in LIFO order.  It does not
+    infer success from a cleanup exception: it fresh-reads the exact bound
+    client liveness and the terminal process observation produced by that
+    one teardown attempt.
+    """
+
+    try:
+        state = adapter._state(generation_ref)  # noqa: SLF001 -- exact owned canary state
+        provider_thread_id = state.provider_session_id
+        alive = state.client.alive()
+    except Exception:  # noqa: BLE001 -- absence proof must be explicit
+        return False, False
+    absent = (
+        isinstance(provider_thread_id, str)
+        and bool(provider_thread_id)
+        and alive is False
+        and process_result.get("terminal_process_state") == "PROVEN_DEAD"
+    )
+    return absent, absent
 
 
 def _grant_by_runtime_name(binding: CodexSkillCanaryBinding, runtime_name: str):
@@ -1026,6 +1152,7 @@ def run_canary(
 
         attempt_root = scratch_root / "cap-s1-attempt-root"
         attempt_root.mkdir(parents=True, exist_ok=True)
+        cleanup_actions.append(("attempt", lambda: _cleanup_dir_action(attempt_root)))
         process_generation_id = f"{operation_id}-gen1"
 
         # Sol wave-3 review (5087345399, finding B2): the origin is now a
@@ -1047,7 +1174,7 @@ def run_canary(
                 "PROVIDER_REALM_UNAVAILABLE", "ephemeral origin archive unavailable"
             ) from exc
         cleanup_actions.append(
-            ("archive_origin", lambda: _cleanup_dir_action(Path(origin_receipt.origin_root)))
+            ("origin", lambda: _cleanup_dir_action(Path(origin_receipt.origin_root)))
         )
 
         projection = stage_skill_projection(
@@ -1157,6 +1284,14 @@ def run_canary(
         # review finding B4). Every exit path below this point tears the
         # process down exactly once, never retried, before the schema/
         # workspace/archive/projection resources it may still be touching.
+        cleanup_actions.append(
+            (
+                "thread",
+                lambda: _verify_thread_absent_action(
+                    adapter, generation_ref, process_result
+                ),
+            )
+        )
         cleanup_actions.append(
             ("process", lambda: _teardown_process_action(adapter, generation_ref, process_result))
         )
@@ -1293,6 +1428,7 @@ def run_canary(
             candidate_commit=candidate_commit,
             candidate_tree=candidate_tree,
             canary_operation_id=operation_id,
+            provider_attempt_id=attempt_id,
             workspace_root=str(adapter.workspace_root),
             process_generation=process_generation_id,
             v4_policy_digest=registry.policy_digest,
@@ -1358,6 +1494,40 @@ def run_canary(
 
 RESULT_CONTRACT_MARKER = "cap-s1-result-contract-v1"
 RESULT_CONTRACT_SCHEMA = "mastermind.cap_s1_result/v1"
+RESULT_RELEASE_STATE = (
+    "BUILT_NOT_PROVEN/FOUR_SKILL_CAPABILITY_PACKAGE_SOURCE/"
+    "DEFAULT_V4_NOT_PROMOTED/PRODUCTION_UNARMED"
+)
+RESULT_CHANGED_PATHS = (
+    "control_plane/chairman_control_room_remote.py",
+    "control_plane/codex_operator_adapter.py",
+    "control_plane/executive_agent_capabilities.py",
+    "control_plane/executive_capability_packages.py",
+    "control_plane/operator_harness_contract.py",
+    "docs/superpowers/plans/2026-09-01-sol-capability-fabric-cap-s1.md",
+    "ops/control_room_remote/install.sh",
+    "scripts/ohf/cap_s1_mastermind_operator_canary.py",
+    "scripts/ohf/capability_skill_projection.py",
+    "scripts/ohf/fake_app_server.py",
+    "scripts/ohf/fake_codex_binary.py",
+    "scripts/ohf/fixtures/executive_agent_capabilities_v4_mastermind_operator.json",
+    "scripts/ohf/protocol.py",
+    "tests/test_cap_s1_mastermind_operator_canary.py",
+    "tests/test_codex_operator_adapter.py",
+    "tests/test_control_room_remote_install.py",
+    "tests/test_executive_agent_capabilities.py",
+    "tests/test_executive_agent_capabilities_v4.py",
+    "tests/test_executive_capability_packages.py",
+    "tests/test_ohf_p1a_operator_harness_contract.py",
+    "tests/test_ohf_protocol_fidelity.py",
+)
+RESULT_HELD_NON_GOALS = (
+    "NO_CAP_PROMOTE1",
+    "NO_DEFAULT_V4_PROMOTION",
+    "NO_MAT_S1_RUNTIMEBINDING_WAKE",
+    "NO_READY_OR_MERGE",
+    "PRODUCTION_UNARMED",
+)
 
 _RESULT_HEX40_RE = re.compile(r"[0-9a-f]{40}")
 _RESULT_HEX64_RE = re.compile(r"[0-9a-f]{64}")
@@ -1371,6 +1541,102 @@ class CapS1ResultError(ValueError):
     Never echoes the caller-supplied value that failed validation -- only a
     fixed, closed reason token -- mirroring ``CanaryStop``'s own discipline.
     """
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1PackageIdentitiesReceipt:
+    exact_head: str
+    exact_tree: str
+    package_content_digest: str
+    package_source_digest: str
+    package_generation_digest: str
+    closures: tuple[tuple[str, str], ...]
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1ProviderAttemptReceipt:
+    state: str
+    attempt_id: str
+    attempt_operation: str
+    candidate_head: str
+    candidate_tree: str
+    disposition: str
+    hold_code: "str | None" = None
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1LocalProofReceipt:
+    exact_head: str
+    exact_tree: str
+    protected_join: str
+    provider_attempt_id: str
+    suite_count: int
+    passed: int
+    skipped: int
+    evidence_digest: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1HostedProofReceipt:
+    exact_head: str
+    exact_tree: str
+    protected_join: str
+    provider_attempt_id: str
+    run_id: str
+    status: str
+    conclusion: str
+    jobs_passed: int
+    evidence_digest: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1SecurityProofReceipt:
+    exact_head: str
+    exact_tree: str
+    protected_join: str
+    provider_attempt_id: str
+    status: str
+    tool_count: int
+    findings: int
+    evidence_digest: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1MutationProofReceipt:
+    exact_head: str
+    exact_tree: str
+    protected_join: str
+    provider_attempt_id: str
+    status: str
+    killed: int
+    survived: int
+    evidence_digest: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1CleanupProofReceipt:
+    exact_head: str
+    exact_tree: str
+    protected_join: str
+    provider_attempt_id: str
+    status: str
+    all_removed: bool
+    residue_count: int
+    resource_kinds: tuple[str, ...]
+    evidence_digest: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1ReviewReceipt:
+    exact_head: str
+    exact_tree: str
+    protected_join: str
+    provider_attempt_id: str
+    author: str
+    reviewer: str
+    review_id: str
+    state: str
+    evidence_digest: str
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -1391,16 +1657,17 @@ class CapS1Result:
     exact_head: str
     exact_tree: str
     current_protected_join: str
+    release_state: str
     changed_path_census: tuple[str, ...]
-    package_identities: dict
-    canary_evidence: dict
-    provider_attempt: dict
-    local_proof: dict
-    hosted_proof: dict
-    security_proof: dict
-    mutation_proof: dict
-    cleanup_proof: dict
-    review_state: dict
+    package_identities: CapS1PackageIdentitiesReceipt
+    canary_evidence: "CanaryEvidence | None"
+    provider_attempt: CapS1ProviderAttemptReceipt
+    local_proof: CapS1LocalProofReceipt
+    hosted_proof: CapS1HostedProofReceipt
+    security_proof: CapS1SecurityProofReceipt
+    mutation_proof: CapS1MutationProofReceipt
+    cleanup_proof: CapS1CleanupProofReceipt
+    review_state: CapS1ReviewReceipt
     held_non_goals: tuple[str, ...]
 
 
@@ -1412,18 +1679,217 @@ def _result_is_hex64(value: object) -> bool:
     return isinstance(value, str) and _RESULT_HEX64_RE.fullmatch(value) is not None
 
 
-def _result_leaf_strings_are_hex64(value: object) -> bool:
-    """Every STRING leaf reachable from ``value`` must be a full 64-hex
-    digest -- ``package_identities`` is documented as "digests + closures",
-    so anything else nested inside it is not a lawful member."""
+_RESULT_SAFE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}")
+_RESULT_SENSITIVE_MARKERS = (
+    "secret",
+    "token",
+    "password",
+    "api_key",
+    "authorization",
+    "bearer",
+)
+_RESULT_CLEANUP_KINDS = (
+    "attempt",
+    "origin",
+    "process",
+    "projection",
+    "schema",
+    "thread",
+    "workspace",
+)
 
-    if isinstance(value, str):
-        return _result_is_hex64(value)
-    if isinstance(value, dict):
-        return all(_result_leaf_strings_are_hex64(item) for item in value.values())
-    if isinstance(value, (list, tuple)):
-        return all(_result_leaf_strings_are_hex64(item) for item in value)
-    return True
+
+def _result_safe_identifier(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and _RESULT_SAFE_ID_RE.fullmatch(value) is not None
+        and not any(marker in value.lower() for marker in _RESULT_SENSITIVE_MARKERS)
+    )
+
+
+def _result_closed_mapping(
+    raw: object, *, keys: set[str], error: str
+) -> dict[str, Any]:
+    if type(raw) is not dict or set(raw) != keys:
+        raise CapS1ResultError(error)
+    return raw
+
+
+def _result_nonnegative_int(value: object) -> bool:
+    return type(value) is int and value >= 0
+
+
+def _parse_package_identities(raw: object) -> CapS1PackageIdentitiesReceipt:
+    values = _result_closed_mapping(
+        raw,
+        keys={
+            "exact_head",
+            "exact_tree",
+            "package_content_digest",
+            "package_source_digest",
+            "package_generation_digest",
+            "closures",
+        },
+        error="cap_s1_result_package_identities_invalid",
+    )
+    closures = values["closures"]
+    if type(closures) is not dict or len(closures) != 4:
+        raise CapS1ResultError("cap_s1_result_package_identities_invalid")
+    closure_rows = tuple(sorted(closures.items()))
+    if not all(
+        _result_safe_identifier(name) and _result_is_hex64(digest)
+        for name, digest in closure_rows
+    ):
+        raise CapS1ResultError("cap_s1_result_package_identities_digest_invalid")
+    return CapS1PackageIdentitiesReceipt(
+        exact_head=values["exact_head"],
+        exact_tree=values["exact_tree"],
+        package_content_digest=values["package_content_digest"],
+        package_source_digest=values["package_source_digest"],
+        package_generation_digest=values["package_generation_digest"],
+        closures=closure_rows,
+    )
+
+
+def _parse_provider_attempt(raw: object) -> CapS1ProviderAttemptReceipt:
+    if type(raw) is not dict:
+        raise CapS1ResultError("cap_s1_result_provider_attempt_invalid")
+    state = raw.get("state")
+    common = {
+        "state",
+        "attempt_id",
+        "attempt_operation",
+        "candidate_head",
+        "candidate_tree",
+        "disposition",
+    }
+    if state == "HOLD":
+        values = _result_closed_mapping(
+            raw,
+            keys=common | {"hold_code"},
+            error="cap_s1_result_provider_attempt_invalid",
+        )
+    elif state == "COMPLETED":
+        values = _result_closed_mapping(
+            raw,
+            keys=common,
+            error="cap_s1_result_provider_attempt_invalid",
+        )
+    else:
+        raise CapS1ResultError("cap_s1_result_provider_attempt_state_invalid")
+    return CapS1ProviderAttemptReceipt(
+        state=state,
+        attempt_id=values["attempt_id"],
+        attempt_operation=values["attempt_operation"],
+        candidate_head=values["candidate_head"],
+        candidate_tree=values["candidate_tree"],
+        disposition=values["disposition"],
+        hold_code=values.get("hold_code"),
+    )
+
+
+def _parse_bound_receipt(
+    raw: object,
+    *,
+    cls: type,
+    extra_keys: set[str],
+    error: str,
+) -> Any:
+    common = {"exact_head", "exact_tree", "protected_join", "provider_attempt_id"}
+    values = _result_closed_mapping(raw, keys=common | extra_keys, error=error)
+    return cls(**values)
+
+
+def _validate_canary_evidence(
+    evidence: CanaryEvidence, *, head: str, tree: str, attempt_id: str
+) -> None:
+    if type(evidence) is not CanaryEvidence:
+        raise CapS1ResultError("cap_s1_result_canary_evidence_type_invalid")
+    if evidence.schema_version != CANARY_EVIDENCE_SCHEMA_VERSION:
+        raise CapS1ResultError("cap_s1_result_canary_evidence_schema_mismatch")
+    if (
+        evidence.candidate_commit != head
+        or evidence.candidate_tree != tree
+        or not _result_safe_identifier(evidence.canary_operation_id)
+        or evidence.provider_attempt_id != attempt_id
+    ):
+        raise CapS1ResultError("cap_s1_result_canary_evidence_binding_mismatch")
+    digest_fields = (
+        evidence.v4_policy_digest,
+        evidence.package_source_digest,
+        evidence.package_generation_digest,
+        evidence.projection_receipt_digest,
+        evidence.binary_digest,
+        evidence.skills_list_raw_shape_digest,
+        evidence.protocol_receipt_digest,
+    )
+    digest_fields = (*digest_fields, evidence.app_server_config_digest)
+    if not all(_result_is_hex64(value) for value in digest_fields):
+        raise CapS1ResultError("cap_s1_result_canary_evidence_digest_invalid")
+    expected_skill_names = (
+        "escalate-decision",
+        "finish-operation",
+        "receive-commission",
+        "return-progress",
+    )
+    for rows in (evidence.skill_grant_digests, evidence.skill_closure_digests):
+        if (
+            type(rows) is not tuple
+            or len(rows) != 4
+            or tuple(sorted(rows)) != rows
+            or not all(
+                type(row) is tuple
+                and len(row) == 2
+                and _result_safe_identifier(row[0])
+                and _result_is_hex64(row[1])
+                for row in rows
+            )
+            or tuple(row[0] for row in rows) != expected_skill_names
+        ):
+            raise CapS1ResultError("cap_s1_result_canary_evidence_digest_invalid")
+    if (
+        not isinstance(evidence.workspace_root, str)
+        or not os.path.isabs(evidence.workspace_root)
+        or not isinstance(evidence.skills_root, str)
+        or not os.path.isabs(evidence.skills_root)
+        or not _result_safe_identifier(evidence.process_generation)
+        or not isinstance(evidence.binary_version, str)
+        or not evidence.binary_version.strip()
+        or evidence.origin_mode != ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE
+        or evidence.origin_authentication != "ephemeral-git-archive"
+        or evidence.launch_decision != "ALLOW"
+        or not isinstance(evidence.served_model, str)
+        or not evidence.served_model.strip()
+        or evidence.terminal_process_state != "PROVEN_DEAD"
+        or evidence.extra_roots_set_outcomes != ("cleared",)
+        or evidence.baseline_enabled_names != expected_skill_names
+        or evidence.after_add_enabled_names != expected_skill_names
+        or evidence.observed_enabled_names != expected_skill_names
+        or evidence.after_clear_enabled_names != ()
+        or type(evidence.artifact_inventory) is not tuple
+        or not evidence.artifact_inventory
+        or not all(
+            isinstance(row, str) and bool(row) and len(row.encode("utf-8")) <= 4096
+            for row in evidence.artifact_inventory
+        )
+    ):
+        raise CapS1ResultError("cap_s1_result_canary_evidence_invalid")
+    expected_markers = (
+        "receive-commission",
+        "return-progress",
+        "escalate-decision",
+        "finish-operation",
+    )
+    if evidence.turn_marker_results != tuple((name, True) for name in expected_markers):
+        raise CapS1ResultError("cap_s1_result_canary_evidence_markers_invalid")
+    if (
+        type(evidence.cleanup) is not CanaryCleanupRecord
+        or evidence.cleanup.schema_version != CANARY_CLEANUP_SCHEMA_VERSION
+        or not evidence.cleanup.all_removed
+        or tuple(sorted(kind for kind, _removed, _absent in evidence.cleanup.artifacts))
+        != _RESULT_CLEANUP_KINDS
+    ):
+        raise CapS1ResultError("cap_s1_result_canary_evidence_cleanup_invalid")
 
 
 def validate_cap_s1_result(result: CapS1Result) -> None:
@@ -1437,6 +1903,8 @@ def validate_cap_s1_result(result: CapS1Result) -> None:
         raise CapS1ResultError("cap_s1_result_schema_mismatch")
     if result.marker != RESULT_CONTRACT_MARKER:
         raise CapS1ResultError("cap_s1_result_marker_mismatch")
+    if result.release_state != RESULT_RELEASE_STATE:
+        raise CapS1ResultError("cap_s1_result_release_state_invalid")
 
     for field_name in ("operation", "receiver", "carrier"):
         value = getattr(result, field_name)
@@ -1456,73 +1924,167 @@ def validate_cap_s1_result(result: CapS1Result) -> None:
         raise CapS1ResultError("cap_s1_result_changed_path_census_duplicate")
     if list(census) != sorted(census):
         raise CapS1ResultError("cap_s1_result_changed_path_census_unsorted")
+    if census != RESULT_CHANGED_PATHS:
+        raise CapS1ResultError("cap_s1_result_changed_path_census_mismatch")
 
-    if not isinstance(result.package_identities, dict) or not result.package_identities:
+    subreceipts = (
+        result.package_identities,
+        result.provider_attempt,
+        result.local_proof,
+        result.hosted_proof,
+        result.security_proof,
+        result.mutation_proof,
+        result.cleanup_proof,
+        result.review_state,
+    )
+    expected_types = (
+        CapS1PackageIdentitiesReceipt,
+        CapS1ProviderAttemptReceipt,
+        CapS1LocalProofReceipt,
+        CapS1HostedProofReceipt,
+        CapS1SecurityProofReceipt,
+        CapS1MutationProofReceipt,
+        CapS1CleanupProofReceipt,
+        CapS1ReviewReceipt,
+    )
+    if any(type(receipt) is not expected for receipt, expected in zip(subreceipts, expected_types)):
+        raise CapS1ResultError("cap_s1_result_subreceipt_type_invalid")
+
+    package = result.package_identities
+    if (
+        package.exact_head != result.exact_head
+        or package.exact_tree != result.exact_tree
+        or type(package.closures) is not tuple
+        or len(package.closures) != 4
+        or tuple(sorted(package.closures)) != package.closures
+        or not all(
+            type(row) is tuple
+            and len(row) == 2
+            and _result_safe_identifier(row[0])
+            and _result_is_hex64(row[1])
+            for row in package.closures
+        )
+    ):
         raise CapS1ResultError("cap_s1_result_package_identities_invalid")
-    if not _result_leaf_strings_are_hex64(result.package_identities):
+    if not all(
+        _result_is_hex64(value)
+        for value in (
+            package.package_content_digest,
+            package.package_source_digest,
+            package.package_generation_digest,
+        )
+    ):
         raise CapS1ResultError("cap_s1_result_package_identities_digest_invalid")
 
     provider_attempt = result.provider_attempt
-    if not isinstance(provider_attempt, dict):
-        raise CapS1ResultError("cap_s1_result_provider_attempt_invalid")
-    state = provider_attempt.get("state")
-    if state not in ("COMPLETED", "HOLD"):
-        raise CapS1ResultError("cap_s1_result_provider_attempt_state_invalid")
-    if state == "HOLD":
-        hold_code = provider_attempt.get("hold_code")
-        if hold_code not in _PROVIDER_ATTEMPT_HOLD_CODES:
-            raise CapS1ResultError("cap_s1_result_provider_attempt_hold_code_invalid")
-        detail = provider_attempt.get("detail")
-        if not isinstance(detail, str) or not detail.strip():
-            raise CapS1ResultError("cap_s1_result_provider_attempt_detail_invalid")
-        if result.canary_evidence:
-            raise CapS1ResultError("cap_s1_result_canary_evidence_must_be_empty_on_hold")
-    else:  # COMPLETED
-        if not isinstance(result.canary_evidence, dict) or not result.canary_evidence:
-            raise CapS1ResultError("cap_s1_result_canary_evidence_required_on_completed")
-        if result.canary_evidence.get("schema_version") != CANARY_EVIDENCE_SCHEMA_VERSION:
-            raise CapS1ResultError("cap_s1_result_canary_evidence_schema_mismatch")
-
-    for field_name in (
-        "security_proof",
-        "mutation_proof",
-        "cleanup_proof",
-        "review_state",
+    if (
+        not _result_safe_identifier(provider_attempt.attempt_id)
+        or not _result_safe_identifier(provider_attempt.attempt_operation)
+        or not _result_is_hex40(provider_attempt.candidate_head)
+        or not _result_is_hex40(provider_attempt.candidate_tree)
     ):
-        if not isinstance(getattr(result, field_name), dict):
-            raise CapS1ResultError(f"cap_s1_result_{field_name}_invalid")
+        raise CapS1ResultError("cap_s1_result_provider_attempt_invalid")
+    if provider_attempt.state == "HOLD":
+        if provider_attempt.hold_code not in _PROVIDER_ATTEMPT_HOLD_CODES:
+            raise CapS1ResultError("cap_s1_result_provider_attempt_hold_code_invalid")
+        if provider_attempt.disposition != "CONSUMED_NOT_ACCEPTED_NO_REPLAY_NO_FAILOVER":
+            raise CapS1ResultError("cap_s1_result_provider_attempt_disposition_invalid")
+        if result.canary_evidence is not None:
+            raise CapS1ResultError("cap_s1_result_canary_evidence_must_be_empty_on_hold")
+    elif provider_attempt.state == "COMPLETED":
+        if provider_attempt.hold_code is not None or provider_attempt.disposition != "ACCEPTED":
+            raise CapS1ResultError("cap_s1_result_provider_attempt_disposition_invalid")
+        if result.canary_evidence is None:
+            raise CapS1ResultError("cap_s1_result_canary_evidence_required_on_completed")
+        _validate_canary_evidence(
+            result.canary_evidence,
+            head=result.exact_head,
+            tree=result.exact_tree,
+            attempt_id=provider_attempt.attempt_id,
+        )
+    else:
+        raise CapS1ResultError("cap_s1_result_provider_attempt_state_invalid")
+
+    bound_receipts = (
+        result.local_proof,
+        result.hosted_proof,
+        result.security_proof,
+        result.mutation_proof,
+        result.cleanup_proof,
+        result.review_state,
+    )
+    if any(
+        receipt.exact_head != result.exact_head
+        or receipt.exact_tree != result.exact_tree
+        or receipt.protected_join != result.current_protected_join
+        or receipt.provider_attempt_id != provider_attempt.attempt_id
+        for receipt in bound_receipts
+    ):
+        raise CapS1ResultError("cap_s1_result_cross_binding_mismatch")
+    if any(not _result_is_hex64(receipt.evidence_digest) for receipt in bound_receipts):
+        raise CapS1ResultError("cap_s1_result_evidence_digest_invalid")
 
     local_proof = result.local_proof
-    if not isinstance(local_proof, dict) or not local_proof:
-        raise CapS1ResultError("cap_s1_result_local_proof_empty")
-    for suite_name, counts in local_proof.items():
-        if not isinstance(suite_name, str) or not suite_name:
-            raise CapS1ResultError("cap_s1_result_local_proof_invalid")
-        if (
-            not isinstance(counts, dict)
-            or "passed" not in counts
-            or "skipped" not in counts
-            or isinstance(counts.get("passed"), bool)
-            or isinstance(counts.get("skipped"), bool)
-            or not isinstance(counts.get("passed"), int)
-            or not isinstance(counts.get("skipped"), int)
-        ):
-            raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+    if (
+        not _result_nonnegative_int(local_proof.suite_count)
+        or local_proof.suite_count == 0
+        or not _result_nonnegative_int(local_proof.passed)
+        or local_proof.passed == 0
+        or not _result_nonnegative_int(local_proof.skipped)
+    ):
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid")
 
     hosted_proof = result.hosted_proof
-    if not isinstance(hosted_proof, dict) or not hosted_proof:
-        raise CapS1ResultError("cap_s1_result_hosted_proof_empty")
-    run_id = hosted_proof.get("run_id")
-    conclusion = hosted_proof.get("conclusion")
-    if not isinstance(run_id, str) or not run_id.strip():
-        raise CapS1ResultError("cap_s1_result_hosted_proof_run_id_invalid")
-    if not isinstance(conclusion, str) or not conclusion.strip():
-        raise CapS1ResultError("cap_s1_result_hosted_proof_conclusion_invalid")
+    if (
+        not _result_safe_identifier(hosted_proof.run_id)
+        or hosted_proof.status != "COMPLETED"
+        or hosted_proof.conclusion != "SUCCESS"
+        or not _result_nonnegative_int(hosted_proof.jobs_passed)
+        or hosted_proof.jobs_passed == 0
+    ):
+        raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
+
+    security_proof = result.security_proof
+    if (
+        security_proof.status != "CLEAN"
+        or not _result_nonnegative_int(security_proof.tool_count)
+        or security_proof.tool_count == 0
+        or security_proof.findings != 0
+    ):
+        raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+
+    mutation_proof = result.mutation_proof
+    if (
+        mutation_proof.status != "PASSED"
+        or not _result_nonnegative_int(mutation_proof.killed)
+        or mutation_proof.killed == 0
+        or mutation_proof.survived != 0
+    ):
+        raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+
+    cleanup_proof = result.cleanup_proof
+    if (
+        cleanup_proof.status != "CLEAN"
+        or cleanup_proof.all_removed is not True
+        or cleanup_proof.residue_count != 0
+        or cleanup_proof.resource_kinds != _RESULT_CLEANUP_KINDS
+    ):
+        raise CapS1ResultError("cap_s1_result_cleanup_proof_invalid")
+
+    review = result.review_state
+    if (
+        not _result_safe_identifier(review.author)
+        or not _result_safe_identifier(review.reviewer)
+        or review.author == review.reviewer
+        or not _result_safe_identifier(review.review_id)
+        or review.state != "APPROVED"
+    ):
+        raise CapS1ResultError("cap_s1_result_review_state_invalid")
 
     held = result.held_non_goals
     if not isinstance(held, tuple) or not held:
         raise CapS1ResultError("cap_s1_result_held_non_goals_empty")
-    if not all(isinstance(item, str) and item.strip() for item in held):
+    if held != RESULT_HELD_NON_GOALS:
         raise CapS1ResultError("cap_s1_result_held_non_goals_invalid")
 
 
@@ -1532,6 +2094,63 @@ def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
 
     kwargs.setdefault("schema_version", RESULT_CONTRACT_SCHEMA)
     kwargs.setdefault("marker", RESULT_CONTRACT_MARKER)
+    kwargs.setdefault("release_state", RESULT_RELEASE_STATE)
+    parsers = {
+        "package_identities": _parse_package_identities,
+        "provider_attempt": _parse_provider_attempt,
+        "local_proof": lambda raw: _parse_bound_receipt(
+            raw,
+            cls=CapS1LocalProofReceipt,
+            extra_keys={"suite_count", "passed", "skipped", "evidence_digest"},
+            error="cap_s1_result_local_proof_invalid",
+        ),
+        "hosted_proof": lambda raw: _parse_bound_receipt(
+            raw,
+            cls=CapS1HostedProofReceipt,
+            extra_keys={"run_id", "status", "conclusion", "jobs_passed", "evidence_digest"},
+            error="cap_s1_result_hosted_proof_invalid",
+        ),
+        "security_proof": lambda raw: _parse_bound_receipt(
+            raw,
+            cls=CapS1SecurityProofReceipt,
+            extra_keys={"status", "tool_count", "findings", "evidence_digest"},
+            error="cap_s1_result_security_proof_invalid",
+        ),
+        "mutation_proof": lambda raw: _parse_bound_receipt(
+            raw,
+            cls=CapS1MutationProofReceipt,
+            extra_keys={"status", "killed", "survived", "evidence_digest"},
+            error="cap_s1_result_mutation_proof_invalid",
+        ),
+        "cleanup_proof": lambda raw: _parse_bound_receipt(
+            raw,
+            cls=CapS1CleanupProofReceipt,
+            extra_keys={
+                "status",
+                "all_removed",
+                "residue_count",
+                "resource_kinds",
+                "evidence_digest",
+            },
+            error="cap_s1_result_cleanup_proof_invalid",
+        ),
+        "review_state": lambda raw: _parse_bound_receipt(
+            raw,
+            cls=CapS1ReviewReceipt,
+            extra_keys={"author", "reviewer", "review_id", "state", "evidence_digest"},
+            error="cap_s1_result_review_state_invalid",
+        ),
+    }
+    for field_name, parser in parsers.items():
+        raw = kwargs.get(field_name)
+        if type(raw) is dict:
+            kwargs[field_name] = parser(raw)
+    if isinstance(kwargs.get("cleanup_proof"), CapS1CleanupProofReceipt):
+        resource_kinds = kwargs["cleanup_proof"].resource_kinds
+        if type(resource_kinds) is list:
+            kwargs["cleanup_proof"] = dataclasses.replace(
+                kwargs["cleanup_proof"], resource_kinds=tuple(resource_kinds)
+            )
     result = CapS1Result(**kwargs)
     validate_cap_s1_result(result)
     return result
