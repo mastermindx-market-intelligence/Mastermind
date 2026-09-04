@@ -28,6 +28,7 @@ import httpx
 import pytest
 
 from control_plane import surface_bindings as sb
+from integrations.chairman_surfaces import chatgpt
 from integrations.chairman_surfaces import mas115_multilogin_port_policy as port_policy
 from integrations.chairman_surfaces import nonseat_canary as core
 from integrations.chairman_surfaces import nonseat_canary_vendors as vendors
@@ -7092,8 +7093,235 @@ def test_mutation_kill_canary_refusal_exception_chain_stays_severed():
 
 
 _REALM1_WORKSPACE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-_REALM1_OLD_GENERATION = "ce075b8e36138211ad9a170fd946cabef1af50406b0f427c79ccff1fe298e5d9"
-_REALM1_GENERATION = "c39dac9ab0c51047b442ac5e8bb2683f2780dd6045c5489b79560b4ce6b131a8"
+_REALM1_OLD_GENERATION = "c39dac9ab0c51047b442ac5e8bb2683f2780dd6045c5489b79560b4ce6b131a8"
+_REALM1_GENERATION = "4b4c77c81a19dafdd6c0ecbed58f14025a41eea77efb2ec070a537e52c999f49"
+
+
+def _strict_inventory_roots(tmp_path):
+    mlx_root = tmp_path / "mlx"
+    gologin_root = tmp_path / "gologin"
+    mlx_root.mkdir()
+    gologin_root.mkdir()
+    return mlx_root, gologin_root
+
+
+def _strict_ps(stdout=""):
+    return {
+        "code": 0,
+        "stdout": stdout,
+        "stderr": "",
+        "timed_out": False,
+    }
+
+
+def test_realm1_strict_producer_returns_row_201_that_legacy_drops_and_gate_refuses_it(tmp_path):
+    """The trusted census cannot inherit the public discovery helper's 200-row truncation."""
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    workspace = mlx_root / _REALM1_WORKSPACE
+    candidate_folder = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    candidate_profile = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    (workspace / candidate_folder / candidate_profile).mkdir(parents=True)
+    ids = [f"{index:024x}" for index in range(201)]
+    for profile_id in ids:
+        (gologin_root / profile_id).mkdir()
+    running = ids[:3] + [ids[-1]]
+    stdout = "\n".join(
+        f"browser --user-data-dir={gologin_root / profile_id}"
+        for profile_id in running
+    )
+
+    legacy = chatgpt.list_local_environments(
+        mlx_profiles_root=os.fspath(mlx_root),
+        gologin_profiles_root=os.fspath(gologin_root),
+        process_args_reader=lambda: stdout.splitlines(),
+    )
+    strict = chatgpt._strict_list_local_environments(  # noqa: SLF001
+        mlx_profiles_root=os.fspath(mlx_root),
+        gologin_profiles_root=os.fspath(gologin_root),
+        process_runner=lambda *_args, **_kwargs: _strict_ps(stdout),
+    )
+    assert len(legacy["gologin"]) == 200
+    assert ids[-1] not in {row["profile_id"] for row in legacy["gologin"]}
+    assert len(strict["gologin"]) == 201
+    assert strict["gologin"][-1] == {"profile_id": ids[-1], "running": True}
+
+    snapshot = _seal_realm1_environment(strict)
+    assert snapshot is not None
+    provision = _stored_provision(_valid_provision("multilogin"))
+    provision_path = _write_provision(tmp_path, provision)
+    loaded, code = core.load_provision(
+        provision_path,
+        bindings_loader=lambda: (_stale_realm1_bindings(), []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert loaded is None and code == "BINDINGS_UNAVAILABLE"
+
+
+def test_realm1_strict_producer_samples_once_before_traversal_and_uses_plus_four_cap(tmp_path):
+    """The one process epoch precedes inventory traversal and preserves a split UTF-8 sentinel."""
+    mlx_root = tmp_path / "mlx"
+    gologin_root = tmp_path / "gologin"
+    calls = []
+
+    def _runner(argv, *, timeout, max_bytes):
+        calls.append((argv, timeout, max_bytes))
+        mlx_root.mkdir()
+        gologin_root.mkdir()
+        return _strict_ps("x" * chatgpt._PS_SNAPSHOT_MAX_BYTES + "\N{EURO SIGN}")
+
+    with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=_runner,
+        )
+    assert calls == [
+        (["/bin/ps", "-axo", "args="], 5.0, chatgpt._PS_SNAPSHOT_MAX_BYTES + 4),
+    ]
+
+
+@pytest.mark.parametrize(
+    "result",
+    (
+        None,
+        {},
+        {"code": True, "stdout": "", "stderr": "", "timed_out": False},
+        {"code": 1, "stdout": "", "stderr": "secret", "timed_out": False},
+        {"code": None, "stdout": "", "stderr": "", "timed_out": True},
+        {"code": 0, "stdout": b"", "stderr": "", "timed_out": False},
+        {"code": 0, "stdout": "\ufffd", "stderr": "", "timed_out": False},
+    ),
+)
+def test_realm1_strict_producer_refuses_malformed_process_envelopes_without_leakage(tmp_path, result):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    with pytest.raises(RuntimeError) as exc_info:
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: result,
+        )
+    assert str(exc_info.value) == "strict local environment inventory unavailable"
+    assert exc_info.value.__cause__ is None
+    assert "secret" not in repr(exc_info.value)
+
+
+def test_realm1_strict_producer_refuses_runner_exception_without_raw_context(tmp_path):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+
+    def _raise(*_args, **_kwargs):
+        raise OSError("SECRET /private/profile/path")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=_raise,
+        )
+    assert str(exc_info.value) == "strict local environment inventory unavailable"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert "SECRET" not in repr(exc_info.value)
+
+
+def test_realm1_strict_producer_accepts_exactly_1000_and_refuses_1001(tmp_path):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    for index in range(1001):
+        (gologin_root / f"{index:024x}").mkdir()
+    kwargs = {
+        "mlx_profiles_root": os.fspath(mlx_root),
+        "gologin_profiles_root": os.fspath(gologin_root),
+        "process_runner": lambda *_args, **_kwargs: _strict_ps(),
+    }
+    with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
+        chatgpt._strict_list_local_environments(**kwargs)  # noqa: SLF001
+    (gologin_root / f"{1000:024x}").rmdir()
+    assert len(chatgpt._strict_list_local_environments(**kwargs)["gologin"]) == 1000  # noqa: SLF001
+
+
+@pytest.mark.parametrize("bad_kind", ("root_symlink", "identity_symlink", "uppercase_gologin"))
+def test_realm1_strict_producer_refuses_ambiguous_filesystem_identities(tmp_path, bad_kind):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    if bad_kind == "root_symlink":
+        mlx_root.rmdir()
+        target = tmp_path / "real-mlx"
+        target.mkdir()
+        mlx_root.symlink_to(target, target_is_directory=True)
+    elif bad_kind == "identity_symlink":
+        target = tmp_path / "real-profile"
+        target.mkdir()
+        (gologin_root / ("a" * 24)).symlink_to(target, target_is_directory=True)
+    else:
+        (gologin_root / ("A" * 24)).mkdir()
+    with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: _strict_ps(),
+        )
+
+
+def test_realm1_strict_producer_refuses_cross_workspace_authority_duplicate(tmp_path):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    folder = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    profile = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    for workspace in (
+        "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    ):
+        (mlx_root / workspace / folder / profile).mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: _strict_ps(),
+        )
+
+
+@pytest.mark.parametrize("mutation", ("unmatched", "wrong_depth", "multiple"))
+def test_realm1_strict_producer_refuses_managed_process_ambiguity(tmp_path, mutation):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    profile = "a" * 24
+    (gologin_root / profile).mkdir()
+    if mutation == "unmatched":
+        line = f"browser --user-data-dir={gologin_root / ('b' * 24)}"
+    elif mutation == "wrong_depth":
+        line = f"browser --user-data-dir={gologin_root / profile / 'nested'}"
+    else:
+        line = (
+            f"browser --user-data-dir={gologin_root / profile} "
+            f"--user-data-dir={gologin_root / profile}"
+        )
+    with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: _strict_ps(line),
+        )
+
+
+def test_realm1_strict_producer_ignores_unrelated_browser_process_and_missing_roots(tmp_path):
+    missing_mlx = tmp_path / "missing-mlx"
+    missing_gologin = tmp_path / "missing-gologin"
+    result = chatgpt._strict_list_local_environments(  # noqa: SLF001
+        mlx_profiles_root=os.fspath(missing_mlx),
+        gologin_profiles_root=os.fspath(missing_gologin),
+        process_runner=lambda *_args, **_kwargs: _strict_ps(
+            "chrome --user-data-dir=/tmp/ordinary-chrome"
+        ),
+    )
+    assert result == {"multilogin": [], "gologin": []}
+
+
+def test_realm1_vendor_live_census_uses_only_the_strict_private_producer(monkeypatch):
+    strict = _realm1_environment()
+    monkeypatch.setattr(chatgpt, "_strict_list_local_environments", lambda: strict, raising=False)
+    monkeypatch.setattr(
+        chatgpt,
+        "list_local_environments",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy discovery is not trusted")),
+    )
+    assert vendors._coordinator_local_census() is strict  # noqa: SLF001
 
 
 def _realm1_environment(provision=None) -> dict:

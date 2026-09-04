@@ -1117,3 +1117,28 @@ def test_realm1_matching_local_row_seals_once_bypasses_reducer_and_threads_same_
     assert len(snapshots) == 2 and snapshots[0] is snapshots[1]
     assert raw == raw_before
     assert bindings == bindings_before
+
+
+def test_realm1_setup_live_snapshot_uses_only_the_strict_private_producer(monkeypatch):
+    """Hazardous setup gates may not fall back to capped tolerant discovery."""
+    raw = _local_census(_mlx(4, running=False))
+    calls = []
+
+    def _strict():
+        calls.append("strict")
+        return raw
+
+    monkeypatch.setattr(
+        setup.chatgpt,
+        "_strict_list_local_environments",
+        _strict,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        setup.chatgpt,
+        "list_local_environments",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy discovery is not trusted")),
+    )
+    snapshot = setup._acquire_current_environment_snapshot()  # noqa: SLF001
+    assert canary._is_current_environment_snapshot(snapshot) is True  # noqa: SLF001
+    assert calls == ["strict"]
