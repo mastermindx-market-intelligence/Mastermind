@@ -418,7 +418,7 @@ def _acquire_current_environment_snapshot():
     """Acquire and immediately seal one strict local environment observation."""
 
     try:
-        raw = chatgpt.list_local_environments()
+        raw = chatgpt._strict_list_local_environments()  # noqa: SLF001
         snapshot = canary._seal_current_environment_snapshot(raw)  # noqa: SLF001
     except Exception:  # noqa: BLE001 — setup exposes one fixed refusal
         raise SetupRefusal(

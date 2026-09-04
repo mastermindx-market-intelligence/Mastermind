@@ -7121,10 +7121,16 @@ def test_realm1_strict_producer_returns_row_201_that_legacy_drops_and_gate_refus
     candidate_folder = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
     candidate_profile = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     (workspace / candidate_folder / candidate_profile).mkdir(parents=True)
-    ids = [f"{index:024x}" for index in range(201)]
+    seats = [
+        "111111111111111111111111",
+        "222222222222222222222222",
+        "333333333333333333333333",
+    ]
+    extra = "f" * 24
+    ids = sorted([f"{index:024x}" for index in range(197)] + seats + [extra])
     for profile_id in ids:
         (gologin_root / profile_id).mkdir()
-    running = ids[:3] + [ids[-1]]
+    running = seats + [extra]
     stdout = "\n".join(
         f"browser --user-data-dir={gologin_root / profile_id}"
         for profile_id in running
@@ -7141,9 +7147,9 @@ def test_realm1_strict_producer_returns_row_201_that_legacy_drops_and_gate_refus
         process_runner=lambda *_args, **_kwargs: _strict_ps(stdout),
     )
     assert len(legacy["gologin"]) == 200
-    assert ids[-1] not in {row["profile_id"] for row in legacy["gologin"]}
+    assert extra not in {row["profile_id"] for row in legacy["gologin"]}
     assert len(strict["gologin"]) == 201
-    assert strict["gologin"][-1] == {"profile_id": ids[-1], "running": True}
+    assert strict["gologin"][-1] == {"profile_id": extra, "running": True}
 
     snapshot = _seal_realm1_environment(strict)
     assert snapshot is not None
@@ -7191,6 +7197,7 @@ def test_realm1_strict_producer_samples_once_before_traversal_and_uses_plus_four
         {"code": None, "stdout": "", "stderr": "", "timed_out": True},
         {"code": 0, "stdout": b"", "stderr": "", "timed_out": False},
         {"code": 0, "stdout": "\ufffd", "stderr": "", "timed_out": False},
+        {"code": 0, "stdout": "", "stderr": "\ufffd", "timed_out": False},
     ),
 )
 def test_realm1_strict_producer_refuses_malformed_process_envelopes_without_leakage(tmp_path, result):
@@ -7278,7 +7285,7 @@ def test_realm1_strict_producer_refuses_cross_workspace_authority_duplicate(tmp_
         )
 
 
-@pytest.mark.parametrize("mutation", ("unmatched", "wrong_depth", "multiple"))
+@pytest.mark.parametrize("mutation", ("unmatched", "wrong_depth", "multiple", "quoted"))
 def test_realm1_strict_producer_refuses_managed_process_ambiguity(tmp_path, mutation):
     mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
     profile = "a" * 24
@@ -7287,11 +7294,13 @@ def test_realm1_strict_producer_refuses_managed_process_ambiguity(tmp_path, muta
         line = f"browser --user-data-dir={gologin_root / ('b' * 24)}"
     elif mutation == "wrong_depth":
         line = f"browser --user-data-dir={gologin_root / profile / 'nested'}"
-    else:
+    elif mutation == "multiple":
         line = (
             f"browser --user-data-dir={gologin_root / profile} "
             f"--user-data-dir={gologin_root / profile}"
         )
+    else:
+        line = f'browser --user-data-dir="{gologin_root / profile}"'
     with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
         chatgpt._strict_list_local_environments(  # noqa: SLF001
             mlx_profiles_root=os.fspath(mlx_root),

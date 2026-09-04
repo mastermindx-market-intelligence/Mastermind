@@ -631,7 +631,7 @@ def _bootstrap_coordinator_state(monkeypatch, *, running=False):
     monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
         setup.chatgpt,
-        "list_local_environments",
+        "_strict_list_local_environments",
         lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
@@ -710,12 +710,12 @@ def test_peer_setup_bootstrap_refuses_failed_post_confirmation_evidence_mint(mon
         _local_census(_mlx(4, running=False)),
         _local_census(_mlx(4, running=True)),
     ))
-    monkeypatch.setattr(setup.chatgpt, "list_local_environments", lambda: next(censuses))
+    monkeypatch.setattr(setup.chatgpt, "_strict_list_local_environments", lambda: next(censuses))
     monkeypatch.setattr(
         "builtins.input", lambda *_a, **_k: setup._CONFIRM_BOOTSTRAP_PEER,
     )
     def _refusing_mint():
-        census = setup.chatgpt.list_local_environments()
+        census = setup.chatgpt._strict_list_local_environments()  # noqa: SLF001
         candidate = next(
             item for item in census["multilogin"]
             if item["profile_id"] == _mlx(4)["profile_id"]
@@ -903,7 +903,7 @@ def test_peer_setup_missing_provision_refuses_after_one_census_without_dispatch(
         lambda **_kwargs: (None, "PROVISION_MISSING"),
     )
     monkeypatch.setattr(
-        setup.chatgpt, "list_local_environments",
+        setup.chatgpt, "_strict_list_local_environments",
         lambda: census_calls.append("inventory") or _local_census(row),
     )
     _refuse_any_peer_dispatch(monkeypatch, "must refuse before any dispatch")
@@ -919,7 +919,7 @@ def test_peer_setup_seat_collision_refuses_before_confirmation_or_dispatch(monke
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
     monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
-        setup.chatgpt, "list_local_environments",
+        setup.chatgpt, "_strict_list_local_environments",
         lambda: _local_census(row),
     )
     monkeypatch.setattr(
@@ -949,7 +949,7 @@ def test_peer_setup_confirmation_mismatch_refuses_without_dispatch(monkeypatch, 
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
     monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
-        setup.chatgpt, "list_local_environments",
+        setup.chatgpt, "_strict_list_local_environments",
         lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
@@ -967,7 +967,7 @@ def test_peer_setup_create_happy_path_delegates_to_exact_capability(monkeypatch)
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
     monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
-        setup.chatgpt, "list_local_environments",
+        setup.chatgpt, "_strict_list_local_environments",
         lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
@@ -991,7 +991,7 @@ def test_peer_setup_rollback_without_release_receipt_refuses_before_confirmation
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
     monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
-        setup.chatgpt, "list_local_environments",
+        setup.chatgpt, "_strict_list_local_environments",
         lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
@@ -1014,7 +1014,7 @@ def test_peer_setup_rollback_with_release_receipt_delegates_to_distinct_capabili
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
     monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
-        setup.chatgpt, "list_local_environments",
+        setup.chatgpt, "_strict_list_local_environments",
         lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
@@ -1040,7 +1040,7 @@ def test_peer_setup_coordinator_never_touches_credential_or_http(monkeypatch):
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
     monkeypatch.setattr(setup, "_load_current_provision", lambda **_kwargs: (provision, None))
     monkeypatch.setattr(
-        setup.chatgpt, "list_local_environments",
+        setup.chatgpt, "_strict_list_local_environments",
         lambda: _local_census(row),
     )
     monkeypatch.setattr(setup, "assert_current_nonseat", lambda *a, **k: None)
@@ -1092,7 +1092,7 @@ def test_realm1_matching_local_row_seals_once_bypasses_reducer_and_threads_same_
         assert canary._is_current_environment_snapshot(snapshot) is True  # noqa: SLF001
         calls.append(("nonseat", snapshot))
 
-    monkeypatch.setattr(setup.chatgpt, "list_local_environments", _inventory)
+    monkeypatch.setattr(setup.chatgpt, "_strict_list_local_environments", _inventory)
     monkeypatch.setattr(setup, "_load_current_provision", _load)
     monkeypatch.setattr(setup, "assert_current_nonseat", _assert_nonseat)
     monkeypatch.setattr(

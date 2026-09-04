@@ -108,10 +108,10 @@ PEER_GENESIS_WITNESS_SCHEMA = "mastermind.mas115_nonseat_peer_genesis_witness.v1
 PEER_BOOTSTRAP_FENCE_SCHEMA = "mastermind.mas115_nonseat_peer_bootstrap_fence.v1"
 PEER_RECEIPT_SCHEMA = "mastermind.mas115_nonseat_peer_lifecycle.v1"
 PEER_OWNERSHIP_FACT_SCHEMA = "mastermind.mas115_peer_downstream_ownership.v1"
-# Semantic source generation for the reviewed REALM1-C1 R3 lifecycle.  It is
+# Semantic source generation for the reviewed REALM1-C1 R4 lifecycle.  It is
 # deliberately independent of a self-referential Git commit hash, but changes
 # whenever this authority/state contract changes.
-PEER_SOURCE_GENERATION = "c39dac9ab0c51047b442ac5e8bb2683f2780dd6045c5489b79560b4ce6b131a8"
+PEER_SOURCE_GENERATION = "4b4c77c81a19dafdd6c0ecbed58f14025a41eea77efb2ec070a537e52c999f49"
 PF1_OPERATION_KEY = "web-sol-pf1-provider-continuation-falsifier-20260901-sol-001"
 INSTALL1_OPERATION_KEY = "web-sol-install1-two-profile-disposable-proof-20260902-sol-001"
 _MAX_OWNERSHIP_RECEIPT_AGE = timedelta(minutes=5)
@@ -3539,7 +3539,7 @@ def _bootstrap_peer_lifecycle_for_existing_anchor(
 def _coordinator_local_census():
     from . import chatgpt
 
-    return chatgpt.list_local_environments()
+    return chatgpt._strict_list_local_environments()  # noqa: SLF001
 
 
 def mint_coordinator_peer_bootstrap_evidence():
