@@ -23,14 +23,18 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _contract(path: Path) -> dict[str, Any]:
+def _contract_text(path: Path) -> str:
     match = re.search(
         re.escape(BEGIN) + r"\s*```json\s*(.*?)\s*```\s*" + re.escape(END),
         _read(path),
         re.S,
     )
     assert match, f"missing closure-spine contract in {path}"
-    value = json.loads(match.group(1))
+    return match.group(1)
+
+
+def _contract(path: Path) -> dict[str, Any]:
+    value = json.loads(_contract_text(path))
     assert isinstance(value, dict)
     return value
 
@@ -51,9 +55,12 @@ def _payload_digest(decision: str, body: dict[str, object]) -> str:
     ).hexdigest()
 
 
-def test_design_and_plan_publish_one_identical_closed_contract() -> None:
-    design, plan = _contract(DESIGN), _contract(PLAN)
+def test_design_and_plan_publish_one_identical_valid_closed_contract() -> None:
+    design_text = _contract_text(DESIGN)
+    plan_text = _contract_text(PLAN)
+    design, plan = json.loads(design_text), json.loads(plan_text)
     assert design == plan
+    assert design_text == plan_text
     assert design["schema"] == "mastermind.autonomy_closure_spine.v1"
     assert design["operation"] == "autonomy-closure-spine-f0-20260903-sol-001"
     assert design["parent_incident"] == "Mastermind#386"
@@ -111,7 +118,11 @@ def test_exception_owner_map_and_no_rebuild_are_closed() -> None:
     }
     no_rebuild = contract["no_rebuild"]
     assert no_rebuild["slack_as_runtime_authority"] is False
-    assert all(value == [] for key, value in no_rebuild.items() if key != "slack_as_runtime_authority")
+    assert all(
+        value == []
+        for key, value in no_rebuild.items()
+        if key != "slack_as_runtime_authority"
+    )
 
 
 def test_acf1_reuses_the_exact_existing_action_target_owner() -> None:
@@ -236,7 +247,10 @@ def test_all_body_variants_have_stable_canonical_payload_digests() -> None:
             "reason_code": "CHAIRMAN_DECISION_REQUIRED",
         },
     }
-    digests = {decision: _payload_digest(decision, body) for decision, body in variants.items()}
+    digests = {
+        decision: _payload_digest(decision, body)
+        for decision, body in variants.items()
+    }
     assert len(set(digests.values())) == 4
     assert all(re.fullmatch(r"[0-9a-f]{64}", value) for value in digests.values())
     reordered = dict(reversed(list(variants["CONTINUE"].items())))
@@ -247,7 +261,9 @@ def test_all_body_variants_have_stable_canonical_payload_digests() -> None:
 
 
 def test_command_identity_forces_competing_decisions_to_collide() -> None:
-    identity = _contract(DESIGN)["acf1_semantic_directive_convergence"]["command_identity"]
+    identity = _contract(DESIGN)["acf1_semantic_directive_convergence"][
+        "command_identity"
+    ]
     assert identity["scope"] == "one terminal-return revision"
     assert identity["fields"] == [
         "root_job_id",
@@ -267,9 +283,12 @@ def test_command_identity_forces_competing_decisions_to_collide() -> None:
     assert "must collide in one command domain" in identity["reason"]
 
 
-def test_replay_is_readback_first_and_survives_target_rotation() -> None:
-    replay = _contract(DESIGN)["acf1_semantic_directive_convergence"]["replay_semantics"]
-    assert replay == {
+def test_replay_is_immutable_readback_first_and_survives_target_rotation() -> None:
+    acf1 = _contract(DESIGN)["acf1_semantic_directive_convergence"]
+    commit = acf1["commit_semantics"]
+    assert commit["exact_replay_is_idempotent_after_immutable_event_validation"] is True
+    assert "exact_replay_is_idempotent_after_current_revalidation" not in commit
+    assert acf1["replay_semantics"] == {
         "lookup_by_command_id_precedes_actor_revalidation": True,
         "exact_existing_event_returns_without_new_actor_authority": True,
         "existing_event_bytes_and_recorded_authority_receipt_are_revalidated": True,
@@ -284,7 +303,7 @@ def test_commit_supersession_consumer_and_results_are_closed() -> None:
     assert acf1["commit_semantics"] == {
         "compare_root_return_and_predecessor_revision": True,
         "one_effective_directive_per_return_revision": True,
-        "exact_replay_is_idempotent_after_current_revalidation": True,
+        "exact_replay_is_idempotent_after_immutable_event_validation": True,
         "changed_payload_is_command_replay_conflict": True,
         "observer_sol_is_zero_effect_refusal": True,
         "stale_target_generation_is_zero_effect_refusal": True,
@@ -309,7 +328,9 @@ def test_commit_supersession_consumer_and_results_are_closed() -> None:
     ] is True
     assert consumer["downstream_event_is_consumption_receipt"] is True
     assert consumer["separate_consumption_table_created"] is False
-    assert consumer["root_terminalization_owner"] == "existing COO cycle / Executive Runtime"
+    assert consumer["root_terminalization_owner"] == (
+        "existing COO cycle / Executive Runtime"
+    )
     assert consumer["fixed_meanings"]["STOP"] == (
         "close only the returned source-child boundary identified by source_job_id; "
         "root terminalization remains existing COO/Runtime law"
@@ -331,14 +352,15 @@ def test_commit_supersession_consumer_and_results_are_closed() -> None:
 
 def test_follow_on_layers_stay_evidence_gated_and_acf1_stays_unassigned() -> None:
     contract = _contract(DESIGN)
-    assert set(contract["acf1_semantic_directive_convergence"]["conditional_layers"]) == {
+    acf1 = contract["acf1_semantic_directive_convergence"]
+    assert set(acf1["conditional_layers"]) == {
         "ACF-2",
         "ACF-3",
         "ACF-4",
         "ACF-5",
         "ACF-6",
     }
-    stop = contract["acf1_semantic_directive_convergence"]["stop_condition"]
+    stop = acf1["stop_condition"]
     assert stop["architecture_release"] == "three protected records only"
     assert stop["implementation_state_after_release"] == (
         "WAITING_RUNTIME_PATH_RELEASE / needs_placement"
