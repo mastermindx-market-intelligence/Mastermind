@@ -107,6 +107,99 @@ def test_commission_wave_child_stop_is_source_local_not_resource_shutdown() -> N
     assert "the temporary watcher must be disarmed" not in commission
 
 
+def test_slack_reciprocal_edges_are_bound_to_exact_thread_root_not_channel() -> None:
+    law = _flat("docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md")
+    for phrase in (
+        "workspace + conversation/channel + thread-root timestamp",
+        "top-level post in the same channel is a carrier-root mismatch",
+        "PICKUP_ACK",
+        "must be replies under that exact parent",
+    ):
+        assert phrase in law
+
+
+def test_terminal_stop_consumes_receiver_assignment_for_that_child() -> None:
+    index = _flat("docs/sol_skills/INDEX.md")
+    routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
+    for text in (index, routing):
+        for phrase in (
+            "Receiver assignment is child-specific",
+            "terminal STOP consumes that child assignment",
+            "standing program instruction does not self-assign a successor child",
+            "fresh Sol/Chairman delivery or canonical placement edge",
+        ):
+            assert phrase in text
+
+
+def test_exact_session_required_does_not_equate_slack_seat_with_native_session() -> None:
+    routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
+    for phrase in (
+        "Slack user/seat identity is not exact native-session identity",
+        "RECEIVER_SESSION_MISMATCH",
+        "delivery to a different session is not PICKUP_ACK",
+        "do not spawn or substitute another session",
+    ):
+        assert phrase in routing
+
+
+def test_exact_session_slack_delivery_requires_proven_native_addressability() -> None:
+    routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
+    for phrase in (
+        "Slack mention alone is not an exact-session delivery mechanism",
+        "production-proven exact native wake/resume path",
+        "WAITING_EXACT_SESSION / wake_unavailable",
+        "do not emit an account-targeted DIRECT_TARGETED packet",
+    ):
+        assert phrase in routing
+
+
+def test_buried_direct_targeted_new_child_reply_cannot_originate_a_child() -> None:
+    law = _flat("docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md")
+    index = _flat("docs/sol_skills/INDEX.md")
+    routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
+
+    for phrase in (
+        "DIRECT_TARGETED — NEW CHILD",
+        "buried reply under an unrelated parent/program/previous-child root",
+        "cannot by itself originate a new independent child",
+        "cannot by itself become that child's receiver-assignment event",
+        "Sol-authored top-level child commission root",
+        "eligible command-create event",
+        "deliberate current live delivery into the actual provider interaction",
+        "production-proven exact native wake/resume path",
+        "binds that child to an exact root",
+    ):
+        assert phrase in law
+
+    for phrase in (
+        "CONTINUE`, `RULING`, and `STOP` remain reciprocal continuation/terminal edges",
+        "exact root of an already-ACKed child",
+    ):
+        assert phrase in routing
+
+    assert "never makes that buried reply a successor-child assignment" in index
+
+
+def test_unacked_slack_delivery_is_unconsumed_prestart_not_active_work() -> None:
+    law = _flat("docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md")
+    index = _flat("docs/sol_skills/INDEX.md")
+    routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
+
+    for text in (law, index, routing):
+        for phrase in (
+            "DELIVERY_SENT or a Slack mention without a valid receiver PICKUP_ACK",
+            "DELIVERY_UNCONSUMED / PRE_START",
+            "must not be projected as active, STARTED, executing, waiting-on-worker, or watcher-consumed",
+        ):
+            assert phrase in text
+
+    for phrase in (
+        "PICKUP_ACK and START are separate edges",
+        "Executive OS remains the lifecycle owner",
+    ):
+        assert phrase in law
+
+
 def test_root_worker_bootstraps_carry_codex_continuation_invariant() -> None:
     for path in ("AGENTS.md", "CLAUDE.md"):
         text = _flat(path)
