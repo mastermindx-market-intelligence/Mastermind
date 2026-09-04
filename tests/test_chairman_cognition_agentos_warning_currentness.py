@@ -7,12 +7,17 @@ source-unavailability by themselves.
 """
 from __future__ import annotations
 
+import importlib.util
 from copy import deepcopy
+from pathlib import Path
 
 from control_plane.chairman_cognition_sources import (
+    AGENT_OS_SOURCE_REF,
     _agentos_brief_status,
     _agentos_receipt,
     _payload_digest,
+    compose_input,
+    evaluate_bundle,
 )
 
 
@@ -78,6 +83,21 @@ def _receipt(brief: dict[str, object], *, attested_payload_digest: str | None = 
     )
 
 
+def _public_bundle_with_warnings(warnings: list[str]) -> dict[str, object]:
+    fixture_path = Path(__file__).with_name("test_chairman_cognition_sources.py")
+    spec = importlib.util.spec_from_file_location(
+        "_chairman_cognition_sources_test_fixtures", fixture_path
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    fixture_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture_module)
+
+    brief = fixture_module._brief(warnings=warnings)  # type: ignore[attr-defined]
+    boot = fixture_module._boot_packet(brief=brief)  # type: ignore[attr-defined]
+    return fixture_module._bundle(boot=boot)  # type: ignore[attr-defined,no-any-return]
+
+
 def test_advisory_agentos_warnings_preserve_current_source() -> None:
     brief = _brief(
         warnings=[
@@ -92,6 +112,29 @@ def test_advisory_agentos_warnings_preserve_current_source() -> None:
     assert valid is True
     assert observed_at == _OBSERVED_AT
     assert _receipt(brief)["state"] == "CURRENT"
+
+
+def test_advisory_warnings_reach_current_through_public_composer() -> None:
+    bundle = _public_bundle_with_warnings(
+        ["agentos/decisions/DEC-X.md: [review-overdue] review date passed"]
+    )
+
+    composed = compose_input(bundle)
+    receipt = next(
+        item
+        for item in composed["source_receipts"]
+        if item["source_ref"] == AGENT_OS_SOURCE_REF
+    )
+    assert receipt["state"] == "CURRENT"
+
+    result = evaluate_bundle(bundle)
+    summary = next(
+        item
+        for item in result["source_summary"]
+        if item["source_ref"] == AGENT_OS_SOURCE_REF
+    )
+    assert summary["state"] == "CURRENT"
+    assert result["packet"]["recommended_option_id"] == "OPT-COMPOSE"
 
 
 def test_unavailable_agentos_input_remains_noncurrent() -> None:

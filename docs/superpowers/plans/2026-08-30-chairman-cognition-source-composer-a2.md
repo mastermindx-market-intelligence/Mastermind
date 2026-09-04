@@ -75,8 +75,9 @@ The R5 repair changes only:
 
 The neighboring legacy-suite change removes only the obsolete expectation that every valid nonempty
 warning list is degradation. It preserves the existing UNKNOWN assertions for unavailable owner
-inputs, degraded readiness, malformed wire shape and unsupported schema, while the dedicated R5
-suite carries the positive warning-currentness and warning-mutation discrimination.
+inputs, degraded readiness, malformed wire shape and unsupported schema. The dedicated R5 suite
+carries the private helper discrimination plus a public `compose_input` / `evaluate_bundle`
+source-summary regression proving valid advisory warnings remain CURRENT end to end.
 
 R5 does not reopen A1, the owner wire, the CEO boot-packet producer, the original A2 CLI, or any
 runtime/effect surface. It introduces no warning allowlist or message classifier: every valid warning
@@ -242,7 +243,7 @@ reusable effect token.
 - content mismatch is `CONFLICT`, never silently refreshed;
 - missing content identity is `UNKNOWN`, never inferred from matching branch names;
 - valid advisory warnings are preserved in the exact brief payload and digest without independently degrading currentness;
-- changing, removing, or adding a warning without a matching payload attestation is `CONFLICT`;
+- changing, removing, or adding a warning against a resolved nonmatching payload attestation is `CONFLICT`; an `UNRESOLVED` payload attestation is `UNKNOWN`;
 - a correction produces a new payload/identity pair and therefore a new composed-input digest;
 - no historical memory, receipt or successful procedure authorizes replay of an effect.
 
@@ -274,7 +275,7 @@ The focused suite must prove:
 - exact strategic payload/blob/revision identity;
 - mutated local strategic payload cannot be CURRENT;
 - exact Agent OS brief/source-record/revision identity;
-- valid nonempty advisory Agent OS warnings preserve CURRENT;
+- valid nonempty advisory Agent OS warnings preserve CURRENT through private receipt and public composer/evaluator paths;
 - unavailable inputs remain UNKNOWN;
 - degraded readiness remains UNKNOWN;
 - malformed warning wire remains UNKNOWN;
