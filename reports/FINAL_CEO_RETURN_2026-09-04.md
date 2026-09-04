@@ -123,13 +123,17 @@ records-first sequencing; (2) a new packet record doc vs reconciling the #6801 r
 
 ## 3. CI evidence
 
-- **PR #6840** (Packet C): at last observation 19/26 checks complete, the only failure being the
-  known foreign red below; a terminal-state watch is armed and the final tally lands as a follow-up
-  observation (the PR is draft HOLD-FOR-SOL either way — CI is evidence for Sol, not a merge gate
-  this session controls).
-- **PR #6842** (Packet B): opened after this return was drafted; checks freshly triggered; same
-  terminal-state watch armed. Note: this PR edits `templates/index.html`, which historically fans
-  out to ~131 CI jobs — a long tail is expected.
+- **PR #6840** (Packet C): CI TERMINAL — **39/39 checks complete, zero PR-caused failures**; the
+  only red is the estate-wide foreign `merge-queue-pilot` below.
+- **PR #6842** (Packet B): first round terminal at 28/28 with one PR-caused red —
+  `trusted-ci / trusted-executor-pack-8` → logical job `dag-conformance` ("exits 1 on undeclared
+  lane drift"): the bake heal added to 4 workflow lanes was not declared in `config/dag.yml`.
+  Discriminated as ours (pack-8 green on #6828/#6831/#6832/#6840), reproduced locally, repaired per
+  the checker's own instruction (declare `bake_landing_preview_fix` before each lane's sync-heal
+  entry — +1 additive file, PR now 13 files +754/−53), local checker green
+  ("DAG conformance OK — 27 lanes"; the 2 SUSPECT drifts are pre-existing W5a inheritances),
+  amended + force-pushed, round-2 watch armed. The checker's base-replay also surfaced an unrelated
+  runner-side interpreter defect on `pc-ci-3` — noted for the CI owner.
 
 The check `ci-authority/codex/merge-queue-pilot` fails estate-wide on all fresh draft PRs (verified
 identically red on #6830/#6831/#6832, none of which touch our paths) — an inherited foreign red,
