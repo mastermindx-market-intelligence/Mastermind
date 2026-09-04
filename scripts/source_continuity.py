@@ -66,6 +66,8 @@ _GIT_CONFIG_OVERRIDES = (
     "core.excludesFile=/dev/null",
     "diff.external=",
     "diff.renames=false",
+    "core.fileMode=true",
+    "core.ignoreStat=false",
     "credential.helper=",
     "protocol.allow=never",
     "protocol.file.allow=always",
@@ -73,6 +75,7 @@ _GIT_CONFIG_OVERRIDES = (
 _GIT_ENV = {
     "LANG": "C",
     "LC_ALL": "C",
+    "TZ": "UTC",
     "PATH": "/usr/bin:/bin",
     "HOME": "/",
     "GIT_OPTIONAL_LOCKS": "0",
@@ -80,6 +83,7 @@ _GIT_ENV = {
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_LOCAL": os.devnull,
     "GIT_ATTR_NOSYSTEM": "1",
     "GIT_LITERAL_PATHSPECS": "1",
     "GIT_NO_REPLACE_OBJECTS": "1",
@@ -181,22 +185,6 @@ def _invoke_git(
             command,
             **runner_kwargs,
         )
-    except AssertionError:
-        if runner is subprocess.run:
-            return None
-        # Preserve the protected pre-hardening test double without weakening
-        # the default subprocess path, which never retries without the fence.
-        legacy_arguments = arguments
-        if arguments and arguments[0] == "diff" and arguments[-1] == "--":
-            legacy_arguments = tuple(
-                argument
-                for argument in arguments[:-1]
-                if argument not in {"--no-renames", "--no-ext-diff", "--no-textconv"}
-            )
-        try:
-            completed = runner([_GIT, *legacy_arguments], **runner_kwargs)
-        except Exception:
-            return None
     except Exception:
         return None
     try:
@@ -329,12 +317,9 @@ def _changed_paths(
         filename = item.get("filename")
         if not isinstance(filename, str) or not _is_safe_remote_path(filename):
             raise _RemoteProbeError()
-        if "status" in item:
-            status = item["status"]
-            if not isinstance(status, str) or status not in _PR_FILE_STATUSES:
-                raise _RemoteProbeError()
-        else:
-            status = None
+        status = item.get("status")
+        if not isinstance(status, str) or status not in _PR_FILE_STATUSES:
+            raise _RemoteProbeError()
         row_paths: tuple[str, ...]
         if status == "renamed":
             previous_filename = item.get("previous_filename")
@@ -363,7 +348,12 @@ def _collision_census(
     repository: str,
     target_pr: int,
     owned_paths: tuple[str, ...],
-) -> tuple[CollisionState, tuple[int, ...], bool]:
+) -> tuple[
+    CollisionState,
+    tuple[int, ...],
+    bool,
+    tuple[tuple[int, tuple[str, ...]], ...],
+]:
     pulls: list[object] = []
     complete = False
     for page in range(1, _MAX_PAGES + 1):
@@ -376,36 +366,44 @@ def _collision_census(
             raise _RemoteProbeError()
         pulls.extend(payload)
         if len(pulls) > _MAX_COLLISION_PRS:
-            return CollisionState.INCOMPLETE, (), False
+            return CollisionState.INCOMPLETE, (), False, ()
         if len(payload) < _PAGE_SIZE:
             complete = True
             break
     if not complete:
-        return CollisionState.INCOMPLETE, (), False
+        return CollisionState.INCOMPLETE, (), False, ()
 
     owned = set(owned_paths)
     other_pr_count = 0
     colliding: list[int] = []
+    seen_numbers: set[int] = set()
+    census: list[tuple[int, tuple[str, ...]]] = []
     for raw_pr in pulls:
         if not isinstance(raw_pr, dict):
             raise _RemoteProbeError()
         number = raw_pr.get("number")
         if type(number) is not int or number <= 0:
             raise _RemoteProbeError()
+        if number in seen_numbers:
+            raise _RemoteProbeError()
+        seen_numbers.add(number)
         if number == target_pr:
+            census.append((number, ()))
             continue
         other_pr_count += 1
         paths, paths_complete = _changed_paths(http_get, token, repository, number)
         if not paths_complete:
-            return CollisionState.INCOMPLETE, (), False
+            return CollisionState.INCOMPLETE, (), False, ()
+        census.append((number, paths))
         if owned.intersection(paths):
             colliding.append(number)
 
+    snapshot = tuple(sorted(census, key=lambda item: item[0]))
     if colliding:
-        return CollisionState.OVERLAP, tuple(sorted(set(colliding))), True
+        return CollisionState.OVERLAP, tuple(sorted(colliding)), True, snapshot
     if other_pr_count:
-        return CollisionState.DISJOINT, (), True
-    return CollisionState.NONE, (), True
+        return CollisionState.DISJOINT, (), True, snapshot
+    return CollisionState.NONE, (), True, snapshot
 
 
 def _probe_remote_prefix(
@@ -424,6 +422,7 @@ def _probe_remote_prefix(
     CollisionState,
     tuple[int, ...],
     bool,
+    tuple[tuple[int, tuple[str, ...]], ...],
 ] | SourceContinuityRefusal:
     pr_endpoint = f"repos/{request.repository}/pulls/{request.pr_number}"
     first_pr = _api(http_get, token, pr_endpoint)
@@ -490,7 +489,12 @@ def _probe_remote_prefix(
         request.repository,
         request.pr_number,
     )
-    collision_state, colliding_pr_numbers, collisions_complete = _collision_census(
+    (
+        collision_state,
+        colliding_pr_numbers,
+        collisions_complete,
+        collision_snapshot,
+    ) = _collision_census(
         http_get,
         token,
         request.repository,
@@ -511,6 +515,7 @@ def _probe_remote_prefix(
         collision_state,
         colliding_pr_numbers,
         collisions_complete,
+        collision_snapshot,
     )
 
 
@@ -547,6 +552,18 @@ def _parse_ls_tree(value: str) -> tuple[RemotePathEntry, ...] | None:
             )
         )
     return tuple(entries)
+
+
+def _index_has_concealed_paths(value: str) -> bool | None:
+    for record in (item for item in value.split("\0") if item):
+        if len(record) < 3 or record[1] != " ":
+            return None
+        tag = record[0]
+        if tag.upper() not in {"H", "S", "M", "R", "C", "K", "?"}:
+            return None
+        if tag != tag.upper() or tag == "S":
+            return True
+    return False
 
 
 def _probe_local_and_entries(
@@ -638,7 +655,15 @@ def _probe_local_and_entries(
     unstaged = _invoke_git(runner, workspace, "diff", *diff_controls, "HEAD", "--")
     staged = _invoke_git(runner, workspace, "diff", "--cached", *diff_controls, "--")
     untracked = _invoke_git(runner, workspace, "ls-files", "--others", "--exclude-standard", "-z")
-    if any(result is None or result.returncode != 0 for result in (unstaged, staged, untracked)):
+    index_flags = _invoke_git(runner, workspace, "ls-files", "-v", "-z")
+    if any(
+        result is None or result.returncode != 0
+        for result in (unstaged, staged, untracked, index_flags)
+    ):
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+    assert index_flags is not None
+    concealed_paths = _index_has_concealed_paths(index_flags.stdout)
+    if concealed_paths is None or concealed_paths:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     local_diff = _invoke_git(
@@ -701,6 +726,7 @@ def _remote_still_matches(
     first_collision_state: CollisionState,
     first_colliding_pr_numbers: tuple[int, ...],
     first_collisions_complete: bool,
+    first_collision_snapshot: tuple[tuple[int, tuple[str, ...]], ...],
 ) -> SourceContinuityRefusal | None:
     pr_endpoint = f"repos/{request.repository}/pulls/{request.pr_number}"
     second_pr = _api(http_get, token, pr_endpoint)
@@ -747,6 +773,7 @@ def _remote_still_matches(
         second_collision_state,
         second_colliding_pr_numbers,
         second_collisions_complete,
+        second_collision_snapshot,
     ) = _collision_census(
         http_get,
         token,
@@ -764,6 +791,7 @@ def _remote_still_matches(
     if (
         second_collision_state is not first_collision_state
         or second_colliding_pr_numbers != first_colliding_pr_numbers
+        or second_collision_snapshot != first_collision_snapshot
     ):
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
     return None
@@ -852,6 +880,7 @@ def main(
             collision_state,
             colliding_pr_numbers,
             collisions_complete,
+            collision_snapshot,
         ) = remote_prefix
 
         if not files_complete or not collisions_complete:
@@ -885,6 +914,7 @@ def main(
             collision_state,
             colliding_pr_numbers,
             collisions_complete,
+            collision_snapshot,
         )
         if remote_refusal is not None:
             return _emit(remote_refusal)
