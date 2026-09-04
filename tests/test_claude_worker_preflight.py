@@ -83,26 +83,32 @@ def _wait_for_pid_exit(pid: int, *, timeout_seconds: float = 3.0) -> bool:
 def test_command_builder_allows_only_provider_work_free_observations(tmp_path: Path):
     module = _load()
     binary = _executable(tmp_path)
+    with module._retain_binary(binary) as retained:
+        assert module.build_allowed_argv(retained, "version") == (
+            retained.execution_path,
+            "--version",
+        )
+        assert module.build_allowed_argv(retained, "auth_status") == (
+            retained.execution_path,
+            "auth",
+            "status",
+        )
+        for forbidden in (
+            "print",
+            "prompt",
+            "resume",
+            "continue",
+            "fork",
+            "respawn",
+            "agents",
+            "mcp",
+            "browser",
+        ):
+            with pytest.raises(module.PreflightError, match="COMMAND_NOT_ALLOWED"):
+                module.build_allowed_argv(retained, forbidden)
 
-    assert module.build_allowed_argv(binary, "version") == (str(binary), "--version")
-    assert module.build_allowed_argv(binary, "auth_status") == (
-        str(binary),
-        "auth",
-        "status",
-    )
-    for forbidden in (
-        "print",
-        "prompt",
-        "resume",
-        "continue",
-        "fork",
-        "respawn",
-        "agents",
-        "mcp",
-        "browser",
-    ):
-        with pytest.raises(module.PreflightError, match="COMMAND_NOT_ALLOWED"):
-            module.build_allowed_argv(binary, forbidden)
+    with pytest.raises(module.PreflightError, match="BINARY_INVALID"):
+        module.build_allowed_argv(binary, "version")
 
 
 def test_auth_status_normalizes_only_native_subscription_selection():
@@ -200,14 +206,12 @@ def test_auth_status_exit_one_is_logged_out_not_transport_failure(
     binary = _executable(tmp_path)
 
     def fake_run(argv, **kwargs):
-        return subprocess.CompletedProcess(
-            argv,
+        return module.CommandObservation(
             1,
-            stdout='{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}',
-            stderr="not logged in",
+            '{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}',
         )
 
-    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(module, "_run", fake_run)
     observed = module.observe_auth(binary)
     assert observed == module.AuthObservation(
         auth_ready=False,
@@ -224,11 +228,9 @@ def test_auth_status_rejects_malformed_json(
     binary = _executable(tmp_path)
 
     monkeypatch.setattr(
-        module.subprocess,
-        "run",
-        lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv, 0, stdout="not-json", stderr="provider prose"
-        ),
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(0, "not-json"),
     )
     with pytest.raises(module.PreflightError, match="AUTH_STATUS_UNSUPPORTED"):
         module.observe_auth(binary)
@@ -240,16 +242,10 @@ def test_auth_status_rejects_unexpected_nonzero_exit(
     module = _load()
     binary = _executable(tmp_path)
 
-    monkeypatch.setattr(
-        module.subprocess,
-        "run",
-        lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv,
-            2,
-            stdout='{"loggedIn":false}',
-            stderr="provider failed with private@example.com",
-        ),
-    )
+    def fail(argv, **kwargs):
+        raise module.PreflightError("PROVIDER_COMMAND_FAILED")
+
+    monkeypatch.setattr(module, "_run", fail)
     with pytest.raises(module.PreflightError, match="PROVIDER_COMMAND_FAILED") as exc:
         module.observe_auth(binary)
     assert "private@example.com" not in str(exc.value)
@@ -262,14 +258,9 @@ def test_auth_status_timeout_is_typed_and_does_not_echo_provider_output(
     binary = _executable(tmp_path)
 
     def timeout(argv, **kwargs):
-        raise subprocess.TimeoutExpired(
-            cmd=argv,
-            timeout=kwargs.get("timeout", 1),
-            output="private@example.com",
-            stderr="sk-" + "x" * 30,
-        )
+        raise module.PreflightError("PROVIDER_TIMEOUT")
 
-    monkeypatch.setattr(module.subprocess, "run", timeout)
+    monkeypatch.setattr(module, "_run", timeout)
     with pytest.raises(module.PreflightError, match="PROVIDER_TIMEOUT") as exc:
         module.observe_auth(binary)
     assert "private@example.com" not in str(exc.value)
@@ -283,13 +274,11 @@ def test_auth_status_exit_code_must_match_logged_in_boolean(
     binary = _executable(tmp_path)
 
     monkeypatch.setattr(
-        module.subprocess,
-        "run",
-        lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv,
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(
             1,
-            stdout='{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}',
-            stderr="",
+            '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}',
         ),
     )
     with pytest.raises(module.PreflightError, match="AUTH_STATUS_UNSUPPORTED"):
@@ -297,29 +286,27 @@ def test_auth_status_exit_code_must_match_logged_in_boolean(
 
 
 def test_auth_status_discards_known_pii_and_raw_stderr(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ):
     module = _load()
-    binary = _executable(tmp_path)
     secretish = "Bearer " + "x" * 24
-
-    monkeypatch.setattr(
-        module.subprocess,
-        "run",
-        lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv,
-            0,
-            stdout=json.dumps(
-                {
-                    "loggedIn": True,
-                    "authMethod": "claude.ai",
-                    "apiProvider": "firstParty",
-                    "email": "private@example.com",
-                    "organization": "private-org",
-                }
-            ),
-            stderr=secretish,
-        ),
+    provider_json = json.dumps(
+        {
+            "loggedIn": True,
+            "authMethod": "claude.ai",
+            "apiProvider": "firstParty",
+            "email": "private@example.com",
+            "organization": "private-org",
+        },
+        separators=(",", ":"),
+    )
+    binary = _executable(
+        tmp_path,
+        (
+            "#!/bin/sh\n"
+            f"printf '%s\\n' '{provider_json}'\n"
+            f"printf '%s\\n' '{secretish}' >&2\n"
+        ).encode(),
     )
     observed = module.observe_auth(binary)
     rendered = repr(observed)
@@ -611,6 +598,39 @@ def test_f1_provider_selector_refuses_before_child_start(
     assert secret not in str(exc.value)
 
 
+@pytest.mark.parametrize(
+    "selector",
+    [
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_FEDERATION_RULE_ID",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_API_KEY_HELPER",
+    ],
+)
+def test_f1_every_provider_control_selector_is_a_fixed_refusal(
+    monkeypatch: pytest.MonkeyPatch, selector: str
+):
+    module = _load()
+    monkeypatch.setenv(selector, "attacker-controlled")
+
+    with pytest.raises(module.PreflightError, match="^PROVIDER_ENV_REFUSED$") as exc:
+        module._run((sys.executable, "-c", "raise SystemExit(0)"))
+
+    assert selector not in str(exc.value)
+
+
+def test_f1_secret_shaped_allowed_path_value_is_not_forwarded():
+    module = _load()
+    secret = "/tmp/sk-" + "x" * 30
+
+    with pytest.raises(module.PreflightError, match="^PROVIDER_ENV_REFUSED$") as exc:
+        module._closed_child_environment({"HOME": secret})
+
+    assert secret not in str(exc.value)
+
+
 def test_f2_stdout_is_rejected_at_the_byte_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -643,6 +663,39 @@ def test_f2_stderr_is_rejected_at_the_byte_ceiling(
                 "import sys; sys.stderr.buffer.write(b'x' * 33); sys.stderr.flush()",
             )
         )
+
+
+def test_f2_one_output_line_cannot_exceed_its_own_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load()
+    monkeypatch.setattr(module, "MAX_STDOUT_BYTES", 64, raising=False)
+    monkeypatch.setattr(module, "MAX_OUTPUT_LINE_BYTES", 32, raising=False)
+
+    with pytest.raises(module.PreflightError, match="^PROVIDER_COMMAND_FAILED$"):
+        module._run(
+            (
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(b'x' * 33); sys.stdout.flush()",
+            )
+        )
+
+
+def test_f2_idle_timeout_is_independent_of_absolute_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load()
+    monkeypatch.setattr(module, "_PROVIDER_IDLE_TIMEOUT_SECONDS", 0.1)
+    started = time.monotonic()
+
+    with pytest.raises(module.PreflightError, match="^PROVIDER_TIMEOUT$"):
+        module._run(
+            (sys.executable, "-c", "import time; time.sleep(5)"),
+            timeout_seconds=2.0,
+        )
+
+    assert time.monotonic() - started < 1.5
 
 
 @pytest.mark.skipif(os.name != "posix", reason="process-group ownership is POSIX-only")
@@ -709,6 +762,38 @@ def test_f3_group_or_world_writable_binary_is_refused(tmp_path: Path):
         module._require_binary(binary)
 
 
+def test_f3_nonsticky_world_writable_parent_is_refused(tmp_path: Path):
+    module = _load()
+    unsafe_parent = tmp_path.resolve() / "unsafe"
+    unsafe_parent.mkdir()
+    unsafe_parent.chmod(0o777)
+    binary = _executable(unsafe_parent)
+
+    with pytest.raises(module.PreflightError, match="^BINARY_INVALID$"):
+        module._require_binary(binary)
+
+
+def test_f3_parent_coordinate_replacement_is_detected_after_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    parent = tmp_path.resolve() / "parent"
+    parent.mkdir()
+    binary = _executable(parent)
+    moved = tmp_path.resolve() / "moved"
+
+    def replace_parent_then_report(argv, **kwargs):
+        parent.rename(moved)
+        parent.symlink_to(moved, target_is_directory=True)
+        return module.CommandObservation(0, "2.1.0")
+
+    monkeypatch.setattr(module, "_run", replace_parent_then_report)
+    with pytest.raises(
+        module.PreflightError, match="^BINARY_CHANGED_DURING_PREFLIGHT$"
+    ):
+        module.observe_binary(binary)
+
+
 @pytest.mark.parametrize("replacement_body", [b"#!/bin/sh\n", b"#!/bin/no\n"])
 def test_f4_atomic_replacement_is_refused_even_when_bytes_match(
     tmp_path: Path,
@@ -753,7 +838,7 @@ def test_f4_mode_and_link_drift_are_refused_after_observation(
         module.observe_binary(binary)
 
 
-def test_f4_observation_executes_retained_descriptor_not_source_path(
+def test_f4_observation_executes_private_exact_copy_not_source_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     module = _load()
@@ -771,9 +856,12 @@ def test_f4_observation_executes_retained_descriptor_not_source_path(
     assert version == "2.1.0"
     called_argv = invocation["argv"]
     assert isinstance(called_argv, tuple)
-    assert called_argv[0].startswith("/dev/fd/")
-    passed = invocation["pass_fds"]
-    assert isinstance(passed, tuple) and len(passed) == 1 and type(passed[0]) is int
+    execution_path = Path(called_argv[0])
+    assert execution_path != binary
+    assert execution_path.name == "claude"
+    assert execution_path.parent.name.startswith("mastermind-claude-preflight-")
+    assert invocation["pass_fds"] is None
+    assert not execution_path.exists()
 
 
 def test_f4_main_reuses_one_retained_object_for_version_and_auth(
@@ -815,8 +903,62 @@ def test_f4_main_reuses_one_retained_object_for_version_and_auth(
     assert receipt["schema"] == module.SCHEMA
     assert len(invocations) == 2
     assert invocations[0][0][0] == invocations[1][0][0]
-    assert invocations[0][0][0].startswith("/dev/fd/")
+    execution_path = Path(invocations[0][0][0])
+    assert execution_path != binary
+    assert execution_path.parent.name.startswith("mastermind-claude-preflight-")
     assert invocations[0][1] == invocations[1][1]
+    assert not execution_path.exists()
+
+
+def test_f4_in_place_same_size_content_drift_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path, b"#!/bin/sh\n")
+    original = binary.stat()
+
+    def rewrite_then_report(argv, **kwargs):
+        binary.write_bytes(b"#!/bin/no\n")
+        os.utime(binary, ns=(original.st_atime_ns, original.st_mtime_ns))
+        return module.CommandObservation(0, "2.1.0")
+
+    monkeypatch.setattr(module, "_run", rewrite_then_report)
+    with pytest.raises(
+        module.PreflightError, match="^BINARY_CHANGED_DURING_PREFLIGHT$"
+    ):
+        module.observe_binary(binary)
+
+
+def test_f4_mutated_private_copy_is_refused_and_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    execution_path: Path | None = None
+
+    def mutate_copy_then_report(argv, **kwargs):
+        nonlocal execution_path
+        execution_path = Path(argv[0])
+        execution_path.parent.chmod(0o700)
+        execution_path.chmod(0o700)
+        execution_path.write_bytes(b"#!/bin/no\n")
+        return module.CommandObservation(0, "2.1.0")
+
+    monkeypatch.setattr(module, "_run", mutate_copy_then_report)
+    try:
+        with pytest.raises(
+            module.PreflightError, match="^BINARY_CHANGED_DURING_PREFLIGHT$"
+        ):
+            module.observe_binary(binary)
+        assert execution_path is not None
+        assert not execution_path.exists()
+        assert not execution_path.parent.exists()
+    finally:
+        if execution_path is not None and execution_path.parent.exists():
+            execution_path.parent.chmod(0o700)
+            if execution_path.exists() or execution_path.is_symlink():
+                execution_path.unlink()
+            execution_path.parent.rmdir()
 
 
 @pytest.mark.parametrize(
@@ -915,3 +1057,22 @@ def test_f5_auth_json_rejects_malformed_utf8_without_echo(
     with pytest.raises(module.PreflightError, match="^AUTH_STATUS_UNSUPPORTED$") as exc:
         module.observe_auth(binary)
     assert "\\xff" not in str(exc.value)
+
+
+def test_f5_auth_json_rejects_a_second_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    raw = (
+        b'{"loggedIn":true,"authMethod":"claude.ai",'
+        b'"apiProvider":"firstParty"}\n{}'
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(0, raw),
+    )
+
+    with pytest.raises(module.PreflightError, match="^AUTH_STATUS_UNSUPPORTED$"):
+        module.observe_auth(binary)
