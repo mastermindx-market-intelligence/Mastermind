@@ -15,6 +15,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -24,6 +25,7 @@ from typing import Any
 
 
 _VERSIONS = {"2.1.248", "2.1.259"}
+_BOUND_STATE_SCHEMA = "mmx.fake-claude-state.v2"
 _MODEL = re.compile(r"claude-(?:opus|sonnet|haiku)-[1-9][0-9]*(?:-[0-9]+)+(?:-[0-9]{8})?\Z")
 _BASE_ENV = {
     "HOME",
@@ -45,6 +47,10 @@ _FAKE_ENV = {
     "MMX_FAKE_CLAUDE_VERSION",
     "MMX_FAKE_CLAUDE_MAX_STARTS",
     "MMX_FAKE_CLAUDE_MANAGED_SETTINGS",
+    "MMX_FAKE_CLAUDE_STATE_FD",
+    "MMX_FAKE_CLAUDE_RUN_NONCE",
+    "MMX_FAKE_CLAUDE_RUNNER_PID",
+    "MMX_FAKE_CLAUDE_SPAWN_NOT_BEFORE_NS",
 }
 _FORBIDDEN_ENV_PREFIXES = (
     "ANTHROPIC_",
@@ -295,20 +301,41 @@ def _empty_state() -> dict[str, Any]:
     }
 
 
-def _read_state(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return _empty_state()
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        _reject("state", 74)
-    if not isinstance(value, dict) or set(value) != set(_empty_state()):
+def _read_descriptor(descriptor: int) -> bytes:
+    value = os.pread(descriptor, 65_537, 0)
+    if not value or len(value) > 65_536:
         _reject("state", 74)
     return value
 
 
-def _write_state(path: Path, state: dict[str, Any]) -> None:
+def _read_state(path: Path, descriptor: int | None = None) -> dict[str, Any]:
+    if descriptor is None and not path.exists():
+        return _empty_state()
+    try:
+        encoded = _read_descriptor(descriptor) if descriptor is not None else path.read_bytes()
+        value = json.loads(encoded.decode("ascii", errors="strict"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        _reject("state", 74)
+    if not isinstance(value, dict) or (descriptor is None and set(value) != set(_empty_state())):
+        _reject("state", 74)
+    return value
+
+
+def _write_state(path: Path, state: dict[str, Any], descriptor: int | None = None) -> None:
     encoded = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if descriptor is not None:
+        try:
+            os.ftruncate(descriptor, 0)
+            offset = 0
+            while offset < len(encoded):
+                written = os.pwrite(descriptor, encoded[offset:], offset)
+                if written <= 0:
+                    raise OSError
+                offset += written
+            os.fsync(descriptor)
+        except OSError:
+            _reject("state", 74)
+        return
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -319,7 +346,27 @@ def _write_state(path: Path, state: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def _acquire_state_lock(path: Path) -> int:
+def _acquire_state_lock(path: Path) -> tuple[int, bool]:
+    inherited = os.environ.get("MMX_FAKE_CLAUDE_STATE_FD")
+    if inherited is not None:
+        if not inherited.isascii() or not inherited.isdigit() or int(inherited) < 3:
+            _reject("environment", 65)
+        descriptor = int(inherited)
+        try:
+            descriptor_info = os.fstat(descriptor)
+            path_info = path.stat()
+            if (
+                not stat.S_ISREG(descriptor_info.st_mode)
+                or stat.S_IMODE(descriptor_info.st_mode) != 0o600
+                or descriptor_info.st_uid != os.getuid()
+                or descriptor_info.st_dev != path_info.st_dev
+                or descriptor_info.st_ino != path_info.st_ino
+            ):
+                _reject("state", 74)
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (OSError, BlockingIOError):
+            _reject("state lock", 73)
+        return descriptor, True
     lock_path = path.with_name(f".{path.name}.lock")
     try:
         descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
@@ -330,7 +377,7 @@ def _acquire_state_lock(path: Path) -> int:
         except (OSError, UnboundLocalError):
             pass
         _reject("state lock", 73)
-    return descriptor
+    return descriptor, False
 
 
 def _release_state_lock(descriptor: int) -> None:
@@ -338,6 +385,85 @@ def _release_state_lock(descriptor: int) -> None:
         fcntl.flock(descriptor, fcntl.LOCK_UN)
     finally:
         os.close(descriptor)
+
+
+def _validate_bound_state(state: dict[str, Any]) -> None:
+    nonce = os.environ.get("MMX_FAKE_CLAUDE_RUN_NONCE", "")
+    runner_pid = os.environ.get("MMX_FAKE_CLAUDE_RUNNER_PID", "")
+    spawn_ns = os.environ.get("MMX_FAKE_CLAUDE_SPAWN_NOT_BEFORE_NS", "")
+    expected_keys = set(_empty_state()) | {
+        "schema",
+        "run_nonce",
+        "runner_pid",
+        "spawn_not_before_ns",
+        "owner_pid",
+        "owner_parent_pid",
+        "owner_started_ns",
+    }
+    try:
+        parsed_nonce = uuid.UUID(nonce)
+    except (ValueError, AttributeError):
+        _reject("state", 74)
+    if (
+        str(parsed_nonce) != nonce
+        or not runner_pid.isascii()
+        or not runner_pid.isdigit()
+        or not spawn_ns.isascii()
+        or not spawn_ns.isdigit()
+        or set(state) != expected_keys
+        or state.get("schema") != _BOUND_STATE_SCHEMA
+        or state.get("run_nonce") != nonce
+        or state.get("runner_pid") != int(runner_pid)
+        or state.get("spawn_not_before_ns") != int(spawn_ns)
+        or state.get("owner_pid") is not None
+        or state.get("owner_parent_pid") is not None
+        or state.get("owner_started_ns") is not None
+        or state.get("escaped_children") != []
+        or state.get("children") != []
+        or any(state.get(key) != 0 for key in set(_empty_state()) - {"children", "escaped_children"})
+        or os.getppid() != int(runner_pid)
+    ):
+        _reject("state", 74)
+    owner_started_ns = time.monotonic_ns()
+    if owner_started_ns < int(spawn_ns):
+        _reject("state", 74)
+    state["owner_pid"] = os.getpid()
+    state["owner_parent_pid"] = os.getppid()
+    state["owner_started_ns"] = owner_started_ns
+
+
+def _process_identity(pid: int) -> tuple[int, int, int, str] | None:
+    ps_binary = Path("/bin/ps") if Path("/bin/ps").is_file() else Path("/usr/bin/ps")
+    try:
+        completed = subprocess.run(
+            [str(ps_binary), "-o", "pid=,ppid=,pgid=,lstart=", "-p", str(pid)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C", "TZ": "UTC"},
+            check=False,
+            timeout=1.0,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    parts = completed.stdout.strip().split(maxsplit=3)
+    if completed.returncode != 0 or len(parts) != 4:
+        return None
+    try:
+        observed_pid, parent_pid, pgid = (int(part) for part in parts[:3])
+    except ValueError:
+        return None
+    if observed_pid != pid or not parts[3]:
+        return None
+    return observed_pid, parent_pid, pgid, parts[3]
+
+
+def _numbered_read_content(content: str) -> str:
+    return "".join(
+        f"{index}\t{line}"
+        for index, line in enumerate(content.splitlines(keepends=True), start=1)
+    )
 
 
 def _event(value: dict[str, Any]) -> bytes:
@@ -350,25 +476,61 @@ def _emit(value: dict[str, Any]) -> None:
 
 
 def _canonical_events(
-    *, model: str, session_id: str, evidence_path: str, evidence: str, result: str
+    *,
+    version: str,
+    model: str,
+    session_id: str,
+    working_directory: str,
+    evidence_path: str,
+    evidence: str,
+    result: str,
 ) -> list[dict[str, Any]]:
+    usage = {
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "input_tokens": 11,
+        "output_tokens": 7,
+    }
+    model_usage = {
+        model: {
+            "cacheCreationInputTokens": 0,
+            "cacheReadInputTokens": 0,
+            "contextWindow": 200_000,
+            "costUSD": 0.001,
+            "inputTokens": 11,
+            "maxOutputTokens": 32_000,
+            "outputTokens": 7,
+            "webSearchRequests": 0,
+        }
+    }
+    line_count = len(evidence.splitlines())
     return [
         {
             "type": "system",
             "subtype": "init",
+            "apiKeySource": "none",
+            "claude_code_version": version,
+            "cwd": working_directory,
             "session_id": session_id,
             "model": model,
             "tools": ["Read"],
             "mcp_servers": [],
             "plugins": [],
             "permissionMode": "dontAsk",
+            "slash_commands": [],
+            "output_style": "default",
+            "skills": [],
             "capabilities": [],
+            "uuid": "11111111-1111-4111-8111-111111111111",
         },
         {
             "type": "assistant",
             "session_id": session_id,
             "parent_tool_use_id": None,
+            "uuid": "22222222-2222-4222-8222-222222222222",
             "message": {
+                "id": "msg_fixture_read",
+                "type": "message",
                 "role": "assistant",
                 "model": model,
                 "content": [
@@ -379,32 +541,52 @@ def _canonical_events(
                         "input": {"file_path": evidence_path},
                     }
                 ],
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": dict(usage),
             },
         },
         {
             "type": "user",
             "session_id": session_id,
             "parent_tool_use_id": None,
+            "uuid": "33333333-3333-4333-8333-333333333333",
             "message": {
                 "role": "user",
                 "content": [
                     {
                         "type": "tool_result",
                         "tool_use_id": "toolu_fixture_read",
-                        "content": evidence,
+                        "content": _numbered_read_content(evidence),
                         "is_error": False,
                     }
                 ],
+            },
+            "tool_use_result": {
+                "type": "text",
+                "file": {
+                    "filePath": evidence_path,
+                    "content": evidence,
+                    "numLines": line_count,
+                    "startLine": 1,
+                    "totalLines": line_count,
+                },
             },
         },
         {
             "type": "assistant",
             "session_id": session_id,
             "parent_tool_use_id": None,
+            "uuid": "44444444-4444-4444-8444-444444444444",
             "message": {
+                "id": "msg_fixture_result",
+                "type": "message",
                 "role": "assistant",
                 "model": model,
                 "content": [{"type": "text", "text": result}],
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": dict(usage),
             },
         },
         {
@@ -415,10 +597,13 @@ def _canonical_events(
             "duration_api_ms": 10,
             "num_turns": 1,
             "result": result,
+            "stop_reason": "end_turn",
             "session_id": session_id,
             "total_cost_usd": 0.001,
-            "usage": {"input_tokens": 11, "output_tokens": 7},
+            "usage": dict(usage),
+            "modelUsage": model_usage,
             "permission_denials": [],
+            "uuid": "55555555-5555-4555-8555-555555555555",
         },
     ]
 
@@ -443,9 +628,12 @@ def _main() -> int:
     _validate_environment(state_path)
     model, session_id, evidence_relative, declared_sha256 = _parse_invocation(version)
 
-    lock_descriptor = _acquire_state_lock(state_path)
+    lock_descriptor, bound_state = _acquire_state_lock(state_path)
     atexit.register(_release_state_lock, lock_descriptor)
-    state = _read_state(state_path)
+    state_descriptor = lock_descriptor if bound_state else None
+    state = _read_state(state_path, state_descriptor)
+    if bound_state:
+        _validate_bound_state(state)
     maximum_starts = os.environ.get("MMX_FAKE_CLAUDE_MAX_STARTS")
     if maximum_starts is not None:
         if not maximum_starts.isascii() or not maximum_starts.isdigit() or int(maximum_starts) < 1:
@@ -454,7 +642,7 @@ def _main() -> int:
             sys.stderr.write("fake claude: second start refused\n")
             return 73
     state["starts"] += 1
-    _write_state(state_path, state)
+    _write_state(state_path, state, state_descriptor)
 
     managed_settings = os.environ.get("MMX_FAKE_CLAUDE_MANAGED_SETTINGS")
     if managed_settings is not None:
@@ -491,12 +679,14 @@ def _main() -> int:
     result = _derived_result(evidence_sha256)
     state["reads"] += 1
     state["submissions"] += 1
-    _write_state(state_path, state)
+    _write_state(state_path, state, state_descriptor)
 
     events = _canonical_events(
+        version=version,
         model=model,
         session_id=session_id,
-        evidence_path=evidence_relative,
+        working_directory=str(workspace),
+        evidence_path=str(resolved_evidence),
         evidence=evidence,
         result=result,
     )
@@ -519,7 +709,7 @@ def _main() -> int:
             close_fds=True,
         )
         state["children"] = [child.pid]
-        _write_state(state_path, state)
+        _write_state(state_path, state, state_descriptor)
         for event in events[:3]:
             _emit(event)
         _hang()
@@ -550,7 +740,22 @@ def _main() -> int:
         return 0
     elif scenario == "oversized_total":
         for _ in range(256):
-            sys.stdout.buffer.write(_event({"type": "system", "subtype": "usage", "session_id": session_id, "usage": {"input_tokens": 1, "output_tokens": 1}, "padding": "x" * 256}))
+            sys.stdout.buffer.write(
+                _event(
+                    {
+                        "type": "system",
+                        "subtype": "usage",
+                        "session_id": session_id,
+                        "usage": {
+                            "input_tokens": 1,
+                            "output_tokens": 1,
+                            "cache_creation_input_tokens": 0,
+                            "cache_read_input_tokens": 0,
+                        },
+                        "padding": "x" * 256,
+                    }
+                )
+            )
         sys.stdout.buffer.flush()
         _hang()
     elif scenario == "excessive_depth":
@@ -579,7 +784,12 @@ def _main() -> int:
                     "type": "system",
                     "subtype": "usage",
                     "session_id": session_id,
-                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                    "usage": {
+                        "input_tokens": 1,
+                        "output_tokens": 1,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                    },
                 }
             )
         return 0
@@ -615,16 +825,30 @@ def _main() -> int:
         events[0]["mcp_servers"] = [{"name": "bad", "status": "connected"}]
     elif scenario == "init_plugin":
         events[0]["plugins"] = [{"name": "bad", "path": "/private/plugin"}]
+    elif scenario == "init_required_field_missing":
+        del events[0]["apiKeySource"]
+    elif scenario == "init_cwd_drift":
+        events[0]["cwd"] = str(workspace.parent)
+    elif scenario == "init_version_drift":
+        events[0]["claude_code_version"] = "2.1.258"
     elif scenario == "assistant_parent_tool":
         events[1]["parent_tool_use_id"] = "toolu_parent"
     elif scenario == "assistant_write_tool":
         events[1]["message"]["content"][0]["name"] = "Write"
     elif scenario == "read_wrong_file":
-        events[1]["message"]["content"][0]["input"]["file_path"] = "sealed/other.txt"
+        events[1]["message"]["content"][0]["input"]["file_path"] = str(
+            workspace / "sealed" / "other.txt"
+        )
     elif scenario == "duplicate_tool":
         events.insert(2, json.loads(json.dumps(events[1])))
     elif scenario == "tool_result_mismatch":
         events[2]["message"]["content"][0]["tool_use_id"] = "toolu_other"
+    elif scenario == "tool_result_unnumbered":
+        events[2]["message"]["content"][0]["content"] = evidence
+    elif scenario == "tool_result_structured_missing":
+        del events[2]["tool_use_result"]
+    elif scenario == "tool_result_structured_mismatch":
+        events[2]["tool_use_result"]["file"]["content"] = "different evidence\n"
     elif scenario == "permission_denied":
         events.insert(
             3,
@@ -664,6 +888,10 @@ def _main() -> int:
         events[-1]["result"] = '{"decision":"BUY"}'
     elif scenario == "result_invalid_cost":
         events[-1]["total_cost_usd"] = -1
+    elif scenario == "result_stop_reason_missing":
+        del events[-1]["stop_reason"]
+    elif scenario == "result_usage_sparse":
+        del events[-1]["usage"]["cache_creation_input_tokens"]
     elif scenario == "secret_output":
         events[0]["capabilities"] = ["sk-" + "ant-" + "FAKE_SENTINEL_NOT_A_SECRET"]
     elif scenario == "private_path_output":
@@ -694,8 +922,9 @@ def _main() -> int:
             close_fds=True,
         )
         state["children"] = [child.pid]
-        _write_state(state_path, state)
+        _write_state(state_path, state, state_descriptor)
     if scenario == "escaped_child_after_result":
+        spawned_at_ns = time.monotonic_ns()
         child = subprocess.Popen(
             [
                 "/usr/bin/python3",
@@ -708,8 +937,33 @@ def _main() -> int:
             start_new_session=True,
             close_fds=True,
         )
-        state["escaped_children"] = [child.pid]
-        _write_state(state_path, state)
+        if bound_state:
+            identity = _process_identity(child.pid)
+            if (
+                identity is None
+                or identity[0] != child.pid
+                or identity[1] != os.getpid()
+                or identity[2] != child.pid
+            ):
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                child.wait(timeout=2)
+                _reject("child identity", 74)
+            state["escaped_children"] = [
+                {
+                    "pid": child.pid,
+                    "pgid": child.pid,
+                    "parent_pid": os.getpid(),
+                    "parent_started_ns": state["owner_started_ns"],
+                    "spawned_at_ns": spawned_at_ns,
+                    "start_token": identity[3],
+                }
+            ]
+        else:
+            state["escaped_children"] = [child.pid]
+        _write_state(state_path, state, state_descriptor)
     for event in events:
         _emit(event)
     return 7 if scenario == "nonzero_after_success" else 0

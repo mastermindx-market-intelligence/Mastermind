@@ -409,7 +409,7 @@ def test_spawn_boundary_revalidates_evidence_prompt_and_result_as_one_identity(t
     assert not (tmp_path / "fake-state.json").exists()
 
 
-def test_runner_executes_opened_reviewed_bytes_after_same_path_replacement(
+def test_runner_executes_sealed_reviewed_bytes_after_same_path_in_place_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     policy, workspace, head, status = _policy(tmp_path)
@@ -421,17 +421,18 @@ def test_runner_executes_opened_reviewed_bytes_after_same_path_replacement(
     real_popen = subprocess.Popen
     replaced = False
 
-    def replace_path_then_spawn(*args: object, **kwargs: object):
+    def mutate_path_then_spawn(*args: object, **kwargs: object):
         nonlocal replaced
         if not replaced:
-            replacement = copied_fake.with_name("replacement.py")
-            replacement.write_text("#!/usr/bin/env python3\nraise SystemExit(97)\n", encoding="utf-8")
-            replacement.chmod(0o700)
-            os.replace(replacement, copied_fake)
+            copied_fake.write_text(
+                "#!/usr/bin/env python3\nraise SystemExit(97)\n",
+                encoding="utf-8",
+            )
+            copied_fake.chmod(0o700)
             replaced = True
         return real_popen(*args, **kwargs)
 
-    monkeypatch.setattr(protocol.subprocess, "Popen", replace_path_then_spawn)
+    monkeypatch.setattr(protocol.subprocess, "Popen", mutate_path_then_spawn)
 
     receipt = ClaudeCliRunner().run(command, fake_controls=_fake_controls(tmp_path))
 
@@ -482,6 +483,60 @@ def test_preexisting_fake_state_is_refused_before_spawn_without_signalling_a_pgi
     assert captured.value.cleanup is None
     assert signalled == []
     _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_escaped_group_mark_requires_exact_parent_chronology_and_live_start_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner_pid = os.getpid()
+    leader_pid = runner_pid + 10_000
+    escaped_pid = leader_pid + 1
+    spawn_not_before_ns = time.monotonic_ns() - 10_000
+    owner_started_ns = spawn_not_before_ns + 1
+    run_nonce = SESSION_ID
+    state = protocol._bound_fake_state(
+        run_nonce=run_nonce,
+        runner_pid=runner_pid,
+        spawn_not_before_ns=spawn_not_before_ns,
+    )
+    state.update(
+        {
+            "owner_pid": leader_pid,
+            "owner_parent_pid": runner_pid,
+            "owner_started_ns": owner_started_ns,
+            "escaped_children": [
+                {
+                    "pid": escaped_pid,
+                    "pgid": escaped_pid,
+                    "parent_pid": leader_pid,
+                    "parent_started_ns": owner_started_ns,
+                    "spawned_at_ns": owner_started_ns + 1,
+                    "start_token": "stale-start-token",
+                }
+            ],
+        }
+    )
+    state_path = tmp_path / "bound-state.json"
+    state_path.write_text(json.dumps(state), encoding="ascii")
+    descriptor = os.open(state_path, os.O_RDONLY)
+    monkeypatch.setattr(
+        protocol,
+        "_process_identity",
+        lambda pid: (pid, 1, pid, "different-live-start-token"),
+    )
+    try:
+        groups, proven = protocol._marked_escaped_groups(
+            descriptor,
+            run_nonce=run_nonce,
+            runner_pid=runner_pid,
+            leader_pid=leader_pid,
+            spawn_not_before_ns=spawn_not_before_ns,
+        )
+    finally:
+        os.close(descriptor)
+
+    assert groups == ()
+    assert proven is False
 
 
 def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Path) -> None:
@@ -694,7 +749,13 @@ def test_escaped_descendant_after_terminal_result_is_killed_and_never_accepted(
     assert error.cleanup is not None
     assert error.cleanup.marked_descendants_empty is True
     payload = json.loads(state.read_text(encoding="utf-8"))
-    for child_pid in payload["escaped_children"]:
+    for child_record in payload["escaped_children"]:
+        child_pid = child_record["pid"]
+        assert child_record["pgid"] == child_pid
+        assert child_record["parent_pid"] == payload["owner_pid"]
+        assert child_record["parent_started_ns"] == payload["owner_started_ns"]
+        assert child_record["spawned_at_ns"] >= payload["owner_started_ns"]
+        assert child_record["start_token"]
         with pytest.raises(ProcessLookupError):
             os.kill(child_pid, 0)
     _assert_workspace_unchanged(workspace, head, status)
