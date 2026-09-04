@@ -622,6 +622,108 @@ def test_persistence_retains_created_file_across_final_name_validation(
     assert raced is True
 
 
+def test_parent_cleanup_preserves_replacement_inserted_between_mkdir_and_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt = _receipt()
+    path = materialization_receipt_path(tmp_path, receipt.operation_command_id)
+    created_elsewhere = tmp_path / "retained-created-parent"
+    original_open = receipt_module.os.open
+    raced = False
+
+    def replace_created_parent_before_open(name, flags, *args, **kwargs):
+        nonlocal raced
+        if not raced and name == ".operator-materializations":
+            raced = True
+            path.parent.parent.rename(created_elsewhere)
+            path.parent.parent.mkdir(mode=0o700)
+        return original_open(name, flags, *args, **kwargs)
+
+    def fail_first_fsync(descriptor: int) -> None:
+        raise OSError("injected post-open failure")
+
+    monkeypatch.setattr(receipt_module.os, "open", replace_created_parent_before_open)
+    monkeypatch.setattr(receipt_module.os, "fsync", fail_first_fsync)
+    with pytest.raises(MaterializationReceiptConflict, match="ambiguous residue"):
+        persist_operator_materialization_receipt(
+            tmp_path, receipt, expected_owner_uid=os.geteuid()
+        )
+    assert raced is True
+    assert path.parent.parent.is_dir()
+    assert created_elsewhere.is_dir()
+
+
+def test_operation_cleanup_preserves_replacement_inserted_between_mkdir_and_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt = _receipt()
+    path = materialization_receipt_path(tmp_path, receipt.operation_command_id)
+    created_elsewhere = path.parent.with_name("retained-created-operation")
+    original_open = receipt_module.os.open
+    original_fsync = receipt_module.os.fsync
+    raced = False
+    fsync_calls = 0
+
+    def replace_created_operation_before_open(name, flags, *args, **kwargs):
+        nonlocal raced
+        if not raced and name == path.parent.name:
+            raced = True
+            path.parent.rename(created_elsewhere)
+            path.parent.mkdir(mode=0o700)
+        return original_open(name, flags, *args, **kwargs)
+
+    def fail_second_fsync(descriptor: int) -> None:
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 2:
+            raise OSError("injected post-open failure")
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(receipt_module.os, "open", replace_created_operation_before_open)
+    monkeypatch.setattr(receipt_module.os, "fsync", fail_second_fsync)
+    with pytest.raises(MaterializationReceiptConflict, match="ambiguous residue"):
+        persist_operator_materialization_receipt(
+            tmp_path, receipt, expected_owner_uid=os.geteuid()
+        )
+    assert raced is True
+    assert path.parent.is_dir()
+    assert created_elsewhere.is_dir()
+
+
+def test_reader_refuses_same_inode_mutation_before_final_name_rebind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt = _receipt()
+    path = materialization_receipt_path(tmp_path, receipt.operation_command_id)
+    persist_operator_materialization_receipt(
+        tmp_path, receipt, expected_owner_uid=os.geteuid()
+    )
+    original_rebind = receipt_module._rebind_receipt_file
+    rebind_calls = 0
+    raced = False
+    original_identity = (path.stat().st_dev, path.stat().st_ino)
+
+    def mutate_before_final_rebind(*args, **kwargs):
+        nonlocal raced, rebind_calls
+        rebind_calls += 1
+        if rebind_calls == 2:
+            raced = True
+            path.write_bytes(b"foreign evidence")
+            path.chmod(0o600)
+            assert (path.stat().st_dev, path.stat().st_ino) == original_identity
+        return original_rebind(*args, **kwargs)
+
+    monkeypatch.setattr(receipt_module, "_rebind_receipt_file", mutate_before_final_rebind)
+    with pytest.raises(OperatorMaterializationReceiptError, match="changed"):
+        read_operator_materialization_receipt(
+            tmp_path,
+            receipt.operation_command_id,
+            expected_owner_uid=os.geteuid(),
+        )
+    assert raced is True
+    assert path.read_bytes() == b"foreign evidence"
+
+
 def test_receipt_open_uses_nonblocking_mode_before_file_type_validation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
