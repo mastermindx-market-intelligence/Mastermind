@@ -698,6 +698,23 @@ def test_f2_idle_timeout_is_independent_of_absolute_timeout(
     assert time.monotonic() - started < 1.5
 
 
+def test_f2_idle_timeout_still_applies_after_both_output_streams_close(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load()
+    monkeypatch.setattr(module, "_PROVIDER_IDLE_TIMEOUT_SECONDS", 0.1)
+    child_code = "import os,time; os.close(1); os.close(2); time.sleep(5)"
+    started = time.monotonic()
+
+    with pytest.raises(module.PreflightError, match="^PROVIDER_TIMEOUT$"):
+        module._run(
+            (sys.executable, "-c", child_code),
+            timeout_seconds=1.0,
+        )
+
+    assert time.monotonic() - started < 0.75
+
+
 @pytest.mark.skipif(os.name != "posix", reason="process-group ownership is POSIX-only")
 def test_f2_timeout_kills_owned_descendant_and_reaps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
