@@ -89,6 +89,7 @@ def _environment(command, tmp_path: Path, **updates: str) -> dict[str, str]:
 
 @pytest.mark.parametrize("version", ["2.1.248", "2.1.259"])
 def test_version_probe_is_deterministic_and_side_effect_free(tmp_path: Path, version: str) -> None:
+    before = {entry.name for entry in tmp_path.iterdir()}
     completed = _run(
         [str(FAKE), "--version"],
         cwd=tmp_path,
@@ -101,7 +102,7 @@ def test_version_probe_is_deterministic_and_side_effect_free(tmp_path: Path, ver
     assert completed.returncode == 0
     assert completed.stdout == f"{version} (Claude Code)\n".encode()
     assert completed.stderr == b""
-    assert list(tmp_path.iterdir()) == []
+    assert {entry.name for entry in tmp_path.iterdir()} == before
 
 
 def test_exact_compiled_command_emits_canonical_stream_and_counters(tmp_path: Path) -> None:

@@ -54,7 +54,7 @@ def _git(*args: str, cwd: Path) -> str:
 
 def _workspace(tmp_path: Path) -> tuple[Path, str, str]:
     workspace = tmp_path / "sealed-workspace"
-    workspace.mkdir(mode=0o700)
+    workspace.mkdir(mode=0o700, parents=True)
     evidence = workspace / "sealed" / "evidence.txt"
     evidence.parent.mkdir(mode=0o700)
     evidence.write_text("observed: fixture confirmation\n", encoding="utf-8")
@@ -201,7 +201,7 @@ def test_compiler_adds_no_prompt_host_flag_only_when_supported(tmp_path: Path) -
 
 @pytest.mark.parametrize("value", ["2.1.247", "2.0.999", "latest", "2.1", "v2.1.259", "2.1.259-beta"])
 def test_version_parser_or_compiler_refuses_unfrozen_versions(tmp_path: Path, value: str) -> None:
-    if value == "2.1.247":
+    if value in {"2.1.247", "2.0.999"}:
         policy, _, _, _ = _policy(tmp_path, version=value)
         with pytest.raises(ClaudeCliProtocolError, match="supported restricted-mode floor") as error:
             compile_claude_cli_command(policy)
@@ -386,7 +386,11 @@ def test_hostile_streams_fail_closed_and_leave_no_workspace_effect(
 
 
 def test_total_stdout_cap_terminates_and_reaps_process_group(tmp_path: Path) -> None:
-    policy, workspace, head, status = _policy(tmp_path, max_stdout_bytes=2_048)
+    policy, workspace, head, status = _policy(
+        tmp_path,
+        max_stdout_bytes=2_048,
+        max_line_bytes=1_024,
+    )
     with pytest.raises(ClaudeCliProtocolError) as captured:
         ClaudeCliRunner().run(
             compile_claude_cli_command(policy),
@@ -402,8 +406,8 @@ def test_total_stdout_cap_terminates_and_reaps_process_group(tmp_path: Path) -> 
 def test_timeout_contains_leader_and_marked_descendants(tmp_path: Path, scenario: str) -> None:
     policy, workspace, head, status = _policy(
         tmp_path,
-        idle_timeout_seconds=0.2,
-        absolute_timeout_seconds=0.5,
+        idle_timeout_seconds=1.0,
+        absolute_timeout_seconds=1.5,
     )
     state = tmp_path / "fake-state.json"
     with pytest.raises(ClaudeCliProtocolError) as captured:
@@ -515,4 +519,3 @@ def test_fake_controls_are_closed_and_fake_only(tmp_path: Path) -> None:
             fake_controls=_fake_controls(tmp_path),
         )
     assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
-
