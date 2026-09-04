@@ -154,7 +154,6 @@ class _ExactSupervisorFixtureDispatcher:
         self.supervisor = ExecutiveSupervisor(
             runtime,
             None,  # type: ignore[arg-type]
-            codex_home=root / "fixture-provider-home-never-opened",
             inspector=object(),  # type: ignore[arg-type]
             instance_id="phase1fc-deterministic-acceptance",
         )

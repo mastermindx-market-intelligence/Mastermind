@@ -31,6 +31,7 @@ from control_plane.codex_worker import (
     WorkerResult,
     WorkerRunStatus,
 )
+from control_plane.worker_execution_contract import WorkerLaunchSpec
 from control_plane.executive_worker_broker import (
     BROKER_REQUEST_SCHEMA_VERSION,
     BROKER_RESPONSE_SCHEMA_VERSION,
@@ -244,7 +245,6 @@ def _fixture(tmp_path: Path):
         "run_dir": str(run_dir),
         "prompt": "bounded harmless proof",
         "result_schema_path": str(schema),
-        "codex_home": str(provider_home),
         "authorities": ["READ", "RUN_TESTS"],
         "authority": None,
         "worker_user": "fixture-worker",
@@ -402,6 +402,81 @@ def test_broker_enforces_roots_principal_and_declared_argv(tmp_path: Path) -> No
                 ),
                 peer=peer,
             )
+
+    asyncio.run(scenario())
+
+
+def test_broker_start_is_provider_neutral(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+        response = await broker.execute(
+            _request(
+                "start",
+                {"launch_spec": spec, "validation_commands": [["/usr/bin/true"]]},
+            ),
+            peer=peer,
+        )
+
+        assert response["ok"] is True
+        assert isinstance(adapter.spec, WorkerLaunchSpec)
+        assert not hasattr(adapter.spec, "codex_home")
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "codex_home",
+        "provider_home",
+        "claude_home",
+        "credential_path",
+        "api_key",
+        "token",
+        "provider_session_id",
+    ],
+)
+def test_broker_refuses_provider_owned_wire_fields_before_adapter_start(
+    tmp_path: Path, field: str
+) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+        supplied = dict(spec)
+        supplied[field] = str(broker.policy.provider_home)
+
+        with pytest.raises(BrokerProtocolError, match="provider-owned fields"):
+            await broker.execute(
+                _request(
+                    "start",
+                    {"launch_spec": supplied, "validation_commands": []},
+                ),
+                peer=peer,
+            )
+
+        assert adapter.spec is None
+
+    asyncio.run(scenario())
+
+
+def test_broker_refuses_another_real_private_home_before_adapter_start(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+        other_home = tmp_path / "other-provider-home"
+        other_home.mkdir(mode=0o700)
+        supplied = dict(spec, codex_home=str(other_home))
+
+        with pytest.raises(BrokerProtocolError, match="provider-owned fields"):
+            await broker.execute(
+                _request(
+                    "start",
+                    {"launch_spec": supplied, "validation_commands": []},
+                ),
+                peer=peer,
+            )
+
+        assert adapter.spec is None
 
     asyncio.run(scenario())
 
@@ -574,9 +649,9 @@ def test_remote_adapter_round_trips_extended_process_identity(tmp_path: Path) ->
             client,
             validation_commands_for_spec=lambda _spec: [["/usr/bin/true"]],
         )
-        from control_plane.executive_worker_broker import _launch_spec
+        from control_plane.executive_worker_broker import _launch_spec_from_wire
 
-        launch_spec = _launch_spec(spec_value, broker.policy)
+        launch_spec = _launch_spec_from_wire(spec_value, broker.policy)
         try:
             ref = await remote.start(launch_spec)
             assert ref.session_id == ref.pid
@@ -593,10 +668,13 @@ def test_remote_adapter_round_trips_extended_process_identity(tmp_path: Path) ->
 def test_remote_adapter_uses_job_and_validation_timeouts(tmp_path: Path) -> None:
     async def scenario() -> None:
         broker, adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
-        from control_plane.executive_worker_broker import _jsonable, _launch_spec
+        from control_plane.executive_worker_broker import (
+            _jsonable,
+            _launch_spec_from_wire,
+        )
 
         spec = dataclasses.replace(
-            _launch_spec(spec_value, broker.policy),
+            _launch_spec_from_wire(spec_value, broker.policy),
             timeout_seconds=1800.0,
             cancel_grace_seconds=15.0,
         )
@@ -730,9 +808,9 @@ def test_remote_controller_retains_terminal_and_fresh_absence_sweeps(
     tmp_path: Path,
 ) -> None:
     broker, adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
-    from control_plane.executive_worker_broker import _jsonable, _launch_spec
+    from control_plane.executive_worker_broker import _jsonable, _launch_spec_from_wire
 
-    spec = _launch_spec(spec_value, broker.policy)
+    spec = _launch_spec_from_wire(spec_value, broker.policy)
     ref = asyncio.run(adapter.start(spec))
     terminal = FakeSweeper().sweep("run_terminal").to_dict()
     terminal["residual_pids_before"] = [777]

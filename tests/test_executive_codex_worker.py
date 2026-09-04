@@ -719,6 +719,26 @@ def test_codex_adapter_rejects_every_second_home_binding(
         adapter._bind_legacy_codex_home(second)
 
 
+def test_codex_adapter_revalidates_private_home_at_start_time(tmp_path: Path) -> None:
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    configured_home = adapter.codex_home
+    moved_home = tmp_path / "moved-codex-home"
+    configured_home.rename(moved_home)
+    configured_home.symlink_to(moved_home, target_is_directory=True)
+
+    with pytest.raises(cw.LaunchValidationError, match="real directory"):
+        asyncio.run(adapter.start(spec))
+
+
+def test_codex_adapter_types_missing_private_home_at_start_time(tmp_path: Path) -> None:
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    configured_home = adapter.codex_home
+    configured_home.rename(tmp_path / "removed-codex-home")
+
+    with pytest.raises(cw.LaunchValidationError, match="CODEX_HOME is unavailable"):
+        asyncio.run(adapter.start(spec))
+
+
 def test_success_uses_exact_one_shot_argv_empty_env_and_private_logs(tmp_path: Path):
     async def exercise():
         adapter, spec, workspace, run_dir = _fixture(tmp_path)
@@ -816,9 +836,9 @@ def test_complete_launch_attestation_is_redacted_and_principal_bound(tmp_path: P
         ref = await adapter.start(spec)
         attestation = adapter.launch_attestation(ref)
         receipt = await adapter.collect_result(ref)
-        return ref, attestation, receipt, spec, workspace
+        return ref, attestation, receipt, spec, workspace, adapter
 
-    ref, attestation, receipt, spec, workspace = asyncio.run(exercise())
+    ref, attestation, receipt, spec, workspace, adapter = asyncio.run(exercise())
     document = attestation.to_dict()
     assert receipt.result.status is cw.WorkerRunStatus.SUCCEEDED
     assert document["schema_version"] == cw.LAUNCH_ATTESTATION_SCHEMA_VERSION

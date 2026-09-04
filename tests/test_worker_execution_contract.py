@@ -10,6 +10,7 @@ import pytest
 
 from control_plane import codex_worker
 from control_plane import executive_supervisor
+from control_plane import executive_worker_broker
 from control_plane import worker_adapter
 from control_plane.worker_execution_contract import (
     WORKER_EXECUTION_CONTRACT_VERSION,
@@ -185,9 +186,11 @@ def test_launch_contract_has_exact_provider_neutral_fields(tmp_path: Path) -> No
     assert fields == _LAUNCH_FIELDS
     for forbidden in (
         "codex_home",
+        "provider_home",
         "claude_home",
         "api_key",
         "credential_path",
+        "token",
         "provider_session_id",
     ):
         assert forbidden not in fields
@@ -233,6 +236,37 @@ def test_common_mapping_inputs_are_copied_and_deeply_immutable(tmp_path: Path) -
     with pytest.raises((AttributeError, TypeError)):
         result.git_manifest["paths"].append("other.json")
 
+    isolation_snapshot = spec.isolation_manifest
+    with pytest.raises(TypeError):
+        isolation_snapshot |= {"new": "value"}
+    assert "new" not in spec.isolation_manifest
+
+    with pytest.raises(TypeError):
+        dict.__setitem__(  # type: ignore[arg-type]
+            spec.secret_canary_verdict,
+            "passed",
+            False,
+        )
+    assert spec.secret_canary_verdict["passed"] is True
+
+
+def test_validation_receipt_copies_mutable_argv_input() -> None:
+    argv = ["/usr/bin/true"]
+    receipt = ValidationReceipt(
+        argv=argv,  # type: ignore[arg-type]
+        exit_code=0,
+        stdout_sha256="0" * 64,
+        stdout_size=0,
+        stderr_sha256="0" * 64,
+        stderr_size=0,
+        timed_out=False,
+        error=None,
+    )
+
+    argv.append("--mutated")
+
+    assert receipt.argv == ("/usr/bin/true",)
+
 
 def test_codex_compatibility_names_are_the_common_types() -> None:
     aliases = {
@@ -254,7 +288,7 @@ def test_codex_compatibility_names_are_the_common_types() -> None:
 
 
 def test_common_consumers_do_not_import_moved_types_from_codex() -> None:
-    for module in (worker_adapter, executive_supervisor):
+    for module in (worker_adapter, executive_supervisor, executive_worker_broker):
         tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
         imported_from_codex = {
             alias.name
@@ -286,3 +320,51 @@ def test_supervisor_never_owns_or_injects_a_provider_home() -> None:
 
     assert owned_home == []
     assert injected_home == []
+
+
+def test_serialized_common_launch_request_has_no_provider_owned_fields(
+    tmp_path: Path,
+) -> None:
+    serialized = executive_worker_broker._launch_spec_to_json(_spec(tmp_path))
+
+    assert {
+        "codex_home",
+        "provider_home",
+        "claude_home",
+        "credential_path",
+        "api_key",
+        "token",
+        "provider_session_id",
+    }.isdisjoint(serialized)
+
+
+def test_phase1c_worker_composes_exactly_one_policy_owned_codex_home() -> None:
+    source = (
+        Path(__file__).resolve().parents[1] / "scripts" / "executive_os_phase1c_worker.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id == "CodexWorkerAdapter")
+            or (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "CodexWorkerAdapter"
+            )
+        )
+    ]
+
+    assert len(calls) == 1
+    home_keywords = [
+        keyword
+        for keyword in calls[0].keywords
+        if keyword.arg in {"codex_home", "provider_home", "claude_home"}
+    ]
+    assert len(home_keywords) == 1
+    assert home_keywords[0].arg == "codex_home"
+    assert ast.dump(home_keywords[0].value, include_attributes=False) == (
+        "Attribute(value=Name(id='policy', ctx=Load()), "
+        "attr='provider_home', ctx=Load())"
+    )
