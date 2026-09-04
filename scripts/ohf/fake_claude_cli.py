@@ -843,6 +843,14 @@ def _main() -> int:
         )
         sys.stdout.flush()
         return 0
+    elif scenario == "nonfinite_json_number":
+        raw_init = _event(events[0]).replace(
+            b'"capabilities":[]',
+            b'"capabilities":[1e999]',
+        )
+        sys.stdout.buffer.write(raw_init)
+        sys.stdout.buffer.flush()
+        return 0
     elif scenario == "oversized_line":
         sys.stdout.write(json.dumps({"type": "system", "subtype": "init", "padding": "x" * 40_000}) + "\n")
         sys.stdout.flush()
@@ -964,6 +972,18 @@ def _main() -> int:
         del events[2]["tool_use_result"]
     elif scenario == "tool_result_structured_mismatch":
         events[2]["tool_use_result"]["file"]["content"] = "different evidence\n"
+    elif scenario == "tool_result_num_lines_bool":
+        events[2]["tool_use_result"]["file"]["numLines"] = True
+    elif scenario == "tool_result_num_lines_float":
+        events[2]["tool_use_result"]["file"]["numLines"] = 1.0
+    elif scenario == "tool_result_start_line_bool":
+        events[2]["tool_use_result"]["file"]["startLine"] = True
+    elif scenario == "tool_result_start_line_float":
+        events[2]["tool_use_result"]["file"]["startLine"] = 1.0
+    elif scenario == "tool_result_total_lines_bool":
+        events[2]["tool_use_result"]["file"]["totalLines"] = True
+    elif scenario == "tool_result_total_lines_float":
+        events[2]["tool_use_result"]["file"]["totalLines"] = 1.0
     elif scenario == "tool_result_synthetic_type_invalid":
         events[2]["isSynthetic"] = 0
     elif scenario == "tool_result_artifact_read_type_invalid":
@@ -982,6 +1002,28 @@ def _main() -> int:
                 "subtype": "permission_denied",
                 "session_id": session_id,
                 "tool_name": "Read",
+            },
+        )
+    elif scenario == "usage_uuid_type_invalid":
+        events.insert(
+            1,
+            {
+                "type": "system",
+                "subtype": "usage",
+                "session_id": session_id,
+                "usage": dict(events[-1]["usage"]),
+                "uuid": 7,
+            },
+        )
+    elif scenario == "usage_uuid_value_invalid":
+        events.insert(
+            1,
+            {
+                "type": "system",
+                "subtype": "usage",
+                "session_id": session_id,
+                "usage": dict(events[-1]["usage"]),
+                "uuid": "not-a-uuid",
             },
         )
     elif scenario == "missing_result":
@@ -1021,6 +1063,10 @@ def _main() -> int:
         events[-1]["ttft_ms"] = "fast"
     elif scenario == "result_queued_type_invalid":
         events[-1]["queued_turn_count"] = False
+    elif scenario == "result_turn_count_bool":
+        events[-1]["num_turns"] = True
+    elif scenario == "result_turn_count_float":
+        events[-1]["num_turns"] = 1.0
     elif scenario == "secret_output":
         events[0]["capabilities"] = ["sk-" + "ant-" + "FAKE_SENTINEL_NOT_A_SECRET"]
     elif scenario == "private_path_output":
