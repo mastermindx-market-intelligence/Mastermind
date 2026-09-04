@@ -2586,9 +2586,26 @@ def load_semantic_receipt(path: Path) -> Mapping[str, Any]:
         or metadata.st_size > 1_048_576
     ):
         raise HostedRunnerError("RECEIPT_UNSAFE", candidate.name)
+
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        decoded: dict[str, object] = {}
+        for key, value in pairs:
+            if key in decoded:
+                raise ValueError("duplicate JSON key")
+            decoded[key] = value
+        return decoded
+
+    def reject_non_finite(_value: str) -> object:
+        raise ValueError("non-finite JSON value")
+
     try:
-        payload = json.loads(candidate.read_bytes())
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raw_bytes = candidate.read_bytes()
+        payload = json.loads(
+            raw_bytes,
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=reject_non_finite,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as error:
         raise HostedRunnerError("RECEIPT_INVALID", candidate.name) from error
     if not isinstance(payload, Mapping):
         raise HostedRunnerError("RECEIPT_INVALID", "receipt is not an object")
@@ -2643,6 +2660,8 @@ def load_semantic_receipt(path: Path) -> Mapping[str, Any]:
     ):
         raise HostedRunnerError("RECEIPT_INVALID", "request identity is inconsistent")
     assert_secret_free(payload)
+    if raw_bytes != locks.canonical_json_bytes(payload) + b"\n":
+        raise HostedRunnerError("RECEIPT_INVALID", "receipt bytes are not canonical")
     return dict(payload)
 
 
