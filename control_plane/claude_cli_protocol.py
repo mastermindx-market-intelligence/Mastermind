@@ -42,9 +42,41 @@ _HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SAFE_FAKE_SCENARIO = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 _TOOL_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _MESSAGE_ID = re.compile(r"msg_[A-Za-z0-9_-]{1,128}\Z")
+_REQUEST_ID = re.compile(r"req_[A-Za-z0-9_-]{1,128}\Z")
 _SAFE_PROTOCOL_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
+_SAFE_TIMESTAMP = re.compile(r"[0-9TZ:.,+\-]{1,64}\Z")
 _MAX_BINARY_BYTES = 1_048_576
 _BOUND_STATE_SCHEMA = "mmx.fake-claude-state.v2"
+_FAST_MODE_STATES = frozenset({"off", "cooldown", "on"})
+_FAST_MODE_DISABLED_REASONS = frozenset(
+    {
+        "free",
+        "preference",
+        "extra_usage_disabled",
+        "network_error",
+        "unknown",
+        "not_first_party",
+        "disabled_by_env",
+        "model_not_allowed",
+        "sdk_opt_in_required",
+        "pending",
+    }
+)
+_EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
+_RESULT_ELAPSED_TIMING_FIELDS = frozenset(
+    {
+        "ttft_ms",
+        "ttft_stream_ms",
+        "time_to_request_ms",
+        "first_content_frame_ms",
+        "first_stream_post_ms",
+        "first_stream_post_ack_ms",
+        "time_to_request_from_spawn_ms",
+    }
+)
+_RESULT_WALL_TIMING_FIELDS = frozenset(
+    {"request_sent_wall_ms", "first_stream_post_wall_ms", "time_origin_ms"}
+)
 _SAFE_ENVIRONMENT = (
     ("PATH", "/usr/bin:/bin"),
     ("LANG", "C.UTF-8"),
@@ -184,8 +216,16 @@ class ClaudeCliCommand:
     binary_sha256: str
     binary_device: int
     binary_inode: int
+    binary_uid: int
+    binary_mode: int
     binary_size: int
     binary_mtime_ns: int
+    evidence_device: int
+    evidence_inode: int
+    evidence_uid: int
+    evidence_mode: int
+    evidence_size: int
+    evidence_mtime_ns: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -243,6 +283,12 @@ class ClaudeCliRunReceipt:
     environment_sha256: str
     settings_sha256: str
     binary_sha256: str
+    binary_device: int
+    binary_inode: int
+    binary_uid: int
+    binary_mode: int
+    binary_size: int
+    binary_mtime_ns: int
     returncode: int
     events: tuple[ClaudeCliEvent, ...]
     cleanup: ClaudeCliCleanupReceipt
@@ -265,6 +311,12 @@ class ClaudeCliRunReceipt:
             "environment_sha256": self.environment_sha256,
             "settings_sha256": self.settings_sha256,
             "binary_sha256": self.binary_sha256,
+            "binary_device": self.binary_device,
+            "binary_inode": self.binary_inode,
+            "binary_uid": self.binary_uid,
+            "binary_mode": self.binary_mode,
+            "binary_size": self.binary_size,
+            "binary_mtime_ns": self.binary_mtime_ns,
             "returncode": self.returncode,
             "events": [dataclasses.asdict(event) for event in self.events],
             "cleanup": self.cleanup.to_dict(),
@@ -424,7 +476,7 @@ def _validate_safe_relative_path(value: Any) -> PurePosixPath:
 
 def _validate_policy(
     policy: ClaudeCliInvocationPolicy,
-) -> tuple[Path, os.stat_result, bytes, Path, Path, bytes]:
+) -> tuple[Path, os.stat_result, bytes, Path, Path, os.stat_result, bytes]:
     if not isinstance(policy, ClaudeCliInvocationPolicy):
         raise _fail_before_start("POLICY_INVALID", "Claude invocation policy is invalid")
     if not isinstance(policy.version, ClaudeCliVersion):
@@ -487,6 +539,7 @@ def _validate_policy(
     if (
         stat.S_ISLNK(evidence_info.st_mode)
         or not stat.S_ISREG(evidence_info.st_mode)
+        or resolved_evidence != evidence_path
         or workspace not in resolved_evidence.parents
         or len(evidence_bytes) > 65_536
     ):
@@ -533,7 +586,7 @@ def _validate_policy(
         raise _fail_before_start("BOUND_INVALID", "absolute timeout must not be shorter than idle timeout")
     if policy.max_line_bytes > policy.max_stdout_bytes:
         raise _fail_before_start("BOUND_INVALID", "line byte limit must not exceed stdout byte limit")
-    return binary, binary_info, binary_bytes, workspace, home, evidence_bytes
+    return binary, binary_info, binary_bytes, workspace, home, evidence_info, evidence_bytes
 
 
 def _build_argv(
@@ -612,7 +665,15 @@ def compile_claude_cli_command(
             "CALLER_ENVIRONMENT_REFUSED",
             "caller environment is not accepted",
         )
-    binary, binary_info, binary_bytes, workspace, home, evidence_bytes = _validate_policy(policy)
+    (
+        binary,
+        binary_info,
+        binary_bytes,
+        workspace,
+        home,
+        evidence_info,
+        evidence_bytes,
+    ) = _validate_policy(policy)
     scratch = policy.isolated_tmp.resolve(strict=True)
     environment = (
         ("HOME", str(home)),
@@ -660,8 +721,16 @@ def compile_claude_cli_command(
         binary_sha256=_sha256_bytes(binary_bytes),
         binary_device=binary_info.st_dev,
         binary_inode=binary_info.st_ino,
+        binary_uid=binary_info.st_uid,
+        binary_mode=binary_info.st_mode,
         binary_size=binary_info.st_size,
         binary_mtime_ns=binary_info.st_mtime_ns,
+        evidence_device=evidence_info.st_dev,
+        evidence_inode=evidence_info.st_ino,
+        evidence_uid=evidence_info.st_uid,
+        evidence_mode=evidence_info.st_mode,
+        evidence_size=evidence_info.st_size,
+        evidence_mtime_ns=evidence_info.st_mtime_ns,
     )
 
 
@@ -788,6 +857,59 @@ def _expect_session(value: Mapping[str, Any], session_id: str) -> None:
             "SESSION_DRIFT",
             ClaudeCliObservation.OUTCOME_UNRECONCILED,
             "stream session identity drifted",
+        )
+
+
+def _expect_optional_uuid_echoes(value: Mapping[str, Any], *, code: str) -> None:
+    primary = value.get("user_message_uuid")
+    if "user_message_uuid" in value:
+        _expect_uuid(primary, code=code, message="user-message UUID was invalid")
+    if "user_message_uuids" not in value:
+        return
+    echoes = value.get("user_message_uuids")
+    if not isinstance(echoes, list) or not 1 <= len(echoes) <= 64:
+        raise _StreamViolation(
+            code,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+            "user-message UUID inventory was invalid",
+        )
+    for echo in echoes:
+        _expect_uuid(echo, code=code, message="user-message UUID inventory was invalid")
+    if primary is None or echoes[-1] != primary:
+        raise _StreamViolation(
+            code,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+            "user-message UUID inventory contradicted its primary UUID",
+        )
+
+
+def _expect_optional_timestamp(value: Any, *, code: str, message: str) -> None:
+    if not isinstance(value, str) or _SAFE_TIMESTAMP.fullmatch(value) is None:
+        raise _StreamViolation(
+            code,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+            message,
+        )
+
+
+def _expect_fast_mode_fields(value: Mapping[str, Any], *, code: str) -> None:
+    state = value.get("fast_mode_state")
+    reason = value.get("fast_mode_disabled_reason")
+    if state is not None and (
+        not isinstance(state, str) or state not in _FAST_MODE_STATES
+    ):
+        raise _StreamViolation(
+            code,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+            "fast-mode state was invalid",
+        )
+    if reason is not None and (
+        not isinstance(reason, str) or reason not in _FAST_MODE_DISABLED_REASONS
+    ):
+        raise _StreamViolation(
+            code,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+            "fast-mode disabled reason was invalid",
         )
 
 
@@ -1305,6 +1427,16 @@ class _StreamParser:
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "init capabilities were invalid",
             )
+        _expect_fast_mode_fields(value, code="INIT_INVALID")
+        effort = value.get("effort")
+        if effort is not None and (
+            not isinstance(effort, str) or effort not in _EFFORT_LEVELS
+        ):
+            raise _StreamViolation(
+                "INIT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "init effort was invalid",
+            )
         self.phase = 1
         self.submission_count = 1
 
@@ -1379,6 +1511,28 @@ class _StreamParser:
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "assistant event carried an unapproved execution marker",
             )
+        request_id = value.get("request_id")
+        if request_id is not None and (
+            not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None
+        ):
+            raise _StreamViolation(
+                "ASSISTANT_EVENT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "assistant request identity was invalid",
+            )
+        _expect_optional_uuid_echoes(value, code="ASSISTANT_EVENT_INVALID")
+        if "timestamp" in value:
+            _expect_optional_timestamp(
+                value.get("timestamp"),
+                code="ASSISTANT_EVENT_INVALID",
+                message="assistant timestamp was invalid",
+            )
+        if value.get("context_usage") is not None:
+            raise _StreamViolation(
+                "ASSISTANT_EVENT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "assistant context report was not accepted",
+            )
         message = value.get("message")
         if not isinstance(message, dict):
             raise _StreamViolation(
@@ -1437,6 +1591,12 @@ class _StreamParser:
                 "ASSISTANT_EVENT_INVALID",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "streamed assistant message carried premature terminal fields",
+            )
+        if message.get("context_management") is not None:
+            raise _StreamViolation(
+                "ASSISTANT_EVENT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "assistant context-management metadata was not accepted",
             )
         _consume_usage_payload(message.get("usage"))
         content = message.get("content")
@@ -1569,6 +1729,30 @@ class _StreamParser:
                 "TOOL_RESULT_INVALID",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "tool result carried an unapproved synthetic or subagent marker",
+            )
+        if value.get("priority") not in (None, "now", "next", "later"):
+            raise _StreamViolation(
+                "TOOL_RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "tool result priority was invalid",
+            )
+        if value.get("origin") is not None:
+            raise _StreamViolation(
+                "TOOL_RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "tool result origin was not accepted for a closed prompt",
+            )
+        if value.get("shouldQuery") is not None and value.get("shouldQuery") is not True:
+            raise _StreamViolation(
+                "TOOL_RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "tool result query marker was invalid",
+            )
+        if "timestamp" in value:
+            _expect_optional_timestamp(
+                value.get("timestamp"),
+                code="TOOL_RESULT_INVALID",
+                message="tool result timestamp was invalid",
             )
         message = value.get("message")
         if not isinstance(message, dict):
@@ -1753,6 +1937,55 @@ class _StreamParser:
             code="RESULT_INVALID",
             message="terminal result UUID was invalid",
         )
+        _expect_optional_uuid_echoes(value, code="RESULT_INVALID")
+        for field in _RESULT_ELAPSED_TIMING_FIELDS:
+            if field not in value:
+                continue
+            timing = value.get(field)
+            if (
+                type(timing) not in {int, float}
+                or not math.isfinite(float(timing))
+                or not 0 <= float(timing) <= 86_400_000
+            ):
+                raise _StreamViolation(
+                    "RESULT_INVALID",
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                    "terminal elapsed timing was invalid",
+                )
+        for field in _RESULT_WALL_TIMING_FIELDS:
+            if field not in value:
+                continue
+            timing = value.get(field)
+            if (
+                type(timing) not in {int, float}
+                or not math.isfinite(float(timing))
+                or not 0 <= float(timing) <= 10_000_000_000_000
+            ):
+                raise _StreamViolation(
+                    "RESULT_INVALID",
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                    "terminal wall-clock timing was invalid",
+                )
+        warm_spare = value.get("warm_spare_claimed")
+        if warm_spare is not None and warm_spare is not False:
+            raise _StreamViolation(
+                "RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "terminal warm-spare marker was invalid",
+            )
+        if value.get("terminal_reason") not in (None, "completed"):
+            raise _StreamViolation(
+                "RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "terminal reason was invalid",
+            )
+        _expect_fast_mode_fields(value, code="RESULT_INVALID")
+        if "origin" in value:
+            raise _StreamViolation(
+                "RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "terminal origin was not accepted for a closed prompt",
+            )
         subtype = value.get("subtype")
         is_error = value.get("is_error")
         denials = value.get("permission_denials", [])
@@ -1919,6 +2152,59 @@ def _read_fd_bytes(descriptor: int, *, maximum: int) -> bytes:
     return value
 
 
+def _open_bound_evidence(command: ClaudeCliCommand) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(_expected_evidence_path(command), flags)
+        before = os.fstat(descriptor)
+        evidence_bytes = os.pread(descriptor, 65_537, 0)
+        after = os.fstat(descriptor)
+        expected_identity = (
+            command.evidence_device,
+            command.evidence_inode,
+            command.evidence_uid,
+            command.evidence_mode,
+            command.evidence_size,
+            command.evidence_mtime_ns,
+        )
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (
+                before.st_dev,
+                before.st_ino,
+                before.st_uid,
+                before.st_mode,
+                before.st_size,
+                before.st_mtime_ns,
+            )
+            != expected_identity
+            or (
+                after.st_dev,
+                after.st_ino,
+                after.st_uid,
+                after.st_mode,
+                after.st_size,
+                after.st_mtime_ns,
+            )
+            != expected_identity
+            or len(evidence_bytes) > 65_536
+            or _sha256_bytes(evidence_bytes) != command.evidence_sha256
+        ):
+            raise OSError("sealed evidence identity drifted")
+        return descriptor
+    except OSError:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise _fail_before_start(
+            "EVIDENCE_DRIFT",
+            "sealed evidence descriptor could not be retained",
+        ) from None
+
+
 def _open_bound_binary(command: ClaudeCliCommand, *, scratch: Path) -> int:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     descriptor: int | None = None
@@ -1933,6 +2219,8 @@ def _open_bound_binary(command: ClaudeCliCommand, *, scratch: Path) -> int:
             not stat.S_ISREG(info.st_mode)
             or info.st_dev != command.binary_device
             or info.st_ino != command.binary_inode
+            or info.st_uid != command.binary_uid
+            or info.st_mode != command.binary_mode
             or info.st_size != command.binary_size
             or info.st_mtime_ns != command.binary_mtime_ns
             or _sha256_bytes(binary_bytes) != command.binary_sha256
@@ -2386,15 +2674,27 @@ def _validate_command_integrity(command: ClaudeCliCommand) -> None:
         binary_info = binary_path.lstat()
         binary = binary_path.resolve(strict=True)
         binary_bytes = binary.read_bytes()
+    except OSError:
+        raise _fail_before_start(
+            "BINARY_DRIFT",
+            "reviewed fake executable identity became unavailable",
+        ) from None
+    try:
         workspace = Path(command.working_directory).resolve(strict=True)
         home = Path(command.isolated_home).resolve(strict=True)
         scratch = Path(command.isolated_tmp).resolve(strict=True)
-        evidence = workspace.joinpath(*relative.parts)
+    except OSError:
+        raise _fail_before_start("COMMAND_DRIFT", "compiled path identity became unavailable") from None
+    evidence = workspace.joinpath(*relative.parts)
+    try:
         evidence_info = evidence.lstat()
         resolved_evidence = evidence.resolve(strict=True)
         evidence_bytes = resolved_evidence.read_bytes()
     except OSError:
-        raise _fail_before_start("COMMAND_DRIFT", "compiled path identity became unavailable") from None
+        raise _fail_before_start(
+            "EVIDENCE_DRIFT",
+            "sealed evidence identity became unavailable",
+        ) from None
     if (
         stat.S_ISLNK(binary_info.st_mode)
         or not stat.S_ISREG(binary_info.st_mode)
@@ -2409,21 +2709,35 @@ def _validate_command_integrity(command: ClaudeCliCommand) -> None:
         or home == scratch
         or workspace in home.parents
         or workspace in scratch.parents
-        or stat.S_ISLNK(evidence_info.st_mode)
+    ):
+        raise _fail_before_start("COMMAND_DRIFT", "compiled path identity drifted")
+    if (
+        stat.S_ISLNK(evidence_info.st_mode)
         or not stat.S_ISREG(evidence_info.st_mode)
+        or resolved_evidence != evidence
         or workspace not in resolved_evidence.parents
         or len(evidence_bytes) > 65_536
     ):
-        raise _fail_before_start("COMMAND_DRIFT", "compiled path identity drifted")
+        raise _fail_before_start("EVIDENCE_DRIFT", "sealed evidence path identity drifted")
     if (
         _sha256_bytes(binary_bytes) != command.binary_sha256
         or binary_info.st_dev != command.binary_device
         or binary_info.st_ino != command.binary_inode
+        or binary_info.st_uid != command.binary_uid
+        or binary_info.st_mode != command.binary_mode
         or binary_info.st_size != command.binary_size
         or binary_info.st_mtime_ns != command.binary_mtime_ns
     ):
         raise _fail_before_start("BINARY_DRIFT", "reviewed fake executable identity drifted")
-    if _sha256_bytes(evidence_bytes) != command.evidence_sha256:
+    if (
+        _sha256_bytes(evidence_bytes) != command.evidence_sha256
+        or evidence_info.st_dev != command.evidence_device
+        or evidence_info.st_ino != command.evidence_inode
+        or evidence_info.st_uid != command.evidence_uid
+        or evidence_info.st_mode != command.evidence_mode
+        or evidence_info.st_size != command.evidence_size
+        or evidence_info.st_mtime_ns != command.evidence_mtime_ns
+    ):
         raise _fail_before_start("EVIDENCE_DRIFT", "sealed evidence file drifted before process start")
     if command.prompt != _derived_prompt(command.evidence_relative_path, command.evidence_sha256):
         raise _fail_before_start("COMMAND_DRIFT", "compiled prompt binding drifted")
@@ -2542,7 +2856,12 @@ class ClaudeCliRunner:
         runner_pid = os.getpid()
         run_nonce = str(uuid.uuid4())
         spawn_not_before_ns = time.monotonic_ns()
-        binary_descriptor = _open_bound_binary(command, scratch=scratch)
+        evidence_descriptor = _open_bound_evidence(command)
+        try:
+            binary_descriptor = _open_bound_binary(command, scratch=scratch)
+        except BaseException:
+            os.close(evidence_descriptor)
+            raise
         try:
             state_descriptor = _create_bound_fake_state(
                 fake_state_path,
@@ -2550,8 +2869,9 @@ class ClaudeCliRunner:
                 runner_pid=runner_pid,
                 spawn_not_before_ns=spawn_not_before_ns,
             )
-        except Exception:
+        except BaseException:
             os.close(binary_descriptor)
+            os.close(evidence_descriptor)
             raise
         environment = dict(command.environment)
         environment.update(controls)
@@ -2561,6 +2881,13 @@ class ClaudeCliRunner:
                 "MMX_FAKE_CLAUDE_RUN_NONCE": run_nonce,
                 "MMX_FAKE_CLAUDE_RUNNER_PID": str(runner_pid),
                 "MMX_FAKE_CLAUDE_SPAWN_NOT_BEFORE_NS": str(spawn_not_before_ns),
+                "MMX_FAKE_CLAUDE_EVIDENCE_FD": str(evidence_descriptor),
+                "MMX_FAKE_CLAUDE_EVIDENCE_DEVICE": str(command.evidence_device),
+                "MMX_FAKE_CLAUDE_EVIDENCE_INODE": str(command.evidence_inode),
+                "MMX_FAKE_CLAUDE_EVIDENCE_UID": str(command.evidence_uid),
+                "MMX_FAKE_CLAUDE_EVIDENCE_MODE": str(command.evidence_mode),
+                "MMX_FAKE_CLAUDE_EVIDENCE_SIZE": str(command.evidence_size),
+                "MMX_FAKE_CLAUDE_EVIDENCE_MTIME_NS": str(command.evidence_mtime_ns),
             }
         )
         try:
@@ -2573,18 +2900,26 @@ class ClaudeCliRunner:
                 stderr=subprocess.PIPE,
                 start_new_session=True,
                 close_fds=True,
-                pass_fds=(binary_descriptor, state_descriptor),
+                pass_fds=(binary_descriptor, state_descriptor, evidence_descriptor),
                 bufsize=0,
             )
         except OSError:
             os.close(binary_descriptor)
+            os.close(evidence_descriptor)
             _unlink_bound_state(fake_state_path, state_descriptor)
             os.close(state_descriptor)
             raise _fail_before_start(
                 "PROCESS_START_FAILED",
                 "Claude CLI process could not be started",
             ) from None
+        except BaseException:
+            os.close(binary_descriptor)
+            os.close(evidence_descriptor)
+            _unlink_bound_state(fake_state_path, state_descriptor)
+            os.close(state_descriptor)
+            raise
         os.close(binary_descriptor)
+        os.close(evidence_descriptor)
 
         # Cleanup ownership begins immediately after Popen.  The new-session
         # candidate group is the leader pid even when getpgid cannot attest it.
@@ -2894,6 +3229,12 @@ class ClaudeCliRunner:
             "environment_sha256": command.environment_sha256,
             "settings_sha256": command.settings_sha256,
             "binary_sha256": command.binary_sha256,
+            "binary_device": command.binary_device,
+            "binary_inode": command.binary_inode,
+            "binary_uid": command.binary_uid,
+            "binary_mode": command.binary_mode,
+            "binary_size": command.binary_size,
+            "binary_mtime_ns": command.binary_mtime_ns,
             "returncode": returncode,
             "events": [dataclasses.asdict(event) for event in parser.events],
             "cleanup": cleanup.to_dict(),
@@ -2914,6 +3255,12 @@ class ClaudeCliRunner:
             environment_sha256=command.environment_sha256,
             settings_sha256=command.settings_sha256,
             binary_sha256=command.binary_sha256,
+            binary_device=command.binary_device,
+            binary_inode=command.binary_inode,
+            binary_uid=command.binary_uid,
+            binary_mode=command.binary_mode,
+            binary_size=command.binary_size,
+            binary_mtime_ns=command.binary_mtime_ns,
             returncode=returncode,
             events=tuple(parser.events),
             cleanup=cleanup,

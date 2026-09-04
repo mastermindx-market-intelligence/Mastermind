@@ -330,10 +330,11 @@ def test_protocol_dataclasses_are_deeply_immutable(tmp_path: Path) -> None:
 
 
 def test_compiler_binds_the_reviewed_fake_bytes_and_filesystem_identity(tmp_path: Path) -> None:
-    policy, _, _, _ = _policy(tmp_path)
+    policy, workspace, _, _ = _policy(tmp_path)
 
     command = compile_claude_cli_command(policy)
     binary_info = FAKE.stat()
+    evidence_info = (workspace / "sealed" / "evidence.txt").stat()
 
     assert command.binary_sha256 == hashlib.sha256(FAKE.read_bytes()).hexdigest()
     assert command.binary_device == binary_info.st_dev
@@ -342,6 +343,12 @@ def test_compiler_binds_the_reviewed_fake_bytes_and_filesystem_identity(tmp_path
     assert command.binary_mode == binary_info.st_mode
     assert command.binary_size == binary_info.st_size
     assert command.binary_mtime_ns == binary_info.st_mtime_ns
+    assert command.evidence_device == evidence_info.st_dev
+    assert command.evidence_inode == evidence_info.st_ino
+    assert command.evidence_uid == evidence_info.st_uid
+    assert command.evidence_mode == evidence_info.st_mode
+    assert command.evidence_size == evidence_info.st_size
+    assert command.evidence_mtime_ns == evidence_info.st_mtime_ns
 
 
 def test_runner_refuses_reviewed_fake_mode_drift_before_spawn(
@@ -698,6 +705,13 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
     assert receipt.submission_count == 1
     assert receipt.result_sha256 == _sha256_text(_expected_result())
     assert receipt.settings_sha256 == command.settings_sha256
+    assert receipt.binary_sha256 == command.binary_sha256
+    assert receipt.binary_device == command.binary_device
+    assert receipt.binary_inode == command.binary_inode
+    assert receipt.binary_uid == command.binary_uid
+    assert receipt.binary_mode == command.binary_mode
+    assert receipt.binary_size == command.binary_size
+    assert receipt.binary_mtime_ns == command.binary_mtime_ns
     assert receipt.returncode == 0
     assert receipt.cleanup.process_group_empty is True
     assert receipt.cleanup.leader_reaped is True

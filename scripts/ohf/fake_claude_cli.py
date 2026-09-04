@@ -51,7 +51,22 @@ _FAKE_ENV = {
     "MMX_FAKE_CLAUDE_RUN_NONCE",
     "MMX_FAKE_CLAUDE_RUNNER_PID",
     "MMX_FAKE_CLAUDE_SPAWN_NOT_BEFORE_NS",
+    "MMX_FAKE_CLAUDE_EVIDENCE_FD",
+    "MMX_FAKE_CLAUDE_EVIDENCE_DEVICE",
+    "MMX_FAKE_CLAUDE_EVIDENCE_INODE",
+    "MMX_FAKE_CLAUDE_EVIDENCE_UID",
+    "MMX_FAKE_CLAUDE_EVIDENCE_MODE",
+    "MMX_FAKE_CLAUDE_EVIDENCE_SIZE",
+    "MMX_FAKE_CLAUDE_EVIDENCE_MTIME_NS",
 }
+_EVIDENCE_IDENTITY_ENV = (
+    "MMX_FAKE_CLAUDE_EVIDENCE_DEVICE",
+    "MMX_FAKE_CLAUDE_EVIDENCE_INODE",
+    "MMX_FAKE_CLAUDE_EVIDENCE_UID",
+    "MMX_FAKE_CLAUDE_EVIDENCE_MODE",
+    "MMX_FAKE_CLAUDE_EVIDENCE_SIZE",
+    "MMX_FAKE_CLAUDE_EVIDENCE_MTIME_NS",
+)
 _FORBIDDEN_ENV_PREFIXES = (
     "ANTHROPIC_",
     "AWS_",
@@ -432,6 +447,107 @@ def _validate_bound_state(state: dict[str, Any]) -> None:
     state["owner_started_ns"] = owner_started_ns
 
 
+def _read_evidence(
+    *,
+    workspace: Path,
+    evidence_relative: str,
+    declared_sha256: str,
+    bound_state: bool,
+    state_descriptor: int | None,
+) -> tuple[Path, str, str]:
+    evidence_path = workspace.joinpath(*PurePosixPath(evidence_relative).parts)
+    descriptor_value = os.environ.get("MMX_FAKE_CLAUDE_EVIDENCE_FD")
+    identity_values = tuple(os.environ.get(name) for name in _EVIDENCE_IDENTITY_ENV)
+    try:
+        path_info = evidence_path.lstat()
+        resolved_evidence = evidence_path.resolve(strict=True)
+        if (
+            stat.S_ISLNK(path_info.st_mode)
+            or not stat.S_ISREG(path_info.st_mode)
+            or resolved_evidence != evidence_path
+            or workspace not in resolved_evidence.parents
+        ):
+            raise OSError("evidence path identity invalid")
+        if bound_state:
+            if (
+                descriptor_value is None
+                or not descriptor_value.isascii()
+                or not descriptor_value.isdigit()
+                or int(descriptor_value) < 3
+                or int(descriptor_value) == state_descriptor
+                or any(
+                    value is None or not value.isascii() or not value.isdigit()
+                    for value in identity_values
+                )
+            ):
+                _reject("environment", 65)
+            evidence_descriptor = int(descriptor_value)
+            expected_identity = tuple(int(value) for value in identity_values)
+            before = os.fstat(evidence_descriptor)
+            if fcntl.fcntl(evidence_descriptor, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDONLY:
+                raise OSError("evidence descriptor was not read-only")
+            evidence_bytes = os.pread(evidence_descriptor, 65_537, 0)
+            after = os.fstat(evidence_descriptor)
+            path_after = evidence_path.lstat()
+            resolved_after = evidence_path.resolve(strict=True)
+            before_identity = (
+                before.st_dev,
+                before.st_ino,
+                before.st_uid,
+                before.st_mode,
+                before.st_size,
+                before.st_mtime_ns,
+            )
+            after_identity = (
+                after.st_dev,
+                after.st_ino,
+                after.st_uid,
+                after.st_mode,
+                after.st_size,
+                after.st_mtime_ns,
+            )
+            path_identity = (
+                path_info.st_dev,
+                path_info.st_ino,
+                path_info.st_uid,
+                path_info.st_mode,
+                path_info.st_size,
+                path_info.st_mtime_ns,
+            )
+            path_after_identity = (
+                path_after.st_dev,
+                path_after.st_ino,
+                path_after.st_uid,
+                path_after.st_mode,
+                path_after.st_size,
+                path_after.st_mtime_ns,
+            )
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or stat.S_ISLNK(path_after.st_mode)
+                or not stat.S_ISREG(path_after.st_mode)
+                or resolved_after != evidence_path
+                or before_identity != expected_identity
+                or after_identity != expected_identity
+                or path_identity != expected_identity
+                or path_after_identity != expected_identity
+            ):
+                raise OSError("evidence identity drifted")
+        else:
+            if descriptor_value is not None or any(value is not None for value in identity_values):
+                _reject("environment", 65)
+            evidence_bytes = resolved_evidence.read_bytes()
+        if len(evidence_bytes) > 65_536:
+            raise OSError("evidence exceeded its byte bound")
+        evidence = evidence_bytes.decode("utf-8", errors="strict")
+    except (OSError, UnicodeError):
+        _reject("invocation", 64)
+    evidence_sha256 = _sha256_bytes(evidence_bytes)
+    if evidence_sha256 != declared_sha256:
+        _reject("invocation", 64)
+    return resolved_evidence, evidence, evidence_sha256
+
+
 def _process_identity(pid: int) -> tuple[int, int, int, str] | None:
     ps_binary = Path("/bin/ps") if Path("/bin/ps").is_file() else Path("/usr/bin/ps")
     try:
@@ -660,27 +776,20 @@ def _main() -> int:
             )
             return 76
 
-    scenario = os.environ.get("MMX_FAKE_CLAUDE_SCENARIO", "ok")
     workspace = Path.cwd().resolve(strict=True)
-    evidence_path = workspace.joinpath(*PurePosixPath(evidence_relative).parts)
-    try:
-        resolved_evidence = evidence_path.resolve(strict=True)
-        if workspace not in resolved_evidence.parents or evidence_path.is_symlink():
-            _reject("invocation", 64)
-        evidence_bytes = resolved_evidence.read_bytes()
-        evidence = evidence_bytes.decode("utf-8", errors="strict")
-    except (OSError, UnicodeError):
-        _reject("invocation", 64)
-    if len(evidence.encode("utf-8")) > 65_536:
-        _reject("invocation", 64)
-    evidence_sha256 = _sha256_bytes(evidence_bytes)
-    if evidence_sha256 != declared_sha256:
-        _reject("invocation", 64)
+    resolved_evidence, evidence, evidence_sha256 = _read_evidence(
+        workspace=workspace,
+        evidence_relative=evidence_relative,
+        declared_sha256=declared_sha256,
+        bound_state=bound_state,
+        state_descriptor=state_descriptor,
+    )
     result = _derived_result(evidence_sha256)
     state["reads"] += 1
     state["submissions"] += 1
     _write_state(state_path, state, state_descriptor)
 
+    scenario = os.environ.get("MMX_FAKE_CLAUDE_SCENARIO", "ok")
     events = _canonical_events(
         version=version,
         model=model,
@@ -827,6 +936,12 @@ def _main() -> int:
         events[0]["plugins"] = [{"name": "bad", "path": "/private/plugin"}]
     elif scenario == "init_required_field_missing":
         del events[0]["apiKeySource"]
+    elif scenario == "init_extra_field":
+        events[0]["unreviewed"] = True
+    elif scenario == "init_uuid_type_invalid":
+        events[0]["uuid"] = 7
+    elif scenario == "init_optional_type_invalid":
+        events[0]["fast_mode_state"] = {"state": "on"}
     elif scenario == "init_cwd_drift":
         events[0]["cwd"] = str(workspace.parent)
     elif scenario == "init_version_drift":
@@ -849,6 +964,10 @@ def _main() -> int:
         del events[2]["tool_use_result"]
     elif scenario == "tool_result_structured_mismatch":
         events[2]["tool_use_result"]["file"]["content"] = "different evidence\n"
+    elif scenario == "tool_result_truncated":
+        events[2]["tool_use_result"]["file"]["truncatedByTokenCap"] = True
+    elif scenario == "tool_result_private_locator_echo":
+        events[2]["message"]["content"][0]["content"] = "1\t/Users/example/private\n"
     elif scenario == "permission_denied":
         events.insert(
             3,
@@ -892,6 +1011,8 @@ def _main() -> int:
         del events[-1]["stop_reason"]
     elif scenario == "result_usage_sparse":
         del events[-1]["usage"]["cache_creation_input_tokens"]
+    elif scenario == "result_timing_type_invalid":
+        events[-1]["ttft_ms"] = "fast"
     elif scenario == "secret_output":
         events[0]["capabilities"] = ["sk-" + "ant-" + "FAKE_SENTINEL_NOT_A_SECRET"]
     elif scenario == "private_path_output":
