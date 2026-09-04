@@ -808,6 +808,12 @@ def _check_json_bounds(
                 max_collection_items=max_collection_items,
             )
         return
+    if type(value) is float and not math.isfinite(value):
+        raise _StreamViolation(
+            "STREAM_JSON_INVALID",
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+            "stream JSON contained a non-finite number",
+        )
     if value is not None and type(value) not in {bool, int, float}:
         raise _StreamViolation(
             "STREAM_JSON_INVALID",
@@ -1449,6 +1455,12 @@ class _StreamParser:
             )
         _expect_keys(value, frozenset({"type", "subtype", "session_id", "usage", "uuid"}))
         _expect_session(value, self.command.session_id)
+        if "uuid" in value:
+            _expect_uuid(
+                value.get("uuid"),
+                code="USAGE_INVALID",
+                message="usage-event UUID was invalid",
+            )
         input_tokens, output_tokens, _, _ = _consume_usage_payload(value.get("usage"))
         self.input_tokens = max(self.input_tokens, input_tokens)
         self.output_tokens = max(self.output_tokens, output_tokens)
@@ -1836,13 +1848,22 @@ class _StreamParser:
         evidence_content = file_result.get("content")
         expected_path = _expected_evidence_path(self.command)
         expected_lines = len(evidence_content.splitlines()) if isinstance(evidence_content, str) else -1
+        num_lines = file_result.get("numLines")
+        start_line = file_result.get("startLine")
+        total_lines = file_result.get("totalLines")
+        if any(type(counter) is not int for counter in (num_lines, start_line, total_lines)):
+            raise _StreamViolation(
+                "TOOL_RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "structured Read line counters were invalid",
+            )
         truncated = file_result.get("truncatedByTokenCap")
         if (
             file_result.get("filePath") != expected_path
             or not isinstance(evidence_content, str)
-            or file_result.get("numLines") != expected_lines
-            or file_result.get("startLine") != 1
-            or file_result.get("totalLines") != expected_lines
+            or num_lines != expected_lines
+            or start_line != 1
+            or total_lines != expected_lines
             or (truncated is not None and truncated is not False)
         ):
             raise _StreamViolation(
@@ -2026,7 +2047,8 @@ class _StreamParser:
                     ClaudeCliObservation.OUTCOME_UNRECONCILED,
                     "terminal duration was invalid",
                 )
-        if value.get("num_turns") != 1:
+        num_turns = value.get("num_turns")
+        if type(num_turns) is not int or num_turns != 1:
             raise _StreamViolation(
                 "TURN_COUNT_INVALID",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
