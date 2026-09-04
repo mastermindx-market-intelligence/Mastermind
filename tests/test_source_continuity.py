@@ -921,6 +921,7 @@ class _ProbeRunner:
             "diff.renames=false",
             "core.checkStat=default",
             "core.trustctime=true",
+            "core.symlinks=true",
             "credential.helper=",
             "protocol.allow=never",
             "protocol.file.allow=always",

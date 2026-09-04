@@ -398,7 +398,7 @@ OVERRIDES = (
     "core.fsmonitor=false", "core.untrackedCache=false", "core.hooksPath=/dev/null",
     "core.attributesFile=/dev/null", "core.excludesFile=/dev/null", "diff.external=",
     "diff.renames=false", "core.fileMode=true", "core.ignoreStat=false",
-    "core.checkStat=default", "core.trustctime=true",
+    "core.checkStat=default", "core.trustctime=true", "core.symlinks=true",
     "credential.helper=", "protocol.allow=never",
     "protocol.file.allow=always",
 )
@@ -723,6 +723,48 @@ def test_real_probe_observes_dirty_submodule_despite_local_ignore_all(tmp_path) 
     assert not isinstance(result, module.SourceContinuityRefusal)
     local_facts, _ = result
     assert local_facts.uncommitted_out_of_scope_count == 1
+
+
+def test_real_probe_observes_symlink_replaced_by_same_bytes_regular_file(
+    tmp_path,
+) -> None:
+    repo = tmp_path / "symlink-mode"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "R3 Test")
+    git(repo, "config", "user.email", "r3@example.invalid")
+    link = repo / "link"
+    link.symlink_to("target")
+    git(repo, "add", "link")
+    git(repo, "commit", "-q", "-m", "symlink base")
+    head = git(repo, "rev-parse", "HEAD^{commit}")
+    git(repo, "config", "core.symlinks", "false")
+    link.unlink()
+    link.write_text("target", encoding="utf-8")
+
+    module = _module()
+    request_with_link = module.SourceContinuityRequest(
+        receipt_kind=module.ReceiptKind.CHECKPOINT_VERIFIED,
+        operation_key="source-continuity-r3-symlink-hardening-20260904-sol-001",
+        repository=REPOSITORY,
+        pr_number=448,
+        branch=git(repo, "symbolic-ref", "--short", "HEAD"),
+        base_ref="master",
+        pinned_base_sha=head,
+        owned_paths=("link",),
+        verified_at="2026-09-04T04:00:00Z",
+    )
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        request_with_link,
+        head,
+        head,
+        (),
+    )
+    assert not isinstance(result, module.SourceContinuityRefusal)
+    local_facts, _ = result
+    assert local_facts.uncommitted_in_scope_count == 1
 
 
 def test_real_diff_disables_fsmonitor_external_diff_and_textconv(tmp_path) -> None:
