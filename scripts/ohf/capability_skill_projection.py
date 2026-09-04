@@ -1179,7 +1179,7 @@ def cleanup_skill_projection(receipt: SkillProjectionReceipt) -> SkillProjection
 
     try:
         current_lstat = os.lstat(str(projection_root_path))
-    except (OSError, ValueError):
+    except FileNotFoundError:
         # Idempotent cleanup: already gone.
         return SkillProjectionCleanupReceipt(
             projection_root=str(projection_root_path),
@@ -1187,6 +1187,8 @@ def cleanup_skill_projection(receipt: SkillProjectionReceipt) -> SkillProjection
             verified_absent=True,
             schema_version=PROJECTION_CLEANUP_SCHEMA_VERSION,
         )
+    except (OSError, ValueError):
+        _refuse("receipt", "projection_root_unavailable")
 
     if stat.S_ISLNK(current_lstat.st_mode) or not stat.S_ISDIR(current_lstat.st_mode):
         _refuse("receipt", "projection_root_containment_refused")
@@ -1198,8 +1200,10 @@ def cleanup_skill_projection(receipt: SkillProjectionReceipt) -> SkillProjection
     try:
         os.lstat(str(projection_root_path))
         verified_absent = False
-    except (OSError, ValueError):
+    except FileNotFoundError:
         verified_absent = True
+    except (OSError, ValueError):
+        verified_absent = False
 
     return SkillProjectionCleanupReceipt(
         projection_root=str(projection_root_path),

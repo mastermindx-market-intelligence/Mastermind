@@ -302,6 +302,7 @@ class CanaryEvidence:
     candidate_tree: str
     canary_operation_id: str
     provider_attempt_id: str
+    protected_join: str
     workspace_root: str
     process_generation: str
     v4_policy_digest: str
@@ -958,6 +959,7 @@ def run_canary(
     repo_root: Path,
     scratch_root: Path,
     operation_id: str,
+    protected_join: str = "",
     client_factory=None,
     run_command: Callable[..., Any] = subprocess.run,
 ) -> CanaryEvidence:
@@ -991,7 +993,10 @@ def run_canary(
         try:
             validate_live_codex_home(codex_home)
         except RuntimeError as exc:
-            raise CanaryStop("PROVIDER_REALM_UNAVAILABLE", str(exc)) from exc
+            raise CanaryStop(
+                "PROVIDER_REALM_UNAVAILABLE",
+                "dedicated Codex home validation failed",
+            ) from exc
         single_binary_path = Path(binary_path)
         adapter_codex_home = codex_home
         adapter_argv = None
@@ -1429,6 +1434,7 @@ def run_canary(
             candidate_tree=candidate_tree,
             canary_operation_id=operation_id,
             provider_attempt_id=attempt_id,
+            protected_join=protected_join,
             workspace_root=str(adapter.workspace_root),
             process_generation=process_generation_id,
             v4_policy_digest=registry.policy_digest,
@@ -1707,6 +1713,29 @@ def _result_safe_identifier(value: object) -> bool:
     )
 
 
+def _result_safe_artifact_inventory_row(value: object) -> bool:
+    if not isinstance(value, str) or not value or len(value.encode("utf-8")) > 1024:
+        return False
+    if value.startswith("projection:file_count="):
+        count = value.removeprefix("projection:file_count=")
+        return count.isascii() and count.isdigit() and 0 < int(count) <= 64
+    prefix, separator, relative = value.partition(":")
+    if prefix not in {"schema", "workspace"} or separator != ":" or not relative:
+        return False
+    if relative.startswith(("/", "\\")) or "\\" in relative:
+        return False
+    if re.fullmatch(r"[A-Za-z0-9._/-]+", relative) is None:
+        return False
+    parts = relative.split("/")
+    if not all(part not in {"", ".", ".."} for part in parts):
+        return False
+    sensitive_segment = re.compile(
+        r"(?:^|[._-])(?:secret|password|api_key|authorization|bearer|token)(?:$|[=._-])",
+        re.IGNORECASE,
+    )
+    return not any(sensitive_segment.search(part) for part in parts)
+
+
 def _result_closed_mapping(
     raw: object, *, keys: set[str], error: str
 ) -> dict[str, Any]:
@@ -1801,7 +1830,12 @@ def _parse_bound_receipt(
 
 
 def _validate_canary_evidence(
-    evidence: CanaryEvidence, *, head: str, tree: str, attempt_id: str
+    evidence: CanaryEvidence,
+    *,
+    head: str,
+    tree: str,
+    protected_join: str,
+    attempt_id: str,
 ) -> None:
     if type(evidence) is not CanaryEvidence:
         raise CapS1ResultError("cap_s1_result_canary_evidence_type_invalid")
@@ -1812,6 +1846,7 @@ def _validate_canary_evidence(
         or evidence.candidate_tree != tree
         or not _result_safe_identifier(evidence.canary_operation_id)
         or evidence.provider_attempt_id != attempt_id
+        or evidence.protected_join != protected_join
     ):
         raise CapS1ResultError("cap_s1_result_canary_evidence_binding_mismatch")
     digest_fields = (
@@ -1868,10 +1903,7 @@ def _validate_canary_evidence(
         or evidence.after_clear_enabled_names != ()
         or type(evidence.artifact_inventory) is not tuple
         or not evidence.artifact_inventory
-        or not all(
-            isinstance(row, str) and bool(row) and len(row.encode("utf-8")) <= 4096
-            for row in evidence.artifact_inventory
-        )
+        or not all(_result_safe_artifact_inventory_row(row) for row in evidence.artifact_inventory)
     ):
         raise CapS1ResultError("cap_s1_result_canary_evidence_invalid")
     expected_markers = (
@@ -2000,6 +2032,7 @@ def validate_cap_s1_result(result: CapS1Result) -> None:
             result.canary_evidence,
             head=result.exact_head,
             tree=result.exact_tree,
+            protected_join=result.current_protected_join,
             attempt_id=provider_attempt.attempt_id,
         )
     else:
@@ -2168,6 +2201,7 @@ def main(argv: "list[str] | None" = None) -> int:
     parser.add_argument("--binary-path", type=Path, default=None)
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--operation-id", required=True)
+    parser.add_argument("--protected-join", default="")
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     args = parser.parse_args(argv)
 
@@ -2227,6 +2261,7 @@ def main(argv: "list[str] | None" = None) -> int:
             repo_root=args.repo_root,
             scratch_root=args.scratch,
             operation_id=args.operation_id,
+            protected_join=args.protected_join,
             client_factory=client_factory,
         )
     except CanaryStop as stop:

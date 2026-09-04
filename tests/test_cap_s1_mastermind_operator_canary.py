@@ -14,6 +14,7 @@ attempt-local projection primitive.
 from __future__ import annotations
 
 import dataclasses
+import errno
 import io
 import json
 import os
@@ -793,6 +794,47 @@ def test_cleanup_reports_failure_honestly_when_parent_undeletable(tmp_path):
         final_cleanup = cleanup_skill_projection(receipt)
         assert final_cleanup.removed is True
         assert final_cleanup.verified_absent is True
+
+
+def test_cleanup_non_enoent_precheck_error_never_proves_absence(
+    tmp_path, monkeypatch
+):
+    receipt = _staged_happy_receipt(tmp_path)
+    projection_root = receipt.projection_root
+    real_lstat = os.lstat
+
+    def _permission_refusal(path, *args, **kwargs):
+        if str(path) == projection_root:
+            raise PermissionError(errno.EACCES, "synthetic access refusal")
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(capability_skill_projection.os, "lstat", _permission_refusal)
+    with pytest.raises(SkillProjectionError, match="projection_root_unavailable"):
+        cleanup_skill_projection(receipt)
+    assert Path(projection_root).exists()
+    monkeypatch.setattr(capability_skill_projection.os, "lstat", real_lstat)
+    cleanup_skill_projection(receipt)
+
+
+def test_cleanup_non_enoent_postcheck_error_never_proves_absence(
+    tmp_path, monkeypatch
+):
+    receipt = _staged_happy_receipt(tmp_path)
+    projection_root = receipt.projection_root
+    real_lstat = os.lstat
+    calls = {"projection": 0}
+
+    def _post_remove_io_error(path, *args, **kwargs):
+        if str(path) == projection_root:
+            calls["projection"] += 1
+            if calls["projection"] == 2:
+                raise OSError(errno.EIO, "synthetic post-remove I/O error")
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(capability_skill_projection.os, "lstat", _post_remove_io_error)
+    cleanup = cleanup_skill_projection(receipt)
+    assert cleanup.removed is False
+    assert cleanup.verified_absent is False
 
 
 # ---------------------------------------------------------------------------
@@ -1641,6 +1683,7 @@ def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
         repo_root=REPO_ROOT,
         scratch_root=scratch,
         operation_id="cap-s1-canary-happy",
+        protected_join="c" * 40,
         client_factory=factory,
         run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
     )
@@ -1669,6 +1712,7 @@ def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
     assert evidence.after_add_enabled_names == evidence.observed_enabled_names
     assert evidence.after_clear_enabled_names == ()
     assert evidence.schema_version == "mastermind.cap_s1_canary_evidence/v1"
+    assert evidence.protected_join == "c" * 40
     assert evidence.origin_mode == ORIGIN_VERIFIED_EPHEMERAL_GIT_ARCHIVE
     assert evidence.origin_authentication == ORIGIN_AUTHENTICATION_EPHEMERAL_GIT_ARCHIVE
     assert evidence.skills_root
@@ -2235,6 +2279,26 @@ def test_run_canary_live_backend_refuses_default_codex_home_without_running_comm
     assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
 
 
+def test_run_canary_live_home_validation_never_echoes_hostile_path(tmp_path) -> None:
+    scratch = tmp_path / "scratch-live-hostile-home"
+    scratch.mkdir()
+    hostile_home = tmp_path / "secret-token-do-not-echo"
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="live",
+            binary_path=Path("/nonexistent/synthetic-codex-binary"),
+            codex_home=hostile_home,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-live-hostile-home",
+            client_factory=lambda *_a, **_k: None,
+        )
+    message = str(excinfo.value)
+    assert str(hostile_home) not in message
+    assert "secret-token-do-not-echo" not in message
+
+
 # ---------------------------------------------------------------------------
 # EFFECT_UNKNOWN, no retry
 # ---------------------------------------------------------------------------
@@ -2562,6 +2626,7 @@ def test_cli_main_prints_evidence_json_and_exits_zero_on_a_clean_journey(
         candidate_tree="b" * 40,
         canary_operation_id="cap-s1-cli-smoke",
         provider_attempt_id="cap-s1-cli-smoke-attempt",
+        protected_join="c" * 40,
         workspace_root=str(tmp_path / "workspace"),
         process_generation="cap-s1-cli-smoke-gen1",
         v4_policy_digest="c" * 64,
@@ -2627,6 +2692,7 @@ def test_cli_main_exits_nonzero_when_a_marker_is_false_or_cleanup_failed(
         candidate_tree="b" * 40,
         canary_operation_id="cap-s1-cli-smoke-2",
         provider_attempt_id="cap-s1-cli-smoke-2-attempt",
+        protected_join="c" * 40,
         workspace_root=str(tmp_path / "workspace2"),
         process_generation="cap-s1-cli-smoke-2-gen1",
         v4_policy_digest="c" * 64,
@@ -2712,6 +2778,7 @@ def test_canary_evidence_schema_pins_version_and_full_field_set() -> None:
         "candidate_tree",
         "canary_operation_id",
         "provider_attempt_id",
+        "protected_join",
         "workspace_root",
         "process_generation",
         "v4_policy_digest",
@@ -3184,7 +3251,9 @@ def test_cap_s1_result_completed_requires_nonempty_matching_canary_evidence() ->
         build_cap_s1_result(**schema_token_only)
 
 
-def _completed_canary_evidence(*, head: str, tree: str, attempt_id: str) -> CanaryEvidence:
+def _completed_canary_evidence(
+    *, head: str, tree: str, attempt_id: str, protected_join: str
+) -> CanaryEvidence:
     skill_rows = (
         ("escalate-decision", "1" * 64),
         ("finish-operation", "2" * 64),
@@ -3196,6 +3265,7 @@ def _completed_canary_evidence(*, head: str, tree: str, attempt_id: str) -> Cana
         candidate_tree=tree,
         canary_operation_id="cap-s1-completed-canary",
         provider_attempt_id=attempt_id,
+        protected_join=protected_join,
         workspace_root="/tmp/cap-s1-workspace",
         process_generation="cap-s1-generation-1",
         v4_policy_digest="5" * 64,
@@ -3256,6 +3326,7 @@ def test_cap_s1_result_completed_accepts_only_fully_bound_typed_canary_evidence(
         head=raw["exact_head"],
         tree=raw["exact_tree"],
         attempt_id=raw["provider_attempt"]["attempt_id"],
+        protected_join=raw["current_protected_join"],
     )
     build_cap_s1_result(**raw)
 
@@ -3274,6 +3345,23 @@ def test_cap_s1_result_completed_accepts_only_fully_bound_typed_canary_evidence(
     )
     with pytest.raises(CapS1ResultError, match="binding_mismatch"):
         build_cap_s1_result(**wrong_attempt)
+
+    wrong_protected_join = dict(raw)
+    wrong_protected_join["canary_evidence"] = dataclasses.replace(
+        raw["canary_evidence"], protected_join="f" * 40
+    )
+    with pytest.raises(CapS1ResultError, match="binding_mismatch"):
+        build_cap_s1_result(**wrong_protected_join)
+
+    hostile_inventory = dict(raw)
+    hostile_inventory["canary_evidence"] = dataclasses.replace(
+        raw["canary_evidence"],
+        artifact_inventory=("workspace:/Users/alice/auth-token-secret",),
+    )
+    with pytest.raises(CapS1ResultError, match="canary_evidence_invalid") as excinfo:
+        build_cap_s1_result(**hostile_inventory)
+    assert "/Users/alice" not in str(excinfo.value)
+    assert "auth-token-secret" not in str(excinfo.value)
 
 
 def test_cap_s1_result_local_and_hosted_proof_shapes_are_enforced() -> None:
