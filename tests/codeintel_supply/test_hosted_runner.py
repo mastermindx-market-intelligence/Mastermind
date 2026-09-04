@@ -32,6 +32,8 @@ HEX_C = "c" * 40
 HEX_D = "d" * 40
 SHA_A = "a" * 64
 SHA_B = "b" * 64
+ADMITTED_CONSUMER_SHA = "2478239c2d5b6a4e111c13247527e2046e6c3969"
+ADMITTED_CONSUMER_TREE = "4594a3a6b9e1286788f0ef7b84c609d4359ca4be"
 
 
 def _github_hosted_environment(tmp_path: Path) -> dict[str, str]:
@@ -277,6 +279,90 @@ def test_request_rejects_moved_refs_shell_payloads_and_wrong_operation(
 ) -> None:
     with pytest.raises(runner.HostedRunnerError, match="INVALID_REQUEST"):
         _request(**{field: value})
+
+
+def test_request_admission_is_pinned_to_reviewed_consumer_identity() -> None:
+    repository_root = Path(runner.__file__).resolve().parents[2]
+    lock = runner.locks.load_toolchain_lock(
+        repository_root
+        / "research/code_intelligence_fabric/codeintel-experiment-toolchain-lock.v1.json",
+        schema_path=repository_root
+        / "research/code_intelligence_fabric/codeintel-experiment-toolchain-lock.schema.json",
+    )
+    runner.validate_admitted_consumer_identity(
+        lock, ADMITTED_CONSUMER_SHA, ADMITTED_CONSUMER_TREE
+    )
+
+    for consumer_sha, consumer_tree in (
+        ("e44ca77f8c3f16d01383a6c4884e427acfc9d650", ADMITTED_CONSUMER_TREE),
+        (ADMITTED_CONSUMER_SHA, "0" * 40),
+    ):
+        with pytest.raises(runner.HostedRunnerError, match="CONSUMER_MISMATCH"):
+            runner.validate_admitted_consumer_identity(
+                lock, consumer_sha, consumer_tree
+            )
+
+
+def test_consumer_contract_discriminator_rejects_cli_or_schema_drift(
+    tmp_path: Path,
+) -> None:
+    consumer = tmp_path / "consumer"
+    source = consumer / "experiments/code_discovery/z0_runner.py"
+    schema = (
+        consumer
+        / "research/code_intelligence_fabric/z0-result.schema.json"
+    )
+    source.parent.mkdir(parents=True)
+    schema.parent.mkdir(parents=True)
+    flags = (
+        "--request-digest",
+        "--toolchain-lock-sha256",
+        "--bundle-sha256",
+        "--bundle-manifest-sha256",
+    )
+    source.write_text(
+        "\n".join(
+            ["import argparse", "parser = argparse.ArgumentParser()"]
+            + [
+                f"parser.add_argument({flag!r}, required=True)"
+                for flag in flags
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result_fields = sorted(runner._Z0_RESULT_FIELDS)  # noqa: SLF001
+    schema_payload = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": result_fields,
+        "properties": {field: {} for field in result_fields},
+        "additionalProperties": False,
+    }
+    schema.write_text(json.dumps(schema_payload) + "\n", encoding="utf-8")
+
+    evidence = runner.validate_consumer_contract(consumer)
+    assert evidence["required_identity_arguments"] == list(flags)
+    assert evidence["result_fields"] == result_fields
+
+    source.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "'--request-digest', required=True",
+            "'--request-digest', required=False",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(runner.HostedRunnerError, match="CONSUMER_CONTRACT_MISMATCH"):
+        runner.validate_consumer_contract(consumer)
+
+    source.write_text(
+        source.read_text(encoding="utf-8").replace("required=False", "required=True"),
+        encoding="utf-8",
+    )
+    schema_payload["required"] = result_fields[:-1]
+    schema.write_text(json.dumps(schema_payload) + "\n", encoding="utf-8")
+    with pytest.raises(runner.HostedRunnerError, match="CONSUMER_CONTRACT_MISMATCH"):
+        runner.validate_consumer_contract(consumer)
 
 
 def test_consumer_path_census_accepts_only_the_z0_ceiling() -> None:
@@ -1118,11 +1204,19 @@ def test_fixed_consumer_argv_has_no_caller_controlled_module_or_suffix(
         log_root=tmp_path / "logs",
         result=tmp_path / "result.json",
         report=tmp_path / "report.md",
+        request_digest="3" * 64,
+        toolchain_lock_sha256="4" * 64,
+        bundle_sha256="5" * 64,
+        bundle_manifest_sha256="6" * 64,
     )
     joined = "\0".join(argv)
     assert "experiments.code_discovery.z0_runner" in joined
     assert "--manifest" in argv
     assert "--path-policy" in argv
+    assert argv[argv.index("--request-digest") + 1] == "3" * 64
+    assert argv[argv.index("--toolchain-lock-sha256") + 1] == "4" * 64
+    assert argv[argv.index("--bundle-sha256") + 1] == "5" * 64
+    assert argv[argv.index("--bundle-manifest-sha256") + 1] == "6" * 64
     assert "shell=True" not in joined
     assert not any(
         "serena" in value.lower() or "pyright" in value.lower() for value in argv
@@ -3271,8 +3365,12 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
         outbound_probe="DENIED",
         denial_errno=errno.ENETUNREACH,
     )
+    observed_argv: list[str] = []
+
     def launch_consumer(*args: object, **kwargs: object) -> runner.LaunchEvidence:
-        del args, kwargs
+        del kwargs
+        assert args
+        observed_argv.extend(args[0])  # type: ignore[arg-type]
         consumer_policy = lock.payload["consumer"]
         manifest_payload: dict[str, object] = {
             "schema_version": "mastermind.codeintel_index_manifest.v1",
@@ -3343,6 +3441,16 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
     assert receipt["effect"] == "APPLIED"
     assert validation_inputs.get("bundle_sha256") == bundle_sha
     assert validation_inputs.get("bundle_manifest_sha256") == verified.manifest_sha256
+    assert observed_argv[observed_argv.index("--request-digest") + 1] == request.digest
+    assert (
+        observed_argv[observed_argv.index("--toolchain-lock-sha256") + 1]
+        == request.lock_sha256
+    )
+    assert observed_argv[observed_argv.index("--bundle-sha256") + 1] == bundle_sha
+    assert (
+        observed_argv[observed_argv.index("--bundle-manifest-sha256") + 1]
+        == verified.manifest_sha256
+    )
     assert receipt["evidence"]["git_metadata_seal"] == seal_evidence
     assert (
         receipt["evidence"]["consumer_invocation"]["sensitive_environment_inherited"]

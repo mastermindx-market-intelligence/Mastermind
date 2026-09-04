@@ -101,6 +101,12 @@ def test_committed_lock_is_closed_and_schema_bound() -> None:
     assert "/bin/mount" in locks.HOST_UTILITY_CONFOUNDS
     assert "pull_request" not in lock.payload["consumer"]
     assert "carrier_ref" not in lock.payload["consumer"]
+    assert lock.payload["consumer"]["commit"] == (
+        "2478239c2d5b6a4e111c13247527e2046e6c3969"
+    )
+    assert lock.payload["consumer"]["tree"] == (
+        "4594a3a6b9e1286788f0ef7b84c609d4359ca4be"
+    )
 
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
@@ -115,6 +121,32 @@ def test_consumer_lock_rejects_reintroduced_mutable_carrier_field(
     consumer = payload["consumer"]
     assert isinstance(consumer, dict)
     consumer["carrier_ref"] = "refs/pull/407/head"
+    hostile = tmp_path / "lock.json"
+    hostile.write_text(
+        json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(locks.ToolchainLockError) as raised:
+        locks.load_toolchain_lock(hostile, schema_path=SCHEMA_PATH)
+
+    assert raised.value.code == "PIN_MISMATCH"
+    assert raised.value.detail == "consumer differs"
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("commit", "e44ca77f8c3f16d01383a6c4884e427acfc9d650"),
+        ("tree", "0" * 40),
+    ],
+)
+def test_consumer_lock_rejects_unreviewed_identity(
+    tmp_path: Path, field: str, replacement: str
+) -> None:
+    payload = _payload()
+    consumer = payload["consumer"]
+    assert isinstance(consumer, dict)
+    consumer[field] = replacement
     hostile = tmp_path / "lock.json"
     hostile.write_text(
         json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8"
