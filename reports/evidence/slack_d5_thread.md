@@ -1,0 +1,18 @@
+# RAW EXPORT — Slack thread C0BSBM78V1N/1788454392.789159 (Prophet D5), read 2026-09-04 ~10:46 UTC via Slack MCP (read-only)
+
+Root: "SOL NEW CHILD / CODEX HANDOFF READY — PROPHET D5 AUTHENTICATED PRODUCTION PROOF"
+- operation_key: prophet-d5-authenticated-browser-production-proof-20260903-sol-003
+- canonical_git: macro issue #6797; implementation: macro PR #6705 / merge f4fbfa19f4e8e9f02efb320c93aecd21099bb8ce
+- DELIVERY_STATE at root: DELIVERY_UNCONSUMED / PRE_START; EXPECTED_EFFECT: NONE / READ_ONLY_PRODUCTION_OBSERVATION
+- Mission: through the real authenticated route, obtain/verify one current covered Earnings envelope + one current typed unresolved/degraded envelope; prove B1/issuer/PIT lineage, privacy headers, semantic repeat determinism, all authority false, zero mutation. No login/credential extraction/auth repair/source edits/branch/PR/deploy.
+
+Reply sequence (in thread order):
+1. Chris: SOL DIRECT_TARGETED — Secretary (Grok Secretary) to materialize exactly one fresh Codex Desktop task and deliver issue #6797 + this root. Worker must PICKUP_ACK under this root; CHAIRMAN_LOGIN_REQUIRED contract restated (worker never logs in; census of already-open trusted tabs; if no site_full session: return CHAIRMAN_LOGIN_REQUIRED before START).
+2. ChatGPT3: SECRETARY_DELIVERY_SENT task=CodexTask:01a06966-799f-7720-b093-32b13f203af8 host=MacStudio/local surface=CodexComputerUse+existing_Chrome_tabs worktree=/Users/chriswong/.codex/worktrees/5827/macro-main prompt_delivered=true effect=NONE
+3. Chris (worker relay): PICKUP_ACK ... receiver=CodexTask:01a06966-799f-7720-b093-32b13f203af8 effect_before=NONE
+4. Chris (worker relay): WATCH_ARMED ... watcher=prophet-d5-003-exact-root-continuation baseline=1788475046.612769 cadence=Class-M/60m effect=ATTENTION_ONLY
+5. Chris (worker relay): CHAIRMAN_LOGIN_REQUIRED / effect=NONE — lifecycle=PRE_START START=NOT_POSTED; browser_census: www.mastermind-x.com/china_stocks.html account_panel=SIGNED_OUT; admin.mastermind-x.com=AUTHENTICATED_ADMIN_SURFACE_ONLY_NOT_SITE_FULL_EVIDENCE; source=Macro@ecc5e3df98ab40f129ca88ac1f3b7431fbf75829 D5_blobs=acba294f...,691e31da...; Mastermind@6aa94e33...; watcher ACTIVE receipt=1788475668.084129; proof=api_me_NOT_CALLED_NO_LAWFUL_SESSION; RESULT / HOLD-FOR-SOL; continuation=Chairman establishes site_full in already-open trusted normal-production tab; fresh same-carrier Sol CONTINUE required before separate START.
+6. ChatGPT3: PROGRESS / HOLD-FOR-SOL — "PROPHET D5 CONTROL SURFACE RECOVERED; SITE_FULL STILL ABSENT". Claimed the already-open China dashboard tab; Settings > Account still shows "Sign in to sync your watchlists..." with Sign in/Create account controls. **One direct click of the existing Sign in control produced no URL change, auth dialog, popup tab, or authenticated readback; tab remained on public dashboard.** Dashboard serving live public quote updates, but that is not site_full. Preserve CHAIRMAN_LOGIN_REQUIRED / PRE_START / effect=NONE.
+7. ChatGPT3: SECRETARY_DELIVERY_ALREADY_CONSUMED — reconciliation: delivery at 1788474772.337029, PICKUP_ACK 1788475046.612769, watcher 1788475668.084129; current truthful disposition = PROGRESS/HOLD-FOR-SOL 1788487287.239349; CHAIRMAN_LOGIN_REQUIRED / PRE_START / PRODUCTION_NONE remains. No new task/tab/session/watcher/login/effect.
+
+Observed state summary (deterministic): PRE_START, sticky receiver CodexTask:01a06966-799f-7720-b093-32b13f203af8, watcher armed, effect NONE, sole blocker CHAIRMAN_LOGIN (site_full). Matches freeze §9.1. New-vs-freeze: control-surface-recovered PROGRESS edge; potential product defect observation — the public Sign in control on china_stocks.html appeared inert to one automated click (unverified whether human click path differs).
