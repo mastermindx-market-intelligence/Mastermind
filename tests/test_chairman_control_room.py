@@ -2333,42 +2333,9 @@ def test_compose_control_room_threads_real_dispatch_evidence_through(
     assert dispatch["historical"] is False
 
 
-def test_gather_dispatch_evidence_reads_real_attempt_state_without_raising(tmp_path):
-    """`_gather_dispatch_evidence` against a REAL Runtime: a claimed Attempt
-    for a job must surface as `attempt_state` on the matching card's row,
-    entirely via public Runtime APIs (`runtime.attempts.list_attempts`),
-    never raising, and never guessing a binding it cannot resolve."""
-    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    runtime.workers.register_worker(
-        "worker-a", provider="openai-codex", account_label="account-a",
-        worker_type="fixture",
-    )
-    job = runtime.jobs.create_job("dispatch-evidence probe")
-    lease = runtime.attempts.claim_job(job.job_id)
-    assert lease is not None
-
-    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": job.job_id}]
-    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["responsibility_ref"] == "WS:PROBE"
-    assert row["root_job_id"] == job.job_id
-    assert row["attempt_state"] == "CLAIMED"
-    # No session-target registry entry exists for this ad-hoc job: the
-    # binding read honestly degrades rather than guessing a resolved one.
-    assert row["action_target_state"] == "UNKNOWN"
-    assert row["binding_evidence_state"] == "UNKNOWN"
-    # No canonical Dialogue/Observer receipt store exists yet (Blocker 1's
-    # documented gap): no watch_*/return_* field is ever fabricated.
-    assert "watch_child_ref" not in row
-    assert "return_kind" not in row
-
-
 def test_gather_dispatch_evidence_never_raises_on_a_malformed_card(tmp_path):
-    """Bounded/defensive: a non-mapping card, or one with no/blank
-    `root_job_id`, must never raise — it is simply skipped, never emitted
-    as a hollow row."""
+    """Malformed cards are skipped; a real responsibility with no root
+    remains visible as an explicit UNKNOWN root and C2 owner hold."""
     ccr.executive_runtime.Runtime.at(tmp_path)  # create the DB, unused otherwise
     cards = [
         {"responsibility_ref": "WS:NO-ROOT"},
@@ -2378,7 +2345,20 @@ def test_gather_dispatch_evidence_never_raises_on_a_malformed_card(tmp_path):
         42,
     ]
     rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-    assert rows == []
+    assert rows == [
+        {
+            "responsibility_ref": "WS:NO-ROOT",
+            "root_job_id": None,
+            "runtime_root_state": "UNKNOWN",
+            "carrier_state": "OWNER_HELD",
+            "carrier_reason": "C2_POSITIVE_OWNER_HELD",
+            "w3c_state": "UNAVAILABLE",
+            "w3c_reason": "C2_EXACT_CANDIDATE_UNAVAILABLE",
+            "w3c_terminal_state": "UNAVAILABLE",
+            "w3c_wake_state": "UNAVAILABLE",
+            "w3c_terminal_applied": "false",
+        }
+    ]
 
 
 def test_gather_dispatch_evidence_absent_runtime_db_never_raises(tmp_path):
@@ -2541,517 +2521,297 @@ def test_end_to_end_build_control_room_threads_a_real_runtime_root_into_the_card
         assert card_without_join["root_job_id"] is None
 
 
-def test_gather_dispatch_evidence_resolves_the_child_carrier_not_the_aggregation_root(tmp_path):
-    """Blocker 2: the responsibility root is often an AGGREGATION root while
-    the executable Attempt belongs to a child/carrier Job.  The root here
-    never gets its own attempt at all -- proving the OLD
-    `list_attempts(job_id=root_job_id)` query would have found nothing for
-    this card."""
-    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    runtime.workers.register_worker(
-        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture",
-    )
-    root = runtime.jobs.create_job("aggregation root probe")
-    child = runtime.jobs.create_job("carrier child", parent_job_id=root.job_id)
-    lease = runtime.attempts.claim_job(child.job_id, worker_id="worker-a")
-    assert lease is not None
-
-    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
-    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-
-    assert len(rows) == 1
-    assert rows[0]["attempt_state"] == "CLAIMED"
+# CR1A W3C-owner repair: the Control Room may consume only one exact C2
+# commitment and the protected canonical terminal/Wake facade.  These tests
+# intentionally describe the replacement seam before production code changes.
+# ---------------------------------------------------------------------------
 
 
-def test_gather_dispatch_evidence_never_uses_max_attempt_number_across_a_stale_root_attempt(tmp_path):
-    """Proves the fix, not just its absence: the aggregation root itself
-    carries a STALE attempt (FAILED, then the job requeued) still sitting
-    in the `attempts` table -- the OLD `list_attempts(job_id=root_job_id)`
-    + `max(attempt_number)` query would have returned exactly that stale
-    FAILED attempt (the only/highest attempt_number row for that job_id).
-    The real, live carrier is the child's CLAIMED attempt."""
-    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    runtime.workers.register_worker(
-        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture",
-    )
-    root = runtime.jobs.create_job("aggregation root probe")
-    root_lease = runtime.attempts.claim_job(root.job_id, worker_id="worker-a")
-    assert root_lease is not None
-    runtime.attempts.fail_attempt(
-        root_lease.attempt.attempt_id,
-        fence_generation=root_lease.attempt.fence_generation,
-        lease_token=root_lease.lease_token,
-        payload=ccr.executive_runtime.JobPayload(summary="stale", errors=["simulated"]),
-    )
-    runtime.jobs.requeue_job(root.job_id)  # clears root.current_attempt_id
-
-    child = runtime.jobs.create_job("carrier child", parent_job_id=root.job_id)
-    child_lease = runtime.attempts.claim_job(child.job_id, worker_id="worker-a")
-    assert child_lease is not None
-
-    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
-    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-
-    assert len(rows) == 1
-    # `max(attempt_number)` over `list_attempts(job_id=root.job_id)` alone
-    # is exactly the stale FAILED root attempt -- the wrong answer.
-    assert rows[0]["attempt_state"] == "CLAIMED"
-    assert rows[0]["attempt_state"] != "FAILED"
-
-
-def test_gather_dispatch_evidence_zero_attempt_candidates_stays_unknown(tmp_path):
-    """No job in the tree carries a live current attempt: `attempt_state`
-    must never appear (binding resolution may still contribute its own,
-    separately-attributed UNKNOWN evidence -- that is unrelated to attempt
-    selection and is unchanged by this blocker)."""
-    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    root = runtime.jobs.create_job("aggregation root probe")
-    runtime.jobs.create_job("carrier child, never claimed", parent_job_id=root.job_id)
-
-    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
-    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-    if rows:
-        assert "attempt_state" not in rows[0]
-        assert "terminal_return_state" not in rows[0]
-
-
-def test_gather_dispatch_evidence_multiple_attempt_candidates_never_picks_one(tmp_path):
-    """Two viable child carriers under the same root: reconciliation-
-    required, never a pick -- `attempt_state` must not appear at all."""
-    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    runtime.workers.register_worker(
-        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture",
-    )
-    runtime.workers.register_worker(
-        "worker-b", provider="openai-codex", account_label="account-b", worker_type="fixture",
-    )
-    root = runtime.jobs.create_job("aggregation root probe")
-    child_one = runtime.jobs.create_job("carrier child one", parent_job_id=root.job_id)
-    child_two = runtime.jobs.create_job("carrier child two", parent_job_id=root.job_id)
-    lease_one = runtime.attempts.claim_job(child_one.job_id, worker_id="worker-a")
-    lease_two = runtime.attempts.claim_job(child_two.job_id, worker_id="worker-b")
-    assert lease_one is not None and lease_two is not None
-
-    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
-    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-    if rows:
-        assert "attempt_state" not in rows[0]
-
-
-def test_gather_dispatch_evidence_finds_a_child_job_wake_obligation_under_the_root(tmp_path):
-    """Blocker 3: `Event.job_id` records the SOURCE job (the child), while
-    the obligation's own `root_job_id` names the responsibility root -- the
-    OLD `list_events(job_id=root_job_id)` filter would have found nothing
-    for a child-sourced obligation."""
-    from control_plane import wake_events, wake_ledger as wl
-
-    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    root = runtime.jobs.create_job("aggregation root probe")
-    child = runtime.jobs.create_job("carrier child", parent_job_id=root.job_id)
-
-    obligation = wake_events.mint_obligation(
-        wake_kind="review_required",
-        source_kind="executive_runtime_event",
-        source_ref=f"runtime:job:{child.job_id}:1",
-        declared_target_seat="ceo",
-        job_id=child.job_id,
-        root_job_id=root.job_id,
-    )
-    repo = ccr.wake_persist.WakeLedgerRepository(runtime)
-    repo.append_record(wl.requested_record(obligation), obligation=obligation)
-
-    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
-    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-
-    assert len(rows) == 1
-    assert rows[0]["obligation_status"] == "PENDING_RETRYABLE"
-
-
-def test_gather_dispatch_evidence_two_child_obligations_under_the_root_stay_ambiguous(tmp_path):
-    from control_plane import wake_events, wake_ledger as wl
-
-    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    root = runtime.jobs.create_job("aggregation root probe")
-    child_one = runtime.jobs.create_job("carrier child one", parent_job_id=root.job_id)
-    child_two = runtime.jobs.create_job("carrier child two", parent_job_id=root.job_id)
-
-    repo = ccr.wake_persist.WakeLedgerRepository(runtime)
-    for index, child in enumerate((child_one, child_two), start=1):
-        obligation = wake_events.mint_obligation(
-            wake_kind="review_required",
-            source_kind="executive_runtime_event",
-            source_ref=f"runtime:job:{child.job_id}:{index}",
-            declared_target_seat="ceo",
-            job_id=child.job_id,
-            root_job_id=root.job_id,
-        )
-        repo.append_record(wl.requested_record(obligation), obligation=obligation)
-
-    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
-    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-    if rows:
-        assert "obligation_status" not in rows[0]
-
-
-def _persist_terminal_return_applied(
-    runtime, *, job_id, attempt_id, worker_id, root_job_id, terminal_digest="a" * 64,
+def test_cr1a_gather_delegates_one_exact_candidate_to_w3c_in_one_snapshot(
+    tmp_path, monkeypatch
 ):
-    with runtime.store.transaction() as connection:
-        runtime.store.append_event(
-            connection,
-            aggregate_type="terminal_return_projection",
-            aggregate_id=attempt_id,
-            event_type="EXECUTIVE_TERMINAL_RETURN_APPLIED",
-            actor="executive_control_service",
-            job_id=job_id,
-            attempt_id=attempt_id,
-            worker_id=worker_id,
-            payload={
-                "schema_version": "mastermind.executive_terminal_return_projection/v1",
-                "job_id": job_id,
-                "attempt_id": attempt_id,
-                "worker_id": worker_id,
-                "root_job_id": root_job_id,
-                "message_key": "probe-key",
-                "terminal_digest": terminal_digest,
-                "candidate_digest": "b" * 64,
-            },
+    from types import SimpleNamespace
+
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    seen = {"connections": [], "w3c": []}
+    original_read = runtime.store.read
+
+    def counted_read():
+        context = original_read()
+
+        class CountedContext:
+            def __enter__(self):
+                connection = context.__enter__()
+                seen["connections"].append(connection)
+                return connection
+
+            def __exit__(self, *args):
+                return context.__exit__(*args)
+
+        return CountedContext()
+
+    monkeypatch.setattr(runtime.store, "read", counted_read)
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "at",
+        classmethod(lambda cls, root, create=False: runtime),
+    )
+
+    def current_capacity_commitment(self, source_root_job_id, *, connection=None):
+        assert self is runtime
+        assert source_root_job_id == "JOB-ROOT-1"
+        assert connection is seen["connections"][0]
+        return SimpleNamespace(
+            source_root_job_id="JOB-ROOT-1",
+            responsibility_ref="WS:W3C-ONE",
+            carrier_job_id="JOB-CARRIER-1",
+            committed_carrier_attempt_id="ATT-CARRIER-1",
+            selected_worker_id="WORKER-1",
         )
 
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "current_capacity_commitment",
+        current_capacity_commitment,
+        raising=False,
+    )
 
-def test_gather_dispatch_evidence_consumes_a_valid_terminal_return_applied_receipt(tmp_path):
-    """Blocker 4: a valid APPLIED receipt matching the exact root/job/
-    attempt/worker lets a terminal Attempt carry `terminal_return_state`
-    so the projection may render RETURNED."""
+    def canonical_read(*, runtime, source_root_job_id, candidate, connection):
+        assert source_root_job_id == "JOB-ROOT-1"
+        assert connection is seen["connections"][0]
+        seen["w3c"].append(candidate)
+        return ccr.executive_dialogue_observation.CanonicalTerminalWakeRead(
+            state="RESOLVED",
+            reason="CANONICAL_TERMINAL_WAKE_RESOLVED",
+            terminal_state="APPLIED",
+            wake_state="TARGET_ACKNOWLEDGED",
+            terminal_applied=True,
+            source_receipt=ccr.executive_dialogue_observation.CanonicalSourceReceipt(
+                observed_at="2026-09-03T10:00:00Z",
+                freshness="SOURCE_EVIDENCE_TIME",
+                snapshot_digest="a" * 64,
+            ),
+        )
+
+    monkeypatch.setattr(
+        ccr.executive_dialogue_observation,
+        "read_runtime_canonical_terminal_wake",
+        canonical_read,
+    )
+
+    rows = ccr._gather_dispatch_evidence(
+        tmp_path,
+        [{"responsibility_ref": "WS:W3C-ONE", "root_job_id": "JOB-ROOT-1"}],
+        "2026-09-03T12:00:00Z",
+    )
+
+    assert len(seen["connections"]) == 1
+    assert len(seen["w3c"]) == 1
+    candidate = seen["w3c"][0]
+    assert isinstance(
+        candidate, ccr.executive_dialogue_observation.CanonicalTerminalWakeCandidate
+    )
+    assert (
+        candidate.root_job_id,
+        candidate.job_id,
+        candidate.attempt_id,
+        candidate.worker_id,
+    ) == ("JOB-ROOT-1", "JOB-CARRIER-1", "ATT-CARRIER-1", "WORKER-1")
+    assert rows == [
+        {
+            "responsibility_ref": "WS:W3C-ONE",
+            "root_job_id": "JOB-ROOT-1",
+            "runtime_root_state": "RESOLVED",
+            "carrier_state": "RESOLVED",
+            "carrier_reason": "C2_CURRENT_CAPACITY_COMMITMENT",
+            "w3c_state": "RESOLVED",
+            "w3c_reason": "CANONICAL_TERMINAL_WAKE_RESOLVED",
+            "w3c_terminal_state": "APPLIED",
+            "w3c_wake_state": "TARGET_ACKNOWLEDGED",
+            "w3c_terminal_applied": "true",
+            "w3c_source_observed_at": "2026-09-03T10:00:00Z",
+            "w3c_source_freshness": "SOURCE_EVIDENCE_TIME",
+            "w3c_snapshot_digest": "a" * 64,
+            "w3c_terminal_source_owner": "executive_terminal_return",
+            "w3c_wake_source_owner": "wake_ledger",
+        }
+    ]
+
+
+def test_cr1a_missing_protected_c2_reader_is_explicit_owner_hold(tmp_path):
     runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    runtime.workers.register_worker(
-        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture",
-    )
-    root = runtime.jobs.create_job("carrier probe")
-    lease = runtime.attempts.claim_job(root.job_id, worker_id="worker-a")
-    assert lease is not None
-    runtime.jobs.complete_job(
-        root.job_id,
-        ccr.executive_runtime.JobPayload(summary="done", current_state="complete"),
+    assert not hasattr(type(runtime), "current_capacity_commitment")
+
+    rows = ccr._gather_dispatch_evidence(
+        tmp_path,
+        [{"responsibility_ref": "WS:C2-HELD", "root_job_id": "JOB-ROOT-2"}],
+        "2026-09-03T12:00:00Z",
     )
 
-    _persist_terminal_return_applied(
-        runtime, job_id=root.job_id, attempt_id=lease.attempt.attempt_id,
-        worker_id="worker-a", root_job_id=root.job_id,
-    )
+    assert rows == [
+        {
+            "responsibility_ref": "WS:C2-HELD",
+            "root_job_id": "JOB-ROOT-2",
+            "runtime_root_state": "RESOLVED",
+            "carrier_state": "OWNER_HELD",
+            "carrier_reason": "C2_POSITIVE_OWNER_HELD",
+            "w3c_state": "UNAVAILABLE",
+            "w3c_reason": "C2_EXACT_CANDIDATE_UNAVAILABLE",
+            "w3c_terminal_state": "UNAVAILABLE",
+            "w3c_wake_state": "UNAVAILABLE",
+            "w3c_terminal_applied": "false",
+        }
+    ]
 
-    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
-    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-    assert len(rows) == 1
-    assert rows[0]["terminal_return_state"] == "APPLIED"
-    assert rows[0]["attempt_state"] == "COMPLETED"
 
-
-def test_gather_dispatch_evidence_ignores_a_terminal_return_applied_receipt_with_mismatched_worker(tmp_path):
-    """A terminal Attempt with an APPLIED receipt that names a DIFFERENT
-    worker must never be consumed -- terminal Attempt status alone (or a
-    mismatched receipt) stays insufficient."""
+def test_cr1a_instance_callback_cannot_substitute_for_protected_c2_owner(
+    tmp_path, monkeypatch
+):
     runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    runtime.workers.register_worker(
-        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture",
+    object.__setattr__(
+        runtime,
+        "current_capacity_commitment",
+        lambda *_args, **_kwargs: pytest.fail("instance callback must not run"),
     )
-    runtime.workers.register_worker(
-        "worker-b", provider="openai-codex", account_label="account-b", worker_type="fixture",
-    )
-    root = runtime.jobs.create_job("carrier probe")
-    lease = runtime.attempts.claim_job(root.job_id, worker_id="worker-a")
-    assert lease is not None
-    runtime.jobs.complete_job(
-        root.job_id,
-        ccr.executive_runtime.JobPayload(summary="done", current_state="complete"),
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "at",
+        classmethod(lambda cls, root, create=False: runtime),
     )
 
-    _persist_terminal_return_applied(
-        runtime, job_id=root.job_id, attempt_id=lease.attempt.attempt_id,
-        worker_id="worker-b", root_job_id=root.job_id,
+    rows = ccr._gather_dispatch_evidence(
+        tmp_path,
+        [{"responsibility_ref": "WS:C2-INJECT", "root_job_id": "JOB-ROOT-3"}],
+        "2026-09-03T12:00:00Z",
     )
 
-    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
-    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-    assert len(rows) == 1
+    assert rows[0]["carrier_state"] == "OWNER_HELD"
+    assert rows[0]["w3c_state"] == "UNAVAILABLE"
     assert "terminal_return_state" not in rows[0]
-    assert rows[0]["attempt_state"] == "COMPLETED"
 
 
-# ---------------------------------------------------------------------------
-# Non-author review of 4ec8c2b1: two blocking connectivity defects
-# ---------------------------------------------------------------------------
-
-
-class _FakeJob:
-    """Only the fields the candidate resolver reads."""
-
-    def __init__(self, job_id, parent_job_id, root_job_id, current_attempt_id):
-        self.job_id = job_id
-        self.parent_job_id = parent_job_id
-        self.root_job_id = root_job_id
-        self.current_attempt_id = current_attempt_id
-
-
-def _cand_ids(jobs):
-    return sorted(j.job_id for j in ccr._executable_attempt_candidates(jobs))
-
-
-def test_review_aggregation_root_retaining_its_attempt_does_not_beat_the_carrier():
-    """`current_attempt_id` is STICKY: a Runtime CHECK keeps it non-null for
-    every non-QUEUED state once a job has been claimed.  So the normal COO
-    shape — an aggregation root that is itself RUNNING or COMPLETED plus a
-    live child carrier — produced TWO candidates and the whole attempt
-    dimension was dropped: neither the root nor the carrier won.
-
-    The prior test for this only passed because it requeued the root first,
-    which clears `current_attempt_id` and removes the very condition that
-    breaks.  This one uses the real topology.
-    """
-    root = _FakeJob("JOB-001", None, "JOB-001", "ATT-root-stale")
-    carrier = _FakeJob("JOB-002", "JOB-001", "JOB-001", "ATT-carrier")
-
-    assert _cand_ids([root, carrier]) == ["JOB-002"]
-    # and through a 3-deep chain the deepest executable job still wins
-    deep = _FakeJob("JOB-003", "JOB-002", "JOB-001", "ATT-deep")
-    assert _cand_ids([root, carrier, deep]) == ["JOB-003"]
-
-
-def test_review_two_sibling_carriers_remain_a_genuine_ambiguity():
-    """Dropping ancestors must not collapse a real multi-carrier ambiguity."""
-    root = _FakeJob("JOB-001", None, "JOB-001", "ATT-root")
-    a = _FakeJob("JOB-002", "JOB-001", "JOB-001", "ATT-a")
-    b = _FakeJob("JOB-004", "JOB-001", "JOB-001", "ATT-b")
-
-    assert _cand_ids([root, a, b]) == ["JOB-002", "JOB-004"]
-
-
-def test_review_a_lone_root_with_a_live_attempt_still_wins():
-    """Positive control: the ancestor rule must not refuse everything.
-
-    A guard that drops every candidate would pass both tests above for the
-    wrong reason.
-    """
-    root = _FakeJob("JOB-001", None, "JOB-001", "ATT-root")
-
-    assert _cand_ids([root]) == ["JOB-001"]
-    assert _cand_ids([_FakeJob("JOB-009", None, "JOB-009", None)]) == []
-
-
-def test_review_a_truncated_wake_scan_reports_ambiguity_not_the_first_found(tmp_path):
-    """Blocker 3 follow-up: the 20-event budget is spent across the WHOLE
-    tree and counts rejected envelopes too, so exhausting it on an early
-    child hid a genuine obligation on a later one and the row asserted a
-    definite `obligation_status` picked by scan order.
-
-    Truncation cannot prove a second obligation is absent, so it must read as
-    ambiguity. Constructed as the review did: enough foreign-envelope events
-    to exhaust the budget, plus two genuine obligations on different children.
-    """
-    from control_plane import wake_events, wake_ledger as wl
-
+def test_cr1a_conflicting_runtime_roots_never_read_c2_or_w3c(
+    tmp_path, monkeypatch
+):
     runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    root = runtime.jobs.create_job("aggregation root")
-    early = runtime.jobs.create_job("early child", parent_job_id=root.job_id)
-    late = runtime.jobs.create_job("late child", parent_job_id=root.job_id)
-    repo = ccr.wake_persist.WakeLedgerRepository(runtime)
 
-    def _mint(job_id, root_job_id, n):
-        ob = wake_events.mint_obligation(
-            wake_kind="review_required",
-            source_kind="executive_runtime_event",
-            source_ref=f"runtime:job:{job_id}:{n}",
-            declared_target_seat="ceo",
-            job_id=job_id,
-            root_job_id=root_job_id,
-        )
-        repo.append_record(wl.requested_record(ob), obligation=ob)
+    def forbidden_commitment(*_args, **_kwargs):
+        pytest.fail("a conflicting WS-to-root join must not ask C2 for a carrier")
 
-    # Foreign envelopes on the EARLY child: rejected by the root filter, but
-    # they still consume the shared budget.  The foreign root must itself be
-    # a canonical JOB-* identity or the obligation minter refuses it.
-    other_root = runtime.jobs.create_job("unrelated root")
-    # Exactly 19, so genuine A becomes the 20th event seen and IS admitted,
-    # while the budget dies before the later child's genuine B is reached.
-    # (A larger count exhausts the budget before A too, leaving the set empty
-    # and the test passing for a reason unrelated to the guard.)
-    for n in range(1, 20):
-        _mint(early.job_id, other_root.job_id, n)
-    _mint(early.job_id, root.job_id, 100)   # genuine A
-    _mint(late.job_id, root.job_id, 101)    # genuine B
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "current_capacity_commitment",
+        forbidden_commitment,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ccr.executive_dialogue_observation,
+        "read_runtime_canonical_terminal_wake",
+        lambda **_kwargs: pytest.fail("W3C must not receive a conflicted root"),
+    )
 
-    cards = [{"responsibility_ref": "WS:PROBE", "root_job_id": root.job_id}]
-    rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
+    rows = ccr._gather_dispatch_evidence(
+        tmp_path,
+        [{
+            "responsibility_ref": "WS:ROOT-CONFLICT",
+            "root_job_id": None,
+            "root_job_candidates": ["JOB-ROOT-A", "JOB-ROOT-B"],
+            "root_job_ambiguous": True,
+        }],
+        "2026-09-03T12:00:00Z",
+    )
 
-    # Pin that a row EXISTS before asserting about its contents — the loop
-    # alone would pass trivially if the row were ever dropped.
-    assert len(rows) == 1
-    for row in rows:
-        assert "obligation_status" not in row, (
-            "a truncated scan asserted a definite obligation status"
-        )
-
-
-def test_review_ancestor_rule_is_bounded_on_corrupt_parent_chains():
-    """The ancestor walk reads caller-supplied `parent_job_id` links, so a
-    corrupt chain must not hang it or make it guess.
-
-    A cycle means no node can be identified as the executable frontier, so
-    every candidate is dropped and the attempt dimension reads unknown --
-    fail-closed, which is the same direction every other refusal here takes.
-    A parent that simply lives outside this tree is NOT corruption and must
-    not cause a drop.
-    """
-    def job(job_id, parent, attempt="ATT-x"):
-        return _FakeJob(job_id, parent, "JOB-ROOT", attempt)
-
-    # self-parent: that node aggregates itself, the other survives
-    assert _cand_ids([job("JOB-001", "JOB-001"), job("JOB-002", "JOB-001")]) == ["JOB-002"]
-    # two- and three-node cycles: no frontier is identifiable, so none is picked
-    assert _cand_ids([job("JOB-001", "JOB-002"), job("JOB-002", "JOB-001")]) == []
-    assert _cand_ids([
-        job("JOB-001", "JOB-003"), job("JOB-002", "JOB-001"), job("JOB-003", "JOB-002"),
-    ]) == []
-    # A parent outside the tree is ordinary, not corrupt.  TWO candidates,
-    # deliberately: a single candidate returns at the `len < 2` short-circuit
-    # and never reaches the walk this test claims to pin.
-    assert _cand_ids([
-        job("JOB-010", "JOB-999"), job("JOB-011", "JOB-998"),
-    ]) == ["JOB-010", "JOB-011"]
-
-
-def test_review_a_dead_descendant_never_evicts_a_live_ancestor():
-    """`current_attempt_id` is sticky on BOTH sides.
-
-    The first ancestor rule let a FAILED/COMPLETED child evict a genuinely
-    RUNNING root, so a live responsibility rendered as terminal — worse than
-    the silence it replaced, because it substituted a confident wrong answer
-    for "cannot tell". Live candidates are preferred outright: a finished
-    child beside a running parent is an ordinary state, not an ambiguity.
-    """
-    class _J(_FakeJob):
-        def __init__(self, job_id, parent, attempt, status):
-            super().__init__(job_id, parent, "JOB-001", attempt)
-            self.status = status
-
-    root_live = _J("JOB-001", None, "ATT-root", "RUNNING")
-    child_dead = _J("JOB-002", "JOB-001", "ATT-dead", "FAILED")
-    assert _cand_ids([root_live, child_dead]) == ["JOB-001"]
-
-    for terminal in ("FAILED", "LOST", "COMPLETED", "CANCELLED"):
-        dead = _J("JOB-002", "JOB-001", "ATT-dead", terminal)
-        assert _cand_ids([root_live, dead]) == ["JOB-001"], terminal
-
-    # a LIVE child still evicts the root — the original repair must survive
-    child_live = _J("JOB-002", "JOB-001", "ATT-live", "RUNNING")
-    assert _cand_ids([root_live, child_live]) == ["JOB-002"]
-
-    # all-terminal tree: no live candidate, so the ancestor rule still applies
-    root_dead = _J("JOB-001", None, "ATT-a", "COMPLETED")
-    assert _cand_ids([root_dead, child_dead]) == ["JOB-002"]
-
-
-def test_review_the_ancestor_walk_is_transitive_not_direct_parent_only():
-    """A QUEUED intermediate holds no attempt, so the grandchild's ancestor
-    link to the root is only visible by walking the chain. A direct-parent-only
-    implementation passes every other test in this file."""
-    class _J(_FakeJob):
-        def __init__(self, job_id, parent, attempt):
-            super().__init__(job_id, parent, "JOB-001", attempt)
-            self.status = "RUNNING"
-
-    root = _J("JOB-001", None, "ATT-root")
-    middle = _FakeJob("JOB-002", "JOB-001", "JOB-001", None)  # QUEUED, no attempt
-    grandchild = _J("JOB-003", "JOB-002", "ATT-gk")
-
-    assert _cand_ids([root, middle, grandchild]) == ["JOB-003"]
+    assert rows[0]["runtime_root_state"] == "CONFLICT"
+    assert rows[0]["carrier_state"] == "OWNER_HELD"
+    assert rows[0]["w3c_state"] == "UNAVAILABLE"
 
 
 @pytest.mark.parametrize(
-    "status", [None, "", "UNKNOWN_FUTURE_STATE", 123, object()],
+    ("field", "value"),
+    [
+        ("source_root_job_id", "JOB-WRONG-ROOT"),
+        ("responsibility_ref", "WS:WRONG"),
+        ("carrier_job_id", ""),
+        ("committed_carrier_attempt_id", None),
+        ("selected_worker_id", 7),
+    ],
 )
-def test_review_an_unclassifiable_status_never_evicts_a_known_live_ancestor(status):
-    """Liveness is a positive allowlist, not a terminal denylist.
+def test_cr1a_nonexact_c2_commitment_never_reaches_w3c(
+    tmp_path, monkeypatch, field, value
+):
+    from types import SimpleNamespace
 
-    A denylist treats an absent, empty, unrecognised or future status as
-    live, so such a descendant would evict a demonstrably RUNNING root and
-    the row would report a state nobody verified over one that was. Reporting
-    the ancestor we know is running beats reporting a descendant we cannot
-    classify.
-    """
-    class _J(_FakeJob):
-        def __init__(self, job_id, parent, attempt, job_status):
-            super().__init__(job_id, parent, "JOB-001", attempt)
-            self.status = job_status
-
-    root = _J("JOB-001", None, "ATT-root", "RUNNING")
-    child = _J("JOB-002", "JOB-001", "ATT-child", status)
-
-    assert _cand_ids([root, child]) == ["JOB-001"]
-
-
-def test_review_an_all_unclassifiable_tree_still_falls_back_to_the_ancestor_rule():
-    """Positive control for the allowlist: when nothing is classifiable there
-    is no live candidate, and the ancestor rule must still resolve rather
-    than the whole dimension going silent."""
-    class _J(_FakeJob):
-        def __init__(self, job_id, parent, attempt):
-            super().__init__(job_id, parent, "JOB-001", attempt)
-            self.status = "SOME_FUTURE_STATUS"
-
-    assert _cand_ids([
-        _J("JOB-001", None, "ATT-a"), _J("JOB-002", "JOB-001", "ATT-b"),
-    ]) == ["JOB-002"]
-
-
-def test_review_liveness_never_drifts_from_the_runtimes_own_terminal_vocabulary():
-    """The Control Room must not hold a second opinion about what "finished"
-    means.
-
-    RATE_LIMITED was allowlisted as live while the Runtime's own
-    `_TERMINAL_JOB_STATUSES` counts it terminal and its `_living_child_rows`
-    excludes it from "living" -- so a rate-limited child evicted a RUNNING
-    root and the row asserted a terminal state over a live responsibility.
-    Requeuability is not the criterion: FAILED and LOST are equally
-    requeuable and are correctly dead.
-
-    This pins the two sets against each other so the vocabularies cannot
-    drift apart again silently.
-    """
-    runtime_terminal = {
-        getattr(status, "value", status)
-        for status in ccr.executive_runtime._TERMINAL_JOB_STATUSES
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    material = {
+        "source_root_job_id": "JOB-ROOT-4",
+        "responsibility_ref": "WS:C2-EXACT",
+        "carrier_job_id": "JOB-CARRIER-4",
+        "committed_carrier_attempt_id": "ATT-CARRIER-4",
+        "selected_worker_id": "WORKER-4",
     }
+    material[field] = value
 
-    assert ccr._LIVE_JOB_STATUSES & runtime_terminal == set(), (
-        "a status the Runtime calls terminal is being treated as live"
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "current_capacity_commitment",
+        lambda self, source_root_job_id, *, connection=None: SimpleNamespace(
+            **material
+        ),
+        raising=False,
     )
-    assert "RATE_LIMITED" in runtime_terminal  # the case that actually drifted
-
-    # Bidirectional, not just disjoint.  Disjointness alone catches a status
-    # the Runtime starts calling terminal, but NOT a future live status the
-    # allowlist simply lacks -- an independent review proved that adding
-    # "PAUSED" to the allowlist, or shrinking it to {"RUNNING"}, left this
-    # test green. Requiring the two sets to PARTITION JobStatus exactly means
-    # neither vocabulary can gain or lose a member unnoticed.
-    all_statuses = {
-        getattr(status, "value", status)
-        for status in ccr.executive_runtime.JobStatus
-    }
-    assert ccr._LIVE_JOB_STATUSES | runtime_terminal == all_statuses, (
-        "the live and terminal sets must exactly partition JobStatus"
+    monkeypatch.setattr(
+        ccr.executive_dialogue_observation,
+        "read_runtime_canonical_terminal_wake",
+        lambda **_kwargs: pytest.fail("W3C must receive only an exact candidate"),
     )
-    assert ccr._LIVE_JOB_STATUSES <= all_statuses, "a non-JobStatus string leaked in"
+
+    rows = ccr._gather_dispatch_evidence(
+        tmp_path,
+        [{"responsibility_ref": "WS:C2-EXACT", "root_job_id": "JOB-ROOT-4"}],
+        "2026-09-03T12:00:00Z",
+    )
+
+    assert rows[0]["carrier_state"] == "UNKNOWN"
+    assert rows[0]["carrier_reason"] == "C2_COMMITMENT_CONFLICT"
+    assert rows[0]["w3c_state"] == "CONFLICT"
+    assert rows[0]["w3c_reason"] == "C2_EXACT_CANDIDATE_CONFLICT"
 
 
-def test_review_a_rate_limited_child_does_not_evict_a_running_root():
-    """The concrete shape the drift produced."""
-    class _J(_FakeJob):
-        def __init__(self, job_id, parent, attempt, job_status):
-            super().__init__(job_id, parent, "JOB-001", attempt)
-            self.status = job_status
+def test_cr1a_gather_is_card_bounded_before_owner_reads(tmp_path, monkeypatch):
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    seen_roots = []
 
-    root = _J("JOB-001", None, "ATT-root", "RUNNING")
-    limited = _J("JOB-002", "JOB-001", "ATT-limited", "RATE_LIMITED")
+    def commitment(self, source_root_job_id, *, connection=None):
+        seen_roots.append(source_root_job_id)
+        return None
 
-    assert _cand_ids([root, limited]) == ["JOB-001"]
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "current_capacity_commitment",
+        commitment,
+        raising=False,
+    )
+    cards = [
+        {"responsibility_ref": f"WS:BOUNDED-{index}", "root_job_id": f"JOB-{index}"}
+        for index in range(ccr._DISPATCH_EVIDENCE_MAX_CARDS + 17)
+    ]
+
+    rows = ccr._gather_dispatch_evidence(
+        tmp_path, cards, "2026-09-03T12:00:00Z"
+    )
+
+    assert len(rows) == ccr._DISPATCH_EVIDENCE_MAX_CARDS
+    assert len(seen_roots) == ccr._DISPATCH_EVIDENCE_MAX_CARDS
+    assert rows[-1]["responsibility_ref"] == "WS:BOUNDED-199"
+
+
+def test_cr1a_gather_has_no_raw_event_or_tree_election_path() -> None:
+    source = Path(ccr.__file__).read_text(encoding="utf-8")
+    gather = source[source.index("def _gather_dispatch_evidence(") :]
+    gather = gather[: gather.index("\n\n# ---------------------------------------------------------------------------")]
+
+    assert ".events" not in gather
+    assert "list_events" not in gather
+    assert "list_attempts" not in gather
+    assert "_executable_attempt_candidates" not in source
+    assert "EXECUTIVE_TERMINAL_RETURN_APPLIED" not in gather

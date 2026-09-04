@@ -1282,22 +1282,12 @@
   // landed, which is exactly the kind of stale comment that tells a reviewer
   // a live behaviour cannot happen.)
   //
-  // What the states mean in practice, stated without over-claiming — an
-  // earlier version of this note said "every real card reads UNKNOWN because
-  // there is no Dialogue receipt owner", which was an absolute claim about a
-  // contingent fact, i.e. the same defect it replaced.
-  //
-  // The gather DOES supply attempt/obligation/binding evidence for any card
-  // with a real root_job_id, so such a card reads STARTED,
-  // RUNTIME_BINDING_RECONCILIATION_REQUIRED, DELIVERY_UNCONSUMED and so on.
-  // On today's Agent-OS artifact every card's root_job_id is null, so the
-  // gather has nothing to join on and each card reads UNKNOWN with reason
-  // dispatch_evidence_not_supplied — an artifact property, not a law.
-  //
-  // Separately: no Dialogue return-receipt owner exists yet, so RETURNED /
-  // CONTINUED / STOPPED are unreachable from gathered evidence regardless.
-  // Any unsafe state suppresses the owed-action Open control by design;
-  // Detail stays reachable throughout.
+  // The proof chain remains visible as three independent readings. The
+  // responsibility mapper owns the Runtime root, C2 owns the exact carrier,
+  // and W3C owns canonical terminal/Wake truth. On the current protected base
+  // C2's positive reader is owner-held, which keeps W3C unavailable rather
+  // than letting this surface infer a carrier from job-tree shape. Any unsafe
+  // state suppresses the owed-action Open control; Detail stays reachable.
   // Every function below remains undefined-safe.
   var AU_DISPATCH = {
     WAITING_CAPACITY: "Waiting for capacity",
@@ -1341,6 +1331,41 @@
     EFFECT_UNKNOWN: true,
     UNKNOWN: true,
   };
+  var AU_RUNTIME_ROOT = {
+    RESOLVED: { text: "ROOT RESOLVED", variant: "is-ok" },
+    UNKNOWN: { text: "ROOT UNKNOWN", variant: "is-dim" },
+    CONFLICT: { text: "ROOT CONFLICT", variant: "is-danger" },
+  };
+  var AU_CARRIER = {
+    RESOLVED: { text: "C2 CARRIER RESOLVED", variant: "is-ok" },
+    OWNER_HELD: { text: "C2 OWNER HELD", variant: "is-dim" },
+    UNKNOWN: { text: "C2 CARRIER UNKNOWN", variant: "is-dim" },
+  };
+  var AU_W3C = {
+    RESOLVED: { text: "W3C RESOLVED", variant: "is-ok" },
+    ABSENT: { text: "W3C ABSENT", variant: "is-dim" },
+    UNAVAILABLE: { text: "W3C UNAVAILABLE", variant: "is-dim" },
+    CONFLICT: { text: "W3C CONFLICT", variant: "is-danger" },
+    AMBIGUOUS: { text: "W3C AMBIGUOUS", variant: "is-danger" },
+    EFFECT_UNKNOWN: { text: "W3C EFFECT UNKNOWN", variant: "is-danger" },
+  };
+
+  function auRuntimeRootChip(card) {
+    var spec = AU_RUNTIME_ROOT[card.runtime_root_state];
+    return spec ? chip(spec.text, spec.variant) : null;
+  }
+
+  function auCarrierChip(card) {
+    var carrier = (card.dispatch || {}).carrier;
+    var spec = carrier && AU_CARRIER[carrier.state];
+    return spec ? chip(spec.text, spec.variant) : null;
+  }
+
+  function auW3cChip(card) {
+    var w3c = (card.dispatch || {}).w3c;
+    var spec = w3c && AU_W3C[w3c.state];
+    return spec ? chip(spec.text, spec.variant) : null;
+  }
 
   // True when this card's dispatch read is one of the five named-unsafe
   // states, or when Law 9's "stale/unknown contributing source" made the
@@ -1463,6 +1488,12 @@
     marks.appendChild(auPlacementChip(card));
     var dispatchChip = auDispatchChip(card);
     if (dispatchChip) marks.appendChild(dispatchChip);
+    var rootChip = auRuntimeRootChip(card);
+    if (rootChip) marks.appendChild(rootChip);
+    var carrierChip = auCarrierChip(card);
+    if (carrierChip) marks.appendChild(carrierChip);
+    var w3cChip = auW3cChip(card);
+    if (w3cChip) marks.appendChild(w3cChip);
     var freshness = AU_FRESHNESS_CHIP[card.freshness];
     if (freshness) marks.appendChild(chip(freshness.text, freshness.variant));
     var status = AU_QUERY_CHIP[card.query_status];
@@ -1840,6 +1871,32 @@
         detailLine(node, "token " + safeText(placement.value) + " · reason " + safeText(placement.reason, "not recorded"), true);
       }
       detailLine(node, "wake " + (AU_WAKE[card.wake_outcome] || "not observable"), true);
+    });
+    detailRail(rails, "Dispatch proof", function (node) {
+      var dispatch = card.dispatch || {};
+      var carrier = dispatch.carrier || null;
+      var w3c = dispatch.w3c || null;
+      detailLine(node, "Runtime root " + safeText(card.runtime_root_state, "UNKNOWN"), false);
+      detailLine(node, "dispatch " + safeText(dispatch.dispatch_state, "UNKNOWN") + " · " + safeText(dispatch.reason, "reason not recorded"), true);
+      if (carrier) {
+        detailLine(node, "C2 carrier " + safeText(carrier.state, "UNKNOWN") + " · " + safeText(carrier.reason, "reason not recorded"), true);
+      } else {
+        detailLine(node, "C2 carrier not observed", true);
+      }
+      if (w3c) {
+        detailLine(node, "W3C " + safeText(w3c.state, "UNKNOWN") + " · terminal " + safeText(w3c.terminal_state, "UNKNOWN") + " · wake " + safeText(w3c.wake_state, "UNKNOWN"), true);
+        var receipt = dispatch.w3c.source_receipt;
+        if (receipt) {
+          detailLine(node, "source time " + safeText(receipt.observed_at, "not recorded") + " · " + safeText(receipt.freshness, "freshness unknown"), true);
+          detailLine(node, "snapshot " + safeText(receipt.snapshot_digest, "not recorded"), true);
+          detailLine(node, "terminal owner " + safeText(receipt.terminal_source_owner, "not recorded"), true);
+          detailLine(node, "wake owner " + safeText(receipt.wake_source_owner, "not recorded"), true);
+        } else {
+          detailLine(node, "No canonical W3C source receipt.", true);
+        }
+      } else {
+        detailLine(node, "W3C not observed", true);
+      }
     });
     detailRail(rails, "Worker", function (node) { auRuntimeRail(node, card.current_worker, "silent — no worker runtime is recorded"); });
     detailRail(rails, "Sol target", function (node) { auRuntimeRail(node, card.current_sol_target, "silent — no Sol target runtime is recorded"); });

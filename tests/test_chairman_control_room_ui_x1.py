@@ -1220,6 +1220,68 @@ def test_dispatch_behavioural_state_renders_visibly() -> None:
     assert out["noEvidence"] is None, "no dispatch evidence yet must render nothing, not a guess"
 
 
+def test_cr1a_proof_dimensions_render_as_distinct_list_chips() -> None:
+    """Runtime-root, C2 carrier, and W3C truth stay visibly distinct.
+
+    In particular, the current protected-base C2 hold must never be flattened
+    into a generic dispatch UNKNOWN chip that could hide which owner is absent.
+    """
+    harness = """
+    function isBlank(v) { return v === null || v === undefined || v === ""; }
+    function el(tag, opts) {
+      opts = opts || {};
+      return { tag: tag, className: opts.className || "", text: opts.text || "" };
+    }
+    %s
+    %s
+    %s
+    %s
+    %s
+    %s
+    var held = {
+      runtime_root_state: "RESOLVED",
+      dispatch: {
+        carrier: { state: "OWNER_HELD", reason: "C2_POSITIVE_OWNER_HELD" },
+        w3c: { state: "UNAVAILABLE", terminal_state: "UNAVAILABLE",
+               wake_state: "UNAVAILABLE", source_receipt: null }
+      }
+    };
+    console.log(JSON.stringify({
+      root: auRuntimeRootChip(held),
+      carrier: auCarrierChip(held),
+      w3c: auW3cChip(held)
+    }));
+    """ % (
+        _extract_fn("chip"),
+        _extract_var("AU_RUNTIME_ROOT"),
+        _extract_var("AU_CARRIER"),
+        _extract_var("AU_W3C"),
+        _extract_fn("auRuntimeRootChip"),
+        _extract_fn("auCarrierChip") + "\n" + _extract_fn("auW3cChip"),
+    )
+    out = _run_node(harness)
+
+    assert out["root"]["text"] == "ROOT RESOLVED"
+    assert out["root"]["className"] == "ccr-chip is-ok"
+    assert out["carrier"]["text"] == "C2 OWNER HELD"
+    assert out["carrier"]["className"] == "ccr-chip is-dim"
+    assert out["w3c"]["text"] == "W3C UNAVAILABLE"
+    assert out["w3c"]["className"] == "ccr-chip is-dim"
+
+
+def test_cr1a_detail_exposes_canonical_source_receipt_without_raw_payload() -> None:
+    js = JS.read_text(encoding="utf-8")
+    detail = _extract_fn("renderAutonomyDetail")
+
+    assert 'detailRail(rails, "Dispatch proof"' in detail
+    assert 'dispatch.w3c.source_receipt' in detail
+    assert '"snapshot " + safeText(receipt.snapshot_digest' in detail
+    assert '"terminal owner " + safeText(receipt.terminal_source_owner' in detail
+    assert '"wake owner " + safeText(receipt.wake_source_owner' in detail
+    assert "terminal_return_state" not in detail
+    assert "EXECUTIVE_TERMINAL_RETURN_APPLIED" not in js
+
+
 def test_dispatch_behavioural_unsafe_states_expose_no_open_control() -> None:
     """FROZEN SPEC UI law, proven behaviourally: 'No owed-action Open
     control may render for a stale, unacknowledged, watch-unproven,

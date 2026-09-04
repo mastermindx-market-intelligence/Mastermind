@@ -1304,6 +1304,13 @@ def project_autonomy(
         owed_by_seat[owed_turn["seat"]] += 1
 
         root_job_candidates = tuple(runtime_root_candidates.get(ref, ()))
+        runtime_root_state = (
+            "CONFLICT"
+            if len(root_job_candidates) > 1
+            else "RESOLVED"
+            if identity.root_job_id is not None and len(root_job_candidates) == 1
+            else "UNKNOWN"
+        )
         card = {
             "responsibility_ref": ref,
             "title": identity.title,
@@ -1315,6 +1322,7 @@ def project_autonomy(
             # in both cases (never a pick).
             "root_job_candidates": sorted(root_job_candidates),
             "root_job_ambiguous": len(root_job_candidates) > 1,
+            "runtime_root_state": runtime_root_state,
             "current_worker": current_worker,
             "current_sol_target": current_sol_target,
             "owed_turn": owed_turn,
@@ -2185,9 +2193,7 @@ def declared_blockers_from_agent_os_state(
 # falsehood this projection exists to prevent (an unconsumed dispatch that
 # LOOKS like progress is never re-sent).
 #
-# Real owners this state machine is *informed by* but never calls (all three
-# require a Runtime/sqlite connection or live outside control_plane's
-# importable surface, so calling them here would violate purity):
+# Historical non-terminal inputs this pure state machine still understands:
 #   - control_plane.wake_ledger.reconstruct_status(...) -> ObligationStatus
 #     (NOT_SEEN, PENDING_RETRYABLE, ATTEMPTED, RECONCILIATION_REQUIRED,
 #     ACCEPTED, DELIVERED_UNACKNOWLEDGED, TARGET_ACKNOWLEDGED,
@@ -2198,11 +2204,14 @@ def declared_blockers_from_agent_os_state(
 #   - control_plane.operator_continuity_projection's AttemptState (CLAIMED,
 #     RUNNING, CHECKPOINTED, CANCEL_REQUESTED, RATE_LIMITED, FAILED, LOST,
 #     COMPLETED, CANCELLED).
-#   - The Agent Dialogue owner (TurnDecision/ObservationReceipt,
-#     integrations/slack_agent_dialogue/) is not importable from
-#     control_plane at all — RETURNED/CONTINUED/STOPPED evidence is
-#     therefore *only* ever supplied plain data (``sol_decision``,
-#     ``sol_decision_carrier_ref``); this module invents none of it.
+#   - operator-continuity Attempt facts may show STARTED, but a terminal
+#     Attempt can never establish return truth.
+#
+# Canonical terminal/Wake truth comes only from W3C's protected public
+# ``CanonicalTerminalWakeRead`` projection, gathered upstream in the same
+# supplied Runtime read snapshot as C2's exact carrier commitment. Raw Wake
+# Events, local APPLIED markers, watcher prose, and Sol decisions are outside
+# this input schema and fail closed.
 #
 # ``project_dispatch_consumption``'s ``dispatch_evidence`` parameter is
 # threaded exactly like ``project_autonomy``'s ``declared_blockers``/
@@ -2262,111 +2271,13 @@ _ATTEMPT_IN_PROGRESS = frozenset({
     "CLAIMED", "RUNNING", "CHECKPOINTED", "CANCEL_REQUESTED", "RATE_LIMITED",
 })
 
-#: ``AttemptState`` wire values meaning the Attempt has concluded — the
-#: precondition for even asking whether a RETURNED/CONTINUED/STOPPED
-#: transition happened (still gated by WATCH_PROVEN, Law 6).
+#: ``AttemptState`` wire values meaning the Attempt has concluded. These are
+#: historical context only; W3C is the sole owner of return truth.
 _ATTEMPT_TERMINAL = frozenset({"COMPLETED", "FAILED", "LOST", "CANCELLED"})
 
-#: Review 5103135217 BLOCKER 4: "Require validated exact child + operation +
-#: carrier + mechanism + handled-baseline evidence."  Extends the original
-#: four-field Law 6 proof with ``watch_operation`` — the fifth field the
-#: adversarial review named — so a forged/duplicated watcher receipt for the
-#: WRONG operation on the same child/carrier can no longer pass.  All five
-#: must be present as non-blank strings — Watcher evidence with any one
-#: missing "grants no authority".
-_WATCH_PROOF_FIELDS = (
-    "watch_child_ref", "watch_operation", "watch_carrier_ref",
-    "watch_mechanism", "watch_baseline_receipt",
-)
-
-#: Review 5103135217 BLOCKER 3: the closed Observer/Dialogue return-kind
-#: vocabulary — the SAME three tokens ``sol_watcher_contract.py``'s
-#: ACTION_AUTHORITATIVE role contract already names verbatim ("For an
-#: in-scope BLOCKED, DECISION_REQUEST, or RESULT ...").  Reused here as a
-#: plain string set rather than importing that module (which owns prompt
-#: CONTRACT validation, not runtime dispatch evidence) — exactly the same
-#: "reuse the literal wire values, never the module" idiom this file already
-#: uses for ``obligation_status``/``WAKE_OUTCOME_TOKENS`` elsewhere.
-_RETURN_KINDS = frozenset({"BLOCKED", "DECISION_REQUEST", "RESULT"})
-
-#: Fields Blocker 3 requires on a genuine return receipt, over and above the
-#: base watch proof: a closed ``return_kind``, the observed edge/reference,
-#: and an observation time.  ``return_child_ref`` / ``return_operation`` /
-#: ``return_carrier_ref`` are validated by EQUALITY against the matching
-#: ``watch_*`` field (see :func:`_return_receipt_proven`) rather than mere
-#: non-blankness — "exact child"/"exact operation"/carrier identity means
-#: the receipt must name the SAME child/operation/carrier the watcher was
-#: actually bound to, not merely carry some non-blank string.
-_RETURN_RECEIPT_NONBLANK_FIELDS = (
-    "return_child_ref", "return_operation", "return_carrier_ref",
-    "return_edge_ref",
-)
-
-
-def _dispatch_nonblank(value: Any) -> bool:
-    return isinstance(value, str) and value.strip() != ""
-
-
-def _watch_proven(row: Mapping[str, Any]) -> bool:
-    """Law 6 + Blocker 4: exact child + operation + carrier + mechanism +
-    baseline receipt, all five, as non-blank strings.  This is necessary but
-    not sufficient for a genuine RETURNED transition — see
-    :func:`_return_receipt_proven` for the full Blocker 3 gate."""
-    return all(_dispatch_nonblank(row.get(field)) for field in _WATCH_PROOF_FIELDS)
-
-
-def _return_receipt_proven(row: Mapping[str, Any], generated_at: str) -> bool:
-    """Blocker 3: "one validated exact-child Observer return receipt
-    carrying a closed return kind (BLOCKED / DECISION_REQUEST / RESULT),
-    exact operation + carrier/root identity, the observed edge/reference,
-    and an observation time.  Attempt terminality ALONE is never a worker
-    return."
-
-    Requires (all of):
-      - the base 5-field watch proof (:func:`_watch_proven`);
-      - ``return_kind`` in the closed :data:`_RETURN_KINDS` vocabulary;
-      - ``return_child_ref`` / ``return_operation`` / ``return_carrier_ref``
-        each present AND byte-EQUAL to the corresponding ``watch_*`` field
-        (the receipt must name the exact same child/operation/carrier the
-        watcher was actually bound to — never merely "some" non-blank
-        value, which is exactly BLOCKER 4's forgeability complaint);
-      - ``return_edge_ref`` present and non-blank (the observed edge itself);
-      - ``return_observed_at`` a parseable timestamp (the observation time).
-    """
-    if not _watch_proven(row):
-        return False
-    if row.get("return_kind") not in _RETURN_KINDS:
-        return False
-    for field in _RETURN_RECEIPT_NONBLANK_FIELDS:
-        if not _dispatch_nonblank(row.get(field)):
-            return False
-    if row.get("return_child_ref") != row.get("watch_child_ref"):
-        return False
-    if row.get("return_operation") != row.get("watch_operation"):
-        return False
-    if row.get("return_carrier_ref") != row.get("watch_carrier_ref"):
-        return False
-    receipt_at = _parse_iso8601(row.get("return_observed_at"))
-    if receipt_at is None:
-        return False
-    # Forward-bound it exactly as `_freshness_for` bounds `observed_at`
-    # (review follow-up, 2026-09-03).  Parseability alone let a receipt
-    # stamped 2999 read as a genuine return AND permanently foreclose
-    # CONTINUED/STOPPED for that row, since no real decision can ever
-    # postdate it.  Evidence from the future is not evidence.
-    reference_at = _parse_iso8601(generated_at)
-    if reference_at is not None and (receipt_at - reference_at) > FUTURE_SKEW_TOLERANCE:
-        return False
-    return True
-
-
-def _dispatch_decision_within_skew(decision_dt: Any, generated_at: str) -> bool:
-    """A decision timestamped beyond the forward skew tolerance is not evidence."""
-    reference_at = _parse_iso8601(generated_at)
-    if reference_at is None or decision_dt is None:
-        return False
-    return (decision_dt - reference_at) <= FUTURE_SKEW_TOLERANCE
-
+#: Dialogue watcher/return receipts are intentionally not interpreted here.
+#: W3C owns terminal and Wake truth; the projection consumes only its closed
+#: canonical result below.
 
 def _dispatch_binding_unresolved(action_target_state: Any, binding_evidence_state: Any) -> tuple[bool, str | None]:
     """Law 7: "Missing/ambiguous/stale RuntimeBinding becomes RUNTIME_BINDING_
@@ -2430,13 +2341,50 @@ def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[s
     derived, so a stale RETURNED reads exactly as historical as a stale
     DELIVERY_SENT.
     """
-    _observed_at, freshness = _freshness_for(row.get("observed_at"), generated_at)
+    freshness_clock = (
+        row.get("w3c_source_observed_at")
+        if row.get("w3c_state") is not None
+        else row.get("observed_at")
+    )
+    _observed_at, freshness = _freshness_for(freshness_clock, generated_at)
     historical = freshness is not Freshness.CURRENT
 
     # Law 8: "EFFECT_UNKNOWN outranks optimistic progress and disables every
     # actuator" — checked first, ahead of every other signal on the row.
     if row.get("effect_state") == "effect_unknown":
         return "EFFECT_UNKNOWN", "effect_unknown_reported", historical
+
+    # W3C is the sole canonical terminal/Wake owner.  Its own bounded result
+    # and source receipt decide every terminal state; the legacy Attempt,
+    # watcher, row clock, and raw APPLIED marker cannot refresh or replace it.
+    w3c_state = row.get("w3c_state")
+    if w3c_state is not None:
+        if w3c_state == "EFFECT_UNKNOWN":
+            return "EFFECT_UNKNOWN", "canonical_terminal_effect_unknown", historical
+        if row.get("runtime_root_state") == "CONFLICT":
+            return "RUNTIME_BINDING_RECONCILIATION_REQUIRED", "runtime_root_conflict", True
+        if row.get("runtime_root_state") != "RESOLVED":
+            return "UNKNOWN", "runtime_root_not_resolved", True
+        if w3c_state in {"CONFLICT", "AMBIGUOUS"}:
+            return "RUNTIME_BINDING_RECONCILIATION_REQUIRED", "canonical_terminal_wake_conflict", True
+        if (
+            w3c_state == "RESOLVED"
+            and row.get("w3c_terminal_state") == "APPLIED"
+            and row.get("w3c_terminal_applied") == "true"
+        ):
+            wake_state = row.get("w3c_wake_state")
+            if wake_state in {"TARGET_ACKNOWLEDGED", "SOURCE_RESOLVED"}:
+                return "RETURNED", "canonical_terminal_wake_acknowledged", historical
+            if wake_state == "DELIVERED_UNACKNOWLEDGED":
+                return "DELIVERY_UNCONSUMED", "canonical_wake_unacknowledged", historical
+            if wake_state == "ACCEPTED":
+                return "DELIVERY_SENT", "canonical_wake_accepted", historical
+            if wake_state in {"PENDING_RETRYABLE", "ATTEMPTED"}:
+                return "DELIVERY_UNCONSUMED", "canonical_wake_not_consumed", historical
+            if wake_state == "RECONCILIATION_REQUIRED":
+                return "RUNTIME_BINDING_RECONCILIATION_REQUIRED", "canonical_wake_reconciliation_required", True
+            return "WATCH_UNPROVEN", "canonical_wake_not_proven", True
+        return "UNKNOWN", f"canonical_w3c_{str(w3c_state).lower()}", True
 
     obligation_status = row.get("obligation_status")
     action_target_state = row.get("action_target_state")
@@ -2490,76 +2438,10 @@ def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[s
         if attempt_state in _ATTEMPT_IN_PROGRESS:
             return "STARTED", f"attempt_in_progress:{attempt_state}", historical
         if attempt_state in _ATTEMPT_TERMINAL:
-            # review 5106453403, Blocker 4: an ADDITIONAL, independent proof
-            # of return -- a validated durable EXECUTIVE_TERMINAL_RETURN_
-            # APPLIED receipt matching the exact root/job/attempt/worker
-            # (the gather layer's own `terminal_return_state == "APPLIED"`
-            # marker; see chairman_control_room._gather_dispatch_evidence).
-            # This is a DIFFERENT owner than the Dialogue/Observer watch/
-            # return receipt below (still unconsumed anywhere in this
-            # codebase) -- either one, alone, is sufficient; terminal
-            # Attempt status alone remains insufficient either way.
-            receipt_proven = _return_receipt_proven(row, generated_at)
-            applied_proven = row.get("terminal_return_state") == "APPLIED"
-            if not (receipt_proven or applied_proven):
-                # Blocker 3 (review 5103135217): "Attempt terminality ALONE
-                # is never a worker return" — a terminal Attempt with no
-                # validated exact-child Observer return receipt (closed
-                # return_kind + exact operation/carrier identity + observed
-                # edge + observation time) AND no durable terminal-return
-                # APPLIED receipt can never advance past this;
-                # RETURNED/CONTINUED/STOPPED are all unavailable.
-                return "WATCH_UNPROVEN", "watch_evidence_incomplete", historical
-            return_dt = _parse_iso8601(row.get("return_observed_at"))
-            decision = row.get("sol_decision")
-            decision_carrier = row.get("sol_decision_carrier_ref")
-            decision_child = row.get("sol_decision_child_ref")
-            decision_operation = row.get("sol_decision_operation")
-            decision_dt = _parse_iso8601(row.get("sol_decision_at"))
-            carrier = row.get("watch_carrier_ref")
-            child = row.get("watch_child_ref")
-            operation = row.get("watch_operation")
-            # Blocker 4: "CONTINUED/STOPPED must bind the SAME exact return
-            # and a decision edge causally AFTER it."  A decision is trusted
-            # only when it names the exact same child, operation and carrier
-            # the proven return receipt named (never merely "a" same-carrier
-            # decision — Law 5's original check, extended here to child +
-            # operation too) AND its own timestamp parses and sits STRICTLY
-            # after the return's own observation time.  A stale/at-or-before
-            # decision, a wrong child/operation/carrier, or an unparseable
-            # timestamp on either side all fail this and leave RETURNED
-            # standing — never silently closing the dialogue.
-            valid_decision = (
-                decision in ("CONTINUE", "STOP")
-                and _dispatch_nonblank(decision_carrier) and decision_carrier == carrier
-                and _dispatch_nonblank(decision_child) and decision_child == child
-                and _dispatch_nonblank(decision_operation) and decision_operation == operation
-                and decision_dt is not None
-                and return_dt is not None
-                and decision_dt > return_dt
-                # Forward-bounded exactly like `return_observed_at`
-                # (review follow-up, 2026-09-03).  The earlier repair bounded
-                # only the receipt, leaving this half of the same symmetric
-                # hole open — and this is the WORSE half: `decision_dt >
-                # return_dt` is the edge that moves a row OFF the only
-                # actionable state, so a decision stamped in the future
-                # silently discharged an owed Chairman decision. Fixing one
-                # timestamp and not its sibling is how a closed finding stays
-                # open.
-                and _dispatch_decision_within_skew(decision_dt, generated_at)
-            )
-            if valid_decision and decision == "CONTINUE":
-                return "CONTINUED", "sol_continue_same_carrier", historical
-            if valid_decision and decision == "STOP":
-                return "STOPPED", "sol_stop_same_carrier", historical
-            if receipt_proven:
-                return "RETURNED", "awaiting_sol_decision", historical
-            # applied_proven only (review 5106453403, Blocker 4): a named,
-            # honest reason distinct from the Dialogue/Observer path -- live
-            # CONTINUE/STOP stays UNKNOWN here too (no sol_decision owner
-            # protects this path yet either), `valid_decision` above is
-            # structurally unreachable without watch_* identity to match.
-            return "RETURNED", "terminal_return_applied", historical
+            # Terminal Attempt state is historical context only.  Neither a
+            # caller-supplied watch receipt nor a raw APPLIED marker is a
+            # canonical return; only the W3C branch above may emit RETURNED.
+            return "WATCH_UNPROVEN", "canonical_w3c_evidence_required", historical
         return "UNKNOWN", f"unrecognized_attempt_state:{attempt_state}", historical
 
     # No Attempt evidence at all: Law 4 forbids inferring STARTED from
@@ -2601,19 +2483,12 @@ _DISPATCH_JOIN_FIELDS = ("responsibility_ref", "root_job_id")
 _DISPATCH_DATA_FIELDS = (
     "observed_at", "obligation_status", "action_target_state",
     "action_target_reason", "binding_evidence_state", "attempt_state",
-    "effect_state", "watch_child_ref", "watch_operation", "watch_carrier_ref",
-    "watch_mechanism", "watch_baseline_receipt", "return_kind",
-    "return_child_ref", "return_operation", "return_carrier_ref",
-    "return_edge_ref", "return_observed_at", "sol_decision",
-    "sol_decision_carrier_ref", "sol_decision_child_ref",
-    "sol_decision_operation", "sol_decision_at",
-    # Blocker 4 (review 5106453403): the gather layer's own closed marker
-    # for a validated EXECUTIVE_TERMINAL_RETURN_APPLIED receipt matching
-    # the exact root/job/attempt/worker -- see
-    # _return_receipt_or_applied_proven below.  Deliberately its own field,
-    # never merged into the watch_*/return_* Dialogue/Observer vocabulary
-    # (a wholly different, still-unconsumed owner).
-    "terminal_return_state",
+    "effect_state",
+    "runtime_root_state", "carrier_state", "carrier_reason",
+    "w3c_state", "w3c_reason", "w3c_terminal_state", "w3c_wake_state",
+    "w3c_terminal_applied", "w3c_source_observed_at",
+    "w3c_source_freshness", "w3c_snapshot_digest",
+    "w3c_terminal_source_owner", "w3c_wake_source_owner",
 )
 _DISPATCH_ALL_FIELDS = frozenset(_DISPATCH_JOIN_FIELDS + _DISPATCH_DATA_FIELDS)
 
@@ -2642,9 +2517,40 @@ _DISPATCH_CLOSED_VOCAB: dict[str, frozenset[str]] = {
         "FAILED", "LOST", "COMPLETED", "CANCELLED",
     }),
     "effect_state": frozenset({"none", "applied", "effect_unknown"}),
-    "return_kind": frozenset(_RETURN_KINDS),
-    "sol_decision": frozenset({"CONTINUE", "STOP"}),
-    "terminal_return_state": frozenset({"APPLIED"}),
+    "runtime_root_state": frozenset({"RESOLVED", "UNKNOWN", "CONFLICT"}),
+    "carrier_state": frozenset({"RESOLVED", "OWNER_HELD", "UNKNOWN"}),
+    "carrier_reason": frozenset({
+        "C2_CURRENT_CAPACITY_COMMITMENT", "C2_POSITIVE_OWNER_HELD",
+        "C2_COMMITMENT_ABSENT", "C2_COMMITMENT_CONFLICT",
+        "C2_COMMITMENT_UNAVAILABLE",
+    }),
+    "w3c_state": frozenset({
+        "RESOLVED", "ABSENT", "UNAVAILABLE", "CONFLICT", "AMBIGUOUS",
+        "EFFECT_UNKNOWN",
+    }),
+    "w3c_reason": frozenset({
+        "C2_EXACT_CANDIDATE_UNAVAILABLE", "C2_EXACT_CANDIDATE_CONFLICT",
+        "W3C_OWNER_UNAVAILABLE", "W3C_RESULT_INVALID",
+        "CANDIDATE_NOT_CANONICAL", "CANONICAL_TERMINAL_ABSENT",
+        "CANONICAL_TERMINAL_CONFLICT", "CANONICAL_TERMINAL_EFFECT_UNKNOWN",
+        "CANONICAL_TERMINAL_UNAVAILABLE", "CANONICAL_TERMINAL_WAKE_RESOLVED",
+        "CORRELATED_WAKE_ABSENT", "MULTIPLE_WAKE_OBLIGATIONS",
+        "READ_CONNECTION_INVALID", "READ_REQUEST_INVALID",
+        "WAKE_EVENT_BUDGET_EXCEEDED", "WAKE_HISTORY_INVALID",
+    }),
+    "w3c_terminal_state": frozenset({
+        "APPLIED", "MISSING", "UNAVAILABLE", "CONFLICT", "EFFECT_UNKNOWN",
+    }),
+    "w3c_wake_state": frozenset({
+        "UNAVAILABLE", "ABSENT", "AMBIGUOUS", "OVERFLOW", "CONFLICT",
+        "NOT_SEEN", "PENDING_RETRYABLE", "ATTEMPTED",
+        "RECONCILIATION_REQUIRED", "ACCEPTED", "DELIVERED_UNACKNOWLEDGED",
+        "TARGET_ACKNOWLEDGED", "SOURCE_RESOLVED",
+    }),
+    "w3c_terminal_applied": frozenset({"true", "false"}),
+    "w3c_source_freshness": frozenset({"SOURCE_EVIDENCE_TIME"}),
+    "w3c_terminal_source_owner": frozenset({"executive_terminal_return"}),
+    "w3c_wake_source_owner": frozenset({"wake_ledger"}),
 }
 
 #: Bounded lengths (bytes, UTF-8).  A join field is bounded tighter — it is
@@ -2846,19 +2752,16 @@ def project_dispatch_consumption(
     ``project_autonomy``'s ``declared_blockers``/``unmapped_
     responsibilities``) is a sequence of already-gathered plain-data rows —
     one per ``(responsibility_ref, root_job_id)`` pair a caller has
-    resolved via the real owners (``wake_ledger.reconstruct_status``,
-    ``sol_action_target.resolve_sol_action_target``, an operator-continuity
-    Attempt fact, an Agent Dialogue return receipt) — never fetched by this
-    function itself.  Each row is validated (Blocker 2, see
+    resolved via the real owners. Canonical terminal/Wake rows contain an
+    exact Runtime-root state, C2 carrier state, and W3C closed result; legacy
+    non-terminal rows may still contain already-projected placement,
+    obligation, and Attempt facts. They are never fetched by this function
+    itself. Each row is validated (Blocker 2, see
     :func:`_validate_dispatch_row`) before anything else touches it and may
     carry: ``observed_at``, ``obligation_status``, ``action_target_state``,
     ``action_target_reason``, ``binding_evidence_state``, ``attempt_state``,
-    ``effect_state``, ``watch_child_ref``, ``watch_operation``,
-    ``watch_carrier_ref``, ``watch_mechanism``, ``watch_baseline_receipt``,
-    ``return_kind``, ``return_child_ref``, ``return_operation``,
-    ``return_carrier_ref``, ``return_edge_ref``, ``return_observed_at``,
-    ``sol_decision``, ``sol_decision_carrier_ref``, ``sol_decision_child_ref``,
-    ``sol_decision_operation``, ``sol_decision_at``.
+    ``effect_state``, ``runtime_root_state``, ``carrier_state``,
+    ``carrier_reason``, and the closed ``w3c_*`` fields.
 
     Absent, empty, unmatched, ambiguous (more than one row sharing the same
     exact join key), or REJECTED (a row that failed :func:`_validate_
@@ -2882,9 +2785,8 @@ def project_dispatch_consumption(
         stale or unknown relative to ``generated_at`` (Law 9), OR the
         evidence itself was absent/unmatched/ambiguous/rejected (Blocker 5)
         — computed independently of ``dispatch_state`` itself.
-      - ``watch_proven``: Law 6/Blocker 4's five-field proof, always
-        computed (even when irrelevant to the derived state) so a caller
-        can inspect it.
+      - ``watch_proven``: compatibility indicator derived only from a
+        RESOLVED/APPLIED canonical W3C result, never local watcher fields.
       - ``evidence``: the matched row's validated, canonical, non-``None``
         fields — never the raw caller-supplied mapping — for forensic
         inspection.  ``None`` when no row was matched or the matched row
@@ -2930,23 +2832,68 @@ def project_dispatch_consumption(
             state, reason, historical = "UNKNOWN", "dispatch_evidence_not_supplied", True
             evidence: dict[str, Any] | None = None
             watch_proven = False
+            carrier = None
+            w3c = None
         elif len(matches) == 0:
             state, reason, historical = "UNKNOWN", "no_exact_join_match", True
             evidence = None
             watch_proven = False
+            carrier = None
+            w3c = None
         elif len(matches) > 1:
             state, reason, historical = "UNKNOWN", "ambiguous_dispatch_evidence", True
             evidence = None
             watch_proven = False
+            carrier = None
+            w3c = None
         elif matches[0] is None:
             state, reason, historical = "UNKNOWN", _DISPATCH_EVIDENCE_REJECTED, True
             evidence = None
             watch_proven = False
+            carrier = None
+            w3c = None
         else:
             row = matches[0]
             state, reason, historical = _classify_dispatch_row(row, generated_at)
             evidence = {k: v for k, v in sorted(row.items()) if v is not None}
-            watch_proven = _watch_proven(row)
+            watch_proven = (
+                row.get("w3c_state") == "RESOLVED"
+                and row.get("w3c_terminal_state") == "APPLIED"
+                and row.get("w3c_terminal_applied") == "true"
+            )
+            carrier = None
+            if row.get("carrier_state") is not None:
+                carrier = {
+                    "state": row["carrier_state"],
+                    "reason": row.get("carrier_reason"),
+                    # Positive C2 is unavailable at this base.  OWNER_HELD and
+                    # UNKNOWN are always historical and never actionable.
+                    "historical": row["carrier_state"] != "RESOLVED",
+                    "actionable": False,
+                }
+            w3c = None
+            if row.get("w3c_state") is not None:
+                source_receipt = None
+                receipt_keys = {
+                    "observed_at": "w3c_source_observed_at",
+                    "freshness": "w3c_source_freshness",
+                    "snapshot_digest": "w3c_snapshot_digest",
+                    "terminal_source_owner": "w3c_terminal_source_owner",
+                    "wake_source_owner": "w3c_wake_source_owner",
+                }
+                if all(row.get(source_key) is not None for source_key in receipt_keys.values()):
+                    source_receipt = {
+                        output_key: row[source_key]
+                        for output_key, source_key in receipt_keys.items()
+                    }
+                w3c = {
+                    "state": row["w3c_state"],
+                    "reason": row.get("w3c_reason"),
+                    "terminal_state": row.get("w3c_terminal_state"),
+                    "wake_state": row.get("w3c_wake_state"),
+                    "terminal_applied": row.get("w3c_terminal_applied") == "true",
+                    "source_receipt": source_receipt,
+                }
 
         actionable = state == "RETURNED" and not historical
 
@@ -2958,6 +2905,8 @@ def project_dispatch_consumption(
             "actionable": actionable,
             "historical": historical,
             "watch_proven": watch_proven,
+            "carrier": carrier,
+            "w3c": w3c,
             "evidence": evidence,
         })
         counts[state] += 1

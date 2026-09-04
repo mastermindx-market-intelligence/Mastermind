@@ -183,33 +183,18 @@ autonomy_control_room_projection = _optional_control_plane_module(
     "autonomy_control_room_projection", requires=("executive_steward",)
 )
 
-#: Review 5103135217 BLOCKER 1: the canonical, real dispatch-evidence
-#: owners for :func:`_gather_dispatch_evidence` below, loaded through the
-#: SAME protected optional mechanism and for the SAME reason as the
-#: selector/projection above — an extracted release's audited runtime file
-#: allowlist may omit any of these, and this module must still boot and
-#: compose a complete (degraded) document rather than raise.  ``requires``
-#: is each module's own full transitive STATIC control-plane import
-#: closure, omitting only :mod:`control_plane.executive_runtime` (already
-#: an unconditional mandatory import of THIS module, at the top of the
-#: file, so it can never be the thing that is missing here).
-wake_persist = _optional_control_plane_module(
-    "wake_persist",
-    requires=("wake_events", "wake_ledger", "session_targets", "wake_transport"),
-)
-wake_ledger = _optional_control_plane_module(
-    "wake_ledger", requires=("session_targets", "wake_events", "wake_transport")
-)
-session_targets = _optional_control_plane_module(
-    "session_targets", requires=("wake_events", "wake_transport")
-)
-sol_action_target = _optional_control_plane_module(
-    "sol_action_target", requires=("session_targets", "wake_events", "wake_transport")
-)
-runtime_binding_projection = _optional_control_plane_module(
-    "runtime_binding_projection",
+#: W3C owns terminal/Wake reconstruction.  The remote Control Room package
+#: intentionally omits this capability and must continue to boot without it,
+#: so the owner is loaded through the existing optional-module fence.  When
+#: present, its public facade is the only terminal/Wake read used below.
+executive_dialogue_observation = _optional_control_plane_module(
+    "executive_dialogue_observation",
     requires=(
-        "operator_harness_contract", "session_targets", "wake_events",
+        "executive_delegation_identity",
+        "executive_terminal_return",
+        "operator_harness_contract",
+        "session_targets",
+        "wake_events",
         "wake_transport",
     ),
 )
@@ -1307,31 +1292,16 @@ def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | N
 
 
 # ---------------------------------------------------------------------------
-# dispatch-consumption evidence gather (review 5103135217 BLOCKER 1) — the
-# ONE place this module reads real Executive Runtime / Wake ledger /
-# RuntimeBinding facts to answer "was this responsibility actually picked
-# up".  Bounded, read-only, never raises.  Builds ZERO new store, event
-# type, cursor, watcher registry, or queue: every read goes through an
-# existing owner's own public API (``runtime.attempts``/``runtime.events``,
-# :class:`control_plane.wake_persist.WakeLedgerRepository` +
-# :func:`control_plane.wake_ledger.reconstruct_status`,
-# :func:`control_plane.sol_action_target.resolve_sol_action_target`, a
-# real-if-available :func:`control_plane.runtime_binding_projection.
-# project_runtime_binding`).  A source genuinely absent (module not shipped,
-# no session-target registry file, no matching Runtime evidence) renders the
-# fixed downstream states (``WATCH_UNPROVEN`` / ``RUNTIME_BINDING_
-# RECONCILIATION_REQUIRED`` / ``DELIVERY_UNCONSUMED`` / ``UNKNOWN``) via
-# :mod:`control_plane.autonomy_control_room_projection`'s own closed
-# classification — this function never fills the gap itself.
+# dispatch-consumption evidence gather (CR1A W3C-owner repair) — the ONE
+# place this module joins a responsibility to the protected canonical
+# terminal/Wake observer.  It is bounded, read-only, and fail-closed.
 #
-# No canonical live Dialogue/Observer return-receipt store exists anywhere
-# in this codebase today (only ``sol_watcher_contract.py``, a prompt-
-# CONTRACT validator, names the closed BLOCKED/DECISION_REQUEST/RESULT
-# vocabulary — it owns no runtime receipt log).  This gather therefore
-# deliberately leaves every ``watch_*``/``return_*``/``sol_decision*`` field
-# unset: a terminal Attempt with no such receipt renders WATCH_UNPROVEN,
-# never a fabricated RETURNED — exactly the "admit ignorance rather than
-# invent progress" law this whole packet exists to enforce.
+# The responsibility projection owns the WS-to-root relation. C2 owns the
+# exact current carrier commitment. W3C owns terminal/Wake reconstruction.
+# This module neither walks the Runtime tree nor scans raw Events, elects a
+# newest/highest attempt, parses APPLIED material, or manufactures a watcher.
+# When C2's public positive reader is not protected at this base, the carrier
+# is explicitly OWNER_HELD and W3C remains unavailable.
 # ---------------------------------------------------------------------------
 
 #: Blocker 1: "The gather must be bounded (cap the rows and the per-row
@@ -1339,100 +1309,170 @@ def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | N
 #: must never turn this gather into unbounded per-request Runtime work.
 _DISPATCH_EVIDENCE_MAX_CARDS = 200
 
-#: Per-card cap on how many WAKE_REQUESTED events (i.e. candidate wake
-#: obligations) this gather will even look at before giving up rather than
-#: reading further — a card with a pathological number of wake obligations
-#: degrades to "ambiguous-shaped" rather than doing unbounded work.
-_DISPATCH_EVIDENCE_MAX_WAKE_REQUESTED = 20
 
+def _runtime_root_state(card: Mapping[str, Any]) -> str:
+    """Classify the already-projected public Runtime-root join.
 
-def _dispatch_evidence_newer(current: str | None, candidate: Any) -> str | None:
-    """Keep the lexicographically-greatest of two Zulu ISO-8601 strings.
-
-    Every timestamp this module reads is a ``YYYY-MM-DDTHH:MM:SS(.ffffff)?Z``
-    wire string (Runtime/Event/WakeLedgerRecord convention throughout this
-    codebase), so plain string comparison is a correct, allocation-free
-    "most recent" — no parsing, no clock, no timezone arithmetic needed
-    here; the projection layer parses it for real freshness comparison.
+    The Agent-OS responsibility mapper owns the exact WS-to-Runtime-root
+    relation. This gatherer consumes that answer; it never walks descendants,
+    compares titles, or elects a carrier from tree shape.
     """
-    if not isinstance(candidate, str) or not candidate:
-        return current
-    if current is None or candidate > current:
-        return candidate
-    return current
+
+    raw_candidates = card.get("root_job_candidates")
+    if isinstance(raw_candidates, Sequence) and not isinstance(
+        raw_candidates, (str, bytes)
+    ):
+        candidates = {
+            item for item in raw_candidates if isinstance(item, str) and item
+        }
+    else:
+        candidates = set()
+    if card.get("root_job_ambiguous") is True or len(candidates) > 1:
+        return "CONFLICT"
+    root_job_id = card.get("root_job_id")
+    if isinstance(root_job_id, str) and root_job_id:
+        if candidates and candidates != {root_job_id}:
+            return "CONFLICT"
+        return "RESOLVED"
+    return "UNKNOWN"
 
 
-#: Job statuses that positively mean the job is still working.  A POSITIVE
-#: allowlist, not a terminal denylist: an absent, empty, unrecognised or
-#: future status is NOT proof of liveness, and a denylist would treat all of
-#: those as live and let them evict a demonstrably RUNNING ancestor -- the
-#: optimistic direction this module refuses everywhere else.  Reporting the
-#: ancestor we know is running beats reporting a descendant we cannot
-#: classify.  An all-unclassifiable tree simply has no live candidate and
-#: falls back to the ancestor rule, exactly as an all-terminal tree does.
-#: RATE_LIMITED is DELIBERATELY absent.  The Runtime's own
-#: `_TERMINAL_JOB_STATUSES` counts it terminal alongside FAILED/LOST/
-#: COMPLETED/CANCELLED, and its `_living_child_rows` excludes it from
-#: "living" -- so calling it live here contradicted the owner's model and let
-#: a rate-limited child evict a RUNNING root.  Requeuability is not the
-#: criterion either: FAILED and LOST are equally requeuable and are correctly
-#: dead.  `tests` pins this set against the Runtime's own terminal set so the
-#: two cannot drift again.
-_LIVE_JOB_STATUSES = frozenset({
-    "QUEUED", "RUNNING", "CHECKPOINTED", "CANCEL_REQUESTED",
-})
+def _owner_held_dispatch_row(
+    *,
+    responsibility_ref: str,
+    root_job_id: str | None,
+    runtime_root_state: str,
+) -> dict[str, Any]:
+    """The honest current-base row while C2's positive reader is unprotected."""
+
+    return {
+        "responsibility_ref": responsibility_ref,
+        "root_job_id": root_job_id,
+        "runtime_root_state": runtime_root_state,
+        "carrier_state": "OWNER_HELD",
+        "carrier_reason": "C2_POSITIVE_OWNER_HELD",
+        "w3c_state": "UNAVAILABLE",
+        "w3c_reason": "C2_EXACT_CANDIDATE_UNAVAILABLE",
+        "w3c_terminal_state": "UNAVAILABLE",
+        "w3c_wake_state": "UNAVAILABLE",
+        "w3c_terminal_applied": "false",
+    }
 
 
-def _executable_attempt_candidates(tree_jobs: Sequence[Any]) -> list[Any]:
-    """Jobs holding a live attempt, minus any that merely aggregate one.
+def _current_capacity_commitment_reader(runtime: Any) -> Any:
+    """Return only the Runtime class-owned C2 reader, never a callback.
 
-    A job is dropped when another candidate is its strict descendant, so an
-    aggregation root never competes with the carrier beneath it.  Ancestry is
-    read from ``parent_job_id`` only — no depth arithmetic, no recency, no
-    attempt-number comparison, and no title or provider inference.
+    PR #415 is not protected at this base. Looking in the Runtime class
+    dictionary deliberately ignores instance attributes and caller callbacks,
+    so a fixture cannot manufacture positive production authority.
     """
-    candidates = [j for j in tree_jobs if getattr(j, "current_attempt_id", None)]
-    if len(candidates) < 2:
-        return candidates
-    # Only a LIVE descendant may evict an ancestor.  `current_attempt_id` is
-    # sticky on both sides: a FAILED/LOST/COMPLETED/CANCELLED child keeps it,
-    # and the first version of this rule let such a dead child evict a
-    # genuinely RUNNING root — turning a live responsibility into a terminal
-    # one on the Chairman's surface, which is worse than the silence it
-    # replaced (review follow-up, 2026-09-03).  A finished child does not
-    # make its still-working parent finished.
-    def _is_live(job: Any) -> bool:
-        status = getattr(job, "status", None)
-        return str(getattr(status, "value", status)) in _LIVE_JOB_STATUSES
 
-    live = [j for j in candidates if _is_live(j)]
-    if live:
-        # A finished child beside a still-running parent is an ordinary state,
-        # not an ambiguity: the live job IS the answer.  Restricting to live
-        # candidates first means a dead descendant neither evicts its live
-        # ancestor nor drags the row into a false "cannot tell".
-        candidates = live
-        if len(candidates) < 2:
-            return candidates
-    by_id = {getattr(j, "job_id", None): j for j in tree_jobs}
-    candidate_ids = {getattr(j, "job_id", None) for j in candidates}
-    aggregating: set[Any] = set()
-    for job in candidates:
-        seen: set[Any] = set()
-        parent = getattr(job, "parent_job_id", None)
-        while parent and parent not in seen:
-            seen.add(parent)
-            if parent in candidate_ids:
-                # Eviction protection lives ENTIRELY in the `candidates = live`
-                # narrowing above; an earlier version repeated a `job in
-                # live_ids` test here, which was always true because both sets
-                # are built from the same list.  It read as a second line of
-                # defence and was none, so it is gone rather than left to
-                # mislead the next reader.
-                aggregating.add(parent)
-            parent_job = by_id.get(parent)
-            parent = getattr(parent_job, "parent_job_id", None) if parent_job else None
-    return [j for j in candidates if getattr(j, "job_id", None) not in aggregating]
+    runtime_type = type(runtime)
+    if runtime_type is not executive_runtime.Runtime:
+        return None
+    reader = vars(runtime_type).get("current_capacity_commitment")
+    return reader if callable(reader) else None
+
+
+def _exact_w3c_candidate(
+    commitment: Any,
+    *,
+    responsibility_ref: str,
+    root_job_id: str,
+) -> Any | None:
+    """Validate C2's public projection into one exact W3C candidate."""
+
+    if executive_dialogue_observation is None or commitment is None:
+        return None
+    expected = {
+        "source_root_job_id": root_job_id,
+        "responsibility_ref": responsibility_ref,
+    }
+    for name, value in expected.items():
+        if getattr(commitment, name, None) != value:
+            return None
+    values = {
+        "root_job_id": root_job_id,
+        "job_id": getattr(commitment, "carrier_job_id", None),
+        "attempt_id": getattr(commitment, "committed_carrier_attempt_id", None),
+        "worker_id": getattr(commitment, "selected_worker_id", None),
+    }
+    if any(not isinstance(value, str) or not value for value in values.values()):
+        return None
+    try:
+        return executive_dialogue_observation.CanonicalTerminalWakeCandidate(
+            **values
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_w3c_read(
+    row: dict[str, Any],
+    *,
+    runtime: Any,
+    root_job_id: str,
+    candidate: Any,
+    connection: Any,
+) -> None:
+    """Delegate one exact candidate to W3C and copy only its closed projection."""
+
+    if executive_dialogue_observation is None:
+        row["w3c_reason"] = "W3C_OWNER_UNAVAILABLE"
+        return
+    try:
+        result = (
+            executive_dialogue_observation.read_runtime_canonical_terminal_wake(
+                runtime=runtime,
+                source_root_job_id=root_job_id,
+                candidate=candidate,
+                connection=connection,
+            )
+        )
+    except Exception:
+        row.update(
+            w3c_state="UNAVAILABLE",
+            w3c_reason="W3C_OWNER_UNAVAILABLE",
+            w3c_terminal_state="UNAVAILABLE",
+            w3c_wake_state="UNAVAILABLE",
+            w3c_terminal_applied="false",
+        )
+        return
+
+    for field in ("state", "reason", "terminal_state", "wake_state"):
+        if not isinstance(getattr(result, field, None), str):
+            row.update(
+                w3c_state="UNAVAILABLE",
+                w3c_reason="W3C_RESULT_INVALID",
+                w3c_terminal_state="UNAVAILABLE",
+                w3c_wake_state="UNAVAILABLE",
+                w3c_terminal_applied="false",
+            )
+            return
+    row.update(
+        w3c_state=result.state,
+        w3c_reason=result.reason,
+        w3c_terminal_state=result.terminal_state,
+        w3c_wake_state=result.wake_state,
+        w3c_terminal_applied="true" if result.terminal_applied is True else "false",
+    )
+    if result.state == "EFFECT_UNKNOWN":
+        row["effect_state"] = "effect_unknown"
+
+    receipt = getattr(result, "source_receipt", None)
+    if receipt is None:
+        return
+    receipt_fields = {
+        "w3c_source_observed_at": getattr(receipt, "observed_at", None),
+        "w3c_source_freshness": getattr(receipt, "freshness", None),
+        "w3c_snapshot_digest": getattr(receipt, "snapshot_digest", None),
+        "w3c_terminal_source_owner": getattr(
+            receipt, "terminal_source_owner", None
+        ),
+        "w3c_wake_source_owner": getattr(receipt, "wake_source_owner", None),
+    }
+    if all(isinstance(value, str) and value for value in receipt_fields.values()):
+        row.update(receipt_fields)
 
 
 def _gather_dispatch_evidence(
@@ -1440,276 +1480,112 @@ def _gather_dispatch_evidence(
     cards: Sequence[Mapping[str, Any]],
     generated_at: str,
 ) -> list[dict[str, Any]]:
-    """Bounded, read-only, never-raising gather of real dispatch evidence.
+    """Bounded, one-snapshot, read-only W3C/C2 evidence gather.
 
-    One row per ``(responsibility_ref, root_job_id)`` — the exact join key
-    :func:`control_plane.autonomy_control_room_projection.
-    project_dispatch_consumption` already owns (Law 1: reused, never
-    reinvented).  A card is skipped entirely (no row emitted — the
-    projection then reads it as absent evidence, ``UNKNOWN``) when its
-    ``root_job_id`` is missing/malformed, or when nothing genuine was found
-    for it at all — this function never emits a content-free row just to
-    claim a happy-path state.
-
-    Review 5106453403, Blockers 2-4 (closing the "40/40 UNKNOWN" defect):
-    a card's ``root_job_id`` is often an AGGREGATION root — the whole point
-    of Blocker 1 upstream — while the executable Attempt, the source of a
-    Wake obligation, and a durable terminal-return receipt all live on a
-    CHILD/carrier Job under that same root.  Every read below is therefore
-    scoped to the exact Runtime job TREE sharing this card's
-    ``root_job_id`` (``Job.root_job_id``, the DB-maintained invariant every
-    descendant at every ``Job.parent_job_id``/``Job.depth`` already
-    carries) — never to the root job_id alone, and never selected across
-    jobs by title, timestamp, or provider.
+    Every responsibility gets an explicit Runtime-root and carrier dimension.
+    On this protected base C2's positive Runtime.current_capacity_commitment
+    API does not exist, so the carrier is honestly OWNER_HELD and W3C is not
+    invoked with a guessed descendant. Once Runtime owns that public API, its
+    exact projection and W3C's facade share one supplied read connection.
     """
+
+    del generated_at
     try:
         db_path = root / executive_inbox.DB_RELATIVE_PATH
         if not db_path.is_file():
             return []
-        try:
-            runtime = executive_runtime.Runtime.at(root, create=False)
-        except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError):
-            return []
-
-        registry = None
-        if session_targets is not None and sol_action_target is not None:
-            try:
-                registry = session_targets.load_session_targets()
-            except Exception:  # noqa: BLE001 — gather layer never raises
-                registry = None
-
-        wake_repo = None
-        if wake_persist is not None and wake_ledger is not None:
-            try:
-                wake_repo = wake_persist.WakeLedgerRepository(runtime)
-            except Exception:  # noqa: BLE001 — gather layer never raises
-                wake_repo = None
-
-        # Blockers 2-3: the whole Runtime job tree, read ONCE (not once per
-        # card) and grouped by `root_job_id` — the canonical, DB-maintained
-        # tree-membership field every job at every depth already carries.
-        # This is what "restrict candidates to the exact root" means in
-        # practice: a candidate job for card X can only ever come from
-        # `jobs_by_root.get(X's root_job_id)`.
-        try:
-            all_jobs = runtime.jobs.list_jobs()
-        except (executive_runtime.RuntimeProofError, ValueError, KeyError, OSError):
-            all_jobs = []
-        jobs_by_root: dict[str, list[Any]] = {}
-        for job in all_jobs:
-            jobs_by_root.setdefault(job.root_job_id, []).append(job)
-
-        rows: list[dict[str, Any]] = []
-        seen_keys: set[tuple[Any, Any]] = set()
-
-        for card in list(cards)[:_DISPATCH_EVIDENCE_MAX_CARDS]:
-            if not isinstance(card, Mapping):
-                continue
-            ref = card.get("responsibility_ref")
-            root_job_id = card.get("root_job_id")
-            if not isinstance(ref, str) or not ref:
-                continue
-            if not isinstance(root_job_id, str) or not root_job_id:
-                continue
-            key = (ref, root_job_id)
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-
-            row: dict[str, Any] = {}
-            observed_at: str | None = None
-            attempt = None
-            candidate_job = None
-            found_evidence = False
-
-            tree_jobs = jobs_by_root.get(root_job_id, [])
-
-            # --- attempt state: the canonical CURRENT attempt of the ONE
-            # viable executable child/carrier Job in this root's tree —
-            # never `max(attempt_number)`, never the aggregation root
-            # itself unless IT is the (only) job carrying a live attempt.
-            # `current_attempt_id` is STICKY in the Runtime schema: a CHECK
-            # constraint keeps it non-null for every non-QUEUED state once a
-            # job has been claimed.  So an aggregation root that is itself
-            # RUNNING or COMPLETED — the normal COO shape — retains its own
-            # attempt alongside a live child carrier, which made the count
-            # two and dropped the whole attempt dimension: neither the root
-            # nor the carrier won (review, real-Runtime probe S1/S2).  The
-            # head's own test only passed because it requeued the root first,
-            # an artificial step that removes the blocking condition.
-            #
-            # Resolve it STRUCTURALLY, never by recency, number or title: an
-            # ancestor that merely aggregates is not the executable job, so a
-            # candidate that is a strict ancestor of another candidate is
-            # dropped.  What survives is the deepest executable frontier —
-            # exactly one carrier, or a genuine multi-carrier ambiguity.
-            attempt_candidates = _executable_attempt_candidates(tree_jobs)
-            if len(attempt_candidates) == 1:
-                candidate_job = attempt_candidates[0]
-                try:
-                    attempt = runtime.attempts.get_attempt(candidate_job.current_attempt_id)
-                except (executive_runtime.RuntimeProofError, ValueError, KeyError, OSError):
-                    attempt = None
-                if attempt is not None:
-                    status_value = getattr(attempt.status, "value", None)
-                    if isinstance(status_value, str) and status_value:
-                        row["attempt_state"] = status_value
-                        found_evidence = True
-                    for ts in (attempt.finished_at, attempt.heartbeat_at, attempt.started_at):
-                        observed_at = _dispatch_evidence_newer(observed_at, ts)
-            # Zero candidates (no job in the tree has a live current
-            # attempt) or MULTIPLE viable candidates (two or more children
-            # each carrying one): this dimension is left unset either way —
-            # reconciliation-required, never a pick.
-
-            # --- durable terminal-return APPLIED receipt (Blocker 4): the
-            # SAME resolved candidate attempt, consulted for a matching
-            # EXECUTIVE_TERMINAL_RETURN_APPLIED event.  A terminal Attempt
-            # with NO such receipt (and no Dialogue/Observer watch proof)
-            # stays WATCH_UNPROVEN downstream — this never fabricates one.
-            if attempt is not None and candidate_job is not None:
-                try:
-                    applied_events = runtime.events.list_events(
-                        aggregate_type="terminal_return_projection",
-                        aggregate_id=attempt.attempt_id,
-                    )
-                except Exception:  # noqa: BLE001 — gather layer never raises
-                    applied_events = []
-                for event in applied_events:
-                    payload = getattr(event, "payload", None)
-                    if (
-                        event.event_type == "EXECUTIVE_TERMINAL_RETURN_APPLIED"
-                        and event.job_id == candidate_job.job_id
-                        and event.attempt_id == attempt.attempt_id
-                        and event.worker_id == attempt.worker_id
-                        and isinstance(payload, Mapping)
-                        and payload.get("root_job_id") == root_job_id
-                    ):
-                        row["terminal_return_state"] = "APPLIED"
-                        found_evidence = True
-                        observed_at = _dispatch_evidence_newer(observed_at, event.created_at)
-                        break
-
-            # --- obligation status: WakeLedgerRepository + reconstruct_status.
-            # Blocker 3: Wake persistence records the SOURCE job in
-            # `Event.job_id` (often a child), while the obligation's OWN
-            # persisted envelope separately carries `root_job_id` (the
-            # responsibility root) — so every job_id in this root's tree is
-            # searched, and each candidate is admitted only when its own
-            # parsed envelope's `root_job_id` matches this card's root
-            # exactly (never merely "same tree", to guard against a
-            # relocated/foreign envelope).
-            if wake_repo is not None and wake_persist is not None:
-                obligation_ids: set[str] = set()
-                seen_event_count = 0
-                scan_truncated = False
-                for job in sorted(tree_jobs, key=lambda j: j.job_id):
-                    if seen_event_count >= _DISPATCH_EVIDENCE_MAX_WAKE_REQUESTED:
-                        scan_truncated = True
-                        break
-                    try:
-                        wake_requested_events = runtime.events.list_events(
-                            aggregate_type=wake_ledger.WAKE_AGGREGATE_TYPE,
-                            job_id=job.job_id,
-                        )
-                    except Exception:  # noqa: BLE001 — gather layer never raises
-                        wake_requested_events = []
-                    for event in wake_requested_events:
-                        if seen_event_count >= _DISPATCH_EVIDENCE_MAX_WAKE_REQUESTED:
-                            scan_truncated = True
-                            break
-                        seen_event_count += 1
-                        if event.event_type != "WAKE_REQUESTED" or not event.aggregate_id:
-                            continue
-                        try:
-                            obligation = wake_persist.parse_obligation(event.payload)
-                        except Exception:  # noqa: BLE001 — untrusted envelope
-                            continue
-                        if obligation.root_job_id != root_job_id:
-                            continue
-                        obligation_ids.add(event.aggregate_id)
-                # More than one candidate obligation under this root: this
-                # ROW cannot pick one without guessing (there is no
-                # recency/title rule in this codebase for that choice), so
-                # it leaves obligation_status unset rather than picking —
-                # conservative, never a fabricated single answer.
-                # A truncated scan cannot prove a second obligation is
-                # absent, so it must read as ambiguity rather than as the
-                # first one found.  The budget is spent across the whole tree
-                # and counts rejected envelopes too, so exhausting it on an
-                # early child previously hid a genuine obligation on a later
-                # one and the row asserted a definite status picked by scan
-                # order (review, real-Runtime probe: 19 foreign envelopes +
-                # two genuine obligations reported one of them).
-                if len(obligation_ids) == 1 and not scan_truncated:
-                    oid = next(iter(obligation_ids))
-                    try:
-                        persisted = wake_repo.list_wake_events(aggregate_id=oid)
-                        status = wake_ledger.reconstruct_status(
-                            oid, tuple(item.record for item in persisted)
-                        )
-                        status_value = getattr(status, "value", None)
-                        if isinstance(status_value, str) and status_value:
-                            row["obligation_status"] = status_value
-                            found_evidence = True
-                        for item in persisted:
-                            observed_at = _dispatch_evidence_newer(
-                                observed_at, item.event.created_at
-                            )
-                    except Exception:  # noqa: BLE001 — gather layer never raises
-                        pass
-
-            # --- binding resolution: sol_action_target + session_targets ---
-            if registry is not None and sol_action_target is not None:
-                try:
-                    seat_map = registry.root_job_bindings.get(root_job_id)
-                    alias = seat_map.get("ceo") if isinstance(seat_map, Mapping) else None
-                    target = registry.targets.get(alias) if isinstance(alias, str) else None
-                    binding_snapshot = sol_action_target.RuntimeBindingSnapshot.unknown()
-                    if (
-                        target is not None
-                        and attempt is not None
-                        and runtime_binding_projection is not None
-                    ):
-                        try:
-                            binding = runtime_binding_projection.project_runtime_binding(
-                                runtime, attempt.attempt_id, target
-                            )
-                            binding_snapshot = sol_action_target.RuntimeBindingSnapshot.current(
-                                [binding]
-                            )
-                        except Exception:  # noqa: BLE001 — gather layer never raises
-                            binding_snapshot = sol_action_target.RuntimeBindingSnapshot.unknown()
-                    resolution = sol_action_target.resolve_sol_action_target(
-                        root_job_id=root_job_id,
-                        registry=registry,
-                        binding_snapshot=binding_snapshot,
-                        actor_binding=None,
-                    )
-                    row["action_target_state"] = resolution.state.value
-                    row["action_target_reason"] = resolution.reason.value
-                    row["binding_evidence_state"] = binding_snapshot.state.value
-                    found_evidence = True
-                except Exception:  # noqa: BLE001 — gather layer never raises
-                    pass
-
-            if not found_evidence:
-                # Nothing genuine was found for this card at all: emit no
-                # row.  The projection then reads this card exactly like
-                # any other card with no supplied evidence — UNKNOWN,
-                # non-actionable, historical — rather than this function
-                # claiming a hollow "WAITING_CAPACITY" it has no basis for.
-                continue
-
-            row["responsibility_ref"] = ref
-            row["root_job_id"] = root_job_id
-            if observed_at is not None:
-                row["observed_at"] = observed_at
-            rows.append(row)
-
-        return rows
-    except Exception:  # noqa: BLE001 — gather layer must never raise
+        runtime = executive_runtime.Runtime.at(root, create=False)
+    except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError):
         return []
+
+    rows: list[dict[str, Any]] = []
+    seen_keys: set[tuple[Any, Any]] = set()
+    for card in list(cards)[:_DISPATCH_EVIDENCE_MAX_CARDS]:
+        if not isinstance(card, Mapping):
+            continue
+        ref = card.get("responsibility_ref")
+        root_job_id = card.get("root_job_id")
+        if not isinstance(ref, str) or not ref:
+            continue
+        if root_job_id is not None and (
+            not isinstance(root_job_id, str) or not root_job_id
+        ):
+            continue
+        key = (ref, root_job_id)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        rows.append(
+            _owner_held_dispatch_row(
+                responsibility_ref=ref,
+                root_job_id=root_job_id,
+                runtime_root_state=_runtime_root_state(card),
+            )
+        )
+
+    reader = _current_capacity_commitment_reader(runtime)
+    if reader is None or executive_dialogue_observation is None:
+        return rows
+
+    try:
+        with runtime.store.read() as connection:
+            for row in rows:
+                if row["runtime_root_state"] != "RESOLVED":
+                    continue
+                root_job_id = row["root_job_id"]
+                responsibility_ref = row["responsibility_ref"]
+                assert isinstance(root_job_id, str)
+                try:
+                    commitment = reader(
+                        runtime, root_job_id, connection=connection
+                    )
+                except Exception:
+                    row.update(
+                        carrier_state="UNKNOWN",
+                        carrier_reason="C2_COMMITMENT_UNAVAILABLE",
+                        w3c_reason="C2_EXACT_CANDIDATE_UNAVAILABLE",
+                    )
+                    continue
+                if commitment is None:
+                    row.update(
+                        carrier_state="UNKNOWN",
+                        carrier_reason="C2_COMMITMENT_ABSENT",
+                        w3c_reason="C2_EXACT_CANDIDATE_UNAVAILABLE",
+                    )
+                    continue
+                candidate = _exact_w3c_candidate(
+                    commitment,
+                    responsibility_ref=responsibility_ref,
+                    root_job_id=root_job_id,
+                )
+                if candidate is None:
+                    row.update(
+                        carrier_state="UNKNOWN",
+                        carrier_reason="C2_COMMITMENT_CONFLICT",
+                        w3c_state="CONFLICT",
+                        w3c_reason="C2_EXACT_CANDIDATE_CONFLICT",
+                    )
+                    continue
+                row.update(
+                    carrier_state="RESOLVED",
+                    carrier_reason="C2_CURRENT_CAPACITY_COMMITMENT",
+                )
+                _apply_w3c_read(
+                    row,
+                    runtime=runtime,
+                    root_job_id=root_job_id,
+                    candidate=candidate,
+                    connection=connection,
+                )
+    except Exception:
+        for row in rows:
+            if row["carrier_state"] == "OWNER_HELD":
+                row.update(
+                    carrier_state="UNKNOWN",
+                    carrier_reason="C2_COMMITMENT_UNAVAILABLE",
+                    w3c_reason="C2_EXACT_CANDIDATE_UNAVAILABLE",
+                )
+    return rows
 
 
 # ---------------------------------------------------------------------------

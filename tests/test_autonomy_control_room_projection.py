@@ -1357,7 +1357,7 @@ def test_output_keys_is_a_closed_set():
             # Blocker 1 (review 5106453403): explicit ambiguity/
             # reconciliation, distinct from plain "no Runtime evidence" —
             # root_job_id itself stays null in both cases (never a pick).
-            "root_job_ambiguous", "root_job_candidates",
+                "root_job_ambiguous", "root_job_candidates", "runtime_root_state",
             "current_worker", "current_sol_target",
             "owed_turn", "placement_state", "wake_outcome", "blocker",
             "declared_blocker", "freshness", "is_actionable",
@@ -1813,12 +1813,13 @@ def _ws_row(
 
 
 def _agent_os_state(rows, *, generated_at="2026-09-01T01:18:31Z"):
-    return {
+    values = {
         "schema": "agent_os_state.v1",
         "generator": "scripts/agentos.py status",
         "generated_at": generated_at,
         "workstreams": rows,
     }
+    return values
 
 
 @pytest.mark.parametrize(
@@ -2917,7 +2918,7 @@ def _drow(
     sol_decision_operation=None,
     sol_decision_at=None,
 ):
-    return {
+    values = {
         "responsibility_ref": ref,
         "root_job_id": root_job_id,
         "observed_at": observed_at,
@@ -2944,6 +2945,7 @@ def _drow(
         "sol_decision_operation": sol_decision_operation,
         "sol_decision_at": sol_decision_at,
     }
+    return {key: value for key, value in values.items() if value is not None}
 
 
 #: A fully proven watch + return receipt: the base 5-field watch proof PLUS
@@ -3038,258 +3040,24 @@ def test_dispatch_post_start_contradictory_rebind():
     assert card["dispatch_state"] == "RUNTIME_BINDING_RECONCILIATION_REQUIRED"
 
 
-def test_dispatch_result_awaiting_sol():
-    """Law 5: RETURNED remains awaiting Sol with no valid CONTINUE/STOP yet."""
-    doc = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            **_proven_watch(),
-        )],
-    )
-    card = _dcard_of(doc, "WS:AD-CR1A")
-    assert card["dispatch_state"] == "RETURNED"
-    assert card["actionable"] is True
 
 
-def test_dispatch_continue():
-    doc = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            sol_decision="CONTINUE",
-            sol_decision_carrier_ref="carrier:C0123",
-            sol_decision_child_ref="child:JOB-AD-CR1A",
-            sol_decision_operation="op:AD-CR1A",
-            sol_decision_at="2026-08-31T13:00:00Z",
-            **_proven_watch(),
-        )],
-    )
-    card = _dcard_of(doc, "WS:AD-CR1A")
-    assert card["dispatch_state"] == "CONTINUED"
-    assert card["actionable"] is False
 
 
-def test_dispatch_stop():
-    doc = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            sol_decision="STOP",
-            sol_decision_carrier_ref="carrier:C0123",
-            sol_decision_child_ref="child:JOB-AD-CR1A",
-            sol_decision_operation="op:AD-CR1A",
-            sol_decision_at="2026-08-31T13:00:00Z",
-            **_proven_watch(),
-        )],
-    )
-    card = _dcard_of(doc, "WS:AD-CR1A")
-    assert card["dispatch_state"] == "STOPPED"
-    assert card["actionable"] is False
 
 
-def test_dispatch_continue_from_a_different_carrier_is_not_trusted():
-    """Law 5 + Blocker 4: 'valid same-carrier' — a decision from a different
-    carrier never resolves RETURNED, even with a valid child/operation/timing."""
-    doc = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            sol_decision="CONTINUE",
-            sol_decision_carrier_ref="carrier:SOMEONE_ELSE",
-            sol_decision_child_ref="child:JOB-AD-CR1A",
-            sol_decision_operation="op:AD-CR1A",
-            sol_decision_at="2026-08-31T13:00:00Z",
-            **_proven_watch(),
-        )],
-    )
-    card = _dcard_of(doc, "WS:AD-CR1A")
-    assert card["dispatch_state"] == "RETURNED"
 
 
-def test_dispatch_decision_on_wrong_child_is_not_trusted():
-    """Blocker 4: a decision naming the wrong exact child never closes the dialogue."""
-    doc = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            sol_decision="STOP",
-            sol_decision_carrier_ref="carrier:C0123",
-            sol_decision_child_ref="child:SOME-OTHER-JOB",
-            sol_decision_operation="op:AD-CR1A",
-            sol_decision_at="2026-08-31T13:00:00Z",
-            **_proven_watch(),
-        )],
-    )
-    card = _dcard_of(doc, "WS:AD-CR1A")
-    assert card["dispatch_state"] == "RETURNED"
 
 
-def test_dispatch_decision_on_wrong_operation_is_not_trusted():
-    """Blocker 4: a decision naming the wrong exact operation never closes the dialogue."""
-    doc = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            sol_decision="CONTINUE",
-            sol_decision_carrier_ref="carrier:C0123",
-            sol_decision_child_ref="child:JOB-AD-CR1A",
-            sol_decision_operation="op:SOME-OTHER-OP",
-            sol_decision_at="2026-08-31T13:00:00Z",
-            **_proven_watch(),
-        )],
-    )
-    card = _dcard_of(doc, "WS:AD-CR1A")
-    assert card["dispatch_state"] == "RETURNED"
 
 
-def test_dispatch_stale_decision_at_or_before_the_return_is_not_trusted():
-    """Blocker 4: a decision edge must be causally AFTER the return — a
-    decision timestamped at or before the return's own observation time
-    (a stale/replayed decision) never closes the dialogue."""
-    at_or_before = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            sol_decision="CONTINUE",
-            sol_decision_carrier_ref="carrier:C0123",
-            sol_decision_child_ref="child:JOB-AD-CR1A",
-            sol_decision_operation="op:AD-CR1A",
-            sol_decision_at=_RETURN_OBSERVED_AT,  # exactly AT the return, not after
-            **_proven_watch(),
-        )],
-    )
-    card = _dcard_of(at_or_before, "WS:AD-CR1A")
-    assert card["dispatch_state"] == "RETURNED"
-
-    before = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            sol_decision="STOP",
-            sol_decision_carrier_ref="carrier:C0123",
-            sol_decision_child_ref="child:JOB-AD-CR1A",
-            sol_decision_operation="op:AD-CR1A",
-            sol_decision_at="2026-08-30T00:00:00Z",  # before the return
-            **_proven_watch(),
-        )],
-    )
-    card2 = _dcard_of(before, "WS:AD-CR1A")
-    assert card2["dispatch_state"] == "RETURNED"
 
 
-def test_dispatch_missing_watcher_receipt():
-    """Law 6 + Blocker 4: WATCH_PROVEN requires exact child + operation +
-    carrier + mechanism + baseline receipt."""
-    doc = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            watch_child_ref="child:JOB-AD-CR1A",
-            watch_carrier_ref="carrier:C0123",
-            # watch_operation, watch_mechanism and watch_baseline_receipt are missing
-        )],
-    )
-    card = _dcard_of(doc, "WS:AD-CR1A")
-    assert card["dispatch_state"] == "WATCH_UNPROVEN"
-    assert card["watch_proven"] is False
-    assert card["actionable"] is False
 
 
-def test_dispatch_terminal_attempt_with_no_return_receipt_is_never_returned():
-    """Blocker 3: 'Attempt terminality ALONE is never a worker return.' A
-    FAILED/LOST/CANCELLED Attempt with the full base watch proof but NO
-    return receipt (no return_kind/child/operation/carrier/edge/observed_at)
-    must render WATCH_UNPROVEN, never RETURNED — and must never be
-    actionable."""
-    for terminal in ("FAILED", "LOST", "CANCELLED"):
-        doc = proj.project_dispatch_consumption(
-            [_dcard()],
-            generated_at=_DISPATCH_GENERATED_AT,
-            dispatch_evidence=[_drow(
-                obligation_status="TARGET_ACKNOWLEDGED",
-                attempt_state=terminal,
-                action_target_state="RESOLVED",
-                binding_evidence_state="CURRENT",
-                watch_child_ref="child:JOB-AD-CR1A",
-                watch_operation="op:AD-CR1A",
-                watch_carrier_ref="carrier:C0123",
-                watch_mechanism="cron",
-                watch_baseline_receipt="receipt:abc123",
-                # no return_* fields at all: no genuine Observer receipt.
-            )],
-        )
-        card = _dcard_of(doc, "WS:AD-CR1A")
-        assert card["dispatch_state"] == "WATCH_UNPROVEN", (terminal, card)
-        assert card["dispatch_state"] != "RETURNED"
-        assert card["actionable"] is False
 
 
-def test_dispatch_return_receipt_wrong_child_or_operation_is_not_proven():
-    """Blocker 3: the return receipt must name the EXACT SAME child and
-    operation the watcher was actually bound to — not merely non-blank
-    strings — or the terminal Attempt stays WATCH_UNPROVEN."""
-    wrong_child = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            **_proven_watch(return_child_ref="child:SOME-OTHER-JOB"),
-        )],
-    )
-    assert _dcard_of(wrong_child, "WS:AD-CR1A")["dispatch_state"] == "WATCH_UNPROVEN"
-
-    wrong_operation = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            **_proven_watch(return_operation="op:SOME-OTHER-OP"),
-        )],
-    )
-    assert _dcard_of(wrong_operation, "WS:AD-CR1A")["dispatch_state"] == "WATCH_UNPROVEN"
 
 
 def test_dispatch_return_receipt_unrecognized_kind_is_not_proven():
@@ -3314,24 +3082,6 @@ def test_dispatch_return_receipt_unrecognized_kind_is_not_proven():
     assert card["actionable"] is False
 
 
-def test_dispatch_missed_fire_is_stale_returned_never_actionable():
-    """A proven-watch terminal attempt whose evidence has gone stale must not be actionable."""
-    doc = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            observed_at=_DISPATCH_STALE_OBSERVED_AT,
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            **_proven_watch(),
-        )],
-    )
-    card = _dcard_of(doc, "WS:AD-CR1A")
-    assert card["dispatch_state"] == "RETURNED"
-    assert card["historical"] is True
-    assert card["actionable"] is False, "stale evidence must never leave an actuator open"
 
 
 def test_dispatch_stale_evidence_marks_non_returned_steps_historical_too():
@@ -3360,7 +3110,6 @@ def test_dispatch_effect_unknown_outranks_optimistic_progress():
             action_target_state="RESOLVED",
             binding_evidence_state="CURRENT",
             effect_state="effect_unknown",
-            **_proven_watch(),
         )],
     )
     card = _dcard_of(doc, "WS:AD-CR1A")
@@ -3661,23 +3410,24 @@ def test_review_absent_binding_evidence_cannot_yield_attempt_progress():
     believed more than one that admitted ignorance.  The gather omits exactly
     these fields in the degraded release, so the degraded reader was strictly
     more optimistic than the complete one."""
-    running = _rv_card({**_RV_BASE, **_RV_W, **_RV_R, "attempt_state": "RUNNING"})
-    terminal = _rv_card({**_RV_BASE, **_RV_W, **_RV_R, "attempt_state": "FAILED"})
+    running = _rv_card({**_RV_BASE, "attempt_state": "RUNNING"})
+    terminal = _rv_card({**_RV_BASE, "attempt_state": "FAILED"})
 
     assert running["dispatch_state"] == "RUNTIME_BINDING_RECONCILIATION_REQUIRED"
     assert terminal["dispatch_state"] == "RUNTIME_BINDING_RECONCILIATION_REQUIRED"
     assert running["reason"] == "runtime_binding_evidence_absent"
 
 
-def test_review_resolved_binding_still_reaches_started_and_returned():
+def test_review_resolved_binding_reaches_started_but_not_a_local_return():
     """Positive control: the gate above must not be inert.  A guard that
     refuses everything passes every adversarial test for the wrong reason."""
     resolved = {"action_target_state": "RESOLVED", "binding_evidence_state": "CURRENT"}
-    running = _rv_card({**_RV_BASE, **_RV_W, **_RV_R, **resolved, "attempt_state": "RUNNING"})
-    terminal = _rv_card({**_RV_BASE, **_RV_W, **_RV_R, **resolved, "attempt_state": "FAILED"})
+    running = _rv_card({**_RV_BASE, **resolved, "attempt_state": "RUNNING"})
+    terminal = _rv_card({**_RV_BASE, **resolved, "attempt_state": "FAILED"})
 
     assert running["dispatch_state"] == "STARTED"
-    assert terminal["dispatch_state"] == "RETURNED"
+    assert terminal["dispatch_state"] == "WATCH_UNPROVEN"
+    assert terminal["reason"] == "canonical_w3c_evidence_required"
 
 
 def test_review_absent_binding_does_not_overwrite_delivery_derived_states():
@@ -3762,7 +3512,7 @@ def test_review_structural_refusal_still_accepts_legitimate_identifiers(value):
     refusing high-entropy strings outright would have broken the contract
     while looking like extra safety.
     """
-    card = _rv_card({**_RV_BASE, "watch_mechanism": value})
+    card = _rv_card({**_RV_BASE, "w3c_snapshot_digest": value})
 
     assert card["reason"] != "dispatch_evidence_rejected"
 
@@ -3883,30 +3633,11 @@ def test_build_autonomy_snapshot_deleting_the_runtime_job_join_makes_the_root_va
 
 
 # ---------------------------------------------------------------------------
-# Blocker 4 (review 5106453403): consume the durable terminal APPLIED
-# receipt.  A valid ``terminal_return_state="APPLIED"`` row (the gather
-# layer's own closed marker for a matching
-# ``EXECUTIVE_TERMINAL_RETURN_APPLIED`` receipt) lets a terminal Attempt
-# project RETURNED even with no Dialogue/Observer watch proof -- but
-# terminal Attempt status ALONE (no applied marker at all) still stays
-# WATCH_UNPROVEN, and live CONTINUE/STOP stays unavailable (no
-# ``sol_decision`` owner exists yet).
+# Legacy terminal Attempt context never establishes a return. Canonical W3C
+# evidence below is the only path to RETURNED; a terminal Attempt alone stays
+# WATCH_UNPROVEN.
 # ---------------------------------------------------------------------------
 
-def test_dispatch_terminal_return_applied_receipt_projects_returned():
-    doc = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-        ) | {"terminal_return_state": "APPLIED"}],
-    )
-    card = _dcard_of(doc, "WS:AD-CR1A")
-    assert card["dispatch_state"] == "RETURNED"
-    assert card["actionable"] is True
 
 
 def test_dispatch_terminal_attempt_alone_without_applied_marker_stays_unproven():
@@ -3928,22 +3659,284 @@ def test_dispatch_terminal_attempt_alone_without_applied_marker_stays_unproven()
     assert card["actionable"] is False
 
 
-def test_dispatch_terminal_return_applied_never_unlocks_live_continue_stop():
-    """Live CONTINUE/STOP stays explicitly UNKNOWN until the W3C-I1 owner
-    protects: an applied-return-proven row with NO sol_decision evidence
-    must still render plain RETURNED, never CONTINUED/STOPPED."""
-    doc = proj.project_dispatch_consumption(
-        [_dcard()],
-        generated_at=_DISPATCH_GENERATED_AT,
-        dispatch_evidence=[_drow(
-            obligation_status="TARGET_ACKNOWLEDGED",
-            attempt_state="COMPLETED",
-            action_target_state="RESOLVED",
-            binding_evidence_state="CURRENT",
-            sol_decision="CONTINUE",
-        ) | {"terminal_return_state": "APPLIED"}],
+
+
+# ---------------------------------------------------------------------------
+# CR1A W3C-owner projection contract.  Freshness is owned by the canonical
+# source receipt; C2 remains a visible, separate owner-held dimension.
+# ---------------------------------------------------------------------------
+
+
+def _w3c_row(**changes):
+    row = {
+        "responsibility_ref": "WS:AD-CR1A",
+        "root_job_id": "JOB-AD-CR1A",
+        "runtime_root_state": "RESOLVED",
+        "carrier_state": "OWNER_HELD",
+        "carrier_reason": "C2_POSITIVE_OWNER_HELD",
+        "w3c_state": "RESOLVED",
+        "w3c_reason": "CANONICAL_TERMINAL_WAKE_RESOLVED",
+        "w3c_terminal_state": "APPLIED",
+        "w3c_wake_state": "TARGET_ACKNOWLEDGED",
+        "w3c_terminal_applied": "true",
+        "w3c_source_observed_at": _DISPATCH_GENERATED_AT,
+        "w3c_source_freshness": "SOURCE_EVIDENCE_TIME",
+        "w3c_snapshot_digest": "a" * 64,
+        "w3c_terminal_source_owner": "executive_terminal_return",
+        "w3c_wake_source_owner": "wake_ledger",
+    }
+    row.update(changes)
+    return row
+
+
+def test_w3c_canonical_applied_and_acknowledged_wake_projects_returned():
+    card = _dcard_of(
+        proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[_w3c_row()],
+        ),
+        "WS:AD-CR1A",
     )
-    card = _dcard_of(doc, "WS:AD-CR1A")
-    # sol_decision alone, with none of the required exact-carrier/child/
-    # operation identity fields, can never validate -- RETURNED stands.
+
     assert card["dispatch_state"] == "RETURNED"
+    assert card["reason"] == "canonical_terminal_wake_acknowledged"
+    assert card["actionable"] is True
+    assert card["historical"] is False
+    assert card["carrier"] == {
+        "state": "OWNER_HELD",
+        "reason": "C2_POSITIVE_OWNER_HELD",
+        "historical": True,
+        "actionable": False,
+    }
+    assert card["w3c"]["source_receipt"]["observed_at"] == _DISPATCH_GENERATED_AT
+
+
+def test_w3c_source_receipt_is_the_weakest_load_bearing_freshness_clock():
+    card = _dcard_of(
+        proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[
+                _w3c_row(
+                    observed_at=_DISPATCH_GENERATED_AT,
+                    w3c_source_observed_at="2026-08-28T00:00:00Z",
+                )
+            ],
+        ),
+        "WS:AD-CR1A",
+    )
+
+    assert card["dispatch_state"] == "RETURNED"
+    assert card["historical"] is True
+    assert card["actionable"] is False
+
+
+def test_w3c_effect_unknown_has_highest_safety_precedence():
+    card = _dcard_of(
+        proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[
+                _w3c_row(
+                    effect_state="effect_unknown",
+                    w3c_state="EFFECT_UNKNOWN",
+                    w3c_reason="CANONICAL_TERMINAL_EFFECT_UNKNOWN",
+                    w3c_terminal_state="EFFECT_UNKNOWN",
+                    w3c_wake_state="UNAVAILABLE",
+                    w3c_terminal_applied="false",
+                    w3c_source_observed_at=None,
+                    w3c_source_freshness=None,
+                    w3c_snapshot_digest=None,
+                    w3c_terminal_source_owner=None,
+                    w3c_wake_source_owner=None,
+                )
+            ],
+        ),
+        "WS:AD-CR1A",
+    )
+
+    assert card["dispatch_state"] == "EFFECT_UNKNOWN"
+    assert card["actionable"] is False
+    assert card["carrier"]["actionable"] is False
+
+
+def test_w3c_effect_unknown_outranks_even_a_runtime_root_conflict():
+    card = _dcard_of(
+        proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[
+                _w3c_row(
+                    effect_state=None,
+                    runtime_root_state="CONFLICT",
+                    w3c_state="EFFECT_UNKNOWN",
+                    w3c_reason="CANONICAL_TERMINAL_EFFECT_UNKNOWN",
+                    w3c_terminal_state="EFFECT_UNKNOWN",
+                    w3c_wake_state="UNAVAILABLE",
+                    w3c_terminal_applied="false",
+                    w3c_source_observed_at=None,
+                    w3c_source_freshness=None,
+                    w3c_snapshot_digest=None,
+                    w3c_terminal_source_owner=None,
+                    w3c_wake_source_owner=None,
+                )
+            ],
+        ),
+        "WS:AD-CR1A",
+    )
+
+    assert card["dispatch_state"] == "EFFECT_UNKNOWN"
+    assert card["reason"] == "canonical_terminal_effect_unknown"
+    assert card["actionable"] is False
+
+
+def test_effect_unknown_outranks_an_otherwise_optimistic_w3c_result():
+    card = _dcard_of(
+        proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[_w3c_row(effect_state="effect_unknown")],
+        ),
+        "WS:AD-CR1A",
+    )
+
+    assert card["dispatch_state"] == "EFFECT_UNKNOWN"
+    assert card["reason"] == "effect_unknown_reported"
+    assert card["actionable"] is False
+
+
+def test_w3c_cannot_be_actionable_without_one_resolved_runtime_root():
+    card = _dcard_of(
+        proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[_w3c_row(runtime_root_state="UNKNOWN")],
+        ),
+        "WS:AD-CR1A",
+    )
+
+    assert card["dispatch_state"] == "UNKNOWN"
+    assert card["reason"] == "runtime_root_not_resolved"
+    assert card["historical"] is True
+    assert card["actionable"] is False
+
+
+def test_c2_owner_hold_stays_visible_historical_and_nonactionable():
+    card = _dcard_of(
+        proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[
+                _w3c_row(
+                    w3c_state="UNAVAILABLE",
+                    w3c_reason="C2_EXACT_CANDIDATE_UNAVAILABLE",
+                    w3c_terminal_state="UNAVAILABLE",
+                    w3c_wake_state="UNAVAILABLE",
+                    w3c_terminal_applied="false",
+                    w3c_source_observed_at=None,
+                    w3c_source_freshness=None,
+                    w3c_snapshot_digest=None,
+                    w3c_terminal_source_owner=None,
+                    w3c_wake_source_owner=None,
+                )
+            ],
+        ),
+        "WS:AD-CR1A",
+    )
+
+    assert card["dispatch_state"] == "UNKNOWN"
+    assert card["reason"] == "canonical_w3c_unavailable"
+    assert card["historical"] is True
+    assert card["actionable"] is False
+    assert card["carrier"]["state"] == "OWNER_HELD"
+    assert card["w3c"]["state"] == "UNAVAILABLE"
+
+
+@pytest.mark.parametrize(
+    ("state", "reason", "terminal", "wake", "expected"),
+    [
+        ("ABSENT", "CANONICAL_TERMINAL_ABSENT", "MISSING", "UNAVAILABLE", "UNKNOWN"),
+        ("ABSENT", "CORRELATED_WAKE_ABSENT", "APPLIED", "ABSENT", "UNKNOWN"),
+        ("UNAVAILABLE", "WAKE_EVENT_BUDGET_EXCEEDED", "APPLIED", "OVERFLOW", "UNKNOWN"),
+        ("CONFLICT", "WAKE_HISTORY_INVALID", "APPLIED", "CONFLICT", "RUNTIME_BINDING_RECONCILIATION_REQUIRED"),
+        ("AMBIGUOUS", "MULTIPLE_WAKE_OBLIGATIONS", "APPLIED", "AMBIGUOUS", "RUNTIME_BINDING_RECONCILIATION_REQUIRED"),
+    ],
+)
+def test_w3c_adverse_states_are_closed_and_never_actionable(
+    state, reason, terminal, wake, expected
+):
+    card = _dcard_of(
+        proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[
+                _w3c_row(
+                    w3c_state=state,
+                    w3c_reason=reason,
+                    w3c_terminal_state=terminal,
+                    w3c_wake_state=wake,
+                    w3c_terminal_applied="true" if terminal == "APPLIED" else "false",
+                )
+            ],
+        ),
+        "WS:AD-CR1A",
+    )
+
+    assert card["dispatch_state"] == expected
+    assert card["historical"] is True
+    assert card["actionable"] is False
+    assert card["w3c"]["state"] == state
+
+
+def test_raw_applied_marker_is_rejected_non_echoing_and_never_actionable():
+    raw = _w3c_row()
+    raw["terminal_return_state"] = "APPLIED"
+    raw["raw_result"] = "PRIVATE-PAYLOAD-MUST-NOT-ECHO"
+
+    card = _dcard_of(
+        proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[raw],
+        ),
+        "WS:AD-CR1A",
+    )
+
+    assert card["dispatch_state"] == "UNKNOWN"
+    assert card["reason"] == "dispatch_evidence_rejected"
+    assert card["evidence"] is None
+    assert card["actionable"] is False
+    dumped = json.dumps(card)
+    assert "terminal_return_state" not in dumped
+    assert "PRIVATE-PAYLOAD-MUST-NOT-ECHO" not in dumped
+
+
+def test_runtime_root_state_is_explicit_for_zero_unique_and_conflicting_roots():
+    agent_os_state = _agent_os_state([
+        _ws_row("ROOT-ZERO", owner="coo-fable"),
+        _ws_row("ROOT-ONE", owner="coo-fable"),
+        _ws_row("ROOT-MANY", owner="coo-fable"),
+    ])
+    runtime_jobs = [
+        {"job_id": "job-1", "status": "running", "workstream": "WS:ROOT-ONE", "root_job_id": "JOB-ONE"},
+        {"job_id": "job-2", "status": "running", "workstream": "WS:ROOT-MANY", "root_job_id": "JOB-A"},
+        {"job_id": "job-3", "status": "running", "workstream": "WS:ROOT-MANY", "root_job_id": "JOB-B"},
+    ]
+    snapshot = proj.build_autonomy_snapshot(
+        inbox=None,
+        boot_packet=None,
+        active_builds=None,
+        agent_os_state=agent_os_state,
+        runtime_jobs=runtime_jobs,
+        bindings=None,
+    )
+    doc = proj.project_autonomy(
+        snapshot,
+        generated_at="2026-09-03T12:00:00Z",
+        runtime_root_candidates=proj.runtime_root_candidates_from_runtime_jobs(runtime_jobs),
+    )
+
+    assert _card(doc, "WS:ROOT-ZERO")["runtime_root_state"] == "UNKNOWN"
+    assert _card(doc, "WS:ROOT-ONE")["runtime_root_state"] == "RESOLVED"
+    assert _card(doc, "WS:ROOT-MANY")["runtime_root_state"] == "CONFLICT"
