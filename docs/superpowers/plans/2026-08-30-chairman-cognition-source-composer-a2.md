@@ -70,9 +70,15 @@ The R5 repair changes only:
 
 1. `control_plane/chairman_cognition_sources.py`;
 2. `tests/test_chairman_cognition_agentos_warning_currentness.py`;
-3. this accepted A2 plan.
+3. `tests/test_chairman_cognition_sources.py`;
+4. this accepted A2 plan.
 
-It does not reopen A1, the owner wire, the CEO boot-packet producer, the original A2 CLI, or any
+The neighboring legacy-suite change removes only the obsolete expectation that every valid nonempty
+warning list is degradation. It preserves the existing UNKNOWN assertions for unavailable owner
+inputs, degraded readiness, malformed wire shape and unsupported schema, while the dedicated R5
+suite carries the positive warning-currentness and warning-mutation discrimination.
+
+R5 does not reopen A1, the owner wire, the CEO boot-packet producer, the original A2 CLI, or any
 runtime/effect surface. It introduces no warning allowlist or message classifier: every valid warning
 string remains advisory evidence, while malformed warning structure still fails closed.
 
@@ -298,7 +304,7 @@ existing CEO boot packet, owner-produced identity and protected A1 contract.
 
 ## Completion and next action
 
-The R5 correction is complete when one exact current-base PR contains only the three repair paths,
+The R5 correction is complete when one exact current-base PR contains only the four repair paths,
 focused and neighboring suites are green, the correction receives independent exact-head review,
 and the expected-head merge is read back from protected `master`. It does not reopen the original A2
 acceptance or claim a live Chairman workflow.
