@@ -112,6 +112,40 @@ def _source_ref(
     )
 
 
+def _packet_with_source_reference_text(
+    field_name: str, value: str
+) -> AssessmentInput:
+    packet = _packet()
+    source_ref = dataclasses.replace(
+        packet.checks_source_ref,
+        **{field_name: value},
+    )
+    return dataclasses.replace(packet, checks_source_ref=source_ref)
+
+
+def _packet_with_extra_source_reference_text(
+    field_name: str, value: str
+) -> AssessmentInput:
+    packet = _packet()
+    extra = _source_ref(
+        "extra_source",
+        "source-token-validation",
+        revision="source-token-validation-v1",
+        content_seed=f"{field_name}:{value}",
+    )
+    extra = dataclasses.replace(extra, **{field_name: value})
+    return dataclasses.replace(packet, source_refs=packet.source_refs + (extra,))
+
+
+def _assert_unsafe_source_reference_text_is_rejected(
+    field_name: str, value: str
+) -> None:
+    with pytest.raises(AssessmentInputError) as raised:
+        assess_github_release(_packet_with_source_reference_text(field_name, value))
+    assert field_name in str(raised.value)
+    assert value not in str(raised.value)
+
+
 def _check_source_resource_id(
     context: str, app_id: int | None, attempt: int, sequence: int
 ) -> str:
@@ -1402,6 +1436,92 @@ def test_malformed_source_reference_secret_and_invalid_content_digest_fail_early
     invalid_digest = dataclasses.replace(packet.checks_source_ref, content_sha256="abc")
     with pytest.raises(AssessmentInputError):
         assess_github_release(dataclasses.replace(packet, checks_source_ref=invalid_digest))
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("source_kind", "AcCeSs_ToKeN:SuperSecret123"),
+        ("source_kind", "CLIENT-SECRET:SuperSecret123"),
+        ("resource_kind", "api.key:SuperSecret123"),
+        ("resource_kind", "ToKeN:SuperSecret123"),
+        ("resource_id", "artifact?SIG=SuperSecret123"),
+        ("resource_id", "artifact#Signature:SuperSecret123"),
+        ("resource_id", "artifact&SeCrEt=SuperSecret123"),
+        ("revision", "branch?Credential=SuperSecret123"),
+        ("revision", "branch#PassWd:SuperSecret123"),
+        ("revision", "branch&PASSWORD=SuperSecret123"),
+        ("continuation", "page:2&Authorization=SuperSecret123"),
+    ],
+)
+def test_source_reference_rejects_generic_credential_assignments_without_echoing(
+    field_name: str, value: str
+) -> None:
+    _assert_unsafe_source_reference_text_is_rejected(field_name, value)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("source_kind", "file:///Users/chris/private/project"),
+        ("resource_kind", "https://internal.example/private"),
+        ("resource_id", "http://localhost:8000/private"),
+        ("resource_id", "https://127.0.0.1/private"),
+        ("resource_id", "https://10.1.2.3/private"),
+        ("revision", "https://172.16.1.2/private"),
+        ("revision", "https://192.168.1.3/private"),
+        ("revision", "C:/Users/chris/private/project"),
+        ("continuation", "unc://private-server/share"),
+        ("continuation", "internal.example/private?page=2"),
+        ("resource_id", "/Users/chris/private/project"),
+        ("revision", "~/private/project"),
+        ("continuation", "C:\\Users\\chris\\private\\project"),
+        ("resource_id", "\\\\private-server\\share"),
+    ],
+)
+def test_source_reference_rejects_private_coordinates_without_echoing(
+    field_name: str, value: str
+) -> None:
+    _assert_unsafe_source_reference_text_is_rejected(field_name, value)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("source_kind", "token:SuperSecret123"),
+        ("repository", "access_token=SuperSecret123"),
+        ("resource_kind", "file:///private"),
+        ("resource_id", "artifact?client_secret=SuperSecret123"),
+        ("revision", "https://internal.example/private?sig=abcdef"),
+        ("content_sha256", "authorization:SuperSecret123"),
+        ("continuation", "C:/Users/chris/private/project"),
+    ],
+)
+def test_every_model_visible_source_reference_text_field_is_closed_or_fenced(
+    field_name: str, value: str
+) -> None:
+    _assert_unsafe_source_reference_text_is_rejected(field_name, value)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("resource_id", "github:pr:295"),
+        ("continuation", "page:2"),
+        ("revision", "runtime-binding-generation-7"),
+        ("resource_id", "check:" + "d" * 64),
+        ("resource_id", "reviewer:1"),
+        ("revision", "sol/sol-capability-fabric-gh1-20260830"),
+        ("revision", "agentos-commit-123"),
+    ],
+)
+def test_lawful_owner_native_source_reference_tokens_remain_accepted(
+    field_name: str, value: str
+) -> None:
+    result = assess_github_release(
+        _packet_with_extra_source_reference_text(field_name, value)
+    )
+    assert any(getattr(ref, field_name) == value for ref in result.source_refs)
 
 
 def test_load_bearing_source_owner_is_bound_to_evidence_role() -> None:

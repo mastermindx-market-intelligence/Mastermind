@@ -43,6 +43,27 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$")
 _CHECK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._:/()\[\]-]{0,127}$")
 _SOURCE_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/@#?=&,+-]{0,511}$")
 _PATH_RE = re.compile(r"^[A-Za-z0-9._/-]{1,512}$")
+_SOURCE_CREDENTIAL_ASSIGNMENT_RE = re.compile(
+    r"(?:^|[?&#])"
+    r"(?:access[._-]?token|client[._-]?secret|api[._-]?key|token|"
+    r"sig(?:nature)?|secret|credential|passw(?:or)?d|authorization)"
+    r"[:=]",
+    re.IGNORECASE,
+)
+_SOURCE_PRIVATE_COORDINATE_RE = re.compile(
+    r"^(?:"
+    r"[A-Za-z][A-Za-z0-9+.-]*://|"
+    r"[A-Za-z]:[/\\]|"
+    r"/|~/|~\\|\\\\|//|"
+    r"(?:localhost|internal(?:\.[A-Za-z0-9-]+)*|"
+    r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?:internal|localhost|local)|"
+    r"127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|"
+    r"172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|"
+    r"192\.168(?:\.\d{1,3}){2}|169\.254(?:\.\d{1,3}){2})"
+    r"(?::\d{1,5})?(?:[/?#]|$)"
+    r")",
+    re.IGNORECASE,
+)
 _SECRET_PATTERNS = (
     re.compile(r"github_pat_", re.IGNORECASE),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]", re.IGNORECASE),
@@ -745,6 +766,18 @@ def _text(value: object, *, field: str, pattern: re.Pattern[str]) -> str:
     return value
 
 
+def _source_reference_text(
+    value: object, *, field: str, pattern: re.Pattern[str]
+) -> str:
+    token = _text(value, field=field, pattern=pattern)
+    if (
+        _SOURCE_CREDENTIAL_ASSIGNMENT_RE.search(token)
+        or _SOURCE_PRIVATE_COORDINATE_RE.search(token)
+    ):
+        raise AssessmentInputError(f"{field} contains unsafe source-reference text")
+    return token
+
+
 def _operation(value: object, *, field: str = "operation_key") -> str:
     return _text(value, field=field, pattern=_OPERATION_RE)
 
@@ -848,23 +881,51 @@ def _paths_overlap(left: str, right: str) -> bool:
 
 def _validate_source_reference(value: object, *, field: str) -> SourceReference:
     item = _exact(value, SourceReference, field=field)
-    _identifier(item.source_kind, field=f"{field}.source_kind")
+    _source_reference_text(
+        item.source_kind,
+        field=f"{field}.source_kind",
+        pattern=_IDENTIFIER_RE,
+    )
     _exact_enum(item.owner, SourceOwner, field=f"{field}.owner")
     if item.repository is not None:
-        _repository(item.repository, field=f"{field}.repository")
-    _identifier(item.resource_kind, field=f"{field}.resource_kind")
-    _source_token(item.resource_id, field=f"{field}.resource_id")
-    _source_token(item.revision, field=f"{field}.revision")
+        _source_reference_text(
+            item.repository,
+            field=f"{field}.repository",
+            pattern=_REPOSITORY_RE,
+        )
+    _source_reference_text(
+        item.resource_kind,
+        field=f"{field}.resource_kind",
+        pattern=_IDENTIFIER_RE,
+    )
+    _source_reference_text(
+        item.resource_id,
+        field=f"{field}.resource_id",
+        pattern=_SOURCE_TOKEN_RE,
+    )
+    _source_reference_text(
+        item.revision,
+        field=f"{field}.revision",
+        pattern=_SOURCE_TOKEN_RE,
+    )
     _plain_int(item.observed_at, field=f"{field}.observed_at", allow_zero=True)
     if item.valid_at is not None:
         _plain_int(item.valid_at, field=f"{field}.valid_at", allow_zero=True)
         if item.valid_at > item.observed_at:
             raise AssessmentInputError(f"{field}.valid_at exceeds observed_at")
-    _text(item.content_sha256, field=f"{field}.content_sha256", pattern=_SHA256_RE)
+    _source_reference_text(
+        item.content_sha256,
+        field=f"{field}.content_sha256",
+        pattern=_SHA256_RE,
+    )
     _exact_enum(item.coverage, SourceReferenceCoverage, field=f"{field}.coverage")
     _plain_bool(item.truncated, field=f"{field}.truncated")
     if item.continuation is not None:
-        _source_token(item.continuation, field=f"{field}.continuation")
+        _source_reference_text(
+            item.continuation,
+            field=f"{field}.continuation",
+            pattern=_SOURCE_TOKEN_RE,
+        )
     return item
 
 
