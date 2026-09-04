@@ -178,7 +178,8 @@ def _selection(
     mode: c1.PlacementMode = c1.PlacementMode.NEW_SESSION_MATERIALIZATION,
     worker_id: str = "worker-1",
     quota_class: str = "standard",
-) -> dict:
+    typed: bool = False,
+) -> dict | c1.PlacementSelectionDecision:
     responsibility = ResponsibilityFact(
         responsibility_ref="WS:CAP-C2",
         title="Atomic alias-carrier placement commitment",
@@ -218,7 +219,7 @@ def _selection(
         candidates=(candidate,),
     )
     assert decision.state is c1.SelectionState.SELECTED
-    return decision.to_dict()
+    return decision if typed else decision.to_dict()
 
 
 def _target_facts(**changes: object) -> dict[str, object]:
@@ -1047,3 +1048,42 @@ def test_aggregation_handoff_cannot_resurrect_through_public_contract() -> None:
         "plan_digest",
     ):
         assert field not in public_text
+
+
+def test_runtime_typed_decision_and_causal_replay_do_not_select_twice(
+    monkeypatch,
+) -> None:
+    decision = _selection(typed=True)
+    assert isinstance(decision, c1.PlacementSelectionDecision)
+    plan = c2.build_commitment_plan_from_selection_decision(
+        source_root_job_id="job-source-1",
+        expected_source_root_revision=7,
+        placement_selection=decision,
+        validated_target_facts=_target_facts(),
+    )
+    payload = _event(plan)
+
+    def c1_must_not_run(_value):
+        raise AssertionError("causal plan rehydration must not rerun C1")
+
+    monkeypatch.setattr(c2, "validate_placement_selection", c1_must_not_run)
+    replay_plan = c2.rebuild_committed_plan_for_replay(
+        payload,
+        current_source_root_revision=8,
+        validated_target_facts=_target_facts(),
+        committed_placement_snapshot=plan.committed_placement_snapshot,
+    )
+
+    assert replay_plan.expected_source_root_revision == 8
+    assert replay_plan.command_semantics() == plan.command_semantics()
+    assert replay_plan.commitment_command_id == plan.commitment_command_id
+    replay_facts = _runtime_facts(plan)
+    replay_facts["source_root_revision"] = 8
+    assert (
+        c2.validate_commitment_event_payload(
+            payload,
+            plan=replay_plan,
+            validated_runtime_facts=replay_facts,
+        )
+        == payload
+    )

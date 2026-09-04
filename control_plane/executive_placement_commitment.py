@@ -33,7 +33,11 @@ from control_plane.executive_orchestration_principal import (
     digest,
     validate_placement_snapshot,
 )
-from control_plane.executive_placement_selection import validate_placement_selection
+from control_plane.executive_placement_selection import (
+    PlacementSelectionDecision,
+    SelectionState,
+    validate_placement_selection,
+)
 
 COMMITMENT_SCHEMA = "mastermind.capacity_placement_commitment/v2"
 COMMAND_SCHEMA = "mastermind.capacity_placement_commitment_command/v2"
@@ -432,15 +436,15 @@ class PlacementCommitmentPlan:
         return value
 
 
-def build_commitment_plan(
+def _build_commitment_plan_from_canonical_selection(
     *,
     source_root_job_id: str,
     expected_source_root_revision: int,
-    placement_selection: Any,
+    selection: Mapping[str, Any],
+    selected: Mapping[str, Any],
+    placement_mode: str,
     validated_target_facts: Any,
 ) -> PlacementCommitmentPlan:
-    """Bind one current C1 selection to the protected alias carrier identity."""
-
     source_root = _token(source_root_job_id, code="SOURCE_ROOT_JOB_ID_INVALID")
     revision = _revision(
         expected_source_root_revision,
@@ -450,8 +454,6 @@ def build_commitment_plan(
     if target["session_alias"] != SESSION_ALIAS:
         raise PlacementCommitmentError("TARGET_DEFINITION_CONFLICT")
     target_fingerprint = digest(target)
-
-    selection, selected, placement_mode = _canonical_selection(placement_selection)
     responsibility_ref = _token(
         selection["responsibility_ref"], code="RESPONSIBILITY_REF_INVALID"
     )
@@ -503,6 +505,68 @@ def build_commitment_plan(
         object.__setattr__(plan, field, value)
     plan.__post_init__()
     return plan
+
+
+def build_commitment_plan(
+    *,
+    source_root_job_id: str,
+    expected_source_root_revision: int,
+    placement_selection: Any,
+    validated_target_facts: Any,
+) -> PlacementCommitmentPlan:
+    """Bind one independently supplied C1 wire to the alias carrier identity."""
+
+    selection, selected, placement_mode = _canonical_selection(placement_selection)
+    return _build_commitment_plan_from_canonical_selection(
+        source_root_job_id=source_root_job_id,
+        expected_source_root_revision=expected_source_root_revision,
+        selection=selection,
+        selected=selected,
+        placement_mode=placement_mode,
+        validated_target_facts=validated_target_facts,
+    )
+
+
+def build_commitment_plan_from_selection_decision(
+    *,
+    source_root_job_id: str,
+    expected_source_root_revision: int,
+    placement_selection: PlacementSelectionDecision,
+    validated_target_facts: Any,
+) -> PlacementCommitmentPlan:
+    """Bind the Runtime's just-computed typed C1 result without selecting twice.
+
+    This seam is for the trusted in-process Runtime owner.  The ordinary wire
+    builder above continues to re-run C1 validation for untrusted documents.
+    ``PlacementSelectionDecision`` has already enforced the typed C1 contract;
+    this adapter only projects its exact canonical wire and selected snapshot.
+    """
+
+    if not isinstance(placement_selection, PlacementSelectionDecision):
+        raise PlacementCommitmentError("PLACEMENT_SELECTION_INVALID")
+    selection = placement_selection.to_dict()
+    if (
+        placement_selection.state is not SelectionState.SELECTED
+        or selection.get("state") != "selected"
+        or selection.get("selection_is_commitment") is not False
+        or placement_selection.selected_mode is None
+    ):
+        raise PlacementCommitmentError("PLACEMENT_SELECTION_NOT_SELECTED")
+    try:
+        selected = validate_placement_snapshot(selection.get("selected"))
+    except (TypeError, ValueError, OrchestrationPrincipalError) as exc:
+        raise PlacementCommitmentError("PLACEMENT_SNAPSHOT_INVALID") from exc
+    placement_mode = placement_selection.selected_mode.value
+    if placement_mode not in _PLACEMENT_MODE_TO_DISPOSITION:
+        raise PlacementCommitmentError("PLACEMENT_MODE_INVALID")
+    return _build_commitment_plan_from_canonical_selection(
+        source_root_job_id=source_root_job_id,
+        expected_source_root_revision=expected_source_root_revision,
+        selection=selection,
+        selected=selected,
+        placement_mode=placement_mode,
+        validated_target_facts=validated_target_facts,
+    )
 
 
 def _canonical_runtime_facts(value: Any) -> dict[str, Any]:
@@ -666,6 +730,87 @@ def build_commitment_event_payload(
     return _event_payload(plan=plan, runtime_facts=facts)
 
 
+def validate_commitment_event_document(value: Any) -> dict[str, Any]:
+    """Return one closed V2 Event document before Runtime causal validation."""
+
+    if not isinstance(value, Mapping):
+        raise PlacementCommitmentError("COMMITMENT_EVENT_SHAPE_INVALID")
+    payload = dict(value)
+    if set(payload) & FORBIDDEN_EVENT_KEYS:
+        raise PlacementCommitmentError("COMMITMENT_EVENT_FORBIDDEN_FIELD")
+    if set(payload) != _EVENT_KEYS:
+        raise PlacementCommitmentError("COMMITMENT_EVENT_SHAPE_INVALID")
+    if payload.get("schema_version") != COMMITMENT_SCHEMA:
+        raise PlacementCommitmentError("COMMITMENT_EVENT_SCHEMA_INVALID")
+    return payload
+
+
+def rebuild_committed_plan_for_replay(
+    value: Any,
+    *,
+    current_source_root_revision: int,
+    validated_target_facts: Any,
+    committed_placement_snapshot: Any,
+) -> PlacementCommitmentPlan:
+    """Rehydrate a committed plan without rerunning pre-effect Capacity C1.
+
+    A successful initial claim necessarily makes the selected quota BUSY, so
+    causal replay validates immutable C1 digests plus the current post-claim
+    graph.  It must not ask the live selector to reproduce the prior NEW result.
+    """
+
+    payload = validate_commitment_event_document(value)
+    revision = _revision(
+        current_source_root_revision,
+        code="EXPECTED_SOURCE_ROOT_REVISION_INVALID",
+    )
+    target = _canonical_target_definition(validated_target_facts)
+    target_fingerprint = digest(target)
+    if (
+        target.get("session_alias") != SESSION_ALIAS
+        or payload.get("session_alias") != SESSION_ALIAS
+        or payload.get("target_definition_fingerprint") != target_fingerprint
+    ):
+        raise PlacementCommitmentError("TARGET_DEFINITION_CONFLICT")
+    try:
+        snapshot = validate_placement_snapshot(committed_placement_snapshot)
+    except (TypeError, ValueError, OrchestrationPrincipalError) as exc:
+        raise PlacementCommitmentError("PLACEMENT_SNAPSHOT_INVALID") from exc
+    if (
+        snapshot.get("worker_id") != payload.get("selected_worker_id")
+        or snapshot.get("quota_class") != payload.get("selected_quota_class")
+        or digest(snapshot) != payload.get("committed_placement_snapshot_digest")
+    ):
+        raise PlacementCommitmentError("COMMITMENT_EVENT_REPLAY_CONFLICT")
+
+    plan = object.__new__(PlacementCommitmentPlan)
+    values = {
+        "source_root_job_id": payload.get("source_root_job_id"),
+        "expected_source_root_revision": revision,
+        "responsibility_ref": payload.get("responsibility_ref"),
+        "placement_mode": payload.get("placement_mode"),
+        "selection_document_digest": payload.get("selection_document_digest"),
+        "selection_evidence_digest": payload.get("selection_evidence_digest"),
+        "selected_worker_id": payload.get("selected_worker_id"),
+        "selected_quota_class": payload.get("selected_quota_class"),
+        "committed_placement_snapshot": snapshot,
+        "committed_placement_snapshot_digest": payload.get(
+            "committed_placement_snapshot_digest"
+        ),
+        "session_alias": payload.get("session_alias"),
+        "target_definition_fingerprint": payload.get("target_definition_fingerprint"),
+        "carrier_generation": payload.get("carrier_generation"),
+        "carrier_job_created_command_id": payload.get("carrier_job_created_command_id"),
+        "commitment_command_id": payload.get("commitment_command_id"),
+        "command_fingerprint": payload.get("command_fingerprint"),
+        "schema_version": COMMAND_SCHEMA,
+    }
+    for field, item in values.items():
+        object.__setattr__(plan, field, item)
+    plan.__post_init__()
+    return plan
+
+
 def validate_commitment_event_payload(
     value: Any,
     *,
@@ -679,14 +824,7 @@ def validate_commitment_event_payload(
     The Event and its hashes never authenticate themselves.
     """
 
-    if not isinstance(value, Mapping):
-        raise PlacementCommitmentError("COMMITMENT_EVENT_SHAPE_INVALID")
-    if set(value) & FORBIDDEN_EVENT_KEYS:
-        raise PlacementCommitmentError("COMMITMENT_EVENT_FORBIDDEN_FIELD")
-    if set(value) != _EVENT_KEYS:
-        raise PlacementCommitmentError("COMMITMENT_EVENT_SHAPE_INVALID")
-    if value.get("schema_version") != COMMITMENT_SCHEMA:
-        raise PlacementCommitmentError("COMMITMENT_EVENT_SCHEMA_INVALID")
+    payload = validate_commitment_event_document(value)
     if not isinstance(plan, PlacementCommitmentPlan):
         raise PlacementCommitmentError("COMMITMENT_PLAN_INVALID")
     try:
@@ -703,7 +841,7 @@ def validate_commitment_event_payload(
             raise
         raise PlacementCommitmentError("COMMITMENT_EVENT_REPLAY_CONFLICT") from exc
     expected = _event_payload(plan=plan, runtime_facts=facts)
-    if dict(value) != expected:
+    if payload != expected:
         raise PlacementCommitmentError("COMMITMENT_EVENT_REPLAY_CONFLICT")
     return expected
 
@@ -722,6 +860,9 @@ __all__ = [
     "PlacementCommitmentPlan",
     "build_commitment_event_payload",
     "build_commitment_plan",
+    "build_commitment_plan_from_selection_decision",
     "fingerprint_target_definition",
+    "rebuild_committed_plan_for_replay",
+    "validate_commitment_event_document",
     "validate_commitment_event_payload",
 ]
