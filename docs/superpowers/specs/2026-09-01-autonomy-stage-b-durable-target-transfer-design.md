@@ -1,204 +1,353 @@
 ---
-schema: mastermind.autonomy_stage_b_f0_design.v5
-architecture_revision: v5.3-post-handoff-aggregation
-operation: stage-b0-r1-real-owner-gap-repair-20260902-sol-001
+schema: mastermind.autonomy_stage_b_f0_design.v6
+architecture_revision: v6.1-split-initial-and-reuse
+operation: stage-b0-r2-alias-carrier-correction-20260903-sol-001
 capability: SPEC_ONLY
 production_effect: NONE
 ---
 
-# Autonomy Stage B — post-handoff aggregation assignment
+# Autonomy Stage B — alias-scoped CEO carrier assignment
 
 ## Status
 
-This records-only correction supersedes Stage-B V1 through V5.2. It freezes one narrow future capability: after a strict CEO-v2 aggregation root has completed its canonical COO planner/work/review-repair lifecycle, produced one validated aggregation handoff, and then been transactionally claimed by Capacity C2, the existing Operator Harness may materialize one exact current Codex writer for that aggregation Attempt. The existing Executive service may then append the first immutable root-scoped Sol target assignment and expose it through unchanged Stage-A enforcement.
+This V6.1 records-only correction supersedes the protected root-claim model. The strict CEO-v2 root remains the root-level `coo` / `aggregation` responsibility aggregate and is never relabeled, cleared, or claimed as the CEO writer. C2-PURE retains the eventual create-or-reuse vocabulary, but C2-R1A may create and claim only one separate alias-scoped, root-level, role-null, READ-only CEO carrier Job. MAT-S1 then materializes that carrier Attempt and extends the canonical current-writer read owner. From MAT-S1, first-root Stage-B1 and later-root C2-R1B are independent lawful children: Stage-B1 does not wait for multi-root reuse, while reuse and its canary remain held until C2-R1B.
 
-Current state is `SPEC_ONLY / PREDECESSORS_HELD / SOURCE_NOT_BUILT / PRODUCTION_INERT`.
-
-The correction is deliberately narrow. It preserves V5.2's claim/materialization split and closes one false Runtime model: protected `create_v2_orchestration_root()` creates an `aggregation` root whose stored owner seat is `coo`; that root must remain unclaimed while the COO cycle runs and may be claimed only after the existing validated aggregation handoff.
+Current state is `SPEC_ONLY / CORRECTION_REQUIRED / SOURCE_NOT_BUILT / PRODUCTION_INERT`. No assignment mode is authorized now. The protected Codex CEO target remains disabled and the system remains globally production-disarmed.
 
 ## One-system model
 
 ```text
-CeoIngress v2
--> ExecutiveControlService._submit_service_intent
--> ceo_intent.submit_intent
--> Runtime.jobs.create_v2_orchestration_root
--> strict CEO-v2 aggregation root (stored owner seat: coo)
-
-existing COO cycle
--> create_cycle_planner
--> admit_cycle_plan
--> work / review / repair as required
--> COO_AGGREGATION_HANDOFF_READY
--> _validated_aggregation_handoff
-
-protected Capacity C1 selection for aggregation execution
--> Capacity C2 same-transaction handoff revalidation + canonical root claim
--> immutable root-bound CAPACITY_PLACEMENT_COMMITTED Event
-   (aggregation Attempt + placement snapshot; no RuntimeBinding yet)
-
-separately protected disabled EXECUTIVE-CEO-CODEX-A target definition
-
-existing Operator Harness start/resume/current-writer owner
--> accepted SessionEpoch + ProcessGeneration + provider session
--> runtime_binding_projection projects exact current binding
-
-existing ExecutiveControlService current-writer materialization/replay path
--> Stage-B1 initial-assignment reducer
--> immutable root-scoped SOL_ACTION_TARGET_ASSIGNED Event
--> complete-map SessionTargetRegistry projection
--> unchanged require_sol_action_authority
+CEO-v2 intent
+-> root-level COO aggregation responsibility root
+-> protected C1 selection
+-> C2-PURE V2 retains create/reuse vocabulary
+-> C2-R1A creates and claims the initial alias-scoped CEO carrier
+-> MAT-S1 materializes that carrier Attempt and owns the canonical current-writer read
+-> first-root Stage-B1 assigns the logical office on the source-root aggregate
+-> later-root C2-R1B reuses that read only to commit a later source root
+-> unchanged Stage-A exact-actor enforcement
 ```
 
-Executive Runtime remains the only Job, Attempt, Worker, quota, lease, fence and Event owner. The COO cycle remains the only planner/work/review/repair and aggregation-handoff owner. Capacity C2 owns only the atomic post-handoff aggregation claim commitment. Operator Harness owns provider-session materialization and accepted current-writer state. SessionTargetRegistry owns logical destination definitions. RuntimeBinding projection owns current concrete materialization. Stage B owns only the root-to-logical-Sol assignment Event. Stage A remains the sole action-time actor enforcement owner.
+Many responsibility roots converge on one logical `EXECUTIVE-CEO-CODEX-A` office. Executive Runtime remains the only Job, Attempt, Worker, quota, lease, fence, and Event owner. Capacity and Operator Harness retain their existing selection, claim, provider-session, epoch, generation, and writer ownership. SessionTargetRegistry owns the target definition; RuntimeBinding projection owns the current concrete binding; Stage B owns only the source-root assignment Event.
 
 ## Normative contract
 
 <!-- STAGE_B_F0_CORRECTION_CONTRACT_BEGIN -->
 ```json
 {
-  "schema": "mastermind.autonomy_stage_b_f0_contract.v5",
-  "architecture_revision": "v5.3-post-handoff-aggregation",
-  "protected_runtime_sha": "c7fa5b43de6ca702f942fbf20cbe3ac45a02b0f6",
-  "architecture_operation": "stage-b0-r1-real-owner-gap-repair-20260902-sol-001",
+  "alias_carrier_owner": {
+    "cardinality": "one initial carrier Job per session_alias and carrier_generation",
+    "creation_command": "SOL-CARRIER-<sha256(canonical alias target-definition fingerprint and generation semantics)[0:32]>",
+    "creation_command_schema": "mastermind.sol_session_carrier_command/v1",
+    "creation_provenance_schema": "mastermind.sol_session_carrier/v1",
+    "identity_excludes": [
+      "source_root_job_id"
+    ],
+    "identity_scope": [
+      "session_alias",
+      "target_definition_fingerprint",
+      "carrier_generation"
+    ],
+    "many_source_roots_may_reference_one_carrier": true,
+    "one_carrier_per_source_root": false,
+    "owner": "Executive Runtime existing Job Attempt Worker Event plane",
+    "shape": {
+      "allowed_write_paths": [],
+      "attempt_limit": 1,
+      "carrier_generation": 1,
+      "depth": 0,
+      "escalation_target": "ceo",
+      "orchestration_role": null,
+      "owner_seat": "ceo",
+      "parent_job_id": null,
+      "requested_authorities": [
+        "READ"
+      ],
+      "root_job_id": "self",
+      "validation_commands": []
+    },
+    "succession_supported_now": false
+  },
+  "architecture_operation": "stage-b0-r2-alias-carrier-correction-20260903-sol-001",
+  "architecture_revision": "v6.1-split-initial-and-reuse",
+  "capacity_c2_commitment": {
+    "aggregate_id": "source responsibility root_job_id",
+    "caller_may_supply_carrier_identity": false,
+    "changed_payload": "COMMAND_REPLAY_CONFLICT",
+    "command_schema": "mastermind.capacity_placement_commitment_command/v2",
+    "event_forbidden": [
+      "runtime_binding_id",
+      "runtime_binding_generation",
+      "provider_session_id",
+      "native_handle",
+      "account_label",
+      "actor binding",
+      "aggregation_handoff_command_id",
+      "aggregation_handoff_digest",
+      "plan_attempt_id",
+      "plan_digest"
+    ],
+    "event_required": [
+      "source_root_job_id",
+      "source_job_created_command_id",
+      "source_authority_fingerprint",
+      "placement_mode",
+      "session_alias",
+      "target_definition_fingerprint",
+      "carrier_job_id",
+      "carrier_job_created_command_id",
+      "carrier_authority_fingerprint",
+      "carrier_generation",
+      "carrier_disposition",
+      "committed_carrier_attempt_id",
+      "selected_worker_id",
+      "selected_quota_class",
+      "committed_placement_snapshot_digest",
+      "commitment_command_id",
+      "command_fingerprint",
+      "commitment_evidence_digest"
+    ],
+    "event_schema": "mastermind.capacity_placement_commitment/v2",
+    "event_type": "CAPACITY_PLACEMENT_COMMITTED",
+    "existing_session_reuse": {
+      "appends_one_root_commitment": true,
+      "changes_quota_or_lease": false,
+      "creates_carrier_attempt": false,
+      "creates_carrier_job": false,
+      "requires_exact_current_carrier_attempt_and_writer": true,
+      "requires_one_exact_current_alias_carrier": true
+    },
+    "historical_event_is_current_authority": false,
+    "identical_replay": "lookup immutable command then revalidate current source and carrier truth",
+    "implementation_waves": {
+      "existing_session_reuse": {
+        "disposition": "reused",
+        "status": "HELD_MAT_S1_CURRENT_WRITER_OWNER",
+        "wave": "C2-R1B_EXISTING_CARRIER_REUSE"
+      },
+      "new_session_materialization": {
+        "disposition": "created",
+        "status": "C2-R1A_INITIAL_CARRIER_COMMITMENT",
+        "wave": "C2-R1A_INITIAL_CARRIER_COMMITMENT"
+      }
+    },
+    "mode_disposition": {
+      "existing_session_reuse": "reused",
+      "new_session_materialization": "created"
+    },
+    "new_session_materialization": {
+      "appends_one_root_commitment": true,
+      "atomic_owner": "one existing BEGIN IMMEDIATE Runtime transaction",
+      "claims_selected_worker_and_quota": true,
+      "creates_carrier_attempt": true,
+      "creates_carrier_job": true,
+      "persists_placement_snapshot": true,
+      "requires_no_existing_alias_carrier": true
+    },
+    "optimistic_preconditions": [
+      "expected_source_root_revision"
+    ],
+    "owner": "CAPACITY_C2_EXISTING_EXECUTIVE_TRANSACTION_AND_CLAIM_OWNER",
+    "placement_modes": [
+      "new_session_materialization",
+      "existing_session_reuse"
+    ],
+    "r1a_constraints": {
+      "forbidden": [
+        "extend Runtime.current_harness_binding_source",
+        "read OHF epoch/generation tables directly",
+        "create a role-null current-writer validator"
+      ],
+      "supported_modes": [
+        "new_session_materialization"
+      ]
+    },
+    "r1b_reuse": {
+      "consumes": "MAT-S1 canonical typed role-null carrier/current-writer read owner",
+      "mutates": "only the missing source-root commitment",
+      "mutates_carrier_job_attempt_quota_lease_or_fence": false
+    },
+    "source_root_claimed": false,
+    "stable_command_fields": [
+      "source_root_job_id",
+      "responsibility_ref",
+      "placement_mode",
+      "selection_document_digest",
+      "selection_evidence_digest",
+      "selected_worker_id",
+      "selected_quota_class",
+      "committed_placement_snapshot_digest",
+      "session_alias",
+      "target_definition_fingerprint",
+      "carrier_generation",
+      "carrier_job_created_command_id"
+    ],
+    "status": "MISSING_SOURCE_IMPLEMENTATION"
+  },
+  "current_state": {
+    "authorized_modes_now": [],
+    "claim": "SPEC_ONLY / CORRECTION_REQUIRED / SOURCE_NOT_BUILT / PRODUCTION_INERT",
+    "production_armed": false,
+    "provider_effect": false,
+    "runtime_effect": false,
+    "source_implementation_authorized_now": false
+  },
+  "failures": [
+    "SOURCE_ROOT_NOT_STRICT_V2_AGGREGATION",
+    "TARGET_CARRIER_MISSING",
+    "TARGET_CARRIER_CARDINALITY_CONFLICT",
+    "TARGET_CARRIER_PROVENANCE_INVALID",
+    "TARGET_CARRIER_NOT_CEO_OWNED",
+    "TARGET_CARRIER_NOT_ROLE_NULL",
+    "TARGET_CARRIER_ATTEMPT_MISMATCH",
+    "TARGET_CARRIER_NOT_CURRENT",
+    "TARGET_CARRIER_SUCCESSION_UNSUPPORTED",
+    "PLACEMENT_COMMITMENT_MISSING",
+    "TARGET_RUNTIME_NOT_MATERIALIZED",
+    "TARGET_ALIAS_ALREADY_BINDS_DIFFERENT_RUNTIME",
+    "COMMAND_REPLAY_CONFLICT",
+    "EFFECT_UNKNOWN_RECONCILE_FIRST"
+  ],
+  "implementation_dag": {
+    "C2-R1A_INITIAL_CARRIER_COMMITMENT": [
+      "C2-PURE"
+    ],
+    "C2-R1B_EXISTING_CARRIER_REUSE": [
+      "MAT-S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION"
+    ],
+    "MAT-S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION": [
+      "C2-R1A_INITIAL_CARRIER_COMMITMENT"
+    ],
+    "MULTI_ROOT_REUSE_CANARY": [
+      "C2-R1B_EXISTING_CARRIER_REUSE",
+      "STAGE-B1_INITIAL_ASSIGNMENT"
+    ],
+    "STAGE-B1_INITIAL_ASSIGNMENT": [
+      "MAT-S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION"
+    ]
+  },
+  "mat_s1_writer_materialization": {
+    "consumes_attempt": "committed_carrier_attempt_id",
+    "current_writer_read_owner": {
+      "owner": "one canonical Runtime read owner",
+      "provenance": "mastermind.sol_session_carrier/v1",
+      "required_evidence": [
+        "CEO/role-null/READ-only carrier grant",
+        "exact C2 commitment",
+        "current OHF epoch/generation/writer"
+      ]
+    },
+    "effect_unknown": "quarantine unresolved identity; no retry failover replacement carrier or G3",
+    "entry": "bounded role-null CEO-carrier materialization",
+    "fabricates_orchestration_work_admission": false,
+    "owner": "existing Operator Harness Runtime broker and Codex adapter",
+    "runtime_binding_source": "exact current CEO carrier Attempt after accepted OHF materialization",
+    "source_root_runtime_binding_forbidden": true,
+    "status": "MISSING_SOURCE_IMPLEMENTATION",
+    "uses_mat_f0_normal_and_reconciled_start_semantics": true,
+    "uses_plan_only_supervisor": false
+  },
+  "no_rebuild": {
+    "capacity_selector_or_claim_owner_duplicated": false,
+    "executive_job_attempt_worker_event_owner_duplicated": false,
+    "new_lifecycles": [],
+    "new_migrations": [],
+    "new_provider_registries": [],
+    "new_queues": [],
+    "new_retry_planes": [],
+    "new_runtime_binding_stores": [],
+    "new_schedulers": [],
+    "new_tables": [],
+    "new_target_registries": [],
+    "operator_harness_owner_duplicated": false,
+    "stage_a_owner_changed": false
+  },
+  "ordered_waves": [
+    "STAGE_B_R2_RECORDS_CORRECTION",
+    "CAPACITY_C2_V2_PURE_CONTRACT",
+    "CAPACITY_C2_R1A_INITIAL_CARRIER_COMMITMENT",
+    "MAT_F0_EFFECT_CERTAIN_PREREQUISITE",
+    "MAT_S1_ROLE_NULL_CEO_CARRIER_MATERIALIZATION",
+    "STAGE_B1_INITIAL_ASSIGNMENT",
+    "CAPACITY_C2_R1B_EXISTING_CARRIER_REUSE",
+    "LIVE_PRODUCTION_DISARMED_CANARY"
+  ],
+  "protected_runtime_sha": "642fa62540f0f2565ccc484a350f2cd0a2259015",
+  "record_paths": [
+    "docs/superpowers/specs/2026-09-01-autonomy-stage-b-durable-target-transfer-design.md",
+    "docs/superpowers/plans/2026-09-01-autonomy-stage-b-durable-target-transfer.md",
+    "tests/test_autonomy_stage_b_durable_target_transfer_source_law.py"
+  ],
+  "release_truth": {
+    "green_ci_is_production_proof": false
+  },
+  "schema": "mastermind.autonomy_stage_b_f0_contract.v6",
+  "source_responsibility_root": {
+    "authority_source": "accepted mastermind.ceo_intent.v2 provenance",
+    "ceo_office_assignment_requires_coo_handoff": false,
+    "escalation_target": "coo",
+    "forbidden": [
+      "relabel root to ceo",
+      "clear aggregation role",
+      "claim root Attempt for CEO carrier",
+      "project root Attempt as ceo RuntimeBinding",
+      "caller-created root binding overlay"
+    ],
+    "orchestration_role": "aggregation",
+    "remains_coo_responsibility_aggregate": true,
+    "remains_stage_b_assignment_aggregate": true,
+    "remains_unclaimed_by_capacity_c2": true,
+    "root_kind": "CEO_V2_AGGREGATION_ROOT",
+    "stored_owner_seat": "coo"
+  },
+  "stage_b1_assignment": {
+    "aggregate_id": "source responsibility root_job_id",
+    "caller_exposed_destination_or_carrier_fields": [],
+    "command_fields": [
+      "root_job_id",
+      "placement_commitment_command_id",
+      "expected_placement_commitment_digest",
+      "expected_session_alias",
+      "carrier_job_id",
+      "carrier_attempt_id",
+      "expected_binding_id",
+      "expected_binding_generation",
+      "expected_target_definition_fingerprint"
+    ],
+    "command_schema": "mastermind.sol_action_target_assignment_command/v2",
+    "complete_map_projection": true,
+    "cross_alias_transfer_supported_now": false,
+    "event_schema": "mastermind.sol_action_target_assignment/v2",
+    "event_type": "SOL_ACTION_TARGET_ASSIGNED",
+    "first_revision": 1,
+    "mode": "INITIAL_ASSIGNMENT",
+    "owner": "Executive Runtime Event plane",
+    "stage_a_owner": "unchanged require_sol_action_authority",
+    "stage_a_signature_changed": false,
+    "status": "MISSING_SOURCE_IMPLEMENTATION",
+    "succession_supported_now": false
+  },
   "supersedes": [
     "mastermind.autonomy_stage_b_f0_contract.v1",
     "mastermind.autonomy_stage_b_f0_contract.v2",
     "mastermind.autonomy_stage_b_f0_contract.v3",
     "mastermind.autonomy_stage_b_f0_contract.v4",
-    "mastermind.autonomy_stage_b_f0_contract.v5.1",
-    "mastermind.autonomy_stage_b_f0_contract.v5.2"
+    "mastermind.autonomy_stage_b_f0_contract.v5"
   ],
-  "current_state": {
-    "claim": "SPEC_ONLY / PREDECESSORS_HELD / SOURCE_NOT_BUILT / PRODUCTION_INERT",
-    "authorized_modes_now": [],
-    "source_implementation_authorized_now": false,
-    "production_armed": false,
-    "runtime_effect": false,
-    "provider_effect": false
-  },
-  "future_supported_mode": {
-    "mode": "INITIAL_ASSIGNMENT",
-    "seat": "ceo",
-    "reasoning_surface": "codex",
-    "held_until": [
-      "COO_AGGREGATION_HANDOFF_VALIDATED",
-      "CAPACITY_C1_PROTECTED",
-      "CAPACITY_C2_ROOT_BOUND_CLAIM_COMMITMENT_PROTECTED",
-      "EXECUTIVE_CEO_CODEX_A_TARGET_PROTECTED",
-      "EXACT_CURRENT_OHF_WRITER_MATERIALIZED"
-    ]
-  },
-  "production_root_owner": {
-    "root_kind": "CEO_V2_AGGREGATION_ROOT",
-    "stored_owner_seat": "coo",
-    "orchestration_role": "aggregation",
-    "authority_source": "accepted mastermind.ceo_intent.v2 provenance",
-    "call_path": [
-      "CeoIngress v2",
-      "ExecutiveControlService._submit_service_intent",
-      "ceo_intent.submit_intent",
-      "Runtime.jobs.create_v2_orchestration_root"
-    ],
-    "pre_claim_lifecycle": [
-      "Runtime.jobs.create_cycle_planner",
-      "Runtime.jobs.admit_cycle_plan",
-      "canonical work review and repair children",
-      "COO_AGGREGATION_HANDOFF_READY",
-      "Runtime._validated_aggregation_handoff"
-    ],
-    "claim_readiness": [
-      "job_id equals root_job_id",
-      "parent_job_id is null",
-      "stored owner_seat equals coo",
-      "orchestration_role equals aggregation",
-      "accepted mastermind.ceo_intent.v2 provenance",
-      "unique canonical JOB_CREATED command",
-      "root status equals QUEUED",
-      "current_attempt_id is null",
-      "cancel_requested_at is null",
-      "all planner work review and repair children are terminal",
-      "one exact validated aggregation handoff is current"
-    ],
-    "replay_owner": "ceo_intent.submit_intent command lookup plus strict v2 aggregation-root reconstruction",
-    "forbidden_substitutes": [
-      "pre-handoff root claim",
-      "root_job_bindings overlay",
-      "Slack message",
-      "model output",
-      "provider identity",
-      "account label",
-      "browser title",
-      "caller-created Job"
-    ]
-  },
-  "placement_commitment_owner": {
-    "status": "MISSING_PREDECESSOR",
-    "owner": "CAPACITY_C2_EXISTING_EXECUTIVE_TRANSACTION_AND_CLAIM_OWNER",
-    "event_type": "CAPACITY_PLACEMENT_COMMITTED",
-    "event_schema": "mastermind.capacity_placement_commitment/v1",
-    "aggregate_type": "job",
-    "aggregate_id": "aggregation root_job_id",
-    "required": [
-      "exact root_job_id",
-      "exact aggregation_handoff_command_id",
-      "exact aggregation_handoff_digest",
-      "exact plan_attempt_id",
-      "exact plan_digest",
-      "selection_document_digest",
-      "selection_evidence_digest",
-      "selected_worker_id",
-      "selected_quota_class",
-      "committed_attempt_id",
-      "committed_placement_snapshot_digest",
-      "commitment_command_id",
-      "commitment_evidence_digest",
-      "canonical aggregation Worker and Attempt claim already committed"
-    ],
-    "forbidden": [
-      "committed_runtime_binding_id",
-      "committed_runtime_binding_generation",
-      "provider_session_id",
-      "native_handle",
-      "account_label",
-      "model output",
-      "caller actor label"
-    ],
-    "binding_timing": "RUNTIME_BINDING_DOES_NOT_EXIST_UNTIL_OHF_WRITER_MATERIALIZATION",
-    "transaction_law": [
-      "BEGIN IMMEDIATE in existing Executive Runtime",
-      "revalidate exact current aggregation handoff before capacity mutation",
-      "recompute and compare the C1 selection",
-      "reread capacity occupancy fence and current Worker facts",
-      "claim existing canonical aggregation Worker and Attempt owners",
-      "persist the canonical placement snapshot on the aggregation Attempt",
-      "append one immutable root-bound claim commitment Event",
-      "rollback Job Attempt quota and Event together on any failure",
-      "changed stale conflicting or effect-unknown handoff or candidate aborts",
-      "do not select a second candidate inside the same modifying operation"
-    ],
-    "pre_handoff_mutation_allowed": false,
-    "c1_selection_is_authority": false,
-    "runtime_binding_alone_is_authority": false,
-    "caller_destination_is_authority": false
-  },
   "target_definition_owner": {
-    "status": "SEPARATE_DISABLED_SOURCE_PREREQUISITE",
-    "owner": "SessionTargetRegistry",
-    "required_definition": {
-      "session_alias": "EXECUTIVE-CEO-CODEX-A",
-      "target_seat": "ceo",
-      "reasoning_surface": "codex",
-      "wake_transport": "codex-app-server",
+    "caller_selectable": false,
+    "definition": {
       "allowed_transports": [
         "codex-app-server"
       ],
-      "workstream": "executive",
+      "reasoning_surface": "codex",
+      "session_alias": "EXECUTIVE-CEO-CODEX-A",
       "target_enabled": false,
-      "production_armed": false,
-      "caller_selectable": false
+      "target_seat": "ceo",
+      "wake_transport": "codex-app-server",
+      "workstream": "executive"
     },
-    "definition_fingerprint_fields": [
+    "fingerprint_fields": [
       "session_alias",
       "target_seat",
       "reasoning_surface",
@@ -206,221 +355,9 @@ Executive Runtime remains the only Job, Attempt, Worker, quota, lease, fence and
       "allowed_transports",
       "workstream"
     ],
-    "fingerprint_excludes": [
-      "root_job_bindings",
-      "unrelated targets",
-      "target_enabled",
-      "production_armed",
-      "policy_version"
-    ]
-  },
-  "writer_materialization_owner": {
-    "owner": "EXISTING_OPERATOR_HARNESS_AND_RUNTIME_BINDING_PROJECTION",
-    "starts_provider_work": false,
-    "consumes_existing_current_writer_only": true,
-    "requires_aggregation_attempt_id_from_c2": true,
-    "required_current_facts": [
-      "committed aggregation Attempt remains canonical current Attempt for the root Job",
-      "accepted Operator Harness SessionEpoch",
-      "accepted current ProcessGeneration",
-      "exact provider session owned by that generation",
-      "current writer fence",
-      "provider maps to codex reasoning surface",
-      "target seat and reasoning surface match"
-    ],
-    "not_ready": "TARGET_RUNTIME_NOT_MATERIALIZED",
-    "effect_unknown": "EFFECT_UNKNOWN_RECONCILE_FIRST"
-  },
-  "assignment_owner": {
-    "owner": "Executive Runtime Event plane",
-    "aggregate_type": "job",
-    "aggregate_id": "aggregation root_job_id",
-    "event_type": "SOL_ACTION_TARGET_ASSIGNED",
-    "event_schema": "mastermind.sol_action_target_assignment/v1",
-    "first_revision": 1,
-    "rule": "first immutable Event is the sole root-seat-alias assignment owner",
-    "event_actor": "ceo",
-    "event_actor_is_authority": false,
-    "separate_assignment_table": false,
-    "implicit_generation_advance": false
-  },
-  "production_call_path": {
-    "owner": "ExecutiveControlService",
-    "entry": "successful or identically replayed exact current-writer materialization after post-handoff C2 commitment",
-    "assignment_function": "sol_action_target_assignment.assign_initial_target",
-    "caller_exposed_destination_fields": [],
-    "caller_may_invoke_assignment_directly": false,
-    "caller_may_supply_actor_label": false,
-    "caller_may_supply_actor_binding": false,
-    "caller_may_supply_worker_attempt_or_runtime_binding": false,
-    "authority": [
-      "accepted post-handoff CEO v2 aggregation root",
-      "exact validated aggregation handoff bound by C2",
-      "exact protected C2 root-bound claim commitment Event",
-      "exact protected target definition",
-      "exact current RuntimeBinding projected after OHF materialization"
-    ],
-    "crash_gap_behavior": "C2 commitment may remain safely unassigned while no current writer exists; exact materialization or replay re-enters the same derived assignment command",
-    "new_daemon_or_scheduler": false
-  },
-  "command": {
-    "schema": "mastermind.sol_action_target_assignment_command/v1",
-    "mode": "INITIAL_ASSIGNMENT",
-    "fields": [
-      "schema",
-      "mode",
-      "root_job_id",
-      "expected_assignment_revision",
-      "placement_commitment_command_id",
-      "expected_placement_commitment_digest",
-      "expected_session_alias",
-      "expected_binding_id",
-      "expected_binding_generation",
-      "expected_target_definition_fingerprint"
-    ],
-    "caller_may_supply_command_id": false,
-    "caller_may_supply_target_carrier_job_id": false,
-    "caller_may_supply_worker_id": false,
-    "caller_may_supply_attempt_id": false,
-    "caller_may_supply_runtime_binding": false,
-    "caller_may_supply_provider_account_or_native_handle": false,
-    "expected_assignment_revision": 0,
-    "expected_session_alias": "EXECUTIVE-CEO-CODEX-A",
-    "derived_command_id": "SOL-TARGET-<sha256(canonical command semantics)[0:32]>",
-    "identical_replay": "revalidate current truth then return the identical Event",
-    "changed_payload": "COMMAND_REPLAY_CONFLICT",
-    "same_root_race": "one append; loser EXPECTED_REVISION_MISMATCH",
-    "effect_unknown": "reconcile only by the same derived command id; no retry or failover"
-  },
-  "trusted_replay": {
-    "lookup_order": "derived assignment command id before mutable reads",
-    "must_revalidate": [
-      "canonical existing assignment Event shape and command fingerprint",
-      "active post-handoff CEO v2 aggregation root and immutable authority provenance",
-      "exact aggregation handoff identity bound by the C2 commitment",
-      "exact root-bound C2 claim commitment Event and digest",
-      "canonical current aggregation Worker and Attempt identities from the commitment",
-      "exact target definition fingerprint",
-      "current RuntimeBinding id generation and reasoning surface projected from the committed Attempt",
-      "global same-alias assignments bind one identical RuntimeBinding"
-    ],
-    "stale_or_moved_binding": "STALE_ASSIGNED_BINDING",
-    "foreign_commitment": "PLACEMENT_COMMITMENT_CONFLICT",
-    "historical_success_is_reusable_authority": false
-  },
-  "event_required": [
-    "schema_version",
-    "mode",
-    "assignment_revision",
-    "root_job_id",
-    "target_seat",
-    "session_alias",
-    "reasoning_surface",
-    "target_definition_fingerprint",
-    "responsibility_job_created_command_id",
-    "responsibility_authority_fingerprint",
-    "placement_commitment_command_id",
-    "placement_commitment_digest",
-    "binding_id",
-    "binding_generation",
-    "command_fingerprint",
-    "evidence_fingerprint"
-  ],
-  "event_forbidden": [
-    "native_handle",
-    "provider_session_id",
-    "account_label",
-    "pid",
-    "pgid",
-    "process_start_identity",
-    "boot_id",
-    "Slack principal",
-    "browser title",
-    "model output",
-    "caller actor label",
-    "Wake acknowledgement token"
-  ],
-  "projection_and_stage_a": {
-    "fold": "one contiguous root-scoped SOL_ACTION_TARGET_ASSIGNED revision starting at 1",
-    "duplicate_gap_or_branch": "ASSIGNMENT_HISTORY_CONFLICT",
-    "unsupported_event": "UNSUPPORTED_ASSIGNMENT_MODE",
-    "action_time": [
-      "reread active post-handoff CEO v2 aggregation root",
-      "fold root assignment Event",
-      "reread and validate the exact C2 claim commitment and bound aggregation handoff",
-      "require the committed aggregation Attempt remains the canonical current Attempt",
-      "recompute target definition fingerprint",
-      "project current RuntimeBinding from the committed Attempt after OHF materialization",
-      "require Event binding_id and binding_generation exact match",
-      "verify every root behind the alias binds one identical RuntimeBinding",
-      "copy complete root_job_bindings and replace only selected root ceo",
-      "call unchanged require_sol_action_authority with the actual actor RuntimeBinding"
-    ],
-    "stage_a_signature_changed": false,
-    "stage_a_actor_rule": "only exact RuntimeBinding identity is action-authoritative; all others are observer-only or refused"
-  },
-  "failures": [
-    "NOT_AUTHORIZED",
-    "ROOT_JOB_NOT_FOUND",
-    "ROOT_JOB_NOT_AGGREGATION_ROOT",
-    "ROOT_JOB_PROVENANCE_INVALID",
-    "ROOT_JOB_TERMINAL",
-    "ROOT_NOT_READY_FOR_AGGREGATION_CLAIM",
-    "AGGREGATION_HANDOFF_MISSING",
-    "AGGREGATION_HANDOFF_CONFLICT",
-    "PLACEMENT_COMMITMENT_MISSING",
-    "PLACEMENT_COMMITMENT_CONFLICT",
-    "PLACEMENT_COMMITMENT_EFFECT_UNKNOWN",
-    "TARGET_CATALOG_ENTRY_MISSING",
-    "TARGET_CATALOG_DEFINITION_CONFLICT",
-    "TARGET_RUNTIME_NOT_MATERIALIZED",
-    "TARGET_RUNTIME_UNAVAILABLE",
-    "TARGET_RUNTIME_CONFLICT",
-    "TARGET_ALIAS_ALREADY_BINDS_DIFFERENT_RUNTIME",
-    "NO_ASSIGNMENT",
-    "ASSIGNMENT_HISTORY_CONFLICT",
-    "EXPECTED_REVISION_MISMATCH",
-    "COMMAND_REPLAY_CONFLICT",
-    "STALE_ASSIGNED_BINDING",
-    "UNSUPPORTED_ASSIGNMENT_MODE",
-    "EFFECT_UNKNOWN_RECONCILE_FIRST",
-    "RUNTIME_TRANSACTION_UNAVAILABLE"
-  ],
-  "time_null_correction": {
-    "timestamps": "audit only; never elect a destination by recency",
-    "nulls": "every required root handoff commitment target writer and binding fact fails closed when absent",
-    "correction": "V5.3 has no reassignment or succession; a moved handoff commitment or binding becomes unavailable",
-    "automatic_retry": false
-  },
-  "source_wave": {
-    "status": "HELD_PREDECESSORS",
-    "name": "STAGE_B1_CEO_CODEX_INITIAL_ASSIGNMENT_VERTICAL",
-    "paths": [
-      "control_plane/executive_runtime.py",
-      "control_plane/runtime_binding_projection.py",
-      "control_plane/sol_action_target_assignment.py",
-      "control_plane/executive_service.py",
-      "tests/test_autonomy_stage_b_initial_assignment.py",
-      "tests/test_autonomy_stage_b_durable_target_transfer_source_law.py"
-    ],
-    "maximum_paths": 6,
-    "target_definition_is_separate_predecessor": true,
-    "release_claim": "BUILT_NOT_PROVEN / INITIAL_ASSIGNMENT_ONLY / PRODUCTION_DISARMED"
-  },
-  "no_rebuild": {
-    "tables": [],
-    "migrations": [],
-    "registries": [],
-    "lifecycles": [],
-    "queues": [],
-    "leases": [],
-    "job_attempt_worker_owners_duplicated": false,
-    "coo_cycle_or_handoff_owner_duplicated": false,
-    "capacity_commitment_owner_duplicated": false,
-    "runtime_binding_owner_duplicated": false,
-    "wake_owner_duplicated": false,
-    "provider_or_slack_calls_in_transaction": false,
-    "production_armed": false
+    "global_production_armed": false,
+    "owner": "SessionTargetRegistry",
+    "session_alias": "EXECUTIVE-CEO-CODEX-A"
   }
 }
 ```
@@ -428,13 +365,12 @@ Executive Runtime remains the only Job, Attempt, Worker, quota, lease, fence and
 
 ## Consequences
 
-1. Admission is not placement readiness. The root must remain available to the canonical COO cycle until its aggregation handoff is valid.
-2. Capacity C1 remains inert evidence. C2 revalidates both the handoff and C1 inside the existing claim transaction.
-3. The committed Attempt is the aggregation root Attempt. Child work/review Attempts do not become the Stage-B CEO target.
-4. RuntimeBinding remains later materialization evidence and cannot substitute for the C2 commitment.
-5. A caller, model, provider/account label, Slack sender or target alias cannot self-authorize assignment.
-6. Identical replay is historical lookup plus complete current-truth revalidation, never historical success as standing authority.
+1. C2 never claims or relabels the source root. Different roots derive different commitment commands while converging on the same carrier creation identity.
+2. C2-R1A supports only new materialization and may not widen `Runtime.current_harness_binding_source`, directly read OHF epoch/generation tables, or create a role-null current-writer validator. Reuse is held until MAT-S1's canonical owner exists.
+3. MAT-S1 obtains current-writer evidence only from the exact carrier Attempt after accepted OHF materialization, using MAT-F0 normal or reconciled terminal evidence. C2-R1B consumes that owner and appends only the missing source-root commitment.
+4. The V6.1 dependency graph has two lawful children after MAT-S1: Stage-B1 derives first-root assignment from current source, C2-R1A, target, carrier, and binding truth, while C2-R1B enables only later-root reuse. Multi-root reuse/canary requires both C2-R1B and Stage-B1. Historical success never authenticates itself.
+5. Terminal, stale, moved, ambiguous, or multiply present carrier state is unavailable. V6 has no succession, replacement, reassignment, retry, failover, implicit generation advance, or G3.
 
 ## Release boundary
 
-A protected merge makes only this corrected source law durable. It does not build C2, add or enable a target, start a provider, claim a root, append an assignment, dispatch Wake, deploy, or prove autonomy live.
+A protected merge makes only this corrected source law durable. It does not implement C2, materialize a provider or RuntimeBinding, enable the target, append an assignment, dispatch Wake, deploy, or prove autonomy live.
