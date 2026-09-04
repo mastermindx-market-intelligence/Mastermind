@@ -794,6 +794,47 @@ def test_f3_nonsticky_world_writable_parent_is_refused(tmp_path: Path):
         module._require_binary(binary)
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO probe requires POSIX")
+def test_f3_fifo_leaf_is_refused_without_blocking(tmp_path: Path):
+    fifo = tmp_path.resolve() / "claude"
+    os.mkfifo(fifo, 0o700)
+    probe = "\n".join(
+        (
+            "import importlib.util, sys",
+            "from pathlib import Path",
+            "module_path = Path(sys.argv[1])",
+            "spec = importlib.util.spec_from_file_location('fifo_preflight_probe', module_path)",
+            "assert spec is not None and spec.loader is not None",
+            "module = importlib.util.module_from_spec(spec)",
+            "sys.modules[spec.name] = module",
+            "spec.loader.exec_module(module)",
+            "try:",
+            "    module._require_binary(Path(sys.argv[2]))",
+            "except module.PreflightError as exc:",
+            "    raise SystemExit(0 if str(exc) == 'BINARY_INVALID' else 2)",
+            "raise SystemExit(3)",
+        )
+    )
+
+    completed = subprocess.run(
+        (sys.executable, "-c", probe, str(_MODULE_PATH), str(fifo)),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=False,
+        timeout=1.0,
+        check=False,
+        env={
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+    )
+
+    assert completed.returncode == 0
+
+
 def test_f3_parent_coordinate_replacement_is_detected_after_open(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
