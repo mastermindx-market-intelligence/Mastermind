@@ -385,3 +385,9 @@ def test_source_has_no_service_arm_or_secret_argv_environment_path():
     assert "termios.ECHO" in source
     assert "tcsetattr" in source
     assert "validate_relay_group_names" in source
+    assert enrollment.DIALOGUE_OBSERVATION_SOCKET == Path(
+        "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+    )
+    assert enrollment.DIALOGUE_RELAY_GID == 457
+    assert 'set(sockets) != {"Operator", "CeoIngress", "DialogueObservation"}' in source
+    assert 'control.get("dialogue_bridge_armed") is not False' in source

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import dataclasses
 
 import pytest
 
@@ -214,6 +215,94 @@ def setup_client() -> InMemorySlackClient:
     client = InMemorySlackClient(relay_bot_user_id=BOT)
     client.add_parent(parent_message())
     return client
+
+
+def test_discovers_bounded_unique_validated_v2_parents_on_shared_client() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    first = parent_message(ts="1787471000.000001")
+    second = parent_message(
+        ts="1787471000.000002",
+        operation_key="worker-presence-dialogue-canary-20260827-002",
+    )
+    client.add_parent(first)
+    client.add_parent(second)
+    client.add_parent(
+        SlackMessage(
+            ts="1787471000.000003",
+            author_user_id="U0WRONG001",
+            text=first.text,
+        )
+    )
+    engine = make_engine(client)
+
+    discovered = run(engine.discover_validated_parents(maximum=2))
+
+    assert tuple(item.thread_ts for item in discovered) == (
+        "1787471000.000002",
+        "1787471000.000001",
+    )
+    assert tuple(item.parent["fingerprint"] for item in discovered) == (
+        parent_value(
+            operation_key="worker-presence-dialogue-canary-20260827-002"
+        )["fingerprint"],
+        parent_value()["fingerprint"],
+    )
+    assert client.channel_history_call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("mutation", "code"),
+    [
+        ("incomplete", "THREAD_HISTORY_INCOMPLETE"),
+        ("mutation_incomplete", "THREAD_RECONCILIATION_INCOMPLETE"),
+        ("malformed", "PARENT_MESSAGE_INVALID"),
+        ("edited", "THREAD_RECONCILIATION_INCOMPLETE"),
+    ],
+)
+def test_parent_discovery_fails_closed_on_incomplete_or_hostile_history(
+    mutation: str, code: str
+) -> None:
+    client = setup_client()
+    if mutation == "incomplete":
+        client.channel_history_complete = False
+    elif mutation == "mutation_incomplete":
+        client.channel_mutation_evidence_complete = False
+    elif mutation == "malformed":
+        client.channel_messages[0] = dataclasses.replace(
+            client.channel_messages[0],
+            text=PARENT_DISCRIMINATOR_V2 + " {not-json}",
+        )
+    else:
+        client.channel_messages[0] = dataclasses.replace(
+            client.channel_messages[0], edited=True
+        )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).discover_validated_parents(maximum=2))
+    assert exc.value.code == code
+
+
+def test_parent_discovery_cardinality_overflow_is_typed_zero_effect() -> None:
+    client = setup_client()
+    client.add_parent(
+        parent_message(
+            ts="1787471000.000002",
+            operation_key="worker-presence-dialogue-canary-20260827-002",
+        )
+    )
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).discover_validated_parents(maximum=1))
+    assert exc.value.code == "THREAD_BINDING_AMBIGUOUS"
+
+
+def test_parent_discovery_refuses_duplicate_physical_parent_identity() -> None:
+    client = setup_client()
+    client.add_parent(parent_message(ts="1787471000.000002"))
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).discover_validated_parents(maximum=2))
+
+    assert exc.value.code == "THREAD_BINDING_AMBIGUOUS"
 
 
 def code(exc: pytest.ExceptionInfo[DialogueEngineError]) -> str:

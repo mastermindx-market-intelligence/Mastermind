@@ -269,6 +269,10 @@ def test_launchd_entrypoint_boots_under_isolated_python_from_foreign_cwd(
 
 
 def _w3c_candidate(runtime, *, stale_parent: bool = False):
+    from control_plane.executive_dialogue_observation import (
+        ACTIVE_CURRENT_WORKER,
+        DialogueCandidateReference,
+    )
     from tests.test_company_dialogue_runtime_binding import (
         THREAD_TS,
         caller,
@@ -281,9 +285,25 @@ def _w3c_candidate(runtime, *, stale_parent: bool = False):
     current = snapshot(
         parent_fingerprint=("f" * 64 if stale_parent else dialogue_parent["fingerprint"])
     )
+    from tests.test_slack_agent_dialogue_turn_routing_facts import _binding_for
+
     return runtime.RelayTurnCandidate(
         delegation_identity=identity(),
-        dialogue_parent=dialogue_parent,
+        dialogue_parent=runtime._ExecutiveDialogueParent(
+            dialogue_parent,
+            candidate_reference=DialogueCandidateReference(
+                mode=ACTIVE_CURRENT_WORKER,
+                root_job_id=current.root_job_id,
+                job_id=current.job_id,
+                attempt_id=current.attempt_id,
+                worker_id=current.worker_id,
+                evidence_digest="e" * 64,
+            ),
+            target_bindings={
+                "coo": _binding_for("coo"),
+                "ceo": _binding_for("ceo"),
+            },
+        ),
         thread_ts=THREAD_TS,
         current_worker=current,
         actor=caller(),
@@ -291,6 +311,10 @@ def _w3c_candidate(runtime, *, stale_parent: bool = False):
 
 
 def _terminal_w3c_material(runtime):
+    from control_plane.executive_dialogue_observation import (
+        TERMINAL_RESULT,
+        DialogueCandidateReference,
+    )
     from integrations.slack_agent_dialogue.contract_v2 import (
         render_message_v2,
         render_parent_v2,
@@ -304,6 +328,7 @@ def _terminal_w3c_material(runtime):
     from tests.test_company_dialogue_runtime_binding import THREAD_TS, caller, identity, parent
     from tests.test_slack_agent_dialogue_engine_v2 import ExactV2AuthorityPolicy
     from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _binding_for,
         _terminal_binding,
         _terminal_candidate,
         _terminal_receipt,
@@ -364,7 +389,21 @@ def _terminal_w3c_material(runtime):
     )
     relay_candidate = runtime.RelayTurnCandidate(
         delegation_identity=identity(),
-        dialogue_parent=dialogue_parent,
+        dialogue_parent=runtime._ExecutiveDialogueParent(
+            dialogue_parent,
+            candidate_reference=DialogueCandidateReference(
+                mode=TERMINAL_RESULT,
+                root_job_id=terminal.root_job_id,
+                job_id=terminal.job_id,
+                attempt_id=terminal.attempt_id,
+                worker_id=terminal.worker_id,
+                evidence_digest="f" * 64,
+            ),
+            target_bindings={
+                "coo": _binding_for("coo"),
+                "ceo": _binding_for("ceo"),
+            },
+        ),
         thread_ts=THREAD_TS,
         current_worker=_terminal_snapshot(),
         actor=caller(),
@@ -1088,13 +1127,6 @@ def test_turn_runtime_factory_reuses_the_existing_relay_slack_client(
     socket_root: Path,
 ) -> None:
     runtime = _runtime()
-    from control_plane.executive_runtime import Runtime
-    from control_plane.wake_persist import WakeLedgerRepository
-    from integrations.executive_wake.registry import WakeDispatcherRegistry
-    from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
-        RuntimeTerminalReturnBindingResolver,
-    )
-    from tests.test_executive_wake_persisted_dispatch import _POLICY
     from tests.test_slack_agent_dialogue_turn_routing_facts import (
         _binding_for,
         _registry,
@@ -1105,20 +1137,19 @@ def test_turn_runtime_factory_reuses_the_existing_relay_slack_client(
     )
     token_file = _token_file(tmp_path)
     service = runtime.build_service(_config(runtime, socket_root, token_file))
+    client = runtime.ExecutiveDialogueObservationClient(
+        runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
+    )
     turn_runtime = runtime.build_turn_runtime(
         service,
         registry=_registry(),
-        repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger")),
-        dispatchers=WakeDispatcherRegistry(),
-        current_binding_for=_binding_for,
-        retry_policy=_POLICY,
-        candidate_source=lambda: (),
-        terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
+        observation_client=client,
     )
 
     assert turn_runtime.observer.client is service.engine.client
     assert turn_runtime.observer.client is service.engine_v2.client
     assert turn_runtime.observer.policy is service.engine.policy
+    assert turn_runtime.observer.wake_carrier is client
     assert service.engine_v2.active_waiter_registry is not None
     assert (
         turn_runtime.active_waiter_registry
@@ -1132,12 +1163,299 @@ def test_turn_runtime_factory_reuses_the_existing_relay_slack_client(
     )
 
 
-@pytest.mark.parametrize("missing", ["registry", "resolver"])
-def test_turn_runtime_composition_refuses_missing_trusted_owner(
+def test_real_observation_source_discovers_parents_through_shared_v2_engine() -> None:
+    runtime = _runtime()
+    from integrations.slack_agent_dialogue.executive_observation_client import (
+        ResolvedDialogueObservation,
+    )
+
+    candidate, _binding, engine = _terminal_w3c_material(runtime)
+    active = _w3c_candidate(runtime)
+
+    class ObservationClient:
+        calls: list[tuple[dict, str]] = []
+
+        async def resolve(self, *, parent, thread_ts):
+            self.calls.append((dict(parent), thread_ts))
+            return ResolvedDialogueObservation(
+                state="RESOLVED",
+                mode="ACTIVE_CURRENT_WORKER",
+                dialogue_parent=dict(parent),
+                thread_ts=thread_ts,
+                delegation_identity=active.delegation_identity,
+                candidate=active.dialogue_parent._candidate_reference,
+                target_bindings=active.dialogue_parent._target_bindings,
+                current_worker=active.current_worker,
+                actor=active.actor,
+            )
+
+    client = ObservationClient()
+
+    async def collect():
+        source = runtime.build_executive_observation_candidate_source(
+            engine,
+            client,
+            maximum=4,
+        )
+        iterator = await source()
+        return tuple([item async for item in iterator])
+
+    observed = asyncio.run(collect())
+
+    assert len(observed) == 1
+    assert observed[0].current_worker == active.current_worker
+    assert observed[0].actor == active.actor
+    assert observed[0].dialogue_parent == candidate.dialogue_parent
+    assert client.calls == [(candidate.dialogue_parent, candidate.thread_ts)]
+    assert engine.client.channel_history_call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("code", "outcome"),
+    [
+        ("TRANSPORT_UNAVAILABLE", "RECONCILIATION_INCOMPLETE"),
+        ("HELD_ZERO_EFFECT", "RECONCILIATION_INCOMPLETE"),
+        ("UNKNOWN_ZERO_EFFECT", "RECONCILIATION_INCOMPLETE"),
+        ("UNAVAILABLE_ZERO_EFFECT", "RECONCILIATION_INCOMPLETE"),
+        ("RESPONSE_REFUSED", "REFUSED"),
+        ("REFUSED_ZERO_EFFECT", "REFUSED"),
+        ("CONFLICT_ZERO_EFFECT", "REFUSED"),
+    ],
+)
+def test_real_observation_failure_is_one_attempt_without_parent_fallback(
+    code: str,
+    outcome: str,
+) -> None:
+    runtime = _runtime()
+    from integrations.slack_agent_dialogue.contract_v2 import render_parent_v2
+    from integrations.slack_agent_dialogue.engine import SlackMessage
+    from tests.test_company_dialogue_runtime_binding import parent
+    from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _binding_for,
+        _registry,
+    )
+
+    _candidate, _binding, engine = _terminal_w3c_material(runtime)
+    second_parent = parent(
+        operation_key="exec-job-201",
+        session_ref="asd-session-exec-job-201",
+        created_at="2026-08-31T22:01:00Z",
+    )
+    engine.client.add_parent(
+        SlackMessage(
+            ts="1788000001.123456",
+            author_user_id=engine.policy.relay_bot_user_id,
+            text=render_parent_v2(second_parent),
+        )
+    )
+
+    class ObservationClient:
+        calls = 0
+
+        async def resolve(self, **_kwargs):
+            self.calls += 1
+            raise runtime.ExecutiveObservationClientError(code)
+
+    class Observer:
+        calls = 0
+
+        async def reconcile_once(self, **_kwargs):
+            self.calls += 1
+            raise AssertionError("failed observation must not reach the observer")
+
+    observation_client = ObservationClient()
+    observer = Observer()
+    source = runtime.build_executive_observation_candidate_source(
+        engine,
+        observation_client,
+        maximum=4,
+    )
+    turn_runtime = runtime.AgentRelayTurnRuntime(
+        observer=observer,
+        registry=_registry(),
+        current_binding_for=_binding_for,
+        candidate_source=source,
+        **_w3c_dependencies(runtime, engine=engine),
+        _executive_observation_source=True,
+    )
+
+    receipt = asyncio.run(turn_runtime.reconcile_once())[0]
+
+    assert observation_client.calls == 1
+    assert observer.calls == 0
+    assert receipt.outcome.value == outcome
+    assert receipt.reason == code
+
+
+def test_ephemeral_executive_listener_to_relay_source_vertical(
     monkeypatch,
     tmp_path: Path,
     socket_root: Path,
-    missing: str,
+) -> None:
+    runtime = _runtime()
+    import control_plane.executive_service as executive_service_module
+    from control_plane.executive_dialogue_observation import (
+        ActiveObservationFacts,
+        DialogueObservationFacts,
+        PublicRuntimeBindingFacts,
+    )
+    from control_plane.executive_service import ExecutiveControlService
+    from tests.test_executive_service import _FakeSupervisor, _config
+
+    active = _w3c_candidate(runtime)
+    current = active.current_worker
+    assert current is not None
+    _terminal, _binding, engine = _terminal_w3c_material(runtime)
+    observation_path = socket_root / "observation" / "dialogue-observation.sock"
+    monkeypatch.setattr(
+        executive_service_module,
+        "_peer_uid",
+        lambda _connection: 457,
+    )
+
+    def facts(_runtime, parent):
+        assert parent == active.dialogue_parent
+        return DialogueObservationFacts(
+            active=(
+                ActiveObservationFacts(
+                    root_job_id=current.root_job_id,
+                    job_id=current.job_id,
+                    attempt_id=current.attempt_id,
+                    worker_id=current.worker_id,
+                    attempt_status=current.attempt_status.value,
+                    worker_status=current.worker_status.value,
+                    execution_profile_id=current.execution_profile_id,
+                    execution_profile_digest=current.execution_profile_digest,
+                    capability_policy_digest=current.capability_policy_digest,
+                    runtime_binding=PublicRuntimeBindingFacts(
+                        session_alias=current.runtime_binding.session_alias,
+                        binding_id=current.runtime_binding.binding_id,
+                        binding_generation=(
+                            current.runtime_binding.binding_generation
+                        ),
+                        reasoning_surface=str(
+                            current.runtime_binding.reasoning_surface
+                        ),
+                    ),
+                    parent_fingerprint=parent["fingerprint"],
+                    company_dialogue_server_identity=(
+                        current.company_dialogue_server_identity
+                    ),
+                    company_dialogue_server_version=(
+                        current.company_dialogue_server_version
+                    ),
+                    company_dialogue_tool_schema_digest=(
+                        current.company_dialogue_tool_schema_digest
+                    ),
+                    company_dialogue_attested=True,
+                ),
+            )
+        )
+
+    executive = ExecutiveControlService(
+        _config(tmp_path, socket_root=socket_root / "operator"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        dialogue_observation_socket_path=observation_path,
+        dialogue_observation_peer_uid=457,
+        dialogue_observation_group_gid=os.getegid(),
+        dialogue_observation_facts_provider=facts,
+    )
+
+    async def scenario():
+        await executive.start()
+        try:
+            assert executive.runtime is not None
+            before = (
+                len(executive.runtime.jobs.list_jobs()),
+                len(executive.runtime.attempts.list_attempts()),
+                len(executive.runtime.workers.list_workers()),
+                len(executive.runtime.events.list_events()),
+            )
+            source = runtime.build_executive_observation_candidate_source(
+                engine,
+                runtime.ExecutiveDialogueObservationClient(
+                    observation_path,
+                    timeout_seconds=1,
+                ),
+                maximum=4,
+            )
+            iterator = await source()
+            observed = tuple([item async for item in iterator])
+            after = (
+                len(executive.runtime.jobs.list_jobs()),
+                len(executive.runtime.attempts.list_attempts()),
+                len(executive.runtime.workers.list_workers()),
+                len(executive.runtime.events.list_events()),
+            )
+            assert len(observed) == 1
+            projected = observed[0].current_worker
+            assert projected is not None
+            assert dataclasses.replace(
+                projected,
+                runtime_binding=current.runtime_binding,
+            ) == current
+            assert projected.runtime_binding.native_handle is None
+            assert projected.runtime_binding.account_label is None
+            assert observed[0].actor is not None
+            assert observed[0].actor.runtime_binding == projected.runtime_binding
+            assert after == before
+            assert engine.client.post_call_count == 0
+        finally:
+            await executive.close()
+
+    asyncio.run(scenario())
+
+
+def test_build_turn_runtime_selects_real_observation_source_when_enabled(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _binding_for,
+        _registry,
+    )
+
+    monkeypatch.setattr(
+        runtime, "AGENT_RELAY_SOCKET_PATH", socket_root / "agent-relay.sock"
+    )
+    service = runtime.build_service(
+        _config(runtime, socket_root, _token_file(tmp_path / "relay-token"))
+    )
+    calls = []
+
+    async def empty_source():
+        return runtime._FrozenCandidateIterator(())
+
+    def compose(engine, client, *, maximum):
+        calls.append((engine, client, maximum))
+        return empty_source
+
+    client = runtime.ExecutiveDialogueObservationClient(
+        runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_executive_observation_candidate_source",
+        compose,
+    )
+    turn_runtime = runtime.build_turn_runtime(
+        service,
+        registry=_registry(),
+        observation_client=client,
+    )
+
+    assert asyncio.run(turn_runtime.reconcile_once()) == ()
+    assert calls == [
+        (service.engine_v2, client, runtime.DEFAULT_MAX_TURN_CANDIDATES_PER_PASS)
+    ]
+
+
+def test_build_turn_runtime_refuses_parallel_candidate_authority_seams(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
 ) -> None:
     runtime = _runtime()
     from control_plane.executive_runtime import Runtime
@@ -1153,6 +1471,209 @@ def test_turn_runtime_composition_refuses_missing_trusted_owner(
     )
 
     monkeypatch.setattr(
+        runtime, "AGENT_RELAY_SOCKET_PATH", socket_root / "agent-relay.sock"
+    )
+    service = runtime.build_service(
+        _config(runtime, socket_root, _token_file(tmp_path / "relay-token"))
+    )
+
+    with pytest.raises(runtime.RelayRuntimeError, match="RUNTIME_INVALID"):
+        runtime.build_turn_runtime(
+            service,
+            registry=_registry(),
+            repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger")),
+            dispatchers=WakeDispatcherRegistry(),
+            retry_policy=_POLICY,
+            candidate_source=lambda: (),
+            observation_client=runtime.ExecutiveDialogueObservationClient(
+                runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
+            ),
+            terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
+        )
+
+    with pytest.raises(runtime.RelayRuntimeError, match="RUNTIME_INVALID"):
+        runtime.build_turn_runtime(
+            service,
+            registry=_registry(),
+            repository=WakeLedgerRepository(Runtime.at(tmp_path / "wake-ledger-2")),
+            dispatchers=WakeDispatcherRegistry(),
+            retry_policy=_POLICY,
+            observation_client=runtime.ExecutiveDialogueObservationClient(
+                "/tmp/not-the-dedicated-executive-observation.sock"
+            ),
+            terminal_binding_resolver=RuntimeTerminalReturnBindingResolver(lambda: None),
+        )
+
+
+def test_slow_observation_collection_leaves_relay_v1_and_v2_responsive(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    from integrations.slack_agent_dialogue.contract_v2 import render_parent_v2
+    from integrations.slack_agent_dialogue.engine import HistoryPage, SlackMessage
+
+    os.chown(socket_root, os.geteuid(), os.getegid())
+    socket_root.chmod(0o710)
+    monkeypatch.setattr(
+        runtime, "AGENT_RELAY_SOCKET_PATH", socket_root / "agent-relay.sock"
+    )
+    monkeypatch.setattr(service_module, "_peer_uid", lambda _connection: 450)
+    service = runtime.build_service(
+        _config(runtime, socket_root, _token_file(tmp_path / "relay-token"))
+    )
+    dialogue_parent = _w3c_candidate(runtime).dialogue_parent
+
+    async def parent_history(**_kwargs):
+        return HistoryPage(
+            messages=(
+                SlackMessage(
+                    ts="1787961600.000001",
+                    author_user_id=service.engine.policy.relay_bot_user_id,
+                    text=render_parent_v2(dialogue_parent),
+                ),
+            ),
+            complete=True,
+            mutation_evidence_complete=True,
+        )
+
+    monkeypatch.setattr(
+        service.engine_v2.client,
+        "fetch_channel_history",
+        parent_history,
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowObservationClient:
+        async def resolve(self, **_kwargs):
+            entered.set()
+            await release.wait()
+            raise runtime.ExecutiveObservationClientError("UNAVAILABLE_ZERO_EFFECT")
+
+    async def collect():
+        source = runtime.build_executive_observation_candidate_source(
+            service.engine_v2,
+            SlowObservationClient(),
+            maximum=4,
+        )
+        iterator = await source()
+        return tuple([item async for item in iterator])
+
+    async def scenario() -> None:
+        await service.start()
+        collection = asyncio.create_task(collect())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            for version in (CONTROL_VERSION, CONTROL_VERSION_V2):
+                response = await asyncio.wait_for(
+                    call_service(service.config.socket_path, _request(version)),
+                    timeout=0.2,
+                )
+                assert response["ok"] is True
+            release.set()
+            with pytest.raises(
+                runtime.ExecutiveObservationClientError,
+                match="UNAVAILABLE_ZERO_EFFECT",
+            ):
+                await asyncio.wait_for(collection, timeout=1)
+        finally:
+            release.set()
+            await asyncio.gather(collection, return_exceptions=True)
+            await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_terminal_observation_candidate_uses_executive_revalidated_binding() -> None:
+    runtime = _runtime()
+    from control_plane.executive_dialogue_observation import (
+        terminal_projection_receipt_reference,
+    )
+    from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _binding_for,
+        _registry,
+    )
+
+    candidate, _binding, engine = _terminal_w3c_material(runtime)
+    candidate = dataclasses.replace(
+        candidate,
+        current_worker=None,
+        actor=None,
+        terminal_projection_receipt=terminal_projection_receipt_reference(
+            candidate.terminal_projection_receipt
+        ),
+    )
+
+    class Observer:
+        calls = 0
+
+        async def reconcile_once(self, **_kwargs):
+            self.calls += 1
+            return runtime.ObservationReceipt(
+                outcome=runtime.ObservationOutcome.NO_ACTION,
+                reason="EXECUTIVE_OBSERVATION_TERMINAL",
+                decision=None,
+                obligation=None,
+                route=None,
+            )
+
+    observer = Observer()
+    executive_dependencies = _w3c_dependencies(runtime, engine=engine)
+    executive_dependencies["terminal_binding_resolver"] = None
+    turn_runtime = runtime.AgentRelayTurnRuntime(
+        observer=observer,
+        registry=_registry(),
+        current_binding_for=_binding_for,
+        candidate_source=lambda: (candidate,),
+        **executive_dependencies,
+        _executive_observation_source=True,
+    )
+
+    receipt = asyncio.run(turn_runtime.reconcile_once())[0]
+
+    assert receipt.outcome is runtime.ObservationOutcome.NO_ACTION
+    assert receipt.reason == "EXECUTIVE_OBSERVATION_TERMINAL"
+    assert observer.calls == 1
+
+    drifted = dataclasses.replace(
+        candidate,
+        terminal_projection_receipt=dataclasses.replace(
+            candidate.terminal_projection_receipt,
+            receipt_digest="f" * 64,
+        ),
+    )
+    drifted_dependencies = _w3c_dependencies(runtime, engine=engine)
+    drifted_dependencies["terminal_binding_resolver"] = None
+    drifted_runtime = runtime.AgentRelayTurnRuntime(
+        observer=observer,
+        registry=_registry(),
+        current_binding_for=_binding_for,
+        candidate_source=lambda: (drifted,),
+        **drifted_dependencies,
+        _executive_observation_source=True,
+    )
+
+    refused = asyncio.run(drifted_runtime.reconcile_once())[0]
+
+    assert refused.outcome is runtime.ObservationOutcome.REFUSED
+    assert refused.reason == "TERMINAL_RESULT_RECEIPT_MISMATCH"
+    assert observer.calls == 1
+
+
+def test_turn_runtime_composition_refuses_missing_shared_waiter_owner(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_routing_facts import (
+        _binding_for,
+        _registry,
+    )
+
+    monkeypatch.setattr(
         runtime,
         "AGENT_RELAY_SOCKET_PATH",
         socket_root / "agent-relay.sock",
@@ -1160,24 +1681,15 @@ def test_turn_runtime_composition_refuses_missing_trusted_owner(
     service = runtime.build_service(
         _config(runtime, socket_root, _token_file(tmp_path / "owner-token"))
     )
-    if missing == "registry":
-        service.engine_v2._active_waiter_registry = None
-    resolver = (
-        object()
-        if missing == "resolver"
-        else RuntimeTerminalReturnBindingResolver(lambda: None)
-    )
+    service.engine_v2._active_waiter_registry = None
 
     with pytest.raises(runtime.RelayRuntimeError, match="RUNTIME_INVALID"):
         runtime.build_turn_runtime(
             service,
             registry=_registry(),
-            repository=WakeLedgerRepository(Runtime.at(tmp_path / "owner-ledger")),
-            dispatchers=WakeDispatcherRegistry(),
-            current_binding_for=_binding_for,
-            retry_policy=_POLICY,
-            candidate_source=lambda: (),
-            terminal_binding_resolver=resolver,
+            observation_client=runtime.ExecutiveDialogueObservationClient(
+                runtime.EXECUTIVE_OBSERVATION_SOCKET_PATH
+            ),
         )
 
 
@@ -1243,3 +1755,262 @@ def test_run_relay_keeps_af_unix_service_available_while_turn_loop_runs(
         assert not service.config.socket_path.exists()
 
     asyncio.run(scenario())
+
+
+def test_configured_coordination_path_builds_real_remote_overlay_without_factory(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    os.chown(socket_root, os.geteuid(), os.getegid())
+    socket_root.chmod(0o710)
+    relay_path = socket_root / "agent-relay.sock"
+    coordination_path = socket_root / "dialogue-coordination.sock"
+    monkeypatch.setattr(runtime, "AGENT_RELAY_SOCKET_PATH", relay_path)
+    monkeypatch.setattr(
+        runtime,
+        "EXECUTIVE_OBSERVATION_SOCKET_PATH",
+        coordination_path,
+    )
+    monkeypatch.setattr(service_module, "_peer_uid", lambda _connection: 450)
+    config = dataclasses.replace(
+        _config(runtime, socket_root, _token_file(tmp_path / "configured-token")),
+        dialogue_coordination_socket_path=coordination_path,
+        w3c_enabled=True,
+    )
+    service = runtime.build_service(config)
+    monkeypatch.setattr(runtime, "build_service", lambda _config: service)
+    built: list[dict[str, object]] = []
+    original_build = runtime.build_turn_runtime
+
+    def capture_build(actual_service, **kwargs):
+        built.append(dict(kwargs))
+        return original_build(actual_service, **kwargs)
+
+    monkeypatch.setattr(runtime, "build_turn_runtime", capture_build)
+    started = asyncio.Event()
+
+    async def controlled_turn_loop(_self):
+        started.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(
+        runtime.AgentRelayTurnRuntime,
+        "serve_forever",
+        controlled_turn_loop,
+    )
+
+    async def scenario() -> None:
+        task = asyncio.create_task(runtime.run_relay(config))
+        for _attempt in range(200):
+            if relay_path.exists() and started.is_set():
+                break
+            if task.done():
+                await task
+            await asyncio.sleep(0.005)
+        else:
+            raise AssertionError("configured remote turn overlay did not start")
+        try:
+            response = await call_service(relay_path, _request(CONTROL_VERSION_V2))
+            assert response["ok"] is True
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(scenario())
+
+    assert len(built) == 1
+    assert set(built[0]) == {
+        "registry",
+        "observation_client",
+    }
+    assert isinstance(
+        built[0]["observation_client"],
+        runtime.ExecutiveDialogueObservationClient,
+    )
+    assert built[0]["observation_client"].socket_path == coordination_path
+
+
+def test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wake(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    from control_plane.executive_dialogue_observation import (
+        RECONCILE_WAKE,
+        SUBMIT_WAKE,
+        TERMINAL_RESULT,
+        terminal_projection_receipt_reference,
+    )
+    from integrations.slack_agent_dialogue.contract_v2 import render_message_v2
+    from integrations.slack_agent_dialogue.engine import SlackMessage
+    from integrations.slack_agent_dialogue.turn_observer import WakeCarrierState
+    from tests.test_slack_agent_dialogue_turn_routing_facts import _registry
+
+    os.chown(socket_root, os.geteuid(), os.getegid())
+    socket_root.chmod(0o710)
+    relay_path = socket_root / "agent-relay.sock"
+    coordination_path = socket_root / "dialogue-coordination.sock"
+    monkeypatch.setattr(runtime, "AGENT_RELAY_SOCKET_PATH", relay_path)
+    monkeypatch.setattr(
+        runtime,
+        "EXECUTIVE_OBSERVATION_SOCKET_PATH",
+        coordination_path,
+    )
+    monkeypatch.setattr(service_module, "_peer_uid", lambda _connection: 450)
+    config = dataclasses.replace(
+        _config(runtime, socket_root, _token_file(tmp_path / "terminal-token")),
+        dialogue_coordination_socket_path=coordination_path,
+        w3c_enabled=True,
+    )
+
+    candidate, _binding, terminal_engine = _terminal_w3c_material(runtime)
+    production_attempt_id = "ATT-" + "2" * 32
+    terminal_candidate = dataclasses.replace(
+        candidate.terminal_candidate,
+        attempt_id=production_attempt_id,
+    )
+    resolved_binding = (
+        runtime.AgentRelayTurnRuntime._terminal_binding_from_executive_observation(
+            dataclasses.replace(candidate, terminal_candidate=terminal_candidate)
+        )
+    )
+    terminal_context = runtime.DialogueContextV2(
+        work_ref=resolved_binding.work_ref,
+        commission_ref=resolved_binding.commission_ref,
+        session_ref=resolved_binding.session_ref,
+        operation_key=resolved_binding.operation_key,
+        watch_mode=resolved_binding.watch_mode,
+        actor_ref=resolved_binding.actor_ref,
+        applies_to=resolved_binding.applies_to,
+    )
+    terminal_message = runtime.build_terminal_result_message(
+        terminal_candidate,
+        terminal_context.normalized(),
+    )
+    terminal_projection_receipt = dataclasses.replace(
+        candidate.terminal_projection_receipt,
+        fingerprint=terminal_message["fingerprint"],
+    )
+    terminal_engine.client.thread_messages[candidate.thread_ts] = [
+        SlackMessage(
+            ts=terminal_projection_receipt.message_ts,
+            author_user_id=terminal_engine.policy.relay_bot_user_id,
+            text=render_message_v2(terminal_message),
+            thread_ts=candidate.thread_ts,
+        )
+    ]
+    terminal_receipt = terminal_projection_receipt_reference(
+        terminal_projection_receipt
+    )
+    candidate_reference = dataclasses.replace(
+        candidate.dialogue_parent._candidate_reference,
+        attempt_id=production_attempt_id,
+    )
+    target_bindings = candidate.dialogue_parent._target_bindings
+
+    service = runtime.build_service(config)
+    service.engine.policy = terminal_engine.policy
+    service.engine.client = terminal_engine.client
+    service.engine_v2 = terminal_engine
+    monkeypatch.setattr(runtime, "build_service", lambda _config: service)
+    monkeypatch.setattr(runtime, "load_session_targets", _registry)
+
+    class RecordingExecutiveObservationClient(
+        runtime.ExecutiveDialogueObservationClient
+    ):
+        instances = []
+
+        def __init__(self, socket_path):
+            super().__init__(socket_path)
+            self.resolve_calls = []
+            self.reconcile_requests = []
+            self.submit_requests = []
+            type(self).instances.append(self)
+
+        async def resolve(self, *, parent, thread_ts):
+            self.resolve_calls.append((dict(parent), thread_ts))
+            return runtime.ResolvedDialogueObservation(
+                state="RESOLVED",
+                mode=TERMINAL_RESULT,
+                dialogue_parent=dict(parent),
+                thread_ts=thread_ts,
+                delegation_identity=candidate.delegation_identity,
+                candidate=candidate_reference,
+                target_bindings=target_bindings,
+                current_worker=None,
+                actor=None,
+                terminal_candidate=terminal_candidate,
+                terminal_projection_receipt=terminal_receipt,
+            )
+
+        async def reconcile(self, obligation, route):
+            self.reconcile_requests.append(
+                self._wake_request(
+                    operation=RECONCILE_WAKE,
+                    obligation=obligation,
+                    route=route,
+                )
+            )
+            return WakeCarrierState.MISSING
+
+        async def submit(self, obligation, route):
+            self.submit_requests.append(
+                self._wake_request(
+                    operation=SUBMIT_WAKE,
+                    obligation=obligation,
+                    route=route,
+                )
+            )
+
+    monkeypatch.setattr(
+        runtime,
+        "ExecutiveDialogueObservationClient",
+        RecordingExecutiveObservationClient,
+    )
+    completed = asyncio.Event()
+    observed = {}
+
+    async def one_terminal_pass(turn_runtime):
+        try:
+            observed["runtime"] = turn_runtime
+            observed["receipts"] = await turn_runtime.reconcile_once()
+        finally:
+            completed.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(
+        runtime.AgentRelayTurnRuntime,
+        "serve_forever",
+        one_terminal_pass,
+    )
+
+    async def scenario() -> None:
+        task = asyncio.create_task(runtime.run_relay(config))
+        try:
+            await asyncio.wait_for(completed.wait(), timeout=1)
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(scenario())
+
+    assert len(RecordingExecutiveObservationClient.instances) == 1
+    observation_client = RecordingExecutiveObservationClient.instances[0]
+    turn_runtime = observed["runtime"]
+    assert turn_runtime._terminal_binding_resolver is None
+    assert isinstance(turn_runtime.observer, runtime.DialogueTurnObserver)
+    assert turn_runtime.observer.wake_carrier is observation_client
+    assert observed["receipts"][0].outcome is runtime.ObservationOutcome.WAKE_SUBMITTED
+    assert observed["receipts"][0].reason == "DIALOGUE_TURN_PENDING"
+    assert observation_client.resolve_calls == [
+        (dict(candidate.dialogue_parent), candidate.thread_ts)
+    ]
+    assert len(observation_client.reconcile_requests) == 1
+    assert len(observation_client.submit_requests) == 1
+    assert terminal_engine.client.channel_history_call_count == 4
+    assert terminal_engine.client.thread_history_call_count == 2
