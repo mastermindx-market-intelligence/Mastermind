@@ -396,6 +396,7 @@ OVERRIDES = (
     "core.fsmonitor=false", "core.untrackedCache=false", "core.hooksPath=/dev/null",
     "core.attributesFile=/dev/null", "core.excludesFile=/dev/null", "diff.external=",
     "diff.renames=false", "core.fileMode=true", "core.ignoreStat=false",
+    "core.checkStat=default", "core.trustctime=true",
     "credential.helper=", "protocol.allow=never",
     "protocol.file.allow=always",
 )
@@ -445,7 +446,7 @@ def test_all_local_probes_use_closed_argv_and_explicit_diff_controls() -> None:
 
 ENV_KEYS = {
     "LANG", "LC_ALL", "TZ", "PATH", "HOME", "GIT_OPTIONAL_LOCKS", "GIT_NO_LAZY_FETCH",
-    "GIT_TERMINAL_PROMPT", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_LOCAL",
+    "GIT_TERMINAL_PROMPT", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL",
     "GIT_ATTR_NOSYSTEM", "GIT_LITERAL_PATHSPECS", "GIT_NO_REPLACE_OBJECTS",
     "GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_ASKPASS", "SSH_ASKPASS",
     "GIT_SSH", "GIT_SSH_COMMAND", "GIT_CONFIG_COUNT",
@@ -482,7 +483,6 @@ def test_git_child_environment_is_exact_and_ignores_hostile_ambient(monkeypatch)
         "LANG": "C", "LC_ALL": "C", "TZ": "UTC", "PATH": "/usr/bin:/bin", "HOME": "/",
         "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0",
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_LOCAL": os.devnull,
         "GIT_ATTR_NOSYSTEM": "1", "GIT_LITERAL_PATHSPECS": "1",
         "GIT_NO_REPLACE_OBJECTS": "1", "GIT_PAGER": "cat",
         "GIT_EDITOR": "/usr/bin/false", "GIT_SEQUENCE_EDITOR": "/usr/bin/false",
@@ -531,6 +531,36 @@ def test_real_probe_observes_mode_change_despite_local_core_filemode_false(tmp_p
     head = init_repo(repo, "base")
     git(repo, "config", "core.fileMode", "false")
     (repo / "value.txt").chmod(0o755)
+    module = _module()
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        repo_request(module, repo, head),
+        head,
+        head,
+        (),
+    )
+    assert not isinstance(result, module.SourceContinuityRefusal)
+    local_facts, _ = result
+    assert local_facts.uncommitted_in_scope_count == 1
+
+
+def test_real_probe_observes_same_size_timestamp_restored_byte_drift(
+    tmp_path,
+) -> None:
+    repo = tmp_path / "hostile-stat-cache"
+    head = init_repo(repo, "base")
+    git(repo, "config", "core.checkStat", "minimal")
+    git(repo, "config", "core.trustctime", "false")
+    path = repo / "value.txt"
+    original = path.stat()
+    path.write_text("drft", encoding="utf-8")
+    os.utime(path, ns=(original.st_atime_ns, original.st_mtime_ns))
+    changed = path.stat()
+    assert changed.st_size == original.st_size
+    assert changed.st_mtime_ns == original.st_mtime_ns
+    assert changed.st_ctime_ns != original.st_ctime_ns
+
     module = _module()
     result = module._probe_local_and_entries(
         subprocess.run,
