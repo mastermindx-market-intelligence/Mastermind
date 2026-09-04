@@ -30,6 +30,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -857,6 +858,34 @@ def _cleanup_dir_action(path: Path) -> "tuple[bool, bool]":
     return removed, removed
 
 
+def _cleanup_owned_dir_action(
+    path: Path, *, expected_device: int, expected_inode: int
+) -> "tuple[bool, bool]":
+    """Remove only the exact directory object this invocation created.
+
+    A pathname is not ownership: another actor can replace an owned directory
+    between creation and teardown.  Refuse deletion unless the final lstat
+    still names the same non-symlink directory identity captured immediately
+    after exclusive creation.
+    """
+
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        return False, True
+    except OSError:
+        return False, False
+    if (
+        stat.S_ISLNK(current.st_mode)
+        or not stat.S_ISDIR(current.st_mode)
+        or current.st_dev != expected_device
+        or current.st_ino != expected_inode
+    ):
+        return False, False
+    removed = _remove_tree(path)
+    return removed, removed
+
+
 def _cleanup_projection_action(projection) -> "tuple[bool, bool]":
     try:
         result = cleanup_skill_projection(projection)
@@ -981,6 +1010,38 @@ def run_canary(
     scratch_root = Path(scratch_root)
     scratch_root.mkdir(parents=True, exist_ok=True)
 
+    cleanup_actions: list[tuple[str, Callable[[], "tuple[bool, bool]"]]] = []
+    process_result: dict[str, Any] = {}
+    evidence_local: "CanaryEvidence | None" = None
+
+    # REQUEST_CHANGES 5112126365: this fixed pathname is attempt-local state
+    # only when THIS invocation created it.  Exclusive creation occurs before
+    # schema/projection/provider/thread/process work and before the fake realm
+    # writes auth/state fixtures.  A pre-existing root is foreign state: refuse
+    # without registering it for cleanup and therefore without deleting a byte.
+    attempt_root = scratch_root / "cap-s1-attempt-root"
+    try:
+        attempt_root.mkdir(parents=False, exist_ok=False)
+        attempt_identity = attempt_root.stat()
+    except FileExistsError as exc:
+        raise CanaryStop(
+            "PROVIDER_REALM_UNAVAILABLE", "attempt root is not exclusively owned"
+        ) from exc
+    except OSError as exc:
+        raise CanaryStop(
+            "PROVIDER_REALM_UNAVAILABLE", "attempt root could not be created"
+        ) from exc
+    cleanup_actions.append(
+        (
+            "attempt",
+            lambda: _cleanup_owned_dir_action(
+                attempt_root,
+                expected_device=attempt_identity.st_dev,
+                expected_inode=attempt_identity.st_ino,
+            ),
+        )
+    )
+
     # --- backend-specific realm/schema/binary/codex_home wiring ------------
     #
     # Single-binary law (CAP-S1 Sol review item 1): in BOTH realms exactly
@@ -1031,7 +1092,7 @@ def run_canary(
         else:
             single_binary_path = FAKE_CODEX_BINARY_PATH
         adapter_codex_home = Path(codex_home) if codex_home is not None else (
-            scratch_root / "codex-home"
+            attempt_root / "codex-home"
         )
         adapter_codex_home.mkdir(parents=True, exist_ok=True)
         adapter_codex_home.chmod(0o700)
@@ -1042,7 +1103,7 @@ def run_canary(
         adapter_argv = (str(single_binary_path), "app-server")
         extra_env = {
             "PYTHONPATH": str(repo_root),
-            "OHF_FAKE_STATE": str(scratch_root / "fake-state.json"),
+            "OHF_FAKE_STATE": str(attempt_root / "fake-state.json"),
             "OHF_FAKE_MODEL": CANARY_REQUESTED_MODEL,
             # The V4 mastermind-operator profile grants no MCP servers; the
             # fake App Server's OHF-probe MCP fixture is unrelated to CAP-S1
@@ -1062,10 +1123,6 @@ def run_canary(
             # to pass the closed marker grammar for all four turns.
             "OHF_FAKE_CAP_S1_TURN_REPLIES": "1",
         }
-
-    cleanup_actions: list[tuple[str, Callable[[], "tuple[bool, bool]"]]] = []
-    process_result: dict[str, Any] = {}
-    evidence_local: "CanaryEvidence | None" = None
 
     try:
         # The probe environment mirrors the adapter's own env-building logic
@@ -1166,9 +1223,6 @@ def run_canary(
                 "PROVIDER_REALM_UNAVAILABLE", "candidate identity is empty or malformed"
             )
 
-        attempt_root = scratch_root / "cap-s1-attempt-root"
-        attempt_root.mkdir(parents=True, exist_ok=True)
-        cleanup_actions.append(("attempt", lambda: _cleanup_dir_action(attempt_root)))
         process_generation_id = f"{operation_id}-gen1"
 
         # Sol wave-3 review (5087345399, finding B2): the origin is now a
@@ -1588,8 +1642,12 @@ class CapS1LocalProofReceipt:
     protected_join: str
     provider_attempt_id: str
     suite_count: int
+    total: int
     passed: int
     skipped: int
+    failed: int
+    cancelled: int
+    suite_manifest: tuple[tuple[str, int, int, int, int], ...]
     evidence_digest: str
 
 
@@ -1602,7 +1660,11 @@ class CapS1HostedProofReceipt:
     run_id: str
     status: str
     conclusion: str
+    jobs_total: int
     jobs_passed: int
+    jobs_failed: int
+    jobs_cancelled: int
+    job_manifest: tuple[tuple[str, str, str, str], ...]
     evidence_digest: str
 
 
@@ -1615,6 +1677,9 @@ class CapS1SecurityProofReceipt:
     status: str
     tool_count: int
     findings: int
+    failures: int
+    cancelled: int
+    tool_manifest: tuple[tuple[str, str, int, str], ...]
     evidence_digest: str
 
 
@@ -1625,8 +1690,13 @@ class CapS1MutationProofReceipt:
     protected_join: str
     provider_attempt_id: str
     status: str
+    total: int
     killed: int
     survived: int
+    skipped: int
+    errors: int
+    cancelled: int
+    mutation_manifest: tuple[tuple[str, str, str], ...]
     evidence_digest: str
 
 
@@ -1638,8 +1708,11 @@ class CapS1CleanupProofReceipt:
     provider_attempt_id: str
     status: str
     all_removed: bool
+    resources_total: int
+    failures: int
     residue_count: int
     resource_kinds: tuple[str, ...]
+    resource_manifest: tuple[tuple[str, str, bool, bool], ...]
     evidence_digest: str
 
 
@@ -1650,9 +1723,12 @@ class CapS1ReviewReceipt:
     protected_join: str
     provider_attempt_id: str
     author: str
+    author_id: int
     reviewer: str
+    reviewer_id: int
     review_id: str
     state: str
+    review_commit: str
     evidence_digest: str
 
 
@@ -1697,6 +1773,11 @@ def _result_is_hex64(value: object) -> bool:
 
 
 _RESULT_SAFE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}")
+_RESULT_OPERATION_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
+_RESULT_RECEIVER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_RESULT_SLACK_CARRIER_RE = re.compile(
+    r"(?:C|D|G)[A-Z0-9]{8,19}/[0-9]{10,16}\.[0-9]{6}"
+)
 _RESULT_SENSITIVE_MARKERS = (
     "secret",
     "token",
@@ -1714,6 +1795,12 @@ _RESULT_CLEANUP_KINDS = (
     "thread",
     "workspace",
 )
+_RESULT_MAX_LOCAL_TESTS = 100_000
+_RESULT_MAX_HOSTED_JOBS = 256
+_RESULT_MAX_SECURITY_TOOLS = 64
+_RESULT_MAX_MUTATIONS = 100_000
+_RESULT_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+_RESULT_PR_NUMBER = 350
 
 
 def _result_safe_identifier(value: object) -> bool:
@@ -1722,6 +1809,143 @@ def _result_safe_identifier(value: object) -> bool:
         and _RESULT_SAFE_ID_RE.fullmatch(value) is not None
         and not any(marker in value.lower() for marker in _RESULT_SENSITIVE_MARKERS)
     )
+
+
+def _result_safe_operation(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and _RESULT_OPERATION_RE.fullmatch(value) is not None
+        and not any(marker in value.lower() for marker in _RESULT_SENSITIVE_MARKERS)
+    )
+
+
+def _result_safe_receiver(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and _RESULT_RECEIVER_RE.fullmatch(value) is not None
+        and not any(marker in value.lower() for marker in _RESULT_SENSITIVE_MARKERS)
+    )
+
+
+def _result_safe_slack_carrier(value: object) -> bool:
+    return isinstance(value, str) and _RESULT_SLACK_CARRIER_RE.fullmatch(value) is not None
+
+
+def _result_safe_manifest_label(value: object) -> bool:
+    if not isinstance(value, str) or not (1 <= len(value.encode("utf-8")) <= 128):
+        return False
+    if not value.isascii() or any(ord(character) < 32 for character in value):
+        return False
+    lowered = value.lower()
+    return (
+        "http://" not in lowered
+        and "https://" not in lowered
+        and "?" not in value
+        and "\\" not in value
+        and not value.startswith(("/", ".", "~"))
+        and "../" not in value
+    )
+
+
+def _result_positive_int(value: object, *, maximum: int = 2**63 - 1) -> bool:
+    return type(value) is int and 0 < value <= maximum
+
+
+def _github_api_json(endpoint: str) -> Any:
+    """Fresh, bounded GitHub read used to authenticate hosted/review proof.
+
+    The endpoint is constructed only from closed contract constants and
+    already-validated decimal IDs.  Tests replace this one read seam with
+    deterministic API-shaped fixtures; production has no caller-supplied
+    callback that could bless its own claims.
+    """
+
+    try:
+        completed = subprocess.run(
+            ["gh", "api", endpoint],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        payload = json.loads(completed.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        raise CapS1ResultError("cap_s1_result_github_evidence_unavailable") from exc
+    if type(payload) is not dict:
+        raise CapS1ResultError("cap_s1_result_github_evidence_unavailable")
+    return payload
+
+
+def _rederive_hosted_job_manifest(
+    *, run_id: str, exact_head: str
+) -> tuple[dict[str, Any], tuple[tuple[str, str, str, str], ...]]:
+    run = _github_api_json(
+        f"repos/{_RESULT_REPOSITORY}/actions/runs/{run_id}"
+    )
+    if str(run.get("id")) != run_id or run.get("head_sha") != exact_head:
+        raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
+
+    rows: list[tuple[str, str, str, str]] = []
+    expected_total: "int | None" = None
+    for page in range(1, 5):
+        payload = _github_api_json(
+            f"repos/{_RESULT_REPOSITORY}/actions/runs/{run_id}/jobs?per_page=100&page={page}"
+        )
+        total = payload.get("total_count")
+        jobs = payload.get("jobs")
+        if (
+            not _result_nonnegative_int(total)
+            or total > _RESULT_MAX_HOSTED_JOBS
+            or type(jobs) is not list
+        ):
+            raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
+        if expected_total is None:
+            expected_total = total
+        elif total != expected_total:
+            raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
+        for job in jobs:
+            if type(job) is not dict:
+                raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
+            job_id = str(job.get("id", ""))
+            name = job.get("name")
+            status = str(job.get("status", "")).upper()
+            conclusion = str(job.get("conclusion", "")).upper()
+            if (
+                not job_id.isascii()
+                or not job_id.isdigit()
+                or len(job_id) > 20
+                or not _result_safe_manifest_label(name)
+            ):
+                raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
+            rows.append((job_id, name, status, conclusion))
+        if len(rows) >= expected_total:
+            break
+    if expected_total is None or len(rows) != expected_total:
+        raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
+    ordered = tuple(sorted(rows))
+    if len(set(row[0] for row in ordered)) != len(ordered):
+        raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
+    return run, ordered
+
+
+def _rederive_github_review(
+    *, review_id: str, exact_head: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    pull = _github_api_json(
+        f"repos/{_RESULT_REPOSITORY}/pulls/{_RESULT_PR_NUMBER}"
+    )
+    review = _github_api_json(
+        f"repos/{_RESULT_REPOSITORY}/pulls/{_RESULT_PR_NUMBER}/reviews/{review_id}"
+    )
+    head = pull.get("head")
+    if (
+        type(head) is not dict
+        or head.get("sha") != exact_head
+        or str(review.get("id")) != review_id
+        or review.get("commit_id") != exact_head
+    ):
+        raise CapS1ResultError("cap_s1_result_review_state_invalid")
+    return pull, review
 
 
 def _result_safe_artifact_inventory_row(value: object) -> bool:
@@ -1758,6 +1982,18 @@ def _result_closed_mapping(
 
 def _result_nonnegative_int(value: object) -> bool:
     return type(value) is int and value >= 0
+
+
+def _result_receipt_evidence_digest(receipt: object) -> str:
+    """Digest the complete typed observation, never a caller-selected label."""
+
+    if not dataclasses.is_dataclass(receipt):
+        raise TypeError("receipt must be a dataclass instance")
+    payload = dataclasses.asdict(receipt)
+    payload.pop("evidence_digest", None)
+    return _canonical_digest(
+        {"receipt_type": type(receipt).__name__, "observation": payload}
+    )
 
 
 def _parse_package_identities(raw: object) -> CapS1PackageIdentitiesReceipt:
@@ -1835,9 +2071,21 @@ def _parse_bound_receipt(
     cls: type,
     extra_keys: set[str],
     error: str,
+    nested_tuple_fields: tuple[str, ...] = (),
+    tuple_fields: tuple[str, ...] = (),
 ) -> Any:
     common = {"exact_head", "exact_tree", "protected_join", "provider_attempt_id"}
-    values = _result_closed_mapping(raw, keys=common | extra_keys, error=error)
+    values = dict(_result_closed_mapping(raw, keys=common | extra_keys, error=error))
+    for field_name in tuple_fields:
+        value = values.get(field_name)
+        if type(value) is list:
+            values[field_name] = tuple(value)
+    for field_name in nested_tuple_fields:
+        value = values.get(field_name)
+        if type(value) in (list, tuple):
+            values[field_name] = tuple(
+                tuple(row) if type(row) in (list, tuple) else row for row in value
+            )
     return cls(**values)
 
 
@@ -1950,9 +2198,13 @@ def validate_cap_s1_result(result: CapS1Result) -> None:
     if result.release_state != RESULT_RELEASE_STATE:
         raise CapS1ResultError("cap_s1_result_release_state_invalid")
 
-    for field_name in ("operation", "receiver", "carrier"):
-        value = getattr(result, field_name)
-        if not isinstance(value, str) or not value.strip():
+    identity_validators = {
+        "operation": _result_safe_operation,
+        "receiver": _result_safe_receiver,
+        "carrier": _result_safe_slack_carrier,
+    }
+    for field_name, validator in identity_validators.items():
+        if not validator(getattr(result, field_name)):
             raise CapS1ResultError(f"cap_s1_result_{field_name}_invalid")
 
     for field_name in ("exact_head", "exact_tree", "current_protected_join"):
@@ -2066,65 +2318,237 @@ def validate_cap_s1_result(result: CapS1Result) -> None:
         for receipt in bound_receipts
     ):
         raise CapS1ResultError("cap_s1_result_cross_binding_mismatch")
-    if any(not _result_is_hex64(receipt.evidence_digest) for receipt in bound_receipts):
-        raise CapS1ResultError("cap_s1_result_evidence_digest_invalid")
-
     local_proof = result.local_proof
+    local_rows = local_proof.suite_manifest
     if (
-        not _result_nonnegative_int(local_proof.suite_count)
-        or local_proof.suite_count == 0
-        or not _result_nonnegative_int(local_proof.passed)
-        or local_proof.passed == 0
-        or not _result_nonnegative_int(local_proof.skipped)
+        type(local_rows) is not tuple
+        or not local_rows
+        or len(local_rows) > 64
+    ):
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+    if not all(
+            type(row) is tuple
+            and len(row) == 5
+            and _result_safe_identifier(row[0])
+            and all(_result_nonnegative_int(count) for count in row[1:])
+            and sum(row[1:]) <= _RESULT_MAX_LOCAL_TESTS
+            for row in local_rows
+    ):
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+    if (
+        tuple(sorted(local_rows)) != local_rows
+        or len({row[0] for row in local_rows}) != len(local_rows)
+    ):
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+    local_passed = sum(row[1] for row in local_rows)
+    local_skipped = sum(row[2] for row in local_rows)
+    local_failed = sum(row[3] for row in local_rows)
+    local_cancelled = sum(row[4] for row in local_rows)
+    local_total = local_passed + local_skipped + local_failed + local_cancelled
+    if (
+        local_proof.suite_count != len(local_rows)
+        or local_proof.total != local_total
+        or local_proof.passed != local_passed
+        or local_proof.skipped != local_skipped
+        or local_proof.failed != local_failed
+        or local_proof.cancelled != local_cancelled
+        or not (0 < local_total <= _RESULT_MAX_LOCAL_TESTS)
+        or local_passed == 0
+        or local_failed != 0
+        or local_cancelled != 0
     ):
         raise CapS1ResultError("cap_s1_result_local_proof_invalid")
 
     hosted_proof = result.hosted_proof
     if (
         not _result_safe_identifier(hosted_proof.run_id)
+        or not hosted_proof.run_id.isdigit()
         or hosted_proof.status != "COMPLETED"
         or hosted_proof.conclusion != "SUCCESS"
-        or not _result_nonnegative_int(hosted_proof.jobs_passed)
-        or hosted_proof.jobs_passed == 0
+    ):
+        raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
+    hosted_run, hosted_rows = _rederive_hosted_job_manifest(
+        run_id=hosted_proof.run_id, exact_head=result.exact_head
+    )
+    hosted_passed = sum(
+        status == "COMPLETED" and conclusion == "SUCCESS"
+        for _job_id, _name, status, conclusion in hosted_rows
+    )
+    hosted_cancelled = sum(
+        conclusion == "CANCELLED"
+        for _job_id, _name, _status, conclusion in hosted_rows
+    )
+    hosted_failed = len(hosted_rows) - hosted_passed - hosted_cancelled
+    if (
+        str(hosted_run.get("status", "")).upper() != hosted_proof.status
+        or str(hosted_run.get("conclusion", "")).upper() != hosted_proof.conclusion
+        or hosted_proof.job_manifest != hosted_rows
+        or hosted_proof.jobs_total != len(hosted_rows)
+        or hosted_proof.jobs_passed != hosted_passed
+        or hosted_proof.jobs_failed != hosted_failed
+        or hosted_proof.jobs_cancelled != hosted_cancelled
+        or hosted_passed == 0
+        or hosted_failed != 0
+        or hosted_cancelled != 0
     ):
         raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
 
     security_proof = result.security_proof
+    security_rows = security_proof.tool_manifest
+    if (
+        type(security_rows) is not tuple
+        or not security_rows
+        or len(security_rows) > _RESULT_MAX_SECURITY_TOOLS
+    ):
+        raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+    if not all(
+            type(row) is tuple
+            and len(row) == 4
+            and _result_safe_manifest_label(row[0])
+            and row[1] in {"PASSED", "FAILED", "CANCELLED"}
+            and _result_nonnegative_int(row[2])
+            and _result_is_hex64(row[3])
+            for row in security_rows
+    ):
+        raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+    if (
+        tuple(sorted(security_rows)) != security_rows
+        or len({row[0] for row in security_rows}) != len(security_rows)
+    ):
+        raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+    security_findings = sum(row[2] for row in security_rows)
+    security_failures = sum(row[1] == "FAILED" for row in security_rows)
+    security_cancelled = sum(row[1] == "CANCELLED" for row in security_rows)
     if (
         security_proof.status != "CLEAN"
-        or not _result_nonnegative_int(security_proof.tool_count)
-        or security_proof.tool_count == 0
-        or security_proof.findings != 0
+        or security_proof.tool_count != len(security_rows)
+        or security_proof.findings != security_findings
+        or security_proof.failures != security_failures
+        or security_proof.cancelled != security_cancelled
+        or security_findings != 0
+        or security_failures != 0
+        or security_cancelled != 0
     ):
         raise CapS1ResultError("cap_s1_result_security_proof_invalid")
 
     mutation_proof = result.mutation_proof
+    mutation_rows = mutation_proof.mutation_manifest
+    mutation_states = {"KILLED", "SURVIVED", "SKIPPED", "ERROR", "CANCELLED"}
+    if (
+        type(mutation_rows) is not tuple
+        or not mutation_rows
+        or len(mutation_rows) > _RESULT_MAX_MUTATIONS
+    ):
+        raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+    if not all(
+            type(row) is tuple
+            and len(row) == 3
+            and _result_safe_identifier(row[0])
+            and row[1] in mutation_states
+            and _result_is_hex64(row[2])
+            for row in mutation_rows
+    ):
+        raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+    if (
+        tuple(sorted(mutation_rows)) != mutation_rows
+        or len({row[0] for row in mutation_rows}) != len(mutation_rows)
+    ):
+        raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+    mutation_counts = {
+        state: sum(row[1] == state for row in mutation_rows)
+        for state in mutation_states
+    }
     if (
         mutation_proof.status != "PASSED"
-        or not _result_nonnegative_int(mutation_proof.killed)
+        or mutation_proof.total != len(mutation_rows)
+        or mutation_proof.killed != mutation_counts["KILLED"]
+        or mutation_proof.survived != mutation_counts["SURVIVED"]
+        or mutation_proof.skipped != mutation_counts["SKIPPED"]
+        or mutation_proof.errors != mutation_counts["ERROR"]
+        or mutation_proof.cancelled != mutation_counts["CANCELLED"]
         or mutation_proof.killed == 0
         or mutation_proof.survived != 0
+        or mutation_proof.errors != 0
+        or mutation_proof.cancelled != 0
     ):
         raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
 
     cleanup_proof = result.cleanup_proof
+    cleanup_rows = cleanup_proof.resource_manifest
+    if (
+        type(cleanup_rows) is not tuple
+        or len(cleanup_rows) != len(_RESULT_CLEANUP_KINDS)
+    ):
+        raise CapS1ResultError("cap_s1_result_cleanup_proof_invalid")
+    if not all(
+            type(row) is tuple
+            and len(row) == 4
+            and row[0] in _RESULT_CLEANUP_KINDS
+            and _result_is_hex64(row[1])
+            and type(row[2]) is bool
+            and type(row[3]) is bool
+            for row in cleanup_rows
+    ):
+        raise CapS1ResultError("cap_s1_result_cleanup_proof_invalid")
+    if (
+        tuple(sorted(cleanup_rows)) != cleanup_rows
+        or tuple(row[0] for row in cleanup_rows) != _RESULT_CLEANUP_KINDS
+    ):
+        raise CapS1ResultError("cap_s1_result_cleanup_proof_invalid")
+    cleanup_failures = sum(not row[2] for row in cleanup_rows)
+    cleanup_residue = sum(not row[3] for row in cleanup_rows)
     if (
         cleanup_proof.status != "CLEAN"
         or cleanup_proof.all_removed is not True
-        or cleanup_proof.residue_count != 0
-        or cleanup_proof.resource_kinds != _RESULT_CLEANUP_KINDS
+        or cleanup_proof.resources_total != len(cleanup_rows)
+        or cleanup_proof.failures != cleanup_failures
+        or cleanup_proof.residue_count != cleanup_residue
+        or cleanup_proof.resource_kinds != tuple(row[0] for row in cleanup_rows)
+        or cleanup_failures != 0
+        or cleanup_residue != 0
     ):
         raise CapS1ResultError("cap_s1_result_cleanup_proof_invalid")
 
     review = result.review_state
     if (
         not _result_safe_identifier(review.author)
+        or not _result_positive_int(review.author_id)
         or not _result_safe_identifier(review.reviewer)
-        or review.author == review.reviewer
+        or not _result_positive_int(review.reviewer_id)
+        or review.author_id == review.reviewer_id
+        or review.author.casefold() == review.reviewer.casefold()
         or not _result_safe_identifier(review.review_id)
+        or not review.review_id.isdigit()
         or review.state != "APPROVED"
+        or review.review_commit != result.exact_head
     ):
         raise CapS1ResultError("cap_s1_result_review_state_invalid")
+    pull, github_review = _rederive_github_review(
+        review_id=review.review_id, exact_head=result.exact_head
+    )
+    pull_author = pull.get("user")
+    github_reviewer = github_review.get("user")
+    if (
+        type(pull_author) is not dict
+        or type(github_reviewer) is not dict
+        or pull_author.get("login") != review.author
+        or pull_author.get("id") != review.author_id
+        or github_reviewer.get("login") != review.reviewer
+        or github_reviewer.get("id") != review.reviewer_id
+        or str(github_review.get("state", "")).upper() != review.state
+        or github_review.get("commit_id") != review.review_commit
+        or pull_author.get("id") == github_reviewer.get("id")
+        or str(pull_author.get("login", "")).casefold()
+        == str(github_reviewer.get("login", "")).casefold()
+    ):
+        raise CapS1ResultError("cap_s1_result_review_state_invalid")
+
+    if any(
+        not _result_is_hex64(receipt.evidence_digest)
+        or receipt.evidence_digest != _result_receipt_evidence_digest(receipt)
+        for receipt in bound_receipts
+    ):
+        raise CapS1ResultError("cap_s1_result_evidence_digest_invalid")
 
     held = result.held_non_goals
     if not isinstance(held, tuple) or not held:
@@ -2146,26 +2570,67 @@ def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
         "local_proof": lambda raw: _parse_bound_receipt(
             raw,
             cls=CapS1LocalProofReceipt,
-            extra_keys={"suite_count", "passed", "skipped", "evidence_digest"},
+            extra_keys={
+                "suite_count",
+                "total",
+                "passed",
+                "skipped",
+                "failed",
+                "cancelled",
+                "suite_manifest",
+                "evidence_digest",
+            },
             error="cap_s1_result_local_proof_invalid",
+            nested_tuple_fields=("suite_manifest",),
         ),
         "hosted_proof": lambda raw: _parse_bound_receipt(
             raw,
             cls=CapS1HostedProofReceipt,
-            extra_keys={"run_id", "status", "conclusion", "jobs_passed", "evidence_digest"},
+            extra_keys={
+                "run_id",
+                "status",
+                "conclusion",
+                "jobs_total",
+                "jobs_passed",
+                "jobs_failed",
+                "jobs_cancelled",
+                "job_manifest",
+                "evidence_digest",
+            },
             error="cap_s1_result_hosted_proof_invalid",
+            nested_tuple_fields=("job_manifest",),
         ),
         "security_proof": lambda raw: _parse_bound_receipt(
             raw,
             cls=CapS1SecurityProofReceipt,
-            extra_keys={"status", "tool_count", "findings", "evidence_digest"},
+            extra_keys={
+                "status",
+                "tool_count",
+                "findings",
+                "failures",
+                "cancelled",
+                "tool_manifest",
+                "evidence_digest",
+            },
             error="cap_s1_result_security_proof_invalid",
+            nested_tuple_fields=("tool_manifest",),
         ),
         "mutation_proof": lambda raw: _parse_bound_receipt(
             raw,
             cls=CapS1MutationProofReceipt,
-            extra_keys={"status", "killed", "survived", "evidence_digest"},
+            extra_keys={
+                "status",
+                "total",
+                "killed",
+                "survived",
+                "skipped",
+                "errors",
+                "cancelled",
+                "mutation_manifest",
+                "evidence_digest",
+            },
             error="cap_s1_result_mutation_proof_invalid",
+            nested_tuple_fields=("mutation_manifest",),
         ),
         "cleanup_proof": lambda raw: _parse_bound_receipt(
             raw,
@@ -2173,16 +2638,30 @@ def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
             extra_keys={
                 "status",
                 "all_removed",
+                "resources_total",
+                "failures",
                 "residue_count",
                 "resource_kinds",
+                "resource_manifest",
                 "evidence_digest",
             },
             error="cap_s1_result_cleanup_proof_invalid",
+            nested_tuple_fields=("resource_manifest",),
+            tuple_fields=("resource_kinds",),
         ),
         "review_state": lambda raw: _parse_bound_receipt(
             raw,
             cls=CapS1ReviewReceipt,
-            extra_keys={"author", "reviewer", "review_id", "state", "evidence_digest"},
+            extra_keys={
+                "author",
+                "author_id",
+                "reviewer",
+                "reviewer_id",
+                "review_id",
+                "state",
+                "review_commit",
+                "evidence_digest",
+            },
             error="cap_s1_result_review_state_invalid",
         ),
     }

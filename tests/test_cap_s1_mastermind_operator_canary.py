@@ -1062,6 +1062,7 @@ from scripts.ohf.cap_s1_mastermind_operator_canary import (
     FAKE_HARNESS_VERSION,
     FROZEN_STOP_CODES,
     _SCHEMA_FIXTURE_BINARY_SOURCE,
+    _canonical_digest,
     attest_protocol_schema,
     build_cap_s1_result,
     build_synthetic_workspace,
@@ -1376,7 +1377,48 @@ def _strip_bundled_from_config_read(result):
 
 
 @pytest.fixture(autouse=True)
-def _close_created_canary_clients():
+def _close_created_canary_clients(monkeypatch):
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    def _fake_github_api_json(endpoint: str):
+        if endpoint == "repos/mastermindx-market-intelligence/Mastermind/actions/runs/33741521536":
+            return {
+                "id": 33741521536,
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "a" * 40,
+            }
+        if endpoint.startswith(
+            "repos/mastermindx-market-intelligence/Mastermind/actions/runs/33741521536/jobs?"
+        ):
+            return {
+                "total_count": 1,
+                "jobs": [
+                    {
+                        "id": 100000000001,
+                        "name": "test",
+                        "status": "completed",
+                        "conclusion": "success",
+                    }
+                ],
+            }
+        if endpoint == "repos/mastermindx-market-intelligence/Mastermind/pulls/350":
+            return {
+                "user": {"login": "chriswong6031-creator", "id": 101},
+                "head": {"sha": "a" * 40},
+            }
+        if endpoint == (
+            "repos/mastermindx-market-intelligence/Mastermind/pulls/350/reviews/5104652791"
+        ):
+            return {
+                "id": 5104652791,
+                "state": "APPROVED",
+                "commit_id": "a" * 40,
+                "user": {"login": "mastermindx-3", "id": 303},
+            }
+        raise AssertionError(f"unexpected fake GitHub endpoint: {endpoint}")
+
+    monkeypatch.setattr(canary_module, "_github_api_json", _fake_github_api_json, raising=False)
     _CREATED_CANARY_CLIENTS.clear()
     yield
     for client in _CREATED_CANARY_CLIENTS:
@@ -3119,7 +3161,7 @@ def _happy_cap_s1_result_kwargs() -> dict:
         "protected_join": protected_join,
         "provider_attempt_id": attempt_id,
     }
-    return dict(
+    raw = dict(
         operation="mastermind-cap-s1-complete-vertical-20260901-sol-001",
         receiver="fable-cap-s1",
         carrier="C0BSBM78V1N/1788258398.440699",
@@ -3176,8 +3218,17 @@ def _happy_cap_s1_result_kwargs() -> dict:
         local_proof={
             **bound,
             "suite_count": 4,
+            "total": 359,
             "passed": 357,
             "skipped": 2,
+            "failed": 0,
+            "cancelled": 0,
+            "suite_manifest": (
+                ("cap-s1-a", 100, 0, 0, 0),
+                ("cap-s1-b", 100, 0, 0, 0),
+                ("cap-s1-c", 100, 0, 0, 0),
+                ("cap-s1-closure", 57, 2, 0, 0),
+            ),
             "evidence_digest": "6" * 64,
         },
         hosted_proof={
@@ -3185,7 +3236,13 @@ def _happy_cap_s1_result_kwargs() -> dict:
             "run_id": "33741521536",
             "status": "COMPLETED",
             "conclusion": "SUCCESS",
-            "jobs_passed": 5,
+            "jobs_total": 1,
+            "jobs_passed": 1,
+            "jobs_failed": 0,
+            "jobs_cancelled": 0,
+            "job_manifest": (
+                ("100000000001", "test", "COMPLETED", "SUCCESS"),
+            ),
             "evidence_digest": "7" * 64,
         },
         security_proof={
@@ -3193,21 +3250,41 @@ def _happy_cap_s1_result_kwargs() -> dict:
             "status": "CLEAN",
             "tool_count": 3,
             "findings": 0,
+            "failures": 0,
+            "cancelled": 0,
+            "tool_manifest": tuple(
+                (name, "PASSED", 0, _canonical_digest({"tool": name}))
+                for name in ("codeql", "diff", "secret-scan")
+            ),
             "evidence_digest": "8" * 64,
         },
         mutation_proof={
             **bound,
             "status": "PASSED",
+            "total": 12,
             "killed": 12,
             "survived": 0,
+            "skipped": 0,
+            "errors": 0,
+            "cancelled": 0,
+            "mutation_manifest": tuple(
+                (
+                    f"mutation-{index:02d}",
+                    "KILLED",
+                    _canonical_digest({"mutation": index, "outcome": "KILLED"}),
+                )
+                for index in range(12)
+            ),
             "evidence_digest": "9" * 64,
         },
         cleanup_proof={
             **bound,
             "status": "CLEAN",
             "all_removed": True,
+            "resources_total": 7,
+            "failures": 0,
             "residue_count": 0,
-            "resource_kinds": [
+            "resource_kinds": (
                 "attempt",
                 "origin",
                 "process",
@@ -3215,15 +3292,30 @@ def _happy_cap_s1_result_kwargs() -> dict:
                 "schema",
                 "thread",
                 "workspace",
-            ],
+            ),
+            "resource_manifest": tuple(
+                (kind, _canonical_digest({"owned_resource": kind}), True, True)
+                for kind in (
+                    "attempt",
+                    "origin",
+                    "process",
+                    "projection",
+                    "schema",
+                    "thread",
+                    "workspace",
+                )
+            ),
             "evidence_digest": "a" * 64,
         },
         review_state={
             **bound,
             "author": "chriswong6031-creator",
+            "author_id": 101,
             "reviewer": "mastermindx-3",
+            "reviewer_id": 303,
             "review_id": "5104652791",
             "state": "APPROVED",
+            "review_commit": exact_head,
             "evidence_digest": "b" * 64,
         },
         held_non_goals=(
@@ -3233,6 +3325,29 @@ def _happy_cap_s1_result_kwargs() -> dict:
             "NO_READY_OR_MERGE",
             "PRODUCTION_UNARMED",
         ),
+    )
+    receipt_types = {
+        "local_proof": "CapS1LocalProofReceipt",
+        "hosted_proof": "CapS1HostedProofReceipt",
+        "security_proof": "CapS1SecurityProofReceipt",
+        "mutation_proof": "CapS1MutationProofReceipt",
+        "cleanup_proof": "CapS1CleanupProofReceipt",
+        "review_state": "CapS1ReviewReceipt",
+    }
+    for field_name, receipt_type in receipt_types.items():
+        observation = dict(raw[field_name])
+        observation.pop("evidence_digest")
+        raw[field_name]["evidence_digest"] = _canonical_digest(
+            {"receipt_type": receipt_type, "observation": observation}
+        )
+    return raw
+
+
+def _refresh_result_receipt_digest(raw: dict, field_name: str, receipt_type: str) -> None:
+    observation = dict(raw[field_name])
+    observation.pop("evidence_digest")
+    raw[field_name]["evidence_digest"] = _canonical_digest(
+        {"receipt_type": receipt_type, "observation": observation}
     )
 
 
@@ -3612,3 +3727,143 @@ def test_cap_s1_result_held_non_goals_must_be_nonempty() -> None:
     empty_held["held_non_goals"] = ()
     with pytest.raises(CapS1ResultError, match="held_non_goals_empty"):
         build_cap_s1_result(**empty_held)
+
+
+# ---------------------------------------------------------------------------
+# REQUEST_CHANGES 5112126365: trust-boundary regressions (RED first)
+# ---------------------------------------------------------------------------
+
+
+def test_run_canary_refuses_foreign_attempt_root_without_touching_it_or_starting_provider(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "scratch-foreign-attempt-root"
+    foreign_root = scratch / "cap-s1-attempt-root"
+    foreign_root.mkdir(parents=True)
+    sentinel = foreign_root / "foreign.txt"
+    sentinel.write_bytes(b"foreign bytes must survive exactly\n")
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-canary-foreign-attempt-root",
+            protected_join="c" * 40,
+            client_factory=_canary_client_factory(),
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+
+    assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    assert sentinel.read_bytes() == b"foreign bytes must survive exactly\n"
+    assert sorted(path.name for path in foreign_root.iterdir()) == ["foreign.txt"]
+    assert _CREATED_CANARY_CLIENTS == []
+    assert not (scratch / "codex-home").exists()
+    assert not (scratch / "fake-state.json").exists()
+    assert not (scratch / "synthetic-workspace").exists()
+    assert not any(path.name.startswith("schema-attestation") for path in scratch.iterdir())
+    assert not any(path.name.startswith("ephemeral-archive-") for path in scratch.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("field_name", "hostile_value"),
+    [
+        ("operation", "x" * (1024 * 1024)),
+        ("receiver", "receiver\nSTART provider-handle: native-task"),
+        ("carrier", "/Users/alice/.codex/auth.json?token=secret"),
+        ("carrier", "C0BSBM78V1N/1788258398.440699\x00native-task"),
+    ],
+)
+def test_cap_s1_result_top_level_identities_use_bounded_closed_grammars(
+    field_name, hostile_value
+) -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    raw[field_name] = hostile_value
+    with pytest.raises(CapS1ResultError, match=f"{field_name}_invalid") as excinfo:
+        build_cap_s1_result(**raw)
+    assert hostile_value not in str(excinfo.value)
+
+
+def test_cap_s1_result_refuses_mixed_case_self_review_identity() -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    raw["review_state"].update(
+        author="chriswong6031-creator",
+        reviewer="CHRISWONG6031-CREATOR",
+    )
+    with pytest.raises(CapS1ResultError, match="review_state_invalid"):
+        build_cap_s1_result(**raw)
+
+
+@pytest.mark.parametrize(
+    ("receipt_name", "field_name", "hostile_value"),
+    [
+        ("local_proof", "passed", 999_999),
+        ("hosted_proof", "jobs_passed", 999),
+        ("security_proof", "tool_count", 999),
+        ("mutation_proof", "killed", 999_999),
+    ],
+)
+def test_cap_s1_result_refuses_unbounded_caller_authored_positive_counts(
+    receipt_name, field_name, hostile_value
+) -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    raw[receipt_name][field_name] = hostile_value
+    with pytest.raises(CapS1ResultError):
+        build_cap_s1_result(**raw)
+
+
+def test_cap_s1_result_refuses_caller_selected_digest_after_summary_mutation() -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    original_digest = raw["security_proof"]["evidence_digest"]
+    raw["security_proof"]["tool_count"] = 4
+    raw["security_proof"]["tool_manifest"] = (
+        *raw["security_proof"]["tool_manifest"],
+        ("typing", "PASSED", 0, _canonical_digest({"tool": "typing"})),
+    )
+    raw["security_proof"]["evidence_digest"] = original_digest
+    with pytest.raises(CapS1ResultError, match="evidence_digest_invalid"):
+        build_cap_s1_result(**raw)
+
+
+def test_cap_s1_result_rederives_local_same_unit_totals_from_suite_manifest() -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    raw["local_proof"]["total"] += 1
+    _refresh_result_receipt_digest(raw, "local_proof", "CapS1LocalProofReceipt")
+    with pytest.raises(CapS1ResultError, match="local_proof_invalid"):
+        build_cap_s1_result(**raw)
+
+
+def test_cap_s1_result_refetches_complete_hosted_job_inventory() -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    raw["hosted_proof"].update(
+        jobs_total=2,
+        jobs_passed=2,
+        job_manifest=(
+            ("100000000001", "test", "COMPLETED", "SUCCESS"),
+            ("100000000002", "invented", "COMPLETED", "SUCCESS"),
+        ),
+    )
+    _refresh_result_receipt_digest(raw, "hosted_proof", "CapS1HostedProofReceipt")
+    with pytest.raises(CapS1ResultError, match="hosted_proof_invalid"):
+        build_cap_s1_result(**raw)
+
+
+def test_cap_s1_result_rederives_cleanup_summary_from_owned_resource_manifest() -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    rows = list(raw["cleanup_proof"]["resource_manifest"])
+    kind, identity, _removed, _absent = rows[0]
+    rows[0] = (kind, identity, False, False)
+    raw["cleanup_proof"]["resource_manifest"] = tuple(rows)
+    _refresh_result_receipt_digest(raw, "cleanup_proof", "CapS1CleanupProofReceipt")
+    with pytest.raises(CapS1ResultError, match="cleanup_proof_invalid"):
+        build_cap_s1_result(**raw)
+
+
+def test_cap_s1_result_refetches_review_and_requires_stable_non_author_ids() -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    raw["review_state"].update(reviewer="invented-reviewer", reviewer_id=404)
+    _refresh_result_receipt_digest(raw, "review_state", "CapS1ReviewReceipt")
+    with pytest.raises(CapS1ResultError, match="review_state_invalid"):
+        build_cap_s1_result(**raw)
