@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -20,6 +23,28 @@ from control_plane.claude_cli_protocol import (
 ROOT = Path(__file__).resolve().parents[1]
 FAKE = ROOT / "scripts" / "ohf" / "fake_claude_cli.py"
 SESSION_ID = "550e8400-e29b-41d4-a716-446655440000"
+EVIDENCE = "bounded evidence\n"
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _expected_result(evidence: str = EVIDENCE) -> str:
+    return json.dumps(
+        {"decision": "HOLD", "evidence_sha256": _sha256_text(evidence)},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _expected_prompt(path: str = "sealed/evidence.txt", evidence: str = EVIDENCE) -> str:
+    return (
+        f"Read exactly one sealed relative file: {path}\n"
+        f"Expected SHA-256: {_sha256_text(evidence)}\n"
+        f"Return exactly: {_expected_result(evidence)}\n"
+        "Do not perform any other action."
+    )
 
 
 def _run(
@@ -47,18 +72,18 @@ def _command(tmp_path: Path, *, version: str = "2.1.259"):
     (workspace / "sealed").mkdir(parents=True, mode=0o700)
     home.mkdir(mode=0o700)
     scratch.mkdir(mode=0o700)
-    (workspace / "sealed" / "evidence.txt").write_text("bounded evidence\n", encoding="utf-8")
+    (workspace / "sealed" / "evidence.txt").write_text(EVIDENCE, encoding="utf-8")
     policy = ClaudeCliInvocationPolicy(
         binary=FAKE.resolve(),
         version=ClaudeCliVersion.parse(version),
         model="claude-opus-4-6",
         session_id=SESSION_ID,
-        prompt="Read only sealed/evidence.txt and return the bounded fixture result.",
+        prompt=_expected_prompt(),
         working_directory=workspace,
         isolated_home=home,
         isolated_tmp=scratch,
         evidence_relative_path="sealed/evidence.txt",
-        expected_result_sha256="48766ca37de6cbd6d7345ff85133cb61d67983eda7c0e1bae6bc5d266bf7d25c",
+        expected_result_sha256=_sha256_text(_expected_result()),
         api_timeout_ms=1_000,
         idle_timeout_seconds=1.0,
         absolute_timeout_seconds=2.0,
@@ -125,10 +150,13 @@ def test_exact_compiled_command_emits_canonical_stream_and_counters(tmp_path: Pa
     assert events[0]["tools"] == ["Read"]
     assert events[0]["mcp_servers"] == []
     assert events[0]["plugins"] == []
+    assert "EndConversation" not in events[0]["tools"]
     assert events[-1]["session_id"] == SESSION_ID
+    assert events[-1]["result"] == _expected_result()
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert state == {
         "children": [],
+        "escaped_children": [],
         "mcp_calls": 0,
         "network_attempts": 0,
         "reads": 1,
@@ -162,6 +190,9 @@ def test_exact_compiled_command_emits_canonical_stream_and_counters(tmp_path: Pa
         "persist_session",
         "two_turns",
         "settings_file",
+        "settings_drop_hook_guard",
+        "settings_expand_permissions",
+        "prompt_path_mismatch",
         "extra_flag",
     ],
 )
@@ -215,7 +246,20 @@ def test_each_canonical_argv_guard_detects_a_mutation(tmp_path: Path, mutation: 
         index = argv.index("--max-turns")
         argv[index + 1] = "2"
     elif mutation == "settings_file":
-        argv[argv.index("{}")] = "/tmp/settings.json"
+        index = argv.index("--settings")
+        argv[index + 1] = "/tmp/settings.json"
+    elif mutation == "settings_drop_hook_guard":
+        index = argv.index("--settings")
+        settings = json.loads(argv[index + 1])
+        del settings["disableAllHooks"]
+        argv[index + 1] = json.dumps(settings, sort_keys=True, separators=(",", ":"))
+    elif mutation == "settings_expand_permissions":
+        index = argv.index("--settings")
+        settings = json.loads(argv[index + 1])
+        settings["permissions"]["allow"].append("Bash")
+        argv[index + 1] = json.dumps(settings, sort_keys=True, separators=(",", ":"))
+    elif mutation == "prompt_path_mismatch":
+        argv[-1] = _expected_prompt("sealed/other.txt")
     elif mutation == "extra_flag":
         argv.insert(-1, "--continue")
     else:  # pragma: no cover - table exhaustiveness
@@ -266,7 +310,51 @@ def test_fake_exclusive_state_refuses_a_second_start(tmp_path: Path) -> None:
     assert second.returncode == 73
     assert second.stdout == b""
     assert second.stderr == b"fake claude: second start refused\n"
-    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["starts"] == 2
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["starts"] == 1
+
+
+def test_fake_state_lock_refuses_a_concurrent_process_without_losing_updates(tmp_path: Path) -> None:
+    command = _command(tmp_path)
+    first_environment = _environment(command, tmp_path, MMX_FAKE_CLAUDE_SCENARIO="hang_before_output")
+    second_environment = _environment(command, tmp_path, MMX_FAKE_CLAUDE_SCENARIO="ok")
+    first = subprocess.Popen(
+        command.argv,
+        cwd=command.working_directory,
+        env=first_environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        close_fds=True,
+    )
+    try:
+        state_path = tmp_path / "state.json"
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not state_path.exists():
+            time.sleep(0.01)
+        assert state_path.exists()
+
+        second = _run(
+            command.argv,
+            cwd=Path(command.working_directory),
+            environment=second_environment,
+        )
+
+        assert second.returncode == 73
+        assert second.stdout == b""
+        assert second.stderr == b"fake claude: state lock rejected\n"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["starts"] == 1
+        assert state["reads"] == 1
+        assert state["submissions"] == 1
+    finally:
+        try:
+            os.killpg(first.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        if first.poll() is None:
+            first.kill()
+        first.wait(timeout=2)
 
 
 def test_248_fake_rejects_newer_permission_prompt_flag(tmp_path: Path) -> None:

@@ -11,13 +11,16 @@ import dataclasses
 import hashlib
 import json
 import os
+import pwd
 import subprocess
 import threading
 import time
+import traceback
 from pathlib import Path
 
 import pytest
 
+import control_plane.claude_cli_protocol as protocol
 from control_plane.claude_cli_protocol import (
     ClaudeCliInvocationPolicy,
     ClaudeCliObservation,
@@ -32,11 +35,29 @@ ROOT = Path(__file__).resolve().parents[1]
 FAKE = ROOT / "scripts" / "ohf" / "fake_claude_cli.py"
 SESSION_ID = "550e8400-e29b-41d4-a716-446655440000"
 MODEL = "claude-opus-4-6"
-RESULT = '{"decision":"HOLD","reason":"sealed fixture"}'
+EVIDENCE = "observed: fixture confirmation\n"
 
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _expected_result(evidence: str = EVIDENCE) -> str:
+    return json.dumps(
+        {"decision": "HOLD", "evidence_sha256": _sha256_text(evidence)},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _expected_prompt(path: str = "sealed/evidence.txt", evidence: str = EVIDENCE) -> str:
+    result = _expected_result(evidence)
+    return (
+        f"Read exactly one sealed relative file: {path}\n"
+        f"Expected SHA-256: {_sha256_text(evidence)}\n"
+        f"Return exactly: {result}\n"
+        "Do not perform any other action."
+    )
 
 
 def _git(*args: str, cwd: Path) -> str:
@@ -57,7 +78,7 @@ def _workspace(tmp_path: Path) -> tuple[Path, str, str]:
     workspace.mkdir(mode=0o700, parents=True)
     evidence = workspace / "sealed" / "evidence.txt"
     evidence.parent.mkdir(mode=0o700)
-    evidence.write_text("observed: fixture confirmation\n", encoding="utf-8")
+    evidence.write_text(EVIDENCE, encoding="utf-8")
     (workspace / ".gitignore").write_text("*.runtime\n", encoding="utf-8")
     _git("init", "-q", cwd=workspace)
     _git("add", ".gitignore", "sealed/evidence.txt", cwd=workspace)
@@ -95,15 +116,12 @@ def _policy(
         version=ClaudeCliVersion.parse(version),
         model=MODEL,
         session_id=SESSION_ID,
-        prompt=(
-            "Read only sealed/evidence.txt. Return exactly the required bounded "
-            "JSON decision and perform no other action."
-        ),
+        prompt=_expected_prompt(),
         working_directory=workspace,
         isolated_home=home,
         isolated_tmp=scratch,
         evidence_relative_path="sealed/evidence.txt",
-        expected_result_sha256=_sha256_text(RESULT),
+        expected_result_sha256=_sha256_text(_expected_result()),
         api_timeout_ms=1_000,
         idle_timeout_seconds=idle_timeout_seconds,
         absolute_timeout_seconds=absolute_timeout_seconds,
@@ -137,6 +155,37 @@ def test_compiler_emits_exact_248_command_and_closed_environment(tmp_path: Path)
 
     command = compile_claude_cli_command(policy)
 
+    settings = {
+        "autoMemoryEnabled": False,
+        "disableAgentView": True,
+        "disableAllHooks": True,
+        "disableAutoMode": "disable",
+        "disableDeepLinkRegistration": "disable",
+        "enableAllProjectMcpServers": False,
+        "enabledMcpjsonServers": [],
+        "includeGitInstructions": False,
+        "permissions": {
+            "allow": ["Read(./sealed/evidence.txt)"],
+            "ask": [],
+            "defaultMode": "dontAsk",
+            "deny": [
+                "Agent",
+                "Bash",
+                "Edit",
+                "Glob",
+                "Grep",
+                "NotebookEdit",
+                "Skill",
+                "Task",
+                "WebFetch",
+                "WebSearch",
+                "Write",
+                "mcp__*",
+            ],
+            "disableBypassPermissionsMode": "disable",
+        },
+    }
+    settings_json = json.dumps(settings, sort_keys=True, separators=(",", ":"))
     assert command.argv == (
         str(FAKE.resolve()),
         "--restricted",
@@ -166,9 +215,10 @@ def test_compiler_emits_exact_248_command_and_closed_environment(tmp_path: Path)
         "--max-turns",
         "1",
         "--settings",
-        "{}",
+        settings_json,
         policy.prompt,
     )
+    assert command.settings_sha256 == _sha256_text(settings_json)
     assert dict(command.environment) == {
         "HOME": str(policy.isolated_home),
         "TMPDIR": str(policy.isolated_tmp),
@@ -287,6 +337,51 @@ def test_compiler_refuses_the_native_home_even_with_an_isolated_temp(tmp_path: P
     assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
 
 
+def test_native_home_identity_comes_from_the_os_account_not_home_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy, _, _, _ = _policy(tmp_path / "fixture")
+    trusted_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=True)
+    monkeypatch.setenv("HOME", str(tmp_path / "fixture" / "empty-home"))
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        compile_claude_cli_command(dataclasses.replace(policy, isolated_home=trusted_home))
+
+    assert captured.value.code == "HOME_NOT_ISOLATED"
+
+
+@pytest.mark.parametrize(
+    "field,value,code",
+    [
+        ("prompt", "Read exactly one sealed relative file: sealed/other.txt", "PROMPT_BINDING_INVALID"),
+        ("expected_result_sha256", "0" * 64, "RESULT_BINDING_INVALID"),
+    ],
+)
+def test_compiler_rejects_prompt_or_result_not_derived_from_sealed_evidence(
+    tmp_path: Path, field: str, value: str, code: str
+) -> None:
+    policy, _, _, _ = _policy(tmp_path)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        compile_claude_cli_command(dataclasses.replace(policy, **{field: value}))
+
+    assert captured.value.code == code
+    assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
+
+
+def test_prestart_error_trace_suppresses_private_locator_context(tmp_path: Path) -> None:
+    policy, _, _, _ = _policy(tmp_path)
+    missing = dataclasses.replace(policy, evidence_relative_path="sealed/missing.txt")
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        compile_claude_cli_command(missing)
+
+    rendered = "".join(traceback.format_exception(captured.value))
+    assert str(tmp_path) not in rendered
+    assert captured.value.__cause__ is None
+    assert captured.value.__suppress_context__ is True
+
+
 def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Path) -> None:
     policy, workspace, head, status = _policy(tmp_path)
     command = compile_claude_cli_command(policy)
@@ -299,10 +394,13 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
     assert receipt.model == MODEL
     assert receipt.read_count == 1
     assert receipt.submission_count == 1
-    assert receipt.result_sha256 == _sha256_text(RESULT)
+    assert receipt.result_sha256 == _sha256_text(_expected_result())
     assert receipt.returncode == 0
     assert receipt.cleanup.process_group_empty is True
     assert receipt.cleanup.leader_reaped is True
+    assert receipt.cleanup.marked_descendants_empty is True
+    assert receipt.cleanup.reader_closed is True
+    assert receipt.cleanup.scratch_empty is True
     assert receipt.cleanup.residue_rows == ()
     first_digest = receipt.receipt_sha256
     state_payload = json.loads(state.read_text(encoding="utf-8"))
@@ -332,40 +430,41 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
 @pytest.mark.parametrize(
     "scenario,code,observation",
     [
-        ("stderr", "STDERR_NOT_EMPTY", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("invalid_utf8", "STDOUT_UTF8_INVALID", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("malformed_json", "STREAM_JSON_INVALID", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("duplicate_key", "STREAM_JSON_DUPLICATE_KEY", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("oversized_line", "STREAM_LINE_LIMIT", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("excessive_depth", "STREAM_JSON_DEPTH", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("excessive_string", "STREAM_JSON_STRING", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("excessive_collection", "STREAM_JSON_COLLECTION", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("too_many_events", "STREAM_EVENT_LIMIT", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("pre_init_hook", "INIT_NOT_FIRST", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("api_retry", "PROVIDER_RETRY_OBSERVED", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("unknown_event", "EVENT_UNKNOWN", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("init_model_drift", "MODEL_DRIFT", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("init_session_drift", "SESSION_DRIFT", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("init_tools_extra", "TOOL_SET_DRIFT", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("init_mcp", "MCP_OBSERVED", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("init_plugin", "PLUGIN_OBSERVED", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("assistant_parent_tool", "SUBAGENT_OBSERVED", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("assistant_write_tool", "TOOL_UNAUTHORIZED", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("read_wrong_file", "READ_SCOPE_DRIFT", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("duplicate_tool", "READ_COUNT_INVALID", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("tool_result_mismatch", "TOOL_RESULT_MISMATCH", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("permission_denied", "PERMISSION_DENIED", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("missing_result", "TERMINAL_RESULT_MISSING", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("duplicate_result", "TERMINAL_RESULT_DUPLICATE", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("post_result", "POST_TERMINAL_EVENT", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("result_session_drift", "SESSION_DRIFT", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
+        ("stderr", "STDERR_NOT_EMPTY", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("invalid_utf8", "STDOUT_UTF8_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("malformed_json", "STREAM_JSON_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("duplicate_key", "STREAM_JSON_DUPLICATE_KEY", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("oversized_line", "STREAM_LINE_LIMIT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("excessive_depth", "STREAM_JSON_DEPTH", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("excessive_string", "STREAM_JSON_STRING", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("excessive_collection", "STREAM_JSON_COLLECTION", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("too_many_events", "STREAM_EVENT_LIMIT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("pre_init_hook", "INIT_NOT_FIRST", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("api_retry", "PROVIDER_RETRY_OBSERVED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("unknown_event", "EVENT_UNKNOWN", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_model_drift", "MODEL_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_session_drift", "SESSION_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_tools_extra", "TOOL_SET_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_end_conversation", "TOOL_SET_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_mcp", "MCP_OBSERVED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_plugin", "PLUGIN_OBSERVED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("assistant_parent_tool", "SUBAGENT_OBSERVED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("assistant_write_tool", "TOOL_UNAUTHORIZED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("read_wrong_file", "READ_SCOPE_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("duplicate_tool", "READ_COUNT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("tool_result_mismatch", "TOOL_RESULT_MISMATCH", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("permission_denied", "PERMISSION_DENIED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("missing_result", "TERMINAL_RESULT_MISSING", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("duplicate_result", "TERMINAL_RESULT_DUPLICATE", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("post_result", "POST_TERMINAL_EVENT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_session_drift", "SESSION_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_failure", "PROVIDER_FAILURE", ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED),
         ("result_permission_denial", "PERMISSION_DENIED", ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED),
-        ("result_mismatch", "STRUCTURED_RESULT_MISMATCH", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("result_invalid_cost", "USAGE_INVALID", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
+        ("result_mismatch", "STRUCTURED_RESULT_MISMATCH", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_invalid_cost", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("nonzero_after_success", "PROCESS_EXIT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
-        ("secret_output", "SENSITIVE_OUTPUT", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
-        ("private_path_output", "PRIVATE_LOCATOR_OUTPUT", ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE),
+        ("secret_output", "SENSITIVE_OUTPUT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("private_path_output", "PRIVATE_LOCATOR_OUTPUT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
     ],
 )
 def test_hostile_streams_fail_closed_and_leave_no_workspace_effect(
@@ -387,6 +486,8 @@ def test_hostile_streams_fail_closed_and_leave_no_workspace_effect(
     assert error.cleanup is not None
     assert error.cleanup.process_group_empty is True
     assert error.cleanup.leader_reaped is True
+    assert error.cleanup.marked_descendants_empty is True
+    assert error.cleanup.reader_closed is True
     assert error.cleanup.residue_rows == ()
     assert "FAKE_SENTINEL" not in str(error)
     assert str(tmp_path) not in str(error)
@@ -461,6 +562,124 @@ def test_descendant_after_terminal_result_prevents_success(tmp_path: Path) -> No
     for child_pid in payload["children"]:
         with pytest.raises(ProcessLookupError):
             os.kill(child_pid, 0)
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_escaped_descendant_after_terminal_result_is_killed_and_never_accepted(
+    tmp_path: Path,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    state = tmp_path / "fake-state.json"
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, "escaped_child_after_result"),
+        )
+
+    error = captured.value
+    assert error.code == "PROCESS_RESIDUE_OBSERVED"
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.marked_descendants_empty is True
+    payload = json.loads(state.read_text(encoding="utf-8"))
+    for child_pid in payload["escaped_children"]:
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_getpgid_failure_still_terminates_the_candidate_group_and_reaps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path, absolute_timeout_seconds=3.0)
+    state = tmp_path / "fake-state.json"
+
+    def fail_after_child_started(pid: int) -> int:
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if state.exists() and json.loads(state.read_text(encoding="utf-8"))["children"]:
+                raise OSError("private locator must not escape")
+            time.sleep(0.01)
+        raise OSError("bounded group lookup failure")
+
+    monkeypatch.setattr(protocol.os, "getpgid", fail_after_child_started)
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, "child_hang"),
+        )
+
+    error = captured.value
+    assert error.code == "PROCESS_GROUP_UNPROVEN"
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.process_group_empty is True
+    assert error.cleanup.leader_reaped is True
+    assert "private locator" not in "".join(traceback.format_exception(error))
+    for child_pid in json.loads(state.read_text(encoding="utf-8"))["children"]:
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_unexpected_post_spawn_exception_is_contained_and_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+
+    def explode(_self: object, _line: bytes) -> None:
+        raise RuntimeError(f"private={tmp_path}")
+
+    monkeypatch.setattr(protocol._StreamParser, "consume", explode)
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path),
+        )
+
+    error = captured.value
+    assert error.code == "PROCESS_OBSERVATION_FAILED"
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.process_group_empty is True
+    assert error.cleanup.leader_reaped is True
+    assert str(tmp_path) not in "".join(traceback.format_exception(error))
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_scratch_residue_prevents_success_and_is_reported_without_a_locator(tmp_path: Path) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, "scratch_residue"),
+        )
+
+    error = captured.value
+    assert error.code == "PROCESS_RESIDUE_UNPROVEN"
+    assert error.cleanup is not None
+    assert error.cleanup.scratch_empty is False
+    assert error.cleanup.residue_rows == ("SCRATCH_RESIDUE",)
+    assert str(tmp_path) not in json.dumps(error.cleanup.to_dict(), sort_keys=True)
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_managed_policy_override_can_never_reach_result_acceptance(tmp_path: Path) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    controls = _fake_controls(tmp_path)
+    controls["MMX_FAKE_CLAUDE_MANAGED_SETTINGS"] = '{"hooks":{"PreToolUse":[{"command":"bad"}]}}'
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(compile_claude_cli_command(policy), fake_controls=controls)
+
+    assert captured.value.code == "MANAGED_POLICY_OBSERVED"
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    state = json.loads((tmp_path / "fake-state.json").read_text(encoding="utf-8"))
+    assert state["starts"] == 1
+    assert state["reads"] == 0
+    assert state["submissions"] == 0
     _assert_workspace_unchanged(workspace, head, status)
 
 
