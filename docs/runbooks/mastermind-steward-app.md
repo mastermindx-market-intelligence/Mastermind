@@ -19,6 +19,25 @@ resolve_surface
 Every tool is read-only, idempotent, closed-world, structured, and requires
 `mastermind.steward.read` in authenticated HTTP mode.
 
+## Public result generation
+
+The public result schema is
+`mastermind.secretary_grounding_mcp_result.v2`. Successful data contains
+`state`, `data.subjects[]`, and `reason_codes`. Each subject owns its
+`subject_ref`; nested facts contain only predicate, value, freshness, and
+source attribution. The Control Room resource is
+`ui://mastermind/steward/control-room-v2.html` and applies one global 64-fact
+display bound across the protected subject order.
+
+The injected `StewardReadPort` remains the flat internal, typed facts boundary.
+The protected Secretary contract alone validates and groups those facts for the
+public generation. Structured results and their matching JSON text fallback
+remain usable when the optional UI cannot render.
+
+Passing source, transport, and UI checks is not production proof. This carrier
+remains `BUILT_NOT_PROVEN / PRODUCTION_INERT` until the separately authorized
+Business installation and read canary completes.
+
 ## Install the isolated app runtime
 
 ```bash

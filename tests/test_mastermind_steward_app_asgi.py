@@ -684,12 +684,13 @@ def test_real_signed_token_performs_one_authenticated_tool_call(
     assert response.status_code == 200
     payload = response.json()
     structured = payload["result"]["structuredContent"]
-    assert structured["schema"] == "mastermind.secretary_grounding_mcp_result.v1"
+    assert structured["schema"] == "mastermind.secretary_grounding_mcp_result.v2"
+    assert structured["server_version"] == "2.0.0"
     assert structured["tool"] == "list_responsibilities"
     assert structured["ok"] is True
     assert structured["data"] == {
         "state": "UNKNOWN",
-        "facts": [],
+        "subjects": [],
         "reason_codes": ["NO_SOURCE"],
     }
     assert json.loads(payload["result"]["content"][0]["text"]) == structured

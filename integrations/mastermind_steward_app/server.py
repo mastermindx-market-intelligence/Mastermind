@@ -32,7 +32,7 @@ from integrations.mastermind_steward_app.ui import (
 )
 
 SERVER_NAME = "mastermind-steward"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "2.0.0"
 REQUIRED_SCOPE = "mastermind.steward.read"
 UI_TOOLS = frozenset({"list_responsibilities"})
 
