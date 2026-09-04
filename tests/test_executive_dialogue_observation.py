@@ -13,6 +13,7 @@ from integrations.mastermind_company_mcp.schemas import (
     TOOL_SCHEMA_DIGEST,
 )
 
+from control_plane import executive_dialogue_observation as observation_mod
 from control_plane.executive_dialogue_observation import (
     ACTIVE_CURRENT_WORKER,
     RECONCILE_WAKE,
@@ -610,6 +611,74 @@ def _persist_dialogue_wake(
     finally:
         connection.close()
     return obligation
+
+
+def test_runtime_canonical_terminal_wake_facade_owns_one_fixed_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removing the fixed public Runtime owner must break the direct facade."""
+
+    reader = getattr(observation_mod, "read_runtime_canonical_terminal_wake", None)
+    facts_owner = getattr(observation_mod, "runtime_canonical_terminal_facts", None)
+    assert callable(reader), "standalone Runtime reader is not exposed"
+    assert callable(facts_owner), "canonical Runtime facts owner is not exposed"
+
+    runtime = Runtime.at(tmp_path / "standalone-runtime-read")
+    parent = valid_parent()
+    terminal = _terminal(parent)
+    candidate = _terminal_wake_candidate(parent)
+    _persist_dialogue_wake(runtime, candidate=candidate, seed="e")
+    original_read = runtime.store.read
+    read_calls = 0
+    owner_connections: list[object] = []
+
+    def counted_read():
+        nonlocal read_calls
+        read_calls += 1
+        return original_read()
+
+    def observed_owner(runtime_arg, candidate_arg, connection_arg):
+        assert runtime_arg is runtime
+        assert candidate_arg == candidate
+        owner_connections.append(connection_arg)
+        return DialogueObservationFacts(terminal=(terminal,))
+
+    monkeypatch.setattr(runtime.store, "read", counted_read)
+    monkeypatch.setattr(
+        observation_mod,
+        "runtime_canonical_terminal_facts",
+        observed_owner,
+    )
+
+    with original_read() as connection:
+        event_count_before = int(
+            connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        )
+        supplied = reader(
+            runtime=runtime,
+            source_root_job_id=candidate.root_job_id,
+            candidate=candidate,
+            connection=connection,
+        )
+        assert read_calls == 0
+        assert owner_connections == [connection]
+
+    owned = reader(
+        runtime=runtime,
+        source_root_job_id=candidate.root_job_id,
+        candidate=candidate,
+    )
+    assert read_calls == 1
+    assert len(owner_connections) == 2
+    with original_read() as connection:
+        event_count_after = int(
+            connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        )
+
+    assert supplied.to_dict() == owned.to_dict()
+    assert owned.state == "RESOLVED"
+    assert event_count_after == event_count_before
 
 
 def test_canonical_terminal_wake_read_is_exact_public_and_unambiguous(

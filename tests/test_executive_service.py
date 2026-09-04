@@ -23,6 +23,7 @@ import pytest
 
 from common.redaction import TRUNCATION_MARKER
 from control_plane import ceo_intent as ceo_intent_mod
+from control_plane import executive_dialogue_observation as observation_mod
 from control_plane import executive_ceo_ingress as ceo_ingress_mod
 from control_plane.executive_runtime import (
     AttemptLease,
@@ -1311,15 +1312,46 @@ def test_public_terminal_wake_read_reuses_real_service_projection_and_wake_owner
         attempt_id=terminal.attempt_id,
         worker_id=terminal.worker_id,
     )
+    direct_reader = getattr(
+        observation_mod,
+        "read_runtime_canonical_terminal_wake",
+        None,
+    )
+    facts_owner = getattr(
+        observation_mod,
+        "runtime_canonical_terminal_facts",
+        None,
+    )
+    assert callable(direct_reader), "standalone Runtime reader is not exposed"
+    assert callable(facts_owner), "canonical Runtime facts owner is not exposed"
+    owner_connections: list[sqlite3.Connection] = []
+
+    def observed_owner(runtime_arg, candidate_arg, connection_arg):
+        owner_connections.append(connection_arg)
+        return facts_owner(runtime_arg, candidate_arg, connection_arg)
+
+    monkeypatch.setattr(
+        observation_mod,
+        "runtime_canonical_terminal_facts",
+        observed_owner,
+    )
+
     result = service.read_canonical_dialogue_terminal_wake(
         source_root_job_id=terminal.root_job_id,
         candidate=exact_candidate,
     )
     with runtime.store.read() as connection:
+        caller_connection = connection
         event_count_before = int(
             connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         )
         same_snapshot = service.read_canonical_dialogue_terminal_wake(
+            source_root_job_id=terminal.root_job_id,
+            candidate=exact_candidate,
+            connection=connection,
+        )
+        direct_snapshot = direct_reader(
+            runtime=runtime,
             source_root_job_id=terminal.root_job_id,
             candidate=exact_candidate,
             connection=connection,
@@ -1339,7 +1371,9 @@ def test_public_terminal_wake_read_reuses_real_service_projection_and_wake_owner
     assert result.wake.obligation_id == obligation.obligation_id
     assert result.wake.status == "PENDING_RETRYABLE"
     assert same_snapshot.to_dict() == result.to_dict()
+    assert direct_snapshot.to_dict() == result.to_dict()
     assert replay.to_dict() == result.to_dict()
+    assert caller_connection in owner_connections
     assert event_count_after == event_count_before
 
 
