@@ -1377,8 +1377,12 @@ def _strip_bundled_from_config_read(result):
 
 
 @pytest.fixture(autouse=True)
-def _close_created_canary_clients(monkeypatch):
+def _close_created_canary_clients(monkeypatch, tmp_path):
     import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    global _CAP_S1_PRODUCER_EVIDENCE_DIR, _CAP_S1_PRODUCER_EVIDENCE_COUNTER
+    _CAP_S1_PRODUCER_EVIDENCE_DIR = tmp_path
+    _CAP_S1_PRODUCER_EVIDENCE_COUNTER = 0
 
     def _fake_github_api_json(endpoint: str):
         if endpoint == "repos/mastermindx-market-intelligence/Mastermind/actions/runs/33741521536":
@@ -1427,6 +1431,7 @@ def _close_created_canary_clients(monkeypatch):
         except Exception:
             pass
     _CREATED_CANARY_CLIENTS.clear()
+    _CAP_S1_PRODUCER_EVIDENCE_DIR = None
 
 
 def _cleanup_map(record) -> dict:
@@ -2227,6 +2232,7 @@ def test_run_canary_empty_candidate_identity_refuses_before_provider_start(
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
     assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    assert not (scratch / "cap-s1-attempt-root").exists()
     assert len(_CREATED_CANARY_CLIENTS) == 0
 
 
@@ -2266,6 +2272,7 @@ def test_run_canary_workspace_git_commit_failure_is_provider_realm_unavailable(
             run_command=failing_workspace_run_command,
         )
     assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    assert not (scratch / "cap-s1-attempt-root").exists()
     # No provider process was ever started.
     assert len(_CREATED_CANARY_CLIENTS) == 0
     # The schema-attestation cleanup action, registered BEFORE the
@@ -2305,6 +2312,7 @@ def test_run_canary_live_backend_refuses_missing_codex_home_without_running_comm
             run_command=_must_not_run,
         )
     assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    assert not (scratch / "cap-s1-attempt-root").exists()
 
 
 def test_run_canary_live_backend_refuses_default_codex_home_without_running_command(
@@ -2331,6 +2339,7 @@ def test_run_canary_live_backend_refuses_default_codex_home_without_running_comm
             run_command=_must_not_run,
         )
     assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    assert not (scratch / "cap-s1-attempt-root").exists()
 
 
 def test_run_canary_live_home_validation_never_echoes_hostile_path(tmp_path) -> None:
@@ -2352,6 +2361,7 @@ def test_run_canary_live_home_validation_never_echoes_hostile_path(tmp_path) -> 
     message = str(excinfo.value)
     assert str(hostile_home) not in message
     assert "secret-token-do-not-echo" not in message
+    assert not (scratch / "cap-s1-attempt-root").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -3150,7 +3160,12 @@ def test_this_test_module_never_references_the_real_codex_binary_as_an_executabl
 # ---------------------------------------------------------------------------
 
 
+_CAP_S1_PRODUCER_EVIDENCE_DIR: Path | None = None
+_CAP_S1_PRODUCER_EVIDENCE_COUNTER = 0
+
+
 def _happy_cap_s1_result_kwargs() -> dict:
+    global _CAP_S1_PRODUCER_EVIDENCE_COUNTER
     exact_head = "a" * 40
     exact_tree = "b" * 40
     protected_join = "c" * 40
@@ -3340,6 +3355,72 @@ def _happy_cap_s1_result_kwargs() -> dict:
         raw[field_name]["evidence_digest"] = _canonical_digest(
             {"receipt_type": receipt_type, "observation": observation}
         )
+    assert _CAP_S1_PRODUCER_EVIDENCE_DIR is not None
+    producer_payload = {
+        "schema_version": "mastermind.cap_s1_producer_evidence/v1",
+        "exact_head": exact_head,
+        "exact_tree": exact_tree,
+        "protected_join": protected_join,
+        "provider_attempt_id": attempt_id,
+        "local_suites": [
+            {
+                "suite_id": suite_id,
+                "passed": passed,
+                "skipped": skipped,
+                "failed": failed,
+                "cancelled": cancelled,
+            }
+            for suite_id, passed, skipped, failed, cancelled in raw["local_proof"][
+                "suite_manifest"
+            ]
+        ],
+        "security_tools": [
+            {
+                "tool_id": tool_id,
+                "status": status,
+                "findings": findings,
+                "evidence": {"tool": tool_id},
+            }
+            for tool_id, status, findings, _digest in raw["security_proof"][
+                "tool_manifest"
+            ]
+        ],
+        "mutations": [
+            {
+                "mutation_id": mutation_id,
+                "state": state,
+                "evidence": {
+                    "mutation": int(mutation_id.removeprefix("mutation-")),
+                    "outcome": state,
+                },
+            }
+            for mutation_id, state, _digest in raw["mutation_proof"][
+                "mutation_manifest"
+            ]
+        ],
+        "cleanup_resources": [
+            {
+                "kind": kind,
+                "identity": {"owned_resource": kind},
+                "removed": removed,
+                "verified_absent": verified_absent,
+            }
+            for kind, _digest, removed, verified_absent in raw["cleanup_proof"][
+                "resource_manifest"
+            ]
+        ],
+    }
+    producer_path = (
+        _CAP_S1_PRODUCER_EVIDENCE_DIR
+        / f"cap-s1-producer-{_CAP_S1_PRODUCER_EVIDENCE_COUNTER}.json"
+    )
+    _CAP_S1_PRODUCER_EVIDENCE_COUNTER += 1
+    producer_path.write_text(
+        json.dumps(producer_payload, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    producer_path.chmod(0o444)
+    raw["producer_evidence_path"] = producer_path
     return raw
 
 
@@ -3352,10 +3433,13 @@ def _refresh_result_receipt_digest(raw: dict, field_name: str, receipt_type: str
 
 
 def test_build_cap_s1_result_happy_path_round_trips_through_json() -> None:
-    result = build_cap_s1_result(**_happy_cap_s1_result_kwargs())
+    raw = _happy_cap_s1_result_kwargs()
+    result = build_cap_s1_result(**raw)
     assert result.schema_version == RESULT_CONTRACT_SCHEMA
     assert result.marker == RESULT_CONTRACT_MARKER
-    validate_cap_s1_result(result)  # never raises on an already-built result
+    validate_cap_s1_result(
+        result, producer_evidence_path=raw["producer_evidence_path"]
+    )  # never raises on an already-built result with the same producer artifact
     payload = dataclasses.asdict(result)
     reloaded = json.loads(json.dumps(payload))
     assert reloaded["schema_version"] == RESULT_CONTRACT_SCHEMA
@@ -3364,11 +3448,16 @@ def test_build_cap_s1_result_happy_path_round_trips_through_json() -> None:
 
 def test_cap_s1_result_schema_and_marker_are_exact() -> None:
     kwargs = _happy_cap_s1_result_kwargs()
+    result = build_cap_s1_result(**kwargs)
     with pytest.raises(CapS1ResultError, match="schema_mismatch"):
-        validate_cap_s1_result(CapS1Result(schema_version="wrong/v1", marker=RESULT_CONTRACT_MARKER, **kwargs))
+        validate_cap_s1_result(
+            dataclasses.replace(result, schema_version="wrong/v1"),
+            producer_evidence_path=kwargs["producer_evidence_path"],
+        )
     with pytest.raises(CapS1ResultError, match="marker_mismatch"):
         validate_cap_s1_result(
-            CapS1Result(schema_version=RESULT_CONTRACT_SCHEMA, marker="wrong-marker", **kwargs)
+            dataclasses.replace(result, marker="wrong-marker"),
+            producer_evidence_path=kwargs["producer_evidence_path"],
         )
 
 
@@ -3417,7 +3506,8 @@ def test_cap_s1_result_package_identities_must_be_nonempty_and_all_hex64() -> No
     with pytest.raises(CapS1ResultError, match="package_identities_digest_invalid"):
         build_cap_s1_result(**nested_bad_leaf)
 
-    typed = build_cap_s1_result(**_happy_cap_s1_result_kwargs())
+    raw = _happy_cap_s1_result_kwargs()
+    typed = build_cap_s1_result(**raw)
     wrong_closure_count = dataclasses.replace(
         typed,
         package_identities=dataclasses.replace(
@@ -3426,7 +3516,10 @@ def test_cap_s1_result_package_identities_must_be_nonempty_and_all_hex64() -> No
         ),
     )
     with pytest.raises(CapS1ResultError, match="package_identities_invalid"):
-        validate_cap_s1_result(wrong_closure_count)
+        validate_cap_s1_result(
+            wrong_closure_count,
+            producer_evidence_path=raw["producer_evidence_path"],
+        )
 
 
 def test_cap_s1_result_provider_attempt_state_is_closed() -> None:
@@ -3701,13 +3794,15 @@ def test_cap_s1_result_hostile_nested_receipts_refuse(mutate, case_name) -> None
 
 def test_cap_s1_result_direct_mapping_subreceipts_are_not_proof() -> None:
     raw = _happy_cap_s1_result_kwargs()
-    result = CapS1Result(
-        schema_version=RESULT_CONTRACT_SCHEMA,
-        marker=RESULT_CONTRACT_MARKER,
-        **raw,
+    typed = build_cap_s1_result(**raw)
+    result = dataclasses.replace(
+        typed,
+        local_proof=dataclasses.asdict(typed.local_proof),
     )
     with pytest.raises(CapS1ResultError, match="subreceipt_type_invalid"):
-        validate_cap_s1_result(result)
+        validate_cap_s1_result(
+            result, producer_evidence_path=raw["producer_evidence_path"]
+        )
 
 
 def test_cap_s1_result_release_ceiling_and_exact_path_census_are_closed() -> None:
@@ -3867,3 +3962,187 @@ def test_cap_s1_result_refetches_review_and_requires_stable_non_author_ids() -> 
     _refresh_result_receipt_digest(raw, "review_state", "CapS1ReviewReceipt")
     with pytest.raises(CapS1ResultError, match="review_state_invalid"):
         build_cap_s1_result(**raw)
+
+
+# ---------------------------------------------------------------------------
+# REQUEST_CHANGES 5112468319: producer-authentic evidence (RED first)
+# ---------------------------------------------------------------------------
+
+
+def test_run_canary_missing_fake_client_factory_has_no_owned_residue(tmp_path) -> None:
+    scratch = tmp_path / "missing-fake-client-factory"
+    with pytest.raises(ValueError, match="explicit client_factory"):
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-missing-fake-client",
+            protected_join="c" * 40,
+            client_factory=None,
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert not (scratch / "cap-s1-attempt-root").exists()
+
+
+def test_run_canary_fake_auth_setup_failure_cleans_first_owned_effect(
+    tmp_path, monkeypatch
+) -> None:
+    scratch = tmp_path / "fake-auth-setup-failure"
+    real_write_text = Path.write_text
+
+    def _fail_auth_write(self, *args, **kwargs):
+        if self.name == "auth.json":
+            raise OSError("synthetic auth write failure")
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", _fail_auth_write)
+    with pytest.raises(OSError, match="synthetic auth write failure"):
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-fake-auth-failure",
+            protected_join="c" * 40,
+            client_factory=_canary_client_factory(),
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+    assert not (scratch / "cap-s1-attempt-root").exists()
+
+
+@pytest.mark.parametrize(
+    "receipt_name",
+    ("local_proof", "security_proof", "mutation_proof", "cleanup_proof"),
+)
+def test_cap_s1_result_refuses_invented_self_consistent_proof_family(
+    receipt_name,
+) -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    if receipt_name == "local_proof":
+        raw[receipt_name].update(
+            suite_count=1,
+            total=1,
+            passed=1,
+            skipped=0,
+            failed=0,
+            cancelled=0,
+            suite_manifest=(("invented-suite", 1, 0, 0, 0),),
+        )
+        receipt_type = "CapS1LocalProofReceipt"
+    elif receipt_name == "security_proof":
+        raw[receipt_name].update(
+            status="CLEAN",
+            tool_count=1,
+            findings=0,
+            failures=0,
+            cancelled=0,
+            tool_manifest=(("invented-tool", "PASSED", 0, "f" * 64),),
+        )
+        receipt_type = "CapS1SecurityProofReceipt"
+    elif receipt_name == "mutation_proof":
+        raw[receipt_name].update(
+            status="PASSED",
+            total=1,
+            killed=1,
+            survived=0,
+            skipped=0,
+            errors=0,
+            cancelled=0,
+            mutation_manifest=(("invented-mutation", "KILLED", "f" * 64),),
+        )
+        receipt_type = "CapS1MutationProofReceipt"
+    else:
+        raw[receipt_name]["resource_manifest"] = tuple(
+            (kind, "f" * 64, True, True)
+            for kind in raw[receipt_name]["resource_kinds"]
+        )
+        receipt_type = "CapS1CleanupProofReceipt"
+    _refresh_result_receipt_digest(raw, receipt_name, receipt_type)
+    with pytest.raises(CapS1ResultError, match=f"{receipt_name}_invalid"):
+        build_cap_s1_result(**raw)
+
+
+def test_cap_s1_result_reopens_only_read_only_regular_producer_evidence() -> None:
+    writable = _happy_cap_s1_result_kwargs()
+    writable["producer_evidence_path"].chmod(0o644)
+    with pytest.raises(CapS1ResultError, match="producer_evidence_invalid"):
+        build_cap_s1_result(**writable)
+
+    linked = _happy_cap_s1_result_kwargs()
+    target = linked["producer_evidence_path"]
+    link = target.with_name(f"{target.stem}-link.json")
+    link.symlink_to(target)
+    linked["producer_evidence_path"] = link
+    with pytest.raises(CapS1ResultError, match="producer_evidence_invalid"):
+        build_cap_s1_result(**linked)
+
+
+def test_cap_s1_result_refuses_rebound_producer_evidence() -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    producer_path = raw["producer_evidence_path"]
+    producer_path.chmod(0o644)
+    payload = json.loads(producer_path.read_text(encoding="utf-8"))
+    payload["exact_head"] = "f" * 40
+    producer_path.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    producer_path.chmod(0o444)
+    with pytest.raises(CapS1ResultError, match="producer_evidence_invalid"):
+        build_cap_s1_result(**raw)
+
+
+@pytest.mark.parametrize(
+    "host_path",
+    (
+        "/Users/alice/private-workspace",
+        "/home/alice/private-workspace",
+        "/private/tmp/private-workspace",
+        "/var/tmp/private-workspace",
+        "/tmp/private-workspace",
+        "~/private-workspace",
+        "/tmp/credentials/auth.json?token=secret",
+        "https://provider.invalid/native-task?token=secret",
+    ),
+)
+def test_completed_cap_s1_result_projects_attempt_local_paths_to_safe_identities(
+    host_path,
+) -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    raw["provider_attempt"] = {
+        key: value for key, value in raw["provider_attempt"].items() if key != "hold_code"
+    }
+    raw["provider_attempt"].update(
+        state="COMPLETED",
+        disposition="ACCEPTED",
+        candidate_head=raw["exact_head"],
+        candidate_tree=raw["exact_tree"],
+    )
+    raw["canary_evidence"] = dataclasses.replace(
+        _completed_canary_evidence(
+            head=raw["exact_head"],
+            tree=raw["exact_tree"],
+            attempt_id=raw["provider_attempt"]["attempt_id"],
+            protected_join=raw["current_protected_join"],
+        ),
+        workspace_root=host_path,
+        skills_root=host_path,
+    )
+    result = build_cap_s1_result(**raw)
+    public_json = json.dumps(dataclasses.asdict(result), sort_keys=True)
+    assert host_path not in public_json
+    assert "workspace_root" not in public_json
+    assert "skills_root" not in public_json
+    assert "producer_evidence_path" not in public_json
+    assert result.canary_evidence.workspace_identity_digest == _canonical_digest(
+        {
+            "identity_type": "cap-s1-synthetic-workspace/v1",
+            "candidate_commit": raw["exact_head"],
+            "candidate_tree": raw["exact_tree"],
+            "canary_operation_id": "cap-s1-completed-canary",
+            "provider_attempt_id": raw["provider_attempt"]["attempt_id"],
+        }
+    )

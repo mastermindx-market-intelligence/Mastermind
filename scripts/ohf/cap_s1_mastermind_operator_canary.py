@@ -333,6 +333,52 @@ class CanaryEvidence:
     cleanup: CanaryCleanupRecord
 
 
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1CanaryResultEvidence:
+    """Secret-safe public projection of attempt-local canary evidence.
+
+    ``CanaryEvidence`` deliberately retains the absolute workspace and Skill
+    roots needed while the attempt is alive.  Those host-local paths are not
+    part of the public result contract.  Their public replacements are
+    semantic identities derived only from already-public, exact-bound canary
+    facts; neither digest contains a path preimage.
+    """
+
+    schema_version: str = CANARY_EVIDENCE_SCHEMA_VERSION
+    candidate_commit: str
+    candidate_tree: str
+    canary_operation_id: str
+    provider_attempt_id: str
+    protected_join: str
+    workspace_identity_digest: str
+    process_generation: str
+    v4_policy_digest: str
+    package_source_digest: str
+    package_generation_digest: str
+    skill_grant_digests: tuple[tuple[str, str], ...]
+    skill_closure_digests: tuple[tuple[str, str], ...]
+    projection_receipt_digest: str
+    binary_digest: str
+    binary_version: str
+    origin_mode: str
+    origin_authentication: str
+    skills_identity_digest: str
+    app_server_config_digest: "str | None"
+    extra_roots_set_outcomes: tuple[str, ...]
+    skills_list_raw_shape_digest: str
+    baseline_enabled_names: tuple[str, ...]
+    after_add_enabled_names: tuple[str, ...]
+    observed_enabled_names: tuple[str, ...]
+    after_clear_enabled_names: tuple[str, ...]
+    protocol_receipt_digest: str
+    launch_decision: str
+    turn_marker_results: tuple[tuple[str, bool], ...]
+    served_model: "str | None"
+    terminal_process_state: str
+    artifact_inventory: tuple[str, ...]
+    cleanup: CanaryCleanupRecord
+
+
 # ---------------------------------------------------------------------------
 # Canonical digesting (same discipline as control_plane.executive_capability_packages)
 # ---------------------------------------------------------------------------
@@ -343,6 +389,39 @@ def _canonical_digest(value: object) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _project_canary_result_evidence(
+    evidence: CanaryEvidence,
+) -> CapS1CanaryResultEvidence:
+    """Drop attempt-local paths while preserving a verifiable public join."""
+
+    if type(evidence) is not CanaryEvidence:
+        raise CapS1ResultError("cap_s1_result_canary_evidence_type_invalid")
+    public_fields = {
+        field.name: getattr(evidence, field.name)
+        for field in dataclasses.fields(CapS1CanaryResultEvidence)
+        if hasattr(evidence, field.name)
+    }
+    public_fields["workspace_identity_digest"] = _canonical_digest(
+        {
+            "identity_type": "cap-s1-synthetic-workspace/v1",
+            "candidate_commit": evidence.candidate_commit,
+            "candidate_tree": evidence.candidate_tree,
+            "canary_operation_id": evidence.canary_operation_id,
+            "provider_attempt_id": evidence.provider_attempt_id,
+        }
+    )
+    public_fields["skills_identity_digest"] = _canonical_digest(
+        {
+            "identity_type": "cap-s1-skill-projection/v1",
+            "package_source_digest": evidence.package_source_digest,
+            "package_generation_digest": evidence.package_generation_digest,
+            "projection_receipt_digest": evidence.projection_receipt_digest,
+            "provider_attempt_id": evidence.provider_attempt_id,
+        }
+    )
+    return CapS1CanaryResultEvidence(**public_fields)
 
 
 def _sha256_file(path: Path) -> str:
@@ -975,6 +1054,62 @@ def _default_fake_client_factory(argv: list[str], env: Mapping[str, str], cwd: P
     return AppServerClient(argv, env=env, cwd=cwd, start_new_session=True)
 
 
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CanaryBackendConfig:
+    single_binary_path: Path
+    adapter_codex_home: Path
+    adapter_argv: "tuple[str, ...] | None"
+    extra_env: dict[str, str]
+
+
+def _configure_canary_backend(
+    *,
+    backend: str,
+    binary_path: "Path | None",
+    codex_home: "Path | None",
+    repo_root: Path,
+    attempt_root: Path,
+) -> _CanaryBackendConfig:
+    """Perform post-ownership backend setup inside the attempt transaction."""
+
+    if backend == "live":
+        assert binary_path is not None  # validated before the first effect
+        assert codex_home is not None
+        return _CanaryBackendConfig(
+            single_binary_path=Path(binary_path),
+            adapter_codex_home=Path(codex_home),
+            adapter_argv=None,
+            extra_env={"PYTHONPATH": str(repo_root)},
+        )
+
+    single_binary_path = (
+        Path(binary_path) if binary_path is not None else FAKE_CODEX_BINARY_PATH
+    )
+    adapter_codex_home = (
+        Path(codex_home) if codex_home is not None else attempt_root / "codex-home"
+    )
+    if codex_home is None:
+        adapter_codex_home.mkdir(parents=False, exist_ok=False)
+        adapter_codex_home.chmod(0o700)
+        auth_path = adapter_codex_home / "auth.json"
+        auth_path.write_text("fixture credential bytes", encoding="utf-8")
+        auth_path.chmod(0o600)
+    return _CanaryBackendConfig(
+        single_binary_path=single_binary_path,
+        adapter_codex_home=adapter_codex_home,
+        adapter_argv=(str(single_binary_path), "app-server"),
+        extra_env={
+            "PYTHONPATH": str(repo_root),
+            "OHF_FAKE_STATE": str(attempt_root / "fake-state.json"),
+            "OHF_FAKE_MODEL": CANARY_REQUESTED_MODEL,
+            "OHF_FAKE_MCP_GONE": "1",
+            "OHF_FAKE_BUNDLED_DISABLED": "1",
+            "OHF_FAKE_ECHO_CLIENT_INFO": "1",
+            "OHF_FAKE_CAP_S1_TURN_REPLIES": "1",
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # run_canary
 # ---------------------------------------------------------------------------
@@ -1008,50 +1143,10 @@ def run_canary(
 
     repo_root = Path(repo_root)
     scratch_root = Path(scratch_root)
-    scratch_root.mkdir(parents=True, exist_ok=True)
-
-    cleanup_actions: list[tuple[str, Callable[[], "tuple[bool, bool]"]]] = []
-    process_result: dict[str, Any] = {}
-    evidence_local: "CanaryEvidence | None" = None
-
-    # REQUEST_CHANGES 5112126365: this fixed pathname is attempt-local state
-    # only when THIS invocation created it.  Exclusive creation occurs before
-    # schema/projection/provider/thread/process work and before the fake realm
-    # writes auth/state fixtures.  A pre-existing root is foreign state: refuse
-    # without registering it for cleanup and therefore without deleting a byte.
-    attempt_root = scratch_root / "cap-s1-attempt-root"
-    try:
-        attempt_root.mkdir(parents=False, exist_ok=False)
-        attempt_identity = attempt_root.stat()
-    except FileExistsError as exc:
-        raise CanaryStop(
-            "PROVIDER_REALM_UNAVAILABLE", "attempt root is not exclusively owned"
-        ) from exc
-    except OSError as exc:
-        raise CanaryStop(
-            "PROVIDER_REALM_UNAVAILABLE", "attempt root could not be created"
-        ) from exc
-    cleanup_actions.append(
-        (
-            "attempt",
-            lambda: _cleanup_owned_dir_action(
-                attempt_root,
-                expected_device=attempt_identity.st_dev,
-                expected_inode=attempt_identity.st_ino,
-            ),
-        )
-    )
-
-    # --- backend-specific realm/schema/binary/codex_home wiring ------------
-    #
-    # Single-binary law (CAP-S1 Sol review item 1): in BOTH realms exactly
-    # ONE file is the schema generator, the ``--version``/initialize-probe
-    # target, AND the App Server the adapter launches -- ``single_binary_
-    # path``. The live realm already satisfied this (the operator-supplied
-    # real Codex binary); the fake realm used to launch a DIFFERENT file
-    # (the running Python interpreter, via ``-m scripts.ohf.fake_app_server``)
-    # than the one the schema probe ran against, which is exactly the gap
-    # that let a receipt attest one binary while authorizing another.
+    # REQUEST_CHANGES 5112468319: every zero-effect realm/argument gate runs
+    # before the first attempt-owned filesystem object exists.
+    if client_factory is None:
+        raise ValueError(f"{backend} backend requires an explicit client_factory")
     if backend == "live":
         if binary_path is None or codex_home is None:
             raise CanaryStop(
@@ -1069,60 +1164,77 @@ def run_canary(
                 "PROVIDER_REALM_UNAVAILABLE",
                 "dedicated Codex home validation failed",
             ) from exc
-        single_binary_path = Path(binary_path)
-        adapter_codex_home = codex_home
-        adapter_argv = None
-        # ``PYTHONPATH`` is in the adapter's own safe-env-key allowlist and
-        # is inert for a real Codex binary; it is required for the addendum
-        # finding-3 seam-probe test's own single-binary fixture (a Python
-        # script whose App Server mode execs into ``-m scripts.ohf.
-        # fake_app_server``) to be genuinely launchable under this realm's
-        # otherwise-minimal environment.
-        extra_env: dict[str, str] = {"PYTHONPATH": str(repo_root)}
-        if client_factory is None:
-            raise ValueError("live backend requires an explicit client_factory")
-    else:
-        if client_factory is None:
-            raise ValueError("fake backend requires an explicit client_factory")
-        if binary_path is not None:
-            single_binary_path = Path(binary_path)
-            if not single_binary_path.exists():
-                single_binary_path.write_text(_SCHEMA_FIXTURE_BINARY_SOURCE, encoding="utf-8")
-                single_binary_path.chmod(0o755)
-        else:
-            single_binary_path = FAKE_CODEX_BINARY_PATH
-        adapter_codex_home = Path(codex_home) if codex_home is not None else (
-            attempt_root / "codex-home"
+    elif binary_path is not None and not Path(binary_path).is_file():
+        # Never manufacture a caller-selected path outside the owned attempt
+        # transaction.  A custom fake binary is an input and must pre-exist.
+        raise CanaryStop(
+            "PROVIDER_REALM_UNAVAILABLE", "fake binary input is unavailable"
         )
-        adapter_codex_home.mkdir(parents=True, exist_ok=True)
-        adapter_codex_home.chmod(0o700)
-        auth_path = adapter_codex_home / "auth.json"
-        if not auth_path.exists():
-            auth_path.write_text("fixture credential bytes", encoding="utf-8")
-        auth_path.chmod(0o600)
-        adapter_argv = (str(single_binary_path), "app-server")
-        extra_env = {
-            "PYTHONPATH": str(repo_root),
-            "OHF_FAKE_STATE": str(attempt_root / "fake-state.json"),
-            "OHF_FAKE_MODEL": CANARY_REQUESTED_MODEL,
-            # The V4 mastermind-operator profile grants no MCP servers; the
-            # fake App Server's OHF-probe MCP fixture is unrelated to CAP-S1
-            # and must not appear in the observed config/mcp surface.
-            "OHF_FAKE_MCP_GONE": "1",
-            # This profile carries V4 Skill grants, so its
-            # ``expected_config_digest`` requires ``skills.bundled.enabled=
-            # false`` on ``config/read`` (protocol amendment §5). The fake
-            # App Server double must echo that block for the config-digest
-            # attestation gate to close.
-            "OHF_FAKE_BUNDLED_DISABLED": "1",
-            "OHF_FAKE_ECHO_CLIENT_INFO": "1",
-            # CAP-S1 addendum finding 1: turn-specific, closed-marker-
-            # compliant replies keyed by the captured Skill turn-input name
-            # -- required for the fake backend's own CLI subprocess journey
-            # (which has no scripted-client reply substitution available)
-            # to pass the closed marker grammar for all four turns.
-            "OHF_FAKE_CAP_S1_TURN_REPLIES": "1",
-        }
+
+    scratch_root.mkdir(parents=True, exist_ok=True)
+
+    cleanup_actions: list[tuple[str, Callable[[], "tuple[bool, bool]"]]] = []
+    process_result: dict[str, Any] = {}
+    evidence_local: "CanaryEvidence | None" = None
+
+    # REQUEST_CHANGES 5112126365: this fixed pathname is attempt-local state
+    # only when THIS invocation created it.  Exclusive creation occurs before
+    # schema/projection/provider/thread/process work and before the fake realm
+    # writes auth/state fixtures.  A pre-existing root is foreign state: refuse
+    # without registering it for cleanup and therefore without deleting a byte.
+    attempt_root = scratch_root / "cap-s1-attempt-root"
+    try:
+        attempt_root.mkdir(parents=False, exist_ok=False)
+    except FileExistsError as exc:
+        raise CanaryStop(
+            "PROVIDER_REALM_UNAVAILABLE", "attempt root is not exclusively owned"
+        ) from exc
+    except OSError as exc:
+        raise CanaryStop(
+            "PROVIDER_REALM_UNAVAILABLE", "attempt root could not be created"
+        ) from exc
+
+    # Everything after exclusive creation is protected by the same cleanup
+    # ledger, including identity capture and fake realm credential/state setup.
+    try:
+        attempt_identity = attempt_root.stat()
+        cleanup_actions.append(
+            (
+                "attempt",
+                lambda: _cleanup_owned_dir_action(
+                    attempt_root,
+                    expected_device=attempt_identity.st_dev,
+                    expected_inode=attempt_identity.st_ino,
+                ),
+            )
+        )
+        backend_config = _configure_canary_backend(
+            backend=backend,
+            binary_path=binary_path,
+            codex_home=codex_home,
+            repo_root=repo_root,
+            attempt_root=attempt_root,
+        )
+    except BaseException:
+        if cleanup_actions:
+            for _kind, cleanup_action in reversed(cleanup_actions):
+                try:
+                    cleanup_action()
+                except Exception:  # noqa: BLE001 -- preserve the setup failure
+                    pass
+        else:
+            # Identity capture itself failed.  Only remove the still-empty
+            # directory we just created; never recurse without a bound identity.
+            try:
+                attempt_root.rmdir()
+            except OSError:
+                pass
+        raise
+
+    single_binary_path = backend_config.single_binary_path
+    adapter_codex_home = backend_config.adapter_codex_home
+    adapter_argv = backend_config.adapter_argv
+    extra_env = backend_config.extra_env
 
     try:
         # The probe environment mirrors the adapter's own env-building logic
@@ -1732,6 +1844,208 @@ class CapS1ReviewReceipt:
     evidence_digest: str
 
 
+CAP_S1_PRODUCER_EVIDENCE_SCHEMA = "mastermind.cap_s1_producer_evidence/v1"
+_RESULT_MAX_PRODUCER_EVIDENCE_BYTES = 1024 * 1024
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CapS1ProducerEvidence:
+    """Immutable producer artifact reopened by result validation.
+
+    This object is never accepted from a result caller.  It is constructed
+    only by :func:`_load_cap_s1_producer_evidence` from one read-only,
+    no-follow regular file whose identity is stable across the bounded read.
+    The public result carries only ``artifact_digest``.
+    """
+
+    artifact_digest: str
+    exact_head: str
+    exact_tree: str
+    protected_join: str
+    provider_attempt_id: str
+    local_suites: tuple[tuple[str, int, int, int, int], ...]
+    security_tools: tuple[tuple[str, str, int, str], ...]
+    mutations: tuple[tuple[str, str, str], ...]
+    cleanup_resources: tuple[tuple[str, str, bool, bool], ...]
+
+
+def _load_cap_s1_producer_evidence(
+    path: "str | os.PathLike[str] | None",
+) -> CapS1ProducerEvidence:
+    """Reopen and derive the four non-GitHub proof manifests.
+
+    The artifact is a content-addressed producer boundary, not another
+    caller-authored result receipt.  It must be a stable, read-only regular
+    file; symlinks and files that change across the bounded read are refused.
+    Security, mutation, and cleanup row digests are derived from concrete JSON
+    preimages retained in the artifact instead of accepting opaque 64-hex
+    labels from the result caller.
+    """
+
+    error = "cap_s1_result_producer_evidence_invalid"
+    try:
+        if path is None:
+            raise ValueError("missing producer evidence")
+        evidence_path = Path(path)
+        before = evidence_path.lstat()
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(evidence_path, flags)
+        try:
+            opened = os.fstat(descriptor)
+            identity = (
+                opened.st_dev,
+                opened.st_ino,
+                opened.st_size,
+                opened.st_mtime_ns,
+            )
+            if (
+                stat.S_ISLNK(before.st_mode)
+                or not stat.S_ISREG(opened.st_mode)
+                or before.st_dev != opened.st_dev
+                or before.st_ino != opened.st_ino
+                or opened.st_mode & 0o222
+                or not (0 < opened.st_size <= _RESULT_MAX_PRODUCER_EVIDENCE_BYTES)
+            ):
+                raise ValueError("unsafe producer evidence")
+            chunks: list[bytes] = []
+            remaining = opened.st_size + 1
+            while remaining > 0:
+                chunk = os.read(descriptor, min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            after = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        payload_bytes = b"".join(chunks)
+        if (
+            len(payload_bytes) != opened.st_size
+            or identity
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        ):
+            raise ValueError("producer evidence changed")
+
+        def _reject_non_json_constant(_value: str) -> None:
+            raise ValueError("non-json numeric constant")
+
+        raw = json.loads(
+            payload_bytes.decode("utf-8"), parse_constant=_reject_non_json_constant
+        )
+        keys = {
+            "schema_version",
+            "exact_head",
+            "exact_tree",
+            "protected_join",
+            "provider_attempt_id",
+            "local_suites",
+            "security_tools",
+            "mutations",
+            "cleanup_resources",
+        }
+        if type(raw) is not dict or set(raw) != keys:
+            raise ValueError("producer evidence shape")
+        if raw["schema_version"] != CAP_S1_PRODUCER_EVIDENCE_SCHEMA:
+            raise ValueError("producer evidence schema")
+
+        local_suites: list[tuple[str, int, int, int, int]] = []
+        if type(raw["local_suites"]) is not list:
+            raise ValueError("local producer shape")
+        for row in raw["local_suites"]:
+            if type(row) is not dict or set(row) != {
+                "suite_id",
+                "passed",
+                "skipped",
+                "failed",
+                "cancelled",
+            }:
+                raise ValueError("local producer row")
+            local_suites.append(
+                (
+                    row["suite_id"],
+                    row["passed"],
+                    row["skipped"],
+                    row["failed"],
+                    row["cancelled"],
+                )
+            )
+
+        security_tools: list[tuple[str, str, int, str]] = []
+        if type(raw["security_tools"]) is not list:
+            raise ValueError("security producer shape")
+        for row in raw["security_tools"]:
+            if (
+                type(row) is not dict
+                or set(row) != {"tool_id", "status", "findings", "evidence"}
+                or type(row["evidence"]) is not dict
+                or not row["evidence"]
+            ):
+                raise ValueError("security producer row")
+            security_tools.append(
+                (
+                    row["tool_id"],
+                    row["status"],
+                    row["findings"],
+                    _canonical_digest(row["evidence"]),
+                )
+            )
+
+        mutations: list[tuple[str, str, str]] = []
+        if type(raw["mutations"]) is not list:
+            raise ValueError("mutation producer shape")
+        for row in raw["mutations"]:
+            if (
+                type(row) is not dict
+                or set(row) != {"mutation_id", "state", "evidence"}
+                or type(row["evidence"]) is not dict
+                or not row["evidence"]
+            ):
+                raise ValueError("mutation producer row")
+            mutations.append(
+                (
+                    row["mutation_id"],
+                    row["state"],
+                    _canonical_digest(row["evidence"]),
+                )
+            )
+
+        cleanup_resources: list[tuple[str, str, bool, bool]] = []
+        if type(raw["cleanup_resources"]) is not list:
+            raise ValueError("cleanup producer shape")
+        for row in raw["cleanup_resources"]:
+            if (
+                type(row) is not dict
+                or set(row)
+                != {"kind", "identity", "removed", "verified_absent"}
+                or type(row["identity"]) is not dict
+                or not row["identity"]
+            ):
+                raise ValueError("cleanup producer row")
+            cleanup_resources.append(
+                (
+                    row["kind"],
+                    _canonical_digest(row["identity"]),
+                    row["removed"],
+                    row["verified_absent"],
+                )
+            )
+    except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise CapS1ResultError(error) from exc
+
+    return CapS1ProducerEvidence(
+        artifact_digest=hashlib.sha256(payload_bytes).hexdigest(),
+        exact_head=raw["exact_head"],
+        exact_tree=raw["exact_tree"],
+        protected_join=raw["protected_join"],
+        provider_attempt_id=raw["provider_attempt_id"],
+        local_suites=tuple(local_suites),
+        security_tools=tuple(security_tools),
+        mutations=tuple(mutations),
+        cleanup_resources=tuple(cleanup_resources),
+    )
+
+
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class CapS1Result:
     """The closed ``mastermind.cap_s1_result/v1`` contract.
@@ -1750,10 +2064,11 @@ class CapS1Result:
     exact_head: str
     exact_tree: str
     current_protected_join: str
+    producer_evidence_digest: str
     release_state: str
     changed_path_census: tuple[str, ...]
     package_identities: CapS1PackageIdentitiesReceipt
-    canary_evidence: "CanaryEvidence | None"
+    canary_evidence: "CapS1CanaryResultEvidence | None"
     provider_attempt: CapS1ProviderAttemptReceipt
     local_proof: CapS1LocalProofReceipt
     hosted_proof: CapS1HostedProofReceipt
@@ -2090,14 +2405,14 @@ def _parse_bound_receipt(
 
 
 def _validate_canary_evidence(
-    evidence: CanaryEvidence,
+    evidence: CapS1CanaryResultEvidence,
     *,
     head: str,
     tree: str,
     protected_join: str,
     attempt_id: str,
 ) -> None:
-    if type(evidence) is not CanaryEvidence:
+    if type(evidence) is not CapS1CanaryResultEvidence:
         raise CapS1ResultError("cap_s1_result_canary_evidence_type_invalid")
     if evidence.schema_version != CANARY_EVIDENCE_SCHEMA_VERSION:
         raise CapS1ResultError("cap_s1_result_canary_evidence_schema_mismatch")
@@ -2110,6 +2425,7 @@ def _validate_canary_evidence(
     ):
         raise CapS1ResultError("cap_s1_result_canary_evidence_binding_mismatch")
     digest_fields = (
+        evidence.workspace_identity_digest,
         evidence.v4_policy_digest,
         evidence.package_source_digest,
         evidence.package_generation_digest,
@@ -2117,6 +2433,7 @@ def _validate_canary_evidence(
         evidence.binary_digest,
         evidence.skills_list_raw_shape_digest,
         evidence.protocol_receipt_digest,
+        evidence.skills_identity_digest,
     )
     digest_fields = (*digest_fields, evidence.app_server_config_digest)
     if not all(_result_is_hex64(value) for value in digest_fields):
@@ -2142,11 +2459,27 @@ def _validate_canary_evidence(
             or tuple(row[0] for row in rows) != expected_skill_names
         ):
             raise CapS1ResultError("cap_s1_result_canary_evidence_digest_invalid")
+    expected_workspace_identity = _canonical_digest(
+        {
+            "identity_type": "cap-s1-synthetic-workspace/v1",
+            "candidate_commit": evidence.candidate_commit,
+            "candidate_tree": evidence.candidate_tree,
+            "canary_operation_id": evidence.canary_operation_id,
+            "provider_attempt_id": evidence.provider_attempt_id,
+        }
+    )
+    expected_skills_identity = _canonical_digest(
+        {
+            "identity_type": "cap-s1-skill-projection/v1",
+            "package_source_digest": evidence.package_source_digest,
+            "package_generation_digest": evidence.package_generation_digest,
+            "projection_receipt_digest": evidence.projection_receipt_digest,
+            "provider_attempt_id": evidence.provider_attempt_id,
+        }
+    )
     if (
-        not isinstance(evidence.workspace_root, str)
-        or not os.path.isabs(evidence.workspace_root)
-        or not isinstance(evidence.skills_root, str)
-        or not os.path.isabs(evidence.skills_root)
+        evidence.workspace_identity_digest != expected_workspace_identity
+        or evidence.skills_identity_digest != expected_skills_identity
         or not _result_safe_identifier(evidence.process_generation)
         or not isinstance(evidence.binary_version, str)
         or not evidence.binary_version.strip()
@@ -2184,7 +2517,11 @@ def _validate_canary_evidence(
         raise CapS1ResultError("cap_s1_result_canary_evidence_cleanup_invalid")
 
 
-def validate_cap_s1_result(result: CapS1Result) -> None:
+def validate_cap_s1_result(
+    result: CapS1Result,
+    *,
+    producer_evidence_path: "str | os.PathLike[str] | None",
+) -> None:
     """Refuse anything not conforming to the closed
     ``mastermind.cap_s1_result/v1`` contract. Every refusal is a fixed,
     bounded, non-echoing reason string."""
@@ -2210,6 +2547,8 @@ def validate_cap_s1_result(result: CapS1Result) -> None:
     for field_name in ("exact_head", "exact_tree", "current_protected_join"):
         if not _result_is_hex40(getattr(result, field_name)):
             raise CapS1ResultError(f"cap_s1_result_{field_name}_invalid")
+    if not _result_is_hex64(result.producer_evidence_digest):
+        raise CapS1ResultError("cap_s1_result_producer_evidence_invalid")
 
     census = result.changed_path_census
     if not isinstance(census, tuple) or not census:
@@ -2318,6 +2657,15 @@ def validate_cap_s1_result(result: CapS1Result) -> None:
         for receipt in bound_receipts
     ):
         raise CapS1ResultError("cap_s1_result_cross_binding_mismatch")
+    producer_evidence = _load_cap_s1_producer_evidence(producer_evidence_path)
+    if (
+        producer_evidence.artifact_digest != result.producer_evidence_digest
+        or producer_evidence.exact_head != result.exact_head
+        or producer_evidence.exact_tree != result.exact_tree
+        or producer_evidence.protected_join != result.current_protected_join
+        or producer_evidence.provider_attempt_id != provider_attempt.attempt_id
+    ):
+        raise CapS1ResultError("cap_s1_result_producer_evidence_invalid")
     local_proof = result.local_proof
     local_rows = local_proof.suite_manifest
     if (
@@ -2549,6 +2897,14 @@ def validate_cap_s1_result(result: CapS1Result) -> None:
         for receipt in bound_receipts
     ):
         raise CapS1ResultError("cap_s1_result_evidence_digest_invalid")
+    if local_rows != producer_evidence.local_suites:
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+    if security_rows != producer_evidence.security_tools:
+        raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+    if mutation_rows != producer_evidence.mutations:
+        raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+    if cleanup_rows != producer_evidence.cleanup_resources:
+        raise CapS1ResultError("cap_s1_result_cleanup_proof_invalid")
 
     held = result.held_non_goals
     if not isinstance(held, tuple) or not held:
@@ -2561,6 +2917,11 @@ def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
     """Construct, then validate, a :class:`CapS1Result` -- the one lawful
     way to obtain an instance believed to satisfy the closed contract."""
 
+    producer_evidence_path = kwargs.pop("producer_evidence_path", None)
+    producer_evidence = _load_cap_s1_producer_evidence(producer_evidence_path)
+    if "producer_evidence_digest" in kwargs:
+        raise CapS1ResultError("cap_s1_result_producer_evidence_invalid")
+    kwargs["producer_evidence_digest"] = producer_evidence.artifact_digest
     kwargs.setdefault("schema_version", RESULT_CONTRACT_SCHEMA)
     kwargs.setdefault("marker", RESULT_CONTRACT_MARKER)
     kwargs.setdefault("release_state", RESULT_RELEASE_STATE)
@@ -2675,8 +3036,12 @@ def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
             kwargs["cleanup_proof"] = dataclasses.replace(
                 kwargs["cleanup_proof"], resource_kinds=tuple(resource_kinds)
             )
+    if type(kwargs.get("canary_evidence")) is CanaryEvidence:
+        kwargs["canary_evidence"] = _project_canary_result_evidence(
+            kwargs["canary_evidence"]
+        )
     result = CapS1Result(**kwargs)
-    validate_cap_s1_result(result)
+    validate_cap_s1_result(result, producer_evidence_path=producer_evidence_path)
     return result
 
 
