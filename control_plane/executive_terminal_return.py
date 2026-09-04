@@ -8,25 +8,48 @@ from __future__ import annotations
 
 import dataclasses
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from control_plane.executive_delegation_identity import (
     ExecutiveDelegationIdentityError,
     derive_delegation_identity,
 )
-from control_plane.executive_orchestration_result import (
-    OrchestrationResultError,
-    canonical_bytes,
-    canonical_digest,
-    validate_envelope,
+from control_plane.executive_runtime import (
+    AttemptExecutionMode,
+    AttemptStatus,
+    ExecutiveDialogueSource,
+    JobStatus,
+    ValidatedRoleCompletion,
 )
-from control_plane.executive_runtime import Attempt, AttemptStatus, Job, JobStatus, Worker
 
 
 class TerminalReturnError(ValueError):
     """A terminal Runtime fact cannot safely become a return candidate."""
 
     def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+_PROJECTION_ERROR_CODES = frozenset(
+    {
+        "DIALOGUE_BINDING_UNAVAILABLE",
+        "DIALOGUE_REFUSED",
+        "SERVICE_UNAVAILABLE",
+        "TRANSPORT_UNAVAILABLE",
+        "EFFECT_UNKNOWN",
+        "PRE_SUBMIT_PROTOCOL_REFUSED",
+    }
+)
+
+
+class TerminalReturnProjectionError(RuntimeError):
+    """A terminal candidate could not cross its optional projection boundary."""
+
+    def __init__(self, code: str) -> None:
+        if code not in _PROJECTION_ERROR_CODES:
+            raise ValueError("unknown terminal-return projection error code")
         self.code = code
         super().__init__(code)
 
@@ -44,137 +67,75 @@ class TerminalReturnCandidate:
     session_ref: str
     runtime_status: str
     result_status: str
-    result_digest: str | None
-    terminal_digest: str | None
+    result_envelope_digest: str
+    terminal_evidence_digest: str
+    artifact_receipt_digest: str
+    validation_receipt_digest: str
+    effective_grant_digest: str
+    terminal_at: str
     message_key: str
     summary: str
     review_verdict: str | None
+    dialogue_source: ExecutiveDialogueSource | None = None
+
+    @property
+    def result_digest(self) -> str:
+        """Compatibility spelling for the result-envelope digest."""
+
+        return self.result_envelope_digest
+
+    @property
+    def terminal_digest(self) -> str:
+        """Compatibility spelling for the terminal-evidence digest."""
+
+        return self.terminal_evidence_digest
 
 
 _TERMINAL_STATUS_MAP = {
     AttemptStatus.COMPLETED: (JobStatus.COMPLETED, "RESULT"),
 }
-_TERMINAL_RECEIPT_KEYS = frozenset(
-    {
-        "schema_version",
-        "status",
-        "job_id",
-        "attempt_id",
-        "orchestration_role",
-        "execution_mode",
-        "result_seal_command_id",
-        "result_evidence",
-        "result_envelope",
-        "result_envelope_digest",
-        "artifact_receipt_digest",
-        "validation_receipt_digest",
-        "effective_grant_digest",
-        "terminal_evidence_digest",
-    }
-)
-
-
 def _refuse(code: str) -> None:
     raise TerminalReturnError(code)
 
 
-def _same_canonical_json(left: Any, right: Any) -> bool:
+def _terminal_utc(value: Any) -> str:
+    if not isinstance(value, str):
+        _refuse("EVIDENCE_REFUSED")
     try:
-        return canonical_bytes(left) == canonical_bytes(right)
-    except TerminalReturnError:
-        raise
-    except (OrchestrationResultError, TypeError, ValueError):
-        return False
-
-
-def _is_digest(value: Any) -> bool:
-    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
-
-
-def _validated_completed_result(job: Job, attempt: Attempt) -> tuple[dict[str, Any], str]:
-    receipt = attempt.result
-    if not isinstance(receipt, dict) or set(receipt) != _TERMINAL_RECEIPT_KEYS:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
         _refuse("EVIDENCE_REFUSED")
-    if not _same_canonical_json(job.result, receipt):
-        _refuse("EVIDENCE_REFUSED")
-    role = job.orchestration_role
-    execution_mode = attempt.execution_mode
-    if execution_mode is None:
-        _refuse("BINDING_REFUSED")
-    # The Runtime-owned SEALED_WORKER validator currently closes over durable
-    # receipt rows and is not exposed as a pure read-only contract.  Do not
-    # duplicate or weaken that owner here: this bounded projector accepts only
-    # the OPERATOR_HARNESS receipt family it can validate completely.  A later
-    # current-source integration may add SEALED_WORKER only by consuming the
-    # canonical Runtime validator.
-    if execution_mode != "OPERATOR_HARNESS":
-        _refuse("EVIDENCE_REFUSED")
-    expected_seal_command = f"orchestration-result-seal:{attempt.attempt_id}"
     if (
-        receipt.get("schema_version")
-        != "mastermind.orchestration_terminal_receipt/v1"
-        or receipt.get("status") != "COMPLETED"
-        or receipt.get("job_id") != job.job_id
-        or receipt.get("attempt_id") != attempt.attempt_id
-        or receipt.get("orchestration_role") != role
-        or receipt.get("execution_mode") != execution_mode
-        or receipt.get("result_seal_command_id") != expected_seal_command
-        or not isinstance(receipt.get("result_envelope"), dict)
-        or not all(
-            _is_digest(receipt.get(name))
-            for name in (
-                "result_envelope_digest",
-                "artifact_receipt_digest",
-                "validation_receipt_digest",
-                "effective_grant_digest",
-                "terminal_evidence_digest",
-            )
-        )
-        or receipt.get("effective_grant_digest") != attempt.effective_grant_digest
-        or receipt.get("result_evidence") is not None
+        parsed.tzinfo is None
+        or parsed.utcoffset() != timedelta(0)
+        or parsed.microsecond != 0
     ):
         _refuse("EVIDENCE_REFUSED")
-    unsigned = dict(receipt)
-    terminal_digest = unsigned.pop("terminal_evidence_digest")
-    try:
-        if canonical_digest(unsigned) != terminal_digest:
-            _refuse("EVIDENCE_REFUSED")
-        envelope = validate_envelope(
-            receipt["result_envelope"],
-            expected_job_id=job.job_id,
-            expected_run_id=attempt.attempt_id,
-            expected_worker_id=attempt.worker_id,
-            expected_role=str(role),
-            expected_root_job_id=job.root_job_id,
-        )
-        digest = canonical_digest(envelope)
-    except TerminalReturnError:
-        raise
-    except (OrchestrationResultError, TypeError, ValueError):
-        _refuse("EVIDENCE_REFUSED")
-    if receipt.get("result_envelope_digest") != digest:
-        _refuse("EVIDENCE_REFUSED")
-    return envelope, digest
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def reduce_terminal_return(*, job: Job, attempt: Attempt, worker: Worker) -> TerminalReturnCandidate:
-    """Reduce exactly one current sealed direct-child terminal result.
+def reduce_terminal_return(
+    *, material: ValidatedRoleCompletion
+) -> TerminalReturnCandidate:
+    """Reduce one canonical Runtime-owned completion snapshot without I/O.
 
-    All supplied objects must be current, mutually bound Runtime objects.  Any
-    missing, stale, foreign, malformed, or noncanonical fact is a typed pure
-    refusal; this function never repairs, defaults, or persists it.
+    Runtime has already validated both receipt families, exact lineage, and the
+    Job/Attempt terminal receipt.  This reducer deliberately does not copy that
+    law; it only checks the snapshot's local binding and derives the projection
+    candidate.
     """
 
-    if (
-        not isinstance(job, Job)
-        or not isinstance(attempt, Attempt)
-        or not isinstance(worker, Worker)
-    ):
+    if not isinstance(material, ValidatedRoleCompletion):
         _refuse("BINDING_REFUSED")
+    job = material.job
+    attempt = material.attempt
+    effective_execution_mode = (
+        attempt.execution_mode or AttemptExecutionMode.SEALED_WORKER.value
+    )
     if (
         job.current_attempt_id != attempt.attempt_id
         or attempt.job_id != job.job_id
-        or attempt.worker_id != worker.worker_id
+        or effective_execution_mode != material.execution_mode
     ):
         _refuse("BINDING_REFUSED")
     terminal = _TERMINAL_STATUS_MAP.get(attempt.status)
@@ -185,26 +146,62 @@ def reduce_terminal_return(*, job: Job, attempt: Attempt, worker: Worker) -> Ter
     except ExecutiveDelegationIdentityError:
         _refuse("IDENTITY_REFUSED")
 
-    envelope, digest = _validated_completed_result(job, attempt)
+    envelope = material.result_envelope
+    terminal_receipt = material.terminal_receipt
+    digest_names = (
+        "result_envelope_digest",
+        "terminal_evidence_digest",
+        "artifact_receipt_digest",
+        "validation_receipt_digest",
+        "effective_grant_digest",
+    )
+    try:
+        digests = {name: terminal_receipt[name] for name in digest_names}
+        summary = envelope["summary"]
+    except (KeyError, TypeError):
+        _refuse("EVIDENCE_REFUSED")
+    if (
+        not isinstance(summary, str)
+        or any(
+            not isinstance(value, str)
+            or re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in digests.values()
+        )
+        or digests["result_envelope_digest"] != material.result_digest
+        or digests["effective_grant_digest"] != attempt.effective_grant_digest
+        or envelope.get("job_id") != job.job_id
+        or envelope.get("run_id") != attempt.attempt_id
+        or envelope.get("worker_id") != attempt.worker_id
+        or envelope.get("role") != job.orchestration_role
+    ):
+        _refuse("EVIDENCE_REFUSED")
     review_verdict: str | None = None
     if job.orchestration_role == "review":
-        verdict = envelope["role_result"].get("verdict")
-        if verdict not in {"approve", "reject"}:
+        role_result = envelope.get("role_result")
+        if not isinstance(role_result, dict):
+            _refuse("EVIDENCE_REFUSED")
+        verdict = role_result.get("verdict")
+        if not isinstance(verdict, str) or verdict not in ("approve", "reject"):
             _refuse("EVIDENCE_REFUSED")
         review_verdict = verdict
     return TerminalReturnCandidate(
         job_id=job.job_id,
         attempt_id=attempt.attempt_id,
-        worker_id=worker.worker_id,
+        worker_id=attempt.worker_id,
         root_job_id=identity.root_job_id,
         role=str(job.orchestration_role),
         operation_key=identity.operation_key,
         session_ref=identity.session_ref,
         runtime_status=attempt.status.value,
         result_status=terminal[1],
-        result_digest=digest,
-        terminal_digest=str(attempt.result["terminal_evidence_digest"]),
-        message_key=f"asd-exec-result-{str(attempt.result['terminal_evidence_digest'])}",
-        summary=str(envelope["summary"]),
+        result_envelope_digest=digests["result_envelope_digest"],
+        terminal_evidence_digest=digests["terminal_evidence_digest"],
+        artifact_receipt_digest=digests["artifact_receipt_digest"],
+        validation_receipt_digest=digests["validation_receipt_digest"],
+        effective_grant_digest=digests["effective_grant_digest"],
+        terminal_at=_terminal_utc(attempt.finished_at),
+        message_key=f"asd-exec-result-{digests['terminal_evidence_digest']}",
+        summary=summary,
         review_verdict=review_verdict,
+        dialogue_source=material.dialogue_source,
     )

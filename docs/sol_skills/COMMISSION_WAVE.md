@@ -300,6 +300,26 @@ The precise point where the worker stops rather than absorbing the next wave.
 Exact return packet Sol needs: head SHA, changed files, CI, proof receipts, discovered conflicts,
 remaining gates and next action.
 
+### Source Continuity checkpoint gate
+
+For a `START`ed source-modifying child expected to remain open through substantial CI, review, or
+context-budget exposure, establish a command-backed `CHECKPOINT_VERIFIED` receipt against the actual
+local Git worktree and authenticated GitHub facts **before long CI, review, or context-budget exposure**.
+The checkpoint must bind the same operation branch and Draft/HOLD PR, exact remote head/tree/base and
+owned path/blob census, local branch/head/tree/ancestry/dirt facts, collision census, and explicit
+external-effect evidence.
+
+The adapter that verifies this receipt is read-only. Commit/push, when separately authorized, occurs
+outside the adapter under the existing source writer and carrier law. `CHECKPOINT_VERIFIED` is
+continuity evidence only: it does not grant receiver transfer, retry, Ready, merge, or writer release,
+and it does not make a dirty or still-effectful `START`ed writer safe to replace. A typed refusal is a
+failed proof, never fallback authority for a new branch, PR, session, retry, or carrier.
+
+Refresh the receipt after head, path, base, or external-effect identity moves, and before relying on a
+prior checkpoint for a later context handoff or other source-continuity decision. The receipt never
+replaces the current carrier reread, current protected source gate, effect reconciliation, or the
+stronger remote-complete and terminal STOP rules.
+
 ### Continuation watch / reciprocal wait discipline
 Any Slack/session handoff that is expected to return later must define how the dialogue loop stays
 alive **and how it terminates explicitly**. The watcher is transport/attention behavior only; it never
