@@ -33,6 +33,7 @@ from experiments.code_intelligence.c0_runner import (
     validate_result,
 )
 from experiments.code_intelligence.decision import REQUIRED_CASES
+from experiments.code_intelligence.ground_truth import TERMINAL_MIGRATE_LEGACY_PIN
 from experiments.code_intelligence.semantic_contract import SEMANTIC_TOOL_NAMES
 from experiments.code_intelligence.serena_backend import (
     SERENA_PINNED_COMMIT,
@@ -63,12 +64,47 @@ def _schema() -> dict:
     return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
+def _python_tree_digest(files: list[dict[str, str]]) -> str:
+    return hashlib.sha256(
+        b"".join(
+            row["name"].encode("utf-8") + b"\0"
+            + row["sha256"].encode("ascii") + b"\n"
+            for row in sorted(files, key=lambda item: item["name"])
+        )
+    ).hexdigest()
+
+
 def _lsp_inputs() -> dict:
-    entry = {"binary": str(PYTHON), "sha256": _python_digest(),
-             "argv": [str(LSP_STAND_IN), "ok"]}
+    lsp_digest = hashlib.sha256(LSP_STAND_IN.read_bytes()).hexdigest()
+    serena_digest = hashlib.sha256(SERENA_STAND_IN.read_bytes()).hexdigest()
+    entry = {
+        "binary": str(PYTHON),
+        "sha256": _python_digest(),
+        "argv": [str(LSP_STAND_IN), "ok"],
+        "targets": [{
+            "name": "lsp:stand-in",
+            "file": str(LSP_STAND_IN),
+            "sha256": lsp_digest,
+            "ecosystem": "stand_in",
+            "package": "mastermind-tests",
+            "version": "source",
+            "binding": "argv_file:1",
+        }],
+    }
     return {"python": dict(entry), "typescript": dict(entry),
-            "serena_launcher": {"binary": str(PYTHON), "sha256": _python_digest(),
-                                "argv": [str(SERENA_STAND_IN), "clean"]}}
+            "serena_launcher": {
+                "binary": str(PYTHON), "sha256": _python_digest(),
+                "argv": [str(SERENA_STAND_IN), "clean"],
+                "targets": [{
+                    "name": "serena:stand-in",
+                    "file": str(SERENA_STAND_IN),
+                    "sha256": serena_digest,
+                    "ecosystem": "stand_in",
+                    "package": "mastermind-tests",
+                    "version": "source",
+                    "binding": "argv_file:1",
+                }],
+            }}
 
 
 def _make_bundle(base: Path):
@@ -108,7 +144,7 @@ def _build(tmp_path: Path, *, with_stand_ins: bool = False, fresh: bool = False)
 class TestBlockedResult:
     def test_no_inputs_produces_a_blocked_result(self, tmp_path: Path) -> None:
         result = _build(tmp_path)
-        assert result["decision_state"] == "BLOCKED_MISSING_PINNED_DEPENDENCY"
+        assert result["decision_state"] == "NON_DECISION"
         assert "decision" not in result
         assert result["blocking_reason"]
 
@@ -128,6 +164,161 @@ class TestBlockedResult:
 
     def test_next_action_names_the_pinned_bundles(self, tmp_path: Path) -> None:
         assert SERENA_PINNED_COMMIT in _build(tmp_path)["next_action"]
+
+    def test_missing_terminal_or_identity_closure_is_nondecision_not_no_safe_backend(
+        self, tmp_path: Path
+    ) -> None:
+        result = _build(tmp_path, with_stand_ins=True)
+        assert result["decision_state"] == "NON_DECISION"
+        assert "decision" not in result
+        assert "terminal" in result["blocking_reason"].lower()
+
+    def test_machine_artifact_requires_toolchain_and_execution_identity(self, tmp_path: Path) -> None:
+        result = _build(tmp_path, with_stand_ins=True)
+        assert set(result["toolchain"]) == {
+            "python_packages", "npm_packages", "resolution_manifests", "executions"
+        }
+        assert result["toolchain"]["executions"]
+        execution = result["toolchain"]["executions"][0]
+        assert set(execution) >= {
+            "candidate", "corpus_id", "language", "provenance",
+            "launcher", "canonical_argv", "argv_file_digests", "targets",
+            "backend_identity_digest",
+        }
+        assert execution["launcher"]["sha256"] == _python_digest()
+        assert execution["targets"][0]["sha256"] != _python_digest()
+
+    def test_provenance_is_machine_derived_and_changes_semantic_identity(self, tmp_path: Path) -> None:
+        result = _build(tmp_path, with_stand_ins=True)
+        assert {row["provenance"]["kind"] for row in result["toolchain"]["executions"]} == {
+            "stand_in"
+        }
+        assert any("stand-in" in risk for risk in result["residual_risks"])
+        mutated = copy.deepcopy(result)
+        mutated["toolchain"]["executions"][0]["provenance"]["kind"] = "real"
+        assert semantic_evidence_digest(mutated) != result["semantic_evidence_digest"]
+
+    def test_receipt_trial_cross_check_refuses_a_missing_execution(self, tmp_path: Path) -> None:
+        result = _build(tmp_path, with_stand_ins=True)
+        result["binding_receipt"]["per_execution"].pop()
+        with pytest.raises(RunnerError) as excinfo:
+            cross_check_result(result)
+        assert excinfo.value.code == "RESULT_EXECUTION_TRIAL_MISMATCH"
+
+    def test_declared_target_digest_is_measured_not_trusted(self, tmp_path: Path) -> None:
+        inputs = _lsp_inputs()
+        inputs["python"]["targets"] = [{
+            "name": "python:fake-lsp",
+            "file": str(LSP_STAND_IN),
+            "sha256": "0" * 64,
+            "ecosystem": "stand_in",
+            "package": "mastermind-tests",
+            "version": "source",
+            "binding": "argv_file:1",
+        }]
+        with pytest.raises(RunnerError) as excinfo:
+            build_result(
+                scratch_parent=tmp_path / "scratch",
+                lsp_binaries=inputs,
+                source=SOURCE,
+            )
+        assert excinfo.value.code == "TARGET_DIGEST_MISMATCH"
+
+    def test_declared_target_must_be_the_bound_argv_file(self, tmp_path: Path) -> None:
+        inputs = _lsp_inputs()
+        inputs["python"]["targets"][0].update({
+            "file": str(SERENA_STAND_IN),
+            "sha256": hashlib.sha256(SERENA_STAND_IN.read_bytes()).hexdigest(),
+        })
+        with pytest.raises(RunnerError) as excinfo:
+            build_result(
+                scratch_parent=tmp_path / "scratch",
+                lsp_binaries=inputs,
+                source=SOURCE,
+            )
+        assert excinfo.value.code == "TARGET_INVOCATION_MISMATCH"
+
+    def test_launcher_without_an_explicit_target_cannot_clear_identity(
+        self, tmp_path: Path
+    ) -> None:
+        inputs = _lsp_inputs()
+        inputs["python"].pop("targets")
+        result = build_result(
+            scratch_parent=tmp_path / "scratch",
+            lsp_binaries=inputs,
+            source=SOURCE,
+        )
+        direct = next(row for row in result["candidates"] if row["kind"] == "direct_lsp")
+        assert direct["identity_complete"] is False
+        assert "EXECUTABLE_TARGET_MISSING" in direct["identity_failures"]
+
+    def test_verified_serena_bundle_does_not_replace_a_selected_launch_target(
+        self, tmp_path: Path
+    ) -> None:
+        inputs = _lsp_inputs()
+        inputs["serena_launcher"].pop("targets")
+        bundle = _make_bundle(tmp_path / "bundles")
+        result = build_result(
+            scratch_parent=tmp_path / "scratch",
+            lsp_binaries=inputs,
+            serena_bundle=bundle.root,
+            serena_sha256=bundle.sha256,
+            source=SOURCE,
+        )
+        serena = next(row for row in result["candidates"] if row["kind"] == "serena")
+        assert serena["identity_complete"] is False
+        assert "TARGET_INVOCATION_UNBOUND" in serena["identity_failures"]
+
+    def test_python_closure_manifest_rehashes_installed_files(self, tmp_path: Path) -> None:
+        installed = tmp_path / "site-packages" / "serena" / "__init__.py"
+        installed.parent.mkdir(parents=True)
+        installed.write_text("__version__ = '1.7.0'\n", encoding="utf-8")
+        manifest = tmp_path / "python-closure.json"
+        manifest.write_text(json.dumps([{
+            "name": "serena",
+            "version": "1.7.0",
+            "files": [{
+                "name": "serena/__init__.py",
+                "source": str(installed),
+                "sha256": "0" * 64,
+            }],
+        }]), encoding="utf-8")
+        manifest_sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        with pytest.raises(RunnerError) as excinfo:
+            build_result(
+                scratch_parent=tmp_path / "scratch",
+                python_closure_manifest=manifest,
+                python_closure_sha256=manifest_sha,
+                source=SOURCE,
+            )
+        assert excinfo.value.code == "PACKAGE_FILE_DIGEST_MISMATCH"
+
+    def test_npm_closure_is_parsed_from_expected_digest_lockfile(self, tmp_path: Path) -> None:
+        lock = tmp_path / "package-lock.json"
+        lock.write_text(json.dumps({
+            "lockfileVersion": 3,
+            "packages": {
+                "": {"name": "c0"},
+                "node_modules/pyright": {
+                    "version": "1.1.403",
+                    "resolved": "https://registry.npmjs.org/pyright/-/pyright-1.1.403.tgz",
+                    "integrity": "sha512-fixture",
+                },
+            },
+        }), encoding="utf-8")
+        result = build_result(
+            scratch_parent=tmp_path / "scratch",
+            npm_lock_manifest=lock,
+            npm_lock_sha256=hashlib.sha256(lock.read_bytes()).hexdigest(),
+            source=SOURCE,
+        )
+        assert result["toolchain"]["npm_packages"] == [{
+            "name": "pyright",
+            "version": "1.1.403",
+            "resolved": "https://registry.npmjs.org/pyright/-/pyright-1.1.403.tgz",
+            "integrity": "sha512-fixture",
+        }]
+        assert result["toolchain"]["resolution_manifests"][0]["ecosystem"] == "npm"
 
 
 class TestFullMatrixWithStandIns:
@@ -152,8 +343,52 @@ class TestFullMatrixWithStandIns:
 
     def test_stand_ins_still_cannot_produce_a_decision(self, tmp_path: Path) -> None:
         result = _build(tmp_path, with_stand_ins=True)
-        assert result["decision_state"] == "BLOCKED_MISSING_PINNED_DEPENDENCY"
+        assert result["decision_state"] == "NON_DECISION"
         assert "decision" not in result
+
+    def test_materialized_terminal_case_runs_cold_and_warm_for_both_candidates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        payload = (
+            b"export function migrateLegacy(value: unknown) { return value; }\n"
+            b"export const alias = migrateLegacy;\n"
+        )
+        monkeypatch.setattr(
+            "experiments.code_intelligence.c0_runner.materialize_terminal_case",
+            lambda _repository: {
+                "case": "terminal_migrate_legacy",
+                "tool": "find_references",
+                "arguments": {"name": "migrateLegacy", "limit": 50},
+                "expected": [
+                    [TERMINAL_MIGRATE_LEGACY_PIN["path"], 1],
+                    [TERMINAL_MIGRATE_LEGACY_PIN["path"], 2],
+                ],
+                "source": dict(TERMINAL_MIGRATE_LEGACY_PIN),
+                "payload": payload,
+            },
+        )
+        terminal_repository = tmp_path / "terminal-repository"
+        terminal_repository.mkdir()
+        bundle = _make_bundle(tmp_path / "bundles")
+        result = build_result(
+            scratch_parent=tmp_path / "scratch",
+            lsp_binaries=_lsp_inputs(),
+            serena_bundle=bundle.root,
+            serena_sha256=bundle.sha256,
+            terminal_repository=terminal_repository,
+            source=SOURCE,
+        )
+        for candidate in result["candidates"]:
+            terminal_trials = [
+                trial for trial in candidate["trials"]
+                if trial["corpus_id"] == "terminal_migrate_legacy"
+            ]
+            assert {trial["phase"] for trial in terminal_trials} == {"cold", "warm"}
+        assert sum(
+            row["corpus_id"] == "terminal_migrate_legacy"
+            for row in result["binding_receipt"]["per_execution"]
+        ) == 2
+        validate_result(result)
 
     def test_direct_lsp_stand_in_answers_correctly_on_both_languages(
         self, tmp_path: Path
@@ -196,11 +431,152 @@ class TestB4DiscriminatingMutants:
         forged["decision_state"] = "DECIDED"
         forged["decision"] = "DIRECT_LSP"
         forged.pop("blocking_reason", None)
+        forged["toolchain"]["python_packages"] = []
+        forged["toolchain"]["npm_packages"] = [
+            {"name": "pyright", "version": "1.1.403",
+             "resolved": "https://registry.npmjs.org/pyright/-/pyright-1.1.403.tgz",
+             "integrity": "sha512-fixture"}
+        ]
+        forged["toolchain"]["resolution_manifests"] = [
+            {"ecosystem": "python", "sha256": "3" * 64,
+             "closure_sha256": "6" * 64,
+             "provenance": "host-supplied immutable lock"},
+            {"ecosystem": "npm", "sha256": "4" * 64,
+             "closure_sha256": "7" * 64,
+             "provenance": "host-supplied immutable lock"},
+        ]
+        forged["corpora"].append({
+            "corpus_id": "terminal_migrate_legacy",
+            "language": "typescript",
+            "manifest_digest": "5" * 64,
+            "ground_truth": {
+                "kind": "derived_external_git_source",
+                "source": dict(TERMINAL_MIGRATE_LEGACY_PIN),
+            },
+        })
         for candidate in forged["candidates"]:
             candidate["hard_failures"] = []
+            candidate["identity_complete"] = True
+            candidate["identity_failures"] = []
+            if candidate["identity"]:
+                candidate["identity"]["provenance"] = "real"
+                candidate["identity"]["dependency_manifests"] = [
+                    {"ecosystem": "python", "sha256": "3" * 64},
+                    {"ecosystem": "npm", "sha256": "4" * 64},
+                ]
             for trial in candidate["trials"]:
                 trial["synthetic"] = False
                 trial["correct"] = True
+            template = next(
+                trial for trial in candidate["trials"]
+                if trial["language"] == "typescript" and trial["phase"] == "cold"
+            )
+            for phase in ("cold", "warm"):
+                terminal_trial = copy.deepcopy(template)
+                terminal_trial.update({
+                    "case": "terminal_migrate_legacy",
+                    "corpus_id": "terminal_migrate_legacy",
+                    "phase": phase,
+                    "correct": True,
+                    "synthetic": False,
+                })
+                candidate["trials"].append(terminal_trial)
+
+            receipt_template = next(
+                row for row in forged["binding_receipt"]["per_execution"]
+                if row["candidate"] == candidate["kind"]
+                and row["language"] == "typescript"
+            )
+            terminal_receipt = copy.deepcopy(receipt_template)
+            terminal_receipt["corpus_id"] = "terminal_migrate_legacy"
+            terminal_receipt["provenance"] = {"kind": "real", "derived": True}
+            forged["binding_receipt"]["per_execution"].append(terminal_receipt)
+            execution = {
+                key: terminal_receipt[key]
+                for key in (
+                    "candidate", "corpus_id", "language", "provenance", "launcher",
+                    "canonical_argv", "argv_file_digests", "targets", "backend_identity",
+                    "dependency_manifests", "backend_identity_digest",
+                )
+            }
+            forged["toolchain"]["executions"].append(execution)
+
+        for row in forged["binding_receipt"]["per_execution"]:
+            row["provenance"] = {"kind": "real", "derived": True}
+            for target in row["targets"]:
+                target.update(
+                    {"ecosystem": "npm", "package": "pyright", "version": "1.1.403"}
+                    if row["candidate"] == "direct_lsp"
+                    else {"ecosystem": "python", "package": "serena",
+                          "version": SERENA_PINNED_VERSION}
+                )
+            row["dependency_manifests"] = [
+                {"ecosystem": "python", "sha256": "3" * 64},
+                {"ecosystem": "npm", "sha256": "4" * 64},
+            ]
+            row["backend_identity"]["provenance"] = "real"
+            row["backend_identity"]["targets"] = [
+                [target["name"], target["sha256"], target["ecosystem"],
+                 target["package"], target["version"], target["binding"]]
+                for target in row["targets"]
+            ]
+            row["backend_identity"]["dependency_manifests"] = [
+                ["python", "3" * 64], ["npm", "4" * 64]
+            ]
+            row["backend_identity_digest"] = hashlib.sha256(
+                json.dumps(
+                    row["backend_identity"], sort_keys=True, separators=(",", ":")
+                ).encode("ascii")
+            ).hexdigest()
+        for row in forged["toolchain"]["executions"]:
+            row["provenance"] = {"kind": "real", "derived": True}
+            for target in row["targets"]:
+                target.update(
+                    {"ecosystem": "npm", "package": "pyright", "version": "1.1.403"}
+                    if row["candidate"] == "direct_lsp"
+                    else {"ecosystem": "python", "package": "serena",
+                          "version": SERENA_PINNED_VERSION}
+                )
+            row["dependency_manifests"] = [
+                {"ecosystem": "python", "sha256": "3" * 64},
+                {"ecosystem": "npm", "sha256": "4" * 64},
+            ]
+            row["backend_identity"]["provenance"] = "real"
+            row["backend_identity"]["targets"] = [
+                [target["name"], target["sha256"], target["ecosystem"],
+                 target["package"], target["version"], target["binding"]]
+                for target in row["targets"]
+            ]
+            row["backend_identity"]["dependency_manifests"] = [
+                ["python", "3" * 64], ["npm", "4" * 64]
+            ]
+            row["backend_identity_digest"] = hashlib.sha256(
+                json.dumps(
+                    row["backend_identity"], sort_keys=True, separators=(",", ":")
+                ).encode("ascii")
+            ).hexdigest()
+        serena_target_digests = sorted({
+            target["sha256"]
+            for row in forged["toolchain"]["executions"]
+            if row["candidate"] == "serena"
+            for target in row["targets"]
+        })
+        python_files = [
+            {"name": f"serena/measured-{index}", "sha256": digest}
+            for index, digest in enumerate(serena_target_digests, start=1)
+        ]
+        forged["toolchain"]["python_packages"] = [{
+            "name": "serena",
+            "version": SERENA_PINNED_VERSION,
+            "files": python_files,
+            "tree_sha256": _python_tree_digest(python_files),
+        }]
+        forged["residual_risks"] = [
+            risk for risk in forged["residual_risks"]
+            if "stand-in" not in risk.lower()
+            and "identity is incomplete" not in risk.lower()
+            and "terminal migratelegacy" not in risk.lower()
+        ]
         return forged
 
     def test_a_fully_real_decided_artifact_is_accepted(self, decided: dict) -> None:
@@ -297,6 +673,81 @@ class TestB4DiscriminatingMutants:
 
     def test_a_consistent_decided_artifact_passes_the_winner_law(self, decided: dict) -> None:
         cross_check_result(decided)
+
+    def test_target_substitution_breaks_the_backend_identity_digest(self, decided: dict) -> None:
+        for container in (
+            decided["binding_receipt"]["per_execution"],
+            decided["toolchain"]["executions"],
+        ):
+            container[0]["targets"][0]["sha256"] = "f" * 64
+        with pytest.raises(RunnerError) as excinfo:
+            cross_check_result(decided)
+        assert excinfo.value.code == "RESULT_EXECUTION_IDENTITY_MISMATCH"
+
+    def test_missing_package_closure_invalidates_identity(self, decided: dict) -> None:
+        decided["toolchain"]["npm_packages"] = []
+        with pytest.raises(RunnerError) as excinfo:
+            cross_check_result(decided)
+        assert excinfo.value.code == "RESULT_IDENTITY_CLOSURE_INCONSISTENT"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.Draft202012Validator(_schema()).validate(decided)
+
+    def test_terminal_source_substitution_is_refused(self, decided: dict) -> None:
+        terminal = next(
+            row for row in decided["corpora"]
+            if row["corpus_id"] == "terminal_migrate_legacy"
+        )
+        terminal["ground_truth"]["source"]["blob"] = "f" * 40
+        with pytest.raises(RunnerError) as excinfo:
+            cross_check_result(decided)
+        assert excinfo.value.code == "RESULT_TERMINAL_PIN_MISMATCH"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.Draft202012Validator(_schema()).validate(decided)
+
+    def test_target_must_bind_to_a_measured_package_coordinate(self, decided: dict) -> None:
+        for collection in (
+            decided["binding_receipt"]["per_execution"],
+            decided["toolchain"]["executions"],
+        ):
+            row = next(item for item in collection if item["candidate"] == "direct_lsp")
+            row["targets"][0]["package"] = "unrelated-package"
+            row["backend_identity"]["targets"][0][3] = "unrelated-package"
+            row["backend_identity_digest"] = hashlib.sha256(
+                json.dumps(
+                    row["backend_identity"], sort_keys=True, separators=(",", ":")
+                ).encode("ascii")
+            ).hexdigest()
+        with pytest.raises(RunnerError) as excinfo:
+            cross_check_result(decided)
+        assert excinfo.value.code == "RESULT_IDENTITY_CLOSURE_INCONSISTENT"
+
+    def test_target_binding_must_match_the_measured_invocation(self, decided: dict) -> None:
+        for collection in (
+            decided["binding_receipt"]["per_execution"],
+            decided["toolchain"]["executions"],
+        ):
+            row = next(item for item in collection if item["candidate"] == "direct_lsp")
+            row["targets"][0]["binding"] = "argv_file:2"
+            row["backend_identity"]["targets"][0][5] = "argv_file:2"
+            row["backend_identity_digest"] = hashlib.sha256(
+                json.dumps(
+                    row["backend_identity"], sort_keys=True, separators=(",", ":")
+                ).encode("ascii")
+            ).hexdigest()
+        with pytest.raises(RunnerError) as excinfo:
+            cross_check_result(decided)
+        assert excinfo.value.code == "RESULT_IDENTITY_CLOSURE_INCONSISTENT"
+
+    def test_python_target_digest_must_match_the_measured_package(self, decided: dict) -> None:
+        files = decided["toolchain"]["python_packages"][0]["files"]
+        for row in files:
+            row["sha256"] = "e" * 64
+        decided["toolchain"]["python_packages"][0]["tree_sha256"] = (
+            _python_tree_digest(files)
+        )
+        with pytest.raises(RunnerError) as excinfo:
+            cross_check_result(decided)
+        assert excinfo.value.code == "RESULT_IDENTITY_CLOSURE_INCONSISTENT"
 
 
 class TestHostileDeterminismAndCleanup:

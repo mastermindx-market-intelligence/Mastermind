@@ -31,6 +31,7 @@ __all__ = [
     "REQUIRED_CASES",
     "REQUIRED_LANGUAGES",
     "REQUIRED_PHASES",
+    "REQUIRED_TRIAL_KEYS",
     "DecisionOutcome",
     "decide",
     "summarize_candidate",
@@ -45,6 +46,18 @@ REQUIRED_CASES = (
     "diagnostics_planted_undefined_name",
 )
 REQUIRED_PHASES = ("cold", "warm")
+
+TERMINAL_CORPUS_ID = "terminal_migrate_legacy"
+TERMINAL_CASE = "terminal_migrate_legacy"
+REQUIRED_TRIAL_KEYS = tuple(
+    (f"{language}_sample", language, case, phase)
+    for language in REQUIRED_LANGUAGES
+    for case in REQUIRED_CASES
+    for phase in REQUIRED_PHASES
+) + tuple(
+    (TERMINAL_CORPUS_ID, "typescript", TERMINAL_CASE, phase)
+    for phase in REQUIRED_PHASES
+)
 
 #: The protected acceptance ruler: a backend is "useful" only when it is correct
 #: on the primary journeys. Secondary cases contribute to materiality, not to the
@@ -80,14 +93,13 @@ def summarize_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
     """Deterministic per-candidate summary over the required matrix."""
     trials = [t for t in candidate.get("trials", []) if not t.get("synthetic", True)]
     covered = {
-        (t.get("language"), t.get("case"), t.get("phase")) for t in trials
+        (t.get("corpus_id"), t.get("language"), t.get("case"), t.get("phase"))
+        for t in trials
     }
     missing = [
-        f"{language}/{case}/{phase}"
-        for language in REQUIRED_LANGUAGES
-        for case in REQUIRED_CASES
-        for phase in REQUIRED_PHASES
-        if (language, case, phase) not in covered
+        f"{corpus_id}/{language}/{case}/{phase}"
+        for corpus_id, language, case, phase in REQUIRED_TRIAL_KEYS
+        if (corpus_id, language, case, phase) not in covered
     ]
     correct = sum(1 for t in trials if t.get("correct"))
     total = len(trials)
@@ -103,7 +115,9 @@ def summarize_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
         "correct": correct,
         "correctness": (correct / total) if total else 0.0,
         "hard_failures": tuple(candidate.get("hard_failures", ())),
-        "complete": not missing,
+        "identity_complete": bool(candidate.get("identity_complete", True)),
+        "identity_failures": tuple(candidate.get("identity_failures", ())),
+        "complete": not missing and bool(candidate.get("identity_complete", True)),
         "missing": missing,
         "median_latency_ms": (
             sorted(t.get("latency_ms", 0) for t in trials)[total // 2] if total else None
@@ -127,16 +141,23 @@ def decide(candidates: Sequence[Mapping[str, Any]]) -> DecisionOutcome:
     if incomplete:
         detail = "; ".join(
             f"{s['kind']} missing {len(s['missing'])} required trial(s)"
+            + (
+                f" and incomplete identity {list(s['identity_failures'])}"
+                if not s["identity_complete"] else ""
+            )
             for s in incomplete
         )
         return DecisionOutcome(
-            state="BLOCKED_MISSING_PINNED_DEPENDENCY",
+            state="NON_DECISION",
             decision=None,
-            gates=("real_evidence_required",),
+            gates=("real_evidence_required", "identity_closure_required"),
             tie_break="",
             blocking_reason=(
                 "No decision may be published: the required candidate x language x "
-                f"case x phase matrix was not genuinely exercised. {detail}. "
+                f"corpus x case x phase matrix and executable identity closure were "
+                f"not both proven. {detail}. The protected Terminal migrateLegacy "
+                "cold+warm case and complete launcher/target/package manifests are "
+                "mandatory. "
                 "Synthetic stand-in trials prove adapter behaviour and are "
                 "categorically ineligible as empirical evidence."
             ),

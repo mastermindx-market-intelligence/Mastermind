@@ -21,13 +21,14 @@ from experiments.code_intelligence.decision import (
 
 
 def _trials(*, correct: bool = True, synthetic: bool = False, languages=None,
-            cases=None, phases=None, latency: int = 10):
+            cases=None, phases=None, latency: int = 10, include_terminal: bool = True):
     languages = languages or REQUIRED_LANGUAGES
     cases = cases or REQUIRED_CASES
     phases = phases or REQUIRED_PHASES
-    return [
+    trials = [
         {
-            "case": case, "language": language, "phase": phase,
+            "case": case, "corpus_id": f"{language}_sample",
+            "language": language, "phase": phase,
             "correct": correct, "expected": [], "actual": [],
             "latency_ms": latency, "synthetic": synthetic, "error": None,
         }
@@ -35,6 +36,23 @@ def _trials(*, correct: bool = True, synthetic: bool = False, languages=None,
         for case in cases
         for phase in phases
     ]
+    if include_terminal and "typescript" in languages:
+        trials.extend(
+            {
+                "case": "terminal_migrate_legacy",
+                "corpus_id": "terminal_migrate_legacy",
+                "language": "typescript",
+                "phase": phase,
+                "correct": correct,
+                "expected": [],
+                "actual": [],
+                "latency_ms": latency,
+                "synthetic": synthetic,
+                "error": None,
+            }
+            for phase in phases
+        )
+    return trials
 
 
 def _candidate(kind, *, trials=None, hard_failures=None, status="EXERCISED"):
@@ -42,6 +60,8 @@ def _candidate(kind, *, trials=None, hard_failures=None, status="EXERCISED"):
         "kind": kind, "status": status,
         "trials": trials if trials is not None else _trials(),
         "hard_failures": hard_failures or [],
+        "identity_complete": True,
+        "identity_failures": [],
     }
 
 
@@ -85,7 +105,7 @@ class TestNoUnearnedDecision:
             _candidate("direct_lsp", trials=_trials(synthetic=True)),
             _candidate("serena", trials=_trials(synthetic=True)),
         ])
-        assert outcome.state == "BLOCKED_MISSING_PINNED_DEPENDENCY"
+        assert outcome.state == "NON_DECISION"
         assert outcome.decision is None
         assert outcome.blocking_reason
 
@@ -94,7 +114,7 @@ class TestNoUnearnedDecision:
             _candidate("direct_lsp"),
             _candidate("serena", trials=_trials(synthetic=True)),
         ])
-        assert outcome.state == "BLOCKED_MISSING_PINNED_DEPENDENCY"
+        assert outcome.state == "NON_DECISION"
         assert outcome.decision is None
 
     def test_unexercised_candidate_cannot_decide(self) -> None:
@@ -103,8 +123,31 @@ class TestNoUnearnedDecision:
             _candidate("serena", trials=[], status="UNEXERCISED_MISSING_BUNDLE",
                        hard_failures=["SERENA_BUNDLE_UNAVAILABLE"]),
         ])
-        assert outcome.state == "BLOCKED_MISSING_PINNED_DEPENDENCY"
+        assert outcome.state == "NON_DECISION"
         assert outcome.decision is None
+
+    def test_missing_terminal_matrix_is_a_typed_nondecision(self) -> None:
+        outcome = decide([
+            _candidate("direct_lsp", trials=_trials(include_terminal=False)),
+            _candidate("serena", trials=_trials(include_terminal=False)),
+        ])
+        assert outcome.state == "NON_DECISION"
+        assert outcome.decision is None
+        assert any("terminal_migrate_legacy" in item for summary in outcome.summaries
+                   for item in summary["missing"])
+
+    def test_identity_incomplete_blocks_even_a_complete_semantic_matrix(self) -> None:
+        candidates = [
+            _candidate("direct_lsp"),
+            _candidate("serena"),
+        ]
+        for candidate in candidates:
+            candidate["identity_complete"] = False
+            candidate["identity_failures"] = ["PACKAGE_CLOSURE_MISSING"]
+        outcome = decide(candidates)
+        assert outcome.state == "NON_DECISION"
+        assert outcome.decision is None
+        assert "identity" in outcome.blocking_reason.lower()
 
 
 class TestSafetyDominates:

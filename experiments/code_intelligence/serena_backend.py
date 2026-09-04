@@ -157,13 +157,26 @@ class SerenaBackend:
     @property
     def identity(self) -> BackendIdentity:
         config = canonical_json(self.host_configuration())
+        targets = (
+            *self._spec.target_digests,
+            (
+                "serena:bundle", self._bundle.sha256, "python", "serena",
+                self._bundle.version, "verified_bundle",
+            ),
+        )
         return BackendIdentity(
             kind="serena",
             source_version=self._bundle.version,
             source_commit=self._bundle.source_commit,
             executable_sha256=self._spec.sha256,
-            language_servers=(("serena:bundle", self._bundle.sha256),),
+            language_servers=tuple((name, digest) for name, digest, *_rest in targets),
             configuration_digest=hashlib.sha256(config.encode("utf-8")).hexdigest(),
+            launcher_name=self._spec.launcher_name,
+            canonical_argv=self._spec.canonical_argv,
+            argv_file_digests=self._spec.argv_file_digests,
+            targets=targets,
+            dependency_manifests=self._spec.dependency_manifests,
+            provenance=self._spec.provenance,
         )
 
     def upstream_tool_census(self) -> list[str]:

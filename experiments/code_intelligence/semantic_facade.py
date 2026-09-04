@@ -23,6 +23,7 @@ from typing import Any, Mapping
 from experiments.code_intelligence.backend import (
     BackendPayloadError,
     backend_identity_digest,
+    backend_identity_payload,
     guard_payload,
 )
 from experiments.code_intelligence.jsonrpc_stdio import JsonRpcError
@@ -96,8 +97,34 @@ class SemanticFacade:
             "facade_source_digest": facade_source_digest(),
             "semantic_schema_digest": semantic_tool_schema_digest(),
             "backend_identity_digest": backend_identity_digest(identity),
+            "backend_identity": backend_identity_payload(identity),
             "backend_kind": identity.kind,
             "language_server_digests": [list(item) for item in identity.language_servers],
+            "launcher": {
+                "name": identity.launcher_name,
+                "sha256": identity.executable_sha256,
+            },
+            "canonical_argv": list(identity.canonical_argv),
+            "argv_file_digests": [
+                {"index": index, "name": name, "sha256": digest}
+                for index, name, digest in identity.argv_file_digests
+            ],
+            "targets": [
+                {
+                    "name": name,
+                    "sha256": digest,
+                    "ecosystem": ecosystem,
+                    "package": package,
+                    "version": version,
+                    "binding": binding,
+                }
+                for name, digest, ecosystem, package, version, binding in identity.targets
+            ],
+            "dependency_manifests": [
+                {"ecosystem": ecosystem, "sha256": digest}
+                for ecosystem, digest in identity.dependency_manifests
+            ],
+            "provenance": {"kind": identity.provenance, "derived": True},
             "startup_unix_ms": int(started * 1000),
             "candidate_tree_before": before,
             "candidate_tree_after": after,

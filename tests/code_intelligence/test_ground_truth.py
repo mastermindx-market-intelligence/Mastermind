@@ -221,3 +221,106 @@ class TestTypeScriptAnswerKeyIsHonest:
 
     def test_corpus_contributes_no_python_test_paths(self) -> None:
         assert list(TS_CORPUS.rglob("test_*.py")) == []
+
+
+class TestTerminalMigrateLegacyMaterialization:
+    def _repo(self, tmp_path: Path) -> tuple[Path, dict[str, str]]:
+        from experiments.code_intelligence.ground_truth import git_blob_sha
+
+        repo = tmp_path / "terminal"
+        source = repo / "terminal" / "lib" / "workspaceMigrate.ts"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "export function migrateLegacy(value: unknown) {\n"
+            "  return value;\n"
+            "}\n"
+            "export const migrateAgain = migrateLegacy;\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "-C", str(repo), "init", "-q", "-b", "main"], check=True)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "-C", str(repo), "remote", "add", "origin",
+             "https://github.com/mastermindx-market-intelligence/mastermind-terminal.git"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "-c", "user.name=c0", "-c",
+             "user.email=c0@example.invalid", "commit", "-q", "-m", "fixture"],
+            check=True,
+        )
+        commit = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+        tree = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"], text=True).strip()
+        return repo, {
+            "commit": commit,
+            "tree": tree,
+            "path": "terminal/lib/workspaceMigrate.ts",
+            "blob": git_blob_sha(source.read_bytes()),
+        }
+
+    def test_terminal_case_is_derived_from_exact_git_source_not_an_answer_key(
+        self, tmp_path: Path
+    ) -> None:
+        from experiments.code_intelligence.ground_truth import materialize_terminal_case
+
+        repo, pin = self._repo(tmp_path)
+        case = materialize_terminal_case(
+            repo,
+            expected_commit=pin["commit"],
+            expected_tree=pin["tree"],
+            expected_path=pin["path"],
+            expected_blob=pin["blob"],
+        )
+        assert case["case"] == "terminal_migrate_legacy"
+        assert case["tool"] == "find_references"
+        assert case["arguments"] == {"name": "migrateLegacy", "limit": 50}
+        assert case["expected"] == [
+            ["terminal/lib/workspaceMigrate.ts", 1],
+            ["terminal/lib/workspaceMigrate.ts", 4],
+        ]
+        assert case["source"]["blob"] == pin["blob"]
+        assert "answer_key" not in case
+
+    def test_wrong_terminal_pin_is_refused_before_materialization(self, tmp_path: Path) -> None:
+        from experiments.code_intelligence.ground_truth import GroundTruthError, materialize_terminal_case
+
+        repo, pin = self._repo(tmp_path)
+        with pytest.raises(GroundTruthError) as excinfo:
+            materialize_terminal_case(
+                repo,
+                expected_commit="f" * 40,
+                expected_tree=pin["tree"],
+                expected_path=pin["path"],
+                expected_blob=pin["blob"],
+            )
+        assert excinfo.value.code == "TERMINAL_COMMIT_MISMATCH"
+
+    def test_wrong_terminal_origin_is_refused(self, tmp_path: Path) -> None:
+        from experiments.code_intelligence.ground_truth import GroundTruthError, materialize_terminal_case
+
+        repo, pin = self._repo(tmp_path)
+        subprocess.run(
+            ["git", "-C", str(repo), "remote", "set-url", "origin",
+             "https://github.com/example/not-terminal.git"],
+            check=True,
+        )
+        with pytest.raises(GroundTruthError) as excinfo:
+            materialize_terminal_case(
+                repo,
+                expected_commit=pin["commit"],
+                expected_tree=pin["tree"],
+                expected_path=pin["path"],
+                expected_blob=pin["blob"],
+            )
+        assert excinfo.value.code == "TERMINAL_REPOSITORY_MISMATCH"
+
+    def test_protected_terminal_pin_constants_are_exact(self) -> None:
+        from experiments.code_intelligence.ground_truth import TERMINAL_MIGRATE_LEGACY_PIN
+
+        assert TERMINAL_MIGRATE_LEGACY_PIN == {
+            "repository": "mastermindx-market-intelligence/mastermind-terminal",
+            "commit": "fadd8b82f03ecaabe8a86d693da89f27be096d9f",
+            "tree": "2ef6840d07c24456fc39e67029c45131fed53b1f",
+            "path": "terminal/lib/workspaceMigrate.ts",
+            "blob": "3b6feb5295d77cefa4f609b4cbafe5e6a68b5565",
+        }

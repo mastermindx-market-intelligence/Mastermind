@@ -95,8 +95,17 @@ class DirectLspBackend:
             source_version=version,
             source_commit=str(self._server_info.get("commit", "unpinned")),
             executable_sha256=self._spec.sha256,
-            language_servers=((f"{self._language}:{name}", self._spec.sha256),),
+            language_servers=tuple(
+                (name, digest) for name, digest, _ecosystem, _package, _version, _binding
+                in self._spec.target_digests
+            ),
             configuration_digest=hashlib.sha256(config.encode("utf-8")).hexdigest(),
+            launcher_name=self._spec.launcher_name,
+            canonical_argv=self._spec.canonical_argv,
+            argv_file_digests=self._spec.argv_file_digests,
+            targets=self._spec.target_digests,
+            dependency_manifests=self._spec.dependency_manifests,
+            provenance=self._spec.provenance,
         )
 
     @property

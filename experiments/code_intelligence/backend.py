@@ -26,6 +26,7 @@ __all__ = [
     "BackendPayloadError",
     "ExecutableSpec",
     "SemanticBackend",
+    "backend_identity_payload",
     "backend_identity_digest",
     "guard_payload",
     "guard_wire_payload",
@@ -96,6 +97,12 @@ class BackendIdentity:
     executable_sha256: str
     language_servers: tuple[tuple[str, str], ...]
     configuration_digest: str
+    launcher_name: str = ""
+    canonical_argv: tuple[str, ...] = ()
+    argv_file_digests: tuple[tuple[int, str, str], ...] = ()
+    targets: tuple[tuple[str, str, str, str, str, str], ...] = ()
+    dependency_manifests: tuple[tuple[str, str], ...] = ()
+    provenance: str = "real"
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +118,9 @@ class ExecutableSpec:
     sha256: str
     argv_suffix: tuple[str, ...]
     argv_digests: tuple[tuple[str, str], ...] = ()
+    targets: tuple[tuple[str, str, str, str, str, str], ...] = ()
+    target_sources: tuple[tuple[str, Path], ...] = ()
+    dependency_manifests: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.sha256, str) or not _HEX64.match(self.sha256):
@@ -127,6 +137,90 @@ class ExecutableSpec:
                 raise TypeError("argv_digests entries must be (path, sha256) pairs")
             if not _HEX64.match(entry[1]):
                 raise ValueError("argv_digests entries need a 64-char hex digest")
+        if not isinstance(self.targets, tuple):
+            raise TypeError("targets must be a tuple")
+        for entry in self.targets:
+            if not (isinstance(entry, tuple) and len(entry) == 6):
+                raise TypeError(
+                    "targets entries must be (name, sha256, ecosystem, package, version, binding)"
+                )
+            if not isinstance(entry[0], str) or not entry[0]:
+                raise ValueError("targets entries need a non-empty name")
+            if not isinstance(entry[1], str) or not _HEX64.match(entry[1]):
+                raise ValueError("targets entries need a 64-char hex digest")
+            if any(not isinstance(item, str) or not item for item in entry[2:]):
+                raise ValueError(
+                    "targets entries need ecosystem, package, version and binding"
+                )
+        if not isinstance(self.target_sources, tuple):
+            raise TypeError("target_sources must be a tuple")
+        target_names = {entry[0] for entry in self.targets}
+        for entry in self.target_sources:
+            if not (isinstance(entry, tuple) and len(entry) == 2):
+                raise TypeError("target_sources entries must be (name, Path) pairs")
+            if entry[0] not in target_names or not isinstance(entry[1], Path):
+                raise ValueError("target_sources must name a declared target Path")
+        if not isinstance(self.dependency_manifests, tuple):
+            raise TypeError("dependency_manifests must be a tuple")
+        for ecosystem, digest in self.dependency_manifests:
+            if ecosystem not in {"python", "npm"} or not _HEX64.match(digest):
+                raise ValueError("dependency manifest requires python/npm and sha256")
+
+    @property
+    def launcher_name(self) -> str:
+        return self.path.name
+
+    @property
+    def argv_file_digests(self) -> tuple[tuple[int, str, str], ...]:
+        """Path-free identity for every digest-pinned argv file."""
+        pinned = {str(Path(path)): digest for path, digest in self.argv_digests}
+        return tuple(
+            (index, Path(item).name, pinned[str(Path(item))])
+            for index, item in enumerate(self.argv_suffix, start=1)
+            if str(Path(item)) in pinned
+        )
+
+    @property
+    def canonical_argv(self) -> tuple[str, ...]:
+        """Exact invocation with host paths replaced by digest-bound tokens."""
+        files = {index: (name, digest) for index, name, digest in self.argv_file_digests}
+        suffix = []
+        for index, item in enumerate(self.argv_suffix, start=1):
+            if index in files:
+                name, digest = files[index]
+                suffix.append(f"<argv-file:{index}:{name}:{digest}>")
+            elif Path(item).is_absolute():
+                suffix.append(f"<unbound-absolute-argv:{index}:{Path(item).name}>")
+            else:
+                suffix.append(item)
+        return (
+            f"<launcher:{self.launcher_name}:{self.sha256}>",
+            *suffix,
+        )
+
+    @property
+    def target_digests(self) -> tuple[tuple[str, str, str, str, str, str], ...]:
+        return self.targets
+
+    @property
+    def provenance(self) -> str:
+        """Classify repository-owned test servers without trusting callers."""
+        marker = ("tests", "code_intelligence", "servers")
+        candidates = [
+            self.path,
+            *(
+                Path(item)
+                for item in self.argv_suffix
+                if Path(item).is_absolute() or Path(item).exists()
+            ),
+            *(Path(path) for path, _digest in self.argv_digests),
+        ]
+        candidates.extend(path for _name, path in self.target_sources)
+        for path in candidates:
+            parts = path.resolve(strict=False).parts
+            if any(tuple(parts[index:index + 3]) == marker for index in range(len(parts) - 2)):
+                return "stand_in"
+        return "real"
 
 
 @runtime_checkable
@@ -163,17 +257,29 @@ class SemanticBackend(Protocol):
     def close(self) -> None: ...
 
 
-def backend_identity_digest(identity: BackendIdentity) -> str:
-    """SHA-256 over every identity field, so any substitution is visible."""
-    payload = {
+def backend_identity_payload(identity: BackendIdentity) -> dict[str, Any]:
+    """Path-free canonical serialization shared by receipts and digests."""
+    return {
         "kind": identity.kind,
         "source_version": identity.source_version,
         "source_commit": identity.source_commit,
         "executable_sha256": identity.executable_sha256,
         "language_servers": [list(item) for item in identity.language_servers],
         "configuration_digest": identity.configuration_digest,
+        "launcher_name": identity.launcher_name,
+        "canonical_argv": list(identity.canonical_argv),
+        "argv_file_digests": [list(item) for item in identity.argv_file_digests],
+        "targets": [list(item) for item in identity.targets],
+        "dependency_manifests": [list(item) for item in identity.dependency_manifests],
+        "provenance": identity.provenance,
     }
-    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def backend_identity_digest(identity: BackendIdentity) -> str:
+    """SHA-256 over every identity field, so any substitution is visible."""
+    return hashlib.sha256(
+        canonical_json(backend_identity_payload(identity)).encode("utf-8")
+    ).hexdigest()
 
 
 def _check_key(key: str) -> None:

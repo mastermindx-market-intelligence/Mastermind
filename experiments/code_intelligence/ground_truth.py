@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import ast
 import builtins
+import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -27,9 +29,196 @@ __all__ = [
     "corpus_manifest_digest",
     "load_answer_key",
     "python_source_files",
+    "GroundTruthError",
+    "TERMINAL_MIGRATE_LEGACY_PIN",
+    "git_blob_sha",
+    "materialize_terminal_case",
 ]
 
 _BUILTINS = frozenset(dir(builtins)) | {"__file__", "__name__", "__doc__", "__package__"}
+
+TERMINAL_MIGRATE_LEGACY_PIN = {
+    "repository": "mastermindx-market-intelligence/mastermind-terminal",
+    "commit": "fadd8b82f03ecaabe8a86d693da89f27be096d9f",
+    "tree": "2ef6840d07c24456fc39e67029c45131fed53b1f",
+    "path": "terminal/lib/workspaceMigrate.ts",
+    "blob": "3b6feb5295d77cefa4f609b4cbafe5e6a68b5565",
+}
+
+
+class GroundTruthError(Exception):
+    """Typed refusal to derive ground truth from an unverified source."""
+
+    def __init__(self, code: str, detail: str = "") -> None:
+        self.code = code
+        self.detail = detail
+        super().__init__(f"{code}: {detail}" if detail else code)
+
+
+def git_blob_sha(payload: bytes) -> str:
+    """Return Git's object identity for exact file bytes."""
+    header = f"blob {len(payload)}\0".encode("ascii")
+    return hashlib.sha1(header + payload).hexdigest()
+
+
+def _git_read(repository: Path, *args: str) -> bytes:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repository), *args],
+            check=True,
+            capture_output=True,
+            shell=False,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise GroundTruthError("TERMINAL_GIT_READ_FAILED", "immutable source unavailable") from exc
+
+
+def _repository_slug(remote: str) -> str:
+    value = remote.strip()
+    if value.startswith("git@github.com:"):
+        value = value.removeprefix("git@github.com:")
+    elif value.startswith("ssh://git@github.com/"):
+        value = value.removeprefix("ssh://git@github.com/")
+    elif value.startswith("https://github.com/"):
+        value = value.removeprefix("https://github.com/")
+    elif value.startswith("http://github.com/"):
+        value = value.removeprefix("http://github.com/")
+    else:
+        return ""
+    return value.removesuffix(".git").strip("/")
+
+
+def _typescript_code_only(text: str) -> str:
+    """Mask comments and quoted text while preserving newlines and columns."""
+    output: list[str] = []
+    quote: str | None = None
+    escaped = False
+    line_comment = False
+    block_comment = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        nxt = text[index + 1] if index + 1 < len(text) else ""
+        if line_comment:
+            if char == "\n":
+                line_comment = False
+                output.append(char)
+            else:
+                output.append(" ")
+        elif block_comment:
+            if char == "*" and nxt == "/":
+                output.extend((" ", " "))
+                index += 1
+                block_comment = False
+            else:
+                output.append("\n" if char == "\n" else " ")
+        elif quote is not None:
+            if escaped:
+                escaped = False
+                output.append("\n" if char == "\n" else " ")
+            elif char == "\\":
+                escaped = True
+                output.append(" ")
+            elif char == quote:
+                quote = None
+                output.append(" ")
+            else:
+                output.append("\n" if char == "\n" else " ")
+        elif char == "/" and nxt == "/":
+            output.extend((" ", " "))
+            index += 1
+            line_comment = True
+        elif char == "/" and nxt == "*":
+            output.extend((" ", " "))
+            index += 1
+            block_comment = True
+        elif char in ("'", '"', "`"):
+            quote = char
+            output.append(" ")
+        else:
+            output.append(char)
+        index += 1
+    return "".join(output)
+
+
+def materialize_terminal_case(
+    repository: Path | str,
+    *,
+    expected_commit: str = TERMINAL_MIGRATE_LEGACY_PIN["commit"],
+    expected_tree: str = TERMINAL_MIGRATE_LEGACY_PIN["tree"],
+    expected_path: str = TERMINAL_MIGRATE_LEGACY_PIN["path"],
+    expected_blob: str = TERMINAL_MIGRATE_LEGACY_PIN["blob"],
+) -> dict[str, Any]:
+    """Derive the migrateLegacy reference oracle from an exact external Git blob.
+
+    The source is read from the named commit, not the checkout and not a copied
+    fixture. A caller gets no case at all unless commit, tree, path and blob all
+    match their immutable pins.
+    """
+    root = Path(repository)
+    if root.is_symlink() or not root.is_dir():
+        raise GroundTruthError("TERMINAL_REPOSITORY_UNAVAILABLE", "repository unavailable")
+    if Path(expected_path).is_absolute() or ".." in Path(expected_path).parts:
+        raise GroundTruthError("TERMINAL_PATH_INVALID", expected_path)
+
+    try:
+        repository_slug = _repository_slug(
+            _git_read(root, "remote", "get-url", "origin").decode()
+        )
+    except GroundTruthError as exc:
+        raise GroundTruthError(
+            "TERMINAL_REPOSITORY_MISMATCH", "origin is unavailable"
+        ) from exc
+    if repository_slug != TERMINAL_MIGRATE_LEGACY_PIN["repository"]:
+        raise GroundTruthError(
+            "TERMINAL_REPOSITORY_MISMATCH",
+            f"expected {TERMINAL_MIGRATE_LEGACY_PIN['repository']}, found {repository_slug}",
+        )
+
+    try:
+        commit = _git_read(root, "rev-parse", f"{expected_commit}^{{commit}}").decode().strip()
+    except GroundTruthError as exc:
+        raise GroundTruthError(
+            "TERMINAL_COMMIT_MISMATCH", f"commit {expected_commit} is unavailable"
+        ) from exc
+    if commit != expected_commit:
+        raise GroundTruthError("TERMINAL_COMMIT_MISMATCH", f"expected {expected_commit}, found {commit}")
+    tree = _git_read(root, "rev-parse", f"{commit}^{{tree}}").decode().strip()
+    if tree != expected_tree:
+        raise GroundTruthError("TERMINAL_TREE_MISMATCH", f"expected {expected_tree}, found {tree}")
+    entry = _git_read(root, "ls-tree", commit, "--", expected_path).decode().strip()
+    fields = entry.split(None, 3)
+    if len(fields) != 4 or fields[1] != "blob" or fields[3] != expected_path:
+        raise GroundTruthError("TERMINAL_PATH_MISSING", expected_path)
+    if fields[2] != expected_blob:
+        raise GroundTruthError("TERMINAL_BLOB_MISMATCH", f"expected {expected_blob}, found {fields[2]}")
+    payload = _git_read(root, "show", f"{commit}:{expected_path}")
+    if git_blob_sha(payload) != expected_blob:
+        raise GroundTruthError("TERMINAL_BLOB_MISMATCH", "blob bytes do not match Git identity")
+
+    code = _typescript_code_only(payload.decode("utf-8"))
+    identifier = re.compile(r"\bmigrateLegacy\b")
+    lines = [
+        [expected_path, number]
+        for number, line in enumerate(code.splitlines(), start=1)
+        if identifier.search(line)
+    ]
+    if not lines:
+        raise GroundTruthError("TERMINAL_SYMBOL_MISSING", "migrateLegacy not found")
+    return {
+        "case": "terminal_migrate_legacy",
+        "tool": "find_references",
+        "arguments": {"name": "migrateLegacy", "limit": 50},
+        "expected": lines,
+        "source": {
+            "repository": repository_slug,
+            "commit": commit,
+            "tree": tree,
+            "path": expected_path,
+            "blob": expected_blob,
+        },
+        "payload": payload,
+    }
 
 
 def load_answer_key(corpus: Path | str) -> dict[str, Any]:
@@ -322,8 +511,6 @@ def _iter_corpus_bytes(corpus: Path | str) -> Iterator[tuple[str, bytes]]:
 
 def corpus_manifest_digest(corpus: Path | str) -> str:
     """Content digest of a corpus, so trials name the exact bytes they ran on."""
-    import hashlib
-
     digest = hashlib.sha256()
     for relative, payload in _iter_corpus_bytes(corpus):
         digest.update(relative.encode("utf-8"))

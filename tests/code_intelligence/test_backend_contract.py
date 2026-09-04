@@ -218,6 +218,91 @@ class TestExecutableSpec:
         with pytest.raises(TypeError):
             ExecutableSpec(path=tmp_path / "bin", sha256="a" * 64, argv_suffix=("ok", 3))  # type: ignore[arg-type]
 
+    def test_identity_digest_binds_launcher_argv_targets_and_provenance(self) -> None:
+        base = BackendIdentity(
+            kind="direct_lsp",
+            source_version="1.1.403",
+            source_commit="0" * 40,
+            executable_sha256="a" * 64,
+            language_servers=(("python:pyright", "b" * 64),),
+            configuration_digest="c" * 64,
+            launcher_name="python3",
+            canonical_argv=("<launcher:python3:a>", "<argv-file:1:pyright.js:b>"),
+            argv_file_digests=((1, "pyright.js", "b" * 64),),
+            targets=((
+                "python:pyright", "b" * 64, "npm", "pyright", "1.1.403",
+                "argv_file:1",
+            ),),
+            dependency_manifests=(("npm", "f" * 64),),
+            provenance="real",
+        )
+        digest = backend_identity_digest(base)
+        mutations = {
+            "launcher_name": "node",
+            "canonical_argv": ("<launcher:python3:a>", "--changed"),
+            "argv_file_digests": ((1, "pyright.js", "d" * 64),),
+            "targets": ((
+                "python:pyright", "e" * 64, "npm", "pyright", "1.1.403",
+                "argv_file:1",
+            ),),
+            "dependency_manifests": (("npm", "0" * 64),),
+            "provenance": "stand_in",
+        }
+        for field, value in mutations.items():
+            mutated = BackendIdentity(
+                **{
+                    **{name: getattr(base, name) for name in base.__dataclass_fields__},
+                    field: value,
+                }
+            )
+            assert backend_identity_digest(mutated) != digest, field
+
+    def test_spec_derives_path_free_canonical_argv_and_stand_in_provenance(
+        self, tmp_path: Path
+    ) -> None:
+        server = Path(__file__).parent / "servers" / "fake_lsp_server.py"
+        digest = __import__("hashlib").sha256(server.read_bytes()).hexdigest()
+        spec = ExecutableSpec(
+            path=Path(__import__("sys").executable).resolve(),
+            sha256=__import__("hashlib").sha256(
+                Path(__import__("sys").executable).resolve().read_bytes()
+            ).hexdigest(),
+            argv_suffix=(str(server.resolve()), "ok"),
+            argv_digests=((str(server.resolve()), digest),),
+            targets=((
+                "python:fake-lsp", digest, "stand_in", "mastermind-tests", "source",
+                "argv_file:1",
+            ),),
+            target_sources=(("python:fake-lsp", server.resolve()),),
+        )
+        assert spec.provenance == "stand_in"
+        assert spec.canonical_argv[0].startswith("<launcher:")
+        assert spec.canonical_argv[1].startswith("<argv-file:1:fake_lsp_server.py:")
+        assert "/Users/" not in " ".join(spec.canonical_argv)
+        assert spec.target_digests == (
+            (
+                "python:fake-lsp", digest, "stand_in", "mastermind-tests", "source",
+                "argv_file:1",
+            ),
+        )
+
+    def test_indirect_test_target_cannot_be_classified_as_real(self) -> None:
+        server = Path(__file__).parent / "servers" / "fake_lsp_server.py"
+        digest = __import__("hashlib").sha256(server.read_bytes()).hexdigest()
+        spec = ExecutableSpec(
+            path=Path(__import__("sys").executable).resolve(),
+            sha256=__import__("hashlib").sha256(
+                Path(__import__("sys").executable).resolve().read_bytes()
+            ).hexdigest(),
+            argv_suffix=("-m", "fake_server"),
+            targets=((
+                "python:fake-lsp", digest, "stand_in", "mastermind-tests", "source",
+                "argv_file:1",
+            ),),
+            target_sources=(("python:fake-lsp", server.resolve()),),
+        )
+        assert spec.provenance == "stand_in"
+
 
 class TestFakeBackendBehaviour:
     def test_lifecycle_flags(self, tmp_path: Path) -> None:

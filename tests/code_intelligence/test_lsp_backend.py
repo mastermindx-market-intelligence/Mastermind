@@ -75,8 +75,17 @@ def _make_corpus_repo(base: Path, marker: str | None = None) -> Path:
 
 
 def _spec(mode: str = "ok") -> ExecutableSpec:
+    server_digest = hashlib.sha256(SERVER.read_bytes()).hexdigest()
     return ExecutableSpec(
-        path=PYTHON, sha256=_python_digest(), argv_suffix=(str(SERVER), mode)
+        path=PYTHON,
+        sha256=_python_digest(),
+        argv_suffix=(str(SERVER), mode),
+        argv_digests=((str(SERVER), server_digest),),
+        targets=((
+            "python:fake-lsp", server_digest, "stand_in", "mastermind-tests", "source",
+            "argv_file:1",
+        ),),
+        target_sources=(("python:fake-lsp", SERVER.resolve()),),
     )
 
 

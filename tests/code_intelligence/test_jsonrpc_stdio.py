@@ -83,6 +83,18 @@ class TestDigestPinning:
         finally:
             client.close()
 
+    def test_spawned_executable_and_argv_equal_the_bound_invocation(
+        self, tmp_path: Path
+    ) -> None:
+        spec = _spec("echo")
+        client = JsonRpcStdioClient(spec=spec, scratch=tmp_path)
+        client.start()
+        try:
+            assert client._process is not None
+            assert client._process.args == [str(spec.path), *spec.argv_suffix]
+        finally:
+            client.close()
+
 
 class TestFraming:
     def test_simple_round_trip(self, tmp_path: Path) -> None:
