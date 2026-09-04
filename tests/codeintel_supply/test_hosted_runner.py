@@ -1145,6 +1145,123 @@ def test_receipt_digest_and_schema_reject_tampering(tmp_path: Path) -> None:
         runner.reconcile_receipt(receipt_path, _request())
 
 
+def test_semantic_receipt_writer_round_trips_exact_canonical_bytes(
+    tmp_path: Path,
+) -> None:
+    receipt_path = tmp_path / "semantic-receipt.json"
+    written = runner.write_semantic_receipt(
+        receipt_path,
+        request=_request(),
+        status="REFUSED",
+        effect="NOT_APPLIED",
+        evidence={"label": "caf\u00e9", "nested": {"key": "value"}},
+    )
+
+    assert receipt_path.read_bytes() == (
+        runner.locks.canonical_json_bytes(written) + b"\n"
+    )
+    assert runner.load_semantic_receipt(receipt_path) == written
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        b'"status":"REFUSED","status":"REFUSED"',
+        b'"status":"COMPLETED","status":"REFUSED"',
+    ],
+    ids=["identical", "conflicting"],
+)
+def test_semantic_receipt_loader_rejects_duplicate_top_level_keys(
+    tmp_path: Path, replacement: bytes
+) -> None:
+    receipt_path = tmp_path / "semantic-receipt.json"
+    runner.write_semantic_receipt(
+        receipt_path,
+        request=_request(),
+        status="REFUSED",
+        effect="NOT_APPLIED",
+        evidence={},
+    )
+    hostile = receipt_path.read_bytes().replace(b'"status":"REFUSED"', replacement)
+    receipt_path.write_bytes(hostile)
+
+    with pytest.raises(runner.HostedRunnerError, match="RECEIPT_INVALID"):
+        runner.load_semantic_receipt(receipt_path)
+
+
+def test_semantic_receipt_loader_rejects_duplicate_nested_keys(tmp_path: Path) -> None:
+    receipt_path = tmp_path / "semantic-receipt.json"
+    runner.write_semantic_receipt(
+        receipt_path,
+        request=_request(),
+        status="REFUSED",
+        effect="NOT_APPLIED",
+        evidence={"nested": {"key": "value"}},
+    )
+    hostile = receipt_path.read_bytes().replace(
+        b'"key":"value"', b'"key":"value","key":"value"'
+    )
+    receipt_path.write_bytes(hostile)
+
+    with pytest.raises(runner.HostedRunnerError, match="RECEIPT_INVALID"):
+        runner.load_semantic_receipt(receipt_path)
+
+
+@pytest.mark.parametrize("constant", [b"NaN", b"Infinity", b"-Infinity"])
+def test_semantic_receipt_loader_rejects_non_finite_json(
+    tmp_path: Path, constant: bytes
+) -> None:
+    receipt_path = tmp_path / "semantic-receipt.json"
+    runner.write_semantic_receipt(
+        receipt_path,
+        request=_request(),
+        status="REFUSED",
+        effect="NOT_APPLIED",
+        evidence={"metric": 0},
+    )
+    hostile = receipt_path.read_bytes().replace(
+        b'"metric":0', b'"metric":' + constant
+    )
+    receipt_path.write_bytes(hostile)
+
+    with pytest.raises(runner.HostedRunnerError, match="RECEIPT_INVALID"):
+        runner.load_semantic_receipt(receipt_path)
+
+
+def test_semantic_receipt_loader_rejects_noncanonical_byte_encodings(
+    tmp_path: Path,
+) -> None:
+    receipt_path = tmp_path / "semantic-receipt.json"
+    written = runner.write_semantic_receipt(
+        receipt_path,
+        request=_request(),
+        status="REFUSED",
+        effect="NOT_APPLIED",
+        evidence={"label": "caf\u00e9"},
+    )
+    canonical = receipt_path.read_bytes()
+    reordered = dict(reversed(list(written.items())))
+    variants = {
+        "leading-whitespace": b" " + canonical,
+        "missing-newline": canonical[:-1],
+        "extra-newline": canonical + b"\n",
+        "reordered-fields": json.dumps(
+            reordered, separators=(",", ":"), ensure_ascii=True
+        ).encode("ascii")
+        + b"\n",
+        "utf-16": canonical.decode("ascii").encode("utf-16"),
+        "literal-non-ascii": json.dumps(
+            written, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        + b"\n",
+    }
+
+    for _label, hostile in variants.items():
+        receipt_path.write_bytes(hostile)
+        with pytest.raises(runner.HostedRunnerError, match="RECEIPT_INVALID"):
+            runner.load_semantic_receipt(receipt_path)
+
+
 def test_candidate_environment_is_minimal_and_contains_no_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
