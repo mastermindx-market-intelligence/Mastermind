@@ -2,6 +2,7 @@
 
 **Operation:** `mastermind-chairman-cognition-source-composer-20260830-sol-001`  
 **R4 repair:** `mastermind-chairman-cognition-source-composer-r4-content-identity-20260901-sol-001`  
+**R5 repair:** `chairman-cognition-agentos-advisory-warning-currentness-repair-20260903-sol-001`  
 **Parent:** `mastermind-chairman-cognition-loop-20260830-sol-001`  
 **Current base:** protected CCL-A1 R3 decision contract  
 **Cognition route:** `CHAT_PRO_DEFAULT`  
@@ -63,6 +64,18 @@ not duplicate those laws.
 No A1 source file, Executive lifecycle, Agent OS owner, CEO boot-packet owner, Steward, GitHub,
 Linear, Slack, RuntimeBinding, Wake, Capacity, provider, credential or production path is modified.
 
+### R5 advisory-warning correction scope
+
+The R5 repair changes only:
+
+1. `control_plane/chairman_cognition_sources.py`;
+2. `tests/test_chairman_cognition_agentos_warning_currentness.py`;
+3. this accepted A2 plan.
+
+It does not reopen A1, the owner wire, the CEO boot-packet producer, the original A2 CLI, or any
+runtime/effect surface. It introduces no warning allowlist or message classifier: every valid warning
+string remains advisory evidence, while malformed warning structure still fails closed.
+
 ## Complete A1 compatibility contract
 
 ### Strategic State root
@@ -123,15 +136,19 @@ brief, canonical revision and owner-produced identity together.
 `AGENT_OS:ceo_brief` is CURRENT only when:
 
 1. the complete `ceo_brief.v1` wire shape and timestamps are valid;
-2. owner degradation and warning lists are empty;
-3. local Macro SHA equals the canonical Agent OS revision;
-4. the attestation is CURRENT;
-5. `source_records_digest` is resolved and syntactically valid;
-6. `payload_digest` equals the digest recomputed from the exact supplied brief.
+2. `inputs.degraded` is a valid empty string list;
+3. `readiness.degraded` is a valid empty string list and every included readiness record is valid;
+4. `warnings` is a valid string list; its entries may be nonempty advisory evidence and remain in the exact payload digest without independently blocking CURRENT;
+5. local Macro SHA equals the canonical Agent OS revision;
+6. the attestation is CURRENT;
+7. `source_records_digest` is resolved and syntactically valid;
+8. `payload_digest` equals the digest recomputed from the exact supplied brief.
 
-A mutated brief with unchanged repository SHA and source-record digest is `CONFLICT`. Missing or
-`UNRESOLVED` owner identity is `UNKNOWN`. Malformed/degraded input is `UNKNOWN` and cannot be
-promoted by an otherwise-current revision receipt.
+A mutated brief, including any warning-set change, with unchanged repository SHA and source-record
+digest is `CONFLICT`. Missing or `UNRESOLVED` owner identity is `UNKNOWN`. Malformed wire shape,
+malformed warnings, nonempty `inputs.degraded`, or nonempty `readiness.degraded` is `UNKNOWN` and
+cannot be promoted by an otherwise-current revision receipt. Valid advisory warnings do not by
+themselves change CURRENT and remain fully content-bound evidence.
 
 ### Mandatory option owner binding
 
@@ -218,6 +235,8 @@ reusable effect token.
 - evidence later than the bundle `as_of` is rejected by A1;
 - content mismatch is `CONFLICT`, never silently refreshed;
 - missing content identity is `UNKNOWN`, never inferred from matching branch names;
+- valid advisory warnings are preserved in the exact brief payload and digest without independently degrading currentness;
+- changing, removing, or adding a warning without a matching payload attestation is `CONFLICT`;
 - a correction produces a new payload/identity pair and therefore a new composed-input digest;
 - no historical memory, receipt or successful procedure authorizes replay of an effect.
 
@@ -229,7 +248,9 @@ reusable effect token.
 - mutated Strategic State with unchanged revision identity -> CONFLICT and root refusal;
 - mutated Agent OS brief with unchanged revision/record identity -> CONFLICT and option refusal;
 - unresolved content identity -> UNKNOWN;
-- malformed/degraded Agent OS brief -> UNKNOWN;
+- malformed Agent OS brief or malformed warning wire -> UNKNOWN;
+- nonempty `inputs.degraded` or `readiness.degraded` -> UNKNOWN;
+- valid nonempty advisory Agent OS warnings alone -> preserve CURRENT eligibility;
 - modifying option omitting Strategic State or Agent OS -> refused;
 - reserved owner injection or duplicate source reference -> refused;
 - missing/mismatched constraints, classification or envelope binding -> A1 rejection;
@@ -247,6 +268,11 @@ The focused suite must prove:
 - exact strategic payload/blob/revision identity;
 - mutated local strategic payload cannot be CURRENT;
 - exact Agent OS brief/source-record/revision identity;
+- valid nonempty advisory Agent OS warnings preserve CURRENT;
+- unavailable inputs remain UNKNOWN;
+- degraded readiness remains UNKNOWN;
+- malformed warning wire remains UNKNOWN;
+- warning mutation after attestation is CONFLICT;
 - mutated local brief cannot be CURRENT;
 - missing/unresolved identities remain UNKNOWN;
 - malformed identity fields and unknown attestation fields are refused;
@@ -272,9 +298,10 @@ existing CEO boot packet, owner-produced identity and protected A1 contract.
 
 ## Completion and next action
 
-A2 is complete when one exact current-base PR contains only the four paths above, focused and
-repository suites are green, the source contract receives exact-head review, and the expected-head
-merge is read back from protected `master`.
+The R5 correction is complete when one exact current-base PR contains only the three repair paths,
+focused and neighboring suites are green, the correction receives independent exact-head review,
+and the expected-head merge is read back from protected `master`. It does not reopen the original A2
+acceptance or claim a live Chairman workflow.
 
 After protection, CCL-A3 may compose one real current-source bundle with materially different
 options, including `PORTFOLIO_HOLD`, but no effect may begin until the prospective Outcome Learning
