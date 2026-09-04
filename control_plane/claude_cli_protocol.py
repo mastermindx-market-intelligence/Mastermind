@@ -1722,7 +1722,8 @@ class _StreamParser:
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "subagent tool result was observed",
             )
-        if value.get("isSynthetic") not in (None, False) or any(
+        is_synthetic = value.get("isSynthetic")
+        if (is_synthetic is not None and is_synthetic is not False) or any(
             value.get(field) is not None for field in ("subagent_type", "task_description")
         ):
             raise _StreamViolation(
@@ -1798,7 +1799,10 @@ class _StreamParser:
             )
         _expect_keys(structured, frozenset({"type", "file", "artifactRead"}))
         file_result = structured.get("file")
-        if structured.get("type") != "text" or structured.get("artifactRead") not in (None, False):
+        artifact_read = structured.get("artifactRead")
+        if structured.get("type") != "text" or (
+            artifact_read is not None and artifact_read is not False
+        ):
             raise _StreamViolation(
                 "TOOL_RESULT_INVALID",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
@@ -1832,13 +1836,14 @@ class _StreamParser:
         evidence_content = file_result.get("content")
         expected_path = _expected_evidence_path(self.command)
         expected_lines = len(evidence_content.splitlines()) if isinstance(evidence_content, str) else -1
+        truncated = file_result.get("truncatedByTokenCap")
         if (
             file_result.get("filePath") != expected_path
             or not isinstance(evidence_content, str)
             or file_result.get("numLines") != expected_lines
             or file_result.get("startLine") != 1
             or file_result.get("totalLines") != expected_lines
-            or file_result.get("truncatedByTokenCap") not in (None, False)
+            or (truncated is not None and truncated is not False)
         ):
             raise _StreamViolation(
                 "TOOL_RESULT_MISMATCH",
@@ -2056,7 +2061,11 @@ class _StreamParser:
             cache_read_input_tokens=cache_read_input_tokens,
             total_cost_usd=float(cost),
         )
-        if value.get("api_error_status") is not None or value.get("queued_turn_count") not in (None, 0):
+        queued_turns = value.get("queued_turn_count")
+        if value.get("api_error_status") is not None or (
+            queued_turns is not None
+            and (type(queued_turns) is not int or queued_turns != 0)
+        ):
             raise _StreamViolation(
                 "RESULT_INVALID",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
