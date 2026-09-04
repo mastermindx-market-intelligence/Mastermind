@@ -749,7 +749,7 @@ def test_receipt_open_uses_nonblocking_mode_before_file_type_validation(
 
 
 @pytest.mark.parametrize("failing_fsync", [1, 2, 3])
-def test_failed_create_cleans_only_its_owned_coordinates_and_allows_clean_retry(
+def test_failed_create_cleans_owned_file_preserves_ambiguous_dirs_and_allows_retry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failing_fsync: int,
@@ -767,13 +767,13 @@ def test_failed_create_cleans_only_its_owned_coordinates_and_allows_clean_retry(
         original_fsync(descriptor)
 
     monkeypatch.setattr(receipt_module.os, "fsync", fail_after_create)
-    with pytest.raises(OperatorMaterializationReceiptError):
+    with pytest.raises(MaterializationReceiptConflict, match="ambiguous residue"):
         persist_operator_materialization_receipt(
             tmp_path, receipt, expected_owner_uid=os.geteuid()
         )
     assert not path.exists()
-    assert not path.parent.exists()
-    assert not path.parent.parent.exists()
+    assert path.parent.exists() is (failing_fsync >= 2)
+    assert path.parent.parent.is_dir()
 
     monkeypatch.setattr(receipt_module.os, "fsync", original_fsync)
     assert persist_operator_materialization_receipt(

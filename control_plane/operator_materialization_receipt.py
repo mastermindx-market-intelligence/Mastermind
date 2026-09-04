@@ -155,6 +155,16 @@ class OperatorMaterializationStatusObservation:
     receipt: OperatorMaterializationReceipt | None
 
 
+@dataclasses.dataclass(frozen=True)
+class _ReceiptContentSignature:
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+    sha256: str
+
+
 def operator_materialization_status(
     value: object,
 ) -> OperatorMaterializationStatusObservation:
@@ -1035,6 +1045,8 @@ def _rebind_receipt_file(
     operation_fd: int,
     retained_fd: int,
     expected_owner_uid: int,
+    *,
+    expected_content_signature: _ReceiptContentSignature | None = None,
 ) -> None:
     retained = os.fstat(retained_fd)
     _verify_receipt_stat(retained, expected_owner_uid)
@@ -1045,15 +1057,37 @@ def _rebind_receipt_file(
             raise OperatorMaterializationReceiptError(
                 "materialization receipt name was replaced"
             )
+        if expected_content_signature is not None:
+            _, observed_signature = _read_receipt_bytes(
+                named_fd, expected_owner_uid
+            )
+            if observed_signature != expected_content_signature:
+                raise OperatorMaterializationReceiptError(
+                    "materialization receipt changed after it was read"
+                )
     finally:
         if named_fd is not None:
             os.close(named_fd)
 
 
-def _read_receipt_descriptor(
+def _receipt_content_signature(
+    info: os.stat_result,
+    raw: bytes,
+) -> _ReceiptContentSignature:
+    return _ReceiptContentSignature(
+        device=info.st_dev,
+        inode=info.st_ino,
+        size=info.st_size,
+        mtime_ns=info.st_mtime_ns,
+        ctime_ns=info.st_ctime_ns,
+        sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def _read_receipt_bytes(
     descriptor: int,
     expected_owner_uid: int,
-) -> OperatorMaterializationReceipt:
+) -> tuple[bytes, _ReceiptContentSignature]:
     os.lseek(descriptor, 0, os.SEEK_SET)
     before = os.fstat(descriptor)
     _verify_receipt_stat(before, expected_owner_uid)
@@ -1088,7 +1122,15 @@ def _read_receipt_descriptor(
         raise OperatorMaterializationReceiptError(
             "materialization receipt exceeds its byte ceiling"
         )
-    return load_operator_materialization_receipt(raw)
+    return raw, _receipt_content_signature(after, raw)
+
+
+def _read_receipt_descriptor(
+    descriptor: int,
+    expected_owner_uid: int,
+) -> tuple[OperatorMaterializationReceipt, _ReceiptContentSignature]:
+    raw, signature = _read_receipt_bytes(descriptor, expected_owner_uid)
+    return load_operator_materialization_receipt(raw), signature
 
 
 def _read_retained_receipt(
@@ -1113,8 +1155,15 @@ def _read_retained_receipt(
         expected_owner_uid,
     )
     _rebind_receipt_file(operation_fd, receipt_fd, expected_owner_uid)
-    receipt = _read_receipt_descriptor(receipt_fd, expected_owner_uid)
-    _rebind_receipt_file(operation_fd, receipt_fd, expected_owner_uid)
+    receipt, content_signature = _read_receipt_descriptor(
+        receipt_fd, expected_owner_uid
+    )
+    _rebind_receipt_file(
+        operation_fd,
+        receipt_fd,
+        expected_owner_uid,
+        expected_content_signature=content_signature,
+    )
     _rebind_private_dir(
         parent_fd,
         operation_name,
@@ -1171,30 +1220,12 @@ def _cleanup_owned_created_coordinates(
             os.unlink("receipt.json", dir_fd=operation_fd)
         except OSError:
             return False
-    if operation_created:
-        if operation_fd is None:
-            return False
-        try:
-            _rebind_private_dir(
-                parent_fd,
-                operation_name,
-                operation_fd,
-                expected_owner_uid,
-            )
-            os.rmdir(operation_name, dir_fd=parent_fd)
-        except (OSError, OperatorMaterializationReceiptError):
-            return False
-    if not parent_created:
-        return True
-    try:
-        _rebind_private_dir(
-            root_fd,
-            ".operator-materializations",
-            parent_fd,
-            expected_owner_uid,
-        )
-        os.rmdir(".operator-materializations", dir_fd=root_fd)
-    except (OSError, OperatorMaterializationReceiptError):
+    # mkdirat does not return a descriptor.  The later open cannot prove that
+    # its object is still the directory created by this invocation when a
+    # same-owner rename/replacement can occur in between.  Never authorize
+    # rmdir from the boolean mkdir result alone; preserve the ambiguous
+    # directory coordinate and surface the typed residue conflict instead.
+    if operation_created or parent_created:
         return False
     return True
 
