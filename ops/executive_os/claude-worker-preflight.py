@@ -791,7 +791,12 @@ def _retain_binary(binary: Path) -> _RetainedExecutable:
     try:
         root_flags = os.O_RDONLY | _required_open_flags("O_DIRECTORY", "O_CLOEXEC")
         directory_flags = root_flags | _required_open_flags("O_NOFOLLOW")
-        leaf_flags = os.O_RDONLY | _required_open_flags("O_NOFOLLOW", "O_CLOEXEC")
+        # The leaf is caller-selected and has not been type-checked yet.  A
+        # blocking read-open would hang forever on a FIFO before the fixed
+        # refusal boundary or any provider timeout exists.
+        leaf_flags = os.O_RDONLY | _required_open_flags(
+            "O_NOFOLLOW", "O_CLOEXEC", "O_NONBLOCK"
+        )
 
         root_fd = os.open("/", root_flags)
         directory_fds.append(root_fd)
