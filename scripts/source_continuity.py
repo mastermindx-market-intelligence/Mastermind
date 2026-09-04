@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import stat
 import subprocess
 import sys
 from typing import Callable, Mapping, Sequence
@@ -51,6 +52,7 @@ _COMMAND_TIMEOUT_SECONDS = 20.0
 _HTTP_TIMEOUT_SECONDS = 20.0
 _MAX_HTTP_BODY_BYTES = 5_000_000
 _MAX_GIT_CONFIG_CENSUS_BYTES = 65_536
+_MAX_GIT_PATH_BYTES = 4_096
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 _MAX_COLLISION_PRS = 100
@@ -570,6 +572,52 @@ def _index_has_concealed_paths(value: str) -> bool | None:
     return False
 
 
+def _grafts_path_if_safe(runner: Runner, workspace: str) -> str | None:
+    common_dir_result = _invoke_git(
+        runner,
+        workspace,
+        "rev-parse",
+        "--git-common-dir",
+    )
+    if common_dir_result is None or common_dir_result.returncode != 0:
+        return None
+    raw_common_dir = common_dir_result.stdout
+    if (
+        not raw_common_dir.endswith("\n")
+        or raw_common_dir.count("\n") != 1
+        or "\0" in raw_common_dir
+    ):
+        return None
+    common_dir_text = raw_common_dir[:-1]
+    try:
+        encoded = common_dir_text.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+    if not encoded or len(encoded) > _MAX_GIT_PATH_BYTES:
+        return None
+
+    common_dir = Path(common_dir_text)
+    if not common_dir.is_absolute():
+        common_dir = Path(workspace) / common_dir
+    grafts_path = os.path.normpath(str(common_dir / "info" / "grafts"))
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        file_descriptor = os.open(grafts_path, flags)
+    except FileNotFoundError:
+        return grafts_path
+    except OSError:
+        return None
+    try:
+        grafts_stat = os.fstat(file_descriptor)
+        if not stat.S_ISREG(grafts_stat.st_mode) or grafts_stat.st_size != 0:
+            return None
+    except OSError:
+        return None
+    finally:
+        os.close(file_descriptor)
+    return grafts_path
+
+
 def _probe_local_and_entries(
     runner: Runner,
     workspace: str,
@@ -617,6 +665,10 @@ def _probe_local_and_entries(
         f"{merge_base_sha}^{{commit}}",
     )
     if merge_base_object is None or merge_base_object.returncode != 0:
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
+    first_grafts_path = _grafts_path_if_safe(runner, workspace)
+    if first_grafts_path is None:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     ancestor_result = _invoke_git(
@@ -677,7 +729,7 @@ def _probe_local_and_entries(
 
     unstaged = _invoke_git(runner, workspace, "diff", *diff_controls, "HEAD", "--")
     staged = _invoke_git(runner, workspace, "diff", "--cached", *diff_controls, "--")
-    untracked = _invoke_git(runner, workspace, "ls-files", "--others", "--exclude-standard", "-z")
+    untracked = _invoke_git(runner, workspace, "ls-files", "--others", "-z", "--")
     index_flags = _invoke_git(runner, workspace, "ls-files", "-v", "-z")
     if any(
         result is None or result.returncode != 0
@@ -717,6 +769,10 @@ def _probe_local_and_entries(
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
     path_entries = _parse_ls_tree(tree_result.stdout)
     if path_entries is None:
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
+    second_grafts_path = _grafts_path_if_safe(runner, workspace)
+    if second_grafts_path is None or second_grafts_path != first_grafts_path:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     tracked_paths = set(_parse_nul_paths(unstaged.stdout)) | set(_parse_nul_paths(staged.stdout))
