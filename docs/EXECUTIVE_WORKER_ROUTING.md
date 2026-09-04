@@ -33,9 +33,9 @@ same broker + worker UID                isolated worktree + validation
 ```
 
 Executive OS SQLite remains the only owner of Jobs, Attempts, Workers, leases,
-process identity, results, and events. The router returns constraints and a
-ranked logical alias list. It does not create a queue, hold a lease, launch a
-process, poll, retry, or mark work complete.
+process identity, results, and events. The router returns suitability decisions
+and compatibility constraints. It does not create a queue, hold a lease, launch
+a process, poll, retry, or mark work complete.
 
 ## 1. Audit findings
 
@@ -71,6 +71,60 @@ The loader fails closed unless:
 - every worker alias belongs to an enabled, autonomous-allowed provider;
 - every route's aliases have the declared task capabilities.
 
+### RF1 — provider-neutral suitability tiers
+
+`config/executive_worker_routes.json` is now
+`mastermind.executive_worker_routes/v2`. Every worker route/risk is a non-empty
+ordered list of exact objects:
+
+```json
+{
+  "tier_id": "implementation.routine.primary",
+  "model_aliases": ["fast.engineering", "standard.engineering"]
+}
+```
+
+The loader refuses unknown route or tier keys, malformed or duplicate tier IDs,
+empty tiers, duplicate aliases inside or across tiers, aliases that are unknown
+or not worker-eligible, and aliases that do not meet the route capability
+contract. Aliases within one tier must share one execution profile; they are an
+equivalence set for suitability, while their declared order remains the existing
+compatibility/placement preference inside that tier.
+
+`RoutingDecision.suitability_tiers` is the structured decision. Its
+`preferred_model_aliases` property deliberately projects *only the first tier*
+for the existing Job constraint schema. `to_dict()` emits both forms, but
+`job_constraints()` keeps its pre-RF1 key set so this source wave does not widen
+persisted Job bindings. CF2-I is the later, separately reviewed consumer of the
+structured tiers.
+
+The selection law is fixed:
+
+```text
+authority / Job constraints
+        -> required capabilities and independence exclusions
+        -> first lawful Model Router suitability tier
+        -> Capacity Fabric ranks only candidates inside that tier
+        -> Executive OS atomically claims one Worker
+```
+
+Capacity, provider health, account availability, host placement, quota and cost
+are outside this router. They may rank candidates only inside the first lawful
+tier with an eligible candidate; they cannot promote a lower tier, re-admit an
+excluded worker, or waive a capability/authority refusal.
+
+The v1-to-v2 migration changes the closed JSON schema only: its externally
+consumed `routing_policy_version` remains `2026-08-24.stage4` so existing
+persisted Job constraints, R1 shadow evidence, and host-bound consumers retain
+their exact V1 identity. It preserves every current Codex outcome with exactly
+one first tier per route: implementation/mechanical/tests routine use
+`fast.engineering`, `standard.engineering`; their elevated routes use
+`standard.engineering`; research routine uses `fast.research`,
+`standard.research`; elevated research uses `standard.research`; and routine or
+elevated review uses `standard.review`. No provider, model binding, cost class,
+profile, capability, worker eligibility, or production-arm value changes in this
+migration.
+
 Current logical aliases:
 
 | Alias | Initial binding | Use |
@@ -88,6 +142,12 @@ Current logical aliases:
 three providers are disabled. No model slug, credential, endpoint, quota, or
 production capability has been invented for them.
 
+A Codex runtime may later serve a `ceo`-seat technical-staff commission under a
+separate authority grant. The router never grants that seat, any executive role,
+review independence, merge/deploy rights, retry authority, or security authority
+from a provider or model alias. In particular, `frontier.orchestrator` remains a
+non-worker `frontier_lead` outcome even though it names a Codex/Sol model.
+
 ## 3. Deterministic rules
 
 The request vocabulary is intentionally small:
@@ -103,22 +163,25 @@ Routing law:
 
 1. Planning, judgment, escalation, critical work, or high-ambiguity work returns
    `frontier_lead`. It cannot be converted into worker Job constraints.
-2. Routine implementation/tests/mechanical work prefers Luna and falls back to
-   Terra.
-3. Routine research prefers Luna and falls back to Terra.
-4. Elevated implementation/research goes directly to Terra.
-5. Review goes to the Terra review alias. A supplied builder worker ID is
+2. Routine implementation/tests/mechanical work returns one current-equivalence
+   primary tier containing Luna then Terra.
+3. Routine research returns one current-equivalence primary tier containing Luna
+   then Terra.
+4. Elevated implementation/research returns one Terra primary tier.
+5. Review returns one Terra review primary tier. A supplied builder worker ID is
    excluded before the atomic claim.
-6. Within the same logical alias, Executive OS keeps its stable worker-ID and
-   quota-class tie-break. Later accounts/providers can therefore be added under
-   the alias without changing Job semantics.
+6. Within the selected suitability tier, Executive OS keeps its stable worker-ID
+   and quota-class tie-break after the compatibility projection. Later
+   accounts/providers require their own reviewed suitability/capacity wave; they
+   cannot change Job semantics merely by appearing in a provider dictionary.
 7. A routed Job can only claim quota capacity registered under the same routing
    policy version. Stale alias registrations fail closed instead of silently
    inheriting a changed binding.
 
-The claim transaction records the policy version, ranked aliases, selected
-alias, and reason codes in the existing `JOB_CLAIMED` event. There is no router
-ledger.
+The claim transaction records the policy version, first-tier compatibility
+aliases, selected alias, and reason codes in the existing `JOB_CLAIMED` event.
+There is no router ledger, capacity claim, provider enablement, or production
+effect in RF1.
 
 ## 4. Adapter layer
 
