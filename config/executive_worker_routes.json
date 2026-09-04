@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind.executive_worker_routes/v2",
-  "policy_version": "2026-09-03.rf1-v2",
+  "policy_version": "2026-08-24.stage4",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "providers": {

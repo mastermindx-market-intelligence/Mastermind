@@ -113,8 +113,11 @@ are outside this router. They may rank candidates only inside the first lawful
 tier with an eligible candidate; they cannot promote a lower tier, re-admit an
 excluded worker, or waive a capability/authority refusal.
 
-The v1-to-v2 migration preserves every current Codex outcome with exactly one
-first tier per route: implementation/mechanical/tests routine use
+The v1-to-v2 migration changes the closed JSON schema only: its externally
+consumed `routing_policy_version` remains `2026-08-24.stage4` so existing
+persisted Job constraints, R1 shadow evidence, and host-bound consumers retain
+their exact V1 identity. It preserves every current Codex outcome with exactly
+one first tier per route: implementation/mechanical/tests routine use
 `fast.engineering`, `standard.engineering`; their elevated routes use
 `standard.engineering`; research routine uses `fast.research`,
 `standard.research`; elevated research uses `standard.research`; and routine or

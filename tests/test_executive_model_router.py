@@ -38,6 +38,8 @@ _V1_EQUIVALENT_FIRST_TIERS = {
     ("review", "elevated"): ("standard.review",),
 }
 
+_V1_ROUTING_POLICY_VERSION = "2026-08-24.stage4"
+
 _JOB_CONSTRAINT_KEYS = {
     "task_kind",
     "risk",
@@ -56,7 +58,6 @@ _JOB_CONSTRAINT_KEYS = {
 
 def _v2_policy() -> dict:
     raw = json.loads(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
-    raw["policy_version"] = "2026-09-03.rf1-v2"
     if raw["schema_version"] == "mastermind.executive_worker_routes/v1":
         raw["schema_version"] = "mastermind.executive_worker_routes/v2"
         for task_kind, route in raw["routes"].items():
@@ -223,7 +224,7 @@ def test_runtime_claim_honors_alias_order_before_worker_id_and_records_receipt(t
         "fast.engineering",
         "standard.engineering",
     ]
-    assert event.payload["routing_policy_version"] == "2026-09-03.rf1-v2"
+    assert event.payload["routing_policy_version"] == _V1_ROUTING_POLICY_VERSION
     assert event.payload["execution_profile_id"] == "sealed.worker.write.no-extensions.v1"
     assert event.payload["execution_profile_digest"] == decision.execution_profile_digest
     assert event.payload["capability_policy_version"] == decision.capability_policy_version
@@ -474,11 +475,11 @@ def test_v2_decision_exposes_ordered_suitability_tiers_and_compatibility_project
     assert "suitability_tiers" not in constraints
 
 
-def test_current_v2_policy_preserves_the_complete_v1_codex_route_inventory():
+def test_current_v2_schema_preserves_the_complete_v1_codex_route_and_policy_contract():
     router = ModelRouter.load()
 
     assert ROUTER_SCHEMA_VERSION == "mastermind.executive_worker_routes/v2"
-    assert router.policy_version == "2026-09-03.rf1-v2"
+    assert router.policy_version == _V1_ROUTING_POLICY_VERSION
     for (task_kind, risk), aliases in _V1_EQUIVALENT_FIRST_TIERS.items():
         decision = router.route(WorkRequest(task_kind, risk=risk))
         assert decision.suitability_tiers == (
@@ -487,6 +488,9 @@ def test_current_v2_policy_preserves_the_complete_v1_codex_route_inventory():
         assert decision.preferred_model_aliases == aliases
         assert decision.to_dict()["preferred_model_aliases"] == list(aliases)
         assert decision.job_constraints()["preferred_model_aliases"] == list(aliases)
+        assert decision.job_constraints()["routing_policy_version"] == (
+            _V1_ROUTING_POLICY_VERSION
+        )
 
 
 @pytest.mark.parametrize(
