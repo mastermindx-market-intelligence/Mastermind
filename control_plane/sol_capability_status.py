@@ -135,8 +135,8 @@ def _timestamp(value: object, field: str, *, optional: bool = False) -> str | No
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (ValueError, OverflowError):
-        raise error from None
-    if parsed.tzinfo is None:
+        parsed = None
+    if parsed is None or parsed.tzinfo is None:
         raise error
     canonical = parsed.astimezone(timezone.utc)
     timespec = "microseconds" if canonical.microsecond else "seconds"
