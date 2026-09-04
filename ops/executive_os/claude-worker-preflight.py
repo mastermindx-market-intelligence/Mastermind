@@ -1195,7 +1195,7 @@ def _collect_bounded_output(
                     timeout_seconds, _PROVIDER_IDLE_TIMEOUT_SECONDS
                 )
 
-        remaining = absolute_deadline - time.monotonic()
+        remaining = min(absolute_deadline, idle_deadline) - time.monotonic()
         if remaining <= 0:
             _raise("PROVIDER_TIMEOUT")
         try:
