@@ -197,6 +197,8 @@ preflight_directory "$SYSTEM_ROOT" 0 0 755
 preflight_directory "$CONFIG_ROOT" 0 0 755
 preflight_directory "$RUNTIME_ROOT" 0 0 711
 preflight_directory "$RELAY_HOME" "$RELAY_UID" "$RELAY_GID" 700
+ensure_numeric_unused Groups PrimaryGroupID "$RELAY_GID" "$RELAY_GROUP"
+ensure_numeric_unused Users UniqueID "$RELAY_UID" "$RELAY_USER"
 
 ensure_group
 ensure_user

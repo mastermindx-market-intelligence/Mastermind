@@ -10,14 +10,40 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PREP = ROOT / "ops" / "executive_os" / "prepare-a2-agent-relay-host.sh"
-RELEASES = "/Library/Application Support/MastermindExecutive/releases"
 
 
-def test_refuses_non_root_before_any_host_preparation():
-    """A privilege-gate regression must never reach a host mutation."""
+def test_refuses_non_macos_before_any_host_preparation(tmp_path: Path):
+    """Removing the production platform guard must fail before argument parsing."""
+
+    fake_uname = tmp_path / "uname"
+    _write_executable(fake_uname, "#!/bin/sh\nprintf 'Linux\\n'\n")
+    artifact = tmp_path / "prepare-a2-agent-relay-host.sh"
+    _write_executable(
+        artifact,
+        PREP.read_text(encoding="utf-8").replace("/usr/bin/uname", str(fake_uname)),
+    )
 
     completed = subprocess.run(
-        ["/bin/bash", str(PREP), "--release-root", f"{RELEASES}/{'a' * 40}"],
+        ["/bin/bash", str(artifact), "--release-root", "/not/a/real/release"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 69
+    assert "supports macOS only" in completed.stderr
+
+
+def test_refuses_non_root_before_any_host_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A privilege-gate regression must never reach a host mutation."""
+
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    monkeypatch.setenv("A2_FAKE_UID", "501")
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
         check=False,
         capture_output=True,
         text=True,
@@ -28,11 +54,15 @@ def test_refuses_non_root_before_any_host_preparation():
 
 
 @pytest.mark.parametrize("arguments", [(), ("--unexpected",), ("--release-root",)])
-def test_refuses_ambiguous_invocation_before_any_host_preparation(arguments):
+def test_refuses_ambiguous_invocation_before_any_host_preparation(
+    arguments, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """Removing the closed argument gate must fail before a host command runs."""
 
+    artifact, state_path, _paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
     completed = subprocess.run(
-        ["/bin/bash", str(PREP), *arguments],
+        ["/bin/bash", str(artifact), *arguments],
         check=False,
         capture_output=True,
         text=True,
@@ -43,20 +73,27 @@ def test_refuses_ambiguous_invocation_before_any_host_preparation(arguments):
 
 
 @pytest.mark.parametrize(
-    ("release_root", "expected_error"),
+    ("candidate", "expected_error"),
     [
-        ("/tmp/unreviewed-release", "beneath the reviewed releases root"),
-        (f"{RELEASES}/not-a-sha", "full 40-character lowercase hexadecimal SHA"),
-        (f"{RELEASES}/{'F' * 40}", "full 40-character lowercase hexadecimal SHA"),
+        ("outside", "beneath the reviewed releases root"),
+        ("not-a-sha", "full 40-character lowercase hexadecimal SHA"),
+        ("F" * 40, "full 40-character lowercase hexadecimal SHA"),
     ],
 )
 def test_refuses_untrusted_release_identity_before_any_host_preparation(
-    release_root, expected_error
+    candidate, expected_error, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """Changing the release boundary or SHA parser must fail this host gate."""
 
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    release_root = (
+        tmp_path / "unreviewed-release"
+        if candidate == "outside"
+        else paths["release"].parent / candidate
+    )
     completed = subprocess.run(
-        ["/bin/bash", str(PREP), "--release-root", release_root],
+        ["/bin/bash", str(artifact), "--release-root", str(release_root)],
         check=False,
         capture_output=True,
         text=True,
@@ -126,7 +163,7 @@ import sys
 
 state = json.loads(open(os.environ["A2_FAKE_STATE"], encoding="utf-8").read())
 if sys.argv[1:] == ["-u"]:
-    print("0")
+    print(os.environ.get("A2_FAKE_UID", "0"))
 elif sys.argv[1:] == ["-G", "_mastermind_exec"]:
     members = state["groups"].get("_mastermind_agent_relay", {{}}).get("GroupMembership", [])
     print("450 457" if "_mastermind_exec" in members else "450")
@@ -363,6 +400,34 @@ def test_refuses_a_foreign_relay_gid_before_creating_any_partial_identity(
 
     assert completed.returncode == 65
     assert "PrimaryGroupID 457 has an unexpected owner set" in completed.stderr
+    assert json.loads(state_path.read_text(encoding="utf-8")) == before
+    assert not paths["runtime"].exists()
+
+
+def test_refuses_a_foreign_relay_uid_before_creating_any_partial_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Moving UID collision validation after group creation must fail this test."""
+
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["users"]["foreign-service"] = {
+        "PrimaryGroupID": "499",
+        "UniqueID": "457",
+    }
+    state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    before = json.loads(state_path.read_text(encoding="utf-8"))
+
+    completed = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 65
+    assert "UniqueID 457 has an unexpected owner set" in completed.stderr
     assert json.loads(state_path.read_text(encoding="utf-8")) == before
     assert not paths["runtime"].exists()
 
