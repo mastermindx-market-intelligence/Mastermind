@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -689,6 +690,61 @@ def test_extracted_terminal_history_owner_rejects_order_material_and_receipt_mut
     candidate = terminal_candidate()
     command_base, material = observation_mod.terminal_return_event_material(candidate)
     phase_spec = observation_mod.terminal_return_phase_spec(command_base)
+    candidate_bytes = (
+        json.dumps(
+            dataclasses.asdict(candidate),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    assert command_base == (
+        f"terminal-return:{candidate.attempt_id}:{candidate.terminal_digest}"
+    )
+    assert material == {
+        "schema_version": "mastermind.executive_terminal_return_projection/v1",
+        "job_id": candidate.job_id,
+        "attempt_id": candidate.attempt_id,
+        "worker_id": candidate.worker_id,
+        "root_job_id": candidate.root_job_id,
+        "message_key": candidate.message_key,
+        "terminal_digest": candidate.terminal_digest,
+        "candidate_digest": hashlib.sha256(candidate_bytes).hexdigest(),
+    }
+    assert phase_spec == (
+        (
+            "PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            f"{command_base}:prepared",
+        ),
+        (
+            "PRE_SUBMIT_REFUSED",
+            "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+            f"{command_base}:pre-submit-refused",
+        ),
+        (
+            "ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            f"{command_base}:attempted",
+        ),
+        (
+            "PROVEN_NO_EFFECT",
+            "EXECUTIVE_TERMINAL_RETURN_PROVEN_NO_EFFECT",
+            f"{command_base}:proven-no-effect",
+        ),
+        (
+            "EFFECT_UNKNOWN",
+            "EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN",
+            f"{command_base}:effect-unknown",
+        ),
+        (
+            "APPLIED",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+            f"{command_base}:applied",
+        ),
+    )
     phase_by_name = {
         phase: (event_type, command_id)
         for phase, event_type, command_id in phase_spec
