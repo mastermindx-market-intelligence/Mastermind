@@ -7174,7 +7174,13 @@ def test_realm1_strict_producer_samples_once_before_traversal_and_uses_plus_four
         calls.append((argv, timeout, max_bytes))
         mlx_root.mkdir()
         gologin_root.mkdir()
-        return _strict_ps("x" * chatgpt._PS_SNAPSHOT_MAX_BYTES + "\N{EURO SIGN}")
+        raw = (
+            "x" * chatgpt._PS_SNAPSHOT_MAX_BYTES + "\N{EURO SIGN}"
+        ).encode("utf-8")
+        # Model runner._cap exactly: a +1 margin drops the split scalar and
+        # falsely looks complete, while +4 preserves bytes beyond the limit.
+        capped = raw[:max_bytes].decode("utf-8", errors="ignore")
+        return _strict_ps(capped)
 
     with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
         chatgpt._strict_list_local_environments(  # noqa: SLF001
