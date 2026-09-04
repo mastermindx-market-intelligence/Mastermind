@@ -5,6 +5,7 @@ import inspect
 import json
 import time
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from types import MethodType
 
 import jwt
@@ -26,6 +27,10 @@ from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 from integrations.mastermind_secretary_mcp.adapter import StewardGrounding
 from integrations.mastermind_steward_app.app import build_authenticated_app
+from integrations.mastermind_steward_app.projection import (
+    ControlRoomStewardReadPort,
+    responsibility_ref_for,
+)
 from integrations.mastermind_steward_app.server import (
     REQUIRED_SCOPE,
     build_contract_server,
@@ -306,6 +311,81 @@ def _build(*, result: AccessToken | None = None):
         token_verifier=verifier,
     )
     return app, policy, calls, port
+
+
+def _projection_snapshot() -> dict[str, object]:
+    return {
+        "schema": "mastermind.chairman_control_room.v1",
+        "generated_at": "2026-09-01T12:04:00Z",
+        "sources": {
+            "agent_os_state_generated_at": "2026-09-01T12:03:00Z",
+            "runtime_db_present": True,
+            "bindings_path_present": True,
+        },
+        "degraded": [],
+        "attention": {
+            "chairman": [],
+            "ceo": [
+                {
+                    "attention_id": "ATTENTION-RAW-001",
+                    "kind": "decision",
+                    "target": "ceo",
+                    "source": "agent_os",
+                    "job_id": None,
+                    "workstream": "WS:ALPHA",
+                    "status": None,
+                    "reason": "Ship or hold the Alpha One rollout?",
+                    "evidence": [],
+                    "existing_next_actions": [],
+                }
+            ],
+            "coo": [],
+        },
+        "work": [
+            {
+                "work_ref": "WS:ALPHA",
+                "agent_os": {
+                    "title": "Alpha program",
+                    "program": "Alpha One",
+                    "next_action": "Get the CEO ruling on ship vs hold",
+                    "status": "in_progress",
+                    "state": "in_progress",
+                    "reason_code": "workstream_active",
+                    "reason": "Authored workstream status is active.",
+                    "depends_on": [],
+                    "unmet_dependencies": [],
+                },
+                "executive": {
+                    "jobs": [
+                        {
+                            "job_id": "JOB-RAW-001",
+                            "status": "queued",
+                            "workstream": "WS:ALPHA",
+                        }
+                    ],
+                    "joined_by": "ceo_intent_provenance",
+                },
+                "github": {"prs": []},
+                "attention_ids": ["ATTENTION-RAW-001"],
+                "bindings": [
+                    {
+                        "binding_id": "11111111-1111-4111-8111-111111111111",
+                        "work_ref": "WS:ALPHA",
+                        "role": "ceo",
+                        "provider": "chatgpt",
+                        "seat_ref": "SEAT-RAW-001",
+                        "locator_kind": "chat",
+                        "observed_at": "2026-09-01T12:03:30Z",
+                        "last_verified_at": "2026-09-01T12:04:30Z",
+                    }
+                ],
+                "disagreements": [],
+            }
+        ],
+        "unjoined_open_prs": [],
+        "unbound_surfaces": [],
+        "binding_conflicts": [],
+    }
 
 
 def _challenge(response) -> str:
@@ -708,6 +788,108 @@ def test_real_signed_token_performs_one_authenticated_tool_call(
     assert missing.json() == {"error": "invalid_token"}
     assert token not in response.text
     assert token not in missing.text
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        ("list_responsibilities", {}),
+        (
+            "get_responsibility",
+            {"responsibility_ref": responsibility_ref_for("WS:ALPHA")},
+        ),
+        ("get_attention", {}),
+        (
+            "get_current_runtime",
+            {"responsibility_ref": responsibility_ref_for("WS:ALPHA")},
+        ),
+        (
+            "explain_blocker",
+            {"responsibility_ref": responsibility_ref_for("WS:ALPHA")},
+        ),
+        (
+            "resolve_surface",
+            {"responsibility_ref": responsibility_ref_for("WS:ALPHA")},
+        ),
+    ],
+)
+def test_real_control_room_port_crosses_exact_a1_asgi_for_each_nonempty_tool(
+    tool_name: str,
+    arguments: dict[str, str],
+    rsa_key: rsa.RSAPrivateKey,
+):
+    policy = _policy()
+    verifier, fetcher, sink = _real_verifier(policy, rsa_key)
+    bearer = _token(rsa_key, policy)
+    snapshot_calls: list[int] = []
+
+    def provider():
+        snapshot_calls.append(1)
+        return _projection_snapshot()
+
+    port = ControlRoomStewardReadPort(
+        provider,
+        clock=lambda: datetime(
+            2026,
+            9,
+            1,
+            12,
+            5,
+            0,
+            tzinfo=timezone.utc,
+        ),
+        stale_after_seconds=900,
+    )
+    app = build_authenticated_app(
+        build_contract_server(port),
+        policy=policy,
+        token_verifier=verifier,
+    )
+    body = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": tool_name, "arguments": arguments},
+    }
+
+    with TestClient(app, base_url=BASE_URL) as client:
+        response = client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": f"Bearer {bearer}"},
+            json=body,
+        )
+
+    assert response.status_code == 200
+    assert snapshot_calls == [1]
+    assert fetcher.calls == [JWKS_URI]
+    assert sink.events == [
+        AuthAuditEvent(
+            schema=AUTH_AUDIT_SCHEMA,
+            policy_id=policy.policy_id,
+            code="accepted",
+            accepted=True,
+        )
+    ]
+    payload = response.json()["result"]
+    structured = payload["structuredContent"]
+    assert structured["schema"] == "mastermind.secretary_grounding_mcp_result.v2"
+    assert structured["server_version"] == "2.0.0"
+    assert structured["tool"] == tool_name
+    assert structured["ok"] is True
+    assert structured["error"] is None
+    assert isinstance(structured["data"], dict)
+    assert structured["data"]["subjects"]
+    assert json.loads(payload["content"][0]["text"]) == structured
+
+    wire = response.text
+    for private in (
+        bearer,
+        "JOB-RAW-001",
+        "ATTENTION-RAW-001",
+        "11111111-1111-4111-8111-111111111111",
+        "SEAT-RAW-001",
+    ):
+        assert private not in wire
 
 
 @pytest.mark.parametrize(
