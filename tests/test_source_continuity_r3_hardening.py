@@ -373,6 +373,8 @@ class CaptureRunner:
             return SimpleNamespace(returncode=0, stdout="")
         if tail[:2] == ("rev-list", "--count"):
             return SimpleNamespace(returncode=0, stdout="0\n")
+        if tail[0] == "config":
+            return SimpleNamespace(returncode=1, stdout="")
         if tail[0] == "diff":
             return SimpleNamespace(
                 returncode=0,
@@ -388,7 +390,7 @@ class CaptureRunner:
 
 
 def git_tail(command: tuple[str, ...]) -> tuple[str, ...]:
-    commands = {"rev-parse", "symbolic-ref", "cat-file", "merge-base", "rev-list", "diff", "ls-files", "ls-tree", "status"}
+    commands = {"rev-parse", "symbolic-ref", "cat-file", "merge-base", "rev-list", "config", "diff", "ls-files", "ls-tree", "status"}
     return command[next(i for i, value in enumerate(command) if i and value in commands):]
 
 
@@ -437,7 +439,10 @@ def test_all_local_probes_use_closed_argv_and_explicit_diff_controls() -> None:
     diffs = [git_tail(c) for c in runner.commands if git_tail(c)[0] == "diff"]
     assert len(diffs) == 3
     for command in diffs:
-        for flag in ("--no-renames", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--"):
+        for flag in (
+            "--no-renames", "--no-ext-diff", "--no-textconv",
+            "--ignore-submodules=none", "--name-only", "-z", "--",
+        ):
             assert flag in command
     tree = next(git_tail(c) for c in runner.commands if git_tail(c)[0] == "ls-tree")
     assert "--" in tree and tree[-1] == OWNED[0]
@@ -628,6 +633,96 @@ def helper(path: Path, marker: Path, output: str = "") -> None:
         encoding="utf-8",
     )
     path.chmod(0o755)
+
+
+@pytest.mark.parametrize("helper_key", ["clean", "process"])
+def test_real_probe_refuses_filter_helpers_before_they_execute(
+    tmp_path,
+    helper_key: str,
+) -> None:
+    repo = tmp_path / f"filter-{helper_key}"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "R3 Test")
+    git(repo, "config", "user.email", "r3@example.invalid")
+    (repo / ".gitattributes").write_text("*.txt filter=evil\n", encoding="utf-8")
+    (repo / "value.txt").write_text("AAAA", encoding="utf-8")
+    git(repo, "add", ".gitattributes", "value.txt")
+    git(repo, "commit", "-q", "-m", "filtered base")
+    head = git(repo, "rev-parse", "HEAD^{commit}")
+
+    marker = tmp_path / f"{helper_key}-executed"
+    script = tmp_path / f"{helper_key}-filter.sh"
+    if helper_key == "clean":
+        script.write_text(
+            "#!/bin/sh\ncat >/dev/null\n"
+            f"printf hit > {marker}\n"
+            "printf AAAA\n",
+            encoding="utf-8",
+        )
+    else:
+        script.write_text(
+            "#!/bin/sh\n"
+            f"printf hit > {marker}\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+    script.chmod(0o755)
+    git(repo, "config", f"filter.evil.{helper_key}", str(script))
+    git(repo, "config", "filter.evil.required", "true")
+    (repo / "value.txt").write_text("BBBB", encoding="utf-8")
+    marker.unlink(missing_ok=True)
+
+    module = _module()
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        repo_request(module, repo, head),
+        head,
+        head,
+        (),
+    )
+    assert isinstance(result, module.SourceContinuityRefusal)
+    assert result.code.value == "LOCAL_PROBE_FAILED"
+    assert not marker.exists()
+
+
+def test_real_probe_observes_dirty_submodule_despite_local_ignore_all(tmp_path) -> None:
+    child = tmp_path / "child"
+    init_repo(child, "child")
+    parent = tmp_path / "parent"
+    init_repo(parent, "parent")
+    git(
+        parent,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        str(child),
+        "sub",
+    )
+    git(parent, "commit", "-q", "-am", "add submodule")
+    merge_base = git(parent, "rev-parse", "HEAD^{commit}")
+    (parent / "value.txt").write_text("remote", encoding="utf-8")
+    git(parent, "add", "value.txt")
+    git(parent, "commit", "-q", "-m", "remote value change")
+    head = git(parent, "rev-parse", "HEAD^{commit}")
+    git(parent, "config", "submodule.sub.ignore", "all")
+    (parent / "sub" / "value.txt").write_text("dirty", encoding="utf-8")
+
+    module = _module()
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(parent),
+        repo_request(module, parent, head),
+        head,
+        merge_base,
+        ("value.txt",),
+    )
+    assert not isinstance(result, module.SourceContinuityRefusal)
+    local_facts, _ = result
+    assert local_facts.uncommitted_out_of_scope_count == 1
 
 
 def test_real_diff_disables_fsmonitor_external_diff_and_textconv(tmp_path) -> None:

@@ -898,6 +898,7 @@ class _ProbeRunner:
             "cat-file",
             "merge-base",
             "rev-list",
+            "config",
             "diff",
             "ls-files",
             "ls-tree",
@@ -918,6 +919,8 @@ class _ProbeRunner:
             "core.excludesFile=/dev/null",
             "diff.external=",
             "diff.renames=false",
+            "core.checkStat=default",
+            "core.trustctime=true",
             "credential.helper=",
             "protocol.allow=never",
             "protocol.file.allow=always",
@@ -942,13 +945,18 @@ class _ProbeRunner:
         if call == ("rev-list", "--count", f"{HEAD_SHA}..HEAD"):
             return self._done(stdout="0\n")
         if call == (
+            "config", "--null", "--name-only", "--get-regexp",
+            r"^filter\..*\.(clean|process)$",
+        ):
+            return self._done(returncode=1)
+        if call == (
             "diff", "--no-renames", "--no-ext-diff", "--no-textconv",
-            "--name-only", "-z", "HEAD", "--",
+            "--ignore-submodules=none", "--name-only", "-z", "HEAD", "--",
         ):
             return self._done()
         if call == (
             "diff", "--cached", "--no-renames", "--no-ext-diff", "--no-textconv",
-            "--name-only", "-z", "--",
+            "--ignore-submodules=none", "--name-only", "-z", "--",
         ):
             return self._done()
         if call == ("ls-files", "-v", "-z"):
@@ -962,6 +970,7 @@ class _ProbeRunner:
             "--no-renames",
             "--no-ext-diff",
             "--no-textconv",
+            "--ignore-submodules=none",
             "--name-only",
             "-z",
             f"{BASE_SHA}..{HEAD_SHA}",
