@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
@@ -50,6 +50,10 @@ def build_result_payload(
     *,
     decision: str,
     generated_at: datetime,
+    request_digest: str,
+    toolchain_lock_sha256: str,
+    bundle_sha256: str,
+    bundle_manifest_sha256: str,
     manifest_digest: str,
     path_policy_digest: str,
     tool_schema_digest: str,
@@ -64,6 +68,10 @@ def build_result_payload(
     if decision not in _DECISIONS:
         raise ValueError("unknown Z0 decision")
     for label, digest in (
+        ("request_digest", request_digest),
+        ("toolchain_lock_sha256", toolchain_lock_sha256),
+        ("bundle_sha256", bundle_sha256),
+        ("bundle_manifest_sha256", bundle_manifest_sha256),
         ("manifest_digest", manifest_digest),
         ("path_policy_digest", path_policy_digest),
         ("tool_schema_digest", tool_schema_digest),
@@ -79,6 +87,10 @@ def build_result_payload(
         "schema_version": RESULT_SCHEMA_VERSION,
         "decision": decision,
         "generated_at": generated_at.astimezone(UTC).isoformat(),
+        "request_digest": request_digest,
+        "toolchain_lock_sha256": toolchain_lock_sha256,
+        "bundle_sha256": bundle_sha256,
+        "bundle_manifest_sha256": bundle_manifest_sha256,
         "manifest_digest": manifest_digest,
         "path_policy_digest": path_policy_digest,
         "tool_schema_digest": tool_schema_digest,
@@ -129,6 +141,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--log-root", type=Path, required=True)
     parser.add_argument("--result", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument(
+        "--request-digest", type=_sha256_argument("request_digest"), required=True
+    )
+    parser.add_argument(
+        "--toolchain-lock-sha256",
+        type=_sha256_argument("toolchain_lock_sha256"),
+        required=True,
+    )
+    parser.add_argument(
+        "--bundle-sha256", type=_sha256_argument("bundle_sha256"), required=True
+    )
+    parser.add_argument(
+        "--bundle-manifest-sha256",
+        type=_sha256_argument("bundle_manifest_sha256"),
+        required=True,
+    )
     parser.add_argument("--startup-timeout-seconds", type=float, default=10.0)
     arguments = parser.parse_args(argv)
 
@@ -155,6 +183,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 statuses, benchmarks_complete=False
             ),
             generated_at=datetime.now(UTC),
+            request_digest=arguments.request_digest,
+            toolchain_lock_sha256=arguments.toolchain_lock_sha256,
+            bundle_sha256=arguments.bundle_sha256,
+            bundle_manifest_sha256=arguments.bundle_manifest_sha256,
             manifest_digest=material_source_manifest_digest(manifest),
             path_policy_digest=_sha256_file(arguments.path_policy),
             tool_schema_digest=discovery_tool_schema_digest(),
@@ -206,6 +238,10 @@ def _render_report(payload: Mapping[str, object]) -> str:
         "# Z0 Global Discovery Falsifier Result\n\n"
         f"Decision: {payload['decision']}\n\n"
         f"Generated at: {payload['generated_at']}\n\n"
+        f"Request digest: {payload['request_digest']}\n\n"
+        f"Toolchain lock SHA-256: {payload['toolchain_lock_sha256']}\n\n"
+        f"Bundle SHA-256: {payload['bundle_sha256']}\n\n"
+        f"Bundle manifest SHA-256: {payload['bundle_manifest_sha256']}\n\n"
         "## Repository/ref status\n\n"
         f"{rows or '- none'}\n\n"
         "This is a disposable production-inert experiment result. It does not "
@@ -217,6 +253,17 @@ def _render_report(payload: Mapping[str, object]) -> str:
 def _require_sha256(label: str, value: str) -> None:
     if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
         raise ValueError(f"{label} must be a lowercase SHA-256 digest")
+
+
+def _sha256_argument(label: str) -> Callable[[str], str]:
+    def parse(value: str) -> str:
+        try:
+            _require_sha256(label, value)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(str(error)) from error
+        return value
+
+    return parse
 
 
 def _sha256_file(path: Path) -> str:
