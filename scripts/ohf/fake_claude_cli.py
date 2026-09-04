@@ -546,12 +546,27 @@ def _main() -> int:
     elif scenario == "result_invalid_cost":
         events[-1]["total_cost_usd"] = -1
     elif scenario == "secret_output":
-        events[0]["capabilities"] = ["sk-ant-FAKE_SENTINEL_NOT_A_SECRET"]
+        events[0]["capabilities"] = ["sk-" + "ant-" + "FAKE_SENTINEL_NOT_A_SECRET"]
     elif scenario == "private_path_output":
         events[0]["capabilities"] = ["/Users/example/private"]
-    elif scenario not in {"ok", "nonzero_after_success"}:
+    elif scenario not in {"ok", "nonzero_after_success", "child_after_result"}:
         _reject("scenario", 75)
 
+    if scenario == "child_after_result":
+        signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+        child = subprocess.Popen(
+            [
+                "/usr/bin/python3",
+                "-c",
+                "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        state["children"] = [child.pid]
+        _write_state(state_path, state)
     for event in events:
         _emit(event)
     return 7 if scenario == "nonzero_after_success" else 0

@@ -1,8 +1,8 @@
 """Closed, provider-private Claude CLI protocol falsifier.
 
 This module compiles and observes exactly one foreground ``claude -p`` shape.
-It deliberately does not define or mutate Executive Worker, Job, Attempt,
-Event, RuntimeBinding, routing, capacity, claim, service, or broker state.
+It deliberately does not define or mutate any shared lifecycle or control-plane
+state.
 
 The boundary is evidence-negative by design: after a process starts, any
 ambiguous stream, timeout, cancellation, exit, or cleanup result fails closed
@@ -1184,6 +1184,16 @@ def _cleanup_process(
     residue: list[str] = []
     if pgid != process.pid or pgid == os.getpgrp():
         residue.append("PROCESS_GROUP_IDENTITY_UNPROVEN")
+        if process.poll() is None:
+            try:
+                process.kill()
+                kill_sent = True
+            except ProcessLookupError:
+                pass
+        try:
+            process.wait(timeout=max(grace_seconds, 1.0))
+        except subprocess.TimeoutExpired:
+            residue.append("LEADER_NOT_REAPED")
     else:
         group_status = _group_status(pgid)
         if force_termination and group_status == "ALIVE":
@@ -1319,7 +1329,7 @@ class ClaudeCliRunner:
         self._lock = threading.Lock()
         self._started = False
 
-    def _claim_once(self) -> None:
+    def _mark_started_once(self) -> None:
         with self._lock:
             if self._started:
                 raise _fail_before_start(
@@ -1335,7 +1345,7 @@ class ClaudeCliRunner:
         cancel_event: threading.Event | None = None,
         fake_controls: Mapping[str, str] | None = None,
     ) -> ClaudeCliRunReceipt:
-        self._claim_once()
+        self._mark_started_once()
         _validate_command_integrity(command)
         controls = _validate_fake_controls(command, fake_controls)
         if cancel_event is not None and cancel_event.is_set():
@@ -1360,7 +1370,8 @@ class ClaudeCliRunner:
             pgid = os.getpgid(process.pid)
         except OSError as exc:
             try:
-                process.kill()
+                if process.poll() is None:
+                    process.kill()
             finally:
                 process.wait()
             raise ClaudeCliProtocolError(
@@ -1398,8 +1409,6 @@ class ClaudeCliRunner:
         parser = _StreamParser(command)
         stream_digest = hashlib.sha256()
         stdout_buffer = bytearray()
-        stderr_seen = bytearray()
-        stdout_seen = bytearray()
         stdout_total = 0
         stderr_total = 0
         selector = selectors.DefaultSelector()
@@ -1459,7 +1468,6 @@ class ClaudeCliRunner:
                         break
                     if key.data == "stderr":
                         stderr_total += len(chunk)
-                        stderr_seen.extend(chunk[-512:])
                         if stderr_total > command.max_stderr_bytes:
                             violation = _StreamViolation(
                                 "STDERR_BYTE_LIMIT",
@@ -1474,7 +1482,6 @@ class ClaudeCliRunner:
                             )
                         break
                     stdout_total += len(chunk)
-                    stdout_seen.extend(chunk[-512:])
                     stream_digest.update(chunk)
                     if stdout_total > command.max_stdout_bytes:
                         violation = _StreamViolation(
@@ -1584,6 +1591,13 @@ class ClaudeCliRunner:
                 "PROCESS_RESIDUE_UNPROVEN",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "Claude CLI cleanup was not fully proven",
+                cleanup=cleanup,
+            )
+        if cleanup.term_sent or cleanup.kill_sent:
+            raise ClaudeCliProtocolError(
+                "PROCESS_RESIDUE_OBSERVED",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "Claude CLI descendants survived the terminal result",
                 cleanup=cleanup,
             )
 

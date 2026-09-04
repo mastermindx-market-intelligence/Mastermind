@@ -79,8 +79,8 @@ def _policy(
     tmp_path: Path,
     *,
     version: str = "2.1.259",
-    idle_timeout_seconds: float = 1.0,
-    absolute_timeout_seconds: float = 3.0,
+    idle_timeout_seconds: float = 3.0,
+    absolute_timeout_seconds: float = 5.0,
     max_stdout_bytes: int = 131_072,
     max_line_bytes: int = 32_768,
     max_events: int = 16,
@@ -279,6 +279,14 @@ def test_protocol_dataclasses_are_deeply_immutable(tmp_path: Path) -> None:
     assert isinstance(command.environment, tuple)
 
 
+def test_compiler_refuses_the_native_home_even_with_an_isolated_temp(tmp_path: Path) -> None:
+    policy, _, _, _ = _policy(tmp_path)
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        compile_claude_cli_command(dataclasses.replace(policy, isolated_home=Path.home()))
+    assert captured.value.code == "HOME_NOT_ISOLATED"
+    assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
+
+
 def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Path) -> None:
     policy, workspace, head, status = _policy(tmp_path)
     command = compile_claude_cli_command(policy)
@@ -406,8 +414,8 @@ def test_total_stdout_cap_terminates_and_reaps_process_group(tmp_path: Path) -> 
 def test_timeout_contains_leader_and_marked_descendants(tmp_path: Path, scenario: str) -> None:
     policy, workspace, head, status = _policy(
         tmp_path,
-        idle_timeout_seconds=1.0,
-        absolute_timeout_seconds=1.5,
+        idle_timeout_seconds=4.0,
+        absolute_timeout_seconds=5.0,
     )
     state = tmp_path / "fake-state.json"
     with pytest.raises(ClaudeCliProtocolError) as captured:
@@ -421,6 +429,33 @@ def test_timeout_contains_leader_and_marked_descendants(tmp_path: Path, scenario
     assert error.cleanup is not None
     assert error.cleanup.process_group_empty is True
     assert error.cleanup.leader_reaped is True
+    assert error.cleanup.residue_rows == ()
+    payload = json.loads(state.read_text(encoding="utf-8"))
+    for child_pid in payload["children"]:
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_descendant_after_terminal_result_prevents_success(tmp_path: Path) -> None:
+    policy, workspace, head, status = _policy(
+        tmp_path,
+        idle_timeout_seconds=2.0,
+        absolute_timeout_seconds=3.0,
+    )
+    state = tmp_path / "fake-state.json"
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, "child_after_result"),
+        )
+    error = captured.value
+    assert error.code == "PROCESS_RESIDUE_OBSERVED"
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.process_group_empty is True
+    assert error.cleanup.leader_reaped is True
+    assert error.cleanup.term_sent or error.cleanup.kill_sent
     assert error.cleanup.residue_rows == ()
     payload = json.loads(state.read_text(encoding="utf-8"))
     for child_pid in payload["children"]:
