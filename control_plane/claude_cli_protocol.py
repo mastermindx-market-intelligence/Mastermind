@@ -1,8 +1,10 @@
 """Closed, provider-private Claude CLI protocol falsifier.
 
-This module compiles and observes exactly one foreground ``claude -p`` shape.
-It deliberately does not define or mutate any shared lifecycle or control-plane
-state.
+This module compiles exactly one foreground ``claude -p`` shape and, in PF1-F0,
+observes it only through the exact committed fake executable.  A later guarded
+integration must supply native managed-policy and authentication attestation
+before it can lift that provider-free effect ceiling.  This module deliberately
+does not define or mutate any shared lifecycle or control-plane state.
 
 The boundary is evidence-negative by design: after a process starts, any
 ambiguous stream, timeout, cancellation, exit, or cleanup result fails closed
@@ -16,6 +18,7 @@ import hashlib
 import json
 import math
 import os
+import pwd
 import re
 import selectors
 import signal
@@ -54,6 +57,7 @@ _FAKE_CONTROL_KEYS = frozenset(
         "MMX_FAKE_CLAUDE_STATE_FILE",
         "MMX_FAKE_CLAUDE_VERSION",
         "MMX_FAKE_CLAUDE_MAX_STARTS",
+        "MMX_FAKE_CLAUDE_MANAGED_SETTINGS",
     }
 )
 _SENSITIVE_BYTES = (
@@ -171,6 +175,7 @@ class ClaudeCliCommand:
     max_json_collection_items: int
     argv_sha256: str
     environment_sha256: str
+    settings_sha256: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -184,10 +189,13 @@ class ClaudeCliEvent:
 @dataclasses.dataclass(frozen=True)
 class ClaudeCliCleanupReceipt:
     process_group_empty: bool
+    marked_descendants_empty: bool
     leader_reaped: bool
     stdin_closed: bool
     stdout_closed: bool
     stderr_closed: bool
+    reader_closed: bool
+    scratch_empty: bool
     term_sent: bool
     kill_sent: bool
     residue_rows: tuple[str, ...]
@@ -195,10 +203,13 @@ class ClaudeCliCleanupReceipt:
     def to_dict(self) -> dict[str, Any]:
         return {
             "process_group_empty": self.process_group_empty,
+            "marked_descendants_empty": self.marked_descendants_empty,
             "leader_reaped": self.leader_reaped,
             "stdin_closed": self.stdin_closed,
             "stdout_closed": self.stdout_closed,
             "stderr_closed": self.stderr_closed,
+            "reader_closed": self.reader_closed,
+            "scratch_empty": self.scratch_empty,
             "term_sent": self.term_sent,
             "kill_sent": self.kill_sent,
             "residue_rows": list(self.residue_rows),
@@ -220,6 +231,7 @@ class ClaudeCliRunReceipt:
     stream_sha256: str
     argv_sha256: str
     environment_sha256: str
+    settings_sha256: str
     returncode: int
     events: tuple[ClaudeCliEvent, ...]
     cleanup: ClaudeCliCleanupReceipt
@@ -240,6 +252,7 @@ class ClaudeCliRunReceipt:
             "stream_sha256": self.stream_sha256,
             "argv_sha256": self.argv_sha256,
             "environment_sha256": self.environment_sha256,
+            "settings_sha256": self.settings_sha256,
             "returncode": self.returncode,
             "events": [dataclasses.asdict(event) for event in self.events],
             "cleanup": self.cleanup.to_dict(),
@@ -295,6 +308,71 @@ def _canonical_sha256(value: Any) -> str:
     return _sha256_bytes(encoded)
 
 
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _derived_result(evidence_sha256: str) -> str:
+    return _canonical_json({"decision": "HOLD", "evidence_sha256": evidence_sha256})
+
+
+def _derived_prompt(evidence_relative_path: str, evidence_sha256: str) -> str:
+    return (
+        f"Read exactly one sealed relative file: {evidence_relative_path}\n"
+        f"Expected SHA-256: {evidence_sha256}\n"
+        f"Return exactly: {_derived_result(evidence_sha256)}\n"
+        "Do not perform any other action."
+    )
+
+
+def _closed_settings_json(evidence_relative_path: str) -> str:
+    return _canonical_json(
+        {
+            "autoMemoryEnabled": False,
+            "disableAgentView": True,
+            "disableAllHooks": True,
+            "disableAutoMode": "disable",
+            "disableDeepLinkRegistration": "disable",
+            "enableAllProjectMcpServers": False,
+            "enabledMcpjsonServers": [],
+            "includeGitInstructions": False,
+            "permissions": {
+                "allow": [f"Read(./{evidence_relative_path})"],
+                "ask": [],
+                "defaultMode": "dontAsk",
+                "deny": [
+                    "Agent",
+                    "Bash",
+                    "Edit",
+                    "Glob",
+                    "Grep",
+                    "NotebookEdit",
+                    "Skill",
+                    "Task",
+                    "WebFetch",
+                    "WebSearch",
+                    "Write",
+                    "mcp__*",
+                ],
+                "disableBypassPermissionsMode": "disable",
+            },
+        }
+    )
+
+
+def _trusted_native_home() -> Path:
+    try:
+        value = pwd.getpwuid(os.getuid()).pw_dir
+        if not value:
+            raise KeyError
+        return Path(value).resolve(strict=True)
+    except (KeyError, OSError):
+        raise _fail_before_start(
+            "NATIVE_HOME_UNPROVEN",
+            "native account home identity could not be proven",
+        ) from None
+
+
 def _fail_before_start(code: str, message: str) -> ClaudeCliProtocolError:
     return ClaudeCliProtocolError(
         code,
@@ -309,8 +387,8 @@ def _resolve_real_directory(value: Any, name: str) -> Path:
     try:
         info = value.lstat()
         resolved = value.resolve(strict=True)
-    except OSError as exc:
-        raise _fail_before_start("PATH_INVALID", f"{name} is unavailable") from exc
+    except OSError:
+        raise _fail_before_start("PATH_INVALID", f"{name} is unavailable") from None
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
         raise _fail_before_start("PATH_INVALID", f"{name} must be a real directory")
     return resolved
@@ -347,8 +425,8 @@ def _validate_policy(policy: ClaudeCliInvocationPolicy) -> tuple[Path, Path, Pat
     try:
         binary_info = policy.binary.lstat()
         binary = policy.binary.resolve(strict=True)
-    except OSError as exc:
-        raise _fail_before_start("BINARY_INVALID", "Claude binary is unavailable") from exc
+    except OSError:
+        raise _fail_before_start("BINARY_INVALID", "Claude binary is unavailable") from None
     if (
         stat.S_ISLNK(binary_info.st_mode)
         or not stat.S_ISREG(binary_info.st_mode)
@@ -361,8 +439,8 @@ def _validate_policy(policy: ClaudeCliInvocationPolicy) -> tuple[Path, Path, Pat
         raise _fail_before_start("SESSION_INVALID", "session UUID is invalid")
     try:
         parsed_session = uuid.UUID(policy.session_id)
-    except (ValueError, AttributeError) as exc:
-        raise _fail_before_start("SESSION_INVALID", "session UUID is invalid") from exc
+    except (ValueError, AttributeError):
+        raise _fail_before_start("SESSION_INVALID", "session UUID is invalid") from None
     if str(parsed_session) != policy.session_id:
         raise _fail_before_start("SESSION_INVALID", "session UUID must use canonical lowercase form")
     if (
@@ -377,10 +455,7 @@ def _validate_policy(policy: ClaudeCliInvocationPolicy) -> tuple[Path, Path, Pat
     workspace = _resolve_real_directory(policy.working_directory, "working directory")
     home = _resolve_real_directory(policy.isolated_home, "isolated home")
     scratch = _resolve_real_directory(policy.isolated_tmp, "isolated temp directory")
-    try:
-        native_home = Path.home().resolve(strict=True)
-    except OSError:
-        native_home = Path.home().resolve()
+    native_home = _trusted_native_home()
     if home == native_home:
         raise _fail_before_start("HOME_NOT_ISOLATED", "isolated home may not be the native home")
     if home == scratch or workspace in home.parents or workspace in scratch.parents:
@@ -390,8 +465,8 @@ def _validate_policy(policy: ClaudeCliInvocationPolicy) -> tuple[Path, Path, Pat
         evidence_info = evidence_path.lstat()
         resolved_evidence = evidence_path.resolve(strict=True)
         evidence_bytes = resolved_evidence.read_bytes()
-    except OSError as exc:
-        raise _fail_before_start("EVIDENCE_INVALID", "sealed evidence file is unavailable") from exc
+    except OSError:
+        raise _fail_before_start("EVIDENCE_INVALID", "sealed evidence file is unavailable") from None
     if (
         stat.S_ISLNK(evidence_info.st_mode)
         or not stat.S_ISREG(evidence_info.st_mode)
@@ -403,6 +478,19 @@ def _validate_policy(policy: ClaudeCliInvocationPolicy) -> tuple[Path, Path, Pat
         policy.expected_result_sha256
     ) is None:
         raise _fail_before_start("RESULT_DIGEST_INVALID", "expected result digest is invalid")
+    evidence_sha256 = _sha256_bytes(evidence_bytes)
+    if policy.prompt != _derived_prompt(policy.evidence_relative_path, evidence_sha256):
+        raise _fail_before_start(
+            "PROMPT_BINDING_INVALID",
+            "prompt was not canonically derived from sealed evidence",
+        )
+    if policy.expected_result_sha256 != _sha256_bytes(
+        _derived_result(evidence_sha256).encode("utf-8")
+    ):
+        raise _fail_before_start(
+            "RESULT_BINDING_INVALID",
+            "expected result was not canonically derived from sealed evidence",
+        )
     integer_bounds = (
         ("API timeout", policy.api_timeout_ms, 100, 600_000),
         ("stdout byte limit", policy.max_stdout_bytes, 1_024, 16_777_216),
@@ -438,6 +526,7 @@ def _build_argv(
     model: str,
     session_id: str,
     prompt: str,
+    settings_json: str,
 ) -> tuple[str, ...]:
     values = [
         binary,
@@ -473,7 +562,7 @@ def _build_argv(
             "--max-turns",
             "1",
             "--settings",
-            "{}",
+            settings_json,
             prompt,
         ]
     )
@@ -520,6 +609,7 @@ def compile_claude_cli_command(
         model=policy.model,
         session_id=policy.session_id,
         prompt=policy.prompt,
+        settings_json=_closed_settings_json(policy.evidence_relative_path),
     )
     return ClaudeCliCommand(
         argv=argv,
@@ -547,6 +637,9 @@ def compile_claude_cli_command(
         max_json_collection_items=policy.max_json_collection_items,
         argv_sha256=_canonical_sha256(list(argv)),
         environment_sha256=_environment_digest(environment),
+        settings_sha256=_sha256_bytes(
+            _closed_settings_json(policy.evidence_relative_path).encode("utf-8")
+        ),
     )
 
 
@@ -574,14 +667,14 @@ def _check_json_bounds(
     if depth > max_depth:
         raise _StreamViolation(
             "STREAM_JSON_DEPTH",
-            ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
             "stream JSON depth exceeded its bound",
         )
     if isinstance(value, str):
         if len(value.encode("utf-8")) > max_string_bytes:
             raise _StreamViolation(
                 "STREAM_JSON_STRING",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream JSON string exceeded its bound",
             )
         return
@@ -589,7 +682,7 @@ def _check_json_bounds(
         if len(value) > max_collection_items:
             raise _StreamViolation(
                 "STREAM_JSON_COLLECTION",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream JSON object exceeded its bound",
             )
         for key, item in value.items():
@@ -612,7 +705,7 @@ def _check_json_bounds(
         if len(value) > max_collection_items:
             raise _StreamViolation(
                 "STREAM_JSON_COLLECTION",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream JSON array exceeded its bound",
             )
         for item in value:
@@ -627,7 +720,7 @@ def _check_json_bounds(
     if value is not None and type(value) not in {bool, int, float}:
         raise _StreamViolation(
             "STREAM_JSON_INVALID",
-            ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
             "stream JSON contained an unsupported value",
         )
 
@@ -636,7 +729,7 @@ def _expect_keys(value: Mapping[str, Any], allowed: frozenset[str]) -> None:
     if not set(value).issubset(allowed):
         raise _StreamViolation(
             "EVENT_FIELDS_UNKNOWN",
-            ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
             "stream event contained unknown fields",
         )
 
@@ -645,7 +738,7 @@ def _expect_session(value: Mapping[str, Any], session_id: str) -> None:
     if value.get("session_id") != session_id:
         raise _StreamViolation(
             "SESSION_DRIFT",
-            ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
             "stream session identity drifted",
         )
 
@@ -654,7 +747,7 @@ def _bounded_token_count(value: Any) -> int:
     if type(value) is not int or not 0 <= value <= 1_000_000_000:
         raise _StreamViolation(
             "USAGE_INVALID",
-            ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
             "stream usage was invalid",
         )
     return value
@@ -680,13 +773,13 @@ class _StreamParser:
         if self.event_count > self.command.max_events:
             raise _StreamViolation(
                 "STREAM_EVENT_LIMIT",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream event count exceeded its bound",
             )
         if not raw_line:
             raise _StreamViolation(
                 "STREAM_JSON_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream contained an empty line",
             )
         try:
@@ -694,7 +787,7 @@ class _StreamParser:
         except UnicodeDecodeError as exc:
             raise _StreamViolation(
                 "STDOUT_UTF8_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stdout was not valid UTF-8",
             ) from exc
         try:
@@ -706,13 +799,13 @@ class _StreamParser:
         except _DuplicateKey as exc:
             raise _StreamViolation(
                 "STREAM_JSON_DUPLICATE_KEY",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream JSON contained a duplicate key",
             ) from exc
         except (json.JSONDecodeError, ValueError) as exc:
             raise _StreamViolation(
                 "STREAM_JSON_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream line was not strict JSON",
             ) from exc
         _check_json_bounds(
@@ -725,7 +818,7 @@ class _StreamParser:
         if not isinstance(value, dict):
             raise _StreamViolation(
                 "STREAM_JSON_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream event must be a JSON object",
             )
         event_type = value.get("type")
@@ -733,7 +826,7 @@ class _StreamParser:
         if not isinstance(event_type, str) or (subtype is not None and not isinstance(subtype, str)):
             raise _StreamViolation(
                 "EVENT_UNKNOWN",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream event identity was invalid",
             )
         if self.terminal:
@@ -741,25 +834,31 @@ class _StreamParser:
             message = "terminal result was duplicated" if event_type == "result" else "event followed terminal result"
             raise _StreamViolation(
                 code,
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 message,
             )
         if event_type == "system" and subtype == "api_retry":
             raise _StreamViolation(
                 "PROVIDER_RETRY_OBSERVED",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "provider retry was observed",
+            )
+        if event_type == "system" and subtype == "managed_policy":
+            raise _StreamViolation(
+                "MANAGED_POLICY_OBSERVED",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "managed policy changed the closed invocation surface",
             )
         if event_type == "system" and subtype == "permission_denied":
             raise _StreamViolation(
                 "PERMISSION_DENIED",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "permission denial was observed",
             )
         if self.phase == 0 and not (event_type == "system" and subtype == "init"):
             raise _StreamViolation(
                 "INIT_NOT_FIRST",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "system init was not the first stream event",
             )
         if event_type == "system" and subtype == "init":
@@ -775,7 +874,7 @@ class _StreamParser:
         else:
             raise _StreamViolation(
                 "EVENT_UNKNOWN",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream event type or subtype was not accepted",
             )
         self.events.append(
@@ -791,7 +890,7 @@ class _StreamParser:
         if self.phase != 0:
             raise _StreamViolation(
                 "INIT_DUPLICATE",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "system init was duplicated",
             )
         _expect_keys(
@@ -817,38 +916,38 @@ class _StreamParser:
         if value.get("model") != self.command.model:
             raise _StreamViolation(
                 "MODEL_DRIFT",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream model identity drifted",
             )
         if value.get("tools") != ["Read"]:
             raise _StreamViolation(
                 "TOOL_SET_DRIFT",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream tool set drifted",
             )
         if value.get("mcp_servers") != [] or value.get("mcp_server_errors") not in (None, []):
             raise _StreamViolation(
                 "MCP_OBSERVED",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "MCP activity was observed",
             )
         if value.get("plugins") != [] or value.get("plugin_errors") not in (None, []):
             raise _StreamViolation(
                 "PLUGIN_OBSERVED",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "plugin activity was observed",
             )
         if value.get("permissionMode") != "dontAsk":
             raise _StreamViolation(
                 "PERMISSION_MODE_DRIFT",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "permission mode drifted",
             )
         capabilities = value.get("capabilities", [])
         if not isinstance(capabilities, list) or any(not isinstance(item, str) for item in capabilities):
             raise _StreamViolation(
                 "INIT_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "init capabilities were invalid",
             )
         self.phase = 1
@@ -858,7 +957,7 @@ class _StreamParser:
         if self.phase == 0 or self.terminal:
             raise _StreamViolation(
                 "EVENT_ORDER_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "usage event was out of order",
             )
         _expect_keys(value, frozenset({"type", "subtype", "session_id", "usage", "uuid"}))
@@ -867,7 +966,7 @@ class _StreamParser:
         if not isinstance(usage, dict):
             raise _StreamViolation(
                 "USAGE_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "stream usage was invalid",
             )
         _expect_keys(usage, frozenset({"input_tokens", "output_tokens"}))
@@ -883,14 +982,14 @@ class _StreamParser:
         if value.get("parent_tool_use_id") is not None:
             raise _StreamViolation(
                 "SUBAGENT_OBSERVED",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "subagent output was observed",
             )
         message = value.get("message")
         if not isinstance(message, dict):
             raise _StreamViolation(
                 "ASSISTANT_EVENT_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "assistant event was invalid",
             )
         _expect_keys(
@@ -912,14 +1011,14 @@ class _StreamParser:
         if message.get("role") != "assistant" or message.get("model") != self.command.model:
             raise _StreamViolation(
                 "MODEL_DRIFT",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "assistant identity drifted",
             )
         content = message.get("content")
         if not isinstance(content, list) or len(content) != 1 or not isinstance(content[0], dict):
             raise _StreamViolation(
                 "ASSISTANT_EVENT_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "assistant content was not singular and bounded",
             )
         block = content[0]
@@ -927,14 +1026,14 @@ class _StreamParser:
             if self.phase != 1:
                 raise _StreamViolation(
                     "READ_COUNT_INVALID",
-                    ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
                     "Read was duplicated or out of order",
                 )
             _expect_keys(block, frozenset({"type", "id", "name", "input"}))
             if block.get("name") != "Read":
                 raise _StreamViolation(
                     "TOOL_UNAUTHORIZED",
-                    ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
                     "an unauthorized tool was observed",
                 )
             tool_id = block.get("id")
@@ -942,19 +1041,19 @@ class _StreamParser:
             if not isinstance(tool_id, str) or _TOOL_ID.fullmatch(tool_id) is None:
                 raise _StreamViolation(
                     "TOOL_EVENT_INVALID",
-                    ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
                     "tool identity was invalid",
                 )
             if not isinstance(inputs, dict) or set(inputs) != {"file_path"}:
                 raise _StreamViolation(
                     "READ_SCOPE_DRIFT",
-                    ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
                     "Read input drifted from the sealed file",
                 )
             if inputs.get("file_path") != self.command.evidence_relative_path:
                 raise _StreamViolation(
                     "READ_SCOPE_DRIFT",
-                    ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
                     "Read path drifted from the sealed file",
                 )
             self.tool_use_id = tool_id
@@ -965,7 +1064,7 @@ class _StreamParser:
             if self.phase != 3:
                 raise _StreamViolation(
                     "EVENT_ORDER_INVALID",
-                    ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
                     "assistant text was out of order",
                 )
             _expect_keys(block, frozenset({"type", "text"}))
@@ -973,14 +1072,14 @@ class _StreamParser:
             if not isinstance(text, str) or _sha256_bytes(text.encode("utf-8")) != self.command.expected_result_sha256:
                 raise _StreamViolation(
                     "STRUCTURED_RESULT_MISMATCH",
-                    ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
                     "assistant result did not match the sealed expectation",
                 )
             self.phase = 4
             return
         raise _StreamViolation(
             "TOOL_UNAUTHORIZED",
-            ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
             "assistant content type was not accepted",
         )
 
@@ -988,7 +1087,7 @@ class _StreamParser:
         if self.phase != 2:
             raise _StreamViolation(
                 "EVENT_ORDER_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "tool result was out of order",
             )
         _expect_keys(
@@ -999,14 +1098,14 @@ class _StreamParser:
         if value.get("parent_tool_use_id") is not None:
             raise _StreamViolation(
                 "SUBAGENT_OBSERVED",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "subagent tool result was observed",
             )
         message = value.get("message")
         if not isinstance(message, dict):
             raise _StreamViolation(
                 "TOOL_RESULT_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "tool result event was invalid",
             )
         _expect_keys(message, frozenset({"role", "content"}))
@@ -1019,7 +1118,7 @@ class _StreamParser:
         ):
             raise _StreamViolation(
                 "TOOL_RESULT_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "tool result event was invalid",
             )
         block = content[0]
@@ -1027,20 +1126,20 @@ class _StreamParser:
         if block.get("type") != "tool_result" or block.get("tool_use_id") != self.tool_use_id:
             raise _StreamViolation(
                 "TOOL_RESULT_MISMATCH",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "tool result identity did not match Read",
             )
         result_content = block.get("content")
         if block.get("is_error") is not False or not isinstance(result_content, str):
             raise _StreamViolation(
                 "TOOL_RESULT_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "Read result reported an error",
             )
         if _sha256_bytes(result_content.encode("utf-8")) != self.command.evidence_sha256:
             raise _StreamViolation(
                 "TOOL_RESULT_MISMATCH",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "Read result did not match the sealed evidence",
             )
         self.phase = 3
@@ -1049,7 +1148,7 @@ class _StreamParser:
         if self.phase != 4:
             raise _StreamViolation(
                 "EVENT_ORDER_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "terminal result was out of order",
             )
         _expect_keys(
@@ -1098,28 +1197,28 @@ class _StreamParser:
         if value.get("num_turns") != 1:
             raise _StreamViolation(
                 "TURN_COUNT_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "terminal turn count was invalid",
             )
         result = value.get("result")
         if not isinstance(result, str) or _sha256_bytes(result.encode("utf-8")) != self.command.expected_result_sha256:
             raise _StreamViolation(
                 "STRUCTURED_RESULT_MISMATCH",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "terminal result did not match the sealed expectation",
             )
         cost = value.get("total_cost_usd")
         if type(cost) not in {int, float} or not math.isfinite(float(cost)) or not 0 <= float(cost) <= 1_000:
             raise _StreamViolation(
                 "USAGE_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "terminal cost estimate was invalid",
             )
         usage = value.get("usage")
         if not isinstance(usage, dict):
             raise _StreamViolation(
                 "USAGE_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "terminal usage was invalid",
             )
         _expect_keys(usage, frozenset({"input_tokens", "output_tokens"}))
@@ -1134,13 +1233,13 @@ class _StreamParser:
         if not self.terminal:
             raise _StreamViolation(
                 "TERMINAL_RESULT_MISSING",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "terminal result was missing",
             )
         if self.read_count != 1 or self.submission_count != 1:
             raise _StreamViolation(
                 "READ_COUNT_INVALID",
-                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "one-Read one-submission invariant was not satisfied",
             )
 
@@ -1158,7 +1257,7 @@ def _group_status(pgid: int) -> str:
         os.killpg(pgid, 0)
     except ProcessLookupError:
         return "EMPTY"
-    except PermissionError:
+    except OSError:
         return "UNKNOWN"
     return "ALIVE"
 
@@ -1172,87 +1271,172 @@ def _wait_group_empty(pgid: int, timeout: float) -> bool:
     return _group_status(pgid) == "EMPTY"
 
 
+def _tree_fingerprint(root: Path) -> str | None:
+    """Return a bounded metadata fingerprint without retaining private names."""
+
+    digest = hashlib.sha256()
+    pending: list[tuple[Path, str]] = [(root, "")]
+    count = 0
+    try:
+        while pending:
+            directory, prefix = pending.pop()
+            with os.scandir(directory) as iterator:
+                entries = sorted(iterator, key=lambda entry: entry.name)
+            for entry in entries:
+                count += 1
+                if count > 512:
+                    return None
+                relative = f"{prefix}/{entry.name}" if prefix else entry.name
+                info = entry.stat(follow_symlinks=False)
+                digest.update(relative.encode("utf-8", errors="surrogateescape"))
+                digest.update(
+                    f"\0{info.st_mode}\0{info.st_size}\0{info.st_mtime_ns}\0".encode("ascii")
+                )
+                if stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode):
+                    pending.append((Path(entry.path), relative))
+    except (OSError, UnicodeError):
+        return None
+    return digest.hexdigest()
+
+
+def _marked_escaped_groups(state_path: Path | None) -> tuple[tuple[int, ...], bool]:
+    if state_path is None or not state_path.exists():
+        return (), True
+    try:
+        encoded = state_path.read_bytes()
+        if len(encoded) > 65_536:
+            return (), False
+        value = json.loads(encoded)
+        children = value.get("escaped_children")
+        if (
+            not isinstance(value, dict)
+            or not isinstance(children, list)
+            or len(children) > 16
+            or any(type(pid) is not int or pid <= 1 or pid == os.getpid() for pid in children)
+        ):
+            return (), False
+        return tuple(children), True
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return (), False
+
+
+def _signal_group(pgid: int, sig: signal.Signals) -> bool:
+    if pgid <= 1 or pgid == os.getpgrp():
+        return False
+    try:
+        os.killpg(pgid, sig)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return False
+
+
 def _cleanup_process(
     process: subprocess.Popen[bytes],
     *,
     pgid: int,
+    group_identity_proven: bool,
     grace_seconds: float,
     force_termination: bool,
+    reader_closed: bool,
+    scratch: Path,
+    scratch_before: str,
+    fake_state_path: Path | None,
 ) -> ClaudeCliCleanupReceipt:
     term_sent = False
     kill_sent = False
     residue: list[str] = []
-    if pgid != process.pid or pgid == os.getpgrp():
+    if not group_identity_proven:
         residue.append("PROCESS_GROUP_IDENTITY_UNPROVEN")
-        if process.poll() is None:
-            try:
-                process.kill()
-                kill_sent = True
-            except ProcessLookupError:
-                pass
+    group_status = _group_status(pgid)
+    if force_termination and group_status != "EMPTY":
+        term_sent = _signal_group(pgid, signal.SIGTERM) or term_sent
+    if process.poll() is None:
+        try:
+            process.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            pass
+    if _group_status(pgid) != "EMPTY":
+        if not term_sent:
+            term_sent = _signal_group(pgid, signal.SIGTERM) or term_sent
+        _wait_group_empty(pgid, grace_seconds)
+    if _group_status(pgid) != "EMPTY":
+        kill_sent = _signal_group(pgid, signal.SIGKILL) or kill_sent
+    if process.poll() is None:
         try:
             process.wait(timeout=max(grace_seconds, 1.0))
         except subprocess.TimeoutExpired:
-            residue.append("LEADER_NOT_REAPED")
-    else:
-        group_status = _group_status(pgid)
-        if force_termination and group_status == "ALIVE":
             try:
-                os.killpg(pgid, signal.SIGTERM)
-                term_sent = True
-            except ProcessLookupError:
+                process.kill()
+                kill_sent = True
+            except OSError:
                 pass
-        if process.poll() is None:
-            try:
-                process.wait(timeout=grace_seconds)
-            except subprocess.TimeoutExpired:
-                pass
-        if _group_status(pgid) == "ALIVE":
-            if not term_sent:
-                try:
-                    os.killpg(pgid, signal.SIGTERM)
-                    term_sent = True
-                except ProcessLookupError:
-                    pass
-                _wait_group_empty(pgid, grace_seconds)
-            if _group_status(pgid) == "ALIVE":
-                try:
-                    os.killpg(pgid, signal.SIGKILL)
-                    kill_sent = True
-                except ProcessLookupError:
-                    pass
-        if process.poll() is None:
             try:
                 process.wait(timeout=max(grace_seconds, 1.0))
             except subprocess.TimeoutExpired:
                 residue.append("LEADER_NOT_REAPED")
-        if not _wait_group_empty(pgid, max(grace_seconds, 1.0)):
-            residue.append("PROCESS_GROUP_NOT_EMPTY")
+    group_empty = _wait_group_empty(pgid, max(grace_seconds, 1.0))
+    if not group_empty:
+        residue.append("PROCESS_GROUP_NOT_EMPTY")
+
+    escaped_groups, marks_proven = _marked_escaped_groups(fake_state_path)
+    if not marks_proven:
+        residue.append("MARKED_DESCENDANTS_UNPROVEN")
+    for escaped_pgid in escaped_groups:
+        if _group_status(escaped_pgid) != "EMPTY":
+            term_sent = _signal_group(escaped_pgid, signal.SIGTERM) or term_sent
+    for escaped_pgid in escaped_groups:
+        _wait_group_empty(escaped_pgid, grace_seconds)
+        if _group_status(escaped_pgid) != "EMPTY":
+            kill_sent = _signal_group(escaped_pgid, signal.SIGKILL) or kill_sent
+    marked_empty = marks_proven and all(
+        _wait_group_empty(escaped_pgid, max(grace_seconds, 1.0))
+        for escaped_pgid in escaped_groups
+    )
+    if not marked_empty and "MARKED_DESCENDANTS_UNPROVEN" not in residue:
+        residue.append("MARKED_DESCENDANTS_NOT_EMPTY")
+
     leader_reaped = process.poll() is not None
     for stream in (process.stdout, process.stderr):
         if stream is not None and not stream.closed:
-            stream.close()
+            try:
+                stream.close()
+            except OSError:
+                residue.append("PIPE_CLOSE_UNPROVEN")
+    scratch_after = _tree_fingerprint(scratch)
+    scratch_empty = scratch_after is not None and scratch_after == scratch_before
+    if not scratch_empty:
+        residue.append("SCRATCH_RESIDUE" if scratch_after is not None else "SCRATCH_STATE_UNPROVEN")
+    if not reader_closed:
+        residue.append("READER_NOT_CLOSED")
     return ClaudeCliCleanupReceipt(
-        process_group_empty=_group_status(pgid) == "EMPTY",
+        process_group_empty=group_empty,
+        marked_descendants_empty=marked_empty,
         leader_reaped=leader_reaped,
         stdin_closed=True,
         stdout_closed=process.stdout is None or process.stdout.closed,
         stderr_closed=process.stderr is None or process.stderr.closed,
+        reader_closed=reader_closed,
+        scratch_empty=scratch_empty,
         term_sent=term_sent,
         kill_sent=kill_sent,
-        residue_rows=tuple(residue),
+        residue_rows=tuple(dict.fromkeys(residue)),
     )
 
 
 def _validate_command_integrity(command: ClaudeCliCommand) -> None:
     if not isinstance(command, ClaudeCliCommand):
         raise _fail_before_start("COMMAND_INVALID", "Claude command is invalid")
+    relative = _validate_safe_relative_path(command.evidence_relative_path)
+    settings_json = _closed_settings_json(command.evidence_relative_path)
     expected_argv = _build_argv(
         binary=command.argv[0] if command.argv else "",
         version=command.version,
         model=command.model,
         session_id=command.session_id,
         prompt=command.prompt,
+        settings_json=settings_json,
     )
     expected_environment = (
         ("HOME", command.isolated_home),
@@ -1260,23 +1444,55 @@ def _validate_command_integrity(command: ClaudeCliCommand) -> None:
         *_SAFE_ENVIRONMENT,
         ("API_TIMEOUT_MS", str(command.api_timeout_ms)),
     )
-    if command.argv != expected_argv or command.argv_sha256 != _canonical_sha256(list(expected_argv)):
+    if (
+        command.argv != expected_argv
+        or command.argv_sha256 != _canonical_sha256(list(expected_argv))
+        or command.settings_sha256 != _sha256_bytes(settings_json.encode("utf-8"))
+    ):
         raise _fail_before_start("COMMAND_DRIFT", "compiled argv integrity check failed")
     if command.environment != expected_environment or command.environment_sha256 != _environment_digest(
         expected_environment
     ):
         raise _fail_before_start("ENVIRONMENT_DRIFT", "compiled environment integrity check failed")
-    if command.working_directory != str(Path(command.working_directory).resolve(strict=True)):
-        raise _fail_before_start("COMMAND_DRIFT", "compiled working directory drifted")
-    evidence = Path(command.working_directory).joinpath(
-        *PurePosixPath(command.evidence_relative_path).parts
-    )
     try:
-        evidence_bytes = evidence.read_bytes()
-    except OSError as exc:
-        raise _fail_before_start("EVIDENCE_INVALID", "sealed evidence file became unavailable") from exc
+        binary_path = Path(command.argv[0])
+        binary_info = binary_path.lstat()
+        binary = binary_path.resolve(strict=True)
+        workspace = Path(command.working_directory).resolve(strict=True)
+        home = Path(command.isolated_home).resolve(strict=True)
+        scratch = Path(command.isolated_tmp).resolve(strict=True)
+        evidence = workspace.joinpath(*relative.parts)
+        evidence_info = evidence.lstat()
+        resolved_evidence = evidence.resolve(strict=True)
+        evidence_bytes = resolved_evidence.read_bytes()
+    except OSError:
+        raise _fail_before_start("COMMAND_DRIFT", "compiled path identity became unavailable") from None
+    if (
+        stat.S_ISLNK(binary_info.st_mode)
+        or not stat.S_ISREG(binary_info.st_mode)
+        or not os.access(binary, os.X_OK)
+        or str(binary) != command.argv[0]
+        or str(workspace) != command.working_directory
+        or str(home) != command.isolated_home
+        or str(scratch) != command.isolated_tmp
+        or home == _trusted_native_home()
+        or home == scratch
+        or workspace in home.parents
+        or workspace in scratch.parents
+        or stat.S_ISLNK(evidence_info.st_mode)
+        or not stat.S_ISREG(evidence_info.st_mode)
+        or workspace not in resolved_evidence.parents
+        or len(evidence_bytes) > 65_536
+    ):
+        raise _fail_before_start("COMMAND_DRIFT", "compiled path identity drifted")
     if _sha256_bytes(evidence_bytes) != command.evidence_sha256:
         raise _fail_before_start("EVIDENCE_DRIFT", "sealed evidence file drifted before process start")
+    if command.prompt != _derived_prompt(command.evidence_relative_path, command.evidence_sha256):
+        raise _fail_before_start("COMMAND_DRIFT", "compiled prompt binding drifted")
+    if command.expected_result_sha256 != _sha256_bytes(
+        _derived_result(command.evidence_sha256).encode("utf-8")
+    ):
+        raise _fail_before_start("COMMAND_DRIFT", "compiled result binding drifted")
 
 
 def _validate_fake_controls(
@@ -1284,8 +1500,20 @@ def _validate_fake_controls(
     fake_controls: Mapping[str, str] | None,
 ) -> dict[str, str]:
     if fake_controls is None:
-        return {}
-    if Path(command.argv[0]).name != "fake_claude_cli.py":
+        raise _fail_before_start(
+            "FAKE_ONLY_EFFECT_CEILING",
+            "PF1-F0 is a fake-only subprocess falsifier",
+        )
+    expected_fake = Path(__file__).resolve().parents[1] / "scripts" / "ohf" / "fake_claude_cli.py"
+    try:
+        binary = Path(command.argv[0]).resolve(strict=True)
+        expected_fake = expected_fake.resolve(strict=True)
+    except OSError:
+        raise _fail_before_start(
+            "FAKE_CONTROL_REFUSED",
+            "fake controls require the committed fake executable",
+        ) from None
+    if binary != expected_fake:
         raise _fail_before_start("FAKE_CONTROL_REFUSED", "fake controls require the committed fake executable")
     if not isinstance(fake_controls, Mapping) or not fake_controls:
         raise _fail_before_start("FAKE_CONTROL_INVALID", "fake control mapping is invalid")
@@ -1350,6 +1578,16 @@ class ClaudeCliRunner:
         controls = _validate_fake_controls(command, fake_controls)
         if cancel_event is not None and cancel_event.is_set():
             raise _fail_before_start("CANCELLED_BEFORE_START", "invocation was cancelled before process start")
+
+        scratch = Path(command.isolated_tmp)
+        scratch_before = _tree_fingerprint(scratch)
+        if scratch_before is None:
+            raise _fail_before_start(
+                "SCRATCH_BASELINE_UNPROVEN",
+                "isolated temp directory baseline could not be proven",
+            )
+        state_value = controls.get("MMX_FAKE_CLAUDE_STATE_FILE")
+        fake_state_path = Path(state_value) if state_value is not None else None
         environment = dict(command.environment)
         environment.update(controls)
         try:
@@ -1364,242 +1602,277 @@ class ClaudeCliRunner:
                 close_fds=True,
                 bufsize=0,
             )
-        except OSError as exc:
-            raise _fail_before_start("PROCESS_START_FAILED", "Claude CLI process could not be started") from exc
-        try:
-            pgid = os.getpgid(process.pid)
-        except OSError as exc:
-            try:
-                if process.poll() is None:
-                    process.kill()
-            finally:
-                process.wait()
-            raise ClaudeCliProtocolError(
-                "PROCESS_GROUP_UNPROVEN",
-                ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                "Claude CLI process-group identity was unavailable",
-            ) from exc
-        if pgid != process.pid or pgid == os.getpgrp():
-            cleanup = _cleanup_process(
-                process,
-                pgid=pgid,
-                grace_seconds=command.terminate_grace_seconds,
-                force_termination=True,
-            )
-            raise ClaudeCliProtocolError(
-                "PROCESS_GROUP_UNPROVEN",
-                ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                "Claude CLI process was not isolated in its own group",
-                cleanup=cleanup,
-            )
-        if process.stdout is None or process.stderr is None:  # pragma: no cover - Popen invariant
-            cleanup = _cleanup_process(
-                process,
-                pgid=pgid,
-                grace_seconds=command.terminate_grace_seconds,
-                force_termination=True,
-            )
-            raise ClaudeCliProtocolError(
-                "PIPE_START_FAILED",
-                ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                "Claude CLI stream pipes were unavailable",
-                cleanup=cleanup,
-            )
+        except OSError:
+            raise _fail_before_start(
+                "PROCESS_START_FAILED",
+                "Claude CLI process could not be started",
+            ) from None
 
+        # Cleanup ownership begins immediately after Popen.  The new-session
+        # candidate group is the leader pid even when getpgid cannot attest it.
+        pgid = process.pid
+        group_identity_proven = False
+        reader_closed = True
+        selector: selectors.BaseSelector | None = None
         parser = _StreamParser(command)
         stream_digest = hashlib.sha256()
-        stdout_buffer = bytearray()
-        stdout_total = 0
-        stderr_total = 0
-        selector = selectors.DefaultSelector()
-        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
-        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
-        started_at = time.monotonic()
-        last_activity = started_at
-        violation: _StreamViolation | None = None
+        returncode: int | None = None
+        failure: tuple[str, ClaudeCliObservation, str] | None = None
         try:
-            while selector.get_map():
-                now = time.monotonic()
-                if cancel_event is not None and cancel_event.is_set():
-                    violation = _StreamViolation(
-                        "CANCELLED_AFTER_START",
-                        ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                        "invocation was cancelled after process start",
-                    )
-                    break
-                if now - started_at >= command.absolute_timeout_seconds:
-                    violation = _StreamViolation(
-                        "ABSOLUTE_TIMEOUT",
-                        ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                        "Claude CLI absolute deadline expired",
-                    )
-                    break
-                if now - last_activity >= command.idle_timeout_seconds:
-                    violation = _StreamViolation(
-                        "IDLE_TIMEOUT",
-                        ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                        "Claude CLI idle deadline expired",
-                    )
-                    break
-                wait_for = min(
-                    0.05,
-                    command.absolute_timeout_seconds - (now - started_at),
-                    command.idle_timeout_seconds - (now - last_activity),
+            try:
+                observed_pgid = os.getpgid(process.pid)
+            except OSError:
+                failure = (
+                    "PROCESS_GROUP_UNPROVEN",
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                    "Claude CLI process-group identity was unavailable",
                 )
-                for key, _ in selector.select(timeout=max(wait_for, 0.001)):
-                    stream = key.fileobj
-                    try:
-                        chunk = os.read(stream.fileno(), 65_536)
-                    except BlockingIOError:  # pragma: no cover - selector readiness race
-                        continue
-                    if not chunk:
-                        selector.unregister(stream)
-                        continue
-                    last_activity = time.monotonic()
-                    sensitive_code = _contains_sensitive_bytes(chunk)
-                    if sensitive_code is not None:
-                        violation = _StreamViolation(
-                            sensitive_code,
-                            ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
-                            "provider output contained sensitive material"
-                            if sensitive_code == "SENSITIVE_OUTPUT"
-                            else "provider output contained a private locator",
-                        )
-                        break
-                    if key.data == "stderr":
-                        stderr_total += len(chunk)
-                        if stderr_total > command.max_stderr_bytes:
-                            violation = _StreamViolation(
-                                "STDERR_BYTE_LIMIT",
-                                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
-                                "stderr exceeded its byte bound",
-                            )
-                        else:
-                            violation = _StreamViolation(
-                                "STDERR_NOT_EMPTY",
-                                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
-                                "stderr was not empty",
-                            )
-                        break
-                    stdout_total += len(chunk)
-                    stream_digest.update(chunk)
-                    if stdout_total > command.max_stdout_bytes:
-                        violation = _StreamViolation(
-                            "STDOUT_BYTE_LIMIT",
-                            ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
-                            "stdout exceeded its byte bound",
-                        )
-                        break
-                    stdout_buffer.extend(chunk)
-                    while True:
-                        newline = stdout_buffer.find(b"\n")
-                        if newline < 0:
-                            break
-                        raw_line = bytes(stdout_buffer[:newline])
-                        del stdout_buffer[: newline + 1]
-                        if len(raw_line) > command.max_line_bytes:
-                            violation = _StreamViolation(
-                                "STREAM_LINE_LIMIT",
-                                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
-                                "stream line exceeded its byte bound",
-                            )
-                            break
-                        sensitive_code = _contains_sensitive_bytes(raw_line)
-                        if sensitive_code is not None:
-                            violation = _StreamViolation(
-                                sensitive_code,
-                                ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
-                                "provider output contained sensitive material"
-                                if sensitive_code == "SENSITIVE_OUTPUT"
-                                else "provider output contained a private locator",
-                            )
-                            break
-                        try:
-                            parser.consume(raw_line)
-                        except _StreamViolation as exc:
-                            violation = exc
-                            break
-                    if violation is not None:
-                        break
-                    if len(stdout_buffer) > command.max_line_bytes:
-                        violation = _StreamViolation(
-                            "STREAM_LINE_LIMIT",
-                            ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
-                            "stream line exceeded its byte bound",
-                        )
-                        break
-                if violation is not None:
-                    break
-            if violation is None and stdout_buffer:
-                violation = _StreamViolation(
-                    "STREAM_LINE_UNTERMINATED",
-                    ClaudeCliObservation.PROCESS_STARTED_SUBMISSION_POSSIBLE,
-                    "stream ended with an unterminated line",
+            else:
+                group_identity_proven = (
+                    observed_pgid == process.pid and observed_pgid != os.getpgrp()
                 )
-            if violation is None:
+                if not group_identity_proven:
+                    failure = (
+                        "PROCESS_GROUP_UNPROVEN",
+                        ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                        "Claude CLI process was not isolated in its own group",
+                    )
+
+            if failure is None and (process.stdout is None or process.stderr is None):
+                failure = (
+                    "PIPE_START_FAILED",
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                    "Claude CLI stream pipes were unavailable",
+                )
+
+            if failure is None:
+                stdout_buffer = bytearray()
+                stdout_total = 0
+                stderr_total = 0
+                selector = selectors.DefaultSelector()
+                reader_closed = False
                 try:
+                    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+                    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+                    started_at = time.monotonic()
+                    last_activity = started_at
+                    while selector.get_map():
+                        now = time.monotonic()
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise _StreamViolation(
+                                "CANCELLED_AFTER_START",
+                                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                                "invocation was cancelled after process start",
+                            )
+                        if now - started_at >= command.absolute_timeout_seconds:
+                            raise _StreamViolation(
+                                "ABSOLUTE_TIMEOUT",
+                                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                                "Claude CLI absolute deadline expired",
+                            )
+                        if now - last_activity >= command.idle_timeout_seconds:
+                            raise _StreamViolation(
+                                "IDLE_TIMEOUT",
+                                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                                "Claude CLI idle deadline expired",
+                            )
+                        wait_for = min(
+                            0.05,
+                            command.absolute_timeout_seconds - (now - started_at),
+                            command.idle_timeout_seconds - (now - last_activity),
+                        )
+                        for key, _ in selector.select(timeout=max(wait_for, 0.001)):
+                            stream = key.fileobj
+                            try:
+                                chunk = os.read(stream.fileno(), 65_536)
+                            except BlockingIOError:  # pragma: no cover - readiness race
+                                continue
+                            if not chunk:
+                                selector.unregister(stream)
+                                continue
+                            last_activity = time.monotonic()
+                            sensitive_code = _contains_sensitive_bytes(chunk)
+                            if sensitive_code is not None:
+                                raise _StreamViolation(
+                                    sensitive_code,
+                                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                                    "provider output contained sensitive material"
+                                    if sensitive_code == "SENSITIVE_OUTPUT"
+                                    else "provider output contained a private locator",
+                                )
+                            if key.data == "stderr":
+                                stderr_total += len(chunk)
+                                raise _StreamViolation(
+                                    "STDERR_BYTE_LIMIT"
+                                    if stderr_total > command.max_stderr_bytes
+                                    else "STDERR_NOT_EMPTY",
+                                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                                    "stderr exceeded its byte bound"
+                                    if stderr_total > command.max_stderr_bytes
+                                    else "stderr was not empty",
+                                )
+                            stdout_total += len(chunk)
+                            stream_digest.update(chunk)
+                            if stdout_total > command.max_stdout_bytes:
+                                raise _StreamViolation(
+                                    "STDOUT_BYTE_LIMIT",
+                                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                                    "stdout exceeded its byte bound",
+                                )
+                            stdout_buffer.extend(chunk)
+                            while True:
+                                newline = stdout_buffer.find(b"\n")
+                                if newline < 0:
+                                    break
+                                raw_line = bytes(stdout_buffer[:newline])
+                                del stdout_buffer[: newline + 1]
+                                if len(raw_line) > command.max_line_bytes:
+                                    raise _StreamViolation(
+                                        "STREAM_LINE_LIMIT",
+                                        ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                                        "stream line exceeded its byte bound",
+                                    )
+                                sensitive_code = _contains_sensitive_bytes(raw_line)
+                                if sensitive_code is not None:
+                                    raise _StreamViolation(
+                                        sensitive_code,
+                                        ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                                        "provider output contained sensitive material"
+                                        if sensitive_code == "SENSITIVE_OUTPUT"
+                                        else "provider output contained a private locator",
+                                    )
+                                parser.consume(raw_line)
+                            if len(stdout_buffer) > command.max_line_bytes:
+                                raise _StreamViolation(
+                                    "STREAM_LINE_LIMIT",
+                                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                                    "stream line exceeded its byte bound",
+                                )
+                    if stdout_buffer:
+                        raise _StreamViolation(
+                            "STREAM_LINE_UNTERMINATED",
+                            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                            "stream ended with an unterminated line",
+                        )
                     parser.finalize()
-                except _StreamViolation as exc:
-                    violation = exc
+                finally:
+                    try:
+                        selector.close()
+                        reader_closed = True
+                    except Exception:
+                        reader_closed = False
+
+                try:
+                    returncode = process.wait(
+                        timeout=max(command.terminate_grace_seconds, 1.0)
+                    )
+                except subprocess.TimeoutExpired:
+                    raise _StreamViolation(
+                        "PROCESS_EXIT_TIMEOUT",
+                        ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                        "Claude CLI did not exit after its terminal result",
+                    ) from None
+                if returncode != 0:
+                    raise _StreamViolation(
+                        "PROCESS_EXIT_INVALID",
+                        ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                        "Claude CLI exit status contradicted its terminal result",
+                    )
+        except _StreamViolation as exc:
+            failure = (exc.code, exc.observation, exc.message)
+        except Exception:
+            failure = (
+                "PROCESS_OBSERVATION_FAILED",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "Claude CLI process observation failed",
+            )
         finally:
-            selector.close()
+            if selector is not None and not reader_closed:
+                try:
+                    selector.close()
+                    reader_closed = True
+                except Exception:
+                    reader_closed = False
+            try:
+                cleanup = _cleanup_process(
+                    process,
+                    pgid=pgid,
+                    group_identity_proven=group_identity_proven,
+                    grace_seconds=command.terminate_grace_seconds,
+                    force_termination=failure is not None or process.poll() is None,
+                    reader_closed=reader_closed,
+                    scratch=scratch,
+                    scratch_before=scratch_before,
+                    fake_state_path=fake_state_path,
+                )
+            except Exception:
+                _signal_group(process.pid, signal.SIGKILL)
+                try:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=max(command.terminate_grace_seconds, 1.0))
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+                for stream in (process.stdout, process.stderr):
+                    try:
+                        if stream is not None and not stream.closed:
+                            stream.close()
+                    except OSError:
+                        pass
+                cleanup = ClaudeCliCleanupReceipt(
+                    process_group_empty=_group_status(process.pid) == "EMPTY",
+                    marked_descendants_empty=False,
+                    leader_reaped=process.poll() is not None,
+                    stdin_closed=True,
+                    stdout_closed=process.stdout is None or process.stdout.closed,
+                    stderr_closed=process.stderr is None or process.stderr.closed,
+                    reader_closed=reader_closed,
+                    scratch_empty=False,
+                    term_sent=False,
+                    kill_sent=True,
+                    residue_rows=("CLEANUP_FAILED",),
+                )
+                failure = (
+                    "PROCESS_CLEANUP_FAILED",
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                    "Claude CLI cleanup failed",
+                )
 
-        if violation is not None:
-            cleanup = _cleanup_process(
-                process,
-                pgid=pgid,
-                grace_seconds=command.terminate_grace_seconds,
-                force_termination=True,
-            )
+        if failure is not None:
             raise ClaudeCliProtocolError(
-                violation.code,
-                violation.observation,
-                violation.message,
+                failure[0],
+                failure[1],
+                failure[2],
                 cleanup=cleanup,
-            )
-
-        try:
-            returncode = process.wait(timeout=max(command.terminate_grace_seconds, 1.0))
-        except subprocess.TimeoutExpired:
-            cleanup = _cleanup_process(
-                process,
-                pgid=pgid,
-                grace_seconds=command.terminate_grace_seconds,
-                force_termination=True,
-            )
-            raise ClaudeCliProtocolError(
-                "PROCESS_EXIT_TIMEOUT",
-                ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                "Claude CLI did not exit after its terminal result",
-                cleanup=cleanup,
-            )
-        cleanup = _cleanup_process(
-            process,
-            pgid=pgid,
-            grace_seconds=command.terminate_grace_seconds,
-            force_termination=False,
-        )
-        if returncode != 0:
-            raise ClaudeCliProtocolError(
-                "PROCESS_EXIT_INVALID",
-                ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                "Claude CLI exit status contradicted its terminal result",
-                cleanup=cleanup,
-            )
-        if not cleanup.process_group_empty or not cleanup.leader_reaped or cleanup.residue_rows:
-            raise ClaudeCliProtocolError(
-                "PROCESS_RESIDUE_UNPROVEN",
-                ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                "Claude CLI cleanup was not fully proven",
-                cleanup=cleanup,
-            )
+            ) from None
         if cleanup.term_sent or cleanup.kill_sent:
             raise ClaudeCliProtocolError(
                 "PROCESS_RESIDUE_OBSERVED",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "Claude CLI descendants survived the terminal result",
                 cleanup=cleanup,
-            )
+            ) from None
+        if (
+            not cleanup.process_group_empty
+            or not cleanup.marked_descendants_empty
+            or not cleanup.leader_reaped
+            or not cleanup.reader_closed
+            or not cleanup.scratch_empty
+            or cleanup.residue_rows
+        ):
+            raise ClaudeCliProtocolError(
+                "PROCESS_RESIDUE_UNPROVEN",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "Claude CLI cleanup was not fully proven",
+                cleanup=cleanup,
+            ) from None
+        if returncode is None:  # pragma: no cover - guarded by failure paths
+            raise ClaudeCliProtocolError(
+                "PROCESS_EXIT_UNPROVEN",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "Claude CLI exit status was unavailable",
+                cleanup=cleanup,
+            ) from None
 
         receipt_body = {
             "observation": ClaudeCliObservation.TERMINAL_RESULT_OBSERVED.value,
@@ -1615,6 +1888,7 @@ class ClaudeCliRunner:
             "stream_sha256": stream_digest.hexdigest(),
             "argv_sha256": command.argv_sha256,
             "environment_sha256": command.environment_sha256,
+            "settings_sha256": command.settings_sha256,
             "returncode": returncode,
             "events": [dataclasses.asdict(event) for event in parser.events],
             "cleanup": cleanup.to_dict(),
@@ -1633,12 +1907,12 @@ class ClaudeCliRunner:
             stream_sha256=stream_digest.hexdigest(),
             argv_sha256=command.argv_sha256,
             environment_sha256=command.environment_sha256,
+            settings_sha256=command.settings_sha256,
             returncode=returncode,
             events=tuple(parser.events),
             cleanup=cleanup,
             receipt_sha256=_canonical_sha256(receipt_body),
         )
-
 
 __all__ = [
     "ClaudeCliCleanupReceipt",

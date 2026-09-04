@@ -8,6 +8,9 @@ credential store, invokes a shell, or writes inside the sealed workspace.
 
 from __future__ import annotations
 
+import atexit
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -20,7 +23,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-_RESULT = '{"decision":"HOLD","reason":"sealed fixture"}'
 _VERSIONS = {"2.1.248", "2.1.259"}
 _MODEL = re.compile(r"claude-(?:opus|sonnet|haiku)-[1-9][0-9]*(?:-[0-9]+)+(?:-[0-9]{8})?\Z")
 _BASE_ENV = {
@@ -42,6 +44,7 @@ _FAKE_ENV = {
     "MMX_FAKE_CLAUDE_STATE_FILE",
     "MMX_FAKE_CLAUDE_VERSION",
     "MMX_FAKE_CLAUDE_MAX_STARTS",
+    "MMX_FAKE_CLAUDE_MANAGED_SETTINGS",
 }
 _FORBIDDEN_ENV_PREFIXES = (
     "ANTHROPIC_",
@@ -74,6 +77,62 @@ _DARWIN_PYTHON_LAUNCHER_ENV = frozenset(
 def _reject(kind: str, code: int) -> None:
     sys.stderr.write(f"fake claude: {kind} rejected\n")
     raise SystemExit(code)
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _derived_result(evidence_sha256: str) -> str:
+    return _canonical_json({"decision": "HOLD", "evidence_sha256": evidence_sha256})
+
+
+def _derived_prompt(evidence_relative_path: str, evidence_sha256: str) -> str:
+    return (
+        f"Read exactly one sealed relative file: {evidence_relative_path}\n"
+        f"Expected SHA-256: {evidence_sha256}\n"
+        f"Return exactly: {_derived_result(evidence_sha256)}\n"
+        "Do not perform any other action."
+    )
+
+
+def _closed_settings_json(evidence_relative_path: str) -> str:
+    return _canonical_json(
+        {
+            "autoMemoryEnabled": False,
+            "disableAgentView": True,
+            "disableAllHooks": True,
+            "disableAutoMode": "disable",
+            "disableDeepLinkRegistration": "disable",
+            "enableAllProjectMcpServers": False,
+            "enabledMcpjsonServers": [],
+            "includeGitInstructions": False,
+            "permissions": {
+                "allow": [f"Read(./{evidence_relative_path})"],
+                "ask": [],
+                "defaultMode": "dontAsk",
+                "deny": [
+                    "Agent",
+                    "Bash",
+                    "Edit",
+                    "Glob",
+                    "Grep",
+                    "NotebookEdit",
+                    "Skill",
+                    "Task",
+                    "WebFetch",
+                    "WebSearch",
+                    "Write",
+                    "mcp__*",
+                ],
+                "disableBypassPermissionsMode": "disable",
+            },
+        }
+    )
 
 
 def _version() -> str:
@@ -150,15 +209,26 @@ def _parse_invocation(version: str) -> tuple[str, str, str, str]:
     if len(args) < 2:
         _reject("invocation", 64)
     prompt = args[-1]
-    match = re.fullmatch(
-        r"Read only ([A-Za-z0-9][A-Za-z0-9._/-]*).+",
-        prompt,
-        flags=re.DOTALL,
-    )
-    if not match or len(prompt.encode("utf-8")) > 8_192:
+    lines = prompt.splitlines()
+    if (
+        len(lines) != 4
+        or not lines[0].startswith("Read exactly one sealed relative file: ")
+        or not lines[1].startswith("Expected SHA-256: ")
+        or not lines[2].startswith("Return exactly: ")
+        or lines[3] != "Do not perform any other action."
+        or len(prompt.encode("utf-8")) > 8_192
+    ):
         _reject("invocation", 64)
-    evidence_path = match.group(1).rstrip(".,;:")
+    evidence_path = lines[0].removeprefix("Read exactly one sealed relative file: ")
+    declared_sha256 = lines[1].removeprefix("Expected SHA-256: ")
+    declared_result = lines[2].removeprefix("Return exactly: ")
     if not _safe_relative_path(evidence_path):
+        _reject("invocation", 64)
+    if (
+        re.fullmatch(r"[0-9a-f]{64}", declared_sha256) is None
+        or declared_result != _derived_result(declared_sha256)
+        or prompt != _derived_prompt(evidence_path, declared_sha256)
+    ):
         _reject("invocation", 64)
     try:
         model = args[args.index("--model") + 1]
@@ -201,18 +271,19 @@ def _parse_invocation(version: str) -> tuple[str, str, str, str]:
             "--max-turns",
             "1",
             "--settings",
-            "{}",
+            _closed_settings_json(evidence_path),
             prompt,
         ]
     )
     if args != expected:
         _reject("invocation", 64)
-    return model, session_id, evidence_path, prompt
+    return model, session_id, evidence_path, declared_sha256
 
 
 def _empty_state() -> dict[str, Any]:
     return {
         "children": [],
+        "escaped_children": [],
         "mcp_calls": 0,
         "network_attempts": 0,
         "reads": 0,
@@ -248,6 +319,27 @@ def _write_state(path: Path, state: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
+def _acquire_state_lock(path: Path) -> int:
+    lock_path = path.with_name(f".{path.name}.lock")
+    try:
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, BlockingIOError):
+        try:
+            os.close(descriptor)
+        except (OSError, UnboundLocalError):
+            pass
+        _reject("state lock", 73)
+    return descriptor
+
+
+def _release_state_lock(descriptor: int) -> None:
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
+
+
 def _event(value: dict[str, Any]) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
@@ -258,7 +350,7 @@ def _emit(value: dict[str, Any]) -> None:
 
 
 def _canonical_events(
-    *, model: str, session_id: str, evidence_path: str, evidence: str
+    *, model: str, session_id: str, evidence_path: str, evidence: str, result: str
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -312,7 +404,7 @@ def _canonical_events(
             "message": {
                 "role": "assistant",
                 "model": model,
-                "content": [{"type": "text", "text": _RESULT}],
+                "content": [{"type": "text", "text": result}],
             },
         },
         {
@@ -322,7 +414,7 @@ def _canonical_events(
             "duration_ms": 25,
             "duration_api_ms": 10,
             "num_turns": 1,
-            "result": _RESULT,
+            "result": result,
             "session_id": session_id,
             "total_cost_usd": 0.001,
             "usage": {"input_tokens": 11, "output_tokens": 7},
@@ -349,18 +441,36 @@ def _main() -> int:
     if not state_path.is_absolute() or not state_path.parent.is_dir():
         _reject("environment", 65)
     _validate_environment(state_path)
-    model, session_id, evidence_relative, _ = _parse_invocation(version)
+    model, session_id, evidence_relative, declared_sha256 = _parse_invocation(version)
 
+    lock_descriptor = _acquire_state_lock(state_path)
+    atexit.register(_release_state_lock, lock_descriptor)
     state = _read_state(state_path)
-    state["starts"] += 1
-    _write_state(state_path, state)
     maximum_starts = os.environ.get("MMX_FAKE_CLAUDE_MAX_STARTS")
     if maximum_starts is not None:
         if not maximum_starts.isascii() or not maximum_starts.isdigit() or int(maximum_starts) < 1:
             _reject("environment", 65)
-        if state["starts"] > int(maximum_starts):
+        if state["starts"] >= int(maximum_starts):
             sys.stderr.write("fake claude: second start refused\n")
             return 73
+    state["starts"] += 1
+    _write_state(state_path, state)
+
+    managed_settings = os.environ.get("MMX_FAKE_CLAUDE_MANAGED_SETTINGS")
+    if managed_settings is not None:
+        try:
+            managed_value = json.loads(managed_settings)
+        except (json.JSONDecodeError, UnicodeError):
+            _reject("environment", 65)
+        if managed_value != {}:
+            _emit(
+                {
+                    "type": "system",
+                    "subtype": "managed_policy",
+                    "session_id": session_id,
+                }
+            )
+            return 76
 
     scenario = os.environ.get("MMX_FAKE_CLAUDE_SCENARIO", "ok")
     workspace = Path.cwd().resolve(strict=True)
@@ -369,11 +479,16 @@ def _main() -> int:
         resolved_evidence = evidence_path.resolve(strict=True)
         if workspace not in resolved_evidence.parents or evidence_path.is_symlink():
             _reject("invocation", 64)
-        evidence = resolved_evidence.read_text(encoding="utf-8")
+        evidence_bytes = resolved_evidence.read_bytes()
+        evidence = evidence_bytes.decode("utf-8", errors="strict")
     except (OSError, UnicodeError):
         _reject("invocation", 64)
     if len(evidence.encode("utf-8")) > 65_536:
         _reject("invocation", 64)
+    evidence_sha256 = _sha256_bytes(evidence_bytes)
+    if evidence_sha256 != declared_sha256:
+        _reject("invocation", 64)
+    result = _derived_result(evidence_sha256)
     state["reads"] += 1
     state["submissions"] += 1
     _write_state(state_path, state)
@@ -383,6 +498,7 @@ def _main() -> int:
         session_id=session_id,
         evidence_path=evidence_relative,
         evidence=evidence,
+        result=result,
     )
 
     if scenario == "hang_before_output":
@@ -492,6 +608,9 @@ def _main() -> int:
         events[0]["session_id"] = "00000000-0000-4000-8000-000000000000"
     elif scenario == "init_tools_extra":
         events[0]["tools"] = ["Read", "Bash"]
+    elif scenario == "init_end_conversation":
+        # EndConversation is intentionally absent from non-interactive -p.
+        events[0]["tools"] = ["Read", "EndConversation"]
     elif scenario == "init_mcp":
         events[0]["mcp_servers"] = [{"name": "bad", "status": "connected"}]
     elif scenario == "init_plugin":
@@ -549,7 +668,16 @@ def _main() -> int:
         events[0]["capabilities"] = ["sk-" + "ant-" + "FAKE_SENTINEL_NOT_A_SECRET"]
     elif scenario == "private_path_output":
         events[0]["capabilities"] = ["/Users/example/private"]
-    elif scenario not in {"ok", "nonzero_after_success", "child_after_result"}:
+    elif scenario == "scratch_residue":
+        scratch_residue = Path(os.environ["TMPDIR"]) / "fake-residue"
+        descriptor = os.open(scratch_residue, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(descriptor)
+    elif scenario not in {
+        "ok",
+        "nonzero_after_success",
+        "child_after_result",
+        "escaped_child_after_result",
+    }:
         _reject("scenario", 75)
 
     if scenario == "child_after_result":
@@ -566,6 +694,21 @@ def _main() -> int:
             close_fds=True,
         )
         state["children"] = [child.pid]
+        _write_state(state_path, state)
+    if scenario == "escaped_child_after_result":
+        child = subprocess.Popen(
+            [
+                "/usr/bin/python3",
+                "-c",
+                "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+        state["escaped_children"] = [child.pid]
         _write_state(state_path, state)
     for event in events:
         _emit(event)

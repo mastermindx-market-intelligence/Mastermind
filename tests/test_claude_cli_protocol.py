@@ -382,6 +382,20 @@ def test_prestart_error_trace_suppresses_private_locator_context(tmp_path: Path)
     assert captured.value.__suppress_context__ is True
 
 
+def test_spawn_boundary_revalidates_evidence_prompt_and_result_as_one_identity(tmp_path: Path) -> None:
+    policy, workspace, _, _ = _policy(tmp_path)
+    command = compile_claude_cli_command(policy)
+    (workspace / "sealed" / "evidence.txt").write_text("drifted after compile\n", encoding="utf-8")
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(command, fake_controls=_fake_controls(tmp_path))
+
+    assert captured.value.code == "EVIDENCE_DRIFT"
+    assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
+    assert captured.value.cleanup is None
+    assert not (tmp_path / "fake-state.json").exists()
+
+
 def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Path) -> None:
     policy, workspace, head, status = _policy(tmp_path)
     command = compile_claude_cli_command(policy)
@@ -395,6 +409,7 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
     assert receipt.read_count == 1
     assert receipt.submission_count == 1
     assert receipt.result_sha256 == _sha256_text(_expected_result())
+    assert receipt.settings_sha256 == command.settings_sha256
     assert receipt.returncode == 0
     assert receipt.cleanup.process_group_empty is True
     assert receipt.cleanup.leader_reaped is True
@@ -759,6 +774,11 @@ def test_runner_is_an_exactly_once_invocation_guard(tmp_path: Path) -> None:
 def test_fake_controls_are_closed_and_fake_only(tmp_path: Path) -> None:
     policy, _, _, _ = _policy(tmp_path)
     command = compile_claude_cli_command(policy)
+    with pytest.raises(ClaudeCliProtocolError, match="fake-only") as captured:
+        ClaudeCliRunner().run(command)
+    assert captured.value.code == "FAKE_ONLY_EFFECT_CEILING"
+    assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
+
     with pytest.raises(ClaudeCliProtocolError, match="fake control") as captured:
         ClaudeCliRunner().run(command, fake_controls={"ANTHROPIC_API_KEY": "FAKE_SENTINEL"})
     assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
