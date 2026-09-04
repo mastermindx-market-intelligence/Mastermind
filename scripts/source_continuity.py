@@ -50,6 +50,7 @@ _API_VERSION = "2022-11-28"
 _COMMAND_TIMEOUT_SECONDS = 20.0
 _HTTP_TIMEOUT_SECONDS = 20.0
 _MAX_HTTP_BODY_BYTES = 5_000_000
+_MAX_GIT_CONFIG_CENSUS_BYTES = 65_536
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 _MAX_COLLISION_PRS = 100
@@ -650,9 +651,28 @@ def _probe_local_and_entries(
         "--no-renames",
         "--no-ext-diff",
         "--no-textconv",
+        "--ignore-submodules=none",
         "--name-only",
         "-z",
     )
+    filter_config = _invoke_git(
+        runner,
+        workspace,
+        "config",
+        "--null",
+        "--name-only",
+        "--get-regexp",
+        r"^filter\..*\.(clean|process)$",
+    )
+    if filter_config is None or filter_config.returncode not in {0, 1}:
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+    if (
+        len(filter_config.stdout.encode("utf-8")) > _MAX_GIT_CONFIG_CENSUS_BYTES
+        or filter_config.returncode == 0
+        or filter_config.stdout
+    ):
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
     unstaged = _invoke_git(runner, workspace, "diff", *diff_controls, "HEAD", "--")
     staged = _invoke_git(runner, workspace, "diff", "--cached", *diff_controls, "--")
     untracked = _invoke_git(runner, workspace, "ls-files", "--others", "--exclude-standard", "-z")
