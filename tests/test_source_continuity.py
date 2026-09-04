@@ -892,39 +892,83 @@ class _ProbeRunner:
         self.calls.append(call)
         self.kwargs.append(dict(kwargs))
 
-        if call == ("/usr/bin/git", "rev-parse", "--show-toplevel"):
+        commands = {
+            "rev-parse",
+            "symbolic-ref",
+            "cat-file",
+            "merge-base",
+            "rev-list",
+            "diff",
+            "ls-files",
+            "ls-tree",
+            "status",
+        }
+        command_index = next(
+            index for index, value in enumerate(call) if index and value in commands
+        )
+        assert call[:3] == ("/usr/bin/git", "--no-pager", "--no-replace-objects")
+        prefix = call[3:command_index]
+        assert len(prefix) % 2 == 0
+        assert all(prefix[index] == "-c" for index in range(0, len(prefix), 2))
+        assert {
+            "core.fsmonitor=false",
+            "core.untrackedCache=false",
+            "core.hooksPath=/dev/null",
+            "core.attributesFile=/dev/null",
+            "core.excludesFile=/dev/null",
+            "diff.external=",
+            "diff.renames=false",
+            "credential.helper=",
+            "protocol.allow=never",
+            "protocol.file.allow=always",
+        } <= set(prefix[1::2])
+        call = call[command_index:]
+
+        if call == ("rev-parse", "--show-toplevel"):
             return self._done(stdout=f"{WORKSPACE}\n")
-        if call == ("/usr/bin/git", "symbolic-ref", "--short", "HEAD"):
+        if call == ("symbolic-ref", "--short", "HEAD"):
             return self._done(stdout=f"{BRANCH}\n")
-        if call == ("/usr/bin/git", "rev-parse", "HEAD^{commit}"):
+        if call == ("rev-parse", "HEAD^{commit}"):
             return self._done(stdout=f"{HEAD_SHA}\n")
-        if call == ("/usr/bin/git", "rev-parse", "HEAD^{tree}"):
+        if call == ("rev-parse", "HEAD^{tree}"):
             return self._done(stdout=f"{TREE_SHA}\n")
         if call in {
-            ("/usr/bin/git", "cat-file", "-e", f"{HEAD_SHA}^{{commit}}"),
-            ("/usr/bin/git", "cat-file", "-e", f"{BASE_SHA}^{{commit}}"),
+            ("cat-file", "-e", f"{HEAD_SHA}^{{commit}}"),
+            ("cat-file", "-e", f"{BASE_SHA}^{{commit}}"),
         }:
             return self._done()
-        if call == ("/usr/bin/git", "merge-base", "--is-ancestor", HEAD_SHA, "HEAD"):
+        if call == ("merge-base", "--is-ancestor", HEAD_SHA, "HEAD"):
             return self._done()
-        if call == ("/usr/bin/git", "rev-list", "--count", f"{HEAD_SHA}..HEAD"):
+        if call == ("rev-list", "--count", f"{HEAD_SHA}..HEAD"):
             return self._done(stdout="0\n")
-        if call == ("/usr/bin/git", "diff", "--name-only", "-z", "HEAD"):
-            return self._done()
-        if call == ("/usr/bin/git", "diff", "--cached", "--name-only", "-z"):
-            return self._done()
-        if call == ("/usr/bin/git", "ls-files", "--others", "--exclude-standard", "-z"):
+        if call == (
+            "diff", "--no-renames", "--no-ext-diff", "--no-textconv",
+            "--name-only", "-z", "HEAD", "--",
+        ):
             return self._done()
         if call == (
-            "/usr/bin/git",
+            "diff", "--cached", "--no-renames", "--no-ext-diff", "--no-textconv",
+            "--name-only", "-z", "--",
+        ):
+            return self._done()
+        if call == ("ls-files", "-v", "-z"):
+            return self._done(
+                stdout="".join(f"H {path}\0" for path in FINAL_OWNED_PATHS)
+            )
+        if call == ("ls-files", "--others", "--exclude-standard", "-z"):
+            return self._done()
+        if call == (
             "diff",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
             "--name-only",
             "-z",
             f"{BASE_SHA}..{HEAD_SHA}",
+            "--",
         ):
             return self._done(stdout="\0".join(FINAL_OWNED_PATHS) + "\0")
         if call == (
-            "/usr/bin/git",
             "ls-tree",
             "-z",
             "-l",
@@ -981,7 +1025,7 @@ class _ProbeHTTP:
         if endpoint == f"repos/{REPOSITORY}/compare/{CURRENT_BASE_SHA}...{HEAD_SHA}":
             return {"merge_base_commit": {"sha": BASE_SHA}}
         if endpoint == f"repos/{REPOSITORY}/pulls/{PR_NUMBER}/files?per_page=100&page=1":
-            return [{"filename": path} for path in FINAL_OWNED_PATHS]
+            return [{"filename": path, "status": "modified"} for path in FINAL_OWNED_PATHS]
         if endpoint == f"repos/{REPOSITORY}/pulls?state=open&per_page=100&page=1":
             return [{"number": PR_NUMBER}]
         raise AssertionError(f"unexpected HTTP probe endpoint: {endpoint}")
@@ -1041,15 +1085,24 @@ def test_cli_collects_facts_with_canonical_read_only_probes_and_prints_one_recei
     assert runner.calls
     for call, kwargs in zip(runner.calls, runner.kwargs, strict=True):
         assert call[0] == "/usr/bin/git"
-        assert call[1] not in forbidden
+        assert not forbidden.intersection(call)
         assert kwargs.get("cwd") == WORKSPACE
         assert kwargs.get("env", {}).get("GIT_OPTIONAL_LOCKS") == "0"
         assert kwargs.get("env", {}).get("GIT_NO_LAZY_FETCH") == "1"
         assert "GITHUB_TOKEN" not in kwargs.get("env", {})
-    assert any(call[1] == "ls-tree" for call in runner.calls)
+    assert any("ls-tree" in call for call in runner.calls)
     assert any(
-        call[1:4] == ("diff", "--name-only", "-z")
-        and call[-1] == f"{BASE_SHA}..{HEAD_SHA}"
+        "diff" in call
+        and f"{BASE_SHA}..{HEAD_SHA}" in call
+        and {
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            "-z",
+            "--",
+        }
+        <= set(call)
         for call in runner.calls
     )
     assert http.calls
@@ -1345,7 +1398,7 @@ class _CollisionFenceHTTP(_ProbeHTTP):
                 else self.final_other_path
             )
             assert selected is not None
-            return [{"filename": selected}]
+            return [{"filename": selected, "status": "modified"}]
 
         return super().__call__(url, token=token, timeout=timeout)
 

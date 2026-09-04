@@ -84,8 +84,10 @@ def test_closed_file_reducer_rejects_duplicate_effective_paths() -> None:
         )
 
 
-def test_statusless_legacy_fixture_is_one_nonrename_path() -> None:
-    assert changed_paths(_module(), [{"filename": "a.py"}]) == ("a.py",)
+def test_closed_file_reducer_rejects_statusless_row() -> None:
+    module = _module()
+    with pytest.raises(module._RemoteProbeError):
+        changed_paths(module, [{"filename": "a.py"}])
 
 
 class CollisionHTTP:
@@ -110,10 +112,47 @@ class CollisionHTTP:
 )
 def test_collision_census_catches_rename_on_either_side(row: dict[str, object]) -> None:
     module = _module()
-    state, numbers, complete = module._collision_census(
+    state, numbers, complete, snapshot = module._collision_census(
         CollisionHTTP(row), TOKEN, REPOSITORY, 448, (OWNED[0],)
     )
     assert (state, numbers, complete) == (module.CollisionState.OVERLAP, (999,), True)
+    assert snapshot == ((448, ()), (999, tuple(row[key] for key in ("previous_filename", "filename"))))
+
+
+class CollisionRowsHTTP:
+    def __init__(self, rows: dict[int, list[dict[str, object]]]) -> None:
+        self.rows = rows
+
+    def __call__(self, url: str, *, token: str, timeout: float) -> object:
+        assert token == TOKEN and timeout > 0
+        if url.endswith("/pulls?state=open&per_page=100&page=1"):
+            return [{"number": 448}, *({"number": number} for number in self.rows)]
+        for number, rows in self.rows.items():
+            if url.endswith(f"/pulls/{number}/files?per_page=100&page=1"):
+                return rows
+        raise AssertionError(url)
+
+
+def test_collision_census_retains_complete_normalized_open_pr_and_path_evidence() -> None:
+    module = _module()
+    state, numbers, complete, snapshot = module._collision_census(
+        CollisionRowsHTTP(
+            {
+                999: [{"filename": OWNED[0], "status": "modified"}],
+                1000: [{"filename": "docs/unrelated.md", "status": "modified"}],
+            }
+        ),
+        TOKEN,
+        REPOSITORY,
+        448,
+        OWNED,
+    )
+    assert (state, numbers, complete) == (module.CollisionState.OVERLAP, (999,), True)
+    assert snapshot == (
+        (448, ()),
+        (999, (OWNED[0],)),
+        (1000, ("docs/unrelated.md",)),
+    )
 
 
 def request(module: Any):
@@ -251,13 +290,64 @@ def test_final_fence_rechecks_target_file_census(monkeypatch, second_paths, comp
     monkeypatch.setattr(module, "_changed_paths", reread)
     result = module._remote_still_matches(
         FenceHTTP(), TOKEN, request(module), module._pr_identity(pr_payload()),
-        HEAD, BASE, OWNED, True, module.CollisionState.NONE, (), True,
+        HEAD, BASE, OWNED, True, module.CollisionState.NONE, (), True, ((448, ()),),
     )
     assert calls == 1
     if expected is None:
         assert result is None
     else:
         assert result is not None and result.code.value == expected
+
+
+class CollisionDriftFenceHTTP(FenceHTTP):
+    def __init__(self, rows: dict[int, str]) -> None:
+        self.rows = rows
+
+    def __call__(self, url: str, *, token: str, timeout: float) -> object:
+        assert token == TOKEN and timeout > 0
+        if url.endswith("/pulls/448/files?per_page=100&page=1"):
+            return [{"filename": path, "status": "modified"} for path in OWNED]
+        if url.endswith("/pulls?state=open&per_page=100&page=1"):
+            return [{"number": 448}, *({"number": number} for number in self.rows)]
+        for number, path in self.rows.items():
+            if url.endswith(f"/pulls/{number}/files?per_page=100&page=1"):
+                return [{"filename": path, "status": "modified"}]
+        return super().__call__(url, token=token, timeout=timeout)
+
+
+@pytest.mark.parametrize(
+    ("first_snapshot", "second_rows"),
+    [
+        (
+            ((448, ()), (999, (OWNED[0],))),
+            {999: OWNED[1]},
+        ),
+        (
+            ((448, ()), (999, (OWNED[0],)), (1000, ("docs/a.md",))),
+            {999: OWNED[0], 1001: "docs/a.md"},
+        ),
+    ],
+)
+def test_final_fence_rejects_same_summary_collision_path_or_open_set_churn(
+    first_snapshot: tuple[tuple[int, tuple[str, ...]], ...],
+    second_rows: dict[int, str],
+) -> None:
+    module = _module()
+    result = module._remote_still_matches(
+        CollisionDriftFenceHTTP(second_rows),
+        TOKEN,
+        request(module),
+        module._pr_identity(pr_payload()),
+        HEAD,
+        BASE,
+        OWNED,
+        True,
+        module.CollisionState.OVERLAP,
+        (999,),
+        True,
+        first_snapshot,
+    )
+    assert result is not None and result.code.value == "REMOTE_PROOF_CHANGED"
 
 
 class CaptureRunner:
@@ -305,7 +395,8 @@ def git_tail(command: tuple[str, ...]) -> tuple[str, ...]:
 OVERRIDES = (
     "core.fsmonitor=false", "core.untrackedCache=false", "core.hooksPath=/dev/null",
     "core.attributesFile=/dev/null", "core.excludesFile=/dev/null", "diff.external=",
-    "diff.renames=false", "credential.helper=", "protocol.allow=never",
+    "diff.renames=false", "core.fileMode=true", "core.ignoreStat=false",
+    "credential.helper=", "protocol.allow=never",
     "protocol.file.allow=always",
 )
 
@@ -316,6 +407,22 @@ def assert_git_prefix(command: tuple[str, ...]) -> None:
     joined = "\0".join(prefix)
     for setting in OVERRIDES:
         assert f"-c\0{setting}" in joined
+
+
+class AssertionRunner:
+    def __init__(self) -> None:
+        self.commands: list[tuple[str, ...]] = []
+
+    def __call__(self, command: list[str], **_kwargs: Any) -> object:
+        self.commands.append(tuple(command))
+        raise AssertionError("test double rejected the command")
+
+
+def test_injected_runner_assertion_never_retries_without_the_git_fence() -> None:
+    module, runner = _module(), AssertionRunner()
+    assert module._invoke_git(runner, "/repo", "rev-parse", "HEAD^{commit}") is None
+    assert len(runner.commands) == 1
+    assert_git_prefix(runner.commands[0])
 
 
 def test_all_local_probes_use_closed_argv_and_explicit_diff_controls() -> None:
@@ -337,8 +444,8 @@ def test_all_local_probes_use_closed_argv_and_explicit_diff_controls() -> None:
 
 
 ENV_KEYS = {
-    "LANG", "LC_ALL", "PATH", "HOME", "GIT_OPTIONAL_LOCKS", "GIT_NO_LAZY_FETCH",
-    "GIT_TERMINAL_PROMPT", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL",
+    "LANG", "LC_ALL", "TZ", "PATH", "HOME", "GIT_OPTIONAL_LOCKS", "GIT_NO_LAZY_FETCH",
+    "GIT_TERMINAL_PROMPT", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_LOCAL",
     "GIT_ATTR_NOSYSTEM", "GIT_LITERAL_PATHSPECS", "GIT_NO_REPLACE_OBJECTS",
     "GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_ASKPASS", "SSH_ASKPASS",
     "GIT_SSH", "GIT_SSH_COMMAND", "GIT_CONFIG_COUNT",
@@ -372,9 +479,10 @@ def test_git_child_environment_is_exact_and_ignores_hostile_ambient(monkeypatch)
     assert set(env) == ENV_KEYS
     assert all(env.get(key) != value for key, value in hostile.items() if key in env)
     assert env == {
-        "LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin", "HOME": "/",
+        "LANG": "C", "LC_ALL": "C", "TZ": "UTC", "PATH": "/usr/bin:/bin", "HOME": "/",
         "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0",
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_LOCAL": os.devnull,
         "GIT_ATTR_NOSYSTEM": "1", "GIT_LITERAL_PATHSPECS": "1",
         "GIT_NO_REPLACE_OBJECTS": "1", "GIT_PAGER": "cat",
         "GIT_EDITOR": "/usr/bin/false", "GIT_SEQUENCE_EDITOR": "/usr/bin/false",
@@ -402,6 +510,61 @@ def init_repo(path: Path, value: str) -> str:
     git(path, "add", "value.txt")
     git(path, "commit", "-q", "-m", value)
     return git(path, "rev-parse", "HEAD^{commit}")
+
+
+def repo_request(module: Any, repo: Path, head: str):
+    return module.SourceContinuityRequest(
+        receipt_kind=module.ReceiptKind.CHECKPOINT_VERIFIED,
+        operation_key="source-continuity-r3-local-index-hardening-20260904-sol-001",
+        repository=REPOSITORY,
+        pr_number=448,
+        branch=git(repo, "symbolic-ref", "--short", "HEAD"),
+        base_ref="master",
+        pinned_base_sha=head,
+        owned_paths=("value.txt",),
+        verified_at="2026-09-04T04:00:00Z",
+    )
+
+
+def test_real_probe_observes_mode_change_despite_local_core_filemode_false(tmp_path) -> None:
+    repo = tmp_path / "filemode"
+    head = init_repo(repo, "base")
+    git(repo, "config", "core.fileMode", "false")
+    (repo / "value.txt").chmod(0o755)
+    module = _module()
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        repo_request(module, repo, head),
+        head,
+        head,
+        (),
+    )
+    assert not isinstance(result, module.SourceContinuityRefusal)
+    local_facts, _ = result
+    assert local_facts.uncommitted_in_scope_count == 1
+
+
+@pytest.mark.parametrize("index_flag", ["--assume-unchanged", "--skip-worktree"])
+def test_real_probe_refuses_index_flags_that_conceal_owned_byte_drift(
+    tmp_path,
+    index_flag: str,
+) -> None:
+    repo = tmp_path / index_flag.removeprefix("--")
+    head = init_repo(repo, "base")
+    git(repo, "update-index", index_flag, "value.txt")
+    (repo / "value.txt").write_text("concealed", encoding="utf-8")
+    module = _module()
+    result = module._probe_local_and_entries(
+        subprocess.run,
+        str(repo),
+        repo_request(module, repo, head),
+        head,
+        head,
+        (),
+    )
+    assert isinstance(result, module.SourceContinuityRefusal)
+    assert result.code.value == "LOCAL_PROBE_FAILED"
 
 
 def test_real_probe_ignores_ambient_repo_selectors(tmp_path, monkeypatch) -> None:
