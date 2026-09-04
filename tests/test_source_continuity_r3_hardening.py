@@ -229,3 +229,78 @@ def test_git_probe_environment_installs_closed_safety_controls(
         "diff.external": "",
         "diff.renames": "false",
     }
+
+
+def _git(repo: Path, *args: str) -> str:
+    import subprocess
+
+    result = subprocess.run(
+        ["/usr/bin/git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(repo)},
+    )
+    return result.stdout.strip()
+
+
+def _init_repo(path: Path, marker: str) -> str:
+    path.mkdir()
+    _git(path, "init", "-q")
+    _git(path, "config", "user.name", "R3 Test")
+    _git(path, "config", "user.email", "r3@example.invalid")
+    (path / "value.txt").write_text(marker, encoding="utf-8")
+    _git(path, "add", "value.txt")
+    _git(path, "commit", "-q", "-m", marker)
+    return _git(path, "rev-parse", "HEAD^{commit}")
+
+
+def test_git_probe_ignores_ambient_git_dir_and_work_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    primary = tmp_path / "primary"
+    foreign = tmp_path / "foreign"
+    primary_head = _init_repo(primary, "primary")
+    foreign_head = _init_repo(foreign, "foreign")
+    assert primary_head != foreign_head
+
+    monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(foreign))
+    module = _module()
+    result = module._invoke_git(
+        subprocess.run,
+        str(primary),
+        "rev-parse",
+        "HEAD^{commit}",
+    )
+    assert result is not None and result.returncode == 0
+    assert result.stdout.strip() == primary_head
+
+
+def test_git_probe_ignores_repository_replace_objects(tmp_path: Path) -> None:
+    import subprocess
+
+    repo = tmp_path / "replace"
+    first = _init_repo(repo, "first")
+    first_tree = _git(repo, "rev-parse", f"{first}^{{tree}}")
+    (repo / "value.txt").write_text("second", encoding="utf-8")
+    _git(repo, "add", "value.txt")
+    _git(repo, "commit", "-q", "-m", "second")
+    second = _git(repo, "rev-parse", "HEAD^{commit}")
+    second_tree = _git(repo, "rev-parse", f"{second}^{{tree}}")
+    assert first_tree != second_tree
+    _git(repo, "replace", second, first)
+
+    module = _module()
+    result = module._invoke_git(
+        subprocess.run,
+        str(repo),
+        "rev-parse",
+        "HEAD^{tree}",
+    )
+    assert result is not None and result.returncode == 0
+    assert result.stdout.strip() == second_tree
