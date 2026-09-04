@@ -2268,12 +2268,14 @@ _OBLIGATION_NOT_YET_DELIVERED = frozenset({None, "NOT_SEEN", "PENDING_RETRYABLE"
 #: ``AttemptState`` wire values (``operator_continuity_projection.py``)
 #: meaning the Attempt is still open/in flight.
 _ATTEMPT_IN_PROGRESS = frozenset({
-    "CLAIMED", "RUNNING", "CHECKPOINTED", "CANCEL_REQUESTED", "RATE_LIMITED",
+    "CLAIMED", "RUNNING", "CHECKPOINTED", "CANCEL_REQUESTED",
 })
 
 #: ``AttemptState`` wire values meaning the Attempt has concluded. These are
 #: historical context only; W3C is the sole owner of return truth.
-_ATTEMPT_TERMINAL = frozenset({"COMPLETED", "FAILED", "LOST", "CANCELLED"})
+_ATTEMPT_TERMINAL = frozenset({
+    "COMPLETED", "FAILED", "LOST", "CANCELLED", "RATE_LIMITED",
+})
 
 #: Dialogue watcher/return receipts are intentionally not interpreted here.
 #: W3C owns terminal and Wake truth; the projection consumes only its closed
@@ -2353,6 +2355,17 @@ def _classify_dispatch_row(row: Mapping[str, Any], generated_at: str) -> tuple[s
     # actuator" — checked first, ahead of every other signal on the row.
     if row.get("effect_state") == "effect_unknown":
         return "EFFECT_UNKNOWN", "effect_unknown_reported", historical
+
+    # The chairman gather brackets its public Runtime reads with two
+    # explicit generation receipts. Any movement makes every derived join
+    # historical and non-actionable, even if an earlier generation appeared
+    # to contain a canonical terminal/Wake result.
+    if row.get("runtime_generation_state") == "CONFLICT":
+        return (
+            "RUNTIME_BINDING_RECONCILIATION_REQUIRED",
+            "runtime_generation_conflict",
+            True,
+        )
 
     # W3C is the sole canonical terminal/Wake owner.  Its own bounded result
     # and source receipt decide every terminal state; the legacy Attempt,
@@ -2484,6 +2497,8 @@ _DISPATCH_DATA_FIELDS = (
     "observed_at", "obligation_status", "action_target_state",
     "action_target_reason", "binding_evidence_state", "attempt_state",
     "effect_state",
+    "runtime_generation_state", "runtime_generation_before",
+    "runtime_generation_after",
     "runtime_root_state", "carrier_state", "carrier_reason",
     "w3c_state", "w3c_reason", "w3c_terminal_state", "w3c_wake_state",
     "w3c_terminal_applied", "w3c_source_observed_at",
@@ -2517,12 +2532,14 @@ _DISPATCH_CLOSED_VOCAB: dict[str, frozenset[str]] = {
         "FAILED", "LOST", "COMPLETED", "CANCELLED",
     }),
     "effect_state": frozenset({"none", "applied", "effect_unknown"}),
+    "runtime_generation_state": frozenset({"SAME", "CONFLICT"}),
     "runtime_root_state": frozenset({"RESOLVED", "UNKNOWN", "CONFLICT"}),
     "carrier_state": frozenset({"RESOLVED", "OWNER_HELD", "UNKNOWN"}),
     "carrier_reason": frozenset({
         "C2_CURRENT_CAPACITY_COMMITMENT", "C2_POSITIVE_OWNER_HELD",
         "C2_COMMITMENT_ABSENT", "C2_COMMITMENT_CONFLICT",
-        "C2_COMMITMENT_UNAVAILABLE",
+        "C2_COMMITMENT_UNAVAILABLE", "RUNTIME_ROOT_CONFLICT",
+        "RUNTIME_GENERATION_CONFLICT",
     }),
     "w3c_state": frozenset({
         "RESOLVED", "ABSENT", "UNAVAILABLE", "CONFLICT", "AMBIGUOUS",
@@ -2530,6 +2547,8 @@ _DISPATCH_CLOSED_VOCAB: dict[str, frozenset[str]] = {
     }),
     "w3c_reason": frozenset({
         "C2_EXACT_CANDIDATE_UNAVAILABLE", "C2_EXACT_CANDIDATE_CONFLICT",
+        "W3C_CANDIDATE_OWNER_SEAM_REQUIRED", "W3C_CANDIDATE_CONFLICT",
+        "RUNTIME_ROOT_CONFLICT", "RUNTIME_GENERATION_CONFLICT",
         "W3C_OWNER_UNAVAILABLE", "W3C_RESULT_INVALID",
         "CANDIDATE_NOT_CANONICAL", "CANONICAL_TERMINAL_ABSENT",
         "CANONICAL_TERMINAL_CONFLICT", "CANONICAL_TERMINAL_EFFECT_UNKNOWN",
@@ -2866,8 +2885,8 @@ def project_dispatch_consumption(
                 carrier = {
                     "state": row["carrier_state"],
                     "reason": row.get("carrier_reason"),
-                    # Positive C2 is unavailable at this base.  OWNER_HELD and
-                    # UNKNOWN are always historical and never actionable.
+                    # OWNER_HELD and UNKNOWN are always historical and never
+                    # actionable, including compatible bases predating C2.
                     "historical": row["carrier_state"] != "RESOLVED",
                     "actionable": False,
                 }

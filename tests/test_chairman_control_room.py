@@ -2345,19 +2345,15 @@ def test_gather_dispatch_evidence_never_raises_on_a_malformed_card(tmp_path):
         42,
     ]
     rows = ccr._gather_dispatch_evidence(tmp_path, cards, "2026-09-03T00:00:00Z")
-    assert rows == [
-        {
-            "responsibility_ref": "WS:NO-ROOT",
-            "root_job_id": None,
-            "runtime_root_state": "UNKNOWN",
-            "carrier_state": "OWNER_HELD",
-            "carrier_reason": "C2_POSITIVE_OWNER_HELD",
-            "w3c_state": "UNAVAILABLE",
-            "w3c_reason": "C2_EXACT_CANDIDATE_UNAVAILABLE",
-            "w3c_terminal_state": "UNAVAILABLE",
-            "w3c_wake_state": "UNAVAILABLE",
-            "w3c_terminal_applied": "false",
-        }
+    assert len(rows) == 1
+    assert rows[0]["responsibility_ref"] == "WS:NO-ROOT"
+    assert rows[0]["root_job_id"] is None
+    assert rows[0]["runtime_root_state"] == "UNKNOWN"
+    assert rows[0]["carrier_state"] == "OWNER_HELD"
+    assert rows[0]["w3c_reason"] == "W3C_CANDIDATE_OWNER_SEAM_REQUIRED"
+    assert rows[0]["runtime_generation_state"] == "SAME"
+    assert rows[0]["runtime_generation_before"] == rows[0][
+        "runtime_generation_after"
     ]
 
 
@@ -2527,13 +2523,274 @@ def test_end_to_end_build_control_room_threads_a_real_runtime_root_into_the_card
 # ---------------------------------------------------------------------------
 
 
-def test_cr1a_gather_delegates_one_exact_candidate_to_w3c_in_one_snapshot(
+def _cr1a_runtime_topology(tmp_path, *, workstream="WS:W3C-TOPOLOGY"):
+    """One real source root, orchestration child, and separate C2 carrier."""
+
+    from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
+
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-orchestration",
+        provider="codex",
+        account_label="orchestration@company",
+        worker_type="mock",
+        capabilities=["read", "research"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "capabilities": ["read", "research"],
+                "cost_class": "small",
+            }
+        },
+    )
+    runtime.workers.register_worker(
+        "worker-carrier",
+        provider="codex",
+        account_label="carrier@company",
+        worker_type="mock",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "capabilities": ["read"],
+                "cost_class": "small",
+            }
+        },
+    )
+    receipt = submit_intent(
+        runtime,
+        {
+            "schema": INTENT_SCHEMA_V2,
+            "intent_id": "CEO-CR1A-W3C-TOPOLOGY",
+            "actor": "ceo-sol",
+            "objective": "Prove the Control Room candidate topology.",
+            "department": "executive-infrastructure",
+            "priority": 9,
+            "grounding": {
+                "mastermind_sha": "a" * 40,
+                "macro_sha": "b" * 40,
+            },
+            "execution_contract": {
+                "requested_authorities": ["READ"],
+                "attempt_limit": 2,
+            },
+            "intent_kind": "executive_coo_cycle",
+            "business_impact": "material",
+            "workstream": workstream,
+        },
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    planner_dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1"
+        ),
+        worker_id="worker-orchestration",
+    )
+    assert planner_dispatch is not None
+
+    # W3C must see a COMPLETED orchestration row. Receipt validation remains
+    # W3C-owned; incomplete material closes after proving which Job crossed.
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE attempts SET status='COMPLETED',result_json='{}',"
+            "finished_at_ms=updated_at_ms,lease_token=NULL "
+            "WHERE attempt_id=?",
+            (planner_dispatch.attempt.attempt_id,),
+        )
+        connection.execute(
+            "UPDATE jobs SET status='COMPLETED',result_json='{}' WHERE job_id=?",
+            (planner.job_id,),
+        )
+
+    carrier = runtime.jobs.create_job(
+        "separate role-null C2 carrier",
+        owner_seat="ceo",
+        escalation_target="ceo",
+        provenance={"schema": "mastermind.ceo_intent.v1"},
+    )
+    carrier_lease = runtime.attempts.claim_job(
+        carrier.job_id,
+        worker_id="worker-carrier",
+    )
+    assert carrier_lease is not None
+    return runtime, root, planner, planner_dispatch.attempt, carrier, carrier_lease.attempt
+
+
+def test_cr1a_real_runtime_keeps_c2_carrier_out_of_w3c(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    runtime, root, planner, planner_attempt, carrier, carrier_attempt = (
+        _cr1a_runtime_topology(tmp_path)
+    )
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "at",
+        classmethod(lambda cls, root, create=False: runtime),
+    )
+    real_provenance = ccr.executive_inbox.ceo_intent_provenance
+    monkeypatch.setattr(
+        ccr.executive_inbox,
+        "ceo_intent_provenance",
+        lambda observed_runtime, job_id: (
+            ({"workstream": "WS:W3C-TOPOLOGY"}, None)
+            if job_id == root.job_id
+            else real_provenance(observed_runtime, job_id)
+        ),
+    )
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "current_capacity_commitment",
+        lambda self, source_root_job_id, *, connection=None: SimpleNamespace(
+            source_root_job_id=root.job_id,
+            responsibility_ref="WS:W3C-TOPOLOGY",
+            carrier_job_id=carrier.job_id,
+            committed_carrier_attempt_id=carrier_attempt.attempt_id,
+            selected_worker_id=carrier_attempt.worker_id,
+        ),
+        raising=False,
+    )
+    real_w3c = ccr.executive_dialogue_observation.read_runtime_canonical_terminal_wake
+    seen = []
+
+    def observe_real_candidate(**kwargs):
+        seen.append(kwargs["candidate"])
+        return real_w3c(**kwargs)
+
+    monkeypatch.setattr(
+        ccr.executive_dialogue_observation,
+        "read_runtime_canonical_terminal_wake",
+        observe_real_candidate,
+    )
+
+    rows = ccr._gather_dispatch_evidence(
+        tmp_path,
+        [{
+            "responsibility_ref": "WS:W3C-TOPOLOGY",
+            "root_job_id": root.job_id,
+            "root_job_candidates": [root.job_id],
+        }],
+        "2026-09-03T12:00:00Z",
+    )
+
+    assert len(seen) == 1
+    assert seen[0].root_job_id == root.job_id
+    assert seen[0].job_id == planner.job_id
+    assert seen[0].attempt_id == planner_attempt.attempt_id
+    assert seen[0].worker_id == planner_attempt.worker_id
+    assert rows[0]["carrier_state"] == "RESOLVED"
+    assert rows[0]["w3c_reason"] != "C2_EXACT_CANDIDATE_CONFLICT"
+
+
+def test_cr1a_current_second_root_conflicts_with_precursor_generation(
+    tmp_path, monkeypatch
+):
+    from control_plane import executive_inbox as ei
+
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    first = runtime.jobs.create_job("generation one root")
+    second = runtime.jobs.create_job("generation two root")
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "at",
+        classmethod(lambda cls, root, create=False: runtime),
+    )
+    monkeypatch.setattr(
+        ei,
+        "ceo_intent_provenance",
+        lambda _runtime, job_id: (
+            ({"workstream": "WS:GENERATION"}, None)
+            if job_id in {first.job_id, second.job_id}
+            else (None, None)
+        ),
+    )
+
+    rows = ccr._gather_dispatch_evidence(
+        tmp_path,
+        [{
+            "responsibility_ref": "WS:GENERATION",
+            "root_job_id": first.job_id,
+            "root_job_candidates": [first.job_id],
+        }],
+        "2026-09-03T12:00:00Z",
+    )
+
+    assert rows[0]["runtime_root_state"] == "CONFLICT"
+    assert rows[0]["w3c_state"] == "CONFLICT"
+    assert rows[0]["carrier_state"] != "RESOLVED"
+
+
+def test_cr1a_runtime_generation_conflicts_when_second_root_arrives_between_reads(
+    tmp_path, monkeypatch
+):
+    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    first = runtime.jobs.create_job(
+        "generation one root",
+        provenance={
+            "schema": "mastermind.ceo_intent.v1",
+            "workstream": "WS:GENERATION-MOVES",
+        },
+    )
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "at",
+        classmethod(lambda cls, root, create=False: runtime),
+    )
+    original_read = ccr._read_runtime_jobs_from_runtime
+    calls = 0
+
+    def read_while_runtime_moves(observed_runtime):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            observed_runtime.jobs.create_job(
+                "generation two root",
+                provenance={
+                    "schema": "mastermind.ceo_intent.v1",
+                    "workstream": "WS:GENERATION-MOVES",
+                },
+            )
+        return original_read(observed_runtime)
+
+    monkeypatch.setattr(
+        ccr, "_read_runtime_jobs_from_runtime", read_while_runtime_moves
+    )
+
+    rows = ccr._gather_dispatch_evidence(
+        tmp_path,
+        [{
+            "responsibility_ref": "WS:GENERATION-MOVES",
+            "root_job_id": first.job_id,
+            "root_job_candidates": [first.job_id],
+        }],
+        "2026-09-03T12:00:00Z",
+    )
+
+    assert calls == 2
+    assert rows[0]["runtime_generation_state"] == "CONFLICT"
+    assert rows[0]["runtime_generation_before"] != rows[0][
+        "runtime_generation_after"
+    ]
+    assert rows[0]["runtime_root_state"] == "CONFLICT"
+    assert rows[0]["w3c_state"] == "CONFLICT"
+    assert rows[0]["w3c_reason"] == "RUNTIME_GENERATION_CONFLICT"
+    assert rows[0]["carrier_state"] != "RESOLVED"
+
+
+def test_cr1a_gather_supplies_one_sentinel_connection_to_c2_and_w3c(
     tmp_path, monkeypatch
 ):
     from types import SimpleNamespace
 
-    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
-    seen = {"connections": [], "w3c": []}
+    runtime, root, planner, planner_attempt, carrier, carrier_attempt = (
+        _cr1a_runtime_topology(tmp_path, workstream="WS:W3C-ONE")
+    )
+    seen = {"connections": [], "c2": [], "w3c": []}
     original_read = runtime.store.read
 
     def counted_read():
@@ -2556,17 +2813,27 @@ def test_cr1a_gather_delegates_one_exact_candidate_to_w3c_in_one_snapshot(
         "at",
         classmethod(lambda cls, root, create=False: runtime),
     )
+    real_provenance = ccr.executive_inbox.ceo_intent_provenance
+    monkeypatch.setattr(
+        ccr.executive_inbox,
+        "ceo_intent_provenance",
+        lambda observed_runtime, job_id: (
+            ({"workstream": "WS:W3C-ONE"}, None)
+            if job_id == root.job_id
+            else real_provenance(observed_runtime, job_id)
+        ),
+    )
 
     def current_capacity_commitment(self, source_root_job_id, *, connection=None):
         assert self is runtime
-        assert source_root_job_id == "JOB-ROOT-1"
-        assert connection is seen["connections"][0]
+        assert source_root_job_id == root.job_id
+        seen["c2"].append(connection)
         return SimpleNamespace(
-            source_root_job_id="JOB-ROOT-1",
+            source_root_job_id=root.job_id,
             responsibility_ref="WS:W3C-ONE",
-            carrier_job_id="JOB-CARRIER-1",
-            committed_carrier_attempt_id="ATT-CARRIER-1",
-            selected_worker_id="WORKER-1",
+            carrier_job_id=carrier.job_id,
+            committed_carrier_attempt_id=carrier_attempt.attempt_id,
+            selected_worker_id=carrier_attempt.worker_id,
         )
 
     monkeypatch.setattr(
@@ -2577,9 +2844,8 @@ def test_cr1a_gather_delegates_one_exact_candidate_to_w3c_in_one_snapshot(
     )
 
     def canonical_read(*, runtime, source_root_job_id, candidate, connection):
-        assert source_root_job_id == "JOB-ROOT-1"
-        assert connection is seen["connections"][0]
-        seen["w3c"].append(candidate)
+        assert source_root_job_id == root.job_id
+        seen["w3c"].append((candidate, connection))
         return ccr.executive_dialogue_observation.CanonicalTerminalWakeRead(
             state="RESOLVED",
             reason="CANONICAL_TERMINAL_WAKE_RESOLVED",
@@ -2601,13 +2867,21 @@ def test_cr1a_gather_delegates_one_exact_candidate_to_w3c_in_one_snapshot(
 
     rows = ccr._gather_dispatch_evidence(
         tmp_path,
-        [{"responsibility_ref": "WS:W3C-ONE", "root_job_id": "JOB-ROOT-1"}],
+        [{
+            "responsibility_ref": "WS:W3C-ONE",
+            "root_job_id": root.job_id,
+            "root_job_candidates": [root.job_id],
+        }],
         "2026-09-03T12:00:00Z",
     )
 
-    assert len(seen["connections"]) == 1
+    # Public registry projections use their own public read calls. C2 and
+    # W3C alone share the gather's outer sentinel transaction.
+    assert len(seen["connections"]) > 1
+    assert seen["c2"] == [seen["connections"][0]]
     assert len(seen["w3c"]) == 1
-    candidate = seen["w3c"][0]
+    candidate, w3c_connection = seen["w3c"][0]
+    assert w3c_connection is seen["connections"][0]
     assert isinstance(
         candidate, ccr.executive_dialogue_observation.CanonicalTerminalWakeCandidate
     )
@@ -2616,25 +2890,17 @@ def test_cr1a_gather_delegates_one_exact_candidate_to_w3c_in_one_snapshot(
         candidate.job_id,
         candidate.attempt_id,
         candidate.worker_id,
-    ) == ("JOB-ROOT-1", "JOB-CARRIER-1", "ATT-CARRIER-1", "WORKER-1")
-    assert rows == [
-        {
-            "responsibility_ref": "WS:W3C-ONE",
-            "root_job_id": "JOB-ROOT-1",
-            "runtime_root_state": "RESOLVED",
-            "carrier_state": "RESOLVED",
-            "carrier_reason": "C2_CURRENT_CAPACITY_COMMITMENT",
-            "w3c_state": "RESOLVED",
-            "w3c_reason": "CANONICAL_TERMINAL_WAKE_RESOLVED",
-            "w3c_terminal_state": "APPLIED",
-            "w3c_wake_state": "TARGET_ACKNOWLEDGED",
-            "w3c_terminal_applied": "true",
-            "w3c_source_observed_at": "2026-09-03T10:00:00Z",
-            "w3c_source_freshness": "SOURCE_EVIDENCE_TIME",
-            "w3c_snapshot_digest": "a" * 64,
-            "w3c_terminal_source_owner": "executive_terminal_return",
-            "w3c_wake_source_owner": "wake_ledger",
-        }
+    ) == (
+        root.job_id,
+        planner.job_id,
+        planner_attempt.attempt_id,
+        planner_attempt.worker_id,
+    )
+    assert rows[0]["carrier_state"] == "RESOLVED"
+    assert rows[0]["w3c_state"] == "RESOLVED"
+    assert rows[0]["runtime_generation_state"] == "SAME"
+    assert rows[0]["runtime_generation_before"] == rows[0][
+        "runtime_generation_after"
     ]
 
 
@@ -2648,20 +2914,12 @@ def test_cr1a_missing_protected_c2_reader_is_explicit_owner_hold(tmp_path):
         "2026-09-03T12:00:00Z",
     )
 
-    assert rows == [
-        {
-            "responsibility_ref": "WS:C2-HELD",
-            "root_job_id": "JOB-ROOT-2",
-            "runtime_root_state": "RESOLVED",
-            "carrier_state": "OWNER_HELD",
-            "carrier_reason": "C2_POSITIVE_OWNER_HELD",
-            "w3c_state": "UNAVAILABLE",
-            "w3c_reason": "C2_EXACT_CANDIDATE_UNAVAILABLE",
-            "w3c_terminal_state": "UNAVAILABLE",
-            "w3c_wake_state": "UNAVAILABLE",
-            "w3c_terminal_applied": "false",
-        }
-    ]
+    assert rows[0]["runtime_root_state"] == "UNKNOWN"
+    assert rows[0]["carrier_state"] == "OWNER_HELD"
+    assert rows[0]["carrier_reason"] == "C2_POSITIVE_OWNER_HELD"
+    assert rows[0]["w3c_state"] == "UNAVAILABLE"
+    assert rows[0]["w3c_reason"] == "W3C_CANDIDATE_OWNER_SEAM_REQUIRED"
+    assert rows[0]["runtime_generation_state"] == "SAME"
 
 
 def test_cr1a_instance_callback_cannot_substitute_for_protected_c2_owner(
@@ -2722,8 +2980,10 @@ def test_cr1a_conflicting_runtime_roots_never_read_c2_or_w3c(
     )
 
     assert rows[0]["runtime_root_state"] == "CONFLICT"
-    assert rows[0]["carrier_state"] == "OWNER_HELD"
-    assert rows[0]["w3c_state"] == "UNAVAILABLE"
+    assert rows[0]["carrier_state"] == "UNKNOWN"
+    assert rows[0]["carrier_reason"] == "RUNTIME_ROOT_CONFLICT"
+    assert rows[0]["w3c_state"] == "CONFLICT"
+    assert rows[0]["w3c_reason"] == "RUNTIME_ROOT_CONFLICT"
 
 
 @pytest.mark.parametrize(
@@ -2736,21 +2996,38 @@ def test_cr1a_conflicting_runtime_roots_never_read_c2_or_w3c(
         ("selected_worker_id", 7),
     ],
 )
-def test_cr1a_nonexact_c2_commitment_never_reaches_w3c(
+def test_cr1a_nonexact_c2_commitment_does_not_substitute_for_w3c_child(
     tmp_path, monkeypatch, field, value
 ):
     from types import SimpleNamespace
 
-    runtime = ccr.executive_runtime.Runtime.at(tmp_path)
+    runtime, root, planner, _planner_attempt, carrier, carrier_attempt = (
+        _cr1a_runtime_topology(tmp_path, workstream="WS:C2-EXACT")
+    )
     material = {
-        "source_root_job_id": "JOB-ROOT-4",
+        "source_root_job_id": root.job_id,
         "responsibility_ref": "WS:C2-EXACT",
-        "carrier_job_id": "JOB-CARRIER-4",
-        "committed_carrier_attempt_id": "ATT-CARRIER-4",
-        "selected_worker_id": "WORKER-4",
+        "carrier_job_id": carrier.job_id,
+        "committed_carrier_attempt_id": carrier_attempt.attempt_id,
+        "selected_worker_id": carrier_attempt.worker_id,
     }
     material[field] = value
 
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "at",
+        classmethod(lambda cls, root, create=False: runtime),
+    )
+    real_provenance = ccr.executive_inbox.ceo_intent_provenance
+    monkeypatch.setattr(
+        ccr.executive_inbox,
+        "ceo_intent_provenance",
+        lambda observed_runtime, job_id: (
+            ({"workstream": "WS:C2-EXACT"}, None)
+            if job_id == root.job_id
+            else real_provenance(observed_runtime, job_id)
+        ),
+    )
     monkeypatch.setattr(
         ccr.executive_runtime.Runtime,
         "current_capacity_commitment",
@@ -2759,22 +3036,38 @@ def test_cr1a_nonexact_c2_commitment_never_reaches_w3c(
         ),
         raising=False,
     )
+    seen = []
+
+    def canonical_read(**kwargs):
+        seen.append(kwargs["candidate"])
+        return ccr.executive_dialogue_observation.CanonicalTerminalWakeRead(
+            state="ABSENT",
+            reason="CANONICAL_TERMINAL_ABSENT",
+            terminal_state="MISSING",
+            wake_state="ABSENT",
+            terminal_applied=False,
+        )
+
     monkeypatch.setattr(
         ccr.executive_dialogue_observation,
         "read_runtime_canonical_terminal_wake",
-        lambda **_kwargs: pytest.fail("W3C must receive only an exact candidate"),
+        canonical_read,
     )
 
     rows = ccr._gather_dispatch_evidence(
         tmp_path,
-        [{"responsibility_ref": "WS:C2-EXACT", "root_job_id": "JOB-ROOT-4"}],
+        [{
+            "responsibility_ref": "WS:C2-EXACT",
+            "root_job_id": root.job_id,
+            "root_job_candidates": [root.job_id],
+        }],
         "2026-09-03T12:00:00Z",
     )
 
     assert rows[0]["carrier_state"] == "UNKNOWN"
     assert rows[0]["carrier_reason"] == "C2_COMMITMENT_CONFLICT"
-    assert rows[0]["w3c_state"] == "CONFLICT"
-    assert rows[0]["w3c_reason"] == "C2_EXACT_CANDIDATE_CONFLICT"
+    assert rows[0]["w3c_state"] == "ABSENT"
+    assert seen[0].job_id == planner.job_id
 
 
 def test_cr1a_gather_is_card_bounded_before_owner_reads(tmp_path, monkeypatch):
@@ -2801,7 +3094,9 @@ def test_cr1a_gather_is_card_bounded_before_owner_reads(tmp_path, monkeypatch):
     )
 
     assert len(rows) == ccr._DISPATCH_EVIDENCE_MAX_CARDS
-    assert len(seen_roots) == ccr._DISPATCH_EVIDENCE_MAX_CARDS
+    # No synthetic card root can trigger an owner read without current public
+    # Runtime evidence for that exact root.
+    assert seen_roots == []
     assert rows[-1]["responsibility_ref"] == "WS:BOUNDED-199"
 
 
@@ -2812,6 +3107,8 @@ def test_cr1a_gather_has_no_raw_event_or_tree_election_path() -> None:
 
     assert ".events" not in gather
     assert "list_events" not in gather
-    assert "list_attempts" not in gather
+    assert "runtime.attempts.list_attempts()" in gather
     assert "_executable_attempt_candidates" not in source
     assert "EXECUTIVE_TERMINAL_RETURN_APPLIED" not in gather
+    assert "SELECT * FROM attempts" not in gather
+    assert "SELECT * FROM jobs" not in gather

@@ -3659,6 +3659,23 @@ def test_dispatch_terminal_attempt_alone_without_applied_marker_stays_unproven()
     assert card["actionable"] is False
 
 
+def test_dispatch_rate_limited_attempt_is_terminal_history_not_started():
+    doc = proj.project_dispatch_consumption(
+        [_dcard()],
+        generated_at=_DISPATCH_GENERATED_AT,
+        dispatch_evidence=[_drow(
+            attempt_state="RATE_LIMITED",
+            action_target_state="RESOLVED",
+            binding_evidence_state="CURRENT",
+        )],
+    )
+
+    card = _dcard_of(doc, "WS:AD-CR1A")
+    assert card["dispatch_state"] == "WATCH_UNPROVEN"
+    assert card["reason"] == "canonical_w3c_evidence_required"
+    assert card["actionable"] is False
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -3820,6 +3837,30 @@ def test_w3c_cannot_be_actionable_without_one_resolved_runtime_root():
     assert card["reason"] == "runtime_root_not_resolved"
     assert card["historical"] is True
     assert card["actionable"] is False
+
+
+def test_runtime_generation_conflict_forces_reconciliation_with_both_receipts():
+    card = _dcard_of(
+        proj.project_dispatch_consumption(
+            [_dcard()],
+            generated_at=_DISPATCH_GENERATED_AT,
+            dispatch_evidence=[
+                _w3c_row(
+                    runtime_generation_state="CONFLICT",
+                    runtime_generation_before="b" * 64,
+                    runtime_generation_after="c" * 64,
+                )
+            ],
+        ),
+        "WS:AD-CR1A",
+    )
+
+    assert card["dispatch_state"] == "RUNTIME_BINDING_RECONCILIATION_REQUIRED"
+    assert card["reason"] == "runtime_generation_conflict"
+    assert card["historical"] is True
+    assert card["actionable"] is False
+    assert card["evidence"]["runtime_generation_before"] == "b" * 64
+    assert card["evidence"]["runtime_generation_after"] == "c" * 64
 
 
 def test_c2_owner_hold_stays_visible_historical_and_nonactionable():

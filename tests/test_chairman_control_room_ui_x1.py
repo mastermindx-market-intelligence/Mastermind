@@ -1275,6 +1275,9 @@ def test_cr1a_detail_exposes_canonical_source_receipt_without_raw_payload() -> N
 
     assert 'detailRail(rails, "Dispatch proof"' in detail
     assert 'dispatch.w3c.source_receipt' in detail
+    assert 'evidence.runtime_generation_state' in detail
+    assert 'evidence.runtime_generation_before' in detail
+    assert 'evidence.runtime_generation_after' in detail
     assert '"snapshot " + safeText(receipt.snapshot_digest' in detail
     assert '"terminal owner " + safeText(receipt.terminal_source_owner' in detail
     assert '"wake owner " + safeText(receipt.wake_source_owner' in detail

@@ -1876,8 +1876,14 @@
       var dispatch = card.dispatch || {};
       var carrier = dispatch.carrier || null;
       var w3c = dispatch.w3c || null;
+      var evidence = dispatch.evidence || {};
       detailLine(node, "Runtime root " + safeText(card.runtime_root_state, "UNKNOWN"), false);
       detailLine(node, "dispatch " + safeText(dispatch.dispatch_state, "UNKNOWN") + " · " + safeText(dispatch.reason, "reason not recorded"), true);
+      if (!isBlank(evidence.runtime_generation_state)) {
+        detailLine(node, "Runtime generation " + safeText(evidence.runtime_generation_state, "UNKNOWN"), true);
+        detailLine(node, "before " + safeText(evidence.runtime_generation_before, "not recorded"), true);
+        detailLine(node, "after " + safeText(evidence.runtime_generation_after, "not recorded"), true);
+      }
       if (carrier) {
         detailLine(node, "C2 carrier " + safeText(carrier.state, "UNKNOWN") + " · " + safeText(carrier.reason, "reason not recorded"), true);
       } else {

@@ -56,6 +56,7 @@ Usage
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
 import json
@@ -1231,6 +1232,41 @@ def _read_agent_os_state(macro_root: str | None) -> tuple[dict[str, Any] | None,
     return loaded, None
 
 
+def _read_runtime_jobs_from_runtime(
+    runtime: Any,
+) -> tuple[list[Any] | None, list[dict[str, Any]] | None, str | None]:
+    """Read public Job objects plus the existing safe workstream projection."""
+
+    try:
+        jobs = runtime.jobs.list_jobs()
+    except (executive_runtime.RuntimeProofError, ValueError, KeyError) as exc:
+        return None, None, (
+            f"jobs unreadable: {str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__}"
+        )
+
+    result: list[dict[str, Any]] = []
+    for job in jobs:
+        try:
+            provenance, _warning = executive_inbox.ceo_intent_provenance(
+                runtime, job.job_id
+            )
+        except (executive_runtime.RuntimeProofError, ValueError, KeyError):
+            continue
+        if provenance is None:
+            continue
+        workstream = provenance.get("workstream")
+        if not isinstance(workstream, str) or not workstream:
+            continue
+        status = getattr(job.status, "value", None) or str(job.status)
+        result.append({
+            "job_id": job.job_id,
+            "status": status,
+            "workstream": workstream,
+            "root_job_id": job.root_job_id,
+        })
+    return list(jobs), result, None
+
+
 def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | None]:
     """Runtime jobs whose CEO-intent provenance carries a workstream.
 
@@ -1263,32 +1299,8 @@ def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | N
     except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError) as exc:
         return None, f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
 
-    try:
-        jobs = runtime.jobs.list_jobs()
-    except (executive_runtime.RuntimeProofError, ValueError, KeyError) as exc:
-        return None, (
-            f"jobs unreadable: {str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__}"
-        )
-
-    result: list[dict[str, Any]] = []
-    for job in jobs:
-        try:
-            provenance, _warning = executive_inbox.ceo_intent_provenance(runtime, job.job_id)
-        except (executive_runtime.RuntimeProofError, ValueError, KeyError):
-            continue
-        if provenance is None:
-            continue
-        workstream = provenance.get("workstream")
-        if not isinstance(workstream, str) or not workstream:
-            continue
-        status = getattr(job.status, "value", None) or str(job.status)
-        result.append({
-            "job_id": job.job_id,
-            "status": status,
-            "workstream": workstream,
-            "root_job_id": job.root_job_id,
-        })
-    return result, None
+    _jobs, result, failure = _read_runtime_jobs_from_runtime(runtime)
+    return result, failure
 
 
 # ---------------------------------------------------------------------------
@@ -1352,7 +1364,7 @@ def _owner_held_dispatch_row(
         "carrier_state": "OWNER_HELD",
         "carrier_reason": "C2_POSITIVE_OWNER_HELD",
         "w3c_state": "UNAVAILABLE",
-        "w3c_reason": "C2_EXACT_CANDIDATE_UNAVAILABLE",
+        "w3c_reason": "W3C_CANDIDATE_OWNER_SEAM_REQUIRED",
         "w3c_terminal_state": "UNAVAILABLE",
         "w3c_wake_state": "UNAVAILABLE",
         "w3c_terminal_applied": "false",
@@ -1362,9 +1374,10 @@ def _owner_held_dispatch_row(
 def _current_capacity_commitment_reader(runtime: Any) -> Any:
     """Return only the Runtime class-owned C2 reader, never a callback.
 
-    PR #415 is not protected at this base. Looking in the Runtime class
-    dictionary deliberately ignores instance attributes and caller callbacks,
-    so a fixture cannot manufacture positive production authority.
+    Looking in the Runtime class dictionary deliberately ignores instance
+    attributes and caller callbacks, so a fixture cannot manufacture positive
+    production authority. Older compatible protected bases without C2 retain
+    the explicit owner-held state.
     """
 
     runtime_type = type(runtime)
@@ -1374,37 +1387,161 @@ def _current_capacity_commitment_reader(runtime: Any) -> Any:
     return reader if callable(reader) else None
 
 
-def _exact_w3c_candidate(
+def _capacity_commitment_is_exact(
     commitment: Any,
     *,
     responsibility_ref: str,
     root_job_id: str,
-) -> Any | None:
-    """Validate C2's public projection into one exact W3C candidate."""
+) -> bool:
+    """Validate C2 identity without treating it as W3C candidate identity."""
 
-    if executive_dialogue_observation is None or commitment is None:
-        return None
+    if commitment is None:
+        return False
     expected = {
         "source_root_job_id": root_job_id,
         "responsibility_ref": responsibility_ref,
     }
     for name, value in expected.items():
         if getattr(commitment, name, None) != value:
-            return None
+            return False
     values = {
-        "root_job_id": root_job_id,
-        "job_id": getattr(commitment, "carrier_job_id", None),
-        "attempt_id": getattr(commitment, "committed_carrier_attempt_id", None),
-        "worker_id": getattr(commitment, "selected_worker_id", None),
+        "carrier_job_id": getattr(commitment, "carrier_job_id", None),
+        "committed_carrier_attempt_id": getattr(
+            commitment, "committed_carrier_attempt_id", None
+        ),
+        "selected_worker_id": getattr(commitment, "selected_worker_id", None),
     }
-    if any(not isinstance(value, str) or not value for value in values.values()):
-        return None
-    try:
-        return executive_dialogue_observation.CanonicalTerminalWakeCandidate(
-            **values
+    return all(isinstance(value, str) and value for value in values.values())
+
+
+_W3C_ORCHESTRATION_ROLES = frozenset({"plan", "work", "review", "repair"})
+
+
+def _exact_w3c_candidate(
+    jobs: Sequence[Any],
+    attempts: Sequence[Any],
+    *,
+    root_job_id: str,
+) -> tuple[Any | None, str]:
+    """Return the one ordinary completed orchestration candidate, or close.
+
+    Public Job/Attempt registries own the identities.  This function applies
+    only exact-root, exact-current-attempt and cardinality gates; it never
+    chooses by role preference, title, depth, recency, numeric id, provider,
+    or C2 carrier identity.  W3C remains the owner of terminal/Wake validity.
+    """
+
+    if executive_dialogue_observation is None:
+        return None, "W3C_OWNER_UNAVAILABLE"
+    attempts_by_id = {
+        getattr(attempt, "attempt_id", None): attempt
+        for attempt in attempts
+        if isinstance(getattr(attempt, "attempt_id", None), str)
+    }
+    candidates: list[Any] = []
+    malformed = False
+    for job in jobs:
+        status = getattr(getattr(job, "status", None), "value", None) or str(
+            getattr(job, "status", "")
         )
-    except (TypeError, ValueError):
-        return None
+        if (
+            getattr(job, "root_job_id", None) != root_job_id
+            or getattr(job, "orchestration_role", None)
+            not in _W3C_ORCHESTRATION_ROLES
+            or status != "COMPLETED"
+        ):
+            continue
+        job_id = getattr(job, "job_id", None)
+        attempt_id = getattr(job, "current_attempt_id", None)
+        attempt = attempts_by_id.get(attempt_id)
+        worker_id = getattr(attempt, "worker_id", None)
+        if (
+            not isinstance(job_id, str)
+            or not job_id
+            or not isinstance(attempt_id, str)
+            or not attempt_id
+            or attempt is None
+            or getattr(attempt, "job_id", None) != job_id
+            or not isinstance(worker_id, str)
+            or not worker_id
+        ):
+            malformed = True
+            continue
+        try:
+            candidates.append(
+                executive_dialogue_observation.CanonicalTerminalWakeCandidate(
+                    root_job_id=root_job_id,
+                    job_id=job_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                )
+            )
+        except (TypeError, ValueError):
+            malformed = True
+    if malformed or len(candidates) > 1:
+        return None, "W3C_CANDIDATE_CONFLICT"
+    if not candidates:
+        return None, "W3C_CANDIDATE_OWNER_SEAM_REQUIRED"
+    return candidates[0], "W3C_EXACT_ORCHESTRATION_CANDIDATE"
+
+
+def _runtime_generation_digest(
+    jobs: Sequence[Any],
+    attempts: Sequence[Any],
+    runtime_jobs: Sequence[Mapping[str, Any]],
+) -> str:
+    """Secret-safe digest of only public load-bearing Runtime identities."""
+
+    job_rows = [
+        {
+            "job_id": getattr(job, "job_id", None),
+            "status": getattr(getattr(job, "status", None), "value", None)
+            or str(getattr(job, "status", "")),
+            "root_job_id": getattr(job, "root_job_id", None),
+            "orchestration_role": getattr(job, "orchestration_role", None),
+            "current_attempt_id": getattr(job, "current_attempt_id", None),
+            "assigned_worker_id": getattr(job, "assigned_worker_id", None),
+        }
+        for job in jobs
+    ]
+    attempt_rows = [
+        {
+            "attempt_id": getattr(attempt, "attempt_id", None),
+            "job_id": getattr(attempt, "job_id", None),
+            "worker_id": getattr(attempt, "worker_id", None),
+            "status": getattr(getattr(attempt, "status", None), "value", None)
+            or str(getattr(attempt, "status", "")),
+        }
+        for attempt in attempts
+    ]
+    material = {
+        "jobs": sorted(job_rows, key=lambda row: str(row["job_id"] or "")),
+        "attempts": sorted(
+            attempt_rows, key=lambda row: str(row["attempt_id"] or "")
+        ),
+        "workstreams": sorted(
+            [dict(row) for row in runtime_jobs],
+            key=lambda row: (
+                str(row.get("workstream") or ""),
+                str(row.get("job_id") or ""),
+            ),
+        ),
+    }
+    return hashlib.sha256(
+        json.dumps(
+            material,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _generation_receipt(data_version: str, snapshot_digest: str) -> str:
+    return hashlib.sha256(
+        f"{data_version}:{snapshot_digest}".encode("ascii")
+    ).hexdigest()
 
 
 def _apply_w3c_read(
@@ -1480,13 +1617,14 @@ def _gather_dispatch_evidence(
     cards: Sequence[Mapping[str, Any]],
     generated_at: str,
 ) -> list[dict[str, Any]]:
-    """Bounded, one-snapshot, read-only W3C/C2 evidence gather.
+    """Bounded, generation-guarded, read-only W3C/C2 evidence gather.
 
-    Every responsibility gets an explicit Runtime-root and carrier dimension.
-    On this protected base C2's positive Runtime.current_capacity_commitment
-    API does not exist, so the carrier is honestly OWNER_HELD and W3C is not
-    invoked with a guessed descendant. Once Runtime owns that public API, its
-    exact projection and W3C's facade share one supplied read connection.
+    The public Runtime registries provide two explicit generations around the
+    supplied C2/W3C read transaction.  If either the database generation or
+    the load-bearing public projection changes, every row fails closed.  The
+    C2 capacity carrier is deliberately independent from W3C's one ordinary
+    completed orchestration child; neither identity can substitute for the
+    other.
     """
 
     del generated_at
@@ -1523,53 +1661,117 @@ def _gather_dispatch_evidence(
             )
         )
 
-    reader = _current_capacity_commitment_reader(runtime)
-    if reader is None or executive_dialogue_observation is None:
-        return rows
-
     try:
         with runtime.store.read() as connection:
+            # PRAGMA data_version alone does not establish a SQLite snapshot.
+            # This schema-only read does, without reading semantic owner data.
+            connection.execute(
+                "SELECT name FROM sqlite_master ORDER BY name LIMIT 1"
+            ).fetchone()
+            before_data_version = str(
+                int(connection.execute("PRAGMA data_version").fetchone()[0])
+            )
+            jobs, runtime_jobs, initial_failure = (
+                _read_runtime_jobs_from_runtime(runtime)
+            )
+            if initial_failure is not None or jobs is None or runtime_jobs is None:
+                raise executive_runtime.RuntimeProofError(
+                    initial_failure or "public Runtime jobs unavailable"
+                )
+            attempts = runtime.attempts.list_attempts()
+            before_digest = _runtime_generation_digest(
+                jobs, attempts, runtime_jobs
+            )
+            current_roots = (
+                autonomy_control_room_projection
+                .runtime_root_candidates_from_runtime_jobs(runtime_jobs)
+            )
+
+            cards_by_key = {
+                (card.get("responsibility_ref"), card.get("root_job_id")): card
+                for card in list(cards)[:_DISPATCH_EVIDENCE_MAX_CARDS]
+                if isinstance(card, Mapping)
+            }
+            reader = _current_capacity_commitment_reader(runtime)
             for row in rows:
-                if row["runtime_root_state"] != "RESOLVED":
-                    continue
+                ref = row["responsibility_ref"]
                 root_job_id = row["root_job_id"]
-                responsibility_ref = row["responsibility_ref"]
+                card = cards_by_key.get((ref, root_job_id), {})
+                candidates = tuple(current_roots.get(ref, ()))
+                precursor_candidates = card.get("root_job_candidates")
+                if isinstance(precursor_candidates, Sequence) and not isinstance(
+                    precursor_candidates, (str, bytes)
+                ):
+                    precursor_set = {
+                        item
+                        for item in precursor_candidates
+                        if isinstance(item, str) and item
+                    }
+                else:
+                    precursor_set = {root_job_id} if root_job_id else set()
+
+                if (
+                    card.get("root_job_ambiguous") is True
+                    or len(candidates) > 1
+                    or len(precursor_set) > 1
+                    or (
+                        candidates
+                        and precursor_set
+                        and set(candidates) != precursor_set
+                    )
+                ):
+                    row.update(
+                        runtime_root_state="CONFLICT",
+                        carrier_state="UNKNOWN",
+                        carrier_reason="RUNTIME_ROOT_CONFLICT",
+                        w3c_state="CONFLICT",
+                        w3c_reason="RUNTIME_ROOT_CONFLICT",
+                    )
+                    continue
+                if len(candidates) != 1 or candidates[0] != root_job_id:
+                    row["runtime_root_state"] = "UNKNOWN"
+                    continue
+                row["runtime_root_state"] = "RESOLVED"
                 assert isinstance(root_job_id, str)
-                try:
-                    commitment = reader(
-                        runtime, root_job_id, connection=connection
-                    )
-                except Exception:
-                    row.update(
-                        carrier_state="UNKNOWN",
-                        carrier_reason="C2_COMMITMENT_UNAVAILABLE",
-                        w3c_reason="C2_EXACT_CANDIDATE_UNAVAILABLE",
-                    )
-                    continue
-                if commitment is None:
-                    row.update(
-                        carrier_state="UNKNOWN",
-                        carrier_reason="C2_COMMITMENT_ABSENT",
-                        w3c_reason="C2_EXACT_CANDIDATE_UNAVAILABLE",
-                    )
-                    continue
-                candidate = _exact_w3c_candidate(
-                    commitment,
-                    responsibility_ref=responsibility_ref,
-                    root_job_id=root_job_id,
+                if reader is not None:
+                    try:
+                        commitment = reader(
+                            runtime, root_job_id, connection=connection
+                        )
+                    except Exception:
+                        row.update(
+                            carrier_state="UNKNOWN",
+                            carrier_reason="C2_COMMITMENT_UNAVAILABLE",
+                        )
+                    else:
+                        if commitment is None:
+                            row.update(
+                                carrier_state="UNKNOWN",
+                                carrier_reason="C2_COMMITMENT_ABSENT",
+                            )
+                        elif _capacity_commitment_is_exact(
+                            commitment,
+                            responsibility_ref=ref,
+                            root_job_id=root_job_id,
+                        ):
+                            row.update(
+                                carrier_state="RESOLVED",
+                                carrier_reason="C2_CURRENT_CAPACITY_COMMITMENT",
+                            )
+                        else:
+                            row.update(
+                                carrier_state="UNKNOWN",
+                                carrier_reason="C2_COMMITMENT_CONFLICT",
+                            )
+
+                candidate, candidate_reason = _exact_w3c_candidate(
+                    jobs, attempts, root_job_id=root_job_id
                 )
                 if candidate is None:
-                    row.update(
-                        carrier_state="UNKNOWN",
-                        carrier_reason="C2_COMMITMENT_CONFLICT",
-                        w3c_state="CONFLICT",
-                        w3c_reason="C2_EXACT_CANDIDATE_CONFLICT",
-                    )
+                    row["w3c_reason"] = candidate_reason
+                    if candidate_reason == "W3C_CANDIDATE_CONFLICT":
+                        row["w3c_state"] = "CONFLICT"
                     continue
-                row.update(
-                    carrier_state="RESOLVED",
-                    carrier_reason="C2_CURRENT_CAPACITY_COMMITMENT",
-                )
                 _apply_w3c_read(
                     row,
                     runtime=runtime,
@@ -1577,14 +1779,79 @@ def _gather_dispatch_evidence(
                     candidate=candidate,
                     connection=connection,
                 )
+
+            final_jobs, final_runtime_jobs, final_failure = (
+                _read_runtime_jobs_from_runtime(runtime)
+            )
+            final_attempts = runtime.attempts.list_attempts()
+            if (
+                final_failure is not None
+                or final_jobs is None
+                or final_runtime_jobs is None
+            ):
+                raise executive_runtime.RuntimeProofError(
+                    final_failure or "final public Runtime jobs unavailable"
+                )
+            after_digest = _runtime_generation_digest(
+                final_jobs, final_attempts, final_runtime_jobs
+            )
+            # End the sentinel snapshot, then let the same connection observe
+            # commits that occurred while the public registries were read.
+            connection.commit()
+            after_data_version = str(
+                int(connection.execute("PRAGMA data_version").fetchone()[0])
+            )
+
+            generation_conflict = (
+                before_data_version != after_data_version
+                or before_digest != after_digest
+            )
+            before_receipt = _generation_receipt(
+                before_data_version, before_digest
+            )
+            after_receipt = _generation_receipt(
+                after_data_version, after_digest
+            )
+            for row in rows:
+                row.update(
+                    runtime_generation_state=(
+                        "CONFLICT" if generation_conflict else "SAME"
+                    ),
+                    runtime_generation_before=before_receipt,
+                    runtime_generation_after=after_receipt,
+                )
+                if not generation_conflict:
+                    continue
+                for field in (
+                    "w3c_source_observed_at",
+                    "w3c_source_freshness",
+                    "w3c_snapshot_digest",
+                    "w3c_terminal_source_owner",
+                    "w3c_wake_source_owner",
+                    "effect_state",
+                ):
+                    row.pop(field, None)
+                row.update(
+                    runtime_root_state="CONFLICT",
+                    carrier_state="UNKNOWN",
+                    carrier_reason="RUNTIME_GENERATION_CONFLICT",
+                    w3c_state="CONFLICT",
+                    w3c_reason="RUNTIME_GENERATION_CONFLICT",
+                    w3c_terminal_state="UNAVAILABLE",
+                    w3c_wake_state="UNAVAILABLE",
+                    w3c_terminal_applied="false",
+                )
     except Exception:
         for row in rows:
-            if row["carrier_state"] == "OWNER_HELD":
-                row.update(
-                    carrier_state="UNKNOWN",
-                    carrier_reason="C2_COMMITMENT_UNAVAILABLE",
-                    w3c_reason="C2_EXACT_CANDIDATE_UNAVAILABLE",
-                )
+            row.update(
+                carrier_state="UNKNOWN",
+                carrier_reason="C2_COMMITMENT_UNAVAILABLE",
+                w3c_state="UNAVAILABLE",
+                w3c_reason="W3C_OWNER_UNAVAILABLE",
+                w3c_terminal_state="UNAVAILABLE",
+                w3c_wake_state="UNAVAILABLE",
+                w3c_terminal_applied="false",
+            )
     return rows
 
 
