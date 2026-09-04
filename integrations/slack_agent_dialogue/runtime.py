@@ -697,7 +697,10 @@ class AgentRelayTurnRuntime:
                 not self._executive_observation_source
                 and type(receipt) is not TerminalReturnProjectionReceipt
             )
-            or resolver is None
+            or (
+                not self._executive_observation_source
+                and resolver is None
+            )
             or engine is None
         ):
             return self._receipt(

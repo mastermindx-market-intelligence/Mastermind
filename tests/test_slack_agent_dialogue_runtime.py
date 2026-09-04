@@ -1606,10 +1606,6 @@ def test_terminal_observation_candidate_uses_executive_revalidated_binding() -> 
         ),
     )
 
-    class NeverLocalResolver:
-        def resolve(self, _candidate):
-            raise AssertionError("Executive-revalidated binding must be consumed directly")
-
     class Observer:
         calls = 0
 
@@ -1624,16 +1620,14 @@ def test_terminal_observation_candidate_uses_executive_revalidated_binding() -> 
             )
 
     observer = Observer()
+    executive_dependencies = _w3c_dependencies(runtime, engine=engine)
+    executive_dependencies["terminal_binding_resolver"] = None
     turn_runtime = runtime.AgentRelayTurnRuntime(
         observer=observer,
         registry=_registry(),
         current_binding_for=_binding_for,
         candidate_source=lambda: (candidate,),
-        **_w3c_dependencies(
-            runtime,
-            engine=engine,
-            terminal_binding_resolver=NeverLocalResolver(),
-        ),
+        **executive_dependencies,
         _executive_observation_source=True,
     )
 
@@ -1650,16 +1644,14 @@ def test_terminal_observation_candidate_uses_executive_revalidated_binding() -> 
             receipt_digest="f" * 64,
         ),
     )
+    drifted_dependencies = _w3c_dependencies(runtime, engine=engine)
+    drifted_dependencies["terminal_binding_resolver"] = None
     drifted_runtime = runtime.AgentRelayTurnRuntime(
         observer=observer,
         registry=_registry(),
         current_binding_for=_binding_for,
         candidate_source=lambda: (drifted,),
-        **_w3c_dependencies(
-            runtime,
-            engine=engine,
-            terminal_binding_resolver=NeverLocalResolver(),
-        ),
+        **drifted_dependencies,
         _executive_observation_source=True,
     )
 
@@ -1839,3 +1831,186 @@ def test_configured_coordination_path_builds_real_remote_overlay_without_factory
         runtime.ExecutiveDialogueObservationClient,
     )
     assert built[0]["observation_client"].socket_path == coordination_path
+
+
+def test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wake(
+    monkeypatch,
+    tmp_path: Path,
+    socket_root: Path,
+) -> None:
+    runtime = _runtime()
+    from control_plane.executive_dialogue_observation import (
+        RECONCILE_WAKE,
+        SUBMIT_WAKE,
+        TERMINAL_RESULT,
+        terminal_projection_receipt_reference,
+    )
+    from integrations.slack_agent_dialogue.contract_v2 import render_message_v2
+    from integrations.slack_agent_dialogue.engine import SlackMessage
+    from integrations.slack_agent_dialogue.turn_observer import WakeCarrierState
+    from tests.test_slack_agent_dialogue_turn_routing_facts import _registry
+
+    os.chown(socket_root, os.geteuid(), os.getegid())
+    socket_root.chmod(0o710)
+    relay_path = socket_root / "agent-relay.sock"
+    coordination_path = socket_root / "dialogue-coordination.sock"
+    monkeypatch.setattr(runtime, "AGENT_RELAY_SOCKET_PATH", relay_path)
+    monkeypatch.setattr(
+        runtime,
+        "EXECUTIVE_OBSERVATION_SOCKET_PATH",
+        coordination_path,
+    )
+    monkeypatch.setattr(service_module, "_peer_uid", lambda _connection: 450)
+    config = dataclasses.replace(
+        _config(runtime, socket_root, _token_file(tmp_path / "terminal-token")),
+        dialogue_coordination_socket_path=coordination_path,
+        w3c_enabled=True,
+    )
+
+    candidate, _binding, terminal_engine = _terminal_w3c_material(runtime)
+    production_attempt_id = "ATT-" + "2" * 32
+    terminal_candidate = dataclasses.replace(
+        candidate.terminal_candidate,
+        attempt_id=production_attempt_id,
+    )
+    resolved_binding = (
+        runtime.AgentRelayTurnRuntime._terminal_binding_from_executive_observation(
+            dataclasses.replace(candidate, terminal_candidate=terminal_candidate)
+        )
+    )
+    terminal_context = runtime.DialogueContextV2(
+        work_ref=resolved_binding.work_ref,
+        commission_ref=resolved_binding.commission_ref,
+        session_ref=resolved_binding.session_ref,
+        operation_key=resolved_binding.operation_key,
+        watch_mode=resolved_binding.watch_mode,
+        actor_ref=resolved_binding.actor_ref,
+        applies_to=resolved_binding.applies_to,
+    )
+    terminal_message = runtime.build_terminal_result_message(
+        terminal_candidate,
+        terminal_context.normalized(),
+    )
+    terminal_projection_receipt = dataclasses.replace(
+        candidate.terminal_projection_receipt,
+        fingerprint=terminal_message["fingerprint"],
+    )
+    terminal_engine.client.thread_messages[candidate.thread_ts] = [
+        SlackMessage(
+            ts=terminal_projection_receipt.message_ts,
+            author_user_id=terminal_engine.policy.relay_bot_user_id,
+            text=render_message_v2(terminal_message),
+            thread_ts=candidate.thread_ts,
+        )
+    ]
+    terminal_receipt = terminal_projection_receipt_reference(
+        terminal_projection_receipt
+    )
+    candidate_reference = dataclasses.replace(
+        candidate.dialogue_parent._candidate_reference,
+        attempt_id=production_attempt_id,
+    )
+    target_bindings = candidate.dialogue_parent._target_bindings
+
+    service = runtime.build_service(config)
+    service.engine.policy = terminal_engine.policy
+    service.engine.client = terminal_engine.client
+    service.engine_v2 = terminal_engine
+    monkeypatch.setattr(runtime, "build_service", lambda _config: service)
+    monkeypatch.setattr(runtime, "load_session_targets", _registry)
+
+    class RecordingExecutiveObservationClient(
+        runtime.ExecutiveDialogueObservationClient
+    ):
+        instances = []
+
+        def __init__(self, socket_path):
+            super().__init__(socket_path)
+            self.resolve_calls = []
+            self.reconcile_requests = []
+            self.submit_requests = []
+            type(self).instances.append(self)
+
+        async def resolve(self, *, parent, thread_ts):
+            self.resolve_calls.append((dict(parent), thread_ts))
+            return runtime.ResolvedDialogueObservation(
+                state="RESOLVED",
+                mode=TERMINAL_RESULT,
+                dialogue_parent=dict(parent),
+                thread_ts=thread_ts,
+                delegation_identity=candidate.delegation_identity,
+                candidate=candidate_reference,
+                target_bindings=target_bindings,
+                current_worker=None,
+                actor=None,
+                terminal_candidate=terminal_candidate,
+                terminal_projection_receipt=terminal_receipt,
+            )
+
+        async def reconcile(self, obligation, route):
+            self.reconcile_requests.append(
+                self._wake_request(
+                    operation=RECONCILE_WAKE,
+                    obligation=obligation,
+                    route=route,
+                )
+            )
+            return WakeCarrierState.MISSING
+
+        async def submit(self, obligation, route):
+            self.submit_requests.append(
+                self._wake_request(
+                    operation=SUBMIT_WAKE,
+                    obligation=obligation,
+                    route=route,
+                )
+            )
+
+    monkeypatch.setattr(
+        runtime,
+        "ExecutiveDialogueObservationClient",
+        RecordingExecutiveObservationClient,
+    )
+    completed = asyncio.Event()
+    observed = {}
+
+    async def one_terminal_pass(turn_runtime):
+        try:
+            observed["runtime"] = turn_runtime
+            observed["receipts"] = await turn_runtime.reconcile_once()
+        finally:
+            completed.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(
+        runtime.AgentRelayTurnRuntime,
+        "serve_forever",
+        one_terminal_pass,
+    )
+
+    async def scenario() -> None:
+        task = asyncio.create_task(runtime.run_relay(config))
+        try:
+            await asyncio.wait_for(completed.wait(), timeout=1)
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(scenario())
+
+    assert len(RecordingExecutiveObservationClient.instances) == 1
+    observation_client = RecordingExecutiveObservationClient.instances[0]
+    turn_runtime = observed["runtime"]
+    assert turn_runtime._terminal_binding_resolver is None
+    assert isinstance(turn_runtime.observer, runtime.DialogueTurnObserver)
+    assert turn_runtime.observer.wake_carrier is observation_client
+    assert observed["receipts"][0].outcome is runtime.ObservationOutcome.WAKE_SUBMITTED
+    assert observed["receipts"][0].reason == "DIALOGUE_TURN_PENDING"
+    assert observation_client.resolve_calls == [
+        (dict(candidate.dialogue_parent), candidate.thread_ts)
+    ]
+    assert len(observation_client.reconcile_requests) == 1
+    assert len(observation_client.submit_requests) == 1
+    assert terminal_engine.client.channel_history_call_count == 4
+    assert terminal_engine.client.thread_history_call_count == 2
