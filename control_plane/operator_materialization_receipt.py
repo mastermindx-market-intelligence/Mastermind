@@ -1,22 +1,35 @@
 """Strict, immutable worker evidence for one Operator materialization effect.
 
-This module is deliberately stdlib-only.  A receipt records what the worker
-observed after one provider start/resume returned; it grants no Runtime
-currentness, retry, placement, or lifecycle authority.
+A receipt records what the worker observed after one provider start/resume
+returned; it grants no Runtime currentness, retry, placement, or lifecycle
+authority.  Attestation evidence is reconstructed through the repository's
+canonical Operator Harness wire owner before it can cross this durable edge.
 """
 from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import enum
 import hashlib
 import json
 import os
 import posixpath
 import re
 import stat
+import types
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Union, get_args, get_origin, get_type_hints
+
+from control_plane.operator_harness_contract import (
+    ACCOUNT_REALM_STATUS,
+    ObservedHarnessAttestation,
+)
+from control_plane.operator_harness_wire import (
+    OperatorHarnessWireError,
+    observed_harness_attestation,
+    to_wire as operator_to_wire,
+)
 
 
 MATERIALIZATION_RECEIPT_SCHEMA = "mastermind.operator_materialization_receipt/v1"
@@ -54,17 +67,45 @@ _CREDENTIAL_FIELDS = frozenset(
 _HOME_FIELDS = frozenset({"path", "device", "inode", "uid", "gid", "mode"})
 _FORBIDDEN_ATTESTATION_KEYS = frozenset(
     {
-        "access_token",
-        "api_key",
+        "accesstoken",
+        "apikey",
         "authorization",
-        "client_secret",
+        "clientsecret",
         "cookie",
+        "credentials",
         "password",
-        "private_key",
-        "refresh_token",
+        "privatekey",
+        "refreshtoken",
         "secret",
         "token",
+        "xapikey",
     }
+)
+_FORBIDDEN_ATTESTATION_KEY_SUFFIXES = (
+    "accesstoken",
+    "apikey",
+    "authorization",
+    "clientsecret",
+    "cookie",
+    "credentials",
+    "password",
+    "privatekey",
+    "refreshtoken",
+    "secret",
+    "token",
+)
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{16,}", re.IGNORECASE),
+    re.compile(r"\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bxox(?:a|b|p|r|s)-[A-Za-z0-9-]{20,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
+    re.compile(
+        r"\b[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{8,}\b"
+    ),
 )
 _MATERIALIZATION_STATUSES = frozenset(
     {
@@ -291,8 +332,10 @@ def build_operator_materialization_receipt(
     profile_digest = _digest(requested_profile_digest, "requested profile")
     provider_session = _identifier(provider_session_id, "provider session")
     process = _process_identity(process_identity)
-    attestation = _json_object(observed_attestation, "observed attestation")
-    _refuse_credential_shaped_attestation(attestation)
+    attestation = _observed_attestation(
+        observed_attestation,
+        worker_id=worker_id,
+    )
     credentials = _process_credentials(process_credentials)
     if credentials["process_identity"] != process:
         raise OperatorMaterializationReceiptError(
@@ -390,13 +433,20 @@ def persist_operator_materialization_receipt(
     *,
     expected_owner_uid: int,
 ) -> OperatorMaterializationReceipt:
-    """Exclusive-create, fsync, reopen, and validate one immutable receipt."""
+    """Exclusive-create, fsync, retain, re-bind, and validate one receipt."""
 
     if not isinstance(receipt, OperatorMaterializationReceipt):
         raise OperatorMaterializationReceiptError(
             "materialization receipt must be typed before persistence"
         )
-    raw = canonical_json_bytes(receipt.to_dict())
+    # Treat the public frozen dataclass and all nested caller-owned mappings as
+    # untrusted.  A single serialization is parsed into an independent closed
+    # snapshot before any filesystem coordinate can be created.  Later caller
+    # mutation cannot change the evidence we write or compare.
+    snapshot = load_operator_materialization_receipt(
+        canonical_json_bytes(receipt.to_dict())
+    )
+    raw = canonical_json_bytes(snapshot.to_dict())
     if len(raw) > MAX_MATERIALIZATION_RECEIPT_BYTES:
         raise OperatorMaterializationReceiptError(
             "materialization receipt exceeds its byte ceiling"
@@ -404,54 +454,111 @@ def persist_operator_materialization_receipt(
     root_fd = _open_root(run_root, expected_owner_uid)
     parent_fd: int | None = None
     operation_fd: int | None = None
+    file_fd: int | None = None
+    parent_created = False
+    operation_created = False
+    file_created = False
+    committed = False
+    operation_name = hashlib.sha256(
+        snapshot.operation_command_id.encode("utf-8", errors="strict")
+    ).hexdigest()
     try:
-        parent_fd = _open_or_create_private_dir(
+        parent_fd, parent_created = _open_or_create_private_dir(
             root_fd, ".operator-materializations", expected_owner_uid
         )
-        operation_name = hashlib.sha256(
-            receipt.operation_command_id.encode("utf-8", errors="strict")
-        ).hexdigest()
-        operation_fd = _open_or_create_private_dir(
+        _rebind_private_dir(
+            root_fd,
+            ".operator-materializations",
+            parent_fd,
+            expected_owner_uid,
+        )
+        if parent_created:
+            os.fsync(root_fd)
+        operation_fd, operation_created = _open_or_create_private_dir(
             parent_fd, operation_name, expected_owner_uid
         )
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+        _rebind_private_dir(
+            parent_fd,
+            operation_name,
+            operation_fd,
+            expected_owner_uid,
+        )
+        if operation_created:
+            os.fsync(parent_fd)
+        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
         try:
             file_fd = os.open("receipt.json", flags, 0o600, dir_fd=operation_fd)
         except FileExistsError:
-            existing = _read_receipt_at(operation_fd, expected_owner_uid)
-            if existing != receipt:
+            file_fd = _open_receipt_descriptor(operation_fd, expected_owner_uid)
+            existing = _read_retained_receipt(
+                root_fd=root_fd,
+                parent_fd=parent_fd,
+                operation_name=operation_name,
+                operation_fd=operation_fd,
+                receipt_fd=file_fd,
+                expected_owner_uid=expected_owner_uid,
+            )
+            if existing != snapshot:
                 raise MaterializationReceiptConflict(
                     "existing materialization receipt conflicts with this operation"
                 )
+            committed = True
             return existing
-        try:
-            os.fchmod(file_fd, 0o600)
-            _verify_receipt_stat(os.fstat(file_fd), expected_owner_uid)
-            offset = 0
-            while offset < len(raw):
-                written = os.write(file_fd, raw[offset:])
-                if written <= 0:
-                    raise OperatorMaterializationReceiptError(
-                        "materialization receipt write made no progress"
-                    )
-                offset += written
-            os.fsync(file_fd)
-        finally:
-            os.close(file_fd)
+        file_created = True
+        os.fchmod(file_fd, 0o600)
+        _verify_receipt_stat(os.fstat(file_fd), expected_owner_uid)
+        _rebind_receipt_file(operation_fd, file_fd, expected_owner_uid)
+        offset = 0
+        while offset < len(raw):
+            written = os.write(file_fd, raw[offset:])
+            if written <= 0:
+                raise OperatorMaterializationReceiptError(
+                    "materialization receipt write made no progress"
+                )
+            offset += written
+        os.fsync(file_fd)
         os.fsync(operation_fd)
-        observed = _read_receipt_at(operation_fd, expected_owner_uid)
-        if observed != receipt:
+        observed = _read_retained_receipt(
+            root_fd=root_fd,
+            parent_fd=parent_fd,
+            operation_name=operation_name,
+            operation_fd=operation_fd,
+            receipt_fd=file_fd,
+            expected_owner_uid=expected_owner_uid,
+        )
+        if observed != snapshot:
             raise OperatorMaterializationReceiptError(
-                "reopened materialization receipt differs from the committed evidence"
+                "retained materialization receipt differs from the committed evidence"
             )
+        committed = True
         return observed
-    except OSError as exc:
-        raise OperatorMaterializationReceiptError(
-            "materialization receipt persistence failed closed"
-        ) from exc
+    except BaseException as exc:
+        cleanup_failed = False
+        if not committed and (file_created or operation_created or parent_created):
+            cleanup_failed = not _cleanup_owned_created_coordinates(
+                root_fd=root_fd,
+                parent_fd=parent_fd,
+                parent_created=parent_created,
+                operation_name=operation_name,
+                operation_fd=operation_fd,
+                operation_created=operation_created,
+                receipt_fd=file_fd if file_created else None,
+                expected_owner_uid=expected_owner_uid,
+            )
+        if cleanup_failed:
+            raise MaterializationReceiptConflict(
+                "materialization receipt cleanup left ambiguous residue"
+            ) from exc
+        if isinstance(exc, OSError):
+            raise OperatorMaterializationReceiptError(
+                "materialization receipt persistence failed closed"
+            ) from exc
+        raise
     finally:
+        if file_fd is not None:
+            os.close(file_fd)
         if operation_fd is not None:
             os.close(operation_fd)
         if parent_fd is not None:
@@ -473,22 +580,45 @@ def read_operator_materialization_receipt(
     root_fd = _open_root(run_root, expected_owner_uid)
     parent_fd: int | None = None
     operation_fd: int | None = None
+    receipt_fd: int | None = None
     try:
         try:
             parent_fd = _open_private_dir(
                 root_fd, ".operator-materializations", expected_owner_uid
             )
+            _rebind_private_dir(
+                root_fd,
+                ".operator-materializations",
+                parent_fd,
+                expected_owner_uid,
+            )
             operation_fd = _open_private_dir(
                 parent_fd, operation_name, expected_owner_uid
             )
+            _rebind_private_dir(
+                parent_fd,
+                operation_name,
+                operation_fd,
+                expected_owner_uid,
+            )
         except FileNotFoundError:
             return None
-        return _read_receipt_at(operation_fd, expected_owner_uid)
+        receipt_fd = _open_receipt_descriptor(operation_fd, expected_owner_uid)
+        return _read_retained_receipt(
+            root_fd=root_fd,
+            parent_fd=parent_fd,
+            operation_name=operation_name,
+            operation_fd=operation_fd,
+            receipt_fd=receipt_fd,
+            expected_owner_uid=expected_owner_uid,
+        )
     except OSError as exc:
         raise OperatorMaterializationReceiptError(
             "materialization receipt read failed closed"
         ) from exc
     finally:
+        if receipt_fd is not None:
+            os.close(receipt_fd)
         if operation_fd is not None:
             os.close(operation_fd)
         if parent_fd is not None:
@@ -606,6 +736,115 @@ def _json_object(value: object, name: str) -> dict[str, Any]:
     return json.loads(encoded.decode("utf-8"))
 
 
+def _validate_wire_annotation(value: object, annotation: object) -> None:
+    """Validate JSON wire scalars from the canonical dataclass annotations."""
+
+    origin = get_origin(annotation)
+    arguments = get_args(annotation)
+    if origin in {Union, types.UnionType}:
+        for option in arguments:
+            try:
+                _validate_wire_annotation(value, option)
+            except OperatorMaterializationReceiptError:
+                continue
+            return
+        raise OperatorMaterializationReceiptError(
+            "observed attestation scalar type is invalid"
+        )
+    if origin is tuple:
+        if not isinstance(value, list):
+            raise OperatorMaterializationReceiptError(
+                "observed attestation collection type is invalid"
+            )
+        if len(arguments) == 2 and arguments[1] is Ellipsis:
+            for item in value:
+                _validate_wire_annotation(item, arguments[0])
+            return
+        if len(value) != len(arguments):
+            raise OperatorMaterializationReceiptError(
+                "observed attestation tuple length is invalid"
+            )
+        for item, item_annotation in zip(value, arguments, strict=True):
+            _validate_wire_annotation(item, item_annotation)
+        return
+    if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
+        if not isinstance(value, Mapping):
+            raise OperatorMaterializationReceiptError(
+                "observed attestation nested object type is invalid"
+            )
+        fields = {field.name: field for field in dataclasses.fields(annotation)}
+        if set(value) != set(fields):
+            raise OperatorMaterializationReceiptError(
+                "observed attestation fields do not match the closed schema"
+            )
+        hints = get_type_hints(annotation)
+        for name in fields:
+            _validate_wire_annotation(value[name], hints[name])
+        return
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        if not isinstance(value, str):
+            raise OperatorMaterializationReceiptError(
+                "observed attestation enum type is invalid"
+            )
+        try:
+            annotation(value)
+        except (TypeError, ValueError) as exc:
+            raise OperatorMaterializationReceiptError(
+                "observed attestation enum value is invalid"
+            ) from exc
+        return
+    if annotation is str:
+        valid = isinstance(value, str)
+    elif annotation is int:
+        valid = isinstance(value, int) and not isinstance(value, bool)
+    elif annotation is bool:
+        valid = isinstance(value, bool)
+    elif annotation is float:
+        valid = isinstance(value, (int, float)) and not isinstance(value, bool)
+    elif annotation is type(None):
+        valid = value is None
+    elif annotation is Any:
+        valid = True
+    else:
+        valid = False
+    if not valid:
+        raise OperatorMaterializationReceiptError(
+            "observed attestation scalar type is invalid"
+        )
+
+
+def _observed_attestation(
+    value: object,
+    *,
+    worker_id: str,
+) -> dict[str, Any]:
+    raw = _json_object(value, "observed attestation")
+    _refuse_credential_shaped_attestation(raw)
+    try:
+        _validate_wire_annotation(raw, ObservedHarnessAttestation)
+        parsed = observed_harness_attestation(raw)
+        projected = operator_to_wire(parsed)
+    except OperatorMaterializationReceiptError:
+        raise
+    except (OperatorHarnessWireError, TypeError, ValueError) as exc:
+        raise OperatorMaterializationReceiptError(
+            "observed attestation does not match the canonical closed wire"
+        ) from exc
+    if not isinstance(projected, dict) or canonical_json_bytes(projected) != canonical_json_bytes(raw):
+        raise OperatorMaterializationReceiptError(
+            "observed attestation is not the canonical closed wire"
+        )
+    if parsed.auth.worker_id != worker_id:
+        raise OperatorMaterializationReceiptError(
+            "observed attestation worker identity differs from the receipt"
+        )
+    if parsed.auth.attestation_status != ACCOUNT_REALM_STATUS:
+        raise OperatorMaterializationReceiptError(
+            "observed attestation auth status is unsupported"
+        )
+    return projected
+
+
 def _validate_json_value(value: object, *, depth: int = 0) -> None:
     if depth > 64:
         raise OperatorMaterializationReceiptError(
@@ -633,8 +872,11 @@ def _validate_json_value(value: object, *, depth: int = 0) -> None:
 def _refuse_credential_shaped_attestation(value: object) -> None:
     if isinstance(value, Mapping):
         for key, item in value.items():
-            normalized = str(key).strip().lower().replace("-", "_")
-            if normalized in _FORBIDDEN_ATTESTATION_KEYS:
+            normalized = re.sub(r"[^a-z0-9]", "", str(key).strip().lower())
+            if normalized in _FORBIDDEN_ATTESTATION_KEYS or any(
+                normalized.endswith(suffix)
+                for suffix in _FORBIDDEN_ATTESTATION_KEY_SUFFIXES
+            ):
                 raise OperatorMaterializationReceiptError(
                     "observed attestation contains a credential-shaped field"
                 )
@@ -642,6 +884,12 @@ def _refuse_credential_shaped_attestation(value: object) -> None:
     elif isinstance(value, list):
         for item in value:
             _refuse_credential_shaped_attestation(item)
+    elif isinstance(value, str) and any(
+        pattern.search(value) is not None for pattern in _SECRET_VALUE_PATTERNS
+    ):
+        raise OperatorMaterializationReceiptError(
+            "observed attestation contains credential-shaped material"
+        )
 
 
 def _utc_timestamp(value: object) -> str:
@@ -681,14 +929,15 @@ def _open_root(run_root: str | Path, expected_owner_uid: int) -> int:
 
 def _open_or_create_private_dir(
     parent_fd: int, name: str, expected_owner_uid: int
-) -> int:
+) -> tuple[int, bool]:
+    created = False
     try:
         os.mkdir(name, 0o700, dir_fd=parent_fd)
     except FileExistsError:
         pass
     else:
-        os.fsync(parent_fd)
-    return _open_private_dir(parent_fd, name, expected_owner_uid)
+        created = True
+    return _open_private_dir(parent_fd, name, expected_owner_uid), created
 
 
 def _open_private_dir(parent_fd: int, name: str, expected_owner_uid: int) -> int:
@@ -707,6 +956,37 @@ def _open_private_dir(parent_fd: int, name: str, expected_owner_uid: int) -> int
             "materialization receipt directory owner or mode drifted"
         )
     return descriptor
+
+
+def _same_object(left: os.stat_result, right: os.stat_result) -> bool:
+    return (left.st_dev, left.st_ino) == (right.st_dev, right.st_ino)
+
+
+def _rebind_private_dir(
+    parent_fd: int,
+    name: str,
+    retained_fd: int,
+    expected_owner_uid: int,
+) -> None:
+    retained = os.fstat(retained_fd)
+    if (
+        not stat.S_ISDIR(retained.st_mode)
+        or retained.st_uid != int(expected_owner_uid)
+        or stat.S_IMODE(retained.st_mode) != 0o700
+    ):
+        raise OperatorMaterializationReceiptError(
+            "materialization receipt directory owner or mode drifted"
+        )
+    named_fd: int | None = None
+    try:
+        named_fd = _open_private_dir(parent_fd, name, expected_owner_uid)
+        if not _same_object(retained, os.fstat(named_fd)):
+            raise OperatorMaterializationReceiptError(
+                "materialization receipt directory name was replaced"
+            )
+    finally:
+        if named_fd is not None:
+            os.close(named_fd)
 
 
 def _verify_receipt_stat(info: os.stat_result, expected_owner_uid: int) -> None:
@@ -728,10 +1008,13 @@ def _verify_receipt_stat(info: os.stat_result, expected_owner_uid: int) -> None:
         )
 
 
-def _read_receipt_at(
-    operation_fd: int, expected_owner_uid: int
-) -> OperatorMaterializationReceipt:
-    flags = os.O_RDONLY | os.O_CLOEXEC
+def _open_receipt_descriptor(
+    operation_fd: int,
+    expected_owner_uid: int,
+) -> int:
+    # O_NOFOLLOW rejects symlinks.  O_NONBLOCK is required as well because a
+    # same-owner FIFO replacement must not hang before fstat can reject it.
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     try:
@@ -741,40 +1024,179 @@ def _read_receipt_at(
             "materialization receipt cannot be opened safely"
         ) from exc
     try:
-        before = os.fstat(descriptor)
-        _verify_receipt_stat(before, expected_owner_uid)
-        chunks: list[bytes] = []
-        remaining = MAX_MATERIALIZATION_RECEIPT_BYTES + 1
-        while remaining > 0:
-            chunk = os.read(descriptor, min(65_536, remaining))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        after = os.fstat(descriptor)
-        _verify_receipt_stat(after, expected_owner_uid)
-        if (
-            before.st_dev,
-            before.st_ino,
-            before.st_size,
-            before.st_mtime_ns,
-        ) != (
-            after.st_dev,
-            after.st_ino,
-            after.st_size,
-            after.st_mtime_ns,
-        ):
-            raise OperatorMaterializationReceiptError(
-                "materialization receipt changed while it was read"
-            )
-        raw = b"".join(chunks)
-        if len(raw) > MAX_MATERIALIZATION_RECEIPT_BYTES:
-            raise OperatorMaterializationReceiptError(
-                "materialization receipt exceeds its byte ceiling"
-            )
-        return load_operator_materialization_receipt(raw)
-    finally:
+        _verify_receipt_stat(os.fstat(descriptor), expected_owner_uid)
+    except BaseException:
         os.close(descriptor)
+        raise
+    return descriptor
+
+
+def _rebind_receipt_file(
+    operation_fd: int,
+    retained_fd: int,
+    expected_owner_uid: int,
+) -> None:
+    retained = os.fstat(retained_fd)
+    _verify_receipt_stat(retained, expected_owner_uid)
+    named_fd: int | None = None
+    try:
+        named_fd = _open_receipt_descriptor(operation_fd, expected_owner_uid)
+        if not _same_object(retained, os.fstat(named_fd)):
+            raise OperatorMaterializationReceiptError(
+                "materialization receipt name was replaced"
+            )
+    finally:
+        if named_fd is not None:
+            os.close(named_fd)
+
+
+def _read_receipt_descriptor(
+    descriptor: int,
+    expected_owner_uid: int,
+) -> OperatorMaterializationReceipt:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    before = os.fstat(descriptor)
+    _verify_receipt_stat(before, expected_owner_uid)
+    chunks: list[bytes] = []
+    remaining = MAX_MATERIALIZATION_RECEIPT_BYTES + 1
+    while remaining > 0:
+        chunk = os.read(descriptor, min(65_536, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    after = os.fstat(descriptor)
+    _verify_receipt_stat(after, expected_owner_uid)
+    if (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    ) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ):
+        raise OperatorMaterializationReceiptError(
+            "materialization receipt changed while it was read"
+        )
+    raw = b"".join(chunks)
+    if len(raw) > MAX_MATERIALIZATION_RECEIPT_BYTES:
+        raise OperatorMaterializationReceiptError(
+            "materialization receipt exceeds its byte ceiling"
+        )
+    return load_operator_materialization_receipt(raw)
+
+
+def _read_retained_receipt(
+    *,
+    root_fd: int,
+    parent_fd: int,
+    operation_name: str,
+    operation_fd: int,
+    receipt_fd: int,
+    expected_owner_uid: int,
+) -> OperatorMaterializationReceipt:
+    _rebind_private_dir(
+        root_fd,
+        ".operator-materializations",
+        parent_fd,
+        expected_owner_uid,
+    )
+    _rebind_private_dir(
+        parent_fd,
+        operation_name,
+        operation_fd,
+        expected_owner_uid,
+    )
+    _rebind_receipt_file(operation_fd, receipt_fd, expected_owner_uid)
+    receipt = _read_receipt_descriptor(receipt_fd, expected_owner_uid)
+    _rebind_receipt_file(operation_fd, receipt_fd, expected_owner_uid)
+    _rebind_private_dir(
+        parent_fd,
+        operation_name,
+        operation_fd,
+        expected_owner_uid,
+    )
+    _rebind_private_dir(
+        root_fd,
+        ".operator-materializations",
+        parent_fd,
+        expected_owner_uid,
+    )
+    return receipt
+
+
+def _cleanup_owned_created_coordinates(
+    *,
+    root_fd: int,
+    parent_fd: int | None,
+    parent_created: bool,
+    operation_name: str,
+    operation_fd: int | None,
+    operation_created: bool,
+    receipt_fd: int | None,
+    expected_owner_uid: int,
+) -> bool:
+    """Remove only entries still bound to this invocation's retained objects."""
+
+    if parent_fd is None:
+        return False
+    try:
+        _rebind_private_dir(
+            root_fd,
+            ".operator-materializations",
+            parent_fd,
+            expected_owner_uid,
+        )
+        if operation_fd is not None:
+            _rebind_private_dir(
+                parent_fd,
+                operation_name,
+                operation_fd,
+                expected_owner_uid,
+            )
+        if receipt_fd is not None:
+            if operation_fd is None:
+                return False
+            _rebind_receipt_file(operation_fd, receipt_fd, expected_owner_uid)
+    except (OSError, OperatorMaterializationReceiptError):
+        return False
+    if receipt_fd is not None:
+        try:
+            assert operation_fd is not None
+            os.unlink("receipt.json", dir_fd=operation_fd)
+        except OSError:
+            return False
+    if operation_created:
+        if operation_fd is None:
+            return False
+        try:
+            _rebind_private_dir(
+                parent_fd,
+                operation_name,
+                operation_fd,
+                expected_owner_uid,
+            )
+            os.rmdir(operation_name, dir_fd=parent_fd)
+        except (OSError, OperatorMaterializationReceiptError):
+            return False
+    if not parent_created:
+        return True
+    try:
+        _rebind_private_dir(
+            root_fd,
+            ".operator-materializations",
+            parent_fd,
+            expected_owner_uid,
+        )
+        os.rmdir(".operator-materializations", dir_fd=root_fd)
+    except (OSError, OperatorMaterializationReceiptError):
+        return False
+    return True
 
 
 __all__ = [

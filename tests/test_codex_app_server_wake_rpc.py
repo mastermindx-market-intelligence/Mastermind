@@ -22,9 +22,12 @@ from control_plane.executive_worker_broker import (
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
+    AuthRealmFact,
     CapabilityManifest,
     LaunchDecision,
     NativeHelperPolicy,
+    ObservedHarnessAttestation,
+    ObservedTriState,
     OperationId,
     ProcessGenerationRef,
     ProcessIdentityObservation,
@@ -1506,7 +1509,27 @@ def test_remote_adapter_uses_one_bounded_materialization_status_request() -> Non
         requested_profile_digest=requested_profile_digest(to_wire(requested)),
         provider_session_id=NATIVE_HANDLE,
         process_identity=process,
-        observed_attestation={"served_model": "gpt-5.6-sol"},
+        observed_attestation=to_wire(
+            ObservedHarnessAttestation(
+                served_model="gpt-5.6-sol",
+                harness_version="0.147.0",
+                harness_binary_digest="a" * 64,
+                capabilities=(),
+                effective_skills=(),
+                effective_mcp=(),
+                effective_plugins_or_apps=(),
+                sandbox_state="read-only",
+                approval_state="never",
+                network_state="disabled",
+                effective_config_digest="d" * 64,
+                auth=AuthRealmFact(
+                    worker_id="worker-123",
+                    provider="openai-codex",
+                ),
+                workspace=workspace,
+                supports_subagent_capability_ceiling=ObservedTriState.FALSE,
+            )
+        ),
         process_credentials={
             "process_identity": process,
             "os_principal_name": "fixture-worker",

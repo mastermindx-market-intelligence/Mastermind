@@ -89,12 +89,14 @@ from control_plane.operator_harness_contract import (
     SessionStartObservation,
     TurnRef,
     TurnStartObservation,
+    compare_launch,
 )
 from control_plane.operator_harness_wire import (
     OperatorHarnessWireError,
     event_cursor as wire_event_cursor,
     launch_comparison as wire_launch_comparison,
     operation_id as wire_operation_id,
+    observed_harness_attestation as wire_observed_harness_attestation,
     process_identity_observation as wire_process_identity_observation,
     process_generation_ref as wire_process_generation_ref,
     requested_execution_profile as wire_requested_execution_profile,
@@ -1652,6 +1654,12 @@ class ExecutiveWorkerBroker:
         generation: ProcessGenerationRef,
         handoff: ProviderSessionHandoff | None,
     ) -> bool:
+        try:
+            observed = wire_observed_harness_attestation(
+                receipt.observed_attestation
+            )
+        except OperatorHarnessWireError:
+            return False
         return (
             receipt.operation_command_id == operation.command_id
             and receipt.operation_kind
@@ -1663,6 +1671,7 @@ class ExecutiveWorkerBroker:
             and receipt.generation_number == generation.generation_number
             and receipt.requested_profile_digest
             == requested_profile_digest(operator_to_wire(requested))
+            and compare_launch(requested, observed).decision is LaunchDecision.ALLOW
             and (
                 handoff is None
                 or receipt.provider_session_id == handoff.provider_session_id
@@ -1694,50 +1703,66 @@ class ExecutiveWorkerBroker:
         operation, requested, epoch, generation, handoff = (
             self._materialization_request(payload, resume=resume)
         )
-        try:
-            receipt = await asyncio.to_thread(
-                read_operator_materialization_receipt,
-                self.policy.run_root,
-                operation.command_id,
-                expected_owner_uid=self.policy.worker_uid,
-            )
-        except OperatorMaterializationReceiptError:
-            return {
-                "schema_version": MATERIALIZATION_STATUS_SCHEMA,
-                "status": "CONFLICT",
-                "receipt": None,
-            }
-        if receipt is None:
-            return {
-                "schema_version": MATERIALIZATION_STATUS_SCHEMA,
-                "status": "ABSENT",
-                "receipt": None,
-            }
-        if not self._receipt_matches_request(
-            receipt,
-            operation=operation,
-            requested=requested,
-            epoch=epoch,
-            generation=generation,
-            handoff=handoff,
-        ):
-            return {
-                "schema_version": MATERIALIZATION_STATUS_SCHEMA,
-                "status": "CONFLICT",
-                "receipt": None,
-            }
+        # Status is one atomic classification over the durable receipt and the
+        # process-local effect state.  Holding the existing state lock across
+        # the bounded read prevents a start/quarantine/terminal transition
+        # from being flattened into stale ABSENT or restart-only evidence.
         async with self._state_lock:
+            read_conflict = False
+            try:
+                receipt = await asyncio.to_thread(
+                    read_operator_materialization_receipt,
+                    self.policy.run_root,
+                    operation.command_id,
+                    expected_owner_uid=self.policy.worker_uid,
+                )
+            except OperatorMaterializationReceiptError:
+                read_conflict = True
+                receipt = None
             state = self._operator_run
-            if state is None:
+            terminal = self._operator_terminal.get(
+                generation.process_generation_id
+            )
+            effect_conflict = (
+                self._starting
+                or self._quarantined_reason is not None
+                or terminal is not None
+            )
+            if receipt is None:
+                if read_conflict or effect_conflict or state is not None:
+                    status = "CONFLICT"
+                else:
+                    status = "ABSENT"
+            elif effect_conflict or not self._receipt_matches_request(
+                receipt,
+                operation=operation,
+                requested=requested,
+                epoch=epoch,
+                generation=generation,
+                handoff=handoff,
+            ):
+                status = "CONFLICT"
+            elif state is None:
                 status = "RECEIPT_ONLY_AFTER_RESTART"
-            elif state.materialization_receipt == receipt:
+            elif (
+                state.generation == generation
+                and state.materialization_receipt == receipt
+            ):
                 status = "RECEIPT_CURRENT_IN_LIVE_BROKER"
             else:
                 status = "CONFLICT"
         return {
             "schema_version": MATERIALIZATION_STATUS_SCHEMA,
             "status": status,
-            "receipt": receipt.to_dict() if status != "CONFLICT" else None,
+            "receipt": (
+                receipt.to_dict()
+                if status
+                in {
+                    "RECEIPT_CURRENT_IN_LIVE_BROKER",
+                    "RECEIPT_ONLY_AFTER_RESTART",
+                }
+                else None
+            ),
         }
 
     async def _ohf_start(

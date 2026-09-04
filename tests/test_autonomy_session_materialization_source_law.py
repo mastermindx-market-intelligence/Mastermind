@@ -17,6 +17,7 @@ RUNTIME = ROOT / "control_plane/executive_runtime.py"
 ORCHESTRATOR = ROOT / "control_plane/operator_harness_orchestrator.py"
 PORT = ROOT / "control_plane/executive_operator_harness_port.py"
 BROKER = ROOT / "control_plane/executive_worker_broker.py"
+RECEIPT = ROOT / "control_plane/operator_materialization_receipt.py"
 REMOTE = ROOT / "control_plane/remote_codex_operator_adapter.py"
 SUPERVISOR = ROOT / "control_plane/executive_operator_supervisor.py"
 BINDING = ROOT / "control_plane/runtime_binding_projection.py"
@@ -397,9 +398,24 @@ def test_existing_provider_chain_records_uncertainty_and_remains_single_owner() 
     assert "return await self._ohf_materialization_status(payload)" in broker_dispatch
     assert "read_operator_materialization_receipt" in broker_status
     assert "self._receipt_matches_request" in broker_status
+    assert "async with self._state_lock:" in broker_status
+    assert broker_status.index("async with self._state_lock:") < broker_status.index(
+        "read_operator_materialization_receipt"
+    )
+    assert "self._starting" in broker_status
+    assert "self._quarantined_reason" in broker_status
+    assert "self._operator_run" in broker_status
+    assert "self._operator_terminal.get" in broker_status
     assert 'status = "RECEIPT_CURRENT_IN_LIVE_BROKER"' in broker_status
     assert 'status = "RECEIPT_ONLY_AFTER_RESTART"' in broker_status
     assert broker_status.count("read_operator_materialization_receipt") == 1
+    receipt_match = definition(
+        BROKER, "ExecutiveWorkerBroker._receipt_matches_request"
+    )
+    assert "wire_observed_harness_attestation" in receipt_match
+    assert "compare_launch(requested, observed).decision is LaunchDecision.ALLOW" in (
+        receipt_match
+    )
     assert '"ohf-materialization-status", payload, timeout_seconds=30' in remote_status
     assert "operator_materialization_status(result)" in remote_status
     assert "receipt.operation_command_id == operation_id.command_id" in remote_status
@@ -422,6 +438,27 @@ def test_existing_provider_chain_records_uncertainty_and_remains_single_owner() 
     assert "active_operator_binding_facts" in projection
     assert "connection=connection" in projection
     assert "RuntimeBinding(" in projection
+
+
+def test_materialization_receipt_boundary_reconstructs_and_rebinds_evidence() -> None:
+    persist = definition(RECEIPT, "persist_operator_materialization_receipt")
+    retained_read = definition(RECEIPT, "_read_retained_receipt")
+    descriptor_open = definition(RECEIPT, "_open_receipt_descriptor")
+    attestation = definition(RECEIPT, "_observed_attestation")
+
+    assert persist.index("load_operator_materialization_receipt") < persist.index(
+        "_open_root"
+    )
+    assert "snapshot.to_dict()" in persist
+    assert "_cleanup_owned_created_coordinates" in persist
+    assert retained_read.count("_rebind_private_dir") == 4
+    assert retained_read.count("_rebind_receipt_file") == 2
+    assert "os.O_NONBLOCK" in descriptor_open
+    assert "ObservedHarnessAttestation" in attestation
+    assert "_validate_wire_annotation" in attestation
+    assert "observed_harness_attestation" in attestation
+    assert "operator_to_wire" in attestation
+    assert "parsed.auth.worker_id != worker_id" in attestation
 
 
 def test_records_only_scope_and_no_arming() -> None:
