@@ -959,10 +959,21 @@ def run_canary(
     repo_root: Path,
     scratch_root: Path,
     operation_id: str,
-    protected_join: str = "",
+    protected_join: str,
     client_factory=None,
     run_command: Callable[..., Any] = subprocess.run,
 ) -> CanaryEvidence:
+    # The protected-source join is an execution gate, not merely a terminal
+    # result annotation.  Refuse before creating scratch state, generating
+    # schemas, constructing a workspace, or reaching a provider seam.
+    if (
+        not isinstance(protected_join, str)
+        or _HEX40_RE.fullmatch(protected_join) is None
+    ):
+        raise CanaryStop(
+            "PROVIDER_REALM_UNAVAILABLE",
+            "protected source join is not attested",
+        )
     if backend not in ("fake", "live"):
         raise ValueError(f"unsupported backend: {backend!r}")
 
@@ -1730,7 +1741,8 @@ def _result_safe_artifact_inventory_row(value: object) -> bool:
     if not all(part not in {"", ".", ".."} for part in parts):
         return False
     sensitive_segment = re.compile(
-        r"(?:^|[._-])(?:secret|password|api_key|authorization|bearer|token)(?:$|[=._-])",
+        r"(?:^|[._-])(?:secret|password|api_key|auth|authorization|bearer|token|"
+        r"credential|credentials)(?:$|[=._-])",
         re.IGNORECASE,
     )
     return not any(sensitive_segment.search(part) for part in parts)
@@ -2201,7 +2213,7 @@ def main(argv: "list[str] | None" = None) -> int:
     parser.add_argument("--binary-path", type=Path, default=None)
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--operation-id", required=True)
-    parser.add_argument("--protected-join", default="")
+    parser.add_argument("--protected-join", required=True)
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     args = parser.parse_args(argv)
 

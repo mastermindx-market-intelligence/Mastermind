@@ -1773,6 +1773,7 @@ def test_probe_env_is_immune_to_inherited_terminal_identity(tmp_path, monkeypatc
         repo_root=REPO_ROOT,
         scratch_root=scratch,
         operation_id="cap-s1-canary-env-immunity",
+        protected_join="c" * 40,
         client_factory=factory,
         run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
     )
@@ -1806,6 +1807,7 @@ def test_probe_client_identity_mismatch_reproduces_the_live_version_refusal(tmp_
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-probe-mismatch",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -1842,6 +1844,7 @@ def test_run_canary_fake_backend_bundled_omission_refuses_config_drift(tmp_path)
         repo_root=REPO_ROOT,
         scratch_root=scratch,
         operation_id="cap-s1-canary-bundled-omit",
+        protected_join="c" * 40,
         client_factory=factory,
         run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
     )
@@ -1885,6 +1888,7 @@ def test_run_canary_records_a_false_marker_without_raising(tmp_path) -> None:
         repo_root=REPO_ROOT,
         scratch_root=scratch,
         operation_id="cap-s1-canary-marker",
+        protected_join="c" * 40,
         client_factory=factory,
         run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
     )
@@ -1927,6 +1931,7 @@ def test_run_canary_ambient_skill_surface_stops(tmp_path) -> None:
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-ambient",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -2011,6 +2016,7 @@ def test_run_canary_extra_enabled_skill_after_root_add_is_causality_failed(tmp_p
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id=operation_id,
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -2067,6 +2073,7 @@ def test_run_canary_pathless_request_with_unrelated_skill_fragment_refuses_befor
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id=operation_id,
+            protected_join="c" * 40,
             client_factory=factory,
             # The schema fixture WITHOUT the skill input path -- the fake
             # binary is never invoked; this is just the JSON doc the
@@ -2120,6 +2127,7 @@ def test_run_canary_skills_changed_notification_stops_before_the_next_turn(tmp_p
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-skills-changed",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -2172,6 +2180,7 @@ def test_run_canary_empty_candidate_identity_refuses_before_provider_start(
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-empty-candidate",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -2210,6 +2219,7 @@ def test_run_canary_workspace_git_commit_failure_is_provider_realm_unavailable(
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-ws-commit-fail",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=failing_workspace_run_command,
         )
@@ -2246,6 +2256,7 @@ def test_run_canary_live_backend_refuses_missing_codex_home_without_running_comm
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-live-realm",
+            protected_join="c" * 40,
             client_factory=lambda *a, **k: (_ for _ in ()).throw(
                 AssertionError("client_factory must never be invoked")
             ),
@@ -2271,6 +2282,7 @@ def test_run_canary_live_backend_refuses_default_codex_home_without_running_comm
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-live-realm-2",
+            protected_join="c" * 40,
             client_factory=lambda *a, **k: (_ for _ in ()).throw(
                 AssertionError("client_factory must never be invoked")
             ),
@@ -2292,6 +2304,7 @@ def test_run_canary_live_home_validation_never_echoes_hostile_path(tmp_path) -> 
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-live-hostile-home",
+            protected_join="c" * 40,
             client_factory=lambda *_a, **_k: None,
         )
     message = str(excinfo.value)
@@ -2319,6 +2332,7 @@ def test_run_canary_transport_failure_mid_turn_is_effect_unknown_with_no_retry(
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-effect-unknown",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -2392,6 +2406,7 @@ def test_run_canary_unexpected_origin_error_removes_owned_attempt_root(
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-unexpected-origin",
+            protected_join="c" * 40,
             client_factory=_canary_client_factory(),
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -2412,6 +2427,7 @@ def test_run_canary_schema_attestation_failure_leaves_scratch_clean(tmp_path) ->
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-cleanup-boundary-schema",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_failing_schema_run_command,
         )
@@ -2440,6 +2456,7 @@ def test_run_canary_ambient_refusal_at_launch_leaves_scratch_clean(tmp_path) -> 
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-cleanup-boundary-ambient",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -2475,6 +2492,7 @@ def test_run_canary_mid_turn_effect_unknown_tears_down_process_exactly_once_and_
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-cleanup-boundary-effect-unknown",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -2509,6 +2527,7 @@ def test_run_canary_marker_noncompliant_journey_still_cleans_up_everything(tmp_p
         repo_root=REPO_ROOT,
         scratch_root=scratch,
         operation_id="cap-s1-canary-cleanup-boundary-marker",
+        protected_join="c" * 40,
         client_factory=factory,
         run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
     )
@@ -2538,6 +2557,7 @@ def test_run_canary_post_clear_drift_refusal_still_cleans_up_everything(tmp_path
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-cleanup-boundary-post-clear",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -2577,6 +2597,7 @@ def test_run_canary_reports_cleanup_failure_honestly(tmp_path, monkeypatch) -> N
             repo_root=REPO_ROOT,
             scratch_root=scratch,
             operation_id="cap-s1-canary-cleanup-honesty",
+            protected_join="c" * 40,
             client_factory=factory,
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
@@ -2604,6 +2625,8 @@ def test_run_canary_reports_cleanup_failure_honestly(tmp_path, monkeypatch) -> N
             str(tmp_path / "cli-scratch-cleanup-honesty"),
             "--operation-id",
             "cap-s1-canary-cleanup-honesty-cli",
+            "--protected-join",
+            "c" * 40,
         ]
     )
     assert exit_code != 0
@@ -2673,7 +2696,16 @@ def test_cli_main_prints_evidence_json_and_exits_zero_on_a_clean_journey(
     monkeypatch.setattr(canary_module, "run_canary", lambda **_kwargs: clean_evidence)
 
     exit_code = canary_module.main(
-        ["--backend", "fake", "--scratch", str(tmp_path / "cli-scratch"), "--operation-id", "cap-s1-cli-smoke"]
+        [
+            "--backend",
+            "fake",
+            "--scratch",
+            str(tmp_path / "cli-scratch"),
+            "--operation-id",
+            "cap-s1-cli-smoke",
+            "--protected-join",
+            "c" * 40,
+        ]
     )
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -2739,7 +2771,16 @@ def test_cli_main_exits_nonzero_when_a_marker_is_false_or_cleanup_failed(
     monkeypatch.setattr(canary_module, "run_canary", lambda **_kwargs: dirty_evidence)
 
     exit_code = canary_module.main(
-        ["--backend", "fake", "--scratch", str(tmp_path / "cli-scratch-2"), "--operation-id", "cap-s1-cli-smoke-2"]
+        [
+            "--backend",
+            "fake",
+            "--scratch",
+            str(tmp_path / "cli-scratch-2"),
+            "--operation-id",
+            "cap-s1-cli-smoke-2",
+            "--protected-join",
+            "c" * 40,
+        ]
     )
     assert exit_code != 0
 
@@ -2755,7 +2796,16 @@ def test_cli_main_prints_stop_code_and_exits_nonzero_on_canary_stop(
     monkeypatch.setattr(canary_module, "run_canary", _raise_stop)
 
     exit_code = canary_module.main(
-        ["--backend", "fake", "--scratch", str(tmp_path / "cli-scratch-3"), "--operation-id", "cap-s1-cli-smoke-3"]
+        [
+            "--backend",
+            "fake",
+            "--scratch",
+            str(tmp_path / "cli-scratch-3"),
+            "--operation-id",
+            "cap-s1-cli-smoke-3",
+            "--protected-join",
+            "c" * 40,
+        ]
     )
     captured = capsys.readouterr()
     assert exit_code != 0
@@ -2874,6 +2924,8 @@ def test_cli_main_fake_backend_completes_the_real_four_turn_journey_as_a_subproc
             str(scratch),
             "--operation-id",
             "cap-s1-cli-e2e-fake",
+            "--protected-join",
+            "c" * 40,
         ],
         cwd=str(REPO_ROOT),
         capture_output=True,
@@ -2883,6 +2935,7 @@ def test_cli_main_fake_backend_completes_the_real_four_turn_journey_as_a_subproc
     assert result.returncode == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
     assert payload["schema_version"] == "mastermind.cap_s1_canary_evidence/v1"
+    assert payload["protected_join"] == "c" * 40
     assert payload["launch_decision"] == "ALLOW"
     assert [ok for _name, ok in payload["turn_marker_results"]] == [True, True, True, True]
     artifacts = payload["cleanup"]["artifacts"]
@@ -2896,6 +2949,60 @@ def test_cli_main_fake_backend_completes_the_real_four_turn_journey_as_a_subproc
         "process",
     }
     assert all(row[1] and row[2] for row in artifacts)
+
+
+def test_cli_main_requires_protected_join_before_creating_scratch(tmp_path) -> None:
+    scratch = tmp_path / "cli-missing-protected-join"
+    result = _subprocess.run(
+        [
+            _sys.executable,
+            "-m",
+            "scripts.ohf.cap_s1_mastermind_operator_canary",
+            "--backend",
+            "fake",
+            "--scratch",
+            str(scratch),
+            "--operation-id",
+            "cap-s1-cli-missing-protected-join",
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert not scratch.exists()
+
+
+@pytest.mark.parametrize(
+    "protected_join",
+    ("", "c" * 39, "g" * 40, "C" * 40),
+)
+def test_run_canary_refuses_unattested_protected_join_before_first_effect(
+    tmp_path, protected_join
+) -> None:
+    scratch = tmp_path / "invalid-protected-join"
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-invalid-protected-join",
+            protected_join=protected_join,
+            client_factory=lambda *_a, **_k: (_ for _ in ()).throw(
+                AssertionError("client factory must not run")
+            ),
+            run_command=lambda *_a, **_k: (_ for _ in ()).throw(
+                AssertionError("schema command must not run")
+            ),
+        )
+
+    assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    assert excinfo.value.detail == "protected source join is not attested"
+    assert not scratch.exists()
 
 
 def test_cli_main_live_backend_seam_probe_reaches_client_construction_and_refuses(
@@ -2945,6 +3052,8 @@ def test_cli_main_live_backend_seam_probe_reaches_client_construction_and_refuse
             str(scratch),
             "--operation-id",
             "cap-s1-cli-e2e-live-seam",
+            "--protected-join",
+            "c" * 40,
         ],
         cwd=str(REPO_ROOT),
         capture_output=True,
@@ -3362,6 +3471,20 @@ def test_cap_s1_result_completed_accepts_only_fully_bound_typed_canary_evidence(
         build_cap_s1_result(**hostile_inventory)
     assert "/Users/alice" not in str(excinfo.value)
     assert "auth-token-secret" not in str(excinfo.value)
+
+    for credential_oriented_name in (
+        "workspace:auth.json",
+        "workspace:credentials.json",
+        "schema:oauth_credentials.json",
+    ):
+        hostile_inventory = dict(raw)
+        hostile_inventory["canary_evidence"] = dataclasses.replace(
+            raw["canary_evidence"],
+            artifact_inventory=(credential_oriented_name,),
+        )
+        with pytest.raises(CapS1ResultError, match="canary_evidence_invalid") as excinfo:
+            build_cap_s1_result(**hostile_inventory)
+        assert credential_oriented_name not in str(excinfo.value)
 
 
 def test_cap_s1_result_local_and_hosted_proof_shapes_are_enforced() -> None:
