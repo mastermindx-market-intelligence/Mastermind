@@ -369,7 +369,8 @@ def test_git_child_environment_is_exact_and_ignores_hostile_ambient(monkeypatch)
     module, runner = _module(), CaptureRunner()
     assert module._invoke_git(runner, "/repo", "status", "--porcelain") is not None
     env = runner.environments[-1]
-    assert set(env) == ENV_KEYS and set(hostile).isdisjoint(env)
+    assert set(env) == ENV_KEYS
+    assert all(env.get(key) != value for key, value in hostile.items() if key in env)
     assert env == {
         "LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin", "HOME": "/",
         "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0",

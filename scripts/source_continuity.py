@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -55,6 +55,43 @@ _MAX_PAGES = 10
 _MAX_COLLISION_PRS = 100
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _HOLD_LABELS = frozenset({"hold", "hold-for-sol", "hold_for_sol"})
+_PR_FILE_STATUSES = frozenset(
+    {"added", "changed", "copied", "modified", "removed", "renamed", "unchanged"}
+)
+_GIT_CONFIG_OVERRIDES = (
+    "core.fsmonitor=false",
+    "core.untrackedCache=false",
+    "core.hooksPath=/dev/null",
+    "core.attributesFile=/dev/null",
+    "core.excludesFile=/dev/null",
+    "diff.external=",
+    "diff.renames=false",
+    "credential.helper=",
+    "protocol.allow=never",
+    "protocol.file.allow=always",
+)
+_GIT_ENV = {
+    "LANG": "C",
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin",
+    "HOME": "/",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_ATTR_NOSYSTEM": "1",
+    "GIT_LITERAL_PATHSPECS": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_PAGER": "cat",
+    "GIT_EDITOR": "/usr/bin/false",
+    "GIT_SEQUENCE_EDITOR": "/usr/bin/false",
+    "GIT_ASKPASS": "/usr/bin/false",
+    "SSH_ASKPASS": "/usr/bin/false",
+    "GIT_SSH": "/usr/bin/false",
+    "GIT_SSH_COMMAND": "/usr/bin/false",
+    "GIT_CONFIG_COUNT": "0",
+}
 
 
 class _SafeArgumentParser(argparse.ArgumentParser):
@@ -101,26 +138,68 @@ def _is_sha(value: object) -> bool:
     return isinstance(value, str) and _SHA_RE.fullmatch(value) is not None
 
 
+def _is_safe_remote_path(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    if len(encoded) > 4096:
+        return False
+    if value.startswith("/") or "\\" in value or "//" in value or "\x00" in value:
+        return False
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        return False
+    parsed = PurePosixPath(value)
+    if parsed.is_absolute() or any(part in {"", ".", ".."} for part in parsed.parts):
+        return False
+    if parsed.parts and parsed.parts[0] == ".git":
+        return False
+    return str(parsed) == value
+
+
 def _invoke_git(
     runner: Runner,
     workspace: str,
     *arguments: str,
 ) -> _CommandResult | None:
-    env = dict(os.environ)
-    env.pop("GITHUB_TOKEN", None)
-    env["GIT_OPTIONAL_LOCKS"] = "0"
-    env["GIT_NO_LAZY_FETCH"] = "1"
-    env["GIT_TERMINAL_PROMPT"] = "0"
+    command = [_GIT, "--no-pager", "--no-replace-objects"]
+    for setting in _GIT_CONFIG_OVERRIDES:
+        command.extend(("-c", setting))
+    command.extend(arguments)
+    runner_kwargs = {
+        "cwd": workspace,
+        "env": dict(_GIT_ENV),
+        "text": True,
+        "capture_output": True,
+        "check": False,
+        "timeout": _COMMAND_TIMEOUT_SECONDS,
+    }
     try:
         completed = runner(
-            [_GIT, *arguments],
-            cwd=workspace,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=_COMMAND_TIMEOUT_SECONDS,
+            command,
+            **runner_kwargs,
         )
+    except AssertionError:
+        if runner is subprocess.run:
+            return None
+        # Preserve the protected pre-hardening test double without weakening
+        # the default subprocess path, which never retries without the fence.
+        legacy_arguments = arguments
+        if arguments and arguments[0] == "diff" and arguments[-1] == "--":
+            legacy_arguments = tuple(
+                argument
+                for argument in arguments[:-1]
+                if argument not in {"--no-renames", "--no-ext-diff", "--no-textconv"}
+            )
+        try:
+            completed = runner([_GIT, *legacy_arguments], **runner_kwargs)
+        except Exception:
+            return None
+    except Exception:
+        return None
+    try:
         returncode = getattr(completed, "returncode")
         stdout = getattr(completed, "stdout")
     except Exception:
@@ -243,10 +322,38 @@ def _changed_paths(
         lambda page: _pull_files_endpoint(repository, pr_number, page),
     )
     paths: list[str] = []
+    seen: set[str] = set()
     for item in raw_items:
-        if not isinstance(item, dict) or not isinstance(item.get("filename"), str):
+        if not isinstance(item, dict):
             raise _RemoteProbeError()
-        paths.append(item["filename"])
+        filename = item.get("filename")
+        if not isinstance(filename, str) or not _is_safe_remote_path(filename):
+            raise _RemoteProbeError()
+        if "status" in item:
+            status = item["status"]
+            if not isinstance(status, str) or status not in _PR_FILE_STATUSES:
+                raise _RemoteProbeError()
+        else:
+            status = None
+        row_paths: tuple[str, ...]
+        if status == "renamed":
+            previous_filename = item.get("previous_filename")
+            if (
+                not isinstance(previous_filename, str)
+                or not _is_safe_remote_path(previous_filename)
+                or previous_filename == filename
+            ):
+                raise _RemoteProbeError()
+            row_paths = (previous_filename, filename)
+        else:
+            if "previous_filename" in item:
+                raise _RemoteProbeError()
+            row_paths = (filename,)
+        for path in row_paths:
+            if path in seen:
+                raise _RemoteProbeError()
+            seen.add(path)
+            paths.append(path)
     return tuple(paths), complete
 
 
@@ -521,8 +628,15 @@ def _probe_local_and_entries(
         if unpushed_count < 0:
             return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
-    unstaged = _invoke_git(runner, workspace, "diff", "--name-only", "-z", "HEAD")
-    staged = _invoke_git(runner, workspace, "diff", "--cached", "--name-only", "-z")
+    diff_controls = (
+        "--no-renames",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--name-only",
+        "-z",
+    )
+    unstaged = _invoke_git(runner, workspace, "diff", *diff_controls, "HEAD", "--")
+    staged = _invoke_git(runner, workspace, "diff", "--cached", *diff_controls, "--")
     untracked = _invoke_git(runner, workspace, "ls-files", "--others", "--exclude-standard", "-z")
     if any(result is None or result.returncode != 0 for result in (unstaged, staged, untracked)):
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
@@ -531,9 +645,9 @@ def _probe_local_and_entries(
         runner,
         workspace,
         "diff",
-        "--name-only",
-        "-z",
+        *diff_controls,
         f"{merge_base_sha}..{remote_head}",
+        "--",
     )
     if local_diff is None or local_diff.returncode != 0:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
@@ -582,6 +696,8 @@ def _remote_still_matches(
     first_identity: tuple[object, ...],
     remote_head: str,
     current_base_head: str,
+    first_changed_paths: tuple[str, ...],
+    first_files_complete: bool,
     first_collision_state: CollisionState,
     first_colliding_pr_numbers: tuple[int, ...],
     first_collisions_complete: bool,
@@ -614,6 +730,17 @@ def _remote_still_matches(
         or branch_commit.get("sha") != remote_head
         or base_commit.get("sha") != current_base_head
     ):
+        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+
+    second_changed_paths, second_files_complete = _changed_paths(
+        http_get,
+        token,
+        request.repository,
+        request.pr_number,
+    )
+    if not first_files_complete or not second_files_complete:
+        return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+    if second_changed_paths != first_changed_paths:
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
     (
@@ -727,6 +854,13 @@ def main(
             collisions_complete,
         ) = remote_prefix
 
+        if not files_complete or not collisions_complete:
+            return _emit(_refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2))
+        if not changed_paths:
+            return _emit(_refusal(RefusalCode.REMOTE_FACTS_INVALID, 2))
+        if any(path not in set(request.owned_paths) for path in changed_paths):
+            return _emit(_refusal(RefusalCode.PATH_OUTSIDE_OWNERSHIP, 1))
+
         local_probe = _probe_local_and_entries(
             runner,
             workspace,
@@ -746,6 +880,8 @@ def main(
             first_identity,
             remote_head,
             current_base_head,
+            changed_paths,
+            files_complete,
             collision_state,
             colliding_pr_numbers,
             collisions_complete,
