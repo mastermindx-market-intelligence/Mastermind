@@ -7,77 +7,55 @@
 **Canonical Git carrier:** Mastermind issue #437  
 **Parent incident:** Mastermind issue #386  
 **Protected pickup:** `mastermindx-market-intelligence/Mastermind@7022e70640637a4fa07f073442dc693301290e2a`  
-**Status:** `RECORDS_ONLY / DRAFT-HOLD SOURCE / IMPLEMENTATION NOT STARTED / PRODUCTION INERT`
+**Status:** `RECORDS_ONLY / DRAFT-HOLD / IMPLEMENTATION NOT STARTED / PRODUCTION INERT`
 
-This plan operationalizes the approved architecture without creating another autonomy program. It is **records-only**. There is **no implementation START**, no implementation worker, no provider effect and no Runtime mutation. Source protection is not production proof.
+This plan operationalizes the approved architecture without replacing the current autonomy train. It is **records-only** and has **no implementation START**. Source protection is not production proof.
 
-## 1. Observable program mission
+## 1. Mission
 
-Finish the first dependable Mastermind autonomy loop while closing one missing convergence edge:
-
-```text
-one validated terminal return
--> exact Sol attention
--> multiple observers may see it
--> one current action-authoritative target
--> one Runtime-owned effective semantic directive
--> one exact downstream same-root transition
--> truthful Control Room state
--> zero Chairman message shuttle
-```
-
-The program must preserve the current critical path rather than replacing it:
+Preserve and complete the existing path:
 
 ```text
-W3C-I1 protected source
+W3C-I1
 -> C2-R1A
 -> MAT-S1
 -> Stage-B1
 -> Control Room
--> one golden root
--> multi-root adverse proof
+-> golden root
+-> adversarial multi-root proof
 -> small fleet
 ```
 
-## 2. Current capability ledger
+Add only the missing pre-fleet closure layer:
 
-| Capability | Current state | Program treatment |
+```text
+terminal return
+-> exact Sol attention
+-> one current action target
+-> one Runtime-owned effective semantic directive
+-> one existing-COO downstream transition
+-> zero Chairman message shuttle
+```
+
+## 2. Capability ledger and sequencing
+
+| Layer | Current state | Ruling |
 |---|---|---|
-| W3C real observation to persisted Wake source | `SOURCE_PROTECTED / DEFAULT_DISARMED` | consume; do not rebuild |
-| C2-R1A atomic initial carrier commitment | `BUILT_NOT_PROVEN / ACTIVE DRAFT` | preserve current PR #415 and Runtime ownership |
-| MAT-S1 current CEO writer materialization | `SPEC_ONLY / PREDECESSOR_HELD` | continue on issue #430 after prerequisites |
-| Stage-B V6.1 target assignment law | `SOURCE_PROTECTED` | consume unchanged |
-| Stage-A exact actor enforcement | `SOURCE_PROTECTED` | consume unchanged |
-| Control Room real-owner joins | `BUILT_NOT_PROVEN / ACTIVE DRAFT` | preserve current PR #326 |
-| terminal return and retry safety | `SOURCE_PROTECTED` | consume unchanged |
-| one effective semantic decision per exact return | `NOT_BUILT` | ACF-1, first permitted closure layer |
-| mission-envelope runtime enforcement | `UNVERIFIED AS COMPLETE` | ACF-2 held for golden-root evidence |
-| useful progress distinct from heartbeat | `UNVERIFIED AS COMPLETE` | ACF-3 held for stall falsifier evidence |
-| machine production acceptance receipt | `UNVERIFIED AS COMPLETE` | ACF-4 held until real result |
-| resource finalization | `PARTIAL / RESOURCE-SPECIFIC` | ACF-5 held until installed resource census |
-| installed generation compatibility receipt | `PARTIAL` | ACF-6 held until reproduced mismatch |
+| W3C source | `SOURCE_PROTECTED / DEFAULT_DISARMED` | consume, do not rebuild |
+| C2-R1A | `BUILT_NOT_PROVEN / ACTIVE DRAFT` | keep current PR #415 and Runtime ownership |
+| MAT-S1 | `SPEC_ONLY / PREDECESSOR_HELD` | continue on issue #430 after predecessors |
+| Stage-B V6.1 | `SOURCE_PROTECTED` | retain target ownership |
+| Control Room real-owner joins | `BUILT_NOT_PROVEN / ACTIVE DRAFT` | keep current PR #326 |
+| ACF-1 semantic directive convergence | `NOT_BUILT` | only new pre-fleet closure layer |
+| ACF-2 through ACF-6 | `EVIDENCE_GATED` | no implementation authority now |
 
-Issue #400 remains closed as a duplicate. Issue #386 remains the canonical incident integration and final acceptance carrier. Issue #437 owns only this closure-spine architecture and sequencing.
+Issue #386 remains the canonical integration/acceptance incident. Issue #400 remains a closed duplicate. Issue #437 owns this architecture only.
 
-## 3. Work-in-progress ruling
+## 3. F0 source release
 
-The current W3C/C2/MAT-S1/Stage-B1/Control Room train keeps priority.
+### Observable mission
 
-The Closure Spine may not consume the Runtime writer, Control Room writer or autonomy release/reviewer lane merely because its architecture is approved. ACF-1 waits for:
-
-1. this F0 source to protect;
-2. C2-R1A to protect or explicitly release `control_plane/executive_runtime.py`;
-3. a fresh exact path and semantic-owner census;
-4. one concrete capacity placement under current routing law;
-5. a separate ACF-1 pickup, watcher disposition and START.
-
-No ancestry-only refresh, substitute PR, parallel Runtime edit or premature implementation packet delivery is permitted.
-
-## 4. F0 — architecture source release
-
-### Mission
-
-Protect one exact three-path architecture record that proves the narrow completion-mode exception, freezes the semantic directive contract and keeps later closure layers evidence-gated.
+Protect one current-base three-path source law that freezes the architecture exception, one conflict domain per return revision, safe supersession, existing-owner consumption and the held routing state.
 
 ### Exact paths
 
@@ -87,140 +65,133 @@ docs/superpowers/plans/2026-09-03-autonomy-closure-spine-v1.md
 tests/test_autonomy_closure_spine_source_law.py
 ```
 
-### Non-goals
-
-No `control_plane/**`, `config/**`, service, Relay, Wake, RuntimeBinding, Stage-B, Control Room, installer, provider, host or deployment edit.
-
 ### Ordered sequence
 
-1. create and reconcile issue #437 under canonical incident #386;
-2. create one current-protected branch;
-3. commit the source-law test before the architecture documents;
-4. publish the identical closed contract in the design and plan;
-5. open one Draft/HOLD PR;
-6. run focused source-law tests, full repository tests, compile/static/security checks;
-7. obtain one independent non-author exact-head review;
-8. Sol reviews the immutable head against the approved outcome;
-9. expected-head release only;
-10. update Agent OS decision/discovery/handoff records without creating a new workstream.
+1. preserve issue #437 as the one architecture carrier;
+2. preserve the current branch/PR and test-first history;
+3. run exact source-law, repository, compile, static and security checks;
+4. obtain one independent non-author exact-head review;
+5. Sol re-pins current procedure and reviews the immutable candidate against Chairman intent;
+6. release only by exact expected head;
+7. update Agent OS with the final source state;
+8. keep ACF-1 waiting until the Runtime path is released.
+
+### F0 non-goals
+
+No Runtime, service, Relay, Wake, Stage-B, RuntimeBinding, Control Room, installer, host, provider, deployment or fleet effect.
 
 ### F0 stop
 
-One protected records-only source. No ACF-1 implementation effect is inherited from F0.
+One protected records-only source. No implementation authority is inherited.
 
-## 5. ACF-1 — Semantic Directive Convergence
+## 4. ACF-1 future handoff
 
 **Future operation:** `autonomy-semantic-directive-convergence-acf1-20260903-sol-001`  
-**State:** `WAITING_ARCHITECTURE_PROTECTION / WAITING_RUNTIME_PATH_RELEASE / needs_placement`  
 **PREFERRED_AVENUE:** CTO Sol  
-**WHY:** bounded authority-sensitive integration in the existing Runtime/Event and COO owners  
-**WHY NOT FABLE:** the Chairman outcome, owner map, event semantics, failure matrix, no-rebuild boundaries and acceptance are frozen  
+**WHY NOT FABLE:** the Chairman outcome, owner map, command identity, supersession law, failure matrix and acceptance are frozen  
 **RECEIVER_BINDING_MODE:** `CAPACITY_SELECTABLE`  
+**PLACEMENT_STATE:** `WAITING_ARCHITECTURE_PROTECTION / WAITING_RUNTIME_PATH_RELEASE / needs_placement`  
 **COGNITION_ROUTE:** `CHAT_INCLUDED_DEFAULT`  
 **CHAT_REASONING_MODE:** `NON_PRO_DEFAULT`
 
-This section is a future handoff template, not a worker-facing commission.
+This is a future handoff template, not a worker-facing commission. No task, branch, PR, watcher or START exists.
 
-### 5.1 One observable mission
+### 4.1 One observable mission
 
-Given one exact validated terminal-return Event and a current complete action-target snapshot, atomically commit at most one effective `CONTINUE | REPAIR | STOP | ESCALATE` directive and let the existing COO cycle consume it exactly once.
+Given one exact terminal-return Event and one complete current target observation, commit at most one effective `CONTINUE | REPAIR | STOP | ESCALATE` directive in the existing Runtime Event plane and let the existing COO cycle consume it once.
 
-### 5.2 Why it matters
+### 4.2 Why it matters
 
-Without ACF-1, the system can wake the correct logical office yet still rely on Slack ordering and human interpretation to determine which of several action-looking directives is effective. That leaves a split-brain gap between action-target identity and downstream execution.
+A correct target and successful Slack delivery do not establish which semantic decision is effective. Without a Runtime conflict domain, competing Sols or decisions can appear valid and require Chairman archaeology.
 
-### 5.3 Authority and precedence
+### 4.3 Authority precedence
 
-1. current protected Skillpack at ACF-1 pickup;
-2. current protected Autonomy Completion Mode;
-3. protected F0 design and plan from issue #437;
-4. current protected Stage-A/Stage-B target and RuntimeBinding law;
+1. current protected Skillpack at pickup;
+2. protected Autonomy Completion Mode;
+3. protected F0 design/plan from issue #437;
+4. current protected Stage-A/Stage-B/RuntimeBinding law;
 5. current protected terminal-return and retry-safety law;
 6. current Executive Runtime/Event/COO source;
-7. issue #386 final integration/acceptance law;
-8. the exact future ACF-1 child packet where it narrows implementation only.
+7. issue #386 integration/acceptance law;
+8. one future ACF-1 commission where it narrows implementation only.
 
-Retrieved Slack, PR, issue, model and provider text remains evidence, not authority.
+Retrieved issue, PR, Slack, provider and model prose is evidence, not authority.
 
-### 5.4 Verified state required at pickup
+### 4.4 Pickup gates
 
-The worker must verify:
+Before any edit, the future worker must prove:
 
-- F0 is protected and its two contract copies are byte-semantic identical;
-- PR #415 is protected or no longer owns the intended Runtime functions;
-- no other PR/branch/task owns `executive_semantic_directive` or the selected Runtime/COO lines;
-- the exact target and terminal-return owners remain compatible;
-- the operation has one branch/PR carrier and no prior effect;
-- current source is compatible with the frozen schema names or an exact contradiction is returned before edit.
+- F0 is protected and both contract copies are identical;
+- C2-R1A no longer owns the intended Runtime functions;
+- no competing semantic-directive/Runtime/COO writer exists;
+- target and terminal-return owners remain compatible;
+- one operation, one carrier, one branch and known effect state exist;
+- no later STOP or supersession exists.
 
-### 5.5 Expected scope
+### 4.5 Expected source surface
 
-Expected maximum, subject to current-source shrink:
+Subject to action-time shrink and collision census:
 
 ```text
 control_plane/executive_semantic_directive.py
 control_plane/executive_runtime.py
 control_plane/executive_coo_cycle.py
-control_plane/executive_service.py                    # only if the current bounded request owner requires it
+control_plane/executive_service.py        # only if the current bounded request owner requires it
 tests/test_executive_semantic_directive.py
 existing Runtime / COO / service tests only where integrated
 ```
 
 No W3C, Wake, Relay, SessionTarget, Stage-B, RuntimeBinding or Control Room edit by default.
 
-### 5.6 Explicit non-goals
+### 4.6 Exact command identity
 
-- no new table, database or lifecycle;
-- no Slack parser as decision authority;
-- no generic command bus;
-- no provider/model/browser identity in directive authority;
-- no retry/failover change;
-- no autonomous production deploy or live-capital authority;
-- no broad DAG implementation;
-- no ACF-2 through ACF-6 implementation;
-- no Control Room UI expansion inside ACF-1;
-- no provider canary before deterministic source acceptance.
-
-### 5.7 Complete user and machine journey
+The command key is one **terminal-return revision**, derived only from:
 
 ```text
-worker Attempt completes
--> terminal-return owner seals exact return
--> W3C/Wake targets the exact Sol office
--> two Sol-capable surfaces may observe
--> observer attempts directive and is refused
--> current target commits one directive in Runtime
--> response may be delivered or lost
--> readback establishes the one effective Event
--> COO consumes it once
--> one next root transition occurs
--> restart reads committed/consumed truth without duplicate action
--> Control Room later projects the state
+root_job_id
+consumed_terminal_event_id
+consumed_terminal_event_digest
+predecessor_directive_id
+revision
 ```
 
-### 5.8 Data, time, null and correction behavior
+Decision, closed body/digest, actor, target generation and timestamp are excluded so competing proposals collide rather than mint parallel commands.
 
-- Every identity is exact and closed; unknown identity is refusal, not best effort.
-- `created_at` is audit time only; it does not elect precedence.
-- Missing predecessor directive is valid only for the first revision.
-- Missing current target, terminal Event, actor identity or digest is not nullable success.
-- Exact replay returns existing identity only after current revalidation.
-- Changed payload, changed return or changed target generation conflicts.
-- Chairman correction appends a superseding revision and preserves history.
-- A transport timeout after possible commit is `EFFECT_UNKNOWN` until exact Event readback.
-- Historical Slack messages are never rewritten into canonical Event truth.
+Runtime-generated `directive_id` and `created_at` are not caller entropy.
 
-### 5.9 Deterministic versus model-generated method
+### 4.7 Closed decision body
 
-**Deterministic authority:** command identity, schema validation, Runtime target/return revalidation, actor classification, compare-and-swap, revision, idempotency, Event append, COO consumption and downstream command binding.
+The Event carries the closed `decision_body` and its canonical digest. Raw prompt, transcript, Slack prose, provider output, credential, email, browser content and raw URL are forbidden.
 
-**Model-generated evidence:** explanatory rationale and bounded decision payload content after it has been canonicalized and digest-bound. Model prose cannot select actor, root, target, return, revision, decision authority or replay behavior.
+The body may narrow the existing lawful transition; it cannot create a new authority, plan, worker, retry, merge or deployment action.
 
-**Statistical authority:** none.
+### 4.8 Runtime transaction
 
-### 5.10 Failure states
+1. validate closed command and stable conflict identity;
+2. re-read exact terminal return and current Attempt/Worker lineage;
+3. re-resolve current target and actor;
+4. read predecessor directive and its consumption/effect state;
+5. reject any effective sibling directive for the return revision;
+6. append one Event or return exact replay;
+7. expose no reusable authority token.
 
-At minimum:
+Exact replay requires current source revalidation. Changed semantics under the same key is `COMMAND_REPLAY_CONFLICT`.
+
+### 4.9 Supersession
+
+Pre-consumption Chairman supersession is allowed only when downstream effect is proven `NONE` and must append a new history-preserving revision.
+
+A consumed directive, applied downstream mutation, or `EFFECT_UNKNOWN` blocks a conflicting new directive. A **post-consumption reversal** is reconciliation-required; it cannot be implemented as “latest instruction wins.”
+
+Normal target rotation never supersedes. Timestamp ordering never supersedes.
+
+### 4.10 Consumer and receipt
+
+The existing COO cycle reads only the effective Event. Its downstream command binds directive Event id, digest and revision. The ordinary downstream Event is the consumption receipt; no second table or lifecycle is created.
+
+Restart and replay must reconstruct the consumed state without applying the downstream mutation twice.
+
+### 4.11 Failure states
 
 ```text
 SOURCE_RETURN_MISSING
@@ -237,145 +208,111 @@ DIRECTIVE_ALREADY_COMMITTED
 CHAIRMAN_AUTHORITY_INVALID
 DIRECTIVE_EFFECT_UNKNOWN
 DIRECTIVE_CONSUMPTION_CONFLICT
+DIRECTIVE_RECONCILIATION_REQUIRED
 DOWNSTREAM_ALREADY_APPLIED
 ```
 
-Every failure reports zero or known effect. No error text or transport behavior may authorize a retry.
+Every failure states known/none/unknown effect. No error text authorizes retry.
 
-### 5.11 Ordered implementation
+### 4.12 Ordered implementation
 
-1. ACK the exact child carrier with actual task/worktree/GitHub identity and effect state.
-2. Load current same-SHA procedure and reconcile current source, branch, Runtime writer and effect.
-3. Arm or truthfully refuse one exact-carrier continuation path.
-4. Publish a path/function freeze.
-5. Emit separate START.
-6. Commit hostile RED tests for the pure directive contract.
-7. Implement the smallest pure validator and canonical command/Event identity.
-8. Commit hostile RED Runtime transaction/replay/concurrency tests.
-9. Add one existing-transaction commit owner; no table/migration.
-10. Commit hostile RED COO consumption/restart tests.
-11. Bind one downstream action to one directive Event.
-12. Add the bounded service seam only if the current owner requires it.
-13. Run focused tests, mutation kills, full repository checks, compile/static/security checks.
-14. Push one current-base Draft/HOLD PR non-force.
-15. Obtain one independent non-author exact-head review.
-16. Return `RESULT / HOLD-FOR-SOL`; no install/canary/Ready/merge without a separate Sol edge.
+1. exact child pickup acknowledgement;
+2. same-SHA procedure/source/effect reconciliation;
+3. exact continuation watcher disposition;
+4. path/function freeze;
+5. separate START;
+6. hostile RED pure-contract tests;
+7. pure schema/identity implementation;
+8. hostile RED Runtime CAS/replay/race tests;
+9. one existing-transaction Event commit owner;
+10. hostile RED consumption/restart tests;
+11. bind existing COO downstream command and Event receipt;
+12. add a service seam only if current ownership requires it;
+13. focused, mutation, repository, compile, static and security proof;
+14. one current-base Draft/HOLD PR;
+15. fresh non-author exact-head review;
+16. `RESULT / HOLD-FOR-SOL` with no install/canary/Ready/merge claim.
 
-### 5.12 Acceptance tests
+### 4.13 Required tests
 
-- two observers; only exact current target commits;
-- old generation cannot act after rotation;
-- exact replay returns same Event;
-- changed decision or payload conflicts;
-- `CONTINUE`/`STOP` race commits exactly one;
-- stale Attempt and late return refuse;
-- Chairman supersession produces one new revision;
-- response loss after commit reconciles without second Event;
-- Slack delivery without Runtime Event remains ineffective;
-- COO consumes once and binds downstream command;
-- restart cannot duplicate the downstream mutation;
-- malformed/secret-bearing/free-form authority fields refuse;
-- no new store, lifecycle, queue, retry plane or watcher owner appears.
+- two Sol observers; observer refused;
+- old target generation refused;
+- exact replay returns one Event;
+- decision/body change under same key conflicts;
+- `CONTINUE`/`STOP` race yields one Event;
+- stale/late terminal evidence refuses;
+- Chairman pre-consumption supersession preserves history;
+- consumed/applied/effect-unknown predecessor blocks post-consumption reversal;
+- response loss after commit reconciles by Event readback;
+- Slack delivery without Runtime Event is ineffective;
+- downstream command consumes one effective revision once;
+- restart cannot duplicate the mutation;
+- free-form or secret-bearing authority fields refuse;
+- no duplicate lifecycle, store, queue, retry, watcher or target owner exists.
 
-### 5.13 Real production proof
+### 4.14 Real proof and stop
 
-After source protection, use one harmless golden-root return and two Sol-capable observers. Only the current target may commit. The next existing same-root transition must happen once. Chris performs no copy/paste, carrier archaeology, session selection or conflict adjudication.
+After source protection, use one harmless golden-root return observed by two Sol-capable surfaces. Only the current target may commit; one downstream transition occurs; Chris performs no copy/paste, session selection, message shuttle or conflict adjudication.
 
-### 5.14 Stop condition
+The source worker stops at `BUILT_NOT_PROVEN / DEFAULT_DISARMED`. The live canary is a separate operation.
 
-Source worker stops at `BUILT_NOT_PROVEN / DEFAULT_DISARMED` after one reviewed exact-head PR. The live canary is a separate operation. Every nonterminal return retains the exact continuation source; terminal acceptance emits explicit STOP and removes only that child source.
+### 4.15 Continuation handoff
 
-### 5.15 Required continuation handoff
+Return exact operation/carrier, protected pickup/current base, branch/PR/head/tree/parents, path/function census, RED/GREEN evidence, CAS/replay/race receipts, hosted/security checks, independent review, effect state, capability transition, unresolved risks, canary prerequisites and exact next action.
 
-Return:
+## 5. Golden-root integration
 
-```text
-operation and carrier
-protected pickup and current base
-exact branch / PR / head / tree / parents
-changed paths and function owners
-RED and GREEN discriminators
-transaction/replay/concurrency receipts
-full hosted and security checks
-independent reviewer and exact verdict
-runtime/provider/production effect
-capability transition
-unresolved risks
-exact live-canary prerequisite
-exact next action
-```
-
-## 6. Golden-root integration
-
-ACF-1 does not become a side program. Its first real consumer is the existing golden-root acceptance path.
-
-Required integrated sequence:
+ACF-1 is not a side program. The existing golden-root proof must include:
 
 ```text
-one Chairman objective
+one objective
 -> one root and bounded child
--> lawful placement
--> one current worker
--> useful real result
--> mechanical terminal return
--> one canonical RESULT
--> exact Sol target and delivery ACK
+-> lawful placement and current worker
+-> real result and terminal return
+-> one canonical company RESULT
+-> exact Sol target and delivery acknowledgement
 -> one Runtime semantic directive
--> one explicit continuation
+-> one downstream continuation
 -> next child/result progress
 -> truthful Control Room state
 -> zero duplicate effect
 -> zero routine Chairman operation
 ```
 
-The adversarial run must include two Sol observers and a stale target. A clean result without those injections does not prove directive convergence.
+The adverse matrix must include two Sol observers, stale target, lost response/restart, `CONTINUE`/`STOP` race and post-consumption reversal refusal.
 
-## 7. Conditional later waves
+## 6. Evidence-gated later layers
 
-### ACF-2 — Mission-envelope enforcement
+- **ACF-2:** start only if a real root proves DelegationPacket admission/accounting is unenforced.
+- **ACF-3:** start only if the stall falsifier cannot close through current checkpoints/Events.
+- **ACF-4:** start only after a real result proves existing production-proof owners cannot express acceptance safely.
+- **ACF-5:** start only from concrete resources actually created by the installed golden root.
+- **ACF-6:** start only after a producer/consumer installed-generation mismatch is reproduced.
 
-Do not start from architecture alone. First prove a real root can exceed or ignore a current DelegationPacket admission/accounting bound. If reproduced, extend the existing packet and Executive admission owner in one vertical.
+Each reuses an existing owner. None is authorized by naming it here.
 
-### ACF-3 — Useful progress versus heartbeat
+## 7. Review ruler
 
-Do not start from a theoretical concern. First run a worker that heartbeats while making no useful progress and determine whether current checkpoints/Operation Assurance can represent and close it. Add only the missing typed contract.
-
-### ACF-4 — Truthful production acceptance
-
-Do not invent an acceptance database. After a real result, determine the smallest Event/receipt needed to bind promised capability, real consumer, production environment, proof, unresolved effects/finalizers and Sol acceptance.
-
-### ACF-5 — Resource finalization
-
-Enumerate only resources actually created by the installed golden root. Extend their current owners and bind terminal cleanup to the root. No universal finalizer service.
-
-### ACF-6 — Compatibility receipt
-
-Begin only after a producer/consumer installed-generation mismatch is reproduced. Extend current release/capability composition and require rollback or compatibility proof.
-
-## 8. Review questions
-
-Every F0 and ACF-1 review must answer:
-
-- Does the primary persona get one effective continuation without message archaeology?
-- Is target identity still owned by Stage B/RuntimeBinding?
-- Is decision truth stored only in the existing Runtime Event plane?
-- Can two action-looking messages both become effective?
+- Does the Chairman get one effective continuation without message archaeology?
+- Can two action-looking directives both become effective?
 - Can an old target act after rotation?
-- Can transport loss duplicate the directive or downstream action?
-- Is Chairman supersession explicit and history-preserving?
-- Does the COO consume the Event rather than Slack prose?
-- Was any duplicate lifecycle, database, queue, retry, watcher or authority system created?
-- Can the result be seen in production?
-- What capability exists that did not exist before?
+- Do `CONTINUE` and `STOP` share one command conflict domain?
+- Can a consumed effect be “reversed” by later prose?
+- Does the COO consume the Runtime Event rather than Slack?
+- Does restart avoid duplicate downstream action?
+- Did any duplicate lifecycle, database, queue, retry, watcher or authority owner appear?
+- Is production proof distinct from source and CI?
 
-## 9. Durable contract
+ACF-1 must be one independently useful vertical.
+
+## 8. Durable contract
 
 <!-- AUTONOMY_CLOSURE_SPINE_V1_CONTRACT_BEGIN -->
 ```json
-{"schema":"mastermind.autonomy_closure_spine.v1","operation":"autonomy-closure-spine-f0-20260903-sol-001","parent_incident":"Mastermind#386","closed_duplicate_not_owner":"Mastermind#400","protected_pickup":"7022e70640637a4fa07f073442dc693301290e2a","current_state":{"capability":"SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT","implementation_started":false,"runtime_effect":false,"provider_effect":false,"production_armed":false,"worker_assigned":false},"architecture_exception":{"default_preserved":"NO_NEW_AUTONOMY_ARCHITECTURE","concrete_blocker":"the exact action-authoritative Sol target exists, but no Runtime-owned compare-and-swap semantic directive binds one exact return to one effective CONTINUE, REPAIR, STOP, or ESCALATE decision","golden_path_edge_unlocked":"terminal return -> exact Sol attention -> one effective Sol decision -> one next same-root transition","observed_incident_class":["conflicting W3C scope directives","stale C2 retreat after START_RESUMED"]},"authorized_pre_fleet_layers":["ACF-1"],"owners":{"lifecycle_and_atomic_commit":"Executive Runtime","current_sol_target":"SessionTargetRegistry / RuntimeBinding / Stage B","terminal_return":"existing Executive terminal-return owner","attention_delivery_ack":"Wake / W3C / Agent Relay","dialogue_transport":"Agent Dialogue","next_orchestration_mutation":"existing COO cycle","operational_projection":"existing Control Room","organizational_memory":"Agent OS","implementation_evidence":"GitHub"},"no_rebuild":{"new_lifecycles":[],"new_databases":[],"new_queues":[],"new_schedulers":[],"new_retry_planes":[],"new_watcher_registries":[],"new_runtime_binding_stores":[],"new_authority_registries":[],"new_transcript_stores":[],"new_control_room_truth_stores":[],"slack_as_runtime_authority":false},"acf1_semantic_directive_convergence":{"command_schema":"mastermind.executive_semantic_directive_command/v1","event_schema":"mastermind.executive_semantic_directive/v1","event_type":"EXECUTIVE_SEMANTIC_DIRECTIVE_COMMITTED","decisions":["CONTINUE","REPAIR","STOP","ESCALATE"],"actor_classes":["ACTION_TARGET","CHAIRMAN"],"required_fields":["directive_id","root_job_id","source_job_id","source_attempt_id","source_worker_id","consumed_terminal_event_id","consumed_terminal_event_digest","current_target_alias","current_target_binding_id","current_target_binding_generation","current_target_reasoning_surface","actor_class","actor_identity_receipt_digest","carrier_reference","predecessor_directive_id","revision","decision","decision_payload_digest","supersedes_directive_id","created_at"],"forbidden_fields":["prompt","model_output","transcript","arbitrary_slack_prose","credential","account_email","provider_secret","browser_content","raw_url","reusable_authority_token"],"commit_semantics":{"runtime_reresolves_current_target":true,"compare_root_return_target_generation_and_predecessor_revision":true,"one_effective_directive_per_return_revision":true,"exact_replay_is_idempotent_after_current_revalidation":true,"changed_payload_is_command_replay_conflict":true,"observer_sol_is_zero_effect_refusal":true,"stale_target_generation_is_zero_effect_refusal":true,"late_superseded_attempt_is_zero_effect_refusal":true,"chairman_supersession_is_explicit_and_history_preserving":true,"transport_loss_after_commit_uses_event_readback":true,"transport_success_without_runtime_commit_is_not_effective":true,"continue_and_stop_cannot_both_be_effective":true},"consumer":{"owner":"existing COO cycle","reads_slack_prose":false,"consumes_effective_event_once":true,"downstream_mutation_is_bound_to_directive_event":true,"directive_is_not_provider_start_retry_merge_or_deploy":true}},"conditional_follow_on_layers":{"ACF-2":{"name":"mission-envelope enforcement","start_gate":"post-golden-root evidence of admission/accounting gap","reuse_owner":"existing DelegationPacket and Executive admission"},"ACF-3":{"name":"useful-progress versus heartbeat","start_gate":"post-golden-root stall falsifier cannot close through checkpoints","reuse_owner":"existing Attempt checkpoint and Event plane"},"ACF-4":{"name":"truthful production acceptance","start_gate":"one real golden-root result exists","reuse_owner":"existing root Event and production-proof owners"},"ACF-5":{"name":"resource finalization","start_gate":"installed golden root exposes concrete required resources","reuse_owner":"the existing owner of each created resource"},"ACF-6":{"name":"producer-consumer compatibility receipt","start_gate":"an installed-generation incompatibility is reproduced","reuse_owner":"existing release and capability owners"}},"acf1_routing":{"future_operation_key":"autonomy-semantic-directive-convergence-acf1-20260903-sol-001","preferred_avenue":"CTO Sol","why_not_fable":"the Chairman outcome, owner map, event semantics, failure matrix, no-rebuild boundaries, and acceptance are frozen","receiver_binding_mode":"CAPACITY_SELECTABLE","placement_state":"WAITING_ARCHITECTURE_PROTECTION / WAITING_RUNTIME_PATH_RELEASE / needs_placement","cognition_route":"CHAT_INCLUDED_DEFAULT","chat_reasoning_mode":"NON_PRO_DEFAULT","worker_facing_commission_created":false,"implementation_branch_created":false,"implementation_started":false},"record_paths":["docs/superpowers/specs/2026-09-03-autonomy-closure-spine-v1-design.md","docs/superpowers/plans/2026-09-03-autonomy-closure-spine-v1.md","tests/test_autonomy_closure_spine_source_law.py"],"f0_stop_condition":"one current-base three-path Draft/HOLD PR with source-law proof, terminal hosted repository/security checks, and one independent exact-head review; no Runtime Event, worker, provider call, deployment, canary, or fleet promotion"}
+{"schema":"mastermind.autonomy_closure_spine.v1","operation":"autonomy-closure-spine-f0-20260903-sol-001","parent_incident":"Mastermind#386","closed_duplicate_not_owner":"Mastermind#400","protected_pickup":"7022e70640637a4fa07f073442dc693301290e2a","current_state":{"capability":"SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT","implementation_started":false,"runtime_effect":false,"provider_effect":false,"production_armed":false,"worker_assigned":false},"architecture_exception":{"default_preserved":"NO_NEW_AUTONOMY_ARCHITECTURE","concrete_blocker":"the exact action-authoritative Sol target exists, but no Runtime-owned compare-and-swap semantic directive binds one exact return to one effective CONTINUE, REPAIR, STOP, or ESCALATE decision","golden_path_edge_unlocked":"terminal return -> exact Sol attention -> one effective Sol decision -> one next same-root transition","observed_incident_class":["conflicting W3C scope directives","stale C2 retreat after START_RESUMED"]},"authorized_pre_fleet_layers":["ACF-1"],"owners":{"lifecycle_and_atomic_commit":"Executive Runtime","current_sol_target":"SessionTargetRegistry / RuntimeBinding / Stage B","terminal_return":"existing Executive terminal-return owner","attention_delivery_ack":"Wake / W3C / Agent Relay","dialogue_transport":"Agent Dialogue","next_orchestration_mutation":"existing COO cycle","operational_projection":"existing Control Room","organizational_memory":"Agent OS","implementation_evidence":"GitHub"},"no_rebuild":{"new_lifecycles":[],"new_databases":[],"new_queues":[],"new_schedulers":[],"new_retry_planes":[],"new_watcher_registries":[],"new_runtime_binding_stores":[],"new_authority_registries":[],"new_transcript_stores":[],"new_control_room_truth_stores":[],"slack_as_runtime_authority":false},"acf1_semantic_directive_convergence":{"command_schema":"mastermind.executive_semantic_directive_command/v1","event_schema":"mastermind.executive_semantic_directive/v1","event_type":"EXECUTIVE_SEMANTIC_DIRECTIVE_COMMITTED","decisions":["CONTINUE","REPAIR","STOP","ESCALATE"],"actor_classes":["ACTION_TARGET","CHAIRMAN"],"runtime_generated_fields":["directive_id","created_at"],"required_fields":["directive_id","root_job_id","source_job_id","source_attempt_id","source_worker_id","consumed_terminal_event_id","consumed_terminal_event_digest","current_target_alias","current_target_binding_id","current_target_binding_generation","current_target_reasoning_surface","actor_class","actor_identity_receipt_digest","carrier_reference","predecessor_directive_id","revision","decision","decision_body","decision_payload_digest","supersedes_directive_id","created_at"],"forbidden_fields":["prompt","model_output","transcript","arbitrary_slack_prose","credential","account_email","provider_secret","browser_content","raw_url","reusable_authority_token"],"command_identity":{"scope":"one terminal-return revision","fields":["root_job_id","consumed_terminal_event_id","consumed_terminal_event_digest","predecessor_directive_id","revision"],"excludes":["decision","decision_body","decision_payload_digest","actor_class","actor_identity_receipt_digest","current_target_binding_id","current_target_binding_generation","created_at"],"reason":"CONTINUE and STOP, observer and target, or old and current target attempts must collide in one command domain instead of minting parallel directives"},"authority_semantics":{"carrier_reference_is_provenance_only":true,"runtime_reresolves_current_target_and_actor":true,"model_slack_browser_and_provider_labels_grant_no_authority":true},"commit_semantics":{"compare_root_return_and_predecessor_revision":true,"one_effective_directive_per_return_revision":true,"exact_replay_is_idempotent_after_current_revalidation":true,"changed_payload_is_command_replay_conflict":true,"observer_sol_is_zero_effect_refusal":true,"stale_target_generation_is_zero_effect_refusal":true,"late_superseded_attempt_is_zero_effect_refusal":true,"transport_loss_after_commit_uses_event_readback":true,"transport_success_without_runtime_commit_is_not_effective":true,"continue_and_stop_cannot_both_be_effective":true},"supersession_semantics":{"history_is_immutable":true,"chairman_may_supersede_only_before_consumption_with_downstream_effect_none":true,"consumed_applied_or_effect_unknown_requires_reconciliation":true,"normal_target_rotation_never_supersedes":true,"new_revision_binds_predecessor_and_supersedes_ids":true},"consumer":{"owner":"existing COO cycle","reads_slack_prose":false,"consumes_effective_event_once":true,"downstream_command_binds_directive_event_id_digest_and_revision":true,"downstream_event_is_consumption_receipt":true,"separate_consumption_table_created":false,"directive_is_not_provider_start_retry_merge_or_deploy":true}},"conditional_follow_on_layers":{"ACF-2":{"name":"mission-envelope enforcement","start_gate":"post-golden-root evidence of admission/accounting gap","reuse_owner":"existing DelegationPacket and Executive admission"},"ACF-3":{"name":"useful-progress versus heartbeat","start_gate":"post-golden-root stall falsifier cannot close through checkpoints","reuse_owner":"existing Attempt checkpoint and Event plane"},"ACF-4":{"name":"truthful production acceptance","start_gate":"one real golden-root result exists","reuse_owner":"existing root Event and production-proof owners"},"ACF-5":{"name":"resource finalization","start_gate":"installed golden root exposes concrete required resources","reuse_owner":"the existing owner of each created resource"},"ACF-6":{"name":"producer-consumer compatibility receipt","start_gate":"an installed-generation incompatibility is reproduced","reuse_owner":"existing release and capability owners"}},"acf1_routing":{"future_operation_key":"autonomy-semantic-directive-convergence-acf1-20260903-sol-001","preferred_avenue":"CTO Sol","why_not_fable":"the Chairman outcome, owner map, event semantics, failure matrix, no-rebuild boundaries, and acceptance are frozen","receiver_binding_mode":"CAPACITY_SELECTABLE","placement_state":"WAITING_ARCHITECTURE_PROTECTION / WAITING_RUNTIME_PATH_RELEASE / needs_placement","cognition_route":"CHAT_INCLUDED_DEFAULT","chat_reasoning_mode":"NON_PRO_DEFAULT","worker_facing_commission_created":false,"implementation_branch_created":false,"implementation_started":false},"record_paths":["docs/superpowers/specs/2026-09-03-autonomy-closure-spine-v1-design.md","docs/superpowers/plans/2026-09-03-autonomy-closure-spine-v1.md","tests/test_autonomy_closure_spine_source_law.py"],"f0_stop_condition":"one current-base three-path Draft/HOLD PR with source-law proof, terminal hosted repository/security checks, and one independent exact-head review; no Runtime Event, worker, provider call, deployment, canary, or fleet promotion"}
 ```
 <!-- AUTONOMY_CLOSURE_SPINE_V1_CONTRACT_END -->
 
-## 10. Exact next action
+## 9. Exact next action
 
-Run the source-law test and full protected repository checks on the current three-path head. Open one Draft/HOLD PR, request one independent non-author exact-head review, and keep ACF-1 at `WAITING_ARCHITECTURE_PROTECTION / WAITING_RUNTIME_PATH_RELEASE / needs_placement`. Do not send a worker-facing ACF-1 commission before both gates clear.
+Run exact-head source-law/repository/security checks and obtain independent review for F0. Then hold ACF-1 until PR #415 releases the Runtime path; perform a fresh collision census and route one separate capacity-placed ACF-1 child.
