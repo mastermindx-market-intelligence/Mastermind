@@ -505,7 +505,14 @@ def _olv1_options(operation_key: str, parent_head: str) -> list[dict[str, Any]]:
 # tree, which a dirty/detached/mutated local checkout could otherwise self-attest.
 _CANONICAL_MASTERMIND_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
 _CANONICAL_MASTERMIND_REPO = "mastermindx-market-intelligence/Mastermind"
-_CANONICAL_MACRO_URL = "https://github.com/mastermindx-market-intelligence/macro.git"
+# The canonical Macro remote is owned by data_layer/macro_refresh.py's authenticated
+# seam (MACRO_GIT_REMOTE, DEC:B1-MACRO-PRIVATE-CUTOVER): Macro is flipping
+# public -> private, and tests/test_no_anonymous_macro_reads.py forbids any other
+# surface from carrying an anonymous Macro read literal. Reusing the seam's value
+# (env override first, then its one allowlisted default) keeps a single owner of
+# that identity — a narrowly justified cross-module reuse per review 5109215567's
+# "reuse current protected source-continuity/owner primitives" instruction.
+from data_layer.macro_refresh import _REMOTE as _CANONICAL_MACRO_URL  # noqa: E402
 # Sparse-worktree omissions this repo's own CLAUDE.md documents as lawful (never
 # "dirty"): a sparse worktree that never checked out these top-level dirs is not an
 # uncommitted mutation of them.
