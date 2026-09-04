@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -51,6 +54,30 @@ def _executable(tmp_path: Path, body: bytes = b"#!/bin/sh\n") -> Path:
     binary.write_bytes(body)
     binary.chmod(0o700)
     return binary
+
+
+def _stdout_text(observation) -> str:
+    stdout = observation.stdout
+    return stdout.decode("utf-8") if isinstance(stdout, bytes) else str(stdout)
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_pid_exit(pid: int, *, timeout_seconds: float = 3.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if not _pid_exists(pid):
+            return True
+        time.sleep(0.02)
+    return not _pid_exists(pid)
 
 
 def test_command_builder_allows_only_provider_work_free_observations(tmp_path: Path):
@@ -539,3 +566,352 @@ def test_host_and_principal_refs_fail_closed_instead_of_being_invented():
     assert module.require_canonical_identity(
         "host-01234567", "principal-01234567"
     ) == ("host-01234567", "principal-01234567")
+
+
+def test_f1_child_environment_is_constructive_not_inherited(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load()
+    monkeypatch.setenv("MM_PREFLIGHT_POISON", "ambient-marker")
+    monkeypatch.setenv("PYTHONPATH", "/ambient/python")
+    monkeypatch.setenv("PATH", "/ambient/path")
+
+    observed = module._run(
+        (
+            sys.executable,
+            "-c",
+            "import json,os; print(json.dumps(dict(os.environ), sort_keys=True))",
+        )
+    )
+    child_environment = json.loads(_stdout_text(observed))
+
+    assert "MM_PREFLIGHT_POISON" not in child_environment
+    assert "PYTHONPATH" not in child_environment
+    assert child_environment["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin"
+
+
+def test_f1_provider_selector_refuses_before_child_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    marker = tmp_path / "child-started"
+    secret = "sk-" + "x" * 30
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
+
+    with pytest.raises(module.PreflightError, match="^PROVIDER_ENV_REFUSED$") as exc:
+        module._run(
+            (
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')",
+            )
+        )
+
+    assert not marker.exists()
+    assert secret not in str(exc.value)
+
+
+def test_f2_stdout_is_rejected_at_the_byte_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load()
+    monkeypatch.setattr(module, "MAX_STDOUT_BYTES", 32, raising=False)
+    monkeypatch.setattr(module, "MAX_OUTPUT_LINE_BYTES", 64, raising=False)
+
+    with pytest.raises(module.PreflightError, match="^PROVIDER_COMMAND_FAILED$"):
+        module._run(
+            (
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(b'x' * 33); sys.stdout.flush()",
+            )
+        )
+
+
+def test_f2_stderr_is_rejected_at_the_byte_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load()
+    monkeypatch.setattr(module, "MAX_STDERR_BYTES", 32, raising=False)
+    monkeypatch.setattr(module, "MAX_OUTPUT_LINE_BYTES", 64, raising=False)
+
+    with pytest.raises(module.PreflightError, match="^PROVIDER_COMMAND_FAILED$"):
+        module._run(
+            (
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.buffer.write(b'x' * 33); sys.stderr.flush()",
+            )
+        )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process-group ownership is POSIX-only")
+def test_f2_timeout_kills_owned_descendant_and_reaps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    pid_path = tmp_path / "descendant.pid"
+    monkeypatch.setattr(
+        module, "_PROCESS_TERMINATE_GRACE_SECONDS", 0.15, raising=False
+    )
+    parent_code = (
+        "import pathlib,signal,subprocess,sys,time; "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+        "pathlib.Path(sys.argv[1]).write_text(str(child.pid)); "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+    )
+    descendant_pid: int | None = None
+    try:
+        with pytest.raises(module.PreflightError, match="^PROVIDER_TIMEOUT$"):
+            module._run(
+                (sys.executable, "-c", parent_code, str(pid_path)),
+                timeout_seconds=0.75,
+            )
+        assert pid_path.exists(), "the parent did not launch its descendant"
+        descendant_pid = int(pid_path.read_text())
+        assert _wait_for_pid_exit(descendant_pid), "owned descendant survived timeout"
+    finally:
+        if descendant_pid is not None and _pid_exists(descendant_pid):
+            try:
+                os.kill(descendant_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_f3_symlinked_parent_is_refused_before_leaf_acceptance(tmp_path: Path):
+    module = _load()
+    real_parent = tmp_path.resolve() / "real" / "bin"
+    real_parent.mkdir(parents=True)
+    _executable(real_parent)
+    linked_parent = tmp_path.resolve() / "linked"
+    linked_parent.symlink_to(real_parent.parent, target_is_directory=True)
+
+    with pytest.raises(module.PreflightError, match="^BINARY_INVALID$"):
+        module._require_binary(linked_parent / "bin" / "claude")
+
+
+def test_f3_hardlinked_binary_is_refused(tmp_path: Path):
+    module = _load()
+    binary = _executable(tmp_path)
+    os.link(binary, tmp_path / "claude-alias")
+
+    with pytest.raises(module.PreflightError, match="^BINARY_INVALID$"):
+        module._require_binary(binary)
+
+
+def test_f3_group_or_world_writable_binary_is_refused(tmp_path: Path):
+    module = _load()
+    binary = _executable(tmp_path)
+    binary.chmod(0o777)
+
+    with pytest.raises(module.PreflightError, match="^BINARY_INVALID$"):
+        module._require_binary(binary)
+
+
+@pytest.mark.parametrize("replacement_body", [b"#!/bin/sh\n", b"#!/bin/no\n"])
+def test_f4_atomic_replacement_is_refused_even_when_bytes_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    replacement_body: bytes,
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(replacement_body)
+    replacement.chmod(0o700)
+
+    def replace_then_report_version(argv, **kwargs):
+        os.replace(replacement, binary)
+        return module.CommandObservation(0, "2.1.0")
+
+    monkeypatch.setattr(module, "_run", replace_then_report_version)
+    with pytest.raises(
+        module.PreflightError, match="^BINARY_CHANGED_DURING_PREFLIGHT$"
+    ):
+        module.observe_binary(binary)
+
+
+@pytest.mark.parametrize("drift", ["mode", "link"])
+def test_f4_mode_and_link_drift_are_refused_after_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: str
+):
+    module = _load()
+    binary = _executable(tmp_path)
+
+    def drift_then_report_version(argv, **kwargs):
+        if drift == "mode":
+            binary.chmod(0o755)
+        else:
+            os.link(binary, tmp_path / "late-alias")
+        return module.CommandObservation(0, "2.1.0")
+
+    monkeypatch.setattr(module, "_run", drift_then_report_version)
+    with pytest.raises(
+        module.PreflightError, match="^BINARY_CHANGED_DURING_PREFLIGHT$"
+    ):
+        module.observe_binary(binary)
+
+
+def test_f4_observation_executes_retained_descriptor_not_source_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    invocation: dict[str, object] = {}
+
+    def report_version(argv, **kwargs):
+        invocation["argv"] = argv
+        invocation["pass_fds"] = kwargs.get("pass_fds")
+        return module.CommandObservation(0, "2.1.0")
+
+    monkeypatch.setattr(module, "_run", report_version)
+    _, version = module.observe_binary(binary)
+
+    assert version == "2.1.0"
+    called_argv = invocation["argv"]
+    assert isinstance(called_argv, tuple)
+    assert called_argv[0].startswith("/dev/fd/")
+    passed = invocation["pass_fds"]
+    assert isinstance(passed, tuple) and len(passed) == 1 and type(passed[0]) is int
+
+
+def test_f4_main_reuses_one_retained_object_for_version_and_auth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    invocations: list[tuple[tuple[str, ...], tuple[int, ...] | None]] = []
+    monkeypatch.setattr(module, "require_current_identity_owner", lambda *args: None)
+
+    def observe(argv, **kwargs):
+        invocations.append((argv, kwargs.get("pass_fds")))
+        if argv[-1] == "--version":
+            return module.CommandObservation(0, "2.1.0")
+        return module.CommandObservation(
+            0,
+            '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}',
+        )
+
+    monkeypatch.setattr(module, "_run", observe)
+    assert (
+        module.main(
+            [
+                "--realm-label",
+                "claude-pro-01",
+                "--host-ref",
+                "host-01234567",
+                "--os-principal-ref",
+                "principal-01234567",
+                "--execution-context",
+                "INTERACTIVE_PRINCIPAL",
+                "--claude-binary",
+                str(binary),
+            ]
+        )
+        == 0
+    )
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["schema"] == module.SCHEMA
+    assert len(invocations) == 2
+    assert invocations[0][0][0] == invocations[1][0][0]
+    assert invocations[0][0][0].startswith("/dev/fd/")
+    assert invocations[0][1] == invocations[1][1]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"loggedIn":false,"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}',
+        '{"loggedIn":true,"authMethod":"api_key","authMethod":"claude.ai","apiProvider":"firstParty"}',
+        '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"other","apiProvider":"firstParty"}',
+        '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"a@example.com","email":"b@example.com"}',
+    ],
+)
+def test_f5_auth_json_rejects_duplicate_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: str
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(0, raw),
+    )
+
+    with pytest.raises(module.PreflightError, match="^AUTH_STATUS_UNSUPPORTED$"):
+        module.observe_auth(binary)
+
+
+def test_f5_auth_json_is_byte_bounded_before_normalization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    monkeypatch.setattr(module, "MAX_AUTH_JSON_BYTES", 128, raising=False)
+    raw = json.dumps(
+        {
+            "loggedIn": True,
+            "authMethod": "claude.ai",
+            "apiProvider": "firstParty",
+            "email": "a" * 256,
+        }
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(0, raw),
+    )
+
+    with pytest.raises(module.PreflightError, match="^AUTH_STATUS_UNSUPPORTED$"):
+        module.observe_auth(binary)
+
+
+@pytest.mark.parametrize(
+    "private_value",
+    [
+        {"nested": "private@example.com"},
+        ["private@example.com"],
+        float("nan"),
+    ],
+)
+def test_f5_auth_json_rejects_nonprimitive_private_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    private_value,
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    raw = json.dumps(
+        {
+            "loggedIn": True,
+            "authMethod": "claude.ai",
+            "apiProvider": "firstParty",
+            "email": private_value,
+        }
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(0, raw),
+    )
+
+    with pytest.raises(module.PreflightError, match="^AUTH_STATUS_UNSUPPORTED$"):
+        module.observe_auth(binary)
+
+
+def test_f5_auth_json_rejects_malformed_utf8_without_echo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    raw = b'{"loggedIn":true,"email":"\xff"}'
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(0, raw),
+    )
+
+    with pytest.raises(module.PreflightError, match="^AUTH_STATUS_UNSUPPORTED$") as exc:
+        module.observe_auth(binary)
+    assert "\\xff" not in str(exc.value)
