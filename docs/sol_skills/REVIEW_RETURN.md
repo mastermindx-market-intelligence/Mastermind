@@ -202,6 +202,28 @@ its passing current integration proof; it does not require an ancestry-only sour
 When Step 2A returns `FULL_REREVIEW_REQUIRED`, review the new immutable semantic head before
 acceptance. When it returns `RELEASE_BLOCKED`, do not improvise around the missing evidence.
 
+### Step 8A — Source Continuity remote-complete and release-maintainer boundary
+
+`REMOTE_COMPLETE_VERIFIED is evidence, not terminality or writer-release authority`. It proves only
+the deterministic source identity encoded by the receipt. The `START`ed builder remains the source
+writer until Sol accepts the builder result, sends terminal STOP, the exact child source is removed
+(or `WATCH_STOP_FAILED` is recorded without reopening the child), and `BRANCH_WRITER_RELEASED` is
+established under the session-close law.
+
+After that release, an authorized owner may create a fresh maintenance-only release operation on the same PR/branch.
+That release maintainer is not a successor feature builder: it may perform only bounded current-base
+integration/release maintenance already authorized by Sol, must not edit feature semantics, and gains
+no automatic Ready, merge, deployment, runtime, lifecycle, retry, receiver-transfer, or production
+authority from `REMOTE_COMPLETE_VERIFIED` or writer release.
+
+Step 2A review-reuse classification remains controlling. If the reviewed semantic head and owned
+blobs remain unchanged and protected movement is proven non-material, classify
+`REVIEW_REUSE_ALLOWED` and refresh integration proof only. Any owned semantic blob change, material
+source/dependency/authority change, touched prior finding, or strengthened capability claim requires
+`FULL_REREVIEW_REQUIRED`. Unknown current-source, collision, integration, review, or effect state is
+`RELEASE_BLOCKED`. This preserves existing PR #404 review-reuse semantics rather than creating a
+second review or release rule.
+
 ## Step 9 — Close or continue the reciprocal dialogue explicitly
 
 A worker return does not become terminal merely because Sol has enough information to continue
