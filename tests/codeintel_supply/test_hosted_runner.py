@@ -3018,6 +3018,20 @@ def test_success_artifacts_reject_preserved_pair_from_wrong_toolchain(
 
 
 @pytest.mark.parametrize(
+    "field",
+    ["bundle_sha256", "bundle_manifest_sha256"],
+)
+def test_success_artifacts_reject_preserved_pair_from_wrong_bundle(
+    tmp_path: Path, field: str
+) -> None:
+    contract = _success_artifact_contract(tmp_path)
+    contract[field] = "4" * 64
+
+    with pytest.raises(runner.HostedRunnerError, match="RESULT_IDENTITY_MISMATCH"):
+        runner._validate_success_artifacts(**contract)  # type: ignore[attr-defined]  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
     "mutation",
     [
         "missing_result",
