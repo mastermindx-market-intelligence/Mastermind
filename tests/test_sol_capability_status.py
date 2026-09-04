@@ -770,3 +770,26 @@ def test_equivalent_timestamp_offsets_have_one_output_and_digest_identity() -> N
     assert offset.capabilities[0].last_proven_at == "2026-08-30T19:59:00Z"
     assert utc.to_dict() == offset.to_dict()
     assert utc.canonical_digest == offset.canonical_digest
+
+
+def test_timestamp_length_bound_precedes_grammar_evaluation(monkeypatch) -> None:
+    class GrammarTrap:
+        def fullmatch(self, value: str) -> None:
+            raise AssertionError("timestamp grammar was consulted")
+
+    monkeypatch.setattr(capability_status_module, "_RFC3339", GrammarTrap())
+    over_bound = "0" * (capability_status_module.MAX_TIMESTAMP_LENGTH + 1)
+    with pytest.raises(
+        CapabilityProjectionError,
+        match="observed_at must be an RFC3339 timestamp",
+    ):
+        _project(_fact(), observed_at=over_bound)
+
+
+def test_semantically_invalid_timestamp_has_no_hidden_exception_context() -> None:
+    invalid = "2026-02-29T20:00:00Z"
+    with pytest.raises(CapabilityProjectionError) as raised:
+        _project(_fact(), observed_at=invalid)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert invalid not in str(raised.value)
