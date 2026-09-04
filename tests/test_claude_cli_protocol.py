@@ -338,8 +338,30 @@ def test_compiler_binds_the_reviewed_fake_bytes_and_filesystem_identity(tmp_path
     assert command.binary_sha256 == hashlib.sha256(FAKE.read_bytes()).hexdigest()
     assert command.binary_device == binary_info.st_dev
     assert command.binary_inode == binary_info.st_ino
+    assert command.binary_uid == binary_info.st_uid
+    assert command.binary_mode == binary_info.st_mode
     assert command.binary_size == binary_info.st_size
     assert command.binary_mtime_ns == binary_info.st_mtime_ns
+
+
+def test_runner_refuses_reviewed_fake_mode_drift_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy, _, _, _ = _policy(tmp_path)
+    copied_fake = tmp_path / "mode-bound-fake.py"
+    copied_fake.write_bytes(FAKE.read_bytes())
+    copied_fake.chmod(0o700)
+    command = compile_claude_cli_command(dataclasses.replace(policy, binary=copied_fake))
+    monkeypatch.setattr(protocol, "_committed_fake_path", lambda: copied_fake.resolve())
+    copied_fake.chmod(0o744)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(command, fake_controls=_fake_controls(tmp_path))
+
+    assert captured.value.code == "BINARY_DRIFT"
+    assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
+    assert captured.value.cleanup is None
+    assert not (tmp_path / "fake-state.json").exists()
 
 
 def test_compiler_refuses_the_native_home_even_with_an_isolated_temp(tmp_path: Path) -> None:
@@ -409,8 +431,43 @@ def test_spawn_boundary_revalidates_evidence_prompt_and_result_as_one_identity(t
     assert not (tmp_path / "fake-state.json").exists()
 
 
-def test_runner_executes_sealed_reviewed_bytes_after_same_path_in_place_mutation(
+def test_runner_refuses_same_path_evidence_replacement_even_when_bytes_match(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    command = compile_claude_cli_command(policy)
+    evidence = workspace / "sealed" / "evidence.txt"
+    real_popen = subprocess.Popen
+    replaced = False
+
+    def replace_evidence_then_spawn(*args: object, **kwargs: object):
+        nonlocal replaced
+        if not replaced:
+            replacement = evidence.with_name("replacement.txt")
+            replacement.write_text(EVIDENCE, encoding="utf-8")
+            os.replace(replacement, evidence)
+            replaced = True
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(protocol.subprocess, "Popen", replace_evidence_then_spawn)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(command, fake_controls=_fake_controls(tmp_path))
+
+    assert replaced is True
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert captured.value.cleanup is not None
+    state = json.loads((tmp_path / "fake-state.json").read_text(encoding="utf-8"))
+    assert state["starts"] == 1
+    assert state["reads"] == 0
+    assert state["submissions"] == 0
+    assert _git("rev-parse", "HEAD", cwd=workspace) == head
+    assert _git("status", "--porcelain=v1", cwd=workspace) == status
+
+
+@pytest.mark.parametrize("mutation", ["replace", "in_place"])
+def test_runner_executes_sealed_reviewed_bytes_after_same_path_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
 ) -> None:
     policy, workspace, head, status = _policy(tmp_path)
     copied_fake = tmp_path / "bound-fake.py"
@@ -424,11 +481,15 @@ def test_runner_executes_sealed_reviewed_bytes_after_same_path_in_place_mutation
     def mutate_path_then_spawn(*args: object, **kwargs: object):
         nonlocal replaced
         if not replaced:
-            copied_fake.write_text(
-                "#!/usr/bin/env python3\nraise SystemExit(97)\n",
-                encoding="utf-8",
-            )
-            copied_fake.chmod(0o700)
+            hostile = "#!/usr/bin/env python3\nraise SystemExit(97)\n"
+            if mutation == "replace":
+                replacement = copied_fake.with_name("replacement.py")
+                replacement.write_text(hostile, encoding="utf-8")
+                replacement.chmod(0o700)
+                os.replace(replacement, copied_fake)
+            else:
+                copied_fake.write_text(hostile, encoding="utf-8")
+                copied_fake.chmod(0o700)
             replaced = True
         return real_popen(*args, **kwargs)
 
@@ -539,6 +600,90 @@ def test_escaped_group_mark_requires_exact_parent_chronology_and_live_start_iden
     assert proven is False
 
 
+def test_cleanup_never_signals_an_unproven_escaped_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner_pid = os.getpid()
+    leader_pid = runner_pid + 10_000
+    escaped_pid = leader_pid + 1
+    spawn_not_before_ns = time.monotonic_ns() - 10_000
+    owner_started_ns = spawn_not_before_ns + 1
+    state = protocol._bound_fake_state(
+        run_nonce=SESSION_ID,
+        runner_pid=runner_pid,
+        spawn_not_before_ns=spawn_not_before_ns,
+    )
+    state.update(
+        {
+            "owner_pid": leader_pid,
+            "owner_parent_pid": runner_pid,
+            "owner_started_ns": owner_started_ns,
+            "escaped_children": [
+                {
+                    "pid": escaped_pid,
+                    "pgid": escaped_pid,
+                    "parent_pid": leader_pid,
+                    "parent_started_ns": owner_started_ns,
+                    "spawned_at_ns": owner_started_ns + 1,
+                    "start_token": "stale-start-token",
+                }
+            ],
+        }
+    )
+    state_path = tmp_path / "bound-state.json"
+    state_path.write_text(json.dumps(state), encoding="ascii")
+    descriptor = os.open(state_path, os.O_RDONLY)
+    signalled: list[tuple[int, object]] = []
+
+    class ReapedProcess:
+        pid = leader_pid
+        stdout = None
+        stderr = None
+
+        @staticmethod
+        def poll() -> int:
+            return 0
+
+    monkeypatch.setattr(
+        protocol,
+        "_process_identity",
+        lambda pid: (pid, 1, pid, "different-live-start-token"),
+    )
+    monkeypatch.setattr(
+        protocol,
+        "_group_status",
+        lambda pgid: "ALIVE" if pgid == escaped_pid else "EMPTY",
+    )
+    monkeypatch.setattr(
+        protocol,
+        "_signal_group",
+        lambda pgid, sent_signal: signalled.append((pgid, sent_signal)) or True,
+    )
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    try:
+        receipt = protocol._cleanup_process(
+            ReapedProcess(),  # type: ignore[arg-type]
+            pgid=leader_pid,
+            group_identity_proven=True,
+            grace_seconds=0.01,
+            force_termination=False,
+            reader_closed=True,
+            scratch=scratch,
+            scratch_before=protocol._tree_fingerprint(scratch),
+            fake_state_descriptor=descriptor,
+            fake_run_nonce=SESSION_ID,
+            runner_pid=runner_pid,
+            spawn_not_before_ns=spawn_not_before_ns,
+        )
+    finally:
+        os.close(descriptor)
+
+    assert signalled == []
+    assert receipt.marked_descendants_empty is False
+    assert "MARKED_DESCENDANTS_UNPROVEN" in receipt.residue_rows
+
+
 def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Path) -> None:
     policy, workspace, head, status = _policy(tmp_path)
     command = compile_claude_cli_command(policy)
@@ -607,6 +752,9 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
         ("init_mcp", "MCP_OBSERVED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("init_plugin", "PLUGIN_OBSERVED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("init_required_field_missing", "INIT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_extra_field", "EVENT_FIELDS_UNKNOWN", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_uuid_type_invalid", "INIT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("init_optional_type_invalid", "INIT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("init_cwd_drift", "WORKING_DIRECTORY_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("init_version_drift", "VERSION_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("assistant_parent_tool", "SUBAGENT_OBSERVED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
@@ -617,6 +765,8 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
         ("tool_result_unnumbered", "TOOL_RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("tool_result_structured_missing", "TOOL_RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("tool_result_structured_mismatch", "TOOL_RESULT_MISMATCH", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("tool_result_truncated", "TOOL_RESULT_MISMATCH", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("tool_result_private_locator_echo", "PRIVATE_LOCATOR_OUTPUT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("permission_denied", "PERMISSION_DENIED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("missing_result", "TERMINAL_RESULT_MISSING", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("duplicate_result", "TERMINAL_RESULT_DUPLICATE", ClaudeCliObservation.OUTCOME_UNRECONCILED),
@@ -628,6 +778,7 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
         ("result_invalid_cost", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_stop_reason_missing", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_usage_sparse", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_timing_type_invalid", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("nonzero_after_success", "PROCESS_EXIT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("secret_output", "SENSITIVE_OUTPUT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("private_path_output", "PRIVATE_LOCATOR_OUTPUT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
