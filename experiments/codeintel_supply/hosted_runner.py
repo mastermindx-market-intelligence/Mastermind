@@ -8,6 +8,7 @@ select a repository, URL, module, executable, command, path, or argv suffix.
 from __future__ import annotations
 
 import argparse
+import ast
 import dataclasses
 import enum
 import errno
@@ -764,6 +765,12 @@ _Z0_STATUS_FIELDS: Final = frozenset(
     }
 )
 _Z0_NON_ACCEPTANCE_DECISION: Final = "ZOEKT_REQUIRES_ARCHITECTURE_REVISION"
+_REQUIRED_CONSUMER_IDENTITY_ARGUMENTS: Final = (
+    "--request-digest",
+    "--toolchain-lock-sha256",
+    "--bundle-sha256",
+    "--bundle-manifest-sha256",
+)
 _CONSUMER_BOOTSTRAP: Final = (
     "import runpy,sys;"
     "sys.path.insert(0,sys.argv.pop(1));"
@@ -2089,6 +2096,122 @@ def consumer_effective_paths(
     return base, validated
 
 
+def validate_admitted_consumer_identity(
+    lock: locks.ToolchainLock, consumer_sha: str, consumer_tree_sha: str
+) -> None:
+    """Refuse every consumer identity except the independently reviewed pin."""
+
+    consumer = lock.payload["consumer"]
+    if (
+        _SHA1_RE.fullmatch(consumer_sha) is None
+        or _SHA1_RE.fullmatch(consumer_tree_sha) is None
+        or consumer_sha != consumer.get("commit")
+        or consumer_tree_sha != consumer.get("tree")
+    ):
+        raise HostedRunnerError(
+            "CONSUMER_MISMATCH", "consumer commit/tree is not the admitted pair"
+        )
+
+
+def validate_consumer_contract(consumer_root: Path) -> Mapping[str, object]:
+    """Prove the checked-out consumer CLI and strict result schema fit Phase E."""
+
+    root = _real_directory(consumer_root, "CONSUMER_CONTRACT_MISMATCH")
+    source_path = _regular_file(
+        root / "experiments/code_discovery/z0_runner.py",
+        "CONSUMER_CONTRACT_MISMATCH",
+        max_bytes=1_048_576,
+    )
+    schema_path = _regular_file(
+        root / "research/code_intelligence_fabric/z0-result.schema.json",
+        "CONSUMER_CONTRACT_MISMATCH",
+        max_bytes=1_048_576,
+    )
+    try:
+        source_bytes = source_path.read_bytes()
+        source_tree = ast.parse(source_bytes, filename=os.fspath(source_path))
+    except (OSError, SyntaxError, ValueError) as error:
+        raise HostedRunnerError(
+            "CONSUMER_CONTRACT_MISMATCH", "consumer CLI source is invalid"
+        ) from error
+
+    required_arguments: list[str] = []
+    expected_arguments = set(_REQUIRED_CONSUMER_IDENTITY_ARGUMENTS)
+    for node in ast.walk(source_tree):
+        if (
+            not isinstance(node, ast.Call)
+            or not isinstance(node.func, ast.Attribute)
+            or node.func.attr != "add_argument"
+            or not node.args
+            or not isinstance(node.args[0], ast.Constant)
+            or not isinstance(node.args[0].value, str)
+            or node.args[0].value not in expected_arguments
+        ):
+            continue
+        required = [
+            keyword.value for keyword in node.keywords if keyword.arg == "required"
+        ]
+        if (
+            len(required) != 1
+            or not isinstance(required[0], ast.Constant)
+            or required[0].value is not True
+        ):
+            raise HostedRunnerError(
+                "CONSUMER_CONTRACT_MISMATCH",
+                f"{node.args[0].value} is not a required CLI identity",
+            )
+        required_arguments.append(node.args[0].value)
+    if required_arguments != list(_REQUIRED_CONSUMER_IDENTITY_ARGUMENTS):
+        raise HostedRunnerError(
+            "CONSUMER_CONTRACT_MISMATCH", "consumer identity CLI differs"
+        )
+
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        decoded: dict[str, object] = {}
+        for key, value in pairs:
+            if key in decoded:
+                raise ValueError(f"duplicate key: {key}")
+            decoded[key] = value
+        return decoded
+
+    def reject_non_finite(value: str) -> object:
+        raise ValueError(f"non-finite value: {value}")
+
+    try:
+        schema = json.loads(
+            schema_path.read_text(encoding="utf-8"),
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=reject_non_finite,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as error:
+        raise HostedRunnerError(
+            "CONSUMER_CONTRACT_MISMATCH", "consumer result schema is invalid"
+        ) from error
+    properties = schema.get("properties") if isinstance(schema, Mapping) else None
+    required = schema.get("required") if isinstance(schema, Mapping) else None
+    if (
+        not isinstance(properties, Mapping)
+        or schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema"
+        or schema.get("type") != "object"
+        or set(properties) != _Z0_RESULT_FIELDS
+        or not isinstance(required, list)
+        or len(required) != len(_Z0_RESULT_FIELDS)
+        or set(required) != _Z0_RESULT_FIELDS
+        or schema.get("additionalProperties") is not False
+    ):
+        raise HostedRunnerError(
+            "CONSUMER_CONTRACT_MISMATCH", "consumer result schema fields differ"
+        )
+    evidence = {
+        "required_identity_arguments": list(_REQUIRED_CONSUMER_IDENTITY_ARGUMENTS),
+        "result_fields": sorted(_Z0_RESULT_FIELDS),
+        "runner_blob_sha1": locks.git_blob_sha1(source_bytes),
+        "schema_blob_sha1": locks.git_blob_sha1(schema_path.read_bytes()),
+    }
+    assert_secret_free(evidence)
+    return evidence
+
+
 def selected_source_digest(
     root: Path, *, includes: Sequence[str], excludes: Sequence[str]
 ) -> str:
@@ -2866,12 +2989,20 @@ def fixed_consumer_argv(
     log_root: Path,
     result: Path,
     report: Path,
+    request_digest: str,
+    toolchain_lock_sha256: str,
+    bundle_sha256: str,
+    bundle_manifest_sha256: str,
 ) -> list[str]:
     """Return the one repository-owned consumer module and complete fixed argv."""
 
     for label, digest in (
         ("indexer", indexer_sha256),
         ("webserver", webserver_sha256),
+        ("request", request_digest),
+        ("toolchain lock", toolchain_lock_sha256),
+        ("bundle", bundle_sha256),
+        ("bundle manifest", bundle_manifest_sha256),
     ):
         if _SHA256_RE.fullmatch(digest) is None:
             raise HostedRunnerError("INVALID_REQUEST", f"{label} digest is not exact")
@@ -2917,6 +3048,14 @@ def fixed_consumer_argv(
         os.fspath(result),
         "--report",
         os.fspath(report),
+        "--request-digest",
+        request_digest,
+        "--toolchain-lock-sha256",
+        toolchain_lock_sha256,
+        "--bundle-sha256",
+        bundle_sha256,
+        "--bundle-manifest-sha256",
+        bundle_manifest_sha256,
         "--startup-timeout-seconds",
         "10",
     ]
@@ -3063,6 +3202,7 @@ def derive_request(
         / "research/code_intelligence_fabric/codeintel-experiment-toolchain-lock.schema.json"
     )
     lock = locks.load_toolchain_lock(lock_path, schema_path=schema_path)
+    validate_admitted_consumer_identity(lock, consumer_sha, consumer_tree_sha)
     workflow_path = root / FIXED_WORKFLOW_PATH
     _validate_workflow_action_pins(workflow_path, lock)
     workflow_sha256 = locks.sha256_file(workflow_path, max_bytes=1_048_576)
@@ -3401,6 +3541,7 @@ def run_phase_e(
     consumer = verify_consumer_checkout(
         consumer_root, request.consumer_sha, request.consumer_tree_sha
     )
+    consumer_contract = validate_consumer_contract(consumer_root)
     git_metadata_seal = _verify_consumer_git_seal(consumer_root)
     merge_base, changed_paths = consumer_effective_paths(
         consumer_root,
@@ -3475,6 +3616,10 @@ def run_phase_e(
         log_root=log_root.resolve(),
         result=result_path.resolve(),
         report=report_path.resolve(),
+        request_digest=request.digest,
+        toolchain_lock_sha256=request.lock_sha256,
+        bundle_sha256=verified_before.sha256,
+        bundle_manifest_sha256=verified_before.manifest_sha256,
     )
     environment = sanitized_consumer_environment(environment_root)
     proof: NetworkSealProof | None = None
@@ -3548,6 +3693,7 @@ def run_phase_e(
                 "changed_paths": list(changed_paths),
                 "source_digest_before": source_before,
                 "source_digest_after": source_after,
+                "result_contract": consumer_contract,
             },
             "bundle": {
                 "name": expected_name,
@@ -3589,6 +3735,14 @@ def run_phase_e(
                     "RESULT_JSON",
                     "--report",
                     "RESULT_MARKDOWN",
+                    "--request-digest",
+                    "NORMALIZED_REQUEST_SHA256",
+                    "--toolchain-lock-sha256",
+                    "PINNED_TOOLCHAIN_LOCK_SHA256",
+                    "--bundle-sha256",
+                    "VERIFIED_BUNDLE_SHA256",
+                    "--bundle-manifest-sha256",
+                    "VERIFIED_BUNDLE_MANIFEST_SHA256",
                     "--startup-timeout-seconds",
                     "10",
                 ],

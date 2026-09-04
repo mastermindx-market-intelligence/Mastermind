@@ -106,6 +106,8 @@ ACTION_COMMITS: Final = MappingProxyType(
 CONSUMER_TOOL_SCHEMA_DIGEST: Final = (
     "4762c5dd05d807db5ee3793fd4c349aa4527fe1bd154bd6dd8ff9945ec1666ca"
 )
+CONSUMER_COMMIT: Final = "2478239c2d5b6a4e111c13247527e2046e6c3969"
+CONSUMER_TREE: Final = "4594a3a6b9e1286788f0ef7b84c609d4359ca4be"
 ALLOWED_HOSTS: Final = (
     "api.github.com",
     "dl.google.com",
@@ -516,6 +518,8 @@ def validate_lock_payload(
         ("consumer",),
         {
             "repository": "mastermindx-market-intelligence/Mastermind",
+            "commit": CONSUMER_COMMIT,
+            "tree": CONSUMER_TREE,
             "operation_key": Z0_OPERATION_KEY,
             "module": "experiments.code_discovery.z0_runner",
             "local_branch": "codeintel-z0-consumer",

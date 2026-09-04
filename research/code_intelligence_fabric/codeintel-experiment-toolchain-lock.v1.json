@@ -135,6 +135,8 @@
   },
   "consumer": {
     "repository": "mastermindx-market-intelligence/Mastermind",
+    "commit": "2478239c2d5b6a4e111c13247527e2046e6c3969",
+    "tree": "4594a3a6b9e1286788f0ef7b84c609d4359ca4be",
     "operation_key": "mastermind-codeintel-z0-discovery-falsifier-20260830-sol-001",
     "module": "experiments.code_discovery.z0_runner",
     "local_branch": "codeintel-z0-consumer",

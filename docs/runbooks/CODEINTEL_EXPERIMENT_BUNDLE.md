@@ -143,6 +143,14 @@ derived from the Git merge base with the forge commit and must stay inside the
 fixed Z0 ceiling. Every changed consumer path must be a regular Git blob, and
 the required `experiments/code_discovery/z0_runner.py` must be present.
 
+The closed lock admits only reviewed consumer commit
+`2478239c2d5b6a4e111c13247527e2046e6c3969` and tree
+`4594a3a6b9e1286788f0ef7b84c609d4359ca4be`; request derivation rejects any
+other otherwise well-formed pair. Before launch, Phase E parses that checkout's
+real `z0_runner.py` argument declarations and strict `z0-result.schema.json` to
+prove the four request/toolchain/bundle identity arguments are required and the
+result field census exactly matches the host validator.
+
 The fixed module is `experiments.code_discovery.z0_runner`. Its fixed role is
 `Z0_DISPOSABLE_FALSIFIER`. The only indexed source selection is
 `experiments/code_discovery/*`, governed by the committed

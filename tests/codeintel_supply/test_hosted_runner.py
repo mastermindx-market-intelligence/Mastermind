@@ -3282,6 +3282,20 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
             runner.FIXED_CONSUMER_BRANCH,
         ),
     )
+    consumer_contract = {
+        "required_identity_arguments": [
+            "--request-digest",
+            "--toolchain-lock-sha256",
+            "--bundle-sha256",
+            "--bundle-manifest-sha256",
+        ],
+        "result_fields": sorted(runner._Z0_RESULT_FIELDS),  # noqa: SLF001
+        "runner_blob_sha1": "8" * 40,
+        "schema_blob_sha1": "9" * 40,
+    }
+    monkeypatch.setattr(
+        runner, "validate_consumer_contract", lambda *args: consumer_contract
+    )
     seal_evidence = {
         "mount_namespace_private": True,
         "requested_mount_options": ["ro", "nosuid", "nodev", "noexec"],
@@ -3452,6 +3466,7 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
         == verified.manifest_sha256
     )
     assert receipt["evidence"]["git_metadata_seal"] == seal_evidence
+    assert receipt["evidence"]["consumer"]["result_contract"] == consumer_contract
     assert (
         receipt["evidence"]["consumer_invocation"]["sensitive_environment_inherited"]
         is False
