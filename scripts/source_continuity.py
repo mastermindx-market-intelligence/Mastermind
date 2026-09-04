@@ -71,6 +71,7 @@ _GIT_CONFIG_OVERRIDES = (
     "core.ignoreStat=false",
     "core.checkStat=default",
     "core.trustctime=true",
+    "core.symlinks=true",
     "credential.helper=",
     "protocol.allow=never",
     "protocol.file.allow=always",
