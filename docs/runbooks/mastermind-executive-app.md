@@ -94,6 +94,9 @@ connects to one that already exists.
   `scopes_supported` projection. Read and submit policy instances must name
   the same resource, metadata URL, issuer, and authorization-server set when
   the app starts; otherwise construction refuses the incoherent generation.
+  An authority-only metadata URL maps to HTTP path `/`; percent-encoded or
+  duplicate-slash path spellings are refused at construction because the
+  raw-path fence deliberately will not serve them.
   The exact path accepts only a query-free `GET`: trailing-slash, query,
   encoded-separator, duplicate-slash, and non-GET forms never alias it.
 * `POST /v1/tools/{executive_state|executive_inbox|executive_job|ceo_intent_status}`

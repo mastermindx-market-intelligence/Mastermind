@@ -521,6 +521,68 @@ def test_create_app_refuses_read_submit_policy_identity_drift(rsa_key, tmp_path,
         create_app(settings)
 
 
+@pytest.mark.parametrize(
+    "metadata_url",
+    [
+        RESOURCE + "/.well-known%2foauth-protected-resource",
+        RESOURCE + "/.well-known%5coauth-protected-resource",
+        RESOURCE + "/.well-known/oauth-protected-%41resource",
+        RESOURCE + "//.well-known/oauth-protected-resource",
+    ],
+)
+def test_create_app_refuses_valid_a1_metadata_paths_the_raw_route_fence_cannot_serve(
+    rsa_key, tmp_path, metadata_url
+):
+    """A1 preserves these URL spellings, but Starlette normalizes them while
+    this edge intentionally refuses encoded separators and duplicate slashes.
+    Construction must not advertise an exact metadata URL it cannot serve.
+    """
+
+    policies = AppPolicies(
+        read=_read_policy(resource_metadata_url=metadata_url),
+        submit=_submit_policy(resource_metadata_url=metadata_url),
+    )
+    settings = AppSettings(
+        policies=policies,
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ValueError, match="not safely serveable"):
+        create_app(settings)
+
+
+def test_metadata_url_without_a_path_serves_the_http_root_exactly(rsa_key, tmp_path):
+    """An authority-only HTTPS URL has the HTTP request path `/`; rejecting
+    it would make one otherwise safe, validated URL form unservable.
+    """
+
+    metadata_url = "https://executive-app.mastermind.example.test"
+    policies = AppPolicies(
+        read=_read_policy(resource_metadata_url=metadata_url),
+        submit=_submit_policy(resource_metadata_url=metadata_url),
+    )
+    settings = AppSettings(
+        policies=policies,
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+    client = TestClient(create_app(settings), raise_server_exceptions=False)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.json()["resource"] == RESOURCE
+
+
 def test_create_app_revalidates_a_forged_policy_before_registering_metadata(rsa_key, tmp_path):
     """A frozen dataclass can be forged with object.__setattr__; accepting it
     would let a stale challenge and public metadata disagree at runtime.

@@ -90,9 +90,9 @@ def _metadata_policy_and_path(policies: AppPolicies) -> tuple[ResourcePolicy, st
     )
     if any(getattr(read_policy, name) != getattr(submit_policy, name) for name in identity):
         raise ValueError("read and submit policies must name the same resource identity")
-    path = urlsplit(read_policy.resource_metadata_url).path
-    if not path:
-        raise ValueError("metadata policy must include an exact route path")
+    path = urlsplit(read_policy.resource_metadata_url).path or "/"
+    if "%" in path or "//" in path:
+        raise ValueError("metadata policy route is not safely serveable")
     return read_policy, path
 
 
