@@ -662,3 +662,111 @@ def test_output_is_secret_free_and_carries_required_contract_fields() -> None:
     assert "github_pat_" not in rendered
     assert "bearer " not in rendered
     assert "-----begin" not in rendered
+
+
+def test_required_spec_only_dependency_is_never_serviceable_even_if_available() -> None:
+    dependency = DependencyFact(
+        name="future-runtime-owner",
+        state=CapabilityState.SPEC_ONLY,
+        required=True,
+        available=True,
+        source_ref="runtime:future-owner",
+    )
+    status = _project(
+        _fact(
+            dependencies=(dependency,),
+            live_proof_current=True,
+            last_proven_at="2026-08-30T19:59:00Z",
+        )
+    ).capabilities[0]
+    assert status.availability is Availability.UNAVAILABLE
+    assert status.proof_state is CapabilityState.SPEC_ONLY
+    assert status.read_serviceable is False
+    assert status.write_serviceable is False
+    assert "DEPENDENCY_SPEC_ONLY" in status.issues
+    assert status.dependencies[0].state is CapabilityState.SPEC_ONLY
+
+
+@pytest.mark.parametrize(
+    "dependency_state",
+    (CapabilityState.NOT_BUILT, CapabilityState.DARK_OR_DISCONNECTED),
+)
+def test_definitive_disconnected_dependency_precedes_unknown_availability(
+    dependency_state: CapabilityState,
+) -> None:
+    dependency = DependencyFact(
+        name=f"missing-{dependency_state.value.lower()}",
+        state=dependency_state,
+        required=True,
+        available=None,
+        source_ref="runtime:missing-owner",
+    )
+    status = _project(_fact(dependencies=(dependency,))).capabilities[0]
+    assert status.availability is Availability.UNAVAILABLE
+    assert status.proof_state is CapabilityState.DARK_OR_DISCONNECTED
+    assert status.read_serviceable is False
+    assert status.write_serviceable is False
+    assert f"DEPENDENCY_{dependency_state.value}" in status.issues
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    (
+        "2026-08-30 20:00:00Z",
+        "20260830T200000Z",
+        "2026-W35-7T20:00:00Z",
+        "2026-08-30T20:00:00+0000",
+        "2026-08-30T20:00:00,123Z",
+        "2026-08-30T20:00:00+00:00:30",
+        "2026-08-30t20:00:00+00:00",
+    ),
+)
+def test_non_rfc3339_timestamp_forms_are_rejected(timestamp: str) -> None:
+    with pytest.raises(
+        CapabilityProjectionError,
+        match="observed_at must be an RFC3339 timestamp",
+    ):
+        _project(_fact(), observed_at=timestamp)
+
+
+def test_timestamp_length_is_bounded_before_permissive_parsing() -> None:
+    over_bound = "2026-08-30T20:00:00." + ("1" * 100) + "Z"
+    with pytest.raises(
+        CapabilityProjectionError,
+        match="observed_at must be an RFC3339 timestamp",
+    ):
+        _project(_fact(), observed_at=over_bound)
+
+
+def test_malformed_timestamp_is_not_echoed_anywhere_in_exception_chain() -> None:
+    opaque = "not-rfc3339-opaque-value"
+    with pytest.raises(CapabilityProjectionError) as raised:
+        _project(_fact(), observed_at=opaque)
+    chain: list[str] = []
+    current: BaseException | None = raised.value
+    while current is not None:
+        chain.append(str(current))
+        current = current.__cause__ or current.__context__
+    assert opaque not in "\n".join(chain)
+
+
+def test_equivalent_timestamp_offsets_have_one_output_and_digest_identity() -> None:
+    utc = _project(
+        _fact(
+            live_proof_current=True,
+            last_proven_at="2026-08-30T19:59:00Z",
+        ),
+        observed_at="2026-08-30T20:00:00Z",
+    )
+    offset = _project(
+        _fact(
+            live_proof_current=True,
+            last_proven_at="2026-08-30T15:59:00-04:00",
+        ),
+        observed_at="2026-08-30T16:00:00-04:00",
+    )
+    assert utc.observed_at == offset.observed_at == "2026-08-30T20:00:00Z"
+    assert utc.capabilities[0].last_proven_at == "2026-08-30T19:59:00Z"
+    assert offset.capabilities[0].last_proven_at == "2026-08-30T19:59:00Z"
+    assert utc.to_dict() == offset.to_dict()
+    assert utc.canonical_digest == offset.canonical_digest
