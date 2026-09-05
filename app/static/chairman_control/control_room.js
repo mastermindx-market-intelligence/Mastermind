@@ -2069,8 +2069,18 @@
     REFRESH_FOLLOW_UP.attempt = 0;
   }
 
+  function stateReadElapsedTime() {
+    try {
+      if (typeof performance === "undefined" || typeof performance.now !== "function") return null;
+      var now = performance.now();
+      return typeof now === "number" && isFinite(now) && now >= 0 ? now : null;
+    } catch (_e) { return null; }
+  }
+
   function remainingStateReadBudget() {
-    return Math.max(0, STATE_READ_DEADLINE_AT - Date.now());
+    if (STATE_READ_DEADLINE_AT === 0) return 0;
+    var now = stateReadElapsedTime();
+    return now === null ? null : Math.max(0, STATE_READ_DEADLINE_AT - now);
   }
 
   function clearStateReadDeadline() {
@@ -2131,17 +2141,18 @@
     clearStateReadDeadline();
   }
 
-  function expireStateReads(generation, refreshStopped) {
+  function expireStateReads(generation, refreshStopped, clockUnavailable) {
     if (STATE_LOAD_GENERATION !== generation) return;
     invalidateStateReads();
-    renderStateUnavailable("control_room_api: state read timed out — current state could not be read", refreshStopped);
+    renderStateUnavailable(clockUnavailable ? null :
+      "control_room_api: state read timed out — current state could not be read", refreshStopped);
   }
 
   function scheduleRefreshFollowUp(generation) {
     if (!refreshFollowUpIsCurrent(generation)) return;
     var remaining = remainingStateReadBudget();
-    if (remaining <= 0) {
-      expireStateReads(generation, true);
+    if (remaining === null || remaining <= 0) {
+      expireStateReads(generation, true, remaining === null);
       return;
     }
     var delay = REFRESH_FOLLOW_UP_BACKOFF_MS[Math.min(
@@ -2151,8 +2162,9 @@
     REFRESH_FOLLOW_UP.attempt += 1;
     REFRESH_FOLLOW_UP.timer = setTimeout(function () {
       REFRESH_FOLLOW_UP.timer = null;
-      if (remainingStateReadBudget() <= 0) {
-        expireStateReads(generation, true);
+      var budget = remainingStateReadBudget();
+      if (budget === null || budget <= 0) {
+        expireStateReads(generation, true, budget === null);
         return;
       }
       readState(generation, true);
@@ -2232,8 +2244,8 @@
   function readState(generation, followUp) {
     if (!stateReadIsCurrent(generation, followUp)) return Promise.resolve(null);
     var remaining = remainingStateReadBudget();
-    if (remaining <= 0) {
-      expireStateReads(generation, followUp);
+    if (remaining === null || remaining <= 0) {
+      expireStateReads(generation, followUp, remaining === null);
       return Promise.resolve(null);
     }
     var controller = typeof AbortController === "function" ? new AbortController() : null;
@@ -2248,8 +2260,15 @@
       renderStateUnavailable("control_room_api: state read timed out — current state could not be read", followUp);
     }, remaining);
     return getJSON("/api/state", controller && controller.signal).then(function (body) {
-      clearActiveStateRead(request);
       if (!stateReadIsCurrent(generation, followUp, request)) return null;
+      // A response microtask can run before an already-due timer task. Check
+      // elapsed time before cancelling that guard or consuming the response.
+      var budget = remainingStateReadBudget();
+      if (budget === null || budget <= 0) {
+        expireStateReads(generation, followUp, budget === null);
+        return null;
+      }
+      clearActiveStateRead(request);
       // Local state envelopes intentionally have no `ok` member, while the
       // remote read-only relay uses `{ok:true, control_room:…}`.  Both must
       // contain the Control Room's essential Inbox arrays before replacing
@@ -2286,7 +2305,12 @@
 
   function loadState() {
     invalidateStateReads();
-    STATE_READ_DEADLINE_AT = Date.now() + STATE_READ_DEADLINE_MS;
+    var now = stateReadElapsedTime();
+    if (now === null) {
+      renderStateUnavailable(null, false);
+      return Promise.resolve(null);
+    }
+    STATE_READ_DEADLINE_AT = now + STATE_READ_DEADLINE_MS;
     return readState(STATE_LOAD_GENERATION, false);
   }
 
