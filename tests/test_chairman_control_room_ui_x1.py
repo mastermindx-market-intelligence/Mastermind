@@ -555,7 +555,10 @@ eval({exposed!r});
   process.stdout.write(JSON.stringify({{remote:global.__transport.remote,calls,postError}}));
 }})();
 """
-    result = subprocess.run([node, "-e", harness], check=True, capture_output=True, text=True)
+    # Avoid the hosted Linux runner's per-argument limit for the full page script.
+    result = subprocess.run(
+        [node, "-"], input=harness, check=True, capture_output=True, text=True, timeout=60
+    )
     import json
     return json.loads(result.stdout)
 
