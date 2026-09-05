@@ -194,6 +194,32 @@ Those source lifetimes are not the resource lifetime.
 
 This is resource/attention discipline only. It creates no watcher registry, source database, seat lifecycle, queue or authority owner.
 
+### 3.6 Source-writer stickiness and remote-complete terminality
+
+A Source Continuity receipt reports source identity; it does not replace dialogue or writer authority.
+`CHECKPOINT_VERIFIED is never a terminal, retry, transfer, or writer-release edge`. A checkpoint may
+truthfully coexist with in-scope dirt, unpushed commits, or an open known effect when the pure verifier
+permits it; the already-`START`ed source writer remains sticky to the same operation/carrier/runtime.
+`EFFECT_UNKNOWN remains exact-session sticky` and must reconcile before any receiver, retry, failover,
+or release-maintainer transition.
+
+`REMOTE_COMPLETE_VERIFIED` is stronger source evidence, but the builder is not terminal merely because
+local and remote source now match. The mandatory ordering is:
+
+```text
+REMOTE_COMPLETE_VERIFIED
+-> SOL_ACCEPTED_BUILDER_RESULT
+-> TERMINAL_BUILDER_STOP
+-> EXACT_CHILD_SOURCE_REMOVAL_OR_WATCH_STOP_FAILED
+-> BRANCH_WRITER_RELEASED
+```
+
+Only after `BRANCH_WRITER_RELEASED` may a separately authorized release owner enter through the fresh
+maintenance-only release operation defined by `REVIEW_RETURN.md`. That release operation remains on
+the same PR/branch, cannot continue the original builder child, and gains no permission to edit
+feature semantics, retry an effect, change receiver identity, mark Ready, merge, deploy, or claim
+production merely from a Source Continuity receipt.
+
 ## 4. Critical anti-pattern
 
 Forbidden:
