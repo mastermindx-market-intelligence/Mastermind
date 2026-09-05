@@ -6,6 +6,7 @@ SOURCE_RESOLVED onto the existing Executive OS events table.
 """
 from __future__ import annotations
 
+import dataclasses
 import threading
 from pathlib import Path
 
@@ -451,6 +452,215 @@ def test_native_handles_and_next_actions_never_persist_as_authority(tmp_path, fr
             )
         )
 
+
+def test_physical_source_payload_is_closed_and_requested_only(tmp_path, frozen_git):
+    runtime = Runtime.at(tmp_path)
+    _completed_review_child(runtime)
+    _reconcile(runtime)
+    event = _requested_kind(runtime, "review_required")[0]
+
+    with pytest.raises(WakeLedgerError, match="physical source is malformed"):
+        wake_record_from_event(dataclasses.replace(
+            event, payload={**event.payload, "physical_source": None}
+        ))
+
+    with pytest.raises(WakeLedgerError, match="WAKE_REQUESTED-only"):
+        wake_record_from_event(dataclasses.replace(
+            event,
+            event_type="FAILED",
+            command_id=f"{event.aggregate_id}:A1:FAILED",
+            payload={"physical_source": {}},
+        ))
+
+
+def test_same_physical_dialogue_source_cannot_mint_a_second_requested_identity(
+    tmp_path,
+) -> None:
+    from control_plane.dialogue_source_resolution import (
+        DialogueSourceObservation,
+        PhysicalDialogueSourceIdentity,
+        attention_source_ref,
+        correlated_source_ref,
+    )
+    from control_plane.wake_events import mint_obligation
+
+    runtime = Runtime.at(tmp_path)
+    repository = WakeLedgerRepository(runtime)
+    root = runtime.jobs.create_job("physical source root")
+    job = runtime.jobs.create_job(
+        "physical source child",
+        parent_job_id=root.job_id,
+    )
+    _register(runtime)
+    lease = runtime.attempts.claim_job(job.job_id, worker_id="worker-a")
+    assert lease is not None
+    parent_fingerprint = "a" * 64
+    operation_key = "exec-job-002"
+
+    def request_for(
+        *,
+        evidence_digest: str,
+        predecessor_key: str,
+        predecessor_fingerprint: str = "b" * 64,
+        workspace_id: str = "T0BRD2AQXQV",
+    ):
+        candidate = {
+            "mode": "ACTIVE_CURRENT_WORKER",
+            "root_job_id": root.job_id,
+            "job_id": job.job_id,
+            "attempt_id": lease.attempt.attempt_id,
+            "worker_id": "worker-a",
+            "evidence_digest": evidence_digest,
+        }
+        observation = DialogueSourceObservation(
+            workspace_id=workspace_id,
+            channel_id="C0BSBM78V1N",
+            thread_ts="1788000000.123456",
+            predecessor_message_key=predecessor_key,
+            predecessor_message_fingerprint=predecessor_fingerprint,
+        )
+        attention = attention_source_ref(
+            parent_fingerprint=parent_fingerprint,
+            message_key=predecessor_key,
+            target_seat="coo",
+        )
+        logical = correlated_source_ref(
+            attention_source_ref=attention,
+            parent_fingerprint=parent_fingerprint,
+            operation_key=operation_key,
+            candidate=candidate,
+        )
+        obligation = mint_obligation(
+            wake_kind="dialogue_turn_pending",
+            source_kind="agent_dialogue_attention",
+            source_ref=logical,
+            declared_target_seat="coo",
+            job_id=candidate["job_id"],
+            attempt_id=candidate["attempt_id"],
+            root_job_id=candidate["root_job_id"],
+            source_workstream="WS:RUNTIME-CONTINUITY",
+            source_created_at="2026-09-05T11:54:00Z",
+            emitted_at="2026-09-05T11:54:01Z",
+        )
+        physical = PhysicalDialogueSourceIdentity.create(
+            logical_source_ref=logical,
+            obligation_id=obligation.obligation_id,
+            observation=observation,
+            parent_fingerprint=parent_fingerprint,
+            operation_key=operation_key,
+            target_seat="coo",
+            candidate=candidate,
+        )
+        return obligation, physical
+
+    first, physical_first = request_for(
+        evidence_digest="c" * 64,
+        predecessor_key="asd-progress-001",
+    )
+    changed, physical_changed = request_for(
+        evidence_digest="d" * 64,
+        predecessor_key="asd-progress-001",
+    )
+    later, physical_later = request_for(
+        evidence_digest="e" * 64,
+        predecessor_key="asd-progress-002",
+    )
+    changed_fingerprint, physical_changed_fingerprint = request_for(
+        evidence_digest="c" * 64,
+        predecessor_key="asd-progress-001",
+        predecessor_fingerprint="f" * 64,
+    )
+
+    barrier = threading.Barrier(2)
+    outcomes: list[tuple[str, str]] = []
+
+    def append_competing(label, obligation, physical):
+        barrier.wait()
+        try:
+            repository.append_record(
+                requested_record(obligation, physical_source=physical),
+                obligation=obligation,
+            )
+            outcomes.append((label, "RECORDED"))
+        except WakeLedgerError as exc:
+            outcomes.append((label, str(exc)))
+
+    threads = (
+        threading.Thread(
+            target=append_competing,
+            args=("first", first, physical_first),
+        ),
+        threading.Thread(
+            target=append_competing,
+            args=("changed", changed, physical_changed),
+        ),
+    )
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    assert [outcome for _, outcome in outcomes].count("RECORDED") == 1
+    assert sum(
+        "physical source already requested" in outcome
+        for _, outcome in outcomes
+    ) == 1
+    with pytest.raises(WakeLedgerError, match="physical source already requested"):
+        repository.append_record(
+            requested_record(
+                changed_fingerprint,
+                physical_source=physical_changed_fingerprint,
+            ),
+            obligation=changed_fingerprint,
+        )
+    repository.append_record(
+        requested_record(later, physical_source=physical_later),
+        obligation=later,
+    )
+
+    competing_counts = (
+        len(repository.list_records(first.obligation_id)),
+        len(repository.list_records(changed.obligation_id)),
+    )
+    assert sorted(competing_counts) == [0, 1]
+    changed_fingerprint_records = repository.list_records(
+        changed_fingerprint.obligation_id
+    )
+    if len(repository.list_records(first.obligation_id)) == 1:
+        assert len(changed_fingerprint_records) == 1
+        assert changed_fingerprint_records[0].record.physical_source == physical_first
+    else:
+        assert changed_fingerprint_records == ()
+    assert len(repository.list_records(later.obligation_id)) == 1
+
+    winner_label = next(label for label, outcome in outcomes if outcome == "RECORDED")
+    winner, winner_physical, winner_digest = (
+        (first, physical_first, "c" * 64)
+        if winner_label == "first"
+        else (changed, physical_changed, "d" * 64)
+    )
+    restarted = WakeLedgerRepository(Runtime.at(tmp_path))
+    hydrated = restarted.list_records(winner.obligation_id)
+    assert len(hydrated) == 1
+    assert hydrated[0].record.physical_source == winner_physical
+    replay = restarted.append_record(
+        requested_record(winner, physical_source=winner_physical),
+        obligation=winner,
+    )
+    assert replay.inserted is False
+
+    copied_carrier, copied_physical = request_for(
+        evidence_digest=winner_digest,
+        predecessor_key="asd-progress-001",
+        workspace_id="T0BRD2AQXQW",
+    )
+    assert copied_carrier.obligation_id == winner.obligation_id
+    with pytest.raises(StateConflict, match="payload disagrees"):
+        restarted.append_record(
+            requested_record(copied_carrier, physical_source=copied_physical),
+            obligation=copied_carrier,
+        )
 
 def test_reconciliation_never_invokes_transport_or_delivery_attempt(tmp_path, frozen_git, monkeypatch):
     calls: list[str] = []

@@ -44,16 +44,34 @@ from control_plane.wake_events import (
     WakeObligation,
     WakeObligationError,
     parse_obligation,
+    mint_obligation,
 )
+from control_plane.dialogue_source_resolution import (
+    DialogueSourceObservation,
+    DialogueSourceSnapshot,
+    DialogueSourceResolutionError,
+    PhysicalDialogueSourceIdentity,
+    attention_source_ref,
+    correlated_source_ref,
+    parse_source_candidate,
+)
+from control_plane.session_targets import route_digest
 
 
 REQUEST_SCHEMA = "mastermind.executive_dialogue_observation_request.v1"
 RESPONSE_SCHEMA = "mastermind.executive_dialogue_observation_response.v1"
 WAKE_REQUEST_SCHEMA = "mastermind.dialogue_wake_request/v1"
+WAKE_REQUEST_V2_SCHEMA = "mastermind.dialogue_wake_request/v2"
 WAKE_RESPONSE_SCHEMA = "mastermind.dialogue_wake_response/v1"
+SOURCE_RECONCILE_REQUEST_SCHEMA = "mastermind.dialogue_source_reconcile_request/v1"
+SOURCE_RECONCILE_RESPONSE_SCHEMA = "mastermind.dialogue_source_reconcile_response/v1"
+DELAYED_ACK_REQUEST_SCHEMA = "mastermind.dialogue_delayed_ack_request/v1"
+DELAYED_ACK_RESPONSE_SCHEMA = "mastermind.dialogue_delayed_ack_response/v1"
 RESOLVE_PARENT = "RESOLVE_PARENT"
 RECONCILE_WAKE = "RECONCILE_WAKE"
 SUBMIT_WAKE = "SUBMIT_WAKE"
+RECONCILE_DIALOGUE_SOURCES = "RECONCILE_DIALOGUE_SOURCES"
+RECONCILE_WAKE_ACK = "RECONCILE_WAKE_ACK"
 ACTIVE_CURRENT_WORKER = "ACTIVE_CURRENT_WORKER"
 TERMINAL_RESULT = "TERMINAL_RESULT"
 MAX_REQUEST_BYTES = 64 * 1024
@@ -85,6 +103,18 @@ _WAKE_REQUEST_KEYS = frozenset(
         "obligation",
         "route",
     }
+)
+_WAKE_REQUEST_V2_KEYS = frozenset(
+    {
+        "schema", "operation", "parent", "source_observation", "candidate",
+        "attention_obligation", "route",
+    }
+)
+_SOURCE_RECONCILE_KEYS = frozenset(
+    {"schema", "operation", "parent", "snapshot"}
+)
+_DELAYED_ACK_KEYS = frozenset(
+    {"schema", "operation", "parent", "source_observation"}
 )
 _CANDIDATE_KEYS = frozenset(
     {"mode", "root_job_id", "job_id", "attempt_id", "worker_id", "evidence_digest"}
@@ -205,6 +235,21 @@ class DialogueWakeRequest:
     candidate: DialogueCandidateReference
     obligation: WakeObligation
     proposed_route: WakeRoute
+    source_observation: DialogueSourceObservation | None = None
+    physical_source: PhysicalDialogueSourceIdentity | None = None
+    transport_schema: str = WAKE_REQUEST_SCHEMA
+
+
+@dataclass(frozen=True)
+class DialogueSourceReconcileRequest:
+    parent: dict[str, Any]
+    snapshot: DialogueSourceSnapshot
+
+
+@dataclass(frozen=True)
+class DialogueDelayedAckRequest:
+    parent: dict[str, Any]
+    source_observation: DialogueSourceObservation
 
 
 @dataclass(frozen=True)
@@ -498,19 +543,12 @@ def parse_observation_request(raw: bytes) -> ObservationRequest:
 
 
 def _validate_candidate(value: Any) -> DialogueCandidateReference:
-    if (
-        not isinstance(value, dict)
-        or set(value) != _CANDIDATE_KEYS
-        or value.get("mode") not in {ACTIVE_CURRENT_WORKER, TERMINAL_RESULT}
-        or any(
-            not _is_route_token(value.get(name))
-            for name in ("root_job_id", "job_id", "attempt_id", "worker_id")
-        )
-        or not _is_digest(value.get("evidence_digest"))
-        or _contains_forbidden_leaf(value)
-    ):
+    if _contains_forbidden_leaf(value):
         raise DialogueObservationProtocolError()
-    return DialogueCandidateReference(**value)
+    try:
+        return DialogueCandidateReference(**parse_source_candidate(value).to_dict())
+    except (DialogueSourceResolutionError, TypeError, ValueError):
+        raise DialogueObservationProtocolError() from None
 
 
 def _validate_proposed_route(
@@ -590,21 +628,35 @@ def parse_wake_request(raw: bytes) -> DialogueWakeRequest:
             object_pairs_hook=_pairs_object,
             parse_constant=_reject_constant,
         )
+        if not isinstance(value, dict):
+            raise DialogueObservationProtocolError()
+        schema = value.get("schema")
         if (
-            not isinstance(value, dict)
-            or set(value) != _WAKE_REQUEST_KEYS
-            or value.get("schema") != WAKE_REQUEST_SCHEMA
+            schema not in {WAKE_REQUEST_SCHEMA, WAKE_REQUEST_V2_SCHEMA}
+            or set(value) != (
+                _WAKE_REQUEST_KEYS if schema == WAKE_REQUEST_SCHEMA
+                else _WAKE_REQUEST_V2_KEYS
+            )
             or value.get("operation") not in {RECONCILE_WAKE, SUBMIT_WAKE}
         ):
             raise DialogueObservationProtocolError()
         parent = _validate_parent(value.get("parent"))
         if parent != value.get("parent"):
             raise DialogueObservationProtocolError()
-        thread_ts = value.get("thread_ts")
+        source_observation = None
+        if schema == WAKE_REQUEST_V2_SCHEMA:
+            source_observation = DialogueSourceObservation.from_dict(
+                value.get("source_observation")
+            )
+            thread_ts = source_observation.thread_ts
+        else:
+            thread_ts = value.get("thread_ts")
         if not isinstance(thread_ts, str) or _THREAD_TS_RE.fullmatch(thread_ts) is None:
             raise DialogueObservationProtocolError()
         candidate = _validate_candidate(value.get("candidate"))
-        obligation_value = value.get("obligation")
+        obligation_value = value.get(
+            "attention_obligation" if schema == WAKE_REQUEST_V2_SCHEMA else "obligation"
+        )
         if not isinstance(obligation_value, dict):
             raise DialogueObservationProtocolError()
         obligation = parse_obligation(obligation_value)
@@ -613,13 +665,67 @@ def parse_wake_request(raw: bytes) -> DialogueWakeRequest:
             or obligation.wake_kind is not WakeKind.DIALOGUE_TURN_PENDING
         ):
             raise DialogueObservationProtocolError()
-        route = _validate_proposed_route(
-            value.get("route"),
-            obligation=obligation,
-        )
+        route = _validate_proposed_route(value.get("route"), obligation=obligation)
+        physical_source = None
+        if source_observation is not None:
+            expected_attention = attention_source_ref(
+                parent_fingerprint=parent["fingerprint"],
+                message_key=source_observation.predecessor_message_key,
+                target_seat=obligation.declared_target_seat,
+            )
+            if obligation.source_ref != expected_attention:
+                raise DialogueObservationProtocolError()
+            if (
+                obligation.root_job_id != candidate.root_job_id
+                or obligation.job_id != candidate.job_id
+                or obligation.attempt_id != candidate.attempt_id
+                or obligation.source_workstream != parent["work_ref"]
+            ):
+                raise DialogueObservationProtocolError()
+            logical_ref = correlated_source_ref(
+                attention_source_ref=expected_attention,
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                candidate=candidate.to_dict(),
+            )
+            correlated = mint_obligation(
+                wake_kind=obligation.wake_kind,
+                source_kind=obligation.source_kind,
+                source_ref=logical_ref,
+                declared_target_seat=obligation.declared_target_seat,
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                root_job_id=candidate.root_job_id,
+                workstream=obligation.workstream,
+                source_workstream=obligation.source_workstream,
+                source_created_at=obligation.source_created_at,
+                emitted_at=obligation.emitted_at,
+            )
+            route = dataclasses.replace(
+                route,
+                obligation_id=correlated.obligation_id,
+                route_digest=route_digest(
+                    obligation_id=correlated.obligation_id,
+                    destination=route.destination_digest,
+                    policy_digest=route.policy_digest,
+                ),
+            )
+            obligation = correlated
+            physical_source = PhysicalDialogueSourceIdentity.create(
+                logical_source_ref=logical_ref,
+                obligation_id=correlated.obligation_id,
+                observation=source_observation,
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                target_seat=correlated.declared_target_seat,
+                candidate=candidate.to_dict(),
+            )
     except DialogueObservationProtocolError:
         raise
-    except (TypeError, UnicodeDecodeError, ValueError, WakeObligationError):
+    except (
+        TypeError, UnicodeDecodeError, ValueError, WakeObligationError,
+        DialogueSourceResolutionError,
+    ):
         raise DialogueObservationProtocolError() from None
     return DialogueWakeRequest(
         operation=value["operation"],
@@ -628,7 +734,107 @@ def parse_wake_request(raw: bytes) -> DialogueWakeRequest:
         candidate=candidate,
         obligation=obligation,
         proposed_route=route,
+        source_observation=source_observation,
+        physical_source=physical_source,
+        transport_schema=schema,
     )
+
+
+def parse_source_reconcile_request(raw: bytes) -> DialogueSourceReconcileRequest:
+    if not isinstance(raw, bytes) or not raw or len(raw) > MAX_REQUEST_BYTES:
+        raise DialogueObservationProtocolError()
+    try:
+        value = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_pairs_object, parse_constant=_reject_constant,
+        )
+        if (
+            type(value) is not dict
+            or set(value) != _SOURCE_RECONCILE_KEYS
+            or value.get("schema") != SOURCE_RECONCILE_REQUEST_SCHEMA
+            or value.get("operation") != RECONCILE_DIALOGUE_SOURCES
+        ):
+            raise DialogueObservationProtocolError()
+        parent = _validate_parent(value.get("parent"))
+        snapshot = DialogueSourceSnapshot.from_dict(value.get("snapshot"))
+        from common.agent_dialogue_contract_v2 import validate_message_v2
+        normalized_messages = tuple(
+            validate_message_v2(message.to_dict()) for message in snapshot.messages
+        )
+        if tuple(message.to_dict() for message in snapshot.messages) != normalized_messages:
+            raise DialogueObservationProtocolError()
+        if (
+            snapshot.parent_fingerprint != parent["fingerprint"]
+            or snapshot.operation_key != parent["operation_key"]
+        ):
+            raise DialogueObservationProtocolError()
+    except DialogueObservationProtocolError:
+        raise
+    except (DialogueSourceResolutionError, TypeError, UnicodeDecodeError, ValueError):
+        raise DialogueObservationProtocolError() from None
+    return DialogueSourceReconcileRequest(parent, snapshot)
+
+
+def parse_delayed_ack_request(raw: bytes) -> DialogueDelayedAckRequest:
+    if not isinstance(raw, bytes) or not raw or len(raw) > MAX_REQUEST_BYTES:
+        raise DialogueObservationProtocolError()
+    try:
+        value = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_pairs_object, parse_constant=_reject_constant,
+        )
+        if (
+            type(value) is not dict
+            or set(value) != _DELAYED_ACK_KEYS
+            or value.get("schema") != DELAYED_ACK_REQUEST_SCHEMA
+            or value.get("operation") != RECONCILE_WAKE_ACK
+        ):
+            raise DialogueObservationProtocolError()
+        parent = _validate_parent(value.get("parent"))
+        if parent != value.get("parent"):
+            raise DialogueObservationProtocolError()
+        observation = DialogueSourceObservation.from_dict(
+            value.get("source_observation")
+        )
+    except DialogueObservationProtocolError:
+        raise
+    except (DialogueSourceResolutionError, TypeError, UnicodeDecodeError, ValueError):
+        raise DialogueObservationProtocolError() from None
+    return DialogueDelayedAckRequest(parent, observation)
+
+
+def source_reconcile_response_bytes(
+    *, state: str, reason: str,
+    source_observation: DialogueSourceObservation | None = None,
+) -> bytes:
+    allowed = {
+        "NOT_APPLICABLE", "NO_RESOLUTION_REQUIRED", "ACK_REQUIRED",
+        "CARRIER_IDENTITY_UNAVAILABLE", "RECORDED", "UNKNOWN",
+    }
+    if state not in allowed or not isinstance(reason, str) or _REASON_RE.fullmatch(reason) is None:
+        raise DialogueObservationProtocolError("FACTS_REFUSED")
+    pending = state == "ACK_REQUIRED" and reason == "DELIVERED_ACK_PENDING"
+    if pending != (type(source_observation) is DialogueSourceObservation):
+        raise DialogueObservationProtocolError("FACTS_REFUSED")
+    value = {
+        "schema": SOURCE_RECONCILE_RESPONSE_SCHEMA,
+        "state": state, "reason": reason,
+    }
+    if source_observation is not None:
+        value["source_observation"] = source_observation.to_dict()
+    return _canonical_json(value) + b"\n"
+
+
+def delayed_ack_response_bytes(*, state: str, reason: str) -> bytes:
+    if (
+        state not in {"NOT_APPLICABLE", "RECORDED", "HOLD", "EFFECT_UNKNOWN"}
+        or not isinstance(reason, str)
+        or _REASON_RE.fullmatch(reason) is None
+    ):
+        raise DialogueObservationProtocolError("FACTS_REFUSED")
+    return _canonical_json({
+        "schema": DELAYED_ACK_RESPONSE_SCHEMA, "state": state, "reason": reason,
+    }) + b"\n"
 
 
 def _canonical_json(value: object) -> bytes:
@@ -1827,9 +2033,12 @@ def _read_canonical_terminal_wake_on_connection(
 __all__ = [
     "ACTIVE_CURRENT_WORKER",
     "CANONICAL_WAKE_EVENT_BUDGET",
+    "DELAYED_ACK_REQUEST_SCHEMA",
+    "DELAYED_ACK_RESPONSE_SCHEMA",
     "MAX_REQUEST_BYTES",
     "MAX_RESPONSE_BYTES",
     "RECONCILE_WAKE",
+    "RECONCILE_WAKE_ACK",
     "REQUEST_SCHEMA",
     "RESOLVE_PARENT",
     "RESPONSE_SCHEMA",
@@ -1854,6 +2063,7 @@ __all__ = [
     "DialogueObservationFacts",
     "DialogueObservationProtocolError",
     "DialogueCandidateReference",
+    "DialogueDelayedAckRequest",
     "DialogueWakeRequest",
     "ObservationRequest",
     "PublicRuntimeBindingFacts",
@@ -1861,6 +2071,7 @@ __all__ = [
     "TerminalProjectionReceiptFacts",
     "TerminalProjectionReceiptReference",
     "parse_observation_request",
+    "parse_delayed_ack_request",
     "parse_wake_request",
     "inspect_terminal_return_history",
     "normalize_terminal_return_projection_receipt",
@@ -1868,6 +2079,8 @@ __all__ = [
     "read_canonical_terminal_wake",
     "read_runtime_canonical_terminal_wake",
     "response_bytes",
+    "delayed_ack_response_bytes",
+    "source_reconcile_response_bytes",
     "runtime_canonical_terminal_facts",
     "terminal_return_event_material",
     "terminal_return_phase_spec",
