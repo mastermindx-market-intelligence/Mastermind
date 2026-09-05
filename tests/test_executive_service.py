@@ -1198,6 +1198,614 @@ def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
     assert phases.count(LedgerPhase.DELIVERY_ATTEMPT) == 1
 
 
+def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The future composition crosses the socket without replacing either resolver."""
+
+    from contextlib import contextmanager
+    from control_plane.dialogue_wake_canary_activation import (
+        DialogueWakeCanaryActivationGrant,
+        DialogueWakeCanaryProfile,
+        SCHEMA as CANARY_SCHEMA,
+    )
+    from control_plane.ceo_intent import submit_intent
+    from control_plane.operator_harness_contract import (
+        AttentionTurnObservation,
+        CapabilityIdentity,
+        CapabilityManifest,
+        ObservedCapabilityIdentity,
+        OperationId,
+        ProcessIdentityObservation,
+        ProcessLiveness,
+        ProviderWriterState,
+        ReconcileObservation,
+        TurnStartObservation,
+    )
+    from control_plane.executive_orchestration_principal import (
+        OperatorPrincipalObservation,
+    )
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
+    from control_plane.wake_persist import WakeLedgerRepository
+    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
+    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.contract_v2 import (
+        PARENT_SCHEMA_V2,
+        build_parent_v2,
+    )
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        HistoricalWakeContext,
+        PersistedWakeCarrier,
+    )
+    from tests import test_wake_ack_ingress as ack_fixtures
+
+    source = _terminal_dialogue_source()
+    runtime = Runtime.at(tmp_path / "runtime")
+    execution_binding = {
+        "eligible_quota_classes": ["default"],
+        "provider": "openai-codex",
+        "model": "fixture-model",
+        "effort": "medium",
+        "cost_class": "small",
+        "base_sha": "b" * 40,
+        "routing_policy_version": "fixture-policy-v1",
+        "execution_profile_id": "fixture-profile-v1",
+        "execution_profile_digest": "1" * 64,
+        "capability_policy_version": "fixture-capabilities-v1",
+        "capability_policy_digest": "2" * 64,
+        "operator_eligible_quota_classes": ["default"],
+        "operator_provider": "openai-codex",
+        "operator_model": "fixture-model",
+        "operator_effort": "medium",
+        "operator_cost_class": "small",
+        "operator_routing_policy_version": "fixture-policy-v1",
+        "operator_execution_profile_id": "fixture-profile-v1",
+        "operator_execution_profile_digest": "1" * 64,
+        "operator_capability_policy_version": "fixture-capabilities-v1",
+        "operator_capability_policy_digest": "2" * 64,
+        "operator_harness_binary_digest": "a" * 64,
+        "operator_harness_version": "1",
+        "operator_harness_armed": True,
+    }
+    runtime.workers.register_worker(
+        "worker-a",
+        provider="openai-codex",
+        account_label="account-a",
+        worker_type="fixture",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "openai-codex",
+                "model": "fixture-model",
+                "effort": "medium",
+                "capabilities": ["read"],
+                "cost_class": "small",
+                "metadata": {
+                    "execution_profile_id": "fixture-profile-v1",
+                    "execution_profile_digest": "1" * 64,
+                    "capability_policy_version": "fixture-capabilities-v1",
+                    "capability_policy_digest": "2" * 64,
+                },
+            }
+        },
+    )
+    admitted = submit_intent(
+        runtime,
+        {**ack_fixtures._intent(), "workstream": source["work_ref"]},
+        execution_binding=execution_binding,
+        dialogue_source=source,
+        require_dialogue_source=True,
+    )
+    root = runtime.jobs.get_job(admitted["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert dispatch is not None and dispatch.lease_token is not None
+    mcp_capability = CapabilityIdentity(
+        name="mastermind-company-dialogue",
+        harness_binary_digest="a" * 64,
+        kind="mcp_server",
+        tool_schema_digest=COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+        mcp_server_identity=COMPANY_DIALOGUE_SERVER_IDENTITY,
+        mcp_server_version=COMPANY_DIALOGUE_SERVER_VERSION,
+    )
+    profile = dataclasses.replace(
+        ack_fixtures._profile(dispatch),
+        capabilities=CapabilityManifest(required=(mcp_capability,)),
+    )
+    sealed = runtime.operator_harness.seal_operator_harness_attempt(
+        dispatch.attempt.attempt_id,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+    )
+    start_operation = OperationId("ohf-op:canary-socket-start")
+    epoch, generation = runtime.operator_harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        operation_id=start_operation,
+    )
+    process = ProcessIdentityObservation(4101, 4101, "start-4101", "boot-fixture")
+    runtime.operator_harness.bind_start_result(
+        epoch=epoch,
+        generation=generation,
+        operation_id=start_operation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        provider_session_id="PROVIDER-SESSION-1",
+        process=process,
+    )
+    principal = OperatorPrincipalObservation(
+        attempt_id=sealed.attempt_id,
+        worker_id="worker-a",
+        process_generation_id=generation.process_generation_id,
+        provider_session_id="PROVIDER-SESSION-1",
+        process_identity={
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        },
+        os_principal_name="fixture-principal",
+        os_principal_uid=os.getuid(),
+        provider_home_identity={
+            "path": "/tmp/wake-canary-home",
+            "device": 1,
+            "inode": 2,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+            "mode": 0o700,
+        },
+        observed_at_ms=runtime.store.now_ms(),
+    )
+    attestation = dataclasses.replace(
+        ack_fixtures._attestation(profile),
+        capabilities=(
+            ObservedCapabilityIdentity(
+                kind="mcp_server",
+                name=mcp_capability.name,
+                tool_schema_digest=COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+                mcp_server_identity=COMPANY_DIALOGUE_SERVER_IDENTITY,
+                mcp_server_version=COMPANY_DIALOGUE_SERVER_VERSION,
+            ),
+        ),
+    )
+    runtime.operator_harness.seal_attestation(
+        generation=generation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+        attestation=attestation,
+        principal_observation=principal,
+    )
+
+    parent = build_parent_v2(
+        {
+            "schema": PARENT_SCHEMA_V2,
+            "work_ref": source["work_ref"],
+            "commission_ref": source["commission_ref"],
+            "session_ref": f"asd-session-exec-{sealed.job_id.lower()}",
+            "operation_key": f"exec-{sealed.job_id.lower()}",
+            "watch_mode": source["watch_mode"],
+            "allowed_sol_user_ids": ["U0BRETDUAS2"],
+            "created_at": "2026-09-03T01:00:00Z",
+        }
+    )
+    target = SessionTarget(
+        session_alias="COO-CANARY",
+        target_seat="coo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=False,
+    )
+    registry = SessionTargetRegistry(
+        schema=TARGET_SCHEMA,
+        lifecycle_authority="executive_os",
+        production_armed=False,
+        policy_version="canary-socket-test",
+        default_alias_by_seat={"coo": target.session_alias},
+        workstream_alias_by_seat={},
+        root_job_bindings={root.job_id: {"coo": target.session_alias}},
+        targets={target.session_alias: target},
+    )
+    monkeypatch.setattr(
+        "control_plane.session_targets.load_session_targets", lambda: registry
+    )
+    binding = project_runtime_binding(runtime, sealed.attempt_id, target)
+    facts_reader = object.__new__(ExecutiveControlService)
+    source_facts = facts_reader._runtime_dialogue_observation_facts(runtime, parent)
+    source_response = reduce_dialogue_observation(
+        parent=parent,
+        thread_ts="1788000000.123456",
+        facts=source_facts,
+    )
+    assert source_response.get("state") == "RESOLVED", (
+        source_response,
+        dataclasses.asdict(source_facts),
+    )
+    material = source_response["observation"]
+    candidate = DialogueCandidateReference(
+        mode=source_response["mode"],
+        root_job_id=material["root_job_id"],
+        job_id=material["job_id"],
+        attempt_id=material["attempt_id"],
+        worker_id=material["worker_id"],
+        evidence_digest=material["evidence_digest"],
+    )
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "e" * 64,
+        declared_target_seat="coo",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        root_job_id=root.job_id,
+        source_workstream=str(source["work_ref"]),
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+    grant = DialogueWakeCanaryActivationGrant(
+        schema=CANARY_SCHEMA,
+        installed_release_sha="a" * 40,
+        operation_key=parent["operation_key"],
+        source_root_job_id=candidate.root_job_id,
+        source_job_id=candidate.job_id,
+        source_attempt_id=candidate.attempt_id,
+        source_worker_id=candidate.worker_id,
+        source_semantic_digest=candidate.evidence_digest,
+        obligation_id=obligation.obligation_id,
+        target_seat="coo",
+        target_session_alias=target.session_alias,
+        target_attempt_id=sealed.attempt_id,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+        process_generation_id=generation.process_generation_id,
+        policy_digest=route.policy_digest,
+        valid_from_epoch_seconds=1_700_000_000,
+        expires_at_epoch_seconds=1_700_000_600,
+    )
+
+    call_order: list[tuple[str, int]] = []
+    initial_thread = threading.get_ident()
+    original_read = runtime.store.read
+
+    @contextmanager
+    def observed_read():
+        thread_id = threading.get_ident()
+        call_order.append(("read-enter", thread_id))
+        with original_read() as connection:
+            yield connection
+        call_order.append(("read-exit", thread_id))
+
+    monkeypatch.setattr(runtime.store, "read", observed_read)
+
+    class Operator:
+        deliver_calls = 0
+        reconcile_calls = 0
+
+        def deliver_attention(self, **kwargs):
+            self.deliver_calls += 1
+            call_order.append(("deliver", threading.get_ident()))
+            return AttentionTurnObservation(
+                process_generation_id=generation.process_generation_id,
+                provider_session_id=binding.native_handle,
+                nudge_id=kwargs["nudge_id"],
+                provider_native_turn_id="turn-canary-1",
+                accepted=True,
+                delivered=False,
+            )
+
+        def reconcile(self, observed_generation):
+            self.reconcile_calls += 1
+            assert observed_generation == generation
+            call_order.append(("reconcile", threading.get_ident()))
+            return ReconcileObservation(
+                process_liveness=ProcessLiveness.ALIVE,
+                observed_process=process,
+                provider_session_reachable=True,
+                provider_writer_state=ProviderWriterState.HELD,
+                observed_provider_session_id=binding.native_handle,
+                late_attention_observation=AttentionTurnObservation(
+                    process_generation_id=generation.process_generation_id,
+                    provider_session_id=binding.native_handle,
+                    nudge_id=next(
+                        record.record.nudge_id
+                        for record in WakeLedgerRepository(runtime).list_records(
+                            obligation.obligation_id
+                        )
+                        if record.record.phase is LedgerPhase.ACCEPTED
+                    ),
+                    provider_native_turn_id="turn-canary-1",
+                    accepted=True,
+                    delivered=True,
+                ),
+            )
+
+    operator = Operator()
+
+    def carrier_factory(**kwargs):
+        repository = WakeLedgerRepository(kwargs["runtime"])
+        if kwargs["historical_only"]:
+            def historical_context(attempt):
+                historical = kwargs["historical_context_for"](attempt)
+                client = CodexCurrentWriterWakeClient(
+                    operator_adapter=historical.operator_adapter,
+                    generation=historical.generation,
+                    attempt_id=historical.target_attempt_id,
+                    runtime_binding=historical.runtime_binding,
+                )
+                return HistoricalWakeContext(
+                    dispatchers=WakeDispatcherRegistry(
+                        {"codex-app-server": CodexAppServerWakeDispatcher(client)}
+                    ),
+                    runtime_binding=historical.runtime_binding,
+                )
+
+            return PersistedWakeCarrier(
+                repository=repository,
+                dispatchers=WakeDispatcherRegistry(),
+                current_binding_for=lambda _route: None,
+                retry_policy=kwargs["retry_policy"],
+                canary_profile=kwargs["canary_profile"],
+                historical_context_for=historical_context,
+            )
+        client = CodexCurrentWriterWakeClient(
+            operator_adapter=kwargs["resolved"].operator_adapter,
+            generation=kwargs["generation"],
+            attempt_id=kwargs["resolved"].target_attempt_id,
+            runtime_binding=kwargs["current_binding"],
+            pre_submit_guard=kwargs["pre_submit_guard"],
+        )
+        return PersistedWakeCarrier(
+            repository=repository,
+            dispatchers=WakeDispatcherRegistry(
+                {"codex-app-server": CodexAppServerWakeDispatcher(client)}
+            ),
+            current_binding_for=lambda _route: kwargs["current_binding"],
+            retry_policy=kwargs["retry_policy"],
+            target_registry=kwargs["resolved"].registry,
+            canary_profile=kwargs["canary_profile"],
+            historical_context_for=kwargs["historical_context_for"],
+        )
+
+    clock = 1_700_000_100
+
+    def now_epoch_seconds():
+        call_order.append(("clock", threading.get_ident()))
+        return clock
+
+    bridge = ExecutiveDialogueWakeBridge(
+        target_provider=None,
+        retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+        operator_adapter=operator,
+        carrier_factory=carrier_factory,
+        canary_profile=DialogueWakeCanaryProfile(grant),
+        canary_now_epoch_seconds=now_epoch_seconds,
+        installed_release_sha=grant.installed_release_sha,
+        operation_key=grant.operation_key,
+    )
+    actual_current_facts = bridge._current_canary_facts
+
+    def observed_current_facts(*args):
+        call_order.append(("current-enter", threading.get_ident()))
+        result = actual_current_facts(*args)
+        call_order.append(("current-exit", threading.get_ident()))
+        return result
+
+    actual_historical_target = bridge._resolve_historical_target
+    historical_resolution_enabled = True
+
+    def observed_historical_target(*args):
+        call_order.append(("historical-enter", threading.get_ident()))
+        if not historical_resolution_enabled:
+            raise StateConflict("diagnostic historical resolver removal")
+        result = actual_historical_target(*args)
+        call_order.append(("historical-exit", threading.get_ident()))
+        return result
+
+    monkeypatch.setattr(bridge, "_current_canary_facts", observed_current_facts)
+    monkeypatch.setattr(bridge, "_resolve_historical_target", observed_historical_target)
+    request = {
+        "schema": "mastermind.dialogue_wake_request/v1",
+        "operation": SUBMIT_WAKE,
+        "parent": parent,
+        "thread_ts": "1788000000.123456",
+        "candidate": candidate.to_dict(),
+        "obligation": obligation.to_dict(),
+        "route": route.to_dict(),
+    }
+
+    async def exchange(path: Path) -> dict[str, object]:
+        return await _raw_request(
+            path,
+            json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+            + b"\n",
+        )
+
+    async def exercise() -> None:
+        monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: 457)
+        observation_path = short_socket_root / "canary-defaults" / "dialogue.sock"
+        service = ExecutiveControlService(
+            _config(tmp_path / "service", socket_root=short_socket_root / "operator"),
+            runtime_factory=lambda _root: runtime,
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_wake_handler=bridge,
+        )
+        await service.start()
+        try:
+            first = await exchange(observation_path)
+            assert first == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }
+            assert operator.deliver_calls == 1
+            deliver_index = next(
+                index for index, item in enumerate(call_order) if item[0] == "deliver"
+            )
+            worker_thread = call_order[deliver_index][1]
+            assert worker_thread != initial_thread
+            worker_prefix = [
+                name for name, thread_id in call_order[:deliver_index]
+                if thread_id == worker_thread
+            ]
+            final_guard_start = len(worker_prefix) - 1 - worker_prefix[::-1].index(
+                "current-enter"
+            )
+            assert worker_prefix[final_guard_start:] == [
+                "current-enter",
+                "read-enter",
+                "clock",
+                "read-exit",
+                "current-exit",
+            ]
+
+            turn_operation = OperationId("ohf-op:canary-socket-turn")
+            turn = runtime.operator_harness.reserve_turn(
+                epoch=epoch,
+                generation=generation,
+                operation_id=turn_operation,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+            )
+            runtime.operator_harness.acknowledge_turn(
+                turn=turn,
+                operation_id=turn_operation,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                observation=TurnStartObservation("NATIVE-CANARY-G1", True),
+            )
+            runtime.operator_harness.record_reconcile_observation(
+                generation=generation,
+                observation=ReconcileObservation(
+                    ProcessLiveness.PROVEN_DEAD,
+                    process,
+                    True,
+                    ProviderWriterState.RELEASED,
+                    binding.native_handle,
+                ),
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+            )
+            resume = OperationId("ohf-op:canary-socket-resume")
+            generation2 = runtime.operator_harness.reserve_same_epoch_resume(
+                epoch=epoch,
+                old_generation=generation,
+                operation_id=resume,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+            )
+            process2 = ProcessIdentityObservation(
+                4102, 4102, "start-4102", "boot-fixture"
+            )
+            runtime.operator_harness.bind_resume_result(
+                epoch=epoch,
+                generation=generation2,
+                operation_id=resume,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                provider_session_id=binding.native_handle,
+                process=process2,
+            )
+            runtime.operator_harness.seal_attestation(
+                generation=generation2,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                requested=profile,
+                attestation=attestation,
+                principal_observation=OperatorPrincipalObservation.from_dict(
+                    {
+                        **principal.to_dict(),
+                        "process_generation_id": generation2.process_generation_id,
+                        "process_identity": {
+                            "pid": process2.pid,
+                            "pgid": process2.pgid,
+                            "process_start_identity": process2.process_start_identity,
+                            "boot_id": process2.boot_id,
+                        },
+                    }
+                ),
+            )
+
+            phases_before_counterfactual = [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ]
+            nonlocal historical_resolution_enabled
+            historical_resolution_enabled = False
+            blocked = await exchange(observation_path)
+            assert blocked == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "EFFECT_UNKNOWN",
+                "reason": "WAKE_EFFECT_UNKNOWN",
+            }
+            assert operator.reconcile_calls == 0
+            assert [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ] == phases_before_counterfactual
+
+            historical_resolution_enabled = True
+            replay = await exchange(observation_path)
+            assert replay == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }
+            assert operator.deliver_calls == 1
+            assert operator.reconcile_calls == 1
+            assert [name for name, _thread_id in call_order].count(
+                "historical-enter"
+            ) == 2
+            assert [name for name, _thread_id in call_order].count(
+                "historical-exit"
+            ) == 1
+            assert [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ].count(LedgerPhase.DELIVERY_ATTEMPT) == 1
+
+            resolver_calls = operator.reconcile_calls
+            terminal_replay = await exchange(observation_path)
+            assert terminal_replay == replay
+            assert operator.reconcile_calls == resolver_calls
+            assert operator.deliver_calls == 1
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
 
 def test_dialogue_observation_shutdown_never_unlinks_replaced_inode(
     tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
