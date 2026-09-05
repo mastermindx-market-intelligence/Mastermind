@@ -430,14 +430,47 @@
     document.getElementById("ccr-drawer-close").focus();
   }
 
-  function renderNeedsYou(items) {
+  function attentionReadState(doc, body) {
+    var attention = doc && doc.attention;
+    var rowsKnown = attention && typeof attention === "object" &&
+      Array.isArray(attention.chairman) && Array.isArray(attention.ceo) && Array.isArray(attention.coo);
+    if (!rowsKnown || (body && (body.state_refresh_error || body.refresh_in_flight))) return "unavailable";
+    var degraded = Array.isArray(doc.degraded) ? doc.degraded : [];
+    if (degraded.some(function (entry) { return typeof entry === "string" && entry.indexOf("executive_inbox:") === 0; })) {
+      return "unavailable";
+    }
+    if (REMOTE_READ_ONLY) {
+      var remoteRuntime = doc.source_freshness && doc.source_freshness.executive_runtime;
+      return remoteRuntime && remoteRuntime.state === "fresh" ? "current" : "unavailable";
+    }
+    if ((doc.sources || {}).runtime_db_present !== true || degraded.some(function (entry) {
+      return typeof entry === "string" && entry.indexOf("executive_runtime:") === 0;
+    })) return "runtime_unavailable";
+    return "current";
+  }
+
+  function emptyAttentionText(state, normalText) {
+    if (state === "unavailable") return "Attention unavailable — refresh canonical sources.";
+    if (state === "runtime_unavailable") return "No recorded Inbox items. Executive runtime unavailable.";
+    return normalText;
+  }
+
+  function appendAttentionFreshnessNote(list, state) {
+    if (state === "unavailable") {
+      list.appendChild(el("li", { text: "Attention may be stale — refresh canonical sources.", className: "ccr-empty-line" }));
+    } else if (state === "runtime_unavailable") {
+      list.appendChild(el("li", { text: "Attention may be incomplete — Executive runtime unavailable.", className: "ccr-empty-line" }));
+    }
+  }
+
+  function renderNeedsYou(items, readState) {
     var section = document.getElementById("needs-you");
     var list = section.querySelector(".ccr-attention-list");
     clear(list);
     var rows = items || [];
     section.className = rows.length ? "ccr-needs ccr-has-items" : "ccr-needs";
     if (!rows.length) {
-      list.appendChild(el("li", { text: "Nothing is waiting on you.", className: "ccr-empty-line" }));
+      list.appendChild(el("li", { text: emptyAttentionText(readState, "Nothing is waiting on you."), className: "ccr-empty-line" }));
       return;
     }
     rows.forEach(function (item) {
@@ -474,15 +507,16 @@
       li.appendChild(actions);
       list.appendChild(li);
     });
+    appendAttentionFreshnessNote(list, readState);
   }
 
-  function renderMiniAttention(containerId, items) {
+  function renderMiniAttention(containerId, items, readState) {
     var container = document.querySelector("#" + containerId + " .ccr-mini-list");
     clear(container);
     var rows = items || [];
     var target = containerId === "sol-attention" ? "ceo" : "coo";
     if (!rows.length) {
-      container.appendChild(el("li", { text: "Clear", className: "ccr-empty-line" }));
+      container.appendChild(el("li", { text: emptyAttentionText(readState, "Clear"), className: "ccr-empty-line" }));
       return;
     }
     rows.slice(0, 5).forEach(function (item) {
@@ -498,6 +532,7 @@
       container.appendChild(li);
     });
     if (rows.length > 5) container.appendChild(el("li", { text: "+" + (rows.length - 5) + " more", className: "ccr-empty-line" }));
+    appendAttentionFreshnessNote(container, readState);
   }
 
   // bindings --------------------------------------------------------------
@@ -1681,7 +1716,7 @@
     band.appendChild(head);
 
     if (!refs.length) {
-      band.appendChild(el("p", { text: "Nothing here needs your decision. Every recorded turn belongs to an actor that can proceed on its own.", className: "ccr-empty-line" }));
+      band.appendChild(el("p", { text: "No Chairman decision is recorded in this projection. Check source-read issues before treating it as current.", className: "ccr-empty-line" }));
       return band;
     }
     var list = el("ul", { className: "ccr-au-decision-list" });
@@ -1976,7 +2011,7 @@
     var panel = el("section", { className: "ccr-au-quiet" });
     panel.appendChild(el("p", { text: "Not wired yet", className: "ccr-au-quiet-title" }));
     panel.appendChild(el("p", {
-      text: "The Control Room is not serving an autonomy projection on this state document. Nothing is hidden and nothing has failed — this surface stays blank until the server publishes it.",
+      text: "No autonomy projection was returned. Its availability and current responsibility state are unknown.",
       className: "ccr-au-quiet-text",
     }));
     mount.appendChild(panel);
@@ -2005,7 +2040,7 @@
     var list = el("div", { className: "ccr-au-list" });
     if (!cards.length) {
       list.appendChild(el("p", {
-        text: "No responsibility is being carried right now. The projection answered and returned an empty list.",
+        text: "No responsibilities were returned by this projection. Check source-read issues below.",
         className: "ccr-au-list-empty",
       }));
     } else {
@@ -2052,16 +2087,18 @@
     renderDegraded(degraded);
 
     var attention = doc.attention || {};
+    var attentionState = attentionReadState(doc, body);
     var chairman = attention.chairman || [];
     var ceo = attention.ceo || [];
     var coo = attention.coo || [];
-    renderNeedsYou(chairman);
-    renderMiniAttention("sol-attention", ceo);
-    renderMiniAttention("coo", coo);
-    setTally("chairman", chairman.length);
-    setTally("ceo", ceo.length);
-    setTally("coo", coo.length);
-    document.getElementById("nav-today-count").textContent = String(chairman.length);
+    renderNeedsYou(chairman, attentionState);
+    renderMiniAttention("sol-attention", ceo, attentionState);
+    renderMiniAttention("coo", coo, attentionState);
+    var attentionTally = attentionState === "current" ? chairman.length : "—";
+    setTally("chairman", attentionTally);
+    setTally("ceo", attentionState === "current" ? ceo.length : "—");
+    setTally("coo", attentionState === "current" ? coo.length : "—");
+    document.getElementById("nav-today-count").textContent = String(attentionTally);
 
     renderAutonomy(doc.autonomy);
     renderWork();
@@ -2079,12 +2116,40 @@
 
   function loadState() {
     return getJSON("/api/state").then(function (body) {
+      // Local state envelopes intentionally have no `ok` member, while the
+      // remote read-only relay uses `{ok:true, control_room:…}`.  Both must
+      // contain the Control Room's essential Inbox arrays before replacing
+      // the last rendered state.  In particular, a remote 503 parses as JSON
+      // (`{ok:false,error:…}`), so transport success alone is not state
+      // success.
+      if (!hasUsableStateEnvelope(body)) {
+        return Promise.reject(new Error("control_room_state_unavailable"));
+      }
       renderEverything(body);
       return body;
     }).catch(function () {
-      renderDegraded(["control_room_api: unavailable — this page could not reach the state endpoint"]);
+      var previous = STATE.doc && typeof STATE.doc === "object" ? STATE.doc : {};
+      var previousDegraded = Array.isArray(previous.degraded) ? previous.degraded.slice() : [];
+      previousDegraded.push("control_room_api: unavailable — current state could not be read");
+      renderDegraded(previousDegraded);
+      var attention = previous.attention && typeof previous.attention === "object" ? previous.attention : {};
+      renderNeedsYou(Array.isArray(attention.chairman) ? attention.chairman : [], "unavailable");
+      renderMiniAttention("sol-attention", Array.isArray(attention.ceo) ? attention.ceo : [], "unavailable");
+      renderMiniAttention("coo", Array.isArray(attention.coo) ? attention.coo : [], "unavailable");
+      setTally("chairman", "—");
+      setTally("ceo", "—");
+      setTally("coo", "—");
+      document.getElementById("nav-today-count").textContent = "—";
       return null;
     });
+  }
+
+  function hasUsableStateEnvelope(body) {
+    if (body && body.ok === false) return false;
+    var doc = body && body.control_room;
+    var attention = doc && typeof doc === "object" && !Array.isArray(doc) && doc.attention;
+    return !!(attention && typeof attention === "object" &&
+      Array.isArray(attention.chairman) && Array.isArray(attention.ceo) && Array.isArray(attention.coo));
   }
 
   // theme -----------------------------------------------------------------
