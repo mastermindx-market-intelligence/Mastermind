@@ -108,9 +108,11 @@ The grammar remains the exact first-line discriminator, one canonical single-lin
 
 ## 4. Linear and ownership reconciliation
 
-| Record | Current read | Disposition |
+The following table preserves the initial investigation snapshot. MAS-48's stale paragraphs were subsequently corrected at 2026-09-05T11:14:32.086Z while keeping In Progress/PARTIAL and all release gates; Mastermind #489 comment 5551411858 records that completed correction. Do not repeat it merely because the original observation remains below.
+
+| Record | Initial read | Disposition |
 |---|---|---|
-| MAS-48 | In Progress / PARTIAL, but body says B1 Todo and C1 not built | Parent description is stale against child/source evidence. Correct projection without changing release gates. |
+| MAS-48 | In Progress / PARTIAL, but body says B1 Todo and C1 not built | Parent description was stale against child/source evidence; the projection-only correction above is complete. |
 | MAS-75 | Done / BUILT_NOT_PROVEN, #100 protected | Completed implementation; its old next-action R0 is historical. |
 | MAS-105 | Done / SPEC_ONLY, accepted #99 architecture | Do not reopen original F0 or imply its completion proved production. |
 | MAS-108 | Done / BUILT_NOT_PROVEN, #106/#114 protected | C1, not another B1 build, owns next production-read work. |
@@ -173,7 +175,7 @@ Wave labels below are plan labels, not Executive Job identities or new worker cl
 | Wave | One observable mission | Gate / owner / stop |
 |---|---|---|
 | R0 host census | Current owner/mode/root/workspace and permitted live-read receipt or typed blocker | One read-only carrier commissioned below; no configuration effects. |
-| R1 Personal account canary | Actual fresh Personal chat scans unchanged readonly MCP and invokes four reads | After owner/root qualification and native account access; stop with A/B/C/D discrimination and visible receipts. |
+| R1 Personal account canary | Actual fresh Personal chat scans unchanged readonly MCP and invokes the reads for which canonical inputs exist | After owner/root qualification and native account access; report each tool and every missing input separately under section 7.1. |
 | R2 optional minimal read repair | Repair only a positively demonstrated manifest or canonical-read binding defect | Only after R1/root falsifier; existing gateway owner; one useful read vertical, no second backend. |
 | C1 reconciliation | Resolve original Step-D effect using original RuntimeBinding/status evidence | Existing operation/carrier only; do not replay. Production continuation needs its own accepted edge. |
 | S0 grant qualification | Exact installed fixture grant and fresh verifier result | Existing native credential owner; stop before final experiment. |
@@ -202,21 +204,21 @@ No B2, C2, credential, tunnel-reconfiguration or production canary was commissio
 
 ## 7. Personal versus Business acceptance matrix
 
-`BLOCKER` below denotes missing acceptance evidence, not a proved plan limitation. Positive comparison categories are limited to the ordinary shared SaaS workflow; a controlled paired account run remains owed. Current-session observations do not attest another account's configuration.
+`BLOCKER` below denotes missing comparative acceptance evidence, not a proved plan limitation or a failure of every individual capability. Current-session SaaS observations remain valid, but do not independently attest the account/plan configuration or demonstrate a paired Business result. The earlier `FUNCTIONALLY_EQUIVALENT` labels for seven unpaired rows were premature and are withdrawn. Every positive parity classification requires actual results from both qualified surfaces; common source code or similar tool labels are not comparison evidence.
 
-| # | CEO job | Personal evidence now | Business comparison | Classification |
+| # | CEO job | Current-session evidence | Business comparison evidence | Parity classification |
 |---|---|---|---|---|
-| 1 | Fresh Sol boot | Current source recovery performed | Same protected bootstrap contract; paired boot not captured | FUNCTIONALLY_EQUIVALENT, procedure scope |
-| 2 | Load current Skillpack | Exact protected SHA and same-SHA reads | Same GitHub procedure | FUNCTIONALLY_EQUIVALENT, source scope |
+| 1 | Fresh Sol boot | Current source recovery performed | Paired qualified-account boot not captured | BLOCKER |
+| 2 | Load current Skillpack | Exact protected SHA and same-SHA reads | Paired qualified-account read not captured | BLOCKER |
 | 3 | Executive state | No direct tool / no live hot-state publication | Loopback/test-issuer only, not account proof | BLOCKER |
 | 4 | Executive inbox | No real account invocation | No paired account receipt | BLOCKER |
 | 5 | Inspect Job | No canonical live Job read | No paired account receipt | BLOCKER |
 | 6 | Inspect intent status | No canonical live intent read | No paired account receipt | BLOCKER |
-| 7 | Organizational context | Real Macro Agent OS reads | Same durable source path | FUNCTIONALLY_EQUIVALENT, GitHub read scope |
-| 8 | GitHub search/read | Performed | Existing native source path; account comparison owed | FUNCTIONALLY_EQUIVALENT, SaaS scope |
-| 9 | PR/CI evidence review | PR/source/review metadata inspected; not an independent approval | Same GitHub evidence owner | FUNCTIONALLY_EQUIVALENT, inspection scope |
-| 10 | Slack search/read | Exact complete carriers read | Same transport source | FUNCTIONALLY_EQUIVALENT, SaaS scope |
-| 11 | Authorized worker message | Handoff sent/read back; no receiver ACK | Same ordinary Slack path; not CEO admission | FUNCTIONALLY_EQUIVALENT, delivery only |
+| 7 | Organizational context | Real Macro Agent OS reads | Same durable source exists; comparison not measured | BLOCKER |
+| 8 | GitHub search/read | Performed | Existing native source path; comparison not measured | BLOCKER |
+| 9 | PR/CI evidence review | PR/source/review metadata inspected; not an independent approval | Comparison not measured | BLOCKER |
+| 10 | Slack search/read | Exact complete carriers read | Comparison not measured | BLOCKER |
+| 11 | Authorized worker message | Handoff sent/read back; no receiver ACK | Comparison not measured | BLOCKER |
 | 12 | Bounded CEO intent | Not attempted | No live baseline established | BLOCKER |
 | 13 | Canonical admission/refusal | Not observed from production | No paired account receipt | BLOCKER |
 | 14 | Duplicate reconciliation | Source/fixture semantics only | No real account proof | BLOCKER |
@@ -228,6 +230,21 @@ No B2, C2, credential, tunnel-reconfiguration or production canary was commissio
 | 20 | Review / continue / stop | Existing owners identified; no new end-to-end cycle | No paired proof | BLOCKER |
 
 No row is accepted as literal UI identity. No claim is made that Business currently has a fully working Executive baseline. Product parity means the complete job, not equal plugin labels.
+
+### 7.1 Finite READONLY canary; no empty-runtime deadlock
+
+This is the acceptance design for a later qualified R1 commission, not permission to mutate the existing read-only host census. Keep client/manifest acceptance, tool invocation, backend fidelity and full parity as separate results.
+
+1. Qualify the actual account/workspace and owner-approved existing readonly server generation. Capture only non-secret identity and configuration evidence; no cookies, credentials, raw process arguments or settings screenshots containing secrets.
+2. Scan the unchanged manifest and record the five advertised names, schemas, annotations and actual enabled/disabled state. An absent tool in this chat's tool inventory is not proof that the platform rejected that tool or server. Current official guidance describes native per-tool controls; use a separately authorized native control only when the actual UI supports it, before proposing a source adapter. Never mislabel a write as a read. [O1, O6]
+3. Invoke `executive_state` and `executive_inbox` through the selected real connection, with their empty argument objects. Preserve the complete bounded envelope, degradation, source/grounding identity, source-observation age and independent canonical-root comparison. `ok=true` alone is insufficient.
+4. Obtain Job/intent identifiers only from already-authorized canonical read evidence. Invoke `executive_job` and `ceo_intent_status` only for those exact observed identifiers. If a verified canonical runtime genuinely has no suitable records, report the affected tools as NOT_EXERCISED with the empty-input reason. This is neither a successful positive test nor an account rejection. Do not fabricate IDs, create a Job, install an empty runtime or submit a fixture merely to manufacture a read test. Positive Job/intent rows remain unaccepted until real inputs exist through a separately authorized path.
+5. Record one finite result per attempted call: selected app/tool, exact safe arguments, runtime/server generation, start/end timestamps, envelope/error, and whether an actual native approval was shown. Distinguish native permission denial, platform eligibility, tunnel/initialization/schema failure, backend refusal and missing data. Do not change permission settings or retry a modifying tool to diagnose a read failure.
+6. End the canary with a per-tool ceiling and exact remaining gate. Read connectivity with two unexercised identity-based tools can inform reuse; it cannot be labeled four-tool proof or final parity. No `submit_ceo_intent`, source change, fixture switch, restart, recovery experiment or alternate carrier is included in this read canary.
+
+### 7.2 Comparable evidence, not equal labels
+
+For each parity row, bind both account observations to the same reviewed contract/server generation and equivalent source inputs, documenting any intentionally different backend or time. Keep tool invocation proof distinct from the model's narrative answer. Grade differences in freshness, permissions, returned semantics, complete task outcome and recovery behavior; do not compare a production Personal result with a Business fixture. Approval behavior is observed per call and configuration, never assumed from plan names. The allowed positive classifications remain IDENTICAL, FUNCTIONALLY_EQUIVALENT, PERSONAL_PRO_BETTER, BUSINESS_ONLY and DEGRADED_BUT_ACCEPTABLE, but none is assigned until the paired evidence supports it.
 
 ## 8. Failure and correction contract
 
@@ -256,7 +273,7 @@ After the harmless canary is explicitly released, record: tool-call start, Slack
 Native actions that cannot be represented as completed by this chat:
 
 1. Resolve the existing tunnel owner/generation and canonical read root, then qualify actual Personal account access. If a required organization/workspace association or Tunnels Read+Use permission is absent, its existing native administrator changes only that binding. No new tunnel by default.
-2. In that qualified account, Plugins > + > New Plugin > Tunnel selects the existing owner-approved READONLY target; scan unchanged tools, then use a fresh chat for the four reads. Account consent/privacy/Project-clearance settings require their actual native owner. Never connect the historical fixture and call it production.
+2. In that qualified account, Plugins > + > New Plugin > Tunnel selects the existing owner-approved READONLY target; scan unchanged tools, then use a fresh chat for the reads under section 7.1. Account consent/privacy/Project-clearance settings require their actual native owner. Never connect the historical fixture and call it production.
 3. Recover original C1 RuntimeBinding/session evidence and settle Step D without replay. This is not a request to reinstall or use a substitute session.
 4. Correct the same S0 fixture's installed grant and protected credential through its existing native secret owner, then stop for verifier qualification. No token enters chat, Slack, GitHub, logs or process arguments.
 
@@ -268,7 +285,7 @@ This study establishes current-source reuse boundaries, real projection disagree
 
 The exact next action is to consume or canonically reconcile the existing read-census carrier, obtain its current host/root receipt, then run the no-code Personal-Pro MCP canary on the qualified existing read target. Do not start another Executive backend or B2 while those facts are missing.
 
-Durable continuation belongs in Macro Agent OS, with this source record as the detailed artifact. Linear should receive a projection correction, not a new command queue or a false Done state. All later sessions must fresh-read the exact census root and C1/BSC owners before any new edge.
+Durable continuation belongs in Macro Agent OS, with this source record as the detailed artifact. Linear's initial stale-state correction is complete as recorded in section 4; further projection changes require new evidence, not a new command queue or a false Done state. All later sessions must fresh-read the exact census root and C1/BSC owners before any new edge.
 
 ## Sources and reproducible reads
 
