@@ -253,6 +253,16 @@ class DialogueSourceReconciler(ABC):
         raise NotImplementedError
 
 
+class DialogueDelayedAckReconciler(ABC):
+    """Nominal capability for one stored-source ACK reconciliation attempt."""
+
+    @abstractmethod
+    async def reconcile_delayed_ack(
+        self, source_observation: DialogueSourceObservation
+    ) -> object:
+        raise NotImplementedError
+
+
 class DialogueSourceState(str, Enum):
     NOT_APPLICABLE = "NOT_APPLICABLE"
     NO_RESOLUTION_REQUIRED = "NO_RESOLUTION_REQUIRED"
@@ -341,7 +351,7 @@ class DialogueSourceSnapshot:
 
 
 __all__ = [
-    "DialogueSourceObservation", "DialogueSourceReconciler",
+    "DialogueDelayedAckReconciler", "DialogueSourceObservation", "DialogueSourceReconciler",
     "DialogueSourceCandidate",
     "DialogueSourceMessage", "DialogueSourceSnapshot", "DialogueSourceState",
     "DialogueSourceResolutionError", "PHYSICAL_SOURCE_SCHEMA",

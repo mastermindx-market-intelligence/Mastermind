@@ -18,6 +18,7 @@ from control_plane.session_targets import (
     route_obligation,
 )
 from control_plane.dialogue_source_resolution import (
+    DialogueDelayedAckReconciler,
     DialogueSourceObservation,
     DialogueSourceMessage,
     DialogueSourceReconciler,
@@ -294,6 +295,7 @@ class DialogueTurnObserver:
                 decision=decision,
             )
         if isinstance(self.wake_carrier, DialogueSourceReconciler):
+            source_result = None
             try:
                 source_messages = tuple(
                     DialogueSourceMessage.create(message) for message in messages
@@ -311,6 +313,27 @@ class DialogueTurnObserver:
                 source_state = source_result.get("state")
             except Exception:
                 source_state = "UNKNOWN"
+            if (
+                source_state == "ACK_REQUIRED"
+                and isinstance(source_result, dict)
+                and source_result.get("reason") == "DELIVERED_ACK_PENDING"
+            ):
+                source_observation = source_result.get("source_observation")
+                if (
+                    isinstance(self.wake_carrier, DialogueDelayedAckReconciler)
+                    and type(source_observation) is DialogueSourceObservation
+                ):
+                    try:
+                        await self.wake_carrier.reconcile_delayed_ack(
+                            source_observation
+                        )
+                    except Exception:
+                        pass
+                return self._receipt(
+                    ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                    "DIALOGUE_SOURCE_RECONCILIATION_REQUIRED",
+                    decision=decision,
+                )
             if source_state not in {"NOT_APPLICABLE", "NO_RESOLUTION_REQUIRED", "RECORDED"}:
                 return self._receipt(
                     ObservationOutcome.RECONCILIATION_INCOMPLETE,

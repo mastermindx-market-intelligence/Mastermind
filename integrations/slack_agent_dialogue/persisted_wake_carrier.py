@@ -6,6 +6,7 @@ ledger, retry state, binding registry, provider discovery, or lifecycle state.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from collections.abc import Callable, Sequence
 
 from control_plane.dialogue_wake_canary_activation import (
@@ -15,7 +16,10 @@ from control_plane.dialogue_wake_canary_activation import (
 )
 
 from control_plane.executive_runtime import StateConflict
-from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdentity
+from control_plane.dialogue_source_resolution import (
+    DialogueSourceObservation,
+    PhysicalDialogueSourceIdentity,
+)
 from control_plane.session_targets import (
     RuntimeBinding,
     SessionTargetRegistry,
@@ -23,11 +27,13 @@ from control_plane.session_targets import (
 )
 from control_plane.wake_dispatcher import (
     PersistedNudgeState,
+    PersistedDeliveredAckState,
     WakeEffectUnknownError,
     WakePreSubmitError,
     dispatch_persisted_nudge,
+    reconcile_persisted_delivered_ack,
 )
-from control_plane.wake_events import WakeObligation
+from control_plane.wake_events import WakeObligation, canonical_json_bytes
 from control_plane.wake_ledger import (
     DeliveryAttempt,
     LedgerPhase,
@@ -217,6 +223,97 @@ class PersistedWakeCarrier:
             raise WakeEffectUnknownError(
                 "persisted Wake delivery requires same-attempt reconciliation"
             )
+
+    async def reconcile_delivered_ack(
+        self,
+        source_observation: DialogueSourceObservation,
+        obligation: WakeObligation,
+    ) -> WakeCarrierState:
+        """Drain one ACK for the exact stored v2 DELIVERED attempt."""
+
+        physical = self._physical_source
+        if (
+            self._canary_profile is None
+            or type(source_observation) is not DialogueSourceObservation
+            or type(physical) is not PhysicalDialogueSourceIdentity
+            or source_observation.to_dict()
+            != {
+                "workspace_id": physical.workspace_id,
+                "channel_id": physical.channel_id,
+                "thread_ts": physical.thread_ts,
+                "predecessor_message_key": physical.predecessor_message_key,
+                "predecessor_message_fingerprint": physical.predecessor_message_fingerprint,
+            }
+        ):
+            return WakeCarrierState.EFFECT_UNKNOWN
+        persisted = self._repository.list_records(obligation.obligation_id)
+        if not persisted:
+            return WakeCarrierState.MISSING
+        try:
+            _assert_requested_replay(obligation, persisted, physical)
+            attempt_records = tuple(
+                item.record for item in persisted
+                if item.record.phase is LedgerPhase.DELIVERY_ATTEMPT
+            )
+            if len(attempt_records) != 1:
+                return WakeCarrierState.EFFECT_UNKNOWN
+            attempt = _delivery_attempt(attempt_records[0])
+            grant = self._canary_profile.grant
+            if grant is None:
+                return WakeCarrierState.EFFECT_UNKNOWN
+            effective_route = WakeRoute(
+                obligation_id=obligation.obligation_id,
+                session_alias=attempt.session_alias,
+                target_seat=grant.target_seat,
+                reasoning_surface=attempt.reasoning_surface,
+                wake_transport=attempt.wake_transport,
+                binding_id=attempt.binding_id,
+                binding_generation=attempt.binding_generation,
+                route_digest=attempt.route_digest,
+                destination_digest=attempt.destination_digest,
+                policy_digest=hashlib.sha256(
+                    canonical_json_bytes({
+                        "base_policy_digest": grant.policy_digest,
+                        "grant_digest": grant.digest,
+                    })
+                ).hexdigest()[:16],
+                root_job_id=obligation.root_job_id,
+                workstream=obligation.workstream,
+                production_armed=True,
+                target_enabled=True,
+                transport_implemented=True,
+                requires_runtime_binding=True,
+                binding_ready=True,
+                human_required=False,
+                policy_version="dialogue-canary-v1",
+                interface_version="mastermind.wake_dispatcher/v1",
+            )
+            if not attempt.matches_route(effective_route):
+                return WakeCarrierState.EFFECT_UNKNOWN
+            resolver = self._historical_context_for
+            if not callable(resolver):
+                return WakeCarrierState.EFFECT_UNKNOWN
+            context = resolver(attempt)
+            if not isinstance(context, HistoricalWakeContext):
+                return WakeCarrierState.EFFECT_UNKNOWN
+            dispatcher = context.dispatchers.resolve(effective_route.wake_transport)
+            registry = context.target_registry
+            if registry is None:
+                return WakeCarrierState.EFFECT_UNKNOWN
+            result = await reconcile_persisted_delivered_ack(
+                self._repository,
+                [(obligation, effective_route)],
+                dispatcher=dispatcher,
+                binding=context.runtime_binding,
+                target_registry=registry,
+            )
+        except Exception:
+            return WakeCarrierState.EFFECT_UNKNOWN
+        if result.state is PersistedDeliveredAckState.RECORDED:
+            return WakeCarrierState.RECORDED
+        if result.state is PersistedDeliveredAckState.HOLD:
+            return WakeCarrierState.MISSING
+        return WakeCarrierState.EFFECT_UNKNOWN
 
     async def _reconcile_canary(
         self,

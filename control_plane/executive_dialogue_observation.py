@@ -65,10 +65,13 @@ WAKE_REQUEST_V2_SCHEMA = "mastermind.dialogue_wake_request/v2"
 WAKE_RESPONSE_SCHEMA = "mastermind.dialogue_wake_response/v1"
 SOURCE_RECONCILE_REQUEST_SCHEMA = "mastermind.dialogue_source_reconcile_request/v1"
 SOURCE_RECONCILE_RESPONSE_SCHEMA = "mastermind.dialogue_source_reconcile_response/v1"
+DELAYED_ACK_REQUEST_SCHEMA = "mastermind.dialogue_delayed_ack_request/v1"
+DELAYED_ACK_RESPONSE_SCHEMA = "mastermind.dialogue_delayed_ack_response/v1"
 RESOLVE_PARENT = "RESOLVE_PARENT"
 RECONCILE_WAKE = "RECONCILE_WAKE"
 SUBMIT_WAKE = "SUBMIT_WAKE"
 RECONCILE_DIALOGUE_SOURCES = "RECONCILE_DIALOGUE_SOURCES"
+RECONCILE_WAKE_ACK = "RECONCILE_WAKE_ACK"
 ACTIVE_CURRENT_WORKER = "ACTIVE_CURRENT_WORKER"
 TERMINAL_RESULT = "TERMINAL_RESULT"
 MAX_REQUEST_BYTES = 64 * 1024
@@ -109,6 +112,9 @@ _WAKE_REQUEST_V2_KEYS = frozenset(
 )
 _SOURCE_RECONCILE_KEYS = frozenset(
     {"schema", "operation", "parent", "snapshot"}
+)
+_DELAYED_ACK_KEYS = frozenset(
+    {"schema", "operation", "parent", "source_observation"}
 )
 _CANDIDATE_KEYS = frozenset(
     {"mode", "root_job_id", "job_id", "attempt_id", "worker_id", "evidence_digest"}
@@ -238,6 +244,12 @@ class DialogueWakeRequest:
 class DialogueSourceReconcileRequest:
     parent: dict[str, Any]
     snapshot: DialogueSourceSnapshot
+
+
+@dataclass(frozen=True)
+class DialogueDelayedAckRequest:
+    parent: dict[str, Any]
+    source_observation: DialogueSourceObservation
 
 
 @dataclass(frozen=True)
@@ -763,16 +775,65 @@ def parse_source_reconcile_request(raw: bytes) -> DialogueSourceReconcileRequest
     return DialogueSourceReconcileRequest(parent, snapshot)
 
 
-def source_reconcile_response_bytes(*, state: str, reason: str) -> bytes:
+def parse_delayed_ack_request(raw: bytes) -> DialogueDelayedAckRequest:
+    if not isinstance(raw, bytes) or not raw or len(raw) > MAX_REQUEST_BYTES:
+        raise DialogueObservationProtocolError()
+    try:
+        value = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_pairs_object, parse_constant=_reject_constant,
+        )
+        if (
+            type(value) is not dict
+            or set(value) != _DELAYED_ACK_KEYS
+            or value.get("schema") != DELAYED_ACK_REQUEST_SCHEMA
+            or value.get("operation") != RECONCILE_WAKE_ACK
+        ):
+            raise DialogueObservationProtocolError()
+        parent = _validate_parent(value.get("parent"))
+        if parent != value.get("parent"):
+            raise DialogueObservationProtocolError()
+        observation = DialogueSourceObservation.from_dict(
+            value.get("source_observation")
+        )
+    except DialogueObservationProtocolError:
+        raise
+    except (DialogueSourceResolutionError, TypeError, UnicodeDecodeError, ValueError):
+        raise DialogueObservationProtocolError() from None
+    return DialogueDelayedAckRequest(parent, observation)
+
+
+def source_reconcile_response_bytes(
+    *, state: str, reason: str,
+    source_observation: DialogueSourceObservation | None = None,
+) -> bytes:
     allowed = {
         "NOT_APPLICABLE", "NO_RESOLUTION_REQUIRED", "ACK_REQUIRED",
         "CARRIER_IDENTITY_UNAVAILABLE", "RECORDED", "UNKNOWN",
     }
     if state not in allowed or not isinstance(reason, str) or _REASON_RE.fullmatch(reason) is None:
         raise DialogueObservationProtocolError("FACTS_REFUSED")
-    return _canonical_json({
+    pending = state == "ACK_REQUIRED" and reason == "DELIVERED_ACK_PENDING"
+    if pending != (type(source_observation) is DialogueSourceObservation):
+        raise DialogueObservationProtocolError("FACTS_REFUSED")
+    value = {
         "schema": SOURCE_RECONCILE_RESPONSE_SCHEMA,
         "state": state, "reason": reason,
+    }
+    if source_observation is not None:
+        value["source_observation"] = source_observation.to_dict()
+    return _canonical_json(value) + b"\n"
+
+
+def delayed_ack_response_bytes(*, state: str, reason: str) -> bytes:
+    if (
+        state not in {"NOT_APPLICABLE", "RECORDED", "HOLD", "EFFECT_UNKNOWN"}
+        or not isinstance(reason, str)
+        or _REASON_RE.fullmatch(reason) is None
+    ):
+        raise DialogueObservationProtocolError("FACTS_REFUSED")
+    return _canonical_json({
+        "schema": DELAYED_ACK_RESPONSE_SCHEMA, "state": state, "reason": reason,
     }) + b"\n"
 
 
@@ -1972,9 +2033,12 @@ def _read_canonical_terminal_wake_on_connection(
 __all__ = [
     "ACTIVE_CURRENT_WORKER",
     "CANONICAL_WAKE_EVENT_BUDGET",
+    "DELAYED_ACK_REQUEST_SCHEMA",
+    "DELAYED_ACK_RESPONSE_SCHEMA",
     "MAX_REQUEST_BYTES",
     "MAX_RESPONSE_BYTES",
     "RECONCILE_WAKE",
+    "RECONCILE_WAKE_ACK",
     "REQUEST_SCHEMA",
     "RESOLVE_PARENT",
     "RESPONSE_SCHEMA",
@@ -1999,6 +2063,7 @@ __all__ = [
     "DialogueObservationFacts",
     "DialogueObservationProtocolError",
     "DialogueCandidateReference",
+    "DialogueDelayedAckRequest",
     "DialogueWakeRequest",
     "ObservationRequest",
     "PublicRuntimeBindingFacts",
@@ -2006,6 +2071,7 @@ __all__ = [
     "TerminalProjectionReceiptFacts",
     "TerminalProjectionReceiptReference",
     "parse_observation_request",
+    "parse_delayed_ack_request",
     "parse_wake_request",
     "inspect_terminal_return_history",
     "normalize_terminal_return_projection_receipt",
@@ -2013,6 +2079,8 @@ __all__ = [
     "read_canonical_terminal_wake",
     "read_runtime_canonical_terminal_wake",
     "response_bytes",
+    "delayed_ack_response_bytes",
+    "source_reconcile_response_bytes",
     "runtime_canonical_terminal_facts",
     "terminal_return_event_material",
     "terminal_return_phase_spec",

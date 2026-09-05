@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 from control_plane.session_targets import load_session_targets, route_obligation
 from control_plane.dialogue_source_resolution import (
+    DialogueDelayedAckReconciler,
+    DialogueSourceObservation,
     DialogueSourceReconciler,
     DialogueSourceSnapshot,
 )
@@ -230,6 +232,52 @@ class SourceAwareRecordingWakeCarrier(DialogueSourceReconciler, RecordingWakeCar
 
     async def submit_from_source(self, _source, obligation, route) -> None:
         await self.submit(obligation, route)
+
+
+class DelayedAckRecordingCarrier(
+    DialogueDelayedAckReconciler, SourceAwareRecordingWakeCarrier
+):
+    def __init__(self, source: DialogueSourceObservation) -> None:
+        SourceAwareRecordingWakeCarrier.__init__(self, "ACK_REQUIRED")
+        self.source = source
+        self.delayed_ack_calls = []
+
+    async def reconcile_dialogue_sources(self, snapshot: object) -> object:
+        self.source_calls.append(snapshot)
+        return {
+            "state": "ACK_REQUIRED", "reason": "DELIVERED_ACK_PENDING",
+            "source_observation": self.source,
+        }
+
+    async def reconcile_delayed_ack(self, source_observation):
+        self.delayed_ack_calls.append(source_observation)
+        return {"state": "RECORDED", "reason": "ACK_RECORDED"}
+
+
+def test_observer_echoes_server_selected_delayed_ack_once_then_holds() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        source = DialogueSourceObservation(
+            workspace_id="T0BRD2AQXQV", channel_id="C0BSBM78V1N",
+            thread_ts=PARENT_TS, predecessor_message_key="asd-old-source-01",
+            predecessor_message_fingerprint="e" * 64,
+        )
+        carrier = DelayedAckRecordingCarrier(source)
+        observer = DialogueTurnObserver(
+            policy=_policy(), client=_client_with_result(parent),
+            registry=_registry(), wake_carrier=carrier,
+        )
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert result.reason == "DIALOGUE_SOURCE_RECONCILIATION_REQUIRED"
+        assert carrier.delayed_ack_calls == [source]
+        assert len(carrier.source_calls) == 1
+        assert carrier.reconcile_calls == []
+        assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
 
 
 def _attention() -> AgentDialogueAttention:

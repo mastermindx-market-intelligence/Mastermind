@@ -32,21 +32,77 @@ from control_plane.executive_dialogue_observation import (
     TerminalObservationFacts,
     TerminalProjectionReceiptFacts,
     parse_observation_request,
+    parse_delayed_ack_request,
     parse_source_reconcile_request,
     parse_wake_request,
     reduce_dialogue_observation,
     read_canonical_terminal_wake,
     wake_response_bytes,
+    source_reconcile_response_bytes,
+    delayed_ack_response_bytes,
 )
 from control_plane.session_targets import WakeRoute
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.wake_events import mint_obligation
 from control_plane.dialogue_source_resolution import (
+    DialogueSourceObservation,
     DialogueSourceMessage,
     DialogueSourceResolutionError,
     DialogueSourceSnapshot,
     attention_source_ref,
 )
+
+
+def _physical_observation() -> DialogueSourceObservation:
+    return DialogueSourceObservation(
+        workspace_id="T0BRD2AQXQV",
+        channel_id="C0BSBM78V1N",
+        thread_ts="1788000000.123456",
+        predecessor_message_key="asd-result-00000001",
+        predecessor_message_fingerprint="a" * 64,
+    )
+
+
+def test_delayed_ack_protocol_is_conditionally_closed() -> None:
+    source = _physical_observation()
+    pending = json.loads(source_reconcile_response_bytes(
+        state="ACK_REQUIRED", reason="DELIVERED_ACK_PENDING",
+        source_observation=source,
+    ))
+    assert set(pending) == {"schema", "state", "reason", "source_observation"}
+    assert pending["source_observation"] == source.to_dict()
+    with pytest.raises(DialogueObservationProtocolError):
+        source_reconcile_response_bytes(
+            state="ACK_REQUIRED", reason="DELIVERED_ACK_PENDING"
+        )
+    with pytest.raises(DialogueObservationProtocolError):
+        source_reconcile_response_bytes(
+            state="RECORDED", reason="SOURCE_ALREADY_RESOLVED",
+            source_observation=source,
+        )
+
+    parent = valid_parent()
+    wire = json.dumps({
+        "schema": "mastermind.dialogue_delayed_ack_request/v1",
+        "operation": "RECONCILE_WAKE_ACK",
+        "parent": parent,
+        "source_observation": source.to_dict(),
+    }, sort_keys=True, separators=(",", ":")).encode()
+    parsed = parse_delayed_ack_request(wire)
+    assert parsed.parent == parent
+    assert parsed.source_observation == source
+    for key in source.to_dict():
+        changed = json.loads(wire)
+        changed["source_observation"][key] = None
+        with pytest.raises(DialogueObservationProtocolError):
+            parse_delayed_ack_request(json.dumps(changed).encode())
+    response = json.loads(delayed_ack_response_bytes(
+        state="RECORDED", reason="ACK_RECORDED"
+    ))
+    assert response == {
+        "schema": "mastermind.dialogue_delayed_ack_response/v1",
+        "state": "RECORDED", "reason": "ACK_RECORDED",
+    }
 from control_plane.wake_ledger import (
     LedgerPhase,
     WAKE_AGGREGATE_TYPE,

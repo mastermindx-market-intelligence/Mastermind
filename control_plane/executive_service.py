@@ -69,6 +69,7 @@ from control_plane.executive_dialogue_observation import (
     CanonicalTerminalWakeCandidate,
     CanonicalTerminalWakeRead,
     DialogueCandidateReference,
+    DialogueDelayedAckRequest,
     DialogueObservationFacts,
     DialogueObservationProtocolError,
     DialogueWakeRequest,
@@ -85,11 +86,13 @@ from control_plane.executive_dialogue_observation import (
     TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT as _TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT,
     TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT as _TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT,
     parse_observation_request,
+    parse_delayed_ack_request,
     parse_source_reconcile_request,
     parse_wake_request,
     reduce_dialogue_observation,
     response_bytes as dialogue_observation_response_bytes,
     SOURCE_RECONCILE_RESPONSE_SCHEMA,
+    DELAYED_ACK_RESPONSE_SCHEMA,
 )
 from control_plane.executive_terminal_return import (
     TerminalReturnCandidate,
@@ -636,6 +639,26 @@ class ExecutiveDialogueWakeBridge:
                 if present:
                     return {"state": "NO_RESOLUTION_REQUIRED", "reason": "SOURCE_PRESENT"}
                 if LedgerPhase.TARGET_ACKNOWLEDGED not in phases:
+                    if (
+                        len(delivery_attempts) == 1
+                        and LedgerPhase.DELIVERED in phases
+                        and LedgerPhase.FAILED not in phases
+                        and LedgerPhase.TARGET_UNAVAILABLE not in phases
+                        and delivery_attempts[0].nudge_id is not None
+                        and delivery_attempts[0].nudge_attempt_command_ids
+                        == (delivery_attempts[0].command_id,)
+                    ):
+                        return {
+                            "state": "ACK_REQUIRED",
+                            "reason": "DELIVERED_ACK_PENDING",
+                            "source_observation": {
+                                "workspace_id": physical.workspace_id,
+                                "channel_id": physical.channel_id,
+                                "thread_ts": physical.thread_ts,
+                                "predecessor_message_key": physical.predecessor_message_key,
+                                "predecessor_message_fingerprint": physical.predecessor_message_fingerprint,
+                            },
+                        }
                     return {"state": "ACK_REQUIRED", "reason": "TARGET_ACK_REQUIRED"}
                 successors = []
                 initial_predecessor = (
@@ -702,6 +725,103 @@ class ExecutiveDialogueWakeBridge:
                 return {"state": "RECORDED", "reason": "SOURCE_RESOLVED"}
         except Exception:
             return {"state": "UNKNOWN", "reason": "SOURCE_RECONCILIATION_UNKNOWN"}
+
+    async def reconcile_delayed_ack(
+        self, runtime: Runtime, request: DialogueDelayedAckRequest
+    ) -> dict[str, str]:
+        """Attempt one provider ACK drain for an exact stored v2 delivery."""
+
+        from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdentity
+        from control_plane.wake_ledger import LedgerPhase, assert_causal
+        from control_plane.wake_persist import WakeLedgerRepository
+
+        profile = self._canary_profile
+        grant = None if profile is None else profile.grant
+        if grant is None:
+            return {"state": "NOT_APPLICABLE", "reason": "NONCANARY_PROFILE"}
+        if request.parent.get("operation_key") != grant.operation_key:
+            return {"state": "HOLD", "reason": "ACK_SOURCE_REFUSED"}
+        repository = WakeLedgerRepository(runtime)
+        persisted = repository.list_records(grant.obligation_id)
+        records = tuple(item.record for item in persisted)
+        try:
+            assert_causal(records)
+        except Exception:
+            return {"state": "HOLD", "reason": "ACK_HISTORY_REFUSED"}
+        if not persisted:
+            return {"state": "HOLD", "reason": "ACK_HISTORY_MISSING"}
+        requested = tuple(
+            item for item in persisted
+            if item.record.phase is LedgerPhase.WAKE_REQUESTED
+        )
+        if len(requested) != 1:
+            return {"state": "HOLD", "reason": "ACK_HISTORY_REFUSED"}
+        physical = requested[0].record.physical_source
+        obligation = requested[0].obligation
+        if (
+            type(physical) is not PhysicalDialogueSourceIdentity
+            or obligation is None
+            or physical.operation_key != request.parent.get("operation_key")
+            or physical.parent_fingerprint != request.parent.get("fingerprint")
+            or request.source_observation.to_dict()
+            != {
+                "workspace_id": physical.workspace_id,
+                "channel_id": physical.channel_id,
+                "thread_ts": physical.thread_ts,
+                "predecessor_message_key": physical.predecessor_message_key,
+                "predecessor_message_fingerprint": physical.predecessor_message_fingerprint,
+            }
+            or physical.obligation_id != grant.obligation_id
+            or physical.target_seat != grant.target_seat
+            or physical.candidate.root_job_id != grant.source_root_job_id
+            or physical.candidate.job_id != grant.source_job_id
+            or physical.candidate.attempt_id != grant.source_attempt_id
+            or physical.candidate.worker_id != grant.source_worker_id
+            or physical.candidate.evidence_digest != grant.source_semantic_digest
+        ):
+            return {"state": "HOLD", "reason": "ACK_SOURCE_REFUSED"}
+        phases = tuple(record.phase for record in records)
+        if (
+            LedgerPhase.TARGET_ACKNOWLEDGED in phases
+            or LedgerPhase.SOURCE_RESOLVED in phases
+        ):
+            return {"state": "RECORDED", "reason": "ACK_ALREADY_RECORDED"}
+        if (
+            phases.count(LedgerPhase.DELIVERY_ATTEMPT) != 1
+            or phases.count(LedgerPhase.DELIVERED) != 1
+            or LedgerPhase.FAILED in phases
+            or LedgerPhase.TARGET_UNAVAILABLE in phases
+        ):
+            return {"state": "HOLD", "reason": "ACK_HISTORY_INELIGIBLE"}
+        carrier = self._carrier_factory(
+            runtime=runtime,
+            resolved=None,
+            target=None,
+            current_binding=None,
+            retry_policy=self._retry_policy,
+            generation=None,
+            canary_profile=profile,
+            pre_submit_guard=None,
+            historical_context_for=lambda attempt: (
+                self._historical_target_for(runtime, attempt)
+                if callable(self._historical_target_for)
+                else self._resolve_historical_target(runtime, attempt)
+            ),
+            historical_only=True,
+            physical_source=physical,
+        )
+        method = getattr(carrier, "reconcile_delivered_ack", None)
+        if not callable(method):
+            return {"state": "HOLD", "reason": "ACK_CARRIER_UNAVAILABLE"}
+        try:
+            state = await method(request.source_observation, obligation)
+        except Exception:
+            return {"state": "EFFECT_UNKNOWN", "reason": "ACK_EFFECT_UNKNOWN"}
+        if state.value == "RECORDED":
+            return {"state": "RECORDED", "reason": "ACK_RECORDED"}
+        if state.value == "EFFECT_UNKNOWN":
+            return {"state": "EFFECT_UNKNOWN", "reason": "ACK_EFFECT_UNKNOWN"}
+        return {"state": "HOLD", "reason": "ACK_NOT_RECORDED"}
 
     def _historical_carrier(self, runtime: Runtime, request: DialogueWakeRequest) -> Any:
         profile = self._canary_profile
@@ -3240,6 +3360,32 @@ class ExecutiveControlService:
                 return
             provider = self._dialogue_observation_facts_provider
             runtime = self._require_runtime()
+            try:
+                delayed_ack_request = parse_delayed_ack_request(raw)
+            except DialogueObservationProtocolError:
+                delayed_ack_request = None
+            if delayed_ack_request is not None:
+                wake_handler = self._dialogue_wake_handler
+                if (
+                    type(wake_handler) is ExecutiveDialogueWakeBridge
+                    and wake_handler.canary_profile is not None
+                ):
+                    delayed_result = await wake_handler.reconcile_delayed_ack(
+                        runtime, delayed_ack_request
+                    )
+                else:
+                    delayed_result = {
+                        "state": "NOT_APPLICABLE",
+                        "reason": "NONCANARY_PROFILE",
+                    }
+                await self._send_dialogue_observation(
+                    writer,
+                    {
+                        "schema": DELAYED_ACK_RESPONSE_SCHEMA,
+                        **delayed_result,
+                    },
+                )
+                return
             try:
                 source_request = parse_source_reconcile_request(raw)
             except DialogueObservationProtocolError:

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from control_plane.dialogue_source_resolution import (
+    DialogueSourceObservation,
     DialogueSourceMessage,
     DialogueSourceSnapshot,
 )
@@ -534,6 +535,127 @@ def test_wake_source_identity_is_exact_replay_stable_and_candidate_bound(
         for item in (first, changed, later, conflicting_message)
     }
     assert len(identities) == 4
+
+
+def test_source_pending_response_is_typed_and_delayed_ack_echoes_exact_source(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        socket_path = socket_root / "delayed-ack.sock"
+        calls: list[dict] = []
+        source = DialogueSourceObservation(
+            workspace_id="T0BRD2AQXQV", channel_id="C0BSBM78V1N",
+            thread_ts=THREAD_TS, predecessor_message_key="asd-result-00000001",
+            predecessor_message_fingerprint="a" * 64,
+        )
+
+        async def handler(reader, writer):
+            request = json.loads(await reader.readline())
+            calls.append(request)
+            if request["operation"] == "RECONCILE_DIALOGUE_SOURCES":
+                response = {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "ACK_REQUIRED", "reason": "DELIVERED_ACK_PENDING",
+                    "source_observation": source.to_dict(),
+                }
+            else:
+                response = {
+                    "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                    "state": "RECORDED", "reason": "ACK_RECORDED",
+                }
+            writer.write(json.dumps(response, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(handler, path=str(socket_path))
+        parent = valid_parent()
+        context = ContextVar("delayed_ack_context", default=None)
+        context.set({
+            "parent": parent, "thread_ts": THREAD_TS,
+            "candidate": DialogueCandidateReference(**_candidate_reference()),
+        })
+        client = ExecutiveDialogueObservationClient(socket_path)
+        client.bind_wake_context(context)
+        snapshot = DialogueSourceSnapshot(
+            workspace_id=source.workspace_id, channel_id=source.channel_id,
+            thread_ts=source.thread_ts, parent_fingerprint=parent["fingerprint"],
+            operation_key=parent["operation_key"], messages=(),
+        )
+        try:
+            pending = await client.reconcile_dialogue_sources(snapshot)
+            assert pending["source_observation"] is source or (
+                pending["source_observation"] == source
+            )
+            recorded = await client.reconcile_delayed_ack(
+                pending["source_observation"]
+            )
+        finally:
+            server.close()
+            await server.wait_closed()
+        assert recorded["state"] == "RECORDED"
+        assert [call["operation"] for call in calls] == [
+            "RECONCILE_DIALOGUE_SOURCES", "RECONCILE_WAKE_ACK",
+        ]
+        assert calls[1]["source_observation"] == source.to_dict()
+        assert calls[1]["parent"] == parent
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("variant", ["missing", "null", "extra", "source_missing"])
+def test_source_pending_conditional_shape_refuses_before_ack_request(
+    socket_root: Path, variant: str,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / f"source-shape-{variant}.sock"
+        source = {
+            "workspace_id": "T0BRD2AQXQV", "channel_id": "C0BSBM78V1N",
+            "thread_ts": THREAD_TS, "predecessor_message_key": "asd-result-00000001",
+            "predecessor_message_fingerprint": "a" * 64,
+        }
+        response = {
+            "schema": "mastermind.dialogue_source_reconcile_response/v1",
+            "state": "ACK_REQUIRED", "reason": "DELIVERED_ACK_PENDING",
+            "source_observation": source,
+        }
+        if variant == "missing":
+            response.pop("source_observation")
+        elif variant == "null":
+            response["source_observation"] = None
+        elif variant == "extra":
+            response.update(state="RECORDED", reason="SOURCE_ALREADY_RESOLVED")
+        else:
+            response["source_observation"] = dict(source)
+            response["source_observation"].pop("channel_id")
+        calls = []
+        server = await _one_shot_server(
+            path,
+            json.dumps(response, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+            calls=calls,
+        )
+        parent = valid_parent()
+        context = ContextVar(f"shape_{variant}", default=None)
+        context.set({
+            "parent": parent, "thread_ts": THREAD_TS,
+            "candidate": DialogueCandidateReference(**_candidate_reference()),
+        })
+        client = ExecutiveDialogueObservationClient(path)
+        client.bind_wake_context(context)
+        try:
+            with pytest.raises(ExecutiveObservationClientError, match="RESPONSE_REFUSED"):
+                await client.reconcile_dialogue_sources(DialogueSourceSnapshot(
+                    workspace_id="T0BRD2AQXQV", channel_id="C0BSBM78V1N",
+                    thread_ts=THREAD_TS, parent_fingerprint=parent["fingerprint"],
+                    operation_key=parent["operation_key"], messages=(),
+                ))
+        finally:
+            server.close()
+            await server.wait_closed()
+        assert len(calls) == 1
+        assert json.loads(calls[0])["operation"] == "RECONCILE_DIALOGUE_SOURCES"
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("failure", ["timeout", "eof", "malformed"])
