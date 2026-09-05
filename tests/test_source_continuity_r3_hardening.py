@@ -450,6 +450,7 @@ def test_all_local_probes_use_closed_argv_and_explicit_diff_controls() -> None:
     tree = next(git_tail(c) for c in runner.commands if git_tail(c)[0] == "ls-tree")
     assert "--" in tree and tree[-1] == OWNED[0]
     assert all(env["GIT_LITERAL_PATHSPECS"] == "1" for env in runner.environments)
+    assert all(env["GIT_GRAFT_FILE"] == os.devnull for env in runner.environments)
 
 
 ENV_KEYS = {
@@ -457,7 +458,7 @@ ENV_KEYS = {
     "GIT_TERMINAL_PROMPT", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL",
     "GIT_ATTR_NOSYSTEM", "GIT_LITERAL_PATHSPECS", "GIT_NO_REPLACE_OBJECTS",
     "GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_ASKPASS", "SSH_ASKPASS",
-    "GIT_SSH", "GIT_SSH_COMMAND", "GIT_CONFIG_COUNT",
+    "GIT_SSH", "GIT_SSH_COMMAND", "GIT_CONFIG_COUNT", "GIT_GRAFT_FILE",
 }
 
 
@@ -467,6 +468,7 @@ def test_git_child_environment_is_exact_and_ignores_hostile_ambient(monkeypatch)
         "GIT_COMMON_DIR": "/tmp/common", "GIT_INDEX_FILE": "/tmp/index",
         "GIT_OBJECT_DIRECTORY": "/tmp/object", "GIT_ALTERNATE_OBJECT_DIRECTORIES": "/tmp/alt",
         "GIT_REPLACE_REF_BASE": "refs/hostile/", "GIT_CONFIG_PARAMETERS": "hostile",
+        "GIT_GRAFT_FILE": "/tmp/grafts",
         "GIT_CONFIG_SYSTEM": "/tmp/system", "GIT_CONFIG_LOCAL": "/tmp/local",
         "XDG_CONFIG_HOME": "/tmp/xdg", "GIT_EXTERNAL_DIFF": "/tmp/external",
         "PAGER": "/tmp/pager", "EDITOR": "/tmp/editor", "VISUAL": "/tmp/visual",
@@ -496,7 +498,7 @@ def test_git_child_environment_is_exact_and_ignores_hostile_ambient(monkeypatch)
         "GIT_EDITOR": "/usr/bin/false", "GIT_SEQUENCE_EDITOR": "/usr/bin/false",
         "GIT_ASKPASS": "/usr/bin/false", "SSH_ASKPASS": "/usr/bin/false",
         "GIT_SSH": "/usr/bin/false", "GIT_SSH_COMMAND": "/usr/bin/false",
-        "GIT_CONFIG_COUNT": "0",
+        "GIT_CONFIG_COUNT": "0", "GIT_GRAFT_FILE": os.devnull,
     }
     assert_git_prefix(runner.commands[-1])
 
@@ -596,6 +598,71 @@ def test_real_probe_counts_ignored_untracked_paths(
 def unrelated_commit(repo: Path, message: str) -> str:
     tree = git(repo, "rev-parse", "HEAD^{tree}")
     return git(repo, "commit-tree", tree, "-m", message)
+
+
+class TransientGraftRunner:
+    def __init__(self, grafts: Path, local_head: str, remote_head: str) -> None:
+        self.grafts = grafts
+        self.local_head = local_head
+        self.remote_head = remote_head
+        self.transient_commands: list[str] = []
+
+    def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        tail = git_tail(tuple(command))
+        transient = tail[:2] in {
+            ("merge-base", "--is-ancestor"),
+            ("rev-list", "--count"),
+        }
+        if not transient:
+            assert not self.grafts.exists()
+            return subprocess.run(command, **kwargs)
+
+        assert not self.grafts.exists()
+        self.grafts.write_text(
+            f"{self.local_head} {self.remote_head}\n",
+            encoding="ascii",
+        )
+        try:
+            result = subprocess.run(command, **kwargs)
+        finally:
+            self.grafts.unlink(missing_ok=True)
+        self.transient_commands.append(tail[0])
+        return result
+
+
+def test_real_probe_ignores_transient_default_graft_during_ancestry(tmp_path) -> None:
+    repo = tmp_path / "transient-graft-history"
+    local_head = init_repo(repo, "local")
+    remote_head = unrelated_commit(repo, "unrelated remote")
+    grafts = git_common_dir(repo) / "info" / "grafts"
+    assert not grafts.exists()
+    baseline = subprocess.run(
+        ["/usr/bin/git", "merge-base", "--is-ancestor", remote_head, local_head],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(repo)},
+    )
+    assert baseline.returncode == 1
+
+    module = _module()
+    runner = TransientGraftRunner(grafts, local_head, remote_head)
+    result = module._probe_local_and_entries(
+        runner,
+        str(repo),
+        repo_request(module, repo, remote_head),
+        remote_head,
+        remote_head,
+        (),
+    )
+    assert not isinstance(result, module.SourceContinuityRefusal)
+    local_facts, _ = result
+    assert (
+        local_facts.remote_head_is_ancestor_of_local,
+        local_facts.unpushed_commit_count,
+    ) == (False, 0)
+    assert runner.transient_commands == ["merge-base"]
+    assert not grafts.exists()
 
 
 def test_real_probe_refuses_nonempty_graft_before_ancestry_is_trusted(tmp_path) -> None:
