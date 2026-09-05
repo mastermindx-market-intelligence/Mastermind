@@ -1,0 +1,45 @@
+{
+  "schema": "mastermind.github_observation.v1",
+  "available": true,
+  "observed_at": "2026-09-05T03:45:09Z",
+  "pull_requests": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "number": 169,
+      "state": "merged",
+      "draft": false,
+      "head_sha": "baba06b8ac2593ae1b86650e5c2e5693f0ab2871",
+      "base_sha": "be68ec881460aa60d7d77cdb69f7c1cae81f6310",
+      "merge_sha": "cef4332d3682991e3e1c3d6160da17cd0a3a8f63",
+      "ci": "success",
+      "workstream": "WS:CHAIRMAN-CONTROL-ROOM",
+      "linear": null,
+      "portfolio_mode": "architecture_candidate",
+      "wave": "CROSS-PLANE-R0",
+      "authority": "architecture",
+      "completion": "acceptance-required",
+      "proof_state": null,
+      "operation_key": "cross-plane-reconciliation-20260827-sol-001",
+      "pickup_head_sha": null
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "number": 170,
+      "state": "open",
+      "draft": true,
+      "head_sha": "8e6ccc3e893e8ab080ead0bb3e6054d98bf82ed0",
+      "base_sha": "ce08a80174cbdcfbbc5169f846cb47dceaf20a4b",
+      "merge_sha": "ec2b7989285421058f064cc3bb47a8604ecec6de",
+      "ci": "pending",
+      "workstream": null,
+      "linear": null,
+      "portfolio_mode": null,
+      "wave": null,
+      "authority": null,
+      "completion": null,
+      "proof_state": "BUILT_NOT_PROVEN",
+      "operation_key": null,
+      "pickup_head_sha": null
+    }
+  ]
+}
