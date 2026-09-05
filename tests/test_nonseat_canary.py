@@ -3846,6 +3846,38 @@ def test_peer_initial_decode_context_oversized_or_hostile_media_never_escapes():
 
 
 @pytest.mark.parametrize(
+    ("declared", "media_class"),
+    (
+        ("application/\u212a+json", "OTHER"),
+        ("\u00a0application/json", "OTHER"),
+        ("application/json\u00a0", "OTHER"),
+        ("application/\x0bjson", "OTHER"),
+        (" \tApplication/Vnd.Example+Json\t ", "JSON"),
+    ),
+)
+def test_peer_initial_decode_context_validates_raw_ascii_media_tokens_before_casefold(
+    declared, media_class,
+):
+    headers = httpx.Headers(
+        [(b"content-type", declared.encode("utf-8"))], encoding="utf-8",
+    )
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            200, content=("{" + _SECRET).encode(), headers=headers,
+        ),
+    )
+    assert receipt["initial_peer_census_diagnostic"] == "RESPONSE_DECODE_FAILURE"
+    _assert_initial_decode_context(receipt, {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": media_class,
+        "decoder_class": "JSON_VALUE_REJECTED",
+    })
+    dumped = json.dumps(receipt)
+    assert declared not in dumped
+    assert _SECRET not in dumped
+
+
+@pytest.mark.parametrize(
     ("body", "decoder_class"),
     (
         (b"\xff", "UNICODE_REJECTED"),

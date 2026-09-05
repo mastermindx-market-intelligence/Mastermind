@@ -435,7 +435,10 @@ def _initial_peer_census_media_type_class(headers) -> str:
     # A comma is ambiguous here: it may represent combined duplicate fields.
     if "," in declared:
         return "OTHER"
-    media_type = declared.split(";", 1)[0].strip().casefold()
+    # HTTP media-type tokens are ASCII.  Validate the declared tokens before
+    # normalization so Unicode case folding or non-OWS whitespace cannot turn
+    # an invalid wire value into an accepted JSON declaration.
+    media_type = declared.split(";", 1)[0].strip(" \t")
     if media_type.count("/") != 1:
         return "OTHER"
     major, subtype = media_type.split("/", 1)
@@ -446,6 +449,8 @@ def _initial_peer_census_media_type_class(headers) -> str:
         or _HTTP_TOKEN_RE.fullmatch(subtype) is None
     ):
         return "OTHER"
+    major = major.casefold()
+    subtype = subtype.casefold()
     if major == "application" and (
         subtype == "json"
         or (subtype.endswith("+json") and len(subtype) > len("+json"))
