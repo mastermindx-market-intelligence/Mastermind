@@ -541,6 +541,25 @@ def _watch_pass(
     )
 
 
+def _no_fire_watch_pass(
+    source,
+    *,
+    opportunity: str,
+    execution,
+    generation: str = "b" * 64,
+):
+    return primitives.WatcherPassReceipt(
+        source=source,
+        schedule_generation=generation,
+        expected_opportunity=opportunity,
+        host_execution=execution,
+        actual_fire_id=None,
+        outcome=primitives.WatcherPassOutcome.EXPECTED_OPPORTUNITY_NO_FIRE,
+        observed_at=f"2026-09-04T08:{int(opportunity[-2:]):02d}:00Z",
+        evidence_digest=f"{int(opportunity[-2:]) % 16:x}" * 64,
+    )
+
+
 def test_watched_source_identity_is_closed_and_revision_conflicts_refuse() -> None:
     source = _watched_source()
     assert source.identity == (
@@ -715,6 +734,97 @@ def test_host_not_invoked_is_not_no_material_change() -> None:
         dataclasses.replace(no_change, actual_fire_id=None)
 
 
+def test_no_fire_gate_opportunities_degrade_without_claiming_a_fire() -> None:
+    source = _watched_source()
+    idle_gated = _no_fire_watch_pass(
+        source,
+        opportunity="window-01",
+        execution=primitives.HostExecutionState.IDLE_GATED,
+    )
+    actively_busy = _no_fire_watch_pass(
+        source,
+        opportunity="window-02",
+        execution=primitives.HostExecutionState.ACTIVELY_BUSY,
+    )
+
+    after_one = primitives.project_watched_source(
+        source,
+        schedule_generation="b" * 64,
+        receipts=(idle_gated,),
+    )
+    after_two = primitives.project_watched_source(
+        source,
+        schedule_generation="b" * 64,
+        receipts=(idle_gated, actively_busy),
+    )
+
+    assert idle_gated.host_execution is primitives.HostExecutionState.IDLE_GATED
+    assert (
+        actively_busy.host_execution
+        is primitives.HostExecutionState.ACTIVELY_BUSY
+    )
+    assert idle_gated.actual_fire_id is None
+    assert actively_busy.actual_fire_id is None
+    assert after_one.state is primitives.WatcherHealth.CURRENT
+    assert after_one.missed_opportunities == 1
+    assert after_two.state is primitives.WatcherHealth.WATCH_DEGRADED
+    assert after_two.missed_opportunities == 2
+    assert after_two.last_fire_opportunity is None
+    assert after_two.last_successful_opportunity is None
+
+    next_generation = primitives.project_watched_source(
+        source,
+        schedule_generation="c" * 64,
+        receipts=(idle_gated, actively_busy),
+    )
+    assert next_generation.state is primitives.WatcherHealth.CURRENT
+    assert next_generation.missed_opportunities == 0
+
+
+def test_no_fire_opportunity_retains_prior_actual_fire_and_refuses_bad_pairs() -> None:
+    source = _watched_source()
+    actual_fire = _watch_pass(source, opportunity="window-01")
+    no_fire = _no_fire_watch_pass(
+        source,
+        opportunity="window-02",
+        execution=primitives.HostExecutionState.ACTIVELY_BUSY,
+    )
+
+    projection = primitives.project_watched_source(
+        source,
+        schedule_generation="b" * 64,
+        receipts=(actual_fire, no_fire),
+    )
+
+    assert projection.last_fire_opportunity == "window-01"
+    assert projection.last_successful_opportunity == "window-01"
+    assert projection.missed_opportunities == 1
+
+    with pytest.raises(
+        primitives.WatchedSourceConflict,
+        match="WATCH_PASS_INVALID",
+    ):
+        dataclasses.replace(no_fire, actual_fire_id="forged-fire")
+
+    with pytest.raises(
+        primitives.WatchedSourceConflict,
+        match="WATCH_PASS_INVALID",
+    ):
+        dataclasses.replace(
+            no_fire,
+            host_execution=primitives.HostExecutionState.NOT_INVOKED,
+        )
+
+    with pytest.raises(
+        primitives.WatchedSourceConflict,
+        match="WATCH_PASS_INVALID",
+    ):
+        dataclasses.replace(
+            no_fire,
+            outcome=primitives.WatcherPassOutcome.HOST_NOT_INVOKED,
+        )
+
+
 def test_conflicting_receipts_for_one_expected_opportunity_refuse() -> None:
     source = _watched_source()
     accepted = _watch_pass(source, opportunity="window-01")
@@ -858,8 +968,48 @@ def test_watch_stop_failed_keeps_child_terminal_and_aggregate_sibling_active() -
     assert projection.state is primitives.WatcherHealth.TERMINAL_SUPPRESSED
     assert projection.watch_stop_failed is True
     assert projection.active_sibling_sources == 1
-    assert projection.aggregate_resource_active is True
     assert projection.action is primitives.WatcherAction.SUPPRESS_TERMINAL_SOURCE
+
+
+def test_child_sources_never_assert_physical_aggregate_resource_liveness() -> None:
+    stopped = _watched_source(
+        disposition=primitives.SourceDisposition.TERMINAL_STOPPED,
+    )
+    cleanup_failure = _watch_pass(
+        stopped,
+        opportunity="window-01",
+        outcome=primitives.WatcherPassOutcome.WATCH_STOP_FAILED,
+    )
+
+    zero_children = primitives.project_watched_source(
+        stopped,
+        schedule_generation="b" * 64,
+        receipts=(cleanup_failure,),
+        aggregate_sources=(stopped,),
+    )
+    # A permanent seat may exist outside this source-only projection.  Zero
+    # supplied children therefore means only that the supplied count is zero.
+    unrelated_active_child = _watched_source(
+        operation_key="unrelated-op",
+        branch="codex/unrelated-source",
+        pull_request=999,
+        purpose="unrelated-source-purpose",
+    )
+    supplied_child = primitives.project_watched_source(
+        stopped,
+        schedule_generation="b" * 64,
+        receipts=(cleanup_failure,),
+        aggregate_sources=(stopped, unrelated_active_child),
+    )
+
+    assert zero_children.active_sibling_sources == 0
+    assert supplied_child.active_sibling_sources == 1
+    assert "aggregate_resource_active" not in {
+        field.name for field in dataclasses.fields(zero_children)
+    }
+    assert "aggregate_resource_active" not in {
+        field.name for field in dataclasses.fields(supplied_child)
+    }
 
 
 def test_projection_has_descriptive_evidence_and_zero_mutation_authority() -> None:

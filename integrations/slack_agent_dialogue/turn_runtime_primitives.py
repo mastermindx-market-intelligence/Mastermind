@@ -120,6 +120,7 @@ class HostExecutionState(str, Enum):
 
 class WatcherPassOutcome(str, Enum):
     HOST_NOT_INVOKED = "HOST_NOT_INVOKED"
+    EXPECTED_OPPORTUNITY_NO_FIRE = "EXPECTED_OPPORTUNITY_NO_FIRE"
     NO_MATERIAL_CHANGE = "NO_MATERIAL_CHANGE"
     CARRIER_READ_FAILED = "CARRIER_READ_FAILED"
     ACTIONABLE_EVENT_DETECTED = "ACTIONABLE_EVENT_DETECTED"
@@ -350,20 +351,18 @@ class WatcherPassReceipt:
                 and self.runtime_binding != self.source.runtime_binding
             )
             or (
-                self.outcome is WatcherPassOutcome.HOST_NOT_INVOKED
-                and self.host_execution is not HostExecutionState.NOT_INVOKED
+                (self.host_execution is HostExecutionState.NOT_INVOKED)
+                != (self.outcome is WatcherPassOutcome.HOST_NOT_INVOKED)
             )
             or (
-                self.host_execution is HostExecutionState.NOT_INVOKED
-                and self.actual_fire_id is not None
-            )
-            or (
-                self.outcome is not WatcherPassOutcome.HOST_NOT_INVOKED
-                and self.host_execution is HostExecutionState.NOT_INVOKED
-            )
-            or (
-                self.host_execution is not HostExecutionState.NOT_INVOKED
-                and self.actual_fire_id is None
+                (self.actual_fire_id is None)
+                != (
+                    self.outcome
+                    in {
+                        WatcherPassOutcome.HOST_NOT_INVOKED,
+                        WatcherPassOutcome.EXPECTED_OPPORTUNITY_NO_FIRE,
+                    }
+                )
             )
             or (
                 self.outcome
@@ -383,7 +382,11 @@ class WatcherPassReceipt:
 
 @dataclass(frozen=True, slots=True)
 class WatcherProjection:
-    """Deterministic health/action evidence with fixed zero mutation authority."""
+    """Deterministic health/action evidence with fixed zero mutation authority.
+
+    ``active_sibling_sources`` counts only supplied source projections.  Aggregate
+    watcher-resource identity and host liveness are deliberately not represented.
+    """
 
     source: WatchedSource
     state: WatcherHealth
@@ -396,7 +399,6 @@ class WatcherProjection:
     action: WatcherAction
     watch_stop_failed: bool
     active_sibling_sources: int
-    aggregate_resource_active: bool
     canonical_terminal_applied: bool
     authority_effect: str = "NONE"
     native_wake_authorized: bool = False
@@ -438,7 +440,6 @@ class WatcherProjection:
             or type(self.watch_stop_failed) is not bool
             or type(self.active_sibling_sources) is not int
             or self.active_sibling_sources < 0
-            or type(self.aggregate_resource_active) is not bool
             or type(self.canonical_terminal_applied) is not bool
             or self.authority_effect != "NONE"
             or any(type(value) is not bool or value for value in authority)
@@ -449,6 +450,7 @@ class WatcherProjection:
 _MISSED_OUTCOMES = frozenset(
     {
         WatcherPassOutcome.HOST_NOT_INVOKED,
+        WatcherPassOutcome.EXPECTED_OPPORTUNITY_NO_FIRE,
         WatcherPassOutcome.CARRIER_READ_FAILED,
         WatcherPassOutcome.EXACT_WAKE_RECORDED_ACK_ABSENT,
         WatcherPassOutcome.WAKE_EFFECT_UNKNOWN,
@@ -600,7 +602,7 @@ def project_watched_source(
                     (
                         receipt.expected_opportunity
                         for receipt in reversed(current)
-                        if receipt.host_execution is not HostExecutionState.NOT_INVOKED
+                        if receipt.actual_fire_id is not None
                     ),
                     None,
                 )
@@ -609,7 +611,6 @@ def project_watched_source(
             action=WatcherAction.SUPPRESS_TERMINAL_SOURCE,
             watch_stop_failed=watch_stop_failed,
             active_sibling_sources=active_siblings,
-            aggregate_resource_active=active_siblings > 0,
             canonical_terminal_applied=canonical_terminal_applied,
         )
 
@@ -655,7 +656,7 @@ def project_watched_source(
             (
                 receipt.expected_opportunity
                 for receipt in reversed(current)
-                if receipt.host_execution is not HostExecutionState.NOT_INVOKED
+                if receipt.actual_fire_id is not None
             ),
             None,
         ),
@@ -670,7 +671,6 @@ def project_watched_source(
         action=action,
         watch_stop_failed=False,
         active_sibling_sources=active_siblings,
-        aggregate_resource_active=active_siblings > 0,
         canonical_terminal_applied=canonical_terminal_applied,
     )
 
