@@ -30,14 +30,16 @@ from typing import Any, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from control_plane.codex_worker import (
-    CollectionReceipt,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
     LAUNCH_ATTESTATION_SCHEMA_VERSION,
-    LaunchSpec,
     ProcessIdentityError,
+)
+from control_plane.worker_execution_contract import (
+    CollectionReceipt,
     ProcessInspector,
-    ProcessRef,
     ValidationReceipt,
+    WorkerLaunchSpec,
+    WorkerProcessRef,
     WorkerRunStatus,
 )
 from control_plane.worker_adapter import WorkerExecutionAdapter
@@ -282,15 +284,15 @@ class ActiveRun:
     """In-memory handle for one process whose identity is already durable."""
 
     lease: AttemptLease = dataclasses.field(repr=False)
-    process_ref: ProcessRef
-    launch_spec: LaunchSpec
+    process_ref: WorkerProcessRef
+    launch_spec: WorkerLaunchSpec
     effective_grant: Mapping[str, Any] | None = dataclasses.field(
         default=None, repr=False
     )
 
 
 @dataclasses.dataclass(frozen=True)
-class OrchestrationLaunchSpec(LaunchSpec):
+class OrchestrationLaunchSpec(WorkerLaunchSpec):
     """LaunchSpec carrying the immutable v4 grant without widening legacy bytes."""
 
     effective_grant_digest: str = ""
@@ -493,8 +495,8 @@ def _validate_output_scope(job: Job, output: Mapping[str, Any]) -> None:
     """
 
     raw_validations = output.get("validations")
-    if not isinstance(raw_validations, list):
-        raise SupervisorError("worker result validations must be a list")
+    if not isinstance(raw_validations, (list, tuple)):
+        raise SupervisorError("worker result validations must be an array")
     if raw_validations:
         raise SupervisorError(
             "worker result must leave validations=[]; supervisor validation is authoritative"
@@ -511,7 +513,6 @@ class ExecutiveSupervisor:
         runtime: Runtime,
         adapter: WorkerExecutionAdapter,
         *,
-        codex_home: str | Path,
         runs_root: str | Path | None = None,
         isolation_roots: Sequence[str | Path] = (),
         receipts_root: str | Path | None = None,
@@ -529,7 +530,6 @@ class ExecutiveSupervisor:
     ) -> None:
         self.runtime = runtime
         self.adapter = adapter
-        self.codex_home = Path(codex_home).resolve()
         self.runs_root = (
             Path(runs_root).resolve()
             if runs_root is not None
@@ -893,7 +893,7 @@ class ExecutiveSupervisor:
         lease: AttemptLease,
         schema_path: Path,
         effective_grant: Mapping[str, Any] | None = None,
-    ) -> LaunchSpec:
+    ) -> WorkerLaunchSpec:
         attempt = lease.attempt
         quota = self.runtime.workers.get_quota_class(attempt.worker_id, attempt.quota_class)
         if quota is None:
@@ -913,7 +913,11 @@ class ExecutiveSupervisor:
             workspace=workspace,
             run_dir=run_dir,
         )
-        spec_type = OrchestrationLaunchSpec if effective_grant is not None else LaunchSpec
+        spec_type = (
+            OrchestrationLaunchSpec
+            if effective_grant is not None
+            else WorkerLaunchSpec
+        )
         spec_kwargs: dict[str, Any] = {
             "effective_grant_digest": attempt.effective_grant_digest
         } if effective_grant is not None else {}
@@ -925,7 +929,6 @@ class ExecutiveSupervisor:
             run_dir=run_dir,
             prompt=self._prompt(job, attempt, effective_grant),
             result_schema_path=schema_path,
-            codex_home=self.codex_home,
             authorities=tuple(
                 effective_grant["authorities"]
                 if effective_grant is not None
@@ -1032,8 +1035,8 @@ class ExecutiveSupervisor:
         *,
         job: Job,
         lease: AttemptLease,
-        spec: LaunchSpec,
-        process_ref: ProcessRef,
+        spec: WorkerLaunchSpec,
+        process_ref: WorkerProcessRef,
         effective_grant: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         quota = self.runtime.workers.get_quota_class(
@@ -1178,7 +1181,7 @@ class ExecutiveSupervisor:
 
         job = self._job(job_id)
         effective_grant = self._effective_grant(job, lease.attempt)
-        process_ref: ProcessRef | None = None
+        process_ref: WorkerProcessRef | None = None
         start_invoked = False
         try:
             self._validate_execution_profile(job, lease, effective_grant)
@@ -1411,8 +1414,11 @@ class ExecutiveSupervisor:
         )
 
         try:
+            json_output = _jsonable(output)
+            if not isinstance(json_output, dict):  # pragma: no cover - mapping invariant
+                raise SupervisorError("orchestration result did not project to an object")
             envelope = validate_envelope(
-                output,
+                json_output,
                 expected_job_id=job.job_id,
                 expected_run_id=active.lease.attempt.attempt_id,
                 expected_worker_id=active.lease.attempt.worker_id,

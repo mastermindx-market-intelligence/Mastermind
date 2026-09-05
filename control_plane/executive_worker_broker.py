@@ -46,21 +46,12 @@ from control_plane.executive_ambient_process import (
     NullAmbientClassifier,
 )
 from control_plane.codex_worker import (
-    ArtifactReceipt,
-    BinaryAttestation,
-    CancelReceipt,
     CodexWorkerAdapter,
-    CollectionReceipt,
     GitPreflightFailed,
     GitPreflightTimeout,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
-    LaunchSpec,
     LaunchValidationStageError,
     ProcessIdentityError,
-    ProcessRef,
-    ValidationReceipt,
-    WorkerResult,
-    WorkerRunStatus,
 )
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
@@ -114,6 +105,17 @@ from control_plane.operator_materialization_receipt import (
     read_operator_materialization_receipt,
     requested_profile_digest,
     validate_materialization_request,
+)
+from control_plane.worker_execution_contract import (
+    ArtifactReceipt,
+    BinaryAttestation,
+    CancelReceipt,
+    CollectionReceipt,
+    ValidationReceipt,
+    WorkerLaunchSpec,
+    WorkerProcessRef,
+    WorkerResult,
+    WorkerRunStatus,
 )
 from control_plane.worker_browser_b1 import (
     BrowserReviewReceipt,
@@ -465,7 +467,10 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, UIDSweepReceipt):
         return _jsonable(value.to_dict())
     if dataclasses.is_dataclass(value):
-        return _jsonable(dataclasses.asdict(value))
+        return {
+            field.name: _jsonable(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
     if isinstance(value, enum.Enum):
         return value.value
     if isinstance(value, Path):
@@ -886,8 +891,8 @@ class BrokerPolicy:
 
 @dataclasses.dataclass
 class _BrokerRun:
-    spec: LaunchSpec
-    process_ref: ProcessRef
+    spec: WorkerLaunchSpec
+    process_ref: WorkerProcessRef
     validation_commands: tuple[tuple[str, ...], ...]
     launch_attestation: Any = None
     collected_receipt: Any = None
@@ -972,7 +977,6 @@ _LAUNCH_SPEC_FIELDS = frozenset(
         "run_dir",
         "prompt",
         "result_schema_path",
-        "codex_home",
         "authorities",
         "authority",
         "model",
@@ -997,11 +1001,27 @@ _LAUNCH_SPEC_FIELDS = frozenset(
         "require_secret_canary",
     }
 )
+_PROVIDER_OWNED_LAUNCH_FIELDS = frozenset(
+    {
+        "codex_home",
+        "provider_home",
+        "claude_home",
+        "credential_path",
+        "api_key",
+        "token",
+        "provider_session_id",
+    }
+)
 
 
-def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
+def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec:
     if not isinstance(value, dict):
         raise BrokerProtocolError("launch_spec must be an object")
+    provider_owned = set(value).intersection(_PROVIDER_OWNED_LAUNCH_FIELDS)
+    if provider_owned:
+        raise BrokerProtocolError(
+            f"launch_spec includes provider-owned fields: {sorted(provider_owned)}"
+        )
     unknown = set(value) - _LAUNCH_SPEC_FIELDS
     if unknown:
         raise BrokerProtocolError(f"launch_spec has unknown fields: {sorted(unknown)}")
@@ -1013,7 +1033,6 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
         "run_dir",
         "prompt",
         "result_schema_path",
-        "codex_home",
         "expected_base_sha",
     }
     missing = required - set(value)
@@ -1043,11 +1062,6 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
     workspace = _resolve_child(value["workspace_path"], policy.workspace_root, field="workspace_path")
     run_dir = _resolve_child(value["run_dir"], policy.run_root, field="run_dir")
     schema = _resolve_child(value["result_schema_path"], run_dir, field="result_schema_path")
-    if not isinstance(value["codex_home"], str):
-        raise BrokerProtocolError("launch_spec CODEX_HOME must be an absolute path string")
-    provider_home = Path(value["codex_home"]).resolve(strict=True)
-    if provider_home != Path(policy.provider_home).resolve(strict=True):
-        raise BrokerProtocolError("launch_spec CODEX_HOME is not the dedicated provider home")
     authorities = value.get("authorities", [])
     artifacts = value.get("allowed_artifact_paths", [])
     isolation = value.get("isolation_roots", [])
@@ -1174,7 +1188,6 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
         "run_dir": run_dir,
         "prompt": value["prompt"],
         "result_schema_path": schema,
-        "codex_home": provider_home,
         "authorities": tuple(authorities),
         "authority": value.get("authority"),
         "worker_user": policy.worker_user,
@@ -1202,7 +1215,7 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
     ):
         if optional in value:
             keyword[optional] = value[optional]
-    return LaunchSpec(**keyword)
+    return WorkerLaunchSpec(**keyword)
 
 
 def get_peer_credentials(peer_socket: socket.socket) -> PeerCredentials:
@@ -2621,7 +2634,7 @@ class ExecutiveWorkerBroker:
         self._require_current_autonomy()
         if set(payload) != {"launch_spec", "validation_commands"}:
             raise BrokerProtocolError("start payload fields are invalid")
-        spec = _launch_spec(payload["launch_spec"], self.policy)
+        spec = _launch_spec_from_wire(payload["launch_spec"], self.policy)
         commands = _validation_commands(payload["validation_commands"])
         async with self._state_lock:
             if self._quarantined_reason is not None:
@@ -3347,11 +3360,11 @@ def _binary_from_json(value: Any) -> BinaryAttestation:
         raise BrokerProtocolError("remote binary attestation is invalid") from exc
 
 
-def _process_ref_from_json(value: Any) -> ProcessRef:
+def _process_ref_from_json(value: Any) -> WorkerProcessRef:
     raw = _mapping(value, field="process reference").copy()
     raw["binary"] = _binary_from_json(raw.get("binary"))
     try:
-        return ProcessRef(**raw)
+        return WorkerProcessRef(**raw)
     except (TypeError, ValueError) as exc:
         raise BrokerProtocolError("remote process reference is invalid") from exc
 
@@ -3405,8 +3418,11 @@ def _uid_sweep_from_json(value: Any) -> dict[str, Any]:
     return raw
 
 
-def _launch_spec_to_json(spec: LaunchSpec) -> dict[str, Any]:
-    return _jsonable(dataclasses.asdict(spec))
+def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
+    serialized = _jsonable(spec)
+    if not isinstance(serialized, dict):  # pragma: no cover - dataclass invariant
+        raise BrokerProtocolError("worker launch spec did not serialize to an object")
+    return serialized
 
 
 class RemoteCodexWorkerAdapter:
@@ -3417,19 +3433,19 @@ class RemoteCodexWorkerAdapter:
         client: WorkerBrokerClient,
         *,
         validation_commands_for_spec: (
-            Callable[[LaunchSpec], Sequence[Sequence[str]]] | None
+            Callable[[WorkerLaunchSpec], Sequence[Sequence[str]]] | None
         ) = None,
     ) -> None:
         self.client = client
         self.validation_commands_for_spec = validation_commands_for_spec or (lambda _spec: ())
-        self._refs: dict[str, ProcessRef] = {}
+        self._refs: dict[str, WorkerProcessRef] = {}
         self._attestations: dict[str, Mapping[str, Any]] = {}
-        self._specs: dict[str, LaunchSpec] = {}
+        self._specs: dict[str, WorkerLaunchSpec] = {}
         self._uid_sweeps: dict[str, Mapping[str, Any]] = {}
         self.startup_uid_sweep: Mapping[str, Any] | None = None
         self.inspector = _UnavailableRemoteInspector()
 
-    async def start(self, spec: LaunchSpec) -> ProcessRef:
+    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
         commands = [list(command) for command in self.validation_commands_for_spec(spec)]
         result = await self.client.request(
             "start",
@@ -3449,12 +3465,12 @@ class RemoteCodexWorkerAdapter:
         self.startup_uid_sweep = startup_sweep
         return process_ref
 
-    def launch_attestation(self, ref: ProcessRef) -> Mapping[str, Any]:
+    def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         return self._attestations[ref.run_id]
 
-    def uid_sweep_receipt(self, ref: ProcessRef) -> Mapping[str, Any]:
+    def uid_sweep_receipt(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
         """Return the last validated per-run broker sweep for durable persistence."""
 
         if self._refs.get(ref.run_id) != ref or ref.run_id not in self._uid_sweeps:
@@ -3490,7 +3506,7 @@ class RemoteCodexWorkerAdapter:
         self._uid_sweeps[run_id] = combined
         return combined
 
-    async def status(self, ref: ProcessRef) -> WorkerRunStatus:
+    async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         result = await self.client.request("status", {"run_id": ref.run_id})
@@ -3507,7 +3523,7 @@ class RemoteCodexWorkerAdapter:
         except ValueError as exc:
             raise BrokerProtocolError("remote worker status is invalid") from exc
 
-    async def collect_result(self, ref: ProcessRef) -> CollectionReceipt:
+    async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         spec = self._specs[ref.run_id]
@@ -3535,7 +3551,7 @@ class RemoteCodexWorkerAdapter:
         self._uid_sweeps[ref.run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
         return receipt
 
-    async def cancel(self, ref: ProcessRef, reason: str) -> CancelReceipt:
+    async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         result = await self.client.request(
@@ -3547,7 +3563,7 @@ class RemoteCodexWorkerAdapter:
 
     async def run_validation_argv(
         self,
-        spec: LaunchSpec,
+        spec: WorkerLaunchSpec,
         argv: Sequence[str],
         *,
         timeout_seconds: float = 300.0,
@@ -3599,7 +3615,7 @@ class RemoteWorkerProcessController:
         return self._uid_sweeps[run_id]
 
     @staticmethod
-    def _matches_attempt(process: ProcessRef, attempt: Any) -> bool:
+    def _matches_attempt(process: WorkerProcessRef, attempt: Any) -> bool:
         metadata = getattr(attempt, "launch_metadata", None)
         if not isinstance(metadata, dict):
             return False
