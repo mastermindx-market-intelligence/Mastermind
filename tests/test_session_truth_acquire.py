@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
 
 import pytest
 
@@ -76,7 +77,7 @@ def _snapshot_files(root: Path) -> dict[str, bytes]:
     return out
 
 
-def _macro_fixture(tmp_path: Path) -> Path:
+def _macro_fixture(tmp_path: Path, *, status_delay: float = 0.0) -> Path:
     macro = tmp_path / "macro"
     _init_git(macro)
     (macro / "agentos").mkdir(parents=True)
@@ -88,15 +89,18 @@ def _macro_fixture(tmp_path: Path) -> Path:
 import json
 from pathlib import Path
 import sys
+import time
 
 root = Path(__file__).resolve().parents[1]
 args = sys.argv[1:]
+status_delay = STATUS_DELAY
 now = None
 if '--now' in args:
     idx = args.index('--now')
     now = args[idx + 1]
 
 if args and args[0] == 'status' and '--dry-run' in args:
+    time.sleep(status_delay)
     payload = {
         'schema': 'agent_os_state.v1',
         'generated_at': now,
@@ -127,7 +131,7 @@ if args and args[0] == 'compile-context' and '--workstream' in args:
 
 (root / '.ILLEGAL_WRITE').write_text('unexpected args: ' + repr(args), encoding='utf-8')
 raise SystemExit(7)
-""",
+""".replace("STATUS_DELAY", repr(status_delay)),
         encoding="utf-8",
     )
     _commit_all(macro, "fixture")
@@ -202,6 +206,92 @@ def test_collect_agentos_uses_status_and_context_without_writes(tmp_path):
     assert got["warnings"] == ["agentos status emitted trailing non-JSON diagnostics"]
     assert _snapshot_files(macro) == before
     assert not (macro / ".ILLEGAL_WRITE").exists()
+
+
+def test_collect_agentos_allows_slow_status_within_explicit_test_budget(tmp_path):
+    module = _acquire()
+    macro = _macro_fixture(tmp_path, status_delay=0.1)
+
+    got = module.collect_agentos(
+        os.fspath(macro),
+        ["WS:TARGET"],
+        environ={},
+        now="2026-08-27T05:00:00Z",
+        timeout=1.0,
+    )
+
+    assert got["available"] is True
+    assert got["state"]["workstreams"][0]["key"] == "TARGET"
+    assert got["contexts"][0]["target"]["workstream"] == "WS:TARGET"
+
+
+def test_collect_agentos_status_timeout_is_typed_and_bounded(tmp_path):
+    module = _acquire()
+    macro = _macro_fixture(tmp_path, status_delay=5.0)
+    started = time.monotonic()
+
+    with pytest.raises(
+        module.AcquisitionError,
+        match=r"Agent OS read timed out after 0\.05s: status --dry-run",
+    ):
+        module.collect_agentos(
+            os.fspath(macro),
+            ["WS:TARGET"],
+            environ={},
+            now=None,
+            timeout=0.05,
+        )
+
+    assert time.monotonic() - started < 2.0
+
+
+def test_collect_agentos_default_budget_preserves_canonical_commands(tmp_path, monkeypatch):
+    module = _acquire()
+    macro = _macro_fixture(tmp_path)
+    calls = []
+
+    def fake_run_agentos(macro_root, args, *, timeout):
+        calls.append((macro_root, list(args), timeout))
+        if args[0] == "status":
+            return json.dumps(
+                {
+                    "schema": "agent_os_state.v1",
+                    "workstreams": [{"key": "TARGET"}],
+                }
+            )
+        return json.dumps(
+            {
+                "schema": "context_bundle.v1",
+                "target": {"workstream": "WS:TARGET"},
+            }
+        )
+
+    monkeypatch.setattr(module, "_run_agentos", fake_run_agentos)
+    module.collect_agentos(
+        os.fspath(macro),
+        ["WS:TARGET"],
+        environ={},
+        now="2026-08-27T05:00:00Z",
+    )
+
+    assert calls == [
+        (
+            macro,
+            ["status", "--dry-run", "--now", "2026-08-27T05:00:00Z"],
+            120.0,
+        ),
+        (
+            macro,
+            [
+                "compile-context",
+                "--workstream",
+                "TARGET",
+                "--now",
+                "2026-08-27T05:00:00Z",
+            ],
+            120.0,
+        ),
+    ]
 
 
 def test_collect_agentos_missing_read_path_is_explicitly_unavailable(tmp_path):

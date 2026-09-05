@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import time
 
 import pytest
 
@@ -75,7 +76,7 @@ def _skillpack_repo(tmp_path: Path) -> tuple[Path, str]:
     return repo, _commit_all(repo, "protected")
 
 
-def _macro_repo(tmp_path: Path) -> Path:
+def _macro_repo(tmp_path: Path, *, status_delay: float = 0.0) -> Path:
     macro = tmp_path / "macro"
     _init_git(macro)
     ws = macro / "agentos" / "workstreams" / "WS-CHAIRMAN-CONTROL-ROOM.md"
@@ -88,11 +89,14 @@ def _macro_repo(tmp_path: Path) -> Path:
 import json
 from pathlib import Path
 import sys
+import time
 
 root = Path(__file__).resolve().parents[1]
 args = sys.argv[1:]
+status_delay = STATUS_DELAY
 
 if args and args[0] == "status" and "--dry-run" in args:
+    time.sleep(status_delay)
     payload = {
         "schema": "agent_os_state.v1",
         "generated_at": "2026-08-27T08:00:00Z",
@@ -131,7 +135,7 @@ if args and args[0] == "compile-context" and "--workstream" in args:
 
 (root / ".ILLEGAL_WRITE").write_text(repr(args), encoding="utf-8")
 raise SystemExit(7)
-""",
+""".replace("STATUS_DELAY", repr(status_delay)),
         encoding="utf-8",
     )
     _commit_all(macro, "fixture")
@@ -394,6 +398,33 @@ def test_direct_agentos_identity_error_exits_2_without_running_invalid_command(t
     assert stdout == ""
     assert 0 < len(stderr) <= 256
     assert not (macro / ".ILLEGAL_WRITE").exists()
+
+
+def test_agentos_timeout_exits_2_without_receipt(tmp_path, monkeypatch):
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path, status_delay=5.0)
+    snapshots = _snapshot_dir(tmp_path)
+    original_collect_agentos = cli.collect_agentos
+
+    def collect_with_scaled_test_timeout(macro_root, workstreams, *, environ, now):
+        return original_collect_agentos(
+            macro_root,
+            workstreams,
+            environ=environ,
+            now=now,
+            timeout=0.05,
+        )
+
+    monkeypatch.setattr(cli, "collect_agentos", collect_with_scaled_test_timeout)
+    started = time.monotonic()
+    code, stdout, stderr = _run(cli, _argv(snapshots, macro, protected), repo)
+
+    assert code == 2
+    assert stdout == ""
+    assert stderr == "session-truth error: canonical acquisition failed\n"
+    assert time.monotonic() - started < 2.0
+    assert "--agentos-timeout" not in cli._parser()._option_string_actions
 
 
 def test_text_mode_uses_bounded_renderer(tmp_path):

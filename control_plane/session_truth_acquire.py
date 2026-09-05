@@ -32,6 +32,7 @@ _FRONTMATTER_KEYS = frozenset(
 _WS_RE = re.compile(r"^WS:[A-Z0-9][A-Z0-9-]*$")
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _GIT_TIMEOUT = 10.0
+_AGENTOS_READ_TIMEOUT = 120.0
 
 
 class AcquisitionError(RuntimeError):
@@ -253,7 +254,7 @@ def collect_agentos(
     *,
     environ: Mapping[str, str],
     now: str | None,
-    timeout: float = 60.0,
+    timeout: float = _AGENTOS_READ_TIMEOUT,
 ) -> dict[str, Any]:
     """Acquire canonical Agent OS state and scoped context without writing Macro.
 
