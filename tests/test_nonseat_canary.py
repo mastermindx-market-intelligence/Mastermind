@@ -3485,6 +3485,21 @@ def _peer_search_payload(data):
     }
 
 
+_INITIAL_DECODE_CONTEXT_NONE = {
+    "status_class": "NONE",
+    "declared_media_type_class": "NONE",
+    "decoder_class": "NONE",
+}
+
+
+def _assert_initial_decode_context(receipt, expected=None):
+    context = receipt["initial_peer_census_decode_context"]
+    assert set(context) == {
+        "status_class", "declared_media_type_class", "decoder_class",
+    }
+    assert context == (expected or _INITIAL_DECODE_CONTEXT_NONE)
+
+
 @pytest.mark.parametrize(
     ("failure", "expected"),
     (
@@ -3504,8 +3519,16 @@ def test_peer_initial_census_transport_failure_classes_are_closed_and_redacted(f
         return httpx.Response(200, content=(secret + "{").encode())
 
     receipt = _initial_peer_census_http_receipt(_handler)
-    assert receipt["schema"] == "mastermind.mas115_nonseat_peer_lifecycle.v2"
+    assert receipt["schema"] == "mastermind.mas115_nonseat_peer_lifecycle.v3"
     assert receipt["initial_peer_census_diagnostic"] == expected
+    if failure == "decode":
+        _assert_initial_decode_context(receipt, {
+            "status_class": "HTTP_200",
+            "declared_media_type_class": "MISSING",
+            "decoder_class": "JSON_VALUE_REJECTED",
+        })
+    else:
+        _assert_initial_decode_context(receipt)
     assert receipt["code"] == "VENDOR_ERROR"
     assert receipt["verdict"] == "REFUSED"
     assert receipt["effect"] == "NONE"
@@ -3532,6 +3555,7 @@ def test_peer_initial_census_http_status_mapping_preserves_receipt_semantics(
         lambda _request: httpx.Response(status_code, json={"private": _SECRET}),
     )
     assert receipt["initial_peer_census_diagnostic"] == diagnostic
+    _assert_initial_decode_context(receipt)
     assert receipt["code"] == code
     assert receipt["verdict"] == "REFUSED"
     assert receipt["effect"] == "NONE"
@@ -3559,6 +3583,7 @@ def test_peer_initial_census_shape_failure_classes_are_closed_and_redacted(paylo
         lambda _request: httpx.Response(200, json=payload),
     )
     assert receipt["initial_peer_census_diagnostic"] == diagnostic
+    _assert_initial_decode_context(receipt)
     assert receipt["code"] == "VENDOR_ERROR"
     assert receipt["effect"] == "NONE"
     assert _SECRET not in json.dumps(receipt)
@@ -3573,6 +3598,7 @@ def test_peer_initial_census_valid_page_keeps_existing_behavior_and_none_is_not_
         commit_intent=commit,
     )
     assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(receipt)
     assert receipt["code"] == "PROVISION_MISSING"
     assert receipt["verdict"] == "REFUSED"
     assert receipt["effect"] == "NONE"
@@ -3597,6 +3623,7 @@ def test_peer_post_dispatch_census_failure_cannot_populate_initial_diagnostic():
     )
     assert calls == ["/profile/search", "/profile/create", "/profile/search"]
     assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(receipt)
     assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
     assert receipt["code"] == "VENDOR_ERROR"
     assert receipt["verdict"] == "HOLD"
@@ -3635,12 +3662,14 @@ def test_peer_initial_census_diagnostic_is_invocation_local_not_last_error_state
     finally:
         bounded.close()
     assert first["initial_peer_census_diagnostic"] == "HTTP_RATE_LIMITED"
+    _assert_initial_decode_context(first)
     assert second["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(second)
     assert second["code"] == "PROVISION_MISSING"
     assert commit.calls == [True]
 
 
-def test_peer_receipt_v2_diagnostic_is_additive_closed_and_defaults_none():
+def test_peer_receipt_v3_diagnostic_is_additive_closed_and_defaults_none():
     predicates = dict(vendors._PEER_BASE_PREDICATES)
     digests = {
         "folder": "a" * 64,
@@ -3652,10 +3681,12 @@ def test_peer_receipt_v2_diagnostic_is_additive_closed_and_defaults_none():
         effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
         digests=digests, **predicates,
     )
-    assert receipt["schema"] == "mastermind.mas115_nonseat_peer_lifecycle.v2"
+    assert receipt["schema"] == "mastermind.mas115_nonseat_peer_lifecycle.v3"
     assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(receipt)
     assert set(receipt) == {
-        "schema", "operation", "initial_peer_census_diagnostic", "verdict",
+        "schema", "operation", "initial_peer_census_diagnostic",
+        "initial_peer_census_decode_context", "verdict",
         "effect", "effect_detail", "code", "detail", "removal_disposition",
         "removal_disposition_detail", "digests", "predicates",
     }
@@ -3665,6 +3696,16 @@ def test_peer_receipt_v2_diagnostic_is_additive_closed_and_defaults_none():
         "HTTP_REQUEST_REJECTED", "HTTP_SERVICE_UNAVAILABLE",
         "HTTP_UNEXPECTED", "STATUS_ENVELOPE_INVALID", "DATA_SCHEMA_INVALID",
         "PROFILE_ITEM_INVALID", "PAGINATION_INVALID",
+    }
+    assert set(vendors.INITIAL_PEER_CENSUS_STATUS_CLASSES) == {
+        "NONE", "HTTP_200", "HTTP_3XX", "HTTP_AUTH", "HTTP_RATE_LIMITED",
+        "HTTP_OTHER_4XX", "HTTP_5XX", "HTTP_OTHER",
+    }
+    assert set(vendors.INITIAL_PEER_CENSUS_MEDIA_TYPE_CLASSES) == {
+        "NONE", "MISSING", "JSON", "HTML", "TEXT", "OTHER",
+    }
+    assert set(vendors.INITIAL_PEER_CENSUS_DECODER_CLASSES) == {
+        "NONE", "UNICODE_REJECTED", "JSON_VALUE_REJECTED",
     }
     with pytest.raises(ValueError):
         vendors.peer_receipt(
@@ -3676,6 +3717,276 @@ def test_peer_receipt_v2_diagnostic_is_additive_closed_and_defaults_none():
             effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
             digests=digests, initial_peer_census_diagnostic=[], **predicates,
         )
+    with pytest.raises(ValueError):
+        vendors.peer_receipt(
+            effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+            digests=digests,
+            initial_peer_census_decode_context={"status_class": "HTTP_200"},
+            **predicates,
+        )
+    with pytest.raises(ValueError):
+        vendors.peer_receipt(
+            effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+            digests=digests,
+            initial_peer_census_decode_context={
+                "status_class": "HTTP_200",
+                "declared_media_type_class": "JSON",
+                "decoder_class": "JSON_VALUE_REJECTED",
+            },
+            **predicates,
+        )
+    with pytest.raises(ValueError):
+        vendors.peer_receipt(
+            effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+            digests=digests,
+            initial_peer_census_diagnostic="RESPONSE_DECODE_FAILURE",
+            initial_peer_census_decode_context={
+                "status_class": "HTTP_200",
+                "declared_media_type_class": "RAW_SECRET_HEADER",
+                "decoder_class": "JSON_VALUE_REJECTED",
+            },
+            **predicates,
+        )
+
+
+@pytest.mark.parametrize(
+    ("status_code", "status_class"),
+    (
+        (200, "HTTP_200"),
+        (302, "HTTP_3XX"),
+        (401, "HTTP_AUTH"),
+        (403, "HTTP_AUTH"),
+        (429, "HTTP_RATE_LIMITED"),
+        (400, "HTTP_OTHER_4XX"),
+        (418, "HTTP_OTHER_4XX"),
+        (503, "HTTP_5XX"),
+        (201, "HTTP_OTHER"),
+    ),
+)
+def test_peer_initial_decode_context_status_cross_product_preserves_public_refusal(
+    status_code, status_class,
+):
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            status_code,
+            content=("<html>" + _SECRET).encode(),
+            headers={"Content-Type": "text/html; charset=UTF-8"},
+        ),
+    )
+    assert receipt["initial_peer_census_diagnostic"] == "RESPONSE_DECODE_FAILURE"
+    _assert_initial_decode_context(receipt, {
+        "status_class": status_class,
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    })
+    # Decode still precedes public status handling, including for 401/403.
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert _SECRET not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize(
+    ("headers", "media_class"),
+    (
+        (None, "MISSING"),
+        ({"Content-Type": "Application/JSON; Charset=UTF-8"}, "JSON"),
+        ({"Content-Type": "application/problem+json; version=1"}, "JSON"),
+        ({"Content-Type": "text/html"}, "HTML"),
+        ({"Content-Type": "TEXT/PLAIN; charset=us-ascii"}, "TEXT"),
+        ({"Content-Type": "application/octet-stream"}, "OTHER"),
+        ({"Content-Type": "application/+json"}, "OTHER"),
+        ({"Content-Type": "application/json, text/html"}, "OTHER"),
+        ([
+            ("Content-Type", "application/json"),
+            ("Content-Type", "text/html"),
+        ], "OTHER"),
+    ),
+)
+def test_peer_initial_decode_context_declared_media_type_is_closed_and_bounded(
+    headers, media_class,
+):
+    kwargs = {} if headers is None else {"headers": headers}
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            200, content=("{" + _SECRET).encode(), **kwargs,
+        ),
+    )
+    assert receipt["initial_peer_census_diagnostic"] == "RESPONSE_DECODE_FAILURE"
+    _assert_initial_decode_context(receipt, {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": media_class,
+        "decoder_class": "JSON_VALUE_REJECTED",
+    })
+    dumped = json.dumps(receipt)
+    assert _SECRET not in dumped
+    if headers is not None:
+        assert str(headers) not in dumped
+
+
+def test_peer_initial_decode_context_oversized_or_hostile_media_never_escapes():
+    hostile = "application/" + _SECRET + (
+        "x" * vendors._MAX_DECLARED_MEDIA_TYPE_BYTES
+    )
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            200,
+            content=("{" + _SECRET).encode(),
+            headers={"Content-Type": hostile},
+        ),
+    )
+    _assert_initial_decode_context(receipt, {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": "OTHER",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    })
+    dumped = json.dumps(receipt)
+    assert _SECRET not in dumped
+    assert hostile not in dumped
+
+
+@pytest.mark.parametrize(
+    ("body", "decoder_class"),
+    (
+        (b"\xff", "UNICODE_REJECTED"),
+        (b"{", "JSON_VALUE_REJECTED"),
+    ),
+)
+def test_peer_initial_decode_context_distinguishes_unicode_from_json_rejection(
+    body, decoder_class,
+):
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            200, content=body, headers={"Content-Type": "application/json"},
+        ),
+    )
+    _assert_initial_decode_context(receipt, {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": "JSON",
+        "decoder_class": decoder_class,
+    })
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["effect"] == "NONE"
+
+
+def test_peer_initial_decode_context_sink_is_first_write_and_has_no_mutable_alias():
+    sink = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    first = {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    }
+    vendors._record_initial_peer_census_diagnostic(
+        sink, "RESPONSE_DECODE_FAILURE", decode_context=first,
+    )
+    first["status_class"] = "HTTP_5XX"
+    escaped = sink.decode_context
+    escaped["decoder_class"] = "UNICODE_REJECTED"
+    vendors._record_initial_peer_census_diagnostic(
+        sink, "TRANSPORT_FAILURE",
+    )
+    assert sink.value == "RESPONSE_DECODE_FAILURE"
+    assert sink.decode_context == {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    }
+
+    first_non_decode = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    vendors._record_initial_peer_census_diagnostic(
+        first_non_decode, "RESPONSE_BODY_LIMIT",
+    )
+    vendors._record_initial_peer_census_diagnostic(
+        first_non_decode, "RESPONSE_DECODE_FAILURE", decode_context={
+            "status_class": "HTTP_5XX",
+            "declared_media_type_class": "HTML",
+            "decoder_class": "JSON_VALUE_REJECTED",
+        },
+    )
+    assert first_non_decode.value == "RESPONSE_BODY_LIMIT"
+    assert first_non_decode.decode_context == _INITIAL_DECODE_CONTEXT_NONE
+
+
+def test_peer_initial_decode_context_is_invocation_local_across_reused_client():
+    calls = []
+
+    def _handler(_request):
+        calls.append(True)
+        if len(calls) == 1:
+            return httpx.Response(
+                503,
+                content=("<html>" + _SECRET).encode(),
+                headers={"Content-Type": "text/html"},
+            )
+        return httpx.Response(
+            200, json=_peer_search_payload({"profiles": [], "total_count": 0}),
+        )
+
+    inner = httpx.Client(
+        transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False,
+    )
+    bounded = vendors.BoundedHttpClient(client=inner)
+    client = vendors.MultiloginClient(core.Credential(_SECRET, "stdin"), bounded)
+    try:
+        first = client.create_peer_profile(
+            folder_id=_PEER_FOLDER,
+            anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False,
+            commit_intent=lambda: (_ for _ in ()).throw(
+                AssertionError("failed census must not commit"),
+            ),
+        )
+        commit = _refusing_intent()
+        second = client.create_peer_profile(
+            folder_id=_PEER_FOLDER,
+            anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False,
+            commit_intent=commit,
+        )
+    finally:
+        bounded.close()
+    assert first["initial_peer_census_diagnostic"] == "RESPONSE_DECODE_FAILURE"
+    _assert_initial_decode_context(first, {
+        "status_class": "HTTP_5XX",
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    })
+    assert second["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(second)
+    assert second["code"] == "PROVISION_MISSING"
+    assert commit.calls == [True]
+
+
+def test_peer_post_dispatch_decode_failure_cannot_populate_initial_context():
+    calls = []
+
+    def _handler(request):
+        calls.append(request.url.path)
+        if request.url.path == "/profile/create":
+            return httpx.Response(201, json={"private": _SECRET})
+        if calls.count("/profile/search") == 1:
+            return httpx.Response(
+                200, json=_peer_search_payload({"profiles": [], "total_count": 0}),
+            )
+        return httpx.Response(
+            503,
+            content=("<html>" + _SECRET).encode(),
+            headers={"Content-Type": "text/html"},
+        )
+
+    receipt = _initial_peer_census_http_receipt(
+        _handler, commit_intent=_committing_intent(),
+    )
+    assert calls == ["/profile/search", "/profile/create", "/profile/search"]
+    assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(receipt)
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert _SECRET not in json.dumps(receipt)
 
 
 def test_peer_diagnostic_does_not_change_generation_or_lifecycle_fence_contract():
