@@ -1210,6 +1210,7 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         DialogueWakeCanaryActivationGrant,
         DialogueWakeCanaryProfile,
         SCHEMA as CANARY_SCHEMA,
+        effective_dialogue_wake_canary_route,
     )
     from control_plane.ceo_intent import submit_intent
     from control_plane.operator_harness_contract import (
@@ -1234,7 +1235,22 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         SessionTargetRegistry,
         route_obligation,
     )
-    from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
+    from control_plane.wake_ledger import (
+        AckMode,
+        LedgerPhase,
+        SourceReadHealth,
+        SourceResolution,
+        SourceResolutionCode,
+        TrustedAckContext,
+        WakeLedgerError,
+        WakeRetryPolicy,
+        acknowledge,
+        ack_record,
+        attempt_record,
+        make_delivery_attempt,
+        requested_record,
+        resolved_record,
+    )
     from control_plane.wake_persist import WakeLedgerRepository
     from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
     from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
@@ -1636,10 +1652,12 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         "route": route.to_dict(),
     }
 
-    async def exchange(path: Path) -> dict[str, object]:
+    async def exchange(
+        path: Path, payload: dict[str, object] = request
+    ) -> dict[str, object]:
         return await _raw_request(
             path,
-            json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
             + b"\n",
         )
 
@@ -1683,6 +1701,62 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                 "read-exit",
                 "current-exit",
             ]
+
+            persisted_before_profile_checks = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            provider_calls_before_profile_checks = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            )
+            null_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(None),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant.installed_release_sha,
+                operation_key=grant.operation_key,
+            )
+            changed_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(
+                    dataclasses.replace(grant, source_semantic_digest="f" * 64)
+                ),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant.installed_release_sha,
+                operation_key=grant.operation_key,
+            )
+            for incompatible in (null_bridge, changed_bridge):
+                service._dialogue_wake_handler = incompatible
+                for operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                    refused = await exchange(
+                        observation_path,
+                        {**request, "operation": operation},
+                    )
+                    assert refused == {
+                        "schema": WAKE_RESPONSE_SCHEMA,
+                        "state": "EFFECT_UNKNOWN",
+                        "reason": "WAKE_EFFECT_UNKNOWN",
+                    }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_calls_before_profile_checks
+            assert tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ) == persisted_before_profile_checks
+            service._dialogue_wake_handler = bridge
 
             turn_operation = OperationId("ohf-op:canary-socket-turn")
             turn = runtime.operator_harness.reserve_turn(
@@ -1751,6 +1825,63 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                 ),
             )
 
+            class BridgeWrapper:
+                canary_profile = bridge.canary_profile
+
+                async def __call__(self, opened, wake_request):
+                    return await bridge(opened, wake_request)
+
+                async def historical_only(self, opened, wake_request):
+                    return await bridge.historical_only(opened, wake_request)
+
+            class FakeHistoricalHandler:
+                canary_profile = bridge.canary_profile
+
+                async def historical_only(self, _opened, _wake_request):
+                    raise AssertionError("fake handler must not receive forced fallback")
+
+            noncanary = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+            )
+            counts_before_exact_class_checks = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count("historical-enter"),
+            )
+            persisted_before_exact_class_checks = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            for excluded in (BridgeWrapper(), FakeHistoricalHandler(), noncanary):
+                service._dialogue_wake_handler = excluded
+                for operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                    excluded_response = await exchange(
+                        observation_path,
+                        {**request, "operation": operation},
+                    )
+                    assert excluded_response == {
+                        "schema": WAKE_RESPONSE_SCHEMA,
+                        "state": "MISSING",
+                        "reason": "CANDIDATE_BINDING_REQUIRED",
+                    }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count("historical-enter"),
+            ) == counts_before_exact_class_checks
+            assert tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ) == persisted_before_exact_class_checks
+            service._dialogue_wake_handler = bridge
+
             phases_before_counterfactual = [
                 item.record.phase
                 for item in WakeLedgerRepository(runtime).list_records(
@@ -1800,6 +1931,194 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
             assert terminal_replay == replay
             assert operator.reconcile_calls == resolver_calls
             assert operator.deliver_calls == 1
+
+            repository = WakeLedgerRepository(runtime)
+            for index, terminal_phase in enumerate(
+                (
+                    LedgerPhase.TARGET_ACKNOWLEDGED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                    LedgerPhase.FAILED,
+                    LedgerPhase.TARGET_UNAVAILABLE,
+                ),
+                start=1,
+            ):
+                terminal_obligation = mint_obligation(
+                    wake_kind="dialogue_turn_pending",
+                    source_kind="agent_dialogue_attention",
+                    source_ref="agent_dialogue_attention:"
+                    + format(index, "x") * 64,
+                    declared_target_seat="coo",
+                    job_id=sealed.job_id,
+                    attempt_id=sealed.attempt_id,
+                    root_job_id=root.job_id,
+                    source_workstream=str(source["work_ref"]),
+                    source_created_at="2026-09-03T01:00:00Z",
+                    emitted_at=f"2026-09-03T01:00:0{index + 1}Z",
+                )
+                terminal_route = route_obligation(
+                    terminal_obligation, registry, binding=binding
+                )
+                terminal_grant = dataclasses.replace(
+                    grant,
+                    obligation_id=terminal_obligation.obligation_id,
+                    policy_digest=terminal_route.policy_digest,
+                )
+                terminal_profile = DialogueWakeCanaryProfile(terminal_grant)
+                effective_terminal_route = effective_dialogue_wake_canary_route(
+                    terminal_profile, terminal_route
+                )
+                delivery_attempt = make_delivery_attempt(
+                    terminal_obligation,
+                    effective_terminal_route,
+                    attempt_n=1,
+                )
+                rows = [
+                    (requested_record(terminal_obligation), terminal_obligation),
+                    (
+                        attempt_record(
+                            delivery_attempt, LedgerPhase.DELIVERY_ATTEMPT
+                        ),
+                        terminal_obligation,
+                    ),
+                ]
+                if terminal_phase in {
+                    LedgerPhase.TARGET_ACKNOWLEDGED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                }:
+                    rows.append(
+                        (
+                            attempt_record(
+                                delivery_attempt, LedgerPhase.DELIVERED
+                            ),
+                            terminal_obligation,
+                        )
+                    )
+                if terminal_phase in {
+                    LedgerPhase.TARGET_ACKNOWLEDGED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                }:
+                    ack = acknowledge(
+                        terminal_obligation,
+                        trusted=TrustedAckContext(
+                            ack_mode=AckMode.REASONING_SESSION,
+                            target_seat="coo",
+                            session_alias=binding.session_alias,
+                            reasoning_surface=binding.reasoning_surface,
+                            binding_id=binding.binding_id,
+                            binding_generation=binding.binding_generation,
+                            acknowledged_at="2026-09-03T01:01:00Z",
+                        ),
+                        claimed_obligation_ids=(
+                            terminal_obligation.obligation_id,
+                        ),
+                        delivered_command_id=attempt_record(
+                            delivery_attempt, LedgerPhase.DELIVERED
+                        ).command_id,
+                    )
+                    rows.append((ack_record(terminal_obligation, ack), terminal_obligation))
+                if terminal_phase is LedgerPhase.SOURCE_RESOLVED:
+                    resolution = SourceResolution(
+                        obligation_id=terminal_obligation.obligation_id,
+                        code=SourceResolutionCode.RUNTIME_REVIEW_ABSENT,
+                        health=SourceReadHealth.HEALTHY,
+                        source_present=False,
+                        source_kind=terminal_obligation.source_kind.value,
+                        source_ref=terminal_obligation.source_ref,
+                        snapshot_digest="ab" * 16,
+                        resolved_at="2026-09-03T01:01:00Z",
+                    )
+                    rows.append(
+                        (
+                            resolved_record(terminal_obligation, resolution),
+                            terminal_obligation,
+                        )
+                    )
+                elif terminal_phase in {
+                    LedgerPhase.FAILED,
+                    LedgerPhase.TARGET_UNAVAILABLE,
+                }:
+                    rows.append(
+                        (
+                            attempt_record(delivery_attempt, terminal_phase),
+                            terminal_obligation,
+                        )
+                    )
+                if terminal_phase is LedgerPhase.SOURCE_RESOLVED:
+                    with pytest.raises(
+                        WakeLedgerError,
+                        match="source resolution code does not match the obligation source",
+                    ):
+                        repository.append_records_atomic(rows)
+                    assert repository.list_records(
+                        terminal_obligation.obligation_id
+                    ) == ()
+                    continue
+                repository.append_records_atomic(rows)
+                terminal_bridge = ExecutiveDialogueWakeBridge(
+                    target_provider=None,
+                    retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                    operator_adapter=operator,
+                    carrier_factory=carrier_factory,
+                    canary_profile=terminal_profile,
+                    canary_now_epoch_seconds=now_epoch_seconds,
+                    installed_release_sha=terminal_grant.installed_release_sha,
+                    operation_key=terminal_grant.operation_key,
+                )
+                terminal_resolver_calls = 0
+                actual_terminal_resolver = terminal_bridge._resolve_historical_target
+
+                def observed_terminal_resolver(*args):
+                    nonlocal terminal_resolver_calls
+                    terminal_resolver_calls += 1
+                    return actual_terminal_resolver(*args)
+
+                monkeypatch.setattr(
+                    terminal_bridge,
+                    "_resolve_historical_target",
+                    observed_terminal_resolver,
+                )
+                service._dialogue_wake_handler = terminal_bridge
+                terminal_request = {
+                    **request,
+                    "obligation": terminal_obligation.to_dict(),
+                    "route": terminal_route.to_dict(),
+                }
+                before_terminal_socket = tuple(
+                    item.record
+                    for item in repository.list_records(
+                        terminal_obligation.obligation_id
+                    )
+                )
+                calls_before_terminal_socket = (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                )
+                for operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                    terminal_response = await exchange(
+                        observation_path,
+                        {**terminal_request, "operation": operation},
+                    )
+                    assert terminal_response == {
+                        "schema": WAKE_RESPONSE_SCHEMA,
+                        "state": "RECORDED",
+                        "reason": "WAKE_RECORDED",
+                    }
+                assert terminal_resolver_calls == 0
+                assert (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                ) == calls_before_terminal_socket
+                after_terminal_socket = tuple(
+                    item.record
+                    for item in repository.list_records(
+                        terminal_obligation.obligation_id
+                    )
+                )
+                assert after_terminal_socket == before_terminal_socket
+                assert sum(
+                    record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                    for record in after_terminal_socket
+                ) == 1
         finally:
             await service.close()
 
