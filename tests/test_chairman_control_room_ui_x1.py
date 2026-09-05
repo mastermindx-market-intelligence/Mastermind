@@ -12,6 +12,8 @@ import subprocess
 
 import pytest
 
+from control_plane import chairman_control_room_remote as remote
+
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "app" / "static" / "chairman_control"
@@ -704,11 +706,11 @@ def test_x1_autonomy_writes_only_through_the_audited_binding_open_never_ad_hoc()
     assert 'postJSON("/api/open"' in open_fn
 
 
-def test_x1_autonomy_absent_projection_is_calm_and_truthful_not_an_error() -> None:
+def test_x1_autonomy_absent_projection_is_source_qualified_not_an_error() -> None:
     block = _autonomy_js()
     assert "function auNotWired(mount)" in block
     assert "Not wired yet" in block
-    assert "Nothing is hidden and nothing has failed" in block
+    assert "No autonomy projection was returned. Its availability and current responsibility state are unknown." in block
     assert "ccr-au-quiet" in block
     assert 'if (!STATE.autonomy) {' in block
     # The not-yet-wired branch must not borrow the degraded-source alarm.
@@ -818,7 +820,7 @@ def test_x1_autonomy_chairman_decision_band_names_the_reason() -> None:
     band = block[block.index("function auDecisions(projection, byRef)") : block.index("function auGapFold")]
     assert "projection.chairman_decisions" in band
     assert "card.chairman_decision_reason" in band
-    assert "Nothing here needs your decision." in band
+    assert "No Chairman decision is recorded in this projection. Check source-read issues before treating it as current." in band
     assert "This reference is not in the loaded responsibility list." in band
 
 
@@ -1090,6 +1092,172 @@ def _run_node(script: str):
     import json
 
     return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_attention_empty_copy_is_source_qualified_when_runtime_or_inbox_is_not_current() -> None:
+    """Empty Inbox arrays are not a complete operational-clear signal."""
+    harness = """
+    var REMOTE_READ_ONLY = false;
+    %s
+    %s
+    console.log(JSON.stringify({
+      healthy: [attentionReadState({attention:{chairman:[],ceo:[],coo:[]}, sources:{runtime_db_present:true}, degraded:[]}, {}), emptyAttentionText("current", "Clear")],
+      runtime: [attentionReadState({attention:{chairman:[],ceo:[],coo:[]}, sources:{runtime_db_present:false}, degraded:[]}, {}), emptyAttentionText("runtime_unavailable", "Clear")],
+      inbox: [attentionReadState({attention:{chairman:[],ceo:[],coo:[]}, sources:{runtime_db_present:true}, degraded:["executive_inbox: unavailable"]}, {}), emptyAttentionText("unavailable", "Clear")],
+      refresh: [attentionReadState({attention:{chairman:[],ceo:[],coo:[]}, sources:{runtime_db_present:true}, degraded:[]}, {refresh_in_flight:true}), emptyAttentionText("unavailable", "Clear")]
+    }));
+    """ % (_extract_fn("attentionReadState"), _extract_fn("emptyAttentionText"))
+    out = _run_node(harness)
+    assert out["healthy"] == ["current", "Clear"]
+    assert out["runtime"] == ["runtime_unavailable", "No recorded Inbox items. Executive runtime unavailable."]
+    assert out["inbox"] == ["unavailable", "Attention unavailable — refresh canonical sources."]
+    assert out["refresh"] == ["unavailable", "Attention unavailable — refresh canonical sources."]
+
+
+def test_remote_attention_uses_its_published_runtime_freshness_not_local_sources() -> None:
+    """A remote document has no local sources; only its closed freshness receipt decides clear copy."""
+    fresh = remote.SourceFreshness("fresh", "2026-09-04T00:00:00Z", "2026-09-04T00:00:00Z", None).state
+    stale = remote.SourceFreshness("stale", "2026-09-04T00:00:00Z", "2026-09-03T00:00:00Z", "over_age").state
+    unavailable = remote.SourceFreshness("unavailable", "2026-09-04T00:00:00Z", None, "missing").state
+    harness = """
+    var REMOTE_READ_ONLY = true;
+    %s
+    function state(value) { return attentionReadState({
+      attention:{chairman:[],ceo:[],coo:[]},
+      source_freshness:{executive_runtime:{state:value}}, degraded:[]
+    }, {}); }
+    console.log(JSON.stringify({fresh:state(%r), stale:state(%r), unavailable:state(%r), invalidCurrent:state("current")}));
+    """ % (_extract_fn("attentionReadState"), fresh, stale, unavailable)
+    assert _run_node(harness) == {
+        "fresh": "current", "stale": "unavailable",
+        "unavailable": "unavailable", "invalidCurrent": "unavailable",
+    }
+
+
+def test_runtime_unavailable_nonempty_attention_stays_visible_with_a_qualification() -> None:
+    """An existing row survives degraded Runtime proof and receives the actual qualifier."""
+    harness = """
+    var rows = [];
+    rows.appendChild = function(v) { rows.push(v); };
+    function el(tag, opts) {
+      var node = {tag:tag, text:(opts || {}).text || "", className:(opts || {}).className || "", children:[]};
+      node.appendChild = function(v) { this.children.push(v); };
+      node.addEventListener = function() {};
+      return node;
+    }
+    function clear(list) { list.length = 0; }
+    var document = { querySelector:function() { return rows; } };
+    function attentionSummary(item) { return item.summary; }
+    function findCardForAttention() { return null; }
+    function safeText(value, fallback) { return value || fallback; }
+    function openAttentionDetail() {}
+    %s
+    %s
+    renderMiniAttention("sol-attention", [{summary:"existing item", workstream:"WS:X"}], "runtime_unavailable");
+    console.log(JSON.stringify(rows.map(function(row) { return {text:row.text, className:row.className, children:row.children.length}; })));
+    """ % (_extract_fn("appendAttentionFreshnessNote"), _extract_fn("renderMiniAttention"))
+    out = _run_node(harness)
+    assert out[0]["className"] == "ccr-mini-item"
+    assert out[0]["children"] == 2
+    assert out[1]["text"] == "Attention may be incomplete — Executive runtime unavailable."
+
+
+def test_attention_read_state_preserves_nonempty_current_attention() -> None:
+    """A real non-empty Inbox remains current even while the new empty-state guard exists."""
+    harness = """
+    var REMOTE_READ_ONLY = false;
+    %s
+    console.log(JSON.stringify(attentionReadState({
+      attention:{chairman:[{attention_id:"a"}],ceo:[],coo:[]},
+      sources:{runtime_db_present:true}, degraded:[]
+    }, {})));
+    """ % _extract_fn("attentionReadState")
+    assert _run_node(harness) == "current"
+
+
+def test_state_refusal_or_network_failure_preserves_previous_attention_and_degraded_state() -> None:
+    """A parsed 503, malformed envelope, or rejected fetch cannot replace a real prior state."""
+    source = JS.read_text(encoding="utf-8")
+    load_state = source[source.index("  function loadState()") : source.index("\n  function readTheme()")]
+    harness = """
+    var STATE;
+    var responses;
+    var calls;
+    var nav;
+    var document = { getElementById:function(id) { return id === "nav-today-count" ? nav : { textContent:"" }; } };
+    function getJSON() { return responses.shift(); }
+    function renderEverything(body) { calls.rendered.push(body); STATE.doc = body.control_room; }
+    function renderDegraded(items) { calls.degraded = items; }
+    function renderNeedsYou(items, state) { calls.chairman = [items, state]; }
+    function renderMiniAttention(id, items, state) { calls[id] = [items, state]; }
+    function setTally(name, value) { calls.tallies[name] = value; }
+    var healthy = {control_room:{
+      degraded:["executive_runtime: cache unavailable"],
+      attention:{chairman:[{attention_id:"chairman-existing"}], ceo:[{attention_id:"ceo-existing"}], coo:[{attention_id:"coo-existing"}]}
+    }};
+    function run(refusal) {
+      calls = {rendered:[], tallies:{}};
+      nav = {textContent:""};
+      STATE = {doc:{}};
+      responses = [Promise.resolve(healthy), refusal];
+      return loadState().then(function() {
+        return loadState();
+      }).then(function() { calls.nav = nav.textContent; return calls; });
+    }
+    %s
+    var scenarios = [
+      function() { return Promise.resolve({ok:false, error:{code:"state_unavailable"}}); },
+      function() { return Promise.resolve({ok:true}); },
+      function() { return Promise.resolve({control_room:{}}); },
+      function() { return Promise.reject(new Error("offline")); }
+    ];
+    var results = [];
+    function next(index) {
+      if (index === scenarios.length) { console.log(JSON.stringify(results)); return; }
+      run(scenarios[index]()).then(function(result) { results.push(result); next(index + 1); });
+    }
+    next(0);
+    """ % _extract_fn("hasUsableStateEnvelope") + load_state
+    out = _run_node(harness)
+    for result in out:
+        assert result["rendered"] == [{
+            "control_room": {
+                "degraded": ["executive_runtime: cache unavailable"],
+                "attention": {
+                    "chairman": [{"attention_id": "chairman-existing"}],
+                    "ceo": [{"attention_id": "ceo-existing"}],
+                    "coo": [{"attention_id": "coo-existing"}],
+                },
+            },
+        }]
+        assert result["chairman"] == [[{"attention_id": "chairman-existing"}], "unavailable"]
+        assert result["sol-attention"] == [[{"attention_id": "ceo-existing"}], "unavailable"]
+        assert result["coo"] == [[{"attention_id": "coo-existing"}], "unavailable"]
+        assert result["degraded"] == [
+            "executive_runtime: cache unavailable",
+            "control_room_api: unavailable — current state could not be read",
+        ]
+        assert result["tallies"] == {"chairman": "—", "ceo": "—", "coo": "—"}
+        assert result["nav"] == "—"
+
+
+def test_state_envelope_accepts_local_and_remote_success_contracts_only_when_inbox_is_complete() -> None:
+    """Local success has no ok field; remote success does, and both require the actual Inbox shape."""
+    harness = """
+    %s
+    var document = {attention:{chairman:[], ceo:[], coo:[]}};
+    console.log(JSON.stringify({
+      local:hasUsableStateEnvelope({control_room:document, capabilities:{}}),
+      remote:hasUsableStateEnvelope({ok:true, control_room:document}),
+      refusedWithDocument:hasUsableStateEnvelope({ok:false, control_room:document}),
+      missingInbox:hasUsableStateEnvelope({control_room:{attention:{chairman:[], ceo:[]}}}),
+      emptyDocument:hasUsableStateEnvelope({control_room:{}})
+    }));
+    """ % _extract_fn("hasUsableStateEnvelope")
+    assert _run_node(harness) == {
+        "local": True, "remote": True, "refusedWithDocument": False,
+        "missingInbox": False, "emptyDocument": False,
+    }
 
 
 def test_addendum_behavioural_owed_binding_is_withheld_from_stale_cards() -> None:
