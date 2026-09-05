@@ -2073,9 +2073,7 @@ def test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wak
         "predecessor_message_key": snapshot_message["message_key"],
         "predecessor_message_fingerprint": snapshot_message["fingerprint"],
     } == expected_physical_source
-    assert observation_client.source_reconcile_requests[0][
-        "source_observation"
-    ] == {
+    expected_source_observation = {
         key: expected_physical_source[key]
         for key in (
             "workspace_id",
@@ -2085,8 +2083,20 @@ def test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wak
             "predecessor_message_fingerprint",
         )
     }
+    assert observation_client.source_reconcile_requests[0][
+        "source_observation"
+    ] == expected_source_observation
     assert observation_client.source_submit_requests[0][
         "source_observation"
-    ] == observation_client.source_reconcile_requests[0]["source_observation"]
+    ] == expected_source_observation
+    for request in (
+        observation_client.source_reconcile_requests[0],
+        observation_client.source_submit_requests[0],
+    ):
+        assert {
+            **request["source_observation"],
+            "parent_fingerprint": request["parent"]["fingerprint"],
+            "operation_key": request["parent"]["operation_key"],
+        } == expected_physical_source
     assert terminal_engine.client.channel_history_call_count == 4
     assert terminal_engine.client.thread_history_call_count == 2
