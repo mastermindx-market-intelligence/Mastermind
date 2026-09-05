@@ -4755,23 +4755,52 @@ def test_cap_s1_supply_refuses_changed_final_identity_or_digest(
 def test_cap_s1_source_observer_registry_is_exact_and_secret_scan_stays_held() -> None:
     registry = cap_s1_observer_registry()
     assert registry["schema_version"] == "mastermind.cap_s1_source_observer_registry/v1"
-    assert registry["python_argv"][:8] == (
+    assert registry["python_argv"][:6] == (
         "<bound-lexical-python-entrypoint>",
         "-I",
         "-B",
-        "-m",
-        "pytest",
+        "-c",
+        "<fixed-source-owned-pytest-bootstrap>",
+        "<private-exact-provenance-binding>",
+    )
+    assert registry["python_argv"][6:9] == (
         "-q",
         "--junitxml",
         "<owned-output>",
     )
-    assert len(registry["python_argv"][8:]) == 17
+    assert len(registry["python_argv"][9:]) == 17
+    assert registry["python_provenance_exit"] not in {0, 1}
+    assert registry["python_bootstrap_sha256"] == hashlib.sha256(
+        registry["python_bootstrap_source"].encode("utf-8")
+    ).hexdigest()
     assert len(registry["diff_argv"][8:]) == 21
     assert tuple(mutation_id for mutation_id, _node in registry["mutants"]) == (
         "CAP_A_UNRELATED_SKILL_ACCEPTED",
         "CAP_B_FORGED_PRODUCER_ACCEPTED",
         "CAP_C_FIRST_EFFECT_CLEANUP_BYPASSED",
     )
+    owned_git = registry["owned_git"]
+    assert owned_git["object_count"] == 131
+    assert owned_git["historical_tree_closure"] == {
+        "commit": "12c2cb8993f78e81c6cb9e9a75a9829f9b194dab",
+        "root_tree": "b5a042c3b0a1a54d74855be5dcd132bef3a7a2ce",
+        "path_count": 124,
+        "unique_object_count": 121,
+        "total_raw_bytes": 77_050,
+        "maximum_raw_bytes": 21_231,
+        "path_manifest_digest": (
+            "5a6c36388af247b001fad02cabd21fd8e4e9d8e97d54adaf3ef785aacca4d92f"
+        ),
+        "object_manifest_digest": (
+            "039b886b8975708e35347716afb50a105b4ae89d83af54300cb37ac25e188666"
+        ),
+        "tracked_attribute_blobs": (),
+        "package_blob_count": 7,
+    }
+    assert "archive-fixed-historical-package" in owned_git["commands"]
+    assert "ls-tree-full-historical-leaf-metadata-no-attributes" in owned_git[
+        "commands"
+    ]
     assert registry["secret_scan"].endswith("EVIDENCE_UNAVAILABLE_HOLD")
 
 
@@ -5020,6 +5049,92 @@ def _write_cap_s1_mutation_junit(
     path.chmod(0o444)
 
 
+def _install_cap_s1_mutation_unit_seams(
+    canary_module,
+    monkeypatch,
+    *,
+    source_root: Path,
+    target: Path,
+) -> None:
+    """Keep narrow mutation-outcome tests independent of Git/provenance fixtures."""
+
+    payload = target.read_bytes()
+    git_blob = hashlib.sha1(
+        f"blob {len(payload)}\0".encode("ascii") + payload
+    ).hexdigest()
+    manifest = (
+        canary_module._CapS1SourceCopyEntry(
+            path=target.relative_to(source_root).as_posix(),
+            mode="100644",
+            blob=git_blob,
+            size=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+        ),
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_owned_cap_s1_source_copy",
+        lambda **_kwargs: (source_root, manifest),
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_cap_s1_owned_git_package_expectation",
+        lambda _source_root: ("b" * 40, "c" * 40, tuple(f"f{i}" for i in range(7))),
+    )
+    fake_git = canary_module._CapS1OwnedGitContext(
+        git_dir=source_root / ".git",
+        device=1,
+        inode=1,
+        exact_head="a" * 40,
+        exact_tree="d" * 40,
+        historical_commit="b" * 40,
+        historical_package_tree="c" * 40,
+        historical_tree_path_manifest=(),
+        historical_tree_path_manifest_digest="4" * 64,
+        historical_tree_object_manifest=(),
+        historical_tree_object_manifest_digest="5" * 64,
+        object_manifest=(),
+        object_manifest_digest="e" * 64,
+        filesystem_manifest=(),
+        filesystem_manifest_digest="3" * 64,
+        archive_digest="f" * 64,
+        archive_diagnostic="",
+        archive_diagnostic_digest=hashlib.sha256(b"").hexdigest(),
+        archive_file_manifest=(),
+        archive_file_manifest_digest="6" * 64,
+        command_registry=(),
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_install_cap_s1_owned_git_context",
+        lambda **_kwargs: fake_git,
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_verify_cap_s1_owned_git_context",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_remove_cap_s1_owned_git_context",
+        lambda *_args, **_kwargs: None,
+    )
+    binding = canary_module._CapS1PytestBinding(
+        payload_json="{}",
+        bootstrap_sha256=hashlib.sha256(
+            canary_module._CAP_S1_PYTEST_BOOTSTRAP.encode("utf-8")
+        ).hexdigest(),
+        source_rows=(),
+        pytest_origin_sha256="1" * 64,
+        evidence_digest="2" * 64,
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_build_cap_s1_pytest_binding",
+        lambda **_kwargs: binding,
+    )
+
+
 def test_cap_s1_mutation_junit_distinguishes_error_skip_and_wrong_node(
     tmp_path,
 ) -> None:
@@ -5041,9 +5156,17 @@ def test_cap_s1_mutation_junit_distinguishes_error_skip_and_wrong_node(
         _parse_cap_s1_mutation_junit(wrong, expected_node=node)
 
 
-@pytest.mark.parametrize("mutant_outcome", ("UNRELATED", "ERROR", "EXCEPTION"))
+@pytest.mark.parametrize(
+    ("mutant_outcome", "expected_error"),
+    (
+        ("UNRELATED", "mutation_proof_invalid"),
+        ("ERROR", "mutation_proof_invalid"),
+        ("EXCEPTION", "mutation_proof_invalid"),
+        ("PROVENANCE", "import_origin_invalid"),
+    ),
+)
 def test_cap_s1_mutation_refuses_hostile_result_and_restores_source(
-    tmp_path, monkeypatch, mutant_outcome
+    tmp_path, monkeypatch, mutant_outcome, expected_error
 ) -> None:
     import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
 
@@ -5068,10 +5191,11 @@ def test_cap_s1_mutation_refuses_hostile_result_and_restores_source(
         "CAP_S1_OBSERVER_MUTANT_TRANSFORMS",
         (("FIXED_MUTANT", "scripts/ohf/fixture.py", "return False\n", "return True\n"),),
     )
-    monkeypatch.setattr(
+    _install_cap_s1_mutation_unit_seams(
         canary_module,
-        "_owned_cap_s1_source_copy",
-        lambda **_kwargs: (source_root, ()),
+        monkeypatch,
+        source_root=source_root,
+        target=target,
     )
     calls = 0
 
@@ -5081,6 +5205,13 @@ def test_cap_s1_mutation_refuses_hostile_result_and_restores_source(
         junit = Path(argv[argv.index("--junitxml") + 1])
         if calls == 2 and mutant_outcome == "EXCEPTION":
             raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+        if calls == 2 and mutant_outcome == "PROVENANCE":
+            return _subprocess.CompletedProcess(
+                argv,
+                canary_module._CAP_S1_PYTEST_PROVENANCE_EXIT,
+                "",
+                "",
+            )
         if calls == 2 and mutant_outcome == "ERROR":
             _write_cap_s1_mutation_junit(junit, outcome="ERROR", detail="setup error")
             return _subprocess.CompletedProcess(argv, 1, "", "")
@@ -5095,7 +5226,7 @@ def test_cap_s1_mutation_refuses_hostile_result_and_restores_source(
         return _subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(canary_module, "_run_cap_s1_observer_process", _run)
-    with pytest.raises(CapS1ResultError, match="mutation_proof_invalid"):
+    with pytest.raises(CapS1ResultError, match=expected_error):
         _observe_cap_s1_mutations(exact_head="a" * 40, scratch_root=tmp_path)
     assert target.read_bytes() == original
     assert calls == 3
@@ -5122,10 +5253,11 @@ def test_cap_s1_mutation_refuses_skipped_control_before_mutation(
         "CAP_S1_OBSERVER_MUTANT_TRANSFORMS",
         (("MUTANT", "scripts/ohf/fixture.py", "return False\n", "return True\n"),),
     )
-    monkeypatch.setattr(
+    _install_cap_s1_mutation_unit_seams(
         canary_module,
-        "_owned_cap_s1_source_copy",
-        lambda **_kwargs: (source_root, ()),
+        monkeypatch,
+        source_root=source_root,
+        target=target,
     )
 
     def _skipped(argv, **_kwargs):
@@ -5139,6 +5271,474 @@ def test_cap_s1_mutation_refuses_skipped_control_before_mutation(
     assert target.read_text(encoding="utf-8") == "return False\n"
 
 
+@pytest.mark.parametrize("replacement", ("directory", "symlink"))
+def test_cap_s1_observer_temp_root_refuses_replacement_before_ownership_change(
+    tmp_path, monkeypatch, replacement
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    output_root = tmp_path / "observer-output"
+    output_root.mkdir(mode=0o700)
+    expected = output_root.lstat()
+    original = tmp_path / "original-output"
+    output_root.rename(original)
+    if replacement == "directory":
+        output_root.mkdir(mode=0o700)
+    else:
+        output_root.symlink_to(original, target_is_directory=True)
+
+    descriptor_mutations = []
+    monkeypatch.setattr(
+        canary_module.os,
+        "fchown",
+        lambda *args: descriptor_mutations.append(args),
+    )
+    monkeypatch.setattr(
+        canary_module.os,
+        "chown",
+        lambda *_args, **_kwargs: pytest.fail(
+            "pathname ownership mutation is forbidden"
+        ),
+    )
+
+    with pytest.raises(CapS1ResultError, match="source_observation_unavailable"):
+        canary_module._bind_cap_s1_observer_temp_root(
+            output_root,
+            expected=expected,
+            error="cap_s1_result_source_observation_unavailable",
+        )
+    assert descriptor_mutations == []
+
+
+def test_cap_s1_observer_temp_root_normalizes_only_verified_descriptor(
+    monkeypatch,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    def _state(gid):
+        return os.stat_result(
+            (stat.S_IFDIR | 0o700, 101, 202, 2, 501, gid, 0, 0, 0, 0)
+        )
+
+    expected = _state(20)
+    normalized = _state(453)
+    fstats = iter((expected, normalized))
+    calls = []
+
+    class _BoundPath:
+        def __fspath__(self):
+            return "/owned/observer-output"
+
+        def lstat(self):
+            calls.append(("lstat",))
+            return normalized
+
+    monkeypatch.setattr(canary_module.os, "getuid", lambda: 501)
+    monkeypatch.setattr(canary_module.os, "getgid", lambda: 453)
+    monkeypatch.setattr(
+        canary_module.os,
+        "open",
+        lambda path, flags: calls.append(("open", os.fspath(path), flags)) or 91,
+    )
+    monkeypatch.setattr(canary_module.os, "fstat", lambda fd: next(fstats))
+    monkeypatch.setattr(
+        canary_module.os,
+        "fchown",
+        lambda fd, uid, gid: calls.append(("fchown", fd, uid, gid)),
+    )
+    monkeypatch.setattr(
+        canary_module.os,
+        "close",
+        lambda fd: calls.append(("close", fd)),
+    )
+    monkeypatch.setattr(
+        canary_module.os,
+        "chown",
+        lambda *_args, **_kwargs: pytest.fail(
+            "pathname ownership mutation is forbidden"
+        ),
+    )
+
+    observed = canary_module._bind_cap_s1_observer_temp_root(
+        _BoundPath(),
+        expected=expected,
+        error="cap_s1_result_source_observation_unavailable",
+    )
+
+    assert observed == normalized
+    assert calls[0][0:2] == ("open", "/owned/observer-output")
+    assert calls[0][2] & os.O_DIRECTORY
+    assert calls[0][2] & os.O_NOFOLLOW
+    assert ("fchown", 91, 501, 453) in calls
+    assert calls[-2:] == [("close", 91), ("lstat",)]
+
+
+def test_cap_s1_owned_tree_cleanup_does_not_chmod_symlink_target(tmp_path) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    external_target = tmp_path / "external-executable"
+    external_target.write_bytes(b"external executable bytes")
+    external_target.chmod(0o755)
+    owned_root = tmp_path / "owned-output"
+    owned_root.mkdir(mode=0o700)
+    (owned_root / "python-link").symlink_to(external_target)
+    owned_root.chmod(0o500)
+
+    assert canary_module._remove_tree(owned_root) is True
+    assert not owned_root.exists()
+    assert external_target.read_bytes() == b"external executable bytes"
+    assert stat.S_IMODE(external_target.lstat().st_mode) == 0o755
+
+
+def test_cap_s1_source_archive_omits_tracked_symlink_from_regular_blob_copy(
+    tmp_path,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    archive = tmp_path / "source.tar"
+    payload = b"verified regular source\n"
+    with tarfile.open(archive, mode="w") as bundle:
+        directory = tarfile.TarInfo("package")
+        directory.type = tarfile.DIRTYPE
+        directory.mode = 0o755
+        bundle.addfile(directory)
+        regular = tarfile.TarInfo("package/module.py")
+        regular.mode = 0o644
+        regular.size = len(payload)
+        bundle.addfile(regular, io.BytesIO(payload))
+        symlink_parent = tarfile.TarInfo("vendor")
+        symlink_parent.type = tarfile.DIRTYPE
+        symlink_parent.mode = 0o755
+        bundle.addfile(symlink_parent)
+        tracked_link = tarfile.TarInfo("vendor/macro")
+        tracked_link.type = tarfile.SYMTYPE
+        tracked_link.linkname = "macro_src"
+        bundle.addfile(tracked_link)
+
+    destination = tmp_path / "source"
+    destination.mkdir(mode=0o700)
+    canary_module._extract_cap_s1_source_archive(archive, destination)
+
+    assert (destination / "package/module.py").read_bytes() == payload
+    assert not (destination / "vendor").exists()
+    assert not (destination / "vendor/macro").exists()
+    assert not (destination / "vendor/macro").is_symlink()
+
+
+def _cap_s1_copy_bootstrap_source(destination: Path) -> tuple[_CapS1SourceCopyEntry, ...]:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    for top_level in ("scripts", "control_plane"):
+        shutil.copytree(
+            REPO_ROOT / top_level,
+            destination / top_level,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+    rows = []
+    for _module, relative in canary_module._CAP_S1_PYTEST_SOURCE_MODULES:
+        payload = (destination / relative).read_bytes()
+        rows.append(
+            _CapS1SourceCopyEntry(
+                path=relative,
+                mode="100644",
+                blob=hashlib.sha1(
+                    f"blob {len(payload)}\0".encode("ascii") + payload
+                ).hexdigest(),
+                size=len(payload),
+                sha256=hashlib.sha256(payload).hexdigest(),
+            )
+        )
+    return tuple(rows)
+
+
+def test_cap_s1_actual_pytest_bootstrap_binds_owned_source_and_ignores_ambient(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    source = tmp_path / "owned-source"
+    source.mkdir()
+    manifest = _cap_s1_copy_bootstrap_source(source)
+    poison = tmp_path / "ambient-editable"
+    (poison / "scripts/ohf").mkdir(parents=True)
+    (poison / "scripts/__init__.py").write_text("", encoding="utf-8")
+    (poison / "scripts/ohf/__init__.py").write_text("", encoding="utf-8")
+    (poison / "scripts/ohf/cap_s1_mastermind_operator_canary.py").write_text(
+        "raise RuntimeError('ambient editable source imported')\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(poison))
+    probe = tmp_path / "test_bootstrap_probe.py"
+    probe.write_text("def test_bootstrap_probe():\n    assert True\n", encoding="utf-8")
+    junit = tmp_path / "bootstrap.xml"
+    interpreter = _capture_cap_s1_interpreter_identity()
+    binding = canary_module._build_cap_s1_pytest_binding(
+        source_root=source,
+        source_manifest=manifest,
+        interpreter=interpreter,
+    )
+    completed = _run_cap_s1_python_observer_process(
+        interpreter,
+        canary_module._cap_s1_pytest_argv(
+            binding,
+            ("-q", "--junitxml", str(junit), str(probe)),
+        ),
+        cwd=source,
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert junit.exists()
+    assert binding.bootstrap_sha256 == hashlib.sha256(
+        canary_module._CAP_S1_PYTEST_BOOTSTRAP.encode("utf-8")
+    ).hexdigest()
+
+
+def test_cap_s1_actual_pytest_bootstrap_refuses_digest_drift_with_non_test_exit(
+    tmp_path,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    source = tmp_path / "owned-source"
+    source.mkdir()
+    manifest = _cap_s1_copy_bootstrap_source(source)
+    interpreter = _capture_cap_s1_interpreter_identity()
+    binding = canary_module._build_cap_s1_pytest_binding(
+        source_root=source,
+        source_manifest=manifest,
+        interpreter=interpreter,
+    )
+    canary_path = source / "scripts/ohf/cap_s1_mastermind_operator_canary.py"
+    original = canary_path.read_bytes()
+    canary_path.write_bytes(original + b"\n# drift\n")
+    probe = tmp_path / "test_bootstrap_probe.py"
+    probe.write_text("def test_bootstrap_probe():\n    assert True\n", encoding="utf-8")
+    junit = tmp_path / "bootstrap.xml"
+    completed = _run_cap_s1_python_observer_process(
+        interpreter,
+        canary_module._cap_s1_pytest_argv(
+            binding,
+            ("-q", "--junitxml", str(junit), str(probe)),
+        ),
+        cwd=source,
+        timeout=120,
+    )
+    assert completed.returncode == canary_module._CAP_S1_PYTEST_PROVENANCE_EXIT
+    assert completed.returncode not in {0, 1}
+    assert not junit.exists()
+    canary_path.write_bytes(original)
+    restored = _run_cap_s1_python_observer_process(
+        interpreter,
+        canary_module._cap_s1_pytest_argv(
+            binding,
+            ("-q", "--junitxml", str(junit), str(probe)),
+        ),
+        cwd=source,
+        timeout=120,
+    )
+    assert restored.returncode == 0, restored.stderr
+
+
+def _build_cap_s1_historical_git_repository(
+    tmp_path: Path,
+) -> tuple[Path, str, str, str, tuple[str, ...]]:
+    repository = tmp_path / "historical-repository"
+    repository.mkdir()
+    _cap_s1_test_git(repository, "init", "--quiet")
+    package_files = (
+        ".codex-plugin/plugin.json",
+        "references/app-bindings.template.json",
+        "references/dialogue-boundary.md",
+        "skills/escalate-decision/SKILL.md",
+        "skills/finish-operation/SKILL.md",
+        "skills/receive-commission/SKILL.md",
+        "skills/return-progress/SKILL.md",
+    )
+    for relative in package_files:
+        path = repository / "plugins/mastermind-operator" / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"historical:{relative}\n", encoding="utf-8")
+    for relative in (".agents/marker/metadata.txt", ".agents/repeated/metadata.txt"):
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("unrelated historical marker\n", encoding="utf-8")
+    _cap_s1_test_git(repository, "add", "--all")
+    _cap_s1_test_git(repository, "commit", "--quiet", "-m", "historical package")
+    historical = _cap_s1_test_git(repository, "rev-parse", "HEAD")
+    package_tree = _cap_s1_test_git(
+        repository, "rev-parse", f"{historical}:plugins/mastermind-operator"
+    )
+    candidate_file = repository / "candidate.txt"
+    candidate_file.write_text("current candidate\n", encoding="utf-8")
+    _cap_s1_test_git(repository, "add", "candidate.txt")
+    _cap_s1_test_git(repository, "commit", "--quiet", "-m", "candidate")
+    candidate = _cap_s1_test_git(repository, "rev-parse", "HEAD")
+    return repository, candidate, historical, package_tree, package_files
+
+
+def test_cap_s1_owned_git_context_is_finite_detached_and_removable(tmp_path) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    repository, candidate, historical, package_tree, package_files = (
+        _build_cap_s1_historical_git_repository(tmp_path)
+    )
+    source = tmp_path / "owned-source"
+    source.mkdir()
+    cleanup = []
+    context = canary_module._install_cap_s1_owned_git_context(
+        source_repository_root=repository,
+        source_root=source,
+        exact_head=candidate,
+        historical_commit=historical,
+        expected_package_tree=package_tree,
+        expected_package_files=package_files,
+        cleanup_observations=cleanup,
+    )
+    assert len(context.object_manifest) == 22
+    assert sum(row[1] == "commit" for row in context.object_manifest) == 2
+    assert sum(row[1] == "tree" for row in context.object_manifest) == 13
+    assert sum(row[1] == "blob" for row in context.object_manifest) == 7
+    marker_tree = _cap_s1_test_git(
+        repository, "rev-parse", f"{historical}:.agents/marker"
+    )
+    repeated_tree = _cap_s1_test_git(
+        repository, "rev-parse", f"{historical}:.agents/repeated"
+    )
+    marker_blob = _cap_s1_test_git(
+        repository, "rev-parse", f"{historical}:.agents/marker/metadata.txt"
+    )
+    assert marker_tree == repeated_tree
+    assert marker_tree in {row[0] for row in context.object_manifest}
+    assert marker_blob not in {row[0] for row in context.object_manifest}
+    expected_archive_diagnostic = (
+        f"error: invalid object 100644 {marker_blob} for "
+        "'.agents/marker/metadata.txt'\n"
+    )
+    assert context.archive_diagnostic == expected_archive_diagnostic
+    assert context.archive_diagnostic_digest == hashlib.sha256(
+        expected_archive_diagnostic.encode("utf-8")
+    ).hexdigest()
+    path_rows = {
+        (path, object_id)
+        for path, object_id, _size in context.historical_tree_path_manifest
+    }
+    assert (".agents/marker", marker_tree) in path_rows
+    assert (".agents/repeated", marker_tree) in path_rows
+    expected_archive = []
+    for relative in package_files:
+        path = repository / "plugins/mastermind-operator" / relative
+        payload = path.read_bytes()
+        expected_archive.append(
+            (
+                f"plugins/mastermind-operator/{relative}",
+                len(payload),
+                hashlib.sha256(payload).hexdigest(),
+            )
+        )
+    assert context.archive_file_manifest == tuple(sorted(expected_archive))
+    assert len(context.filesystem_manifest) == 5
+    assert {row[0] for row in context.filesystem_manifest} == {
+        "HEAD",
+        "config",
+        *(
+            path.relative_to(source / ".git").as_posix()
+            for path in (source / ".git/objects/pack").iterdir()
+        ),
+    }
+    assert _cap_s1_test_git(source, "rev-parse", "HEAD") == candidate
+    assert _cap_s1_test_git(
+        source, "rev-parse", f"{historical}:plugins/mastermind-operator"
+    ) == package_tree
+    assert _cap_s1_test_git(source, "for-each-ref") == ""
+    assert not (source / ".git/hooks").exists()
+    assert not (source / ".git/objects/info/alternates").exists()
+    assert "fetch" not in " ".join(context.command_registry)
+    canary_module._verify_cap_s1_owned_git_context(context)
+    canary_module._remove_cap_s1_owned_git_context(
+        context,
+        cleanup_observations=cleanup,
+    )
+    assert not (source / ".git").exists()
+    assert cleanup and all(row.removed and row.verified_absent for row in cleanup)
+
+
+def test_cap_s1_owned_git_context_refuses_missing_packed_object(tmp_path) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    repository, candidate, historical, package_tree, package_files = (
+        _build_cap_s1_historical_git_repository(tmp_path)
+    )
+    source = tmp_path / "owned-source"
+    source.mkdir()
+    context = canary_module._install_cap_s1_owned_git_context(
+        source_repository_root=repository,
+        source_root=source,
+        exact_head=candidate,
+        historical_commit=historical,
+        expected_package_tree=package_tree,
+        expected_package_files=package_files,
+    )
+    pack = next((source / ".git/objects/pack").glob("*.pack"))
+    pack.parent.chmod(0o700)
+    pack.chmod(0o600)
+    pack.unlink()
+    with pytest.raises(CapS1ResultError, match="owned_git_invalid"):
+        canary_module._verify_cap_s1_owned_git_context(context)
+    canary_module._remove_cap_s1_owned_git_context(context)
+
+
+def test_cap_s1_owned_git_context_refuses_missing_historical_sibling_tree(
+    tmp_path,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    repository, candidate, historical, package_tree, package_files = (
+        _build_cap_s1_historical_git_repository(tmp_path)
+    )
+    marker_tree = _cap_s1_test_git(
+        repository, "rev-parse", f"{historical}:.agents/marker"
+    )
+    loose_tree = repository / ".git/objects" / marker_tree[:2] / marker_tree[2:]
+    assert loose_tree.is_file()
+    loose_tree.unlink()
+    source = tmp_path / "owned-source"
+    source.mkdir()
+    with pytest.raises(CapS1ResultError, match="owned_git_invalid"):
+        canary_module._install_cap_s1_owned_git_context(
+            source_repository_root=repository,
+            source_root=source,
+            exact_head=candidate,
+            historical_commit=historical,
+            expected_package_tree=package_tree,
+            expected_package_files=package_files,
+        )
+    assert not (source / ".git").exists()
+
+
+def test_cap_s1_owned_git_context_refuses_credential_config_drift(tmp_path) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    repository, candidate, historical, package_tree, package_files = (
+        _build_cap_s1_historical_git_repository(tmp_path)
+    )
+    source = tmp_path / "owned-source"
+    source.mkdir()
+    context = canary_module._install_cap_s1_owned_git_context(
+        source_repository_root=repository,
+        source_root=source,
+        exact_head=candidate,
+        historical_commit=historical,
+        expected_package_tree=package_tree,
+        expected_package_files=package_files,
+    )
+    config = source / ".git/config"
+    config.chmod(0o600)
+    with config.open("a", encoding="ascii") as handle:
+        handle.write("\n[credential]\n\thelper = hostile\n")
+    config.chmod(0o400)
+    with pytest.raises(CapS1ResultError, match="owned_git_invalid"):
+        canary_module._verify_cap_s1_owned_git_context(context)
+    canary_module._remove_cap_s1_owned_git_context(context)
+
+
 def test_cap_s1_observer_process_and_junit_parser_short_fixture_seam(tmp_path) -> None:
     cleanup = []
     completed = _run_cap_s1_observer_process(
@@ -5146,7 +5746,17 @@ def test_cap_s1_observer_process_and_junit_parser_short_fixture_seam(tmp_path) -
             _sys.executable,
             "-I",
             "-c",
-            "import os; assert 'PYTHONPATH' not in os.environ; print('fixture-ok')",
+            "import os,pathlib,stat; "
+            "assert 'PYTHONPATH' not in os.environ; "
+            "assert '/usr/sbin' in os.environ['PATH'].split(os.pathsep); "
+            "temp_root=pathlib.Path(os.environ['TMPDIR']); "
+            "temp_state=temp_root.lstat(); "
+            "assert stat.S_ISDIR(temp_state.st_mode); "
+            "assert not stat.S_ISLNK(temp_state.st_mode); "
+            "assert stat.S_IMODE(temp_state.st_mode)==0o700; "
+            "assert temp_state.st_uid==os.getuid(); "
+            "assert temp_state.st_gid==os.getgid(); "
+            "print('fixture-ok')",
         ),
         cwd=tmp_path,
         timeout=30,
@@ -5170,6 +5780,67 @@ def test_cap_s1_observer_process_and_junit_parser_short_fixture_seam(tmp_path) -
         junit,
         expected_scope=("tests/test_fixture_scope.py",),
     ) == (("tests/test_fixture_scope.py", 1, 0, 0, 0),)
+
+
+def test_cap_s1_observer_environment_is_closed_across_all_process_call_sites(
+    tmp_path, monkeypatch
+) -> None:
+    poisoned_tmp = tmp_path / "ambient-poison"
+    poisoned_tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(poisoned_tmp))
+    monkeypatch.setenv("PYTHONPATH", "/ambient/python/path")
+    child = (
+        "import os,pathlib,stat; "
+        "assert 'PYTHONPATH' not in os.environ; "
+        f"assert os.environ['TMPDIR']!={str(poisoned_tmp)!r}; "
+        "assert '/usr/sbin' in os.environ['PATH'].split(os.pathsep); "
+        "root=pathlib.Path(os.environ['TMPDIR']); state=root.lstat(); "
+        "assert stat.S_ISDIR(state.st_mode) and not stat.S_ISLNK(state.st_mode); "
+        "assert stat.S_IMODE(state.st_mode)==0o700; "
+        "assert state.st_uid==os.getuid() and state.st_gid==os.getgid(); "
+        "print('closed-environment-ok')"
+    )
+
+    for github_environment in (False, True):
+        cleanup = []
+        completed = _run_cap_s1_observer_process(
+            (_sys.executable, "-I", "-c", child),
+            cwd=tmp_path,
+            timeout=30,
+            cleanup_observations=cleanup,
+            github_environment=github_environment,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout.strip() == "closed-environment-ok"
+        assert len(cleanup) == 2
+        assert all(row.removed and row.verified_absent for row in cleanup)
+
+    byte_cleanup = []
+    completed_bytes = _run_cap_s1_observer_bytes(
+        (_sys.executable, "-I", "-c", child),
+        cwd=tmp_path,
+        timeout=30,
+        maximum_stream_bytes=4096,
+        cleanup_observations=byte_cleanup,
+    )
+    assert completed_bytes.returncode == 0, completed_bytes.stderr
+    assert completed_bytes.stdout.strip() == b"closed-environment-ok"
+    assert len(byte_cleanup) == 2
+    assert all(row.removed and row.verified_absent for row in byte_cleanup)
+    assert cap_s1_observer_registry()["environment_keys"] == (
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_NO_LAZY_FETCH",
+        "GIT_OPTIONAL_LOCKS",
+        "GIT_TERMINAL_PROMPT",
+        "LANG",
+        "LC_ALL",
+        "OHF_FAKE_STATE",
+        "PATH",
+        "PYTEST_ADDOPTS",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+        "TMPDIR",
+    )
 
 
 def test_cap_s1_actual_junit_parser_rows_are_accepted_by_result_consumer(
@@ -5298,7 +5969,9 @@ def test_cap_s1_observer_process_preserves_replaced_output_root(
     monkeypatch.setattr(
         canary_module.tempfile,
         "mkdtemp",
-        lambda *_args, **_kwargs: str(output_root.mkdir() or output_root),
+        lambda *_args, **_kwargs: str(
+            output_root.mkdir(mode=0o700) or output_root
+        ),
     )
     monkeypatch.setattr(canary_module, "_run_cap_s1_owned_process", _owned_process)
     with pytest.raises(CapS1ResultError, match="source_observation_unavailable"):
@@ -5324,7 +5997,9 @@ def test_cap_s1_observer_bytes_preserves_replaced_output_root(
     monkeypatch.setattr(
         canary_module.tempfile,
         "mkdtemp",
-        lambda *_args, **_kwargs: str(output_root.mkdir() or output_root),
+        lambda *_args, **_kwargs: str(
+            output_root.mkdir(mode=0o700) or output_root
+        ),
     )
     monkeypatch.setattr(canary_module, "_run_cap_s1_owned_process", _owned_process)
     with pytest.raises(CapS1ResultError, match="source_copy_invalid"):
@@ -5366,6 +6041,228 @@ def test_cap_s1_python_observer_uses_lexical_entrypoint_isolation_and_no_pycache
         "pythonhashseed": None,
     }
     assert not (tmp_path / "__pycache__").exists()
+
+
+_CAP_S1_FAKE_CHILD_FIXTURE_PATHS = (
+    "scripts/__init__.py",
+    "scripts/ohf/__init__.py",
+    "scripts/ohf/fake_app_server.py",
+    "scripts/ohf/fake_codex_binary.py",
+    "scripts/ohf/fixtures/__init__.py",
+    "scripts/ohf/fixtures/executive_agent_capabilities_v4_mastermind_operator.json",
+    "plugins/mastermind-operator/.codex-plugin/plugin.json",
+    "plugins/mastermind-operator/references/app-bindings.template.json",
+    "plugins/mastermind-operator/references/dialogue-boundary.md",
+    "plugins/mastermind-operator/skills/escalate-decision/SKILL.md",
+    "plugins/mastermind-operator/skills/finish-operation/SKILL.md",
+    "plugins/mastermind-operator/skills/receive-commission/SKILL.md",
+    "plugins/mastermind-operator/skills/return-progress/SKILL.md",
+)
+
+
+def _cap_s1_verify_selected_fake_child_fixture(
+    source_root: Path,
+    manifest: tuple[_CapS1SourceCopyEntry, ...],
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    assert tuple(entry.path for entry in manifest) == _CAP_S1_FAKE_CHILD_FIXTURE_PATHS
+    canary_module._verify_cap_s1_owned_source_manifest(
+        source_root=source_root,
+        manifest=manifest,
+    )
+    for entry in manifest:
+        candidate = source_root / entry.path
+        state = candidate.lstat()
+        expected_mode = 0o755 if entry.mode == "100755" else 0o644
+        assert stat.S_ISREG(state.st_mode)
+        assert not candidate.is_symlink()
+        assert stat.S_IMODE(state.st_mode) == expected_mode
+        assert state.st_size == entry.size
+        assert hashlib.sha256(candidate.read_bytes()).hexdigest() == entry.sha256
+
+
+def _cap_s1_copy_selected_fake_child_fixture(
+    source_root: Path,
+) -> tuple[_CapS1SourceCopyEntry, ...]:
+    rows = []
+    total_bytes = 0
+    for relative in _CAP_S1_FAKE_CHILD_FIXTURE_PATHS:
+        origin = REPO_ROOT / relative
+        before = origin.lstat()
+        mode = stat.S_IMODE(before.st_mode)
+        assert stat.S_ISREG(before.st_mode)
+        assert not origin.is_symlink()
+        assert mode in {0o644, 0o755}
+        assert 0 < before.st_size <= 1024 * 1024
+        payload = origin.read_bytes()
+        after = origin.lstat()
+        assert (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_size,
+            before.st_mtime_ns,
+        ) == (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_size,
+            after.st_mtime_ns,
+        )
+        assert len(payload) == before.st_size
+        total_bytes += len(payload)
+        assert total_bytes <= 2 * 1024 * 1024
+        destination = source_root / relative
+        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        destination.write_bytes(payload)
+        destination.chmod(mode)
+        git_blob = hashlib.sha1()
+        git_blob.update(f"blob {len(payload)}\0".encode("ascii"))
+        git_blob.update(payload)
+        rows.append(
+            _CapS1SourceCopyEntry(
+                path=relative,
+                mode="100755" if mode == 0o755 else "100644",
+                blob=git_blob.hexdigest(),
+                size=len(payload),
+                sha256=hashlib.sha256(payload).hexdigest(),
+            )
+        )
+    manifest = tuple(rows)
+    _cap_s1_verify_selected_fake_child_fixture(source_root, manifest)
+    return manifest
+
+
+def test_cap_s1_fake_child_bytecode_binding_prevents_owned_source_residue(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    exact_head = _cap_s1_test_git(REPO_ROOT, "rev-parse", "HEAD")
+    exact_tree = _cap_s1_test_git(REPO_ROOT, "rev-parse", "HEAD^{tree}")
+    original_configure = canary_module._configure_canary_backend
+    original_resolve_repo_git_dir = canary_module._resolve_repo_git_dir
+
+    def run_actual_fake_process(label: str, *, omit_binding: bool) -> None:
+        outer = tmp_path / label
+        outer.mkdir(mode=0o700)
+        outer_state = outer.lstat()
+        owned_roots = [
+            _register_cap_s1_owned_root(outer, kind="observer-scratch")
+        ]
+        process_cleanup = []
+        copy_root = outer / "source-copy"
+        copy_root.mkdir(mode=0o700)
+        owned_roots.append(
+            _register_cap_s1_owned_root(copy_root, kind="observer-source")
+        )
+        source_root = copy_root / "verified-source"
+        source_root.mkdir(mode=0o700)
+        owned_roots.append(
+            _register_cap_s1_owned_root(source_root, kind="observer-source")
+        )
+        source_manifest = _cap_s1_copy_selected_fake_child_fixture(source_root)
+        existing_git_dir = original_resolve_repo_git_dir(REPO_ROOT)
+        historical_commit, historical_tree, _historical_files = (
+            canary_module._cap_s1_owned_git_package_expectation(source_root)
+        )
+        assert _cap_s1_test_git(REPO_ROOT, "rev-parse", "HEAD^{commit}") == exact_head
+        assert _cap_s1_test_git(REPO_ROOT, "rev-parse", "HEAD^{tree}") == exact_tree
+        assert (
+            _cap_s1_test_git(
+                REPO_ROOT,
+                "rev-parse",
+                f"{historical_commit}:plugins/mastermind-operator",
+            )
+            == historical_tree
+        )
+
+        def resolve_existing_git_dir(repo_root: Path) -> Path:
+            if Path(repo_root) == source_root:
+                return existing_git_dir
+            return original_resolve_repo_git_dir(repo_root)
+
+        monkeypatch.setattr(
+            canary_module,
+            "_resolve_repo_git_dir",
+            resolve_existing_git_dir,
+        )
+        canary_scratch = outer / "canary-scratch"
+        canary_scratch.mkdir(mode=0o700)
+        owned_roots.append(
+            _register_cap_s1_owned_root(canary_scratch, kind="observer-scratch")
+        )
+
+        if omit_binding:
+            def configure_without_bytecode_binding(**kwargs):
+                configured = original_configure(**kwargs)
+                extra_env = dict(configured.extra_env)
+                extra_env.pop("PYTHONDONTWRITEBYTECODE", None)
+                return dataclasses.replace(configured, extra_env=extra_env)
+
+            monkeypatch.setattr(
+                canary_module,
+                "_configure_canary_backend",
+                configure_without_bytecode_binding,
+            )
+        else:
+            monkeypatch.setattr(
+                canary_module,
+                "_configure_canary_backend",
+                original_configure,
+            )
+
+        try:
+            evidence = canary_module.run_canary(
+                backend="fake",
+                binary_path=source_root / "scripts/ohf/fake_codex_binary.py",
+                codex_home=None,
+                repo_root=source_root,
+                scratch_root=canary_scratch,
+                operation_id=f"cap-s1-fake-child-bytecode-{label}",
+                protected_join="c" * 40,
+                client_factory=canary_module._default_fake_client_factory,
+            )
+            assert evidence.launch_decision == LaunchDecision.ALLOW.value
+            assert len(evidence.cleanup.artifacts) == 7
+            assert all(removed and absent for _kind, removed, absent in evidence.cleanup.artifacts)
+            cache_directories = tuple(
+                sorted(
+                    path.relative_to(source_root).as_posix()
+                    for path in source_root.rglob("__pycache__")
+                    if path.is_dir()
+                )
+            )
+            if omit_binding:
+                assert "scripts/__pycache__" in cache_directories
+                with pytest.raises(CapS1ResultError, match="source_copy_invalid"):
+                    canary_module._verify_cap_s1_owned_source_manifest(
+                        source_root=source_root,
+                        manifest=source_manifest,
+                    )
+            else:
+                assert cache_directories == ()
+                _cap_s1_verify_selected_fake_child_fixture(
+                    source_root,
+                    source_manifest,
+                )
+        finally:
+            cleanup_rows = _finalize_cap_s1_observer_cleanup(
+                scratch_path=outer,
+                scratch_device=outer_state.st_dev,
+                scratch_inode=outer_state.st_ino,
+                owned_roots=owned_roots,
+                process_cleanup=process_cleanup,
+                require_complete=False,
+            )
+            assert cleanup_rows
+            assert all(removed and absent for _kind, _digest, removed, absent in cleanup_rows)
+            assert process_cleanup == []
+            assert not outer.exists()
+
+    run_actual_fake_process("binding-omitted", omit_binding=True)
+    run_actual_fake_process("binding-fixed", omit_binding=False)
 
 
 def test_cap_s1_interpreter_identity_binds_entrypoint_target_and_venv_config(
@@ -5745,6 +6642,7 @@ def test_cap_s1_secret_scan_policy_registry_is_exact_and_unobserved() -> None:
     assert registry["secret_argv"][0] == "<verified-owned-gitleaks>"
     assert "--ignore-gitleaks-allow" in registry["secret_argv"]
     assert "--exit-code" in registry["secret_argv"]
+    assert "--no-color" in registry["secret_argv"]
     assert registry["secret_environment_keys"] == (
         "HOME",
         "LANG",
@@ -5752,6 +6650,47 @@ def test_cap_s1_secret_scan_policy_registry_is_exact_and_unobserved() -> None:
         "PATH",
         "TMPDIR",
     )
+
+
+def test_cap_s1_gitleaks_runtime_argv_disables_color_exactly_once(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    binary = tmp_path / "gitleaks"
+    rule = tmp_path / "gitleaks.toml"
+    target = tmp_path / "source"
+    invocation = tmp_path / "invocation"
+    binary.write_bytes(b"fixture")
+    rule.write_bytes(b"fixture")
+    target.mkdir()
+    observed = []
+
+    def _capture(argv, **kwargs):
+        observed.append(tuple(argv))
+        (invocation / "report.json").write_bytes(b"[]")
+        kwargs["stdout_path"].write_bytes(b"")
+        kwargs["stderr_path"].write_bytes(b"")
+        return 0
+
+    monkeypatch.setattr(canary_module, "_run_cap_s1_secret_process", _capture)
+    canary_module._run_cap_s1_gitleaks_dir(
+        binary_path=binary,
+        rule_path=rule,
+        target_root=target,
+        invocation_root=invocation,
+    )
+    assert len(observed) == 1
+    assert observed[0].count("--no-color") == 1
+    expected = list(cap_s1_observer_registry()["secret_argv"])
+    substitutions = {
+        "<verified-owned-gitleaks>": str(binary),
+        "<verified-owned-21-path-tree>": str(target),
+        "<verified-pinned-rule-file>": str(rule),
+        "<owned-private-report>": str(invocation / "report.json"),
+        "<owned-empty-ignore-file>": str(invocation / "empty-ignore"),
+    }
+    assert observed[0] == tuple(substitutions.get(value, value) for value in expected)
 
 
 def test_cap_s1_secret_control_recipes_assemble_only_in_owned_scratch(tmp_path) -> None:
@@ -5890,9 +6829,34 @@ def test_cap_s1_secret_report_parser_requires_complete_clean_evidence(tmp_path) 
         manifest=manifest,
         expected_bytes=total,
     )
+    colored_log = (
+        log.replace(b"TRC ", b"\x1b[90mTRC\x1b[0m ")
+        .replace(b'path="', b'path=\x1b[0m"')
+    )
+    with pytest.raises(CapS1ResultError, match="secret_scan_incomplete"):
+        _parse_cap_s1_gitleaks_coverage(
+            colored_log,
+            source_root=source,
+            manifest=manifest,
+            expected_bytes=total,
+        )
     with pytest.raises(CapS1ResultError, match="secret_scan_incomplete"):
         _parse_cap_s1_gitleaks_coverage(
             log.replace(b"no leaks found", b"partial scan completed"),
+            source_root=source,
+            manifest=manifest,
+            expected_bytes=total,
+        )
+    with pytest.raises(CapS1ResultError, match="secret_scan_incomplete"):
+        _parse_cap_s1_gitleaks_coverage(
+            log.replace(b"no leaks found", b"partial\x1b[0m scan completed"),
+            source_root=source,
+            manifest=manifest,
+            expected_bytes=total,
+        )
+    with pytest.raises(CapS1ResultError, match="secret_scan_incomplete"):
+        _parse_cap_s1_gitleaks_coverage(
+            log.replace(b"TRC ", b"\x1b]unsupported-controlTRC "),
             source_root=source,
             manifest=manifest,
             expected_bytes=total,
@@ -5935,27 +6899,127 @@ def test_cap_s1_secret_report_parser_preserves_findings_and_rejects_forgery() ->
 
 
 def test_cap_s1_secret_source_stage_is_immutable_complete_and_bounded(tmp_path) -> None:
-    head = _subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()
-    protected = _subprocess.check_output(
-        ["git", "rev-parse", "origin/master"], cwd=REPO_ROOT, text=True
-    ).strip()
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    repository, protected, head = _build_cap_s1_secret_stage_repository(tmp_path)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(canary_module, "REPO_ROOT", repository)
     owner = tmp_path / "source-owner"
     owner.mkdir()
-    source, manifest, total = _stage_cap_s1_secret_source(
-        exact_head=head,
-        protected_join=protected,
-        owned_root=owner,
-    )
-    assert len(manifest) == 21
-    assert tuple(entry.path for entry in manifest) == tuple(sorted(entry.path for entry in manifest))
-    assert total == sum(entry.size for entry in manifest)
-    assert 0 < total <= 10 * 1024 * 1024
-    _verify_cap_s1_secret_manifest(source_root=source, manifest=manifest)
-    first = source / manifest[0].path
-    first.chmod(0o600)
-    first.write_bytes(first.read_bytes() + b"changed")
-    with pytest.raises(CapS1ResultError, match="secret_source_changed"):
+    try:
+        source, manifest, total = _stage_cap_s1_secret_source(
+            exact_head=head,
+            protected_join=protected,
+            owned_root=owner,
+        )
+        assert len(manifest) == 21
+        assert tuple(entry.path for entry in manifest) == tuple(
+            sorted(entry.path for entry in manifest)
+        )
+        assert total == sum(entry.size for entry in manifest)
+        assert 0 < total <= 10 * 1024 * 1024
         _verify_cap_s1_secret_manifest(source_root=source, manifest=manifest)
+        first = source / manifest[0].path
+        first.chmod(0o600)
+        first.write_bytes(first.read_bytes() + b"changed")
+        with pytest.raises(CapS1ResultError, match="secret_source_changed"):
+            _verify_cap_s1_secret_manifest(source_root=source, manifest=manifest)
+    finally:
+        monkeypatch.undo()
+
+
+def _cap_s1_test_git(repository: Path, *args: str) -> str:
+    environment = {
+        "PATH": os.environ["PATH"],
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_AUTHOR_NAME": "CAP-S1 fixture",
+        "GIT_AUTHOR_EMAIL": "cap-s1-fixture@example.invalid",
+        "GIT_COMMITTER_NAME": "CAP-S1 fixture",
+        "GIT_COMMITTER_EMAIL": "cap-s1-fixture@example.invalid",
+    }
+    return _subprocess.check_output(
+        ["git", *args], cwd=repository, env=environment, text=True
+    ).strip()
+
+
+def _build_cap_s1_secret_stage_repository(
+    tmp_path: Path,
+    *,
+    extra_candidate_path: str | None = None,
+    omit_candidate_path: str | None = None,
+) -> tuple[Path, str, str]:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    repository = tmp_path / "stage-repository"
+    repository.mkdir()
+    _cap_s1_test_git(repository, "init", "--quiet")
+    for relative in canary_module.RESULT_CHANGED_PATHS:
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"protected:{relative}\n", encoding="utf-8")
+        if relative in {
+            "ops/control_room_remote/install.sh",
+            "scripts/ohf/fake_codex_binary.py",
+        }:
+            path.chmod(0o755)
+    _cap_s1_test_git(repository, "add", "--", *canary_module.RESULT_CHANGED_PATHS)
+    _cap_s1_test_git(repository, "commit", "--quiet", "-m", "protected fixture")
+    protected = _cap_s1_test_git(repository, "rev-parse", "HEAD")
+    for relative in canary_module.RESULT_CHANGED_PATHS:
+        path = repository / relative
+        path.write_text(f"candidate:{relative}\n", encoding="utf-8")
+    if omit_candidate_path is not None:
+        (repository / omit_candidate_path).unlink()
+    if extra_candidate_path is not None:
+        extra = repository / extra_candidate_path
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("unexpected candidate path\n", encoding="utf-8")
+    _cap_s1_test_git(repository, "add", "--all")
+    _cap_s1_test_git(repository, "commit", "--quiet", "-m", "candidate fixture")
+    return repository, protected, _cap_s1_test_git(repository, "rev-parse", "HEAD")
+
+
+def test_cap_s1_secret_source_stage_refuses_real_22nd_path(tmp_path, monkeypatch) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    repository, protected, head = _build_cap_s1_secret_stage_repository(
+        tmp_path, extra_candidate_path="unexpected/22nd-path.txt"
+    )
+    monkeypatch.setattr(canary_module, "REPO_ROOT", repository)
+    owner = tmp_path / "source-owner"
+    owner.mkdir()
+    with pytest.raises(CapS1ResultError, match="secret_source_path_boundary"):
+        _stage_cap_s1_secret_source(
+            exact_head=head,
+            protected_join=protected,
+            owned_root=owner,
+        )
+
+
+def test_cap_s1_secret_source_stage_refuses_missing_candidate_blob(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    missing = canary_module.RESULT_CHANGED_PATHS[-1]
+    repository, protected, head = _build_cap_s1_secret_stage_repository(
+        tmp_path, omit_candidate_path=missing
+    )
+    monkeypatch.setattr(canary_module, "REPO_ROOT", repository)
+    owner = tmp_path / "source-owner"
+    owner.mkdir()
+    with pytest.raises(CapS1ResultError, match="secret_source_unsupported"):
+        _stage_cap_s1_secret_source(
+            exact_head=head,
+            protected_join=protected,
+            owned_root=owner,
+        )
 
 
 def test_cap_s1_result_reopens_only_read_only_regular_producer_evidence() -> None:

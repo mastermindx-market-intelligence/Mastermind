@@ -26,6 +26,7 @@ import argparse
 import dataclasses
 import hashlib
 import importlib
+import importlib.util
 import io
 import json
 import os
@@ -1063,23 +1064,30 @@ def _remove_tree(path: Path) -> bool:
 
     ``build_synthetic_workspace`` may have chmodded everything under
     ``path`` down to 0o444/0o555 -- a plain ``shutil.rmtree`` cannot unlink
-    entries out of a non-writable directory, so every directory/file mode is
-    forced back to writable first (mirrors
-    ``capability_skill_projection._force_remove_tree``'s own discipline).
+    entries out of a non-writable directory, so each traversed directory is
+    made writable through a no-follow descriptor first.  File modes do not
+    need to change for unlink, and pathname chmod of a file would follow an
+    attacker-controlled symlink outside the owned tree.
     """
 
     try:
         if path.is_dir() and not path.is_symlink():
-            for dirpath, _dirnames, filenames in os.walk(str(path)):
+            for dirpath, _dirnames, _filenames in os.walk(str(path)):
+                descriptor: "int | None" = None
                 try:
-                    os.chmod(dirpath, 0o700)
+                    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                    if hasattr(os, "O_CLOEXEC"):
+                        flags |= os.O_CLOEXEC
+                    descriptor = os.open(dirpath, flags)
+                    os.fchmod(descriptor, 0o700)
                 except OSError:
                     pass
-                for name in filenames:
-                    try:
-                        os.chmod(os.path.join(dirpath, name), 0o600)
-                    except OSError:
-                        pass
+                finally:
+                    if descriptor is not None:
+                        try:
+                            os.close(descriptor)
+                        except OSError:
+                            pass
             shutil.rmtree(path, ignore_errors=True)
         elif path.exists():
             path.unlink()
@@ -1279,6 +1287,7 @@ def _configure_canary_backend(
         adapter_argv=(str(single_binary_path), "app-server"),
         extra_env={
             "PYTHONPATH": str(repo_root),
+            "PYTHONDONTWRITEBYTECODE": "1",
             "OHF_FAKE_STATE": str(attempt_root / "fake-state.json"),
             "OHF_FAKE_MODEL": CANARY_REQUESTED_MODEL,
             "OHF_FAKE_MCP_GONE": "1",
@@ -1561,6 +1570,34 @@ def run_canary(
         )
 
         # --- adapter construction --------------------------------------------
+        adapter_extra_env = extra_env
+        adapter_client_factory = client_factory
+        fake_bytecode_binding = extra_env.get("PYTHONDONTWRITEBYTECODE")
+        if backend == "fake" and fake_bytecode_binding is not None:
+            if fake_bytecode_binding != "1":
+                raise CanaryStop(
+                    "PROVIDER_REALM_UNAVAILABLE",
+                    "fake backend bytecode binding is invalid",
+                )
+            # The adapter deliberately accepts only its frozen environment
+            # allowlist.  Keep that policy intact, then restore this fixed
+            # fake-only interpreter control at the final client-process
+            # boundary.  The protocol probe and the actual fake process thus
+            # receive the same bytecode setting without changing live runs,
+            # the binary identity, or the app-server argv.
+            adapter_extra_env = dict(extra_env)
+            adapter_extra_env.pop("PYTHONDONTWRITEBYTECODE")
+            base_client_factory = client_factory
+
+            def fake_bytecode_client_factory(
+                argv: list[str], env: Mapping[str, str], cwd: Path
+            ):
+                bound_env = dict(env)
+                bound_env["PYTHONDONTWRITEBYTECODE"] = fake_bytecode_binding
+                return base_client_factory(argv, bound_env, cwd)
+
+            adapter_client_factory = fake_bytecode_client_factory
+
         adapter = CodexOperatorAdapter(
             binary_path=adapter_binary_path,
             codex_home=adapter_codex_home,
@@ -1586,8 +1623,8 @@ def run_canary(
             expected_config_digest=profile.expected_config_digest,
             network_policy="disabled",
             base_sha_resolver=lambda _path: workspace_base_sha,
-            client_factory=client_factory,
-            extra_env=extra_env,
+            client_factory=adapter_client_factory,
+            extra_env=adapter_extra_env,
             skill_canary_binding=binding,
         )
 
@@ -1976,13 +2013,134 @@ CAP_S1_OBSERVER_MUTANT_TRANSFORMS = (
         "                    pass\n",
     ),
 )
+_CAP_S1_PYTEST_PROVENANCE_EXIT = 86
+_CAP_S1_PYTEST_SOURCE_MODULES = (
+    (
+        "scripts.ohf.cap_s1_mastermind_operator_canary",
+        "scripts/ohf/cap_s1_mastermind_operator_canary.py",
+    ),
+    (
+        "scripts.ohf.capability_skill_projection",
+        "scripts/ohf/capability_skill_projection.py",
+    ),
+    ("scripts.ohf.protocol", "scripts/ohf/protocol.py"),
+    ("scripts.ohf.laboratory", "scripts/ohf/laboratory.py"),
+    (
+        "control_plane.codex_operator_adapter",
+        "control_plane/codex_operator_adapter.py",
+    ),
+    (
+        "control_plane.executive_agent_capabilities",
+        "control_plane/executive_agent_capabilities.py",
+    ),
+    (
+        "control_plane.executive_capability_packages",
+        "control_plane/executive_capability_packages.py",
+    ),
+    (
+        "control_plane.operator_harness_contract",
+        "control_plane/operator_harness_contract.py",
+    ),
+)
+_CAP_S1_PYTEST_BOOTSTRAP = r'''import hashlib
+import importlib
+import json
+import os
+import pathlib
+import stat
+import sys
+
+PROVENANCE_EXIT = 86
+
+
+def refuse():
+    os._exit(PROVENANCE_EXIT)
+
+
+def stable_sha256(path, maximum):
+    before = path.lstat()
+    if (not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode)
+            or before.st_size <= 0 or before.st_size > maximum):
+        refuse()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    after = path.lstat()
+    if (before.st_dev, before.st_ino, before.st_mode, before.st_size,
+            before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_mode,
+            after.st_size, after.st_mtime_ns):
+        refuse()
+    return digest
+
+
+try:
+    binding = json.loads(sys.argv[1])
+    if set(binding) != {"schema_version", "source_rows", "pytest_origin",
+                        "pytest_sha256"}:
+        refuse()
+    if binding["schema_version"] != "mastermind.cap_s1_pytest_child_binding/v1":
+        refuse()
+    root = pathlib.Path(os.getcwd()).resolve(strict=True)
+    root_state = pathlib.Path(os.getcwd()).lstat()
+    if not stat.S_ISDIR(root_state.st_mode) or stat.S_ISLNK(root_state.st_mode):
+        refuse()
+    rows = binding["source_rows"]
+    if not isinstance(rows, list) or not rows:
+        refuse()
+    expected = {}
+    for row in rows:
+        if (not isinstance(row, list) or len(row) != 3
+                or not all(isinstance(value, str) for value in row)):
+            refuse()
+        module_name, relative, digest = row
+        relative_path = pathlib.PurePosixPath(relative)
+        if (not module_name or relative_path.is_absolute() or ".." in relative_path.parts
+                or len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest)
+                or module_name in expected):
+            refuse()
+        path = (root / relative).resolve(strict=True)
+        if path.parent != root and root not in path.parents:
+            refuse()
+        if stable_sha256(path, 64 * 1024 * 1024) != digest:
+            refuse()
+        expected[module_name] = (path, digest)
+    sys.path.insert(0, str(root))
+    for module_name, (expected_path, expected_digest) in expected.items():
+        module = importlib.import_module(module_name)
+        origin = pathlib.Path(module.__file__).resolve(strict=True)
+        if origin != expected_path or stable_sha256(origin, 64 * 1024 * 1024) != expected_digest:
+            refuse()
+    pytest = importlib.import_module("pytest")
+    pytest_origin = pathlib.Path(pytest.__file__).resolve(strict=True)
+    expected_pytest = pathlib.Path(binding["pytest_origin"]).resolve(strict=True)
+    if (pytest_origin != expected_pytest
+            or stable_sha256(pytest_origin, 16 * 1024 * 1024)
+            != binding["pytest_sha256"]):
+        refuse()
+except BaseException:
+    refuse()
+
+sys.argv = ["pytest", *sys.argv[2:]]
+raise SystemExit(pytest.main())
+'''
+_CAP_S1_GIT_ENVIRONMENT = {
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+}
 CAP_S1_OBSERVER_ENVIRONMENT_KEYS = (
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_NO_LAZY_FETCH",
+    "GIT_OPTIONAL_LOCKS",
+    "GIT_TERMINAL_PROMPT",
     "LANG",
     "LC_ALL",
     "OHF_FAKE_STATE",
     "PATH",
     "PYTEST_ADDOPTS",
     "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+    "TMPDIR",
 )
 CAP_S1_GITLEAKS_VERSION = "8.30.1"
 CAP_S1_GITLEAKS_SOURCE_COMMIT = "83d9cd684c87d95d656c1458ef04895a7f1cbd8e"
@@ -3548,13 +3706,55 @@ def cap_s1_observer_registry() -> dict[str, object]:
             "<bound-lexical-python-entrypoint>",
             "-I",
             "-B",
-            "-m",
-            "pytest",
+            "-c",
+            "<fixed-source-owned-pytest-bootstrap>",
+            "<private-exact-provenance-binding>",
             "-q",
             "--junitxml",
             "<owned-output>",
             *CAP_S1_OBSERVER_TEST_MODULES,
         ),
+        "python_provenance_exit": _CAP_S1_PYTEST_PROVENANCE_EXIT,
+        "python_bootstrap_source": _CAP_S1_PYTEST_BOOTSTRAP,
+        "python_bootstrap_sha256": hashlib.sha256(
+            _CAP_S1_PYTEST_BOOTSTRAP.encode("utf-8")
+        ).hexdigest(),
+        "python_source_modules": _CAP_S1_PYTEST_SOURCE_MODULES,
+        "owned_git": {
+            "object_count": _CAP_S1_OWNED_GIT_OBJECT_COUNT,
+            "maximum_object_bytes": _CAP_S1_OWNED_GIT_MAX_OBJECT_BYTES,
+            "filesystem_file_count": 5,
+            "historical_tree_closure": {
+                "commit": _CAP_S1_HISTORICAL_COMMIT,
+                "root_tree": _CAP_S1_HISTORICAL_ROOT_TREE,
+                "path_count": _CAP_S1_HISTORICAL_TREE_PATH_COUNT,
+                "unique_object_count": _CAP_S1_HISTORICAL_TREE_UNIQUE_COUNT,
+                "total_raw_bytes": _CAP_S1_HISTORICAL_TREE_TOTAL_RAW_BYTES,
+                "maximum_raw_bytes": _CAP_S1_HISTORICAL_TREE_MAX_RAW_BYTES,
+                "path_manifest_digest": (
+                    _CAP_S1_HISTORICAL_TREE_PATH_MANIFEST_DIGEST
+                ),
+                "object_manifest_digest": (
+                    _CAP_S1_HISTORICAL_TREE_OBJECT_MANIFEST_DIGEST
+                ),
+                "tracked_attribute_blobs": (),
+                "package_blob_count": 7,
+            },
+            "environment": tuple(sorted(_CAP_S1_GIT_ENVIRONMENT)),
+            "commands": (
+                "rev-parse-fixed-identities",
+                "ls-tree-full-historical-tree-metadata",
+                "ls-tree-full-historical-leaf-metadata-no-attributes",
+                "ls-tree-fixed-historical-package",
+                "cat-file-batch-exact-object-manifest",
+                "init-bare-owned-empty-template",
+                "pack-objects-exact-manifest-with-indexes",
+                "update-ref-no-deref-head",
+                "rev-parse-fixed-owned-identities",
+                "archive-fixed-historical-package",
+                "for-each-ref-empty",
+            ),
+        },
         "diff_argv": (
             "git",
             "--no-pager",
@@ -3628,6 +3828,7 @@ def cap_s1_observer_registry() -> dict[str, object]:
             "<verified-pinned-rule-file>",
             "--redact=100",
             "--no-banner",
+            "--no-color",
             "--log-level",
             "trace",
             "--report-format",
@@ -3667,13 +3868,15 @@ def cap_s1_observer_registry() -> dict[str, object]:
 
 
 def _cap_s1_observer_environment(
-    *, owned_state_path: "Path | None" = None
+    *,
+    owned_state_path: "Path | None" = None,
+    owned_temp_root: "Path | None" = None,
 ) -> dict[str, str]:
     """Build the fixed non-secret child environment from source constants."""
 
     executable_dir = str(Path(os.path.abspath(sys.executable)).parent)
     system_path = os.pathsep.join(
-        ("/opt/homebrew/bin", "/usr/local/bin", os.defpath)
+        ("/opt/homebrew/bin", "/usr/local/bin", "/usr/sbin", os.defpath)
     )
     environment = {
         "LANG": "C.UTF-8",
@@ -3684,17 +3887,21 @@ def _cap_s1_observer_environment(
     }
     if owned_state_path is not None:
         environment["OHF_FAKE_STATE"] = str(owned_state_path)
+    if owned_temp_root is not None:
+        environment["TMPDIR"] = str(owned_temp_root)
     return environment
 
 
-def _cap_s1_github_environment(*, owned_state_root: Path) -> dict[str, str]:
+def _cap_s1_github_environment(
+    *, owned_state_root: Path, owned_temp_root: Path
+) -> dict[str, str]:
     """Narrow inherited GitHub auth while keeping all CLI state attempt-local."""
 
     try:
         owned_state_root.mkdir(mode=0o700)
     except OSError as exc:
         raise CapS1ResultError("cap_s1_result_github_evidence_unavailable") from exc
-    environment = _cap_s1_observer_environment()
+    environment = _cap_s1_observer_environment(owned_temp_root=owned_temp_root)
     environment.update(
         {
             "HOME": str(Path.home()),
@@ -3708,6 +3915,96 @@ def _cap_s1_github_environment(*, owned_state_root: Path) -> dict[str, str]:
         if value:
             environment[key] = value
     return environment
+
+
+def _bind_cap_s1_observer_temp_root(
+    path: Path,
+    *,
+    expected: os.stat_result,
+    error: str,
+) -> os.stat_result:
+    """Bind one freshly-created output root as the child's private TMPDIR.
+
+    Ownership normalization is descriptor-bound.  The pathname may be replaced
+    between ``mkdtemp``/``lstat`` and this helper, so no pathname mutation is
+    permitted until an ``O_NOFOLLOW`` directory descriptor has reproduced the
+    expected object identity.  The pathname is checked again after the
+    descriptor is closed before callers use it.
+    """
+
+    if (
+        stat.S_ISLNK(expected.st_mode)
+        or not stat.S_ISDIR(expected.st_mode)
+        or expected.st_uid != os.getuid()
+        or stat.S_IMODE(expected.st_mode) != 0o700
+    ):
+        raise CapS1ResultError(error)
+
+    try:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        if hasattr(os, "O_CLOEXEC"):
+            flags |= os.O_CLOEXEC
+        descriptor = os.open(path, flags)
+    except (AttributeError, NotImplementedError, OSError) as exc:
+        raise CapS1ResultError(error) from exc
+
+    normalized: "os.stat_result | None" = None
+    descriptor_error: "CapS1ResultError | None" = None
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(before.st_mode)
+            or (before.st_dev, before.st_ino) != (expected.st_dev, expected.st_ino)
+            or stat.S_IFMT(before.st_mode) != stat.S_IFMT(expected.st_mode)
+            or before.st_uid != expected.st_uid
+            or before.st_gid != expected.st_gid
+            or stat.S_IMODE(before.st_mode) != stat.S_IMODE(expected.st_mode)
+        ):
+            raise CapS1ResultError(error)
+        if before.st_gid != os.getgid():
+            os.fchown(descriptor, os.getuid(), os.getgid())
+        normalized = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(normalized.st_mode)
+            or (normalized.st_dev, normalized.st_ino)
+            != (expected.st_dev, expected.st_ino)
+            or normalized.st_uid != os.getuid()
+            or normalized.st_gid != os.getgid()
+            or stat.S_IMODE(normalized.st_mode) != 0o700
+        ):
+            raise CapS1ResultError(error)
+    except CapS1ResultError as exc:
+        descriptor_error = exc
+    except (NotImplementedError, OSError) as exc:
+        descriptor_error = CapS1ResultError(error)
+        descriptor_error.__cause__ = exc
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError as exc:
+            if descriptor_error is None:
+                descriptor_error = CapS1ResultError(error)
+                descriptor_error.__cause__ = exc
+    if descriptor_error is not None:
+        raise descriptor_error
+    if normalized is None:  # pragma: no cover - defensive invariant
+        raise CapS1ResultError(error)
+
+    try:
+        current = path.lstat()
+    except OSError as exc:
+        raise CapS1ResultError(error) from exc
+    if (
+        stat.S_ISLNK(current.st_mode)
+        or not stat.S_ISDIR(current.st_mode)
+        or (current.st_dev, current.st_ino)
+        != (normalized.st_dev, normalized.st_ino)
+        or current.st_uid != os.getuid()
+        or current.st_gid != os.getgid()
+        or stat.S_IMODE(current.st_mode) != 0o700
+    ):
+        raise CapS1ResultError(error)
+    return current
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -3725,6 +4022,17 @@ class _CapS1InterpreterIdentity:
     venv_config_path: "str | None"
     venv_config_identity: "tuple[int, int, int, int, int] | None"
     venv_config_sha256: "str | None"
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1PytestBinding:
+    """Private exact-source binding consumed by the actual pytest child."""
+
+    payload_json: str
+    bootstrap_sha256: str
+    source_rows: tuple[tuple[str, str, str], ...]
+    pytest_origin_sha256: str
+    evidence_digest: str
 
 
 def _cap_s1_stable_file_identity(
@@ -3849,6 +4157,110 @@ def _revalidate_cap_s1_interpreter_identity(
         raise CapS1ResultError("cap_s1_result_interpreter_identity_changed")
 
 
+def _build_cap_s1_pytest_binding(
+    *,
+    source_root: Path,
+    source_manifest: Sequence["_CapS1SourceCopyEntry"],
+    interpreter: _CapS1InterpreterIdentity,
+    expected_canary_sha256: "str | None" = None,
+) -> _CapS1PytestBinding:
+    """Bind source bytes and pytest before constructing the fixed child argv."""
+
+    if type(interpreter) is not _CapS1InterpreterIdentity:
+        raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+    manifest_by_path = {entry.path: entry for entry in source_manifest}
+    if len(manifest_by_path) != len(source_manifest):
+        raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+    source_rows: list[tuple[str, str, str]] = []
+    for module_name, relative in _CAP_S1_PYTEST_SOURCE_MODULES:
+        entry = manifest_by_path.get(relative)
+        if entry is None or not _result_is_hex64(entry.sha256):
+            raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+        expected_digest = entry.sha256
+        if relative == "scripts/ohf/cap_s1_mastermind_operator_canary.py":
+            if expected_canary_sha256 is not None:
+                if not _result_is_hex64(expected_canary_sha256):
+                    raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+                expected_digest = expected_canary_sha256
+        try:
+            candidate = (source_root / relative).resolve(strict=True)
+            candidate.relative_to(source_root.resolve(strict=True))
+            _identity, actual_digest = _cap_s1_stable_file_identity(
+                candidate,
+                maximum_bytes=64 * 1024 * 1024,
+            )
+        except (OSError, ValueError, CapS1ResultError) as exc:
+            raise CapS1ResultError("cap_s1_result_import_origin_invalid") from exc
+        if actual_digest != expected_digest:
+            raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+        source_rows.append((module_name, relative, expected_digest))
+
+    try:
+        pytest_spec = importlib.util.find_spec("pytest")
+        if pytest_spec is None or not pytest_spec.origin:
+            raise ValueError("pytest origin unavailable")
+        pytest_origin = Path(pytest_spec.origin).resolve(strict=True)
+        pytest_origin.relative_to(Path(interpreter.prefix).resolve(strict=True))
+        try:
+            pytest_origin.relative_to(source_root.resolve(strict=True))
+        except ValueError:
+            pass
+        else:
+            raise ValueError("pytest resolved inside source copy")
+        _pytest_identity, pytest_digest = _cap_s1_stable_file_identity(
+            pytest_origin,
+            maximum_bytes=16 * 1024 * 1024,
+        )
+    except (OSError, ValueError, CapS1ResultError) as exc:
+        raise CapS1ResultError("cap_s1_result_import_origin_invalid") from exc
+
+    payload = {
+        "schema_version": "mastermind.cap_s1_pytest_child_binding/v1",
+        "source_rows": source_rows,
+        "pytest_origin": str(pytest_origin),
+        "pytest_sha256": pytest_digest,
+    }
+    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    bootstrap_sha256 = hashlib.sha256(
+        _CAP_S1_PYTEST_BOOTSTRAP.encode("utf-8")
+    ).hexdigest()
+    evidence_digest = _canonical_digest(
+        {
+            "schema_version": payload["schema_version"],
+            "bootstrap_sha256": bootstrap_sha256,
+            "source_rows": source_rows,
+            "pytest_sha256": pytest_digest,
+            "interpreter_entrypoint": hashlib.sha256(
+                interpreter.entrypoint_path.encode("utf-8")
+            ).hexdigest(),
+        }
+    )
+    return _CapS1PytestBinding(
+        payload_json=payload_json,
+        bootstrap_sha256=bootstrap_sha256,
+        source_rows=tuple(source_rows),
+        pytest_origin_sha256=pytest_digest,
+        evidence_digest=evidence_digest,
+    )
+
+
+def _cap_s1_pytest_argv(
+    binding: _CapS1PytestBinding,
+    pytest_argv: Sequence[str],
+) -> tuple[str, ...]:
+    """Return only the fixed bootstrap; callers cannot inject executable code."""
+
+    if (
+        type(binding) is not _CapS1PytestBinding
+        or not pytest_argv
+        or binding.bootstrap_sha256
+        != hashlib.sha256(_CAP_S1_PYTEST_BOOTSTRAP.encode("utf-8")).hexdigest()
+        or not _result_is_hex64(binding.evidence_digest)
+    ):
+        raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+    return ("-c", _CAP_S1_PYTEST_BOOTSTRAP, binding.payload_json, *pytest_argv)
+
+
 def _cap_s1_process_group_exists(process_group: int) -> bool:
     try:
         os.killpg(process_group, 0)
@@ -3918,6 +4330,7 @@ def _run_cap_s1_owned_process(
     maximum_stream_bytes: int,
     error: str,
     cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+    stdin_path: "Path | None" = None,
 ) -> int:
     """Run one source-owned child with pre-bound streams and group cleanup."""
 
@@ -3928,6 +4341,7 @@ def _run_cap_s1_owned_process(
         or stdout_path.parent != stderr_path.parent
         or stdout_path.exists()
         or stderr_path.exists()
+        or (stdin_path is not None and not stdin_path.is_file())
     ):
         raise CapS1ResultError(error)
 
@@ -3943,17 +4357,34 @@ def _run_cap_s1_owned_process(
     timed_out = False
     unexpected_descendant = False
     survivor = False
+    stdin_file: "Any | None" = None
+    stdin_identity: "tuple[int, int, int, int] | None" = None
     try:
         with stdout_path.open("xb") as stdout_file, stderr_path.open("xb") as stderr_file:
             stdout_state = os.fstat(stdout_file.fileno())
             stderr_state = os.fstat(stderr_file.fileno())
             stdout_identity = (stdout_state.st_dev, stdout_state.st_ino)
             stderr_identity = (stderr_state.st_dev, stderr_state.st_ino)
+            if stdin_path is not None:
+                stdin_file = stdin_path.open("rb")
+                stdin_state = os.fstat(stdin_file.fileno())
+                if (
+                    not stat.S_ISREG(stdin_state.st_mode)
+                    or stat.S_ISLNK(stdin_path.lstat().st_mode)
+                    or stdin_state.st_size > 64 * 1024
+                ):
+                    raise CapS1ResultError(error)
+                stdin_identity = (
+                    stdin_state.st_dev,
+                    stdin_state.st_ino,
+                    stdin_state.st_size,
+                    stdin_state.st_mtime_ns,
+                )
             process = subprocess.Popen(
                 list(argv),
                 cwd=cwd,
                 env=dict(environment),
-                stdin=subprocess.DEVNULL,
+                stdin=stdin_file if stdin_file is not None else subprocess.DEVNULL,
                 stdout=stdout_file,
                 stderr=stderr_file,
                 start_new_session=True,
@@ -3978,6 +4409,15 @@ def _run_cap_s1_owned_process(
                     raise CapS1ResultError(error)
                 os.killpg(process_group, signal.SIGKILL)
                 process.wait(timeout=10)
+        if stdin_file is not None:
+            current_input = stdin_path.lstat() if stdin_path is not None else None
+            if current_input is None or stdin_identity != (
+                current_input.st_dev,
+                current_input.st_ino,
+                current_input.st_size,
+                current_input.st_mtime_ns,
+            ):
+                raise CapS1ResultError(error)
         if process_group is not None and _cap_s1_process_group_exists(process_group):
             # A descendant survived the direct child.  This exact process group
             # was created above and never exposed, so clean it before refusing.
@@ -3998,6 +4438,12 @@ def _run_cap_s1_owned_process(
             finally:
                 process.wait(timeout=10)
         raise CapS1ResultError(error) from None
+    finally:
+        if stdin_file is not None:
+            try:
+                stdin_file.close()
+            except OSError:
+                pass
 
     try:
         stdout_state = stdout_path.lstat()
@@ -4030,6 +4476,7 @@ def _run_cap_s1_owned_process(
                         "stderr_identity": stderr_identity,
                         "stdout_size": stdout_state.st_size,
                         "stderr_size": stderr_state.st_size,
+                        "stdin_identity": stdin_identity,
                     }
                 ),
                 removed=True,
@@ -4047,6 +4494,8 @@ def _run_cap_s1_observer_process(
     owned_state_path: "Path | None" = None,
     cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
     github_environment: bool = False,
+    git_environment: bool = False,
+    stdin_path: "Path | None" = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run one fixed observer child without unbounded pipe capture."""
 
@@ -4061,15 +4510,26 @@ def _run_cap_s1_observer_process(
     try:
         output_root = Path(tempfile.mkdtemp(prefix="cap-s1-observer-process-"))
         root_state = output_root.lstat()
+        root_state = _bind_cap_s1_observer_temp_root(
+            output_root,
+            expected=root_state,
+            error="cap_s1_result_source_observation_unavailable",
+        )
         stdout_path = output_root / "stdout"
         stderr_path = output_root / "stderr"
         environment = (
             _cap_s1_github_environment(
-                owned_state_root=output_root / "github-state"
+                owned_state_root=output_root / "github-state",
+                owned_temp_root=output_root,
             )
             if github_environment
-            else _cap_s1_observer_environment(owned_state_path=owned_state_path)
+            else _cap_s1_observer_environment(
+                owned_state_path=owned_state_path,
+                owned_temp_root=output_root,
+            )
         )
+        if git_environment:
+            environment.update(_CAP_S1_GIT_ENVIRONMENT)
         return_code = _run_cap_s1_owned_process(
             argv,
             cwd=cwd,
@@ -4080,6 +4540,7 @@ def _run_cap_s1_observer_process(
             maximum_stream_bytes=_CAP_S1_OBSERVER_MAX_OUTPUT_BYTES,
             error="cap_s1_result_source_observation_unavailable",
             cleanup_observations=cleanup_observations,
+            stdin_path=stdin_path,
         )
         current = output_root.lstat()
         if (
@@ -4153,6 +4614,7 @@ def _run_cap_s1_python_observer_process(
         timeout=timeout,
         owned_state_path=owned_state_path,
         cleanup_observations=cleanup_observations,
+        git_environment=True,
     )
     _revalidate_cap_s1_interpreter_identity(interpreter)
     return completed
@@ -4308,6 +4770,1044 @@ class _CapS1SourceCopyEntry:
     sha256: str
 
 
+_CAP_S1_OWNED_GIT_MAX_OBJECT_BYTES = 8 * 1024 * 1024
+_CAP_S1_OWNED_GIT_OBJECT_COUNT = 131
+_CAP_S1_HISTORICAL_COMMIT = "12c2cb8993f78e81c6cb9e9a75a9829f9b194dab"
+_CAP_S1_HISTORICAL_ROOT_TREE = "b5a042c3b0a1a54d74855be5dcd132bef3a7a2ce"
+_CAP_S1_HISTORICAL_TREE_PATH_COUNT = 124
+_CAP_S1_HISTORICAL_TREE_UNIQUE_COUNT = 121
+_CAP_S1_HISTORICAL_TREE_TOTAL_RAW_BYTES = 77_050
+_CAP_S1_HISTORICAL_TREE_MAX_RAW_BYTES = 21_231
+_CAP_S1_HISTORICAL_TREE_PATH_MANIFEST_DIGEST = (
+    "5a6c36388af247b001fad02cabd21fd8e4e9d8e97d54adaf3ef785aacca4d92f"
+)
+_CAP_S1_HISTORICAL_TREE_OBJECT_MANIFEST_DIGEST = (
+    "039b886b8975708e35347716afb50a105b4ae89d83af54300cb37ac25e188666"
+)
+_CAP_S1_HISTORICAL_TREE_MAX_COUNT = 256
+_CAP_S1_HISTORICAL_TREE_MAX_TOTAL_RAW_BYTES = 8 * 1024 * 1024
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1OwnedGitContext:
+    git_dir: Path
+    device: int
+    inode: int
+    exact_head: str
+    exact_tree: str
+    historical_commit: str
+    historical_package_tree: str
+    historical_tree_path_manifest: tuple[tuple[str, str, int], ...]
+    historical_tree_path_manifest_digest: str
+    historical_tree_object_manifest: tuple[tuple[str, int], ...]
+    historical_tree_object_manifest_digest: str
+    object_manifest: tuple[tuple[str, str, int], ...]
+    object_manifest_digest: str
+    filesystem_manifest: tuple[tuple[str, int, str], ...]
+    filesystem_manifest_digest: str
+    archive_digest: str
+    archive_diagnostic: str
+    archive_diagnostic_digest: str
+    archive_file_manifest: tuple[tuple[str, int, str], ...]
+    archive_file_manifest_digest: str
+    command_registry: tuple[str, ...]
+
+
+def _cap_s1_owned_git_command(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+    stdin_path: "Path | None" = None,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return _run_cap_s1_observer_process(
+            argv,
+            cwd=cwd,
+            timeout=120,
+            cleanup_observations=cleanup_observations,
+            git_environment=True,
+            stdin_path=stdin_path,
+        )
+    except CapS1ResultError as exc:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid") from exc
+
+
+def _record_cap_s1_transient_root_cleanup(
+    identity: _CapS1OwnedRootIdentity,
+    *,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None",
+) -> bool:
+    removed, absent = _cleanup_owned_dir_action(
+        identity.path,
+        expected_device=identity.device,
+        expected_inode=identity.inode,
+    )
+    if cleanup_observations is not None:
+        cleanup_observations.append(
+            _CapS1OwnedProcessCleanupObservation(
+                identity_digest=_canonical_digest(
+                    {
+                        "kind": "owned-git-transient-root",
+                        "path_kind": identity.kind,
+                        "device": identity.device,
+                        "inode": identity.inode,
+                    }
+                ),
+                removed=removed,
+                verified_absent=absent,
+            )
+        )
+    return removed and absent
+
+
+def _cap_s1_owned_git_expected_paths(
+    expected_package_files: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    if len(expected_package_files) != 7 or len(set(expected_package_files)) != 7:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    package_root = Path("plugins/mastermind-operator")
+    blob_paths: list[str] = []
+    tree_paths = {"plugins", package_root.as_posix()}
+    for relative in expected_package_files:
+        path = Path(relative)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        full = package_root / path
+        blob_paths.append(full.as_posix())
+        parent = full.parent
+        while parent != package_root:
+            tree_paths.add(parent.as_posix())
+            parent = parent.parent
+    trees = tuple(sorted(tree_paths))
+    blobs = tuple(sorted(blob_paths))
+    if len(trees) != 9:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    return trees, blobs
+
+
+def _cap_s1_owned_git_package_expectation(
+    source_root: Path,
+) -> tuple[str, str, tuple[str, ...]]:
+    """Read the verified copied fixture and return its immutable Git closure."""
+
+    try:
+        fixture_path = source_root / V4_FIXTURE_RELATIVE_PATH
+        raw = _strict_json_loads(
+            fixture_path.read_bytes(),
+            error="cap_s1_result_owned_git_invalid",
+        )
+        package = raw["capability_packages"][PACKAGE_CAPABILITY_ID]
+        generation = build_capability_package_generation(
+            capability_id=PACKAGE_CAPABILITY_ID,
+            raw=package,
+        )
+    except (KeyError, OSError, CapabilityPackageError, CapS1ResultError) as exc:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid") from exc
+    files = tuple(row.relative_path for row in generation.files)
+    if (
+        not _result_is_hex40(generation.source_commit)
+        or not _result_is_hex40(generation.source_tree_sha)
+        or len(files) != 7
+    ):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    return generation.source_commit, generation.source_tree_sha, files
+
+
+def _parse_cap_s1_owned_git_tree_listing(
+    raw: str,
+    *,
+    expected_tree_paths: Sequence[str],
+    expected_blob_paths: Sequence[str],
+) -> tuple[tuple[str, str, str], ...]:
+    rows: list[tuple[str, str, str]] = []
+    for record in raw.split("\0"):
+        if not record:
+            continue
+        metadata, separator, path = record.partition("\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 3:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        mode, kind, object_id = fields
+        if (
+            kind not in {"tree", "blob"}
+            or not _result_is_hex40(object_id)
+            or (kind == "tree" and mode != "040000")
+            or (kind == "blob" and mode not in {"100644", "100755"})
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        rows.append((path, kind, object_id))
+    if (
+        tuple(sorted(path for path, kind, _oid in rows if kind == "tree"))
+        != tuple(sorted(expected_tree_paths))
+        or tuple(sorted(path for path, kind, _oid in rows if kind == "blob"))
+        != tuple(sorted(expected_blob_paths))
+    ):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    return tuple(rows)
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1HistoricalTreeClosure:
+    path_manifest: tuple[tuple[str, str, int], ...]
+    path_manifest_digest: str
+    object_manifest: tuple[tuple[str, int], ...]
+    object_manifest_digest: str
+    archive_diagnostic: str
+
+
+def _derive_cap_s1_historical_tree_closure(
+    *,
+    source_git_dir: Path,
+    source_repository_root: Path,
+    historical_commit: str,
+    historical_root_tree: str,
+    included_blob_ids: Sequence[str],
+    build_root: Path,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> _CapS1HistoricalTreeClosure:
+    """Derive every historical tree needed for Git's exact archive traversal."""
+
+    listing = _cap_s1_owned_git_command(
+        (
+            "git",
+            f"--git-dir={source_git_dir}",
+            "ls-tree",
+            "-d",
+            "-r",
+            "-t",
+            "-z",
+            historical_commit,
+        ),
+        cwd=source_repository_root,
+        cleanup_observations=cleanup_observations,
+    )
+    if listing.returncode != 0 or listing.stderr:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    path_objects: list[tuple[str, str]] = [(".", historical_root_tree)]
+    seen_paths = {"."}
+    for record in listing.stdout.split("\0"):
+        if not record:
+            continue
+        metadata, separator, path = record.partition("\t")
+        fields = metadata.split()
+        candidate = Path(path)
+        if (
+            not separator
+            or len(fields) != 3
+            or fields[0] != "040000"
+            or fields[1] != "tree"
+            or not _result_is_hex40(fields[2])
+            or candidate.is_absolute()
+            or not candidate.parts
+            or ".." in candidate.parts
+            or path in seen_paths
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        seen_paths.add(path)
+        path_objects.append((path, fields[2]))
+    if not (1 < len(path_objects) <= _CAP_S1_HISTORICAL_TREE_MAX_COUNT):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+
+    included_blobs = set(included_blob_ids)
+    if len(included_blobs) != 7 or not all(
+        _result_is_hex40(object_id) for object_id in included_blobs
+    ):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    all_paths = _cap_s1_owned_git_command(
+        (
+            "git",
+            f"--git-dir={source_git_dir}",
+            "ls-tree",
+            "-r",
+            "-z",
+            historical_commit,
+        ),
+        cwd=source_repository_root,
+        cleanup_observations=cleanup_observations,
+    )
+    if all_paths.returncode != 0 or all_paths.stderr:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    historical_paths: list[str] = []
+    seen_leaf_paths: set[str] = set()
+    first_missing: "tuple[str, str, str] | None" = None
+    for record in all_paths.stdout.split("\0"):
+        if not record:
+            continue
+        metadata, separator, path = record.partition("\t")
+        fields = metadata.split()
+        candidate = Path(path)
+        if (
+            not separator
+            or len(fields) != 3
+            or fields[1] not in {"blob", "commit"}
+            or not _result_is_hex40(fields[2])
+            or (fields[1] == "blob" and fields[0] not in {"100644", "100755", "120000"})
+            or (fields[1] == "commit" and fields[0] != "160000")
+            or candidate.is_absolute()
+            or not candidate.parts
+            or ".." in candidate.parts
+            or path in seen_leaf_paths
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        seen_leaf_paths.add(path)
+        historical_paths.append(path)
+        if fields[2] not in included_blobs and first_missing is None:
+            if re.fullmatch(r"[A-Za-z0-9._/-]+", path) is None:
+                raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+            first_missing = (fields[0], fields[2], path)
+    if any(Path(path).name == ".gitattributes" for path in historical_paths):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    archive_diagnostic = ""
+    if first_missing is not None:
+        mode, object_id, path = first_missing
+        archive_diagnostic = f"error: invalid object {mode} {object_id} for '{path}'\n"
+
+    tree_ids = tuple(sorted({object_id for _path, object_id in path_objects}))
+    tree_input = build_root / "historical-trees.in"
+    _write_cap_s1_owned_bytes(
+        tree_input,
+        ("\n".join(tree_ids) + "\n").encode("ascii"),
+        maximum=64 * 1024,
+    )
+    tree_input.chmod(0o400)
+    manifest_run = _cap_s1_owned_git_command(
+        (
+            "git",
+            f"--git-dir={source_git_dir}",
+            "cat-file",
+            "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        ),
+        cwd=source_repository_root,
+        cleanup_observations=cleanup_observations,
+        stdin_path=tree_input,
+    )
+    if manifest_run.returncode != 0 or manifest_run.stderr:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    sizes: dict[str, int] = {}
+    for row in manifest_run.stdout.splitlines():
+        fields = row.split()
+        if len(fields) != 3:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        object_id, kind, raw_size = fields
+        try:
+            size = int(raw_size)
+        except ValueError as exc:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid") from exc
+        if (
+            object_id not in tree_ids
+            or object_id in sizes
+            or kind != "tree"
+            or size <= 0
+            or size > _CAP_S1_HISTORICAL_TREE_MAX_TOTAL_RAW_BYTES
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        sizes[object_id] = size
+    if set(sizes) != set(tree_ids):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    object_manifest = tuple(sorted(sizes.items()))
+    path_manifest = tuple(
+        sorted((path, object_id, sizes[object_id]) for path, object_id in path_objects)
+    )
+    total_bytes = sum(size for _object_id, size in object_manifest)
+    maximum_bytes = max(size for _object_id, size in object_manifest)
+    path_digest = _canonical_digest(path_manifest)
+    object_digest = _canonical_digest(object_manifest)
+    if (
+        len(object_manifest) > _CAP_S1_HISTORICAL_TREE_MAX_COUNT
+        or total_bytes > _CAP_S1_HISTORICAL_TREE_MAX_TOTAL_RAW_BYTES
+    ):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    if historical_commit == _CAP_S1_HISTORICAL_COMMIT and (
+        historical_root_tree != _CAP_S1_HISTORICAL_ROOT_TREE
+        or len(path_manifest) != _CAP_S1_HISTORICAL_TREE_PATH_COUNT
+        or len(object_manifest) != _CAP_S1_HISTORICAL_TREE_UNIQUE_COUNT
+        or total_bytes != _CAP_S1_HISTORICAL_TREE_TOTAL_RAW_BYTES
+        or maximum_bytes != _CAP_S1_HISTORICAL_TREE_MAX_RAW_BYTES
+        or path_digest != _CAP_S1_HISTORICAL_TREE_PATH_MANIFEST_DIGEST
+        or object_digest != _CAP_S1_HISTORICAL_TREE_OBJECT_MANIFEST_DIGEST
+    ):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    return _CapS1HistoricalTreeClosure(
+        path_manifest=path_manifest,
+        path_manifest_digest=path_digest,
+        object_manifest=object_manifest,
+        object_manifest_digest=object_digest,
+        archive_diagnostic=archive_diagnostic,
+    )
+
+
+def _parse_cap_s1_owned_git_object_manifest(
+    raw: str,
+    *,
+    expected: Mapping[str, str],
+    expected_count: int,
+) -> tuple[tuple[str, str, int], ...]:
+    rows: list[tuple[str, str, int]] = []
+    for line in raw.splitlines():
+        fields = line.split()
+        if len(fields) != 3:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        object_id, kind, raw_size = fields
+        try:
+            size = int(raw_size)
+        except ValueError as exc:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid") from exc
+        if (
+            expected.get(object_id) != kind
+            or kind not in {"commit", "tree", "blob"}
+            or size <= 0
+            or size > _CAP_S1_OWNED_GIT_MAX_OBJECT_BYTES
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        rows.append((object_id, kind, size))
+    result = tuple(sorted(rows))
+    if (
+        len(result) != expected_count
+        or len({row[0] for row in result}) != len(result)
+        or set(expected) != {row[0] for row in result}
+        or sum(row[2] for row in result) > _CAP_S1_OWNED_GIT_MAX_OBJECT_BYTES
+    ):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    return result
+
+
+def _parse_cap_s1_owned_git_archive(
+    archive_path: Path,
+    *,
+    expected_tree_paths: Sequence[str],
+    package_tree_rows: Sequence[tuple[str, str, str]],
+) -> tuple[tuple[str, int, str], ...]:
+    """Verify the unchanged Git archive argv produced exactly seven files."""
+
+    expected_directories = set(expected_tree_paths)
+    expected_blobs = {
+        path: object_id
+        for path, kind, object_id in package_tree_rows
+        if kind == "blob"
+    }
+    if len(expected_blobs) != 7:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    files: list[tuple[str, int, str]] = []
+    seen: set[str] = set()
+    try:
+        with tarfile.open(archive_path, mode="r:") as bundle:
+            members = bundle.getmembers()
+            if len(members) != len(expected_directories) + len(expected_blobs):
+                raise ValueError("archive member count")
+            for member in members:
+                name = member.name.rstrip("/")
+                path = Path(name)
+                if (
+                    not name
+                    or path.is_absolute()
+                    or ".." in path.parts
+                    or name in seen
+                ):
+                    raise ValueError("archive member path")
+                seen.add(name)
+                if name in expected_directories:
+                    if not member.isdir() or member.size != 0:
+                        raise ValueError("archive directory")
+                    continue
+                expected_blob = expected_blobs.get(name)
+                if expected_blob is None or not member.isfile() or member.size < 0:
+                    raise ValueError("archive file")
+                extracted = bundle.extractfile(member)
+                if extracted is None:
+                    raise ValueError("archive file unavailable")
+                payload = extracted.read(_CAP_S1_OWNED_GIT_MAX_OBJECT_BYTES + 1)
+                if len(payload) != member.size or len(payload) > _CAP_S1_OWNED_GIT_MAX_OBJECT_BYTES:
+                    raise ValueError("archive file size")
+                git_blob = hashlib.sha1()
+                git_blob.update(f"blob {len(payload)}\0".encode("ascii"))
+                git_blob.update(payload)
+                if git_blob.hexdigest() != expected_blob:
+                    raise ValueError("archive file identity")
+                files.append((name, len(payload), hashlib.sha256(payload).hexdigest()))
+    except (OSError, ValueError, tarfile.TarError) as exc:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid") from exc
+    if seen != expected_directories | set(expected_blobs) or len(files) != 7:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    return tuple(sorted(files))
+
+
+def _seal_cap_s1_owned_git(git_dir: Path) -> None:
+    try:
+        for dirpath, dirnames, filenames in os.walk(git_dir, topdown=False):
+            for name in (*dirnames, *filenames):
+                state = (Path(dirpath) / name).lstat()
+                if stat.S_ISLNK(state.st_mode):
+                    raise ValueError("owned git symlink")
+            for name in filenames:
+                (Path(dirpath) / name).chmod(0o400)
+            Path(dirpath).chmod(0o500)
+    except (OSError, ValueError) as exc:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid") from exc
+
+
+def _cap_s1_owned_git_filesystem_manifest(
+    git_dir: Path,
+) -> tuple[tuple[str, int, str], ...]:
+    """Bind the complete sealed capsule and reject every Git authority surface."""
+
+    expected_directories = {
+        "objects",
+        "objects/info",
+        "objects/pack",
+        "refs",
+        "refs/heads",
+        "refs/tags",
+    }
+    try:
+        root_state = git_dir.lstat()
+        if (
+            stat.S_ISLNK(root_state.st_mode)
+            or not stat.S_ISDIR(root_state.st_mode)
+            or stat.S_IMODE(root_state.st_mode) != 0o500
+        ):
+            raise ValueError("unsafe owned git root")
+        directories: set[str] = set()
+        files: list[tuple[str, int, str]] = []
+        for path in git_dir.rglob("*"):
+            relative = path.relative_to(git_dir).as_posix()
+            state = path.lstat()
+            if stat.S_ISLNK(state.st_mode):
+                raise ValueError("owned git symlink")
+            if stat.S_ISDIR(state.st_mode):
+                if stat.S_IMODE(state.st_mode) != 0o500:
+                    raise ValueError("writable owned git directory")
+                directories.add(relative)
+                continue
+            if (
+                not stat.S_ISREG(state.st_mode)
+                or stat.S_IMODE(state.st_mode) != 0o400
+                or state.st_size <= 0
+                or state.st_size > _CAP_S1_OWNED_GIT_MAX_OBJECT_BYTES
+            ):
+                raise ValueError("unsafe owned git file")
+            files.append((relative, state.st_size, _sha256_file(path)))
+        if directories != expected_directories or len(files) != 5:
+            raise ValueError("owned git filesystem closure changed")
+        paths = {row[0] for row in files}
+        pack_rows = sorted(path for path in paths if path.startswith("objects/pack/"))
+        if paths - set(pack_rows) != {"HEAD", "config"} or len(pack_rows) != 3:
+            raise ValueError("owned git file closure changed")
+        pack_parts = [
+            re.fullmatch(r"objects/pack/cap-s1-([0-9a-f]{40})\.(idx|pack|rev)", path)
+            for path in pack_rows
+        ]
+        if (
+            any(match is None for match in pack_parts)
+            or {match.group(1) for match in pack_parts if match is not None}
+            != {pack_parts[0].group(1)}
+            or {match.group(2) for match in pack_parts if match is not None}
+            != {"idx", "pack", "rev"}
+        ):
+            raise ValueError("owned git pack closure changed")
+        config_lines = (git_dir / "config").read_text(encoding="ascii").splitlines()
+        if not config_lines or config_lines[0] != "[core]":
+            raise ValueError("owned git config changed")
+        config: dict[str, str] = {}
+        for line in config_lines[1:]:
+            match = re.fullmatch(r"\t([a-z]+) = ([a-z0-9]+)", line)
+            if match is None or match.group(1) in config:
+                raise ValueError("owned git config changed")
+            config[match.group(1)] = match.group(2)
+        if (
+            config.get("repositoryformatversion") != "0"
+            or config.get("bare") != "true"
+            or set(config)
+            - {
+                "repositoryformatversion",
+                "filemode",
+                "bare",
+                "ignorecase",
+                "precomposeunicode",
+            }
+            or any(
+                value not in {"true", "false"}
+                for key, value in config.items()
+                if key != "repositoryformatversion"
+            )
+        ):
+            raise ValueError("owned git config changed")
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid") from exc
+    return tuple(sorted(files))
+
+
+def _install_cap_s1_owned_git_context(
+    *,
+    source_repository_root: Path,
+    source_root: Path,
+    exact_head: str,
+    historical_commit: str,
+    expected_package_tree: str,
+    expected_package_files: Sequence[str],
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> _CapS1OwnedGitContext:
+    """Install only the finite objects needed by the real copied-source child."""
+
+    if (
+        not _result_is_hex40(exact_head)
+        or not _result_is_hex40(historical_commit)
+        or not _result_is_hex40(expected_package_tree)
+    ):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    expected_tree_paths, expected_blob_paths = _cap_s1_owned_git_expected_paths(
+        expected_package_files
+    )
+    git_dir = source_root / ".git"
+    build_root = source_root.parent / "owned-git-build"
+    if git_dir.exists() or build_root.exists():
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    git_dir.mkdir(mode=0o700)
+    git_identity = _register_cap_s1_owned_root(git_dir, kind="observer-source")
+    build_root.mkdir(mode=0o700)
+    build_identity = _register_cap_s1_owned_root(
+        build_root, kind="observer-source"
+    )
+    succeeded = False
+    context: "_CapS1OwnedGitContext | None" = None
+    try:
+        template_root = build_root / "empty-template"
+        template_root.mkdir(mode=0o700)
+        source_git = _cap_s1_owned_git_command(
+            ("git", "rev-parse", "--git-dir"),
+            cwd=source_repository_root,
+            cleanup_observations=cleanup_observations,
+        )
+        source_git_dir = Path(source_git.stdout.strip())
+        if source_git.returncode != 0 or source_git.stderr or not source_git.stdout.strip():
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        if not source_git_dir.is_absolute():
+            source_git_dir = (source_repository_root / source_git_dir).resolve(strict=True)
+        else:
+            source_git_dir = source_git_dir.resolve(strict=True)
+
+        identities = _cap_s1_owned_git_command(
+            (
+                "git",
+                f"--git-dir={source_git_dir}",
+                "rev-parse",
+                f"{exact_head}^{{commit}}",
+                f"{exact_head}^{{tree}}",
+                f"{historical_commit}^{{commit}}",
+                f"{historical_commit}^{{tree}}",
+                f"{historical_commit}:plugins",
+                f"{historical_commit}:plugins/mastermind-operator",
+            ),
+            cwd=source_repository_root,
+            cleanup_observations=cleanup_observations,
+        )
+        identity_rows = identities.stdout.splitlines()
+        if (
+            identities.returncode != 0
+            or identities.stderr
+            or len(identity_rows) != 6
+            or not all(_result_is_hex40(value) for value in identity_rows)
+            or identity_rows[0] != exact_head
+            or identity_rows[2] != historical_commit
+            or identity_rows[5] != expected_package_tree
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        exact_tree = identity_rows[1]
+        historical_tree = identity_rows[3]
+        listing = _cap_s1_owned_git_command(
+            (
+                "git",
+                f"--git-dir={source_git_dir}",
+                "ls-tree",
+                "-rz",
+                "-t",
+                "-r",
+                historical_commit,
+                "--",
+                "plugins/mastermind-operator",
+            ),
+            cwd=source_repository_root,
+            cleanup_observations=cleanup_observations,
+        )
+        if listing.returncode != 0 or listing.stderr:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        tree_rows = _parse_cap_s1_owned_git_tree_listing(
+            listing.stdout,
+            expected_tree_paths=expected_tree_paths,
+            expected_blob_paths=expected_blob_paths,
+        )
+        historical_closure = _derive_cap_s1_historical_tree_closure(
+            source_git_dir=source_git_dir,
+            source_repository_root=source_repository_root,
+            historical_commit=historical_commit,
+            historical_root_tree=historical_tree,
+            included_blob_ids=tuple(
+                object_id for _path, kind, object_id in tree_rows if kind == "blob"
+            ),
+            build_root=build_root,
+            cleanup_observations=cleanup_observations,
+        )
+        object_types: dict[str, str] = {
+            exact_head: "commit",
+            exact_tree: "tree",
+            historical_commit: "commit",
+        }
+        if exact_tree in {row[0] for row in historical_closure.object_manifest}:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        for object_id, _size in historical_closure.object_manifest:
+            prior = object_types.setdefault(object_id, "tree")
+            if prior != "tree":
+                raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        for _path, kind, object_id in tree_rows:
+            if kind == "tree" and object_id not in object_types:
+                raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+            prior = object_types.setdefault(object_id, kind)
+            if prior != kind:
+                raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        expected_object_count = 3 + len(historical_closure.object_manifest) + 7
+        if (
+            len(object_types) != expected_object_count
+            or (
+                historical_commit == _CAP_S1_HISTORICAL_COMMIT
+                and expected_object_count != _CAP_S1_OWNED_GIT_OBJECT_COUNT
+            )
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+
+        object_input = build_root / "objects.in"
+        _write_cap_s1_owned_bytes(
+            object_input,
+            ("\n".join(sorted(object_types)) + "\n").encode("ascii"),
+            maximum=64 * 1024,
+        )
+        object_input.chmod(0o400)
+        source_manifest_run = _cap_s1_owned_git_command(
+            (
+                "git",
+                f"--git-dir={source_git_dir}",
+                "cat-file",
+                "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+            ),
+            cwd=source_repository_root,
+            cleanup_observations=cleanup_observations,
+            stdin_path=object_input,
+        )
+        if source_manifest_run.returncode != 0 or source_manifest_run.stderr:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        object_manifest = _parse_cap_s1_owned_git_object_manifest(
+            source_manifest_run.stdout,
+            expected=object_types,
+            expected_count=expected_object_count,
+        )
+
+        initialized = _cap_s1_owned_git_command(
+            (
+                "git",
+                "init",
+                "--bare",
+                "--quiet",
+                f"--template={template_root}",
+                str(git_dir),
+            ),
+            cwd=build_root,
+            cleanup_observations=cleanup_observations,
+        )
+        if initialized.returncode != 0 or initialized.stderr:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        pack_prefix = git_dir / "objects/pack/cap-s1"
+        packed = _cap_s1_owned_git_command(
+            (
+                "git",
+                f"--git-dir={source_git_dir}",
+                "pack-objects",
+                "--window=0",
+                "--depth=0",
+                "--no-reuse-delta",
+                "--no-reuse-object",
+                str(pack_prefix),
+            ),
+            cwd=build_root,
+            cleanup_observations=cleanup_observations,
+            stdin_path=object_input,
+        )
+        pack_id = packed.stdout.strip()
+        if (
+            packed.returncode != 0
+            or packed.stderr
+            or not _result_is_hex40(pack_id)
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        pack_path = pack_prefix.with_name(f"cap-s1-{pack_id}.pack")
+        index_path = pack_prefix.with_name(f"cap-s1-{pack_id}.idx")
+        reverse_index_path = pack_prefix.with_name(f"cap-s1-{pack_id}.rev")
+        if set((git_dir / "objects/pack").iterdir()) != {
+            pack_path,
+            index_path,
+            reverse_index_path,
+        }:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        if (
+            pack_path.stat().st_size <= 0
+            or pack_path.stat().st_size > _CAP_S1_OWNED_GIT_MAX_OBJECT_BYTES
+            or index_path.stat().st_size <= 0
+            or index_path.stat().st_size > 1024 * 1024
+            or reverse_index_path.stat().st_size <= 0
+            or reverse_index_path.stat().st_size > 1024 * 1024
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+
+        updated = _cap_s1_owned_git_command(
+            (
+                "git",
+                f"--git-dir={git_dir}",
+                "update-ref",
+                "--no-deref",
+                "HEAD",
+                exact_head,
+            ),
+            cwd=source_root,
+            cleanup_observations=cleanup_observations,
+        )
+        if updated.returncode != 0 or updated.stderr:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+
+        verified_manifest = _cap_s1_owned_git_command(
+            (
+                "git",
+                f"--git-dir={git_dir}",
+                "cat-file",
+                "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+            ),
+            cwd=source_root,
+            cleanup_observations=cleanup_observations,
+            stdin_path=object_input,
+        )
+        if verified_manifest.returncode != 0 or verified_manifest.stderr:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        if _parse_cap_s1_owned_git_object_manifest(
+            verified_manifest.stdout,
+            expected=object_types,
+            expected_count=expected_object_count,
+        ) != object_manifest:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+
+        verification = _cap_s1_owned_git_command(
+            (
+                "git",
+                f"--git-dir={git_dir}",
+                "rev-parse",
+                "HEAD",
+                "HEAD^{tree}",
+                f"{historical_commit}^{{commit}}",
+                f"{historical_commit}:plugins/mastermind-operator",
+            ),
+            cwd=source_root,
+            cleanup_observations=cleanup_observations,
+        )
+        if verification.stdout.splitlines() != [
+            exact_head,
+            exact_tree,
+            historical_commit,
+            expected_package_tree,
+        ] or verification.stderr or verification.returncode != 0:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+
+        archive_path = build_root / "package.tar"
+        archive_run = _cap_s1_owned_git_command(
+            (
+                "git",
+                f"--git-dir={git_dir}",
+                "archive",
+                "--format=tar",
+                f"--output={archive_path}",
+                historical_commit,
+                "--",
+                "plugins/mastermind-operator",
+            ),
+            cwd=source_root,
+            cleanup_observations=cleanup_observations,
+        )
+        if (
+            archive_run.returncode != 0
+            or archive_run.stderr != historical_closure.archive_diagnostic
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        archive_state = archive_path.lstat()
+        if (
+            not stat.S_ISREG(archive_state.st_mode)
+            or archive_state.st_size <= 0
+            or archive_state.st_size > _CAP_S1_OWNED_GIT_MAX_OBJECT_BYTES
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        archive_digest = _sha256_file(archive_path)
+        archive_file_manifest = _parse_cap_s1_owned_git_archive(
+            archive_path,
+            expected_tree_paths=expected_tree_paths,
+            package_tree_rows=tree_rows,
+        )
+
+        forbidden = (
+            git_dir / "hooks",
+            git_dir / "index",
+            git_dir / "logs",
+            git_dir / "objects/info/alternates",
+            git_dir / "refs/remotes",
+            git_dir / "refs/replace",
+            git_dir / "shallow",
+        )
+        refs = _cap_s1_owned_git_command(
+            ("git", f"--git-dir={git_dir}", "for-each-ref"),
+            cwd=source_root,
+            cleanup_observations=cleanup_observations,
+        )
+        if refs.returncode != 0 or refs.stdout or refs.stderr or any(
+            path.exists() for path in forbidden
+        ):
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+        if (git_dir / "HEAD").read_text(encoding="ascii").strip() != exact_head:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+
+        _seal_cap_s1_owned_git(git_dir)
+        filesystem_manifest = _cap_s1_owned_git_filesystem_manifest(git_dir)
+        context = _CapS1OwnedGitContext(
+            git_dir=git_dir,
+            device=git_identity.device,
+            inode=git_identity.inode,
+            exact_head=exact_head,
+            exact_tree=exact_tree,
+            historical_commit=historical_commit,
+            historical_package_tree=expected_package_tree,
+            historical_tree_path_manifest=historical_closure.path_manifest,
+            historical_tree_path_manifest_digest=(
+                historical_closure.path_manifest_digest
+            ),
+            historical_tree_object_manifest=historical_closure.object_manifest,
+            historical_tree_object_manifest_digest=(
+                historical_closure.object_manifest_digest
+            ),
+            object_manifest=object_manifest,
+            object_manifest_digest=_canonical_digest(object_manifest),
+            filesystem_manifest=filesystem_manifest,
+            filesystem_manifest_digest=_canonical_digest(filesystem_manifest),
+            archive_digest=archive_digest,
+            archive_diagnostic=historical_closure.archive_diagnostic,
+            archive_diagnostic_digest=hashlib.sha256(
+                historical_closure.archive_diagnostic.encode("utf-8")
+            ).hexdigest(),
+            archive_file_manifest=archive_file_manifest,
+            archive_file_manifest_digest=_canonical_digest(archive_file_manifest),
+            command_registry=(
+                "rev-parse-fixed-identities",
+                "ls-tree-full-historical-tree-metadata",
+                "ls-tree-full-historical-leaf-metadata-no-attributes",
+                "ls-tree-fixed-historical-package",
+                "cat-file-batch-exact-object-manifest",
+                "init-bare-owned-empty-template",
+                "pack-objects-exact-manifest-with-indexes",
+                "update-ref-no-deref-head",
+                "rev-parse-fixed-owned-identities",
+                "archive-fixed-historical-package",
+                "for-each-ref-empty",
+            ),
+        )
+        succeeded = True
+    except (OSError, UnicodeError, ValueError, tarfile.TarError, CapS1ResultError) as exc:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid") from exc
+    finally:
+        build_clean = _record_cap_s1_transient_root_cleanup(
+            build_identity,
+            cleanup_observations=cleanup_observations,
+        )
+        if not succeeded or not build_clean:
+            git_clean = _record_cap_s1_transient_root_cleanup(
+                git_identity,
+                cleanup_observations=cleanup_observations,
+            )
+            if succeeded and (not build_clean or not git_clean):
+                raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    if context is None:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    return context
+
+
+def _verify_cap_s1_owned_git_context(
+    context: _CapS1OwnedGitContext,
+    *,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> None:
+    if type(context) is not _CapS1OwnedGitContext:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    try:
+        state = context.git_dir.lstat()
+    except OSError as exc:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid") from exc
+    if (
+        stat.S_ISLNK(state.st_mode)
+        or not stat.S_ISDIR(state.st_mode)
+        or (state.st_dev, state.st_ino) != (context.device, context.inode)
+        or _canonical_digest(context.object_manifest) != context.object_manifest_digest
+        or _canonical_digest(context.historical_tree_path_manifest)
+        != context.historical_tree_path_manifest_digest
+        or _canonical_digest(context.historical_tree_object_manifest)
+        != context.historical_tree_object_manifest_digest
+        or _canonical_digest(context.filesystem_manifest)
+        != context.filesystem_manifest_digest
+        or hashlib.sha256(context.archive_diagnostic.encode("utf-8")).hexdigest()
+        != context.archive_diagnostic_digest
+        or _canonical_digest(context.archive_file_manifest)
+        != context.archive_file_manifest_digest
+        or _cap_s1_owned_git_filesystem_manifest(context.git_dir)
+        != context.filesystem_manifest
+    ):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    for object_id, _kind, _size in context.object_manifest:
+        observed = _cap_s1_owned_git_command(
+            ("git", f"--git-dir={context.git_dir}", "cat-file", "-e", object_id),
+            cwd=context.git_dir.parent,
+            cleanup_observations=cleanup_observations,
+        )
+        if observed.returncode != 0 or observed.stdout or observed.stderr:
+            raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+    identities = _cap_s1_owned_git_command(
+        (
+            "git",
+            f"--git-dir={context.git_dir}",
+            "rev-parse",
+            "HEAD",
+            "HEAD^{tree}",
+            f"{context.historical_commit}^{{commit}}",
+            f"{context.historical_commit}:plugins/mastermind-operator",
+        ),
+        cwd=context.git_dir.parent,
+        cleanup_observations=cleanup_observations,
+    )
+    if identities.stdout.splitlines() != [
+        context.exact_head,
+        context.exact_tree,
+        context.historical_commit,
+        context.historical_package_tree,
+    ] or identities.stderr or identities.returncode != 0:
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+
+
+def _remove_cap_s1_owned_git_context(
+    context: _CapS1OwnedGitContext,
+    *,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> None:
+    identity = _CapS1OwnedRootIdentity(
+        kind="observer-source",
+        path=context.git_dir,
+        device=context.device,
+        inode=context.inode,
+    )
+    if not _record_cap_s1_transient_root_cleanup(
+        identity,
+        cleanup_observations=cleanup_observations,
+    ):
+        raise CapS1ResultError("cap_s1_result_owned_git_invalid")
+
+
 def _run_cap_s1_observer_bytes(
     argv: Sequence[str],
     *,
@@ -4315,6 +5815,8 @@ def _run_cap_s1_observer_bytes(
     timeout: float,
     maximum_stream_bytes: int,
     cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+    git_environment: bool = False,
+    stdin_path: "Path | None" = None,
 ) -> subprocess.CompletedProcess[bytes]:
     """Binary-output counterpart for bounded fixed Git observations."""
 
@@ -4327,18 +5829,29 @@ def _run_cap_s1_observer_bytes(
     try:
         output_root = Path(tempfile.mkdtemp(prefix="cap-s1-observer-bytes-"))
         root_state = output_root.lstat()
+        root_state = _bind_cap_s1_observer_temp_root(
+            output_root,
+            expected=root_state,
+            error="cap_s1_result_source_copy_invalid",
+        )
         stdout_path = output_root / "stdout"
         stderr_path = output_root / "stderr"
+        environment = _cap_s1_observer_environment(
+            owned_temp_root=output_root,
+        )
+        if git_environment:
+            environment.update(_CAP_S1_GIT_ENVIRONMENT)
         return_code = _run_cap_s1_owned_process(
             argv,
             cwd=cwd,
-            environment=_cap_s1_observer_environment(),
+            environment=environment,
             stdout_path=stdout_path,
             stderr_path=stderr_path,
             timeout=timeout,
             maximum_stream_bytes=maximum_stream_bytes,
             error="cap_s1_result_source_copy_invalid",
             cleanup_observations=cleanup_observations,
+            stdin_path=stdin_path,
         )
         current = output_root.lstat()
         if (
@@ -4388,7 +5901,14 @@ def _run_cap_s1_observer_bytes(
 
 
 def _extract_cap_s1_source_archive(archive_path: Path, destination: Path) -> None:
-    """Extract an owner-created Git archive without links/path traversal."""
+    """Extract the regular-file projection of an owner-created Git archive.
+
+    Tracked symbolic links are intentionally omitted: mutation proof imports
+    and verifies every regular blob, while materializing a link would expand
+    the owned source tree's filesystem authority.  Hard links and special
+    members remain invalid, and the later manifest pass proves the complete
+    regular-blob census against the exact commit.
+    """
 
     try:
         archive_state = archive_path.lstat()
@@ -4402,17 +5922,23 @@ def _extract_cap_s1_source_archive(archive_path: Path, destination: Path) -> Non
             members = bundle.getmembers()
             if not members:
                 raise ValueError("empty archive")
+            extractable: list[tarfile.TarInfo] = []
             for member in members:
                 path = Path(member.name)
                 if (
                     path.is_absolute()
                     or ".." in path.parts
-                    or member.issym()
                     or member.islnk()
-                    or not (member.isfile() or member.isdir())
                 ):
                     raise ValueError("unsafe archive member")
-            bundle.extractall(destination, members=members, filter="data")
+                if member.issym() or member.isdir():
+                    continue
+                if not member.isfile():
+                    raise ValueError("unsafe archive member")
+                extractable.append(member)
+            if not extractable:
+                raise ValueError("empty regular archive projection")
+            bundle.extractall(destination, members=extractable, filter="data")
     except (OSError, tarfile.TarError, ValueError) as exc:
         raise CapS1ResultError("cap_s1_result_source_copy_invalid") from exc
 
@@ -4718,14 +6244,19 @@ def _observe_cap_s1_import_origins(
 def _observe_cap_s1_local_suite(
     *,
     source_root: Path,
+    source_manifest: Sequence[_CapS1SourceCopyEntry],
     output_root: Path,
     interpreter: "_CapS1InterpreterIdentity | None" = None,
     process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
-) -> tuple[tuple[str, int, int, int, int], ...]:
+) -> tuple[tuple[tuple[str, int, int, int, int], ...], str]:
     junit_path = output_root / "local-suite.xml"
-    argv = (
-        "-m",
-        "pytest",
+    bound_interpreter = interpreter or _capture_cap_s1_interpreter_identity()
+    binding = _build_cap_s1_pytest_binding(
+        source_root=source_root,
+        source_manifest=source_manifest,
+        interpreter=bound_interpreter,
+    )
+    pytest_argv = (
         "-q",
         "--junitxml",
         str(junit_path),
@@ -4733,13 +6264,15 @@ def _observe_cap_s1_local_suite(
     )
     fake_state = output_root / "fake-app-state.json"
     completed = _run_cap_s1_python_observer_process(
-        interpreter or _capture_cap_s1_interpreter_identity(),
-        argv,
+        bound_interpreter,
+        _cap_s1_pytest_argv(binding, pytest_argv),
         cwd=source_root,
         timeout=3600,
         owned_state_path=fake_state,
         cleanup_observations=process_cleanup,
     )
+    if completed.returncode == _CAP_S1_PYTEST_PROVENANCE_EXIT:
+        raise CapS1ResultError("cap_s1_result_import_origin_invalid")
     try:
         junit_path.chmod(0o444)
     except OSError as exc:
@@ -4754,7 +6287,7 @@ def _observe_cap_s1_local_suite(
             raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
     if completed.returncode != 0 or any(row[3] or row[4] for row in rows):
         raise CapS1ResultError("cap_s1_result_local_proof_invalid")
-    return rows
+    return rows, binding.evidence_digest
 
 
 def _observe_cap_s1_diff(
@@ -4856,129 +6389,221 @@ def _observe_cap_s1_mutations(
             owned_roots.append(
                 _register_cap_s1_owned_root(mutant_root, kind="observer-mutants")
             )
-        source_root, _source_manifest = _owned_cap_s1_source_copy(
+        source_root, source_manifest = _owned_cap_s1_source_copy(
             exact_head=exact_head,
             scratch_root=mutant_root,
             owned_roots=owned_roots,
             process_cleanup=process_cleanup,
         )
-        target = source_root / relative_path
-        original = target.read_bytes()
-        original_digest = hashlib.sha256(original).hexdigest()
-        decoded = original.decode("utf-8")
-        if decoded.count(preimage) != 1 or postimage in decoded:
-            raise CapS1ResultError("cap_s1_result_mutation_preimage_invalid")
-        node = node_by_id[mutation_id]
-
-        def _run(
-            label: str,
-        ) -> tuple[subprocess.CompletedProcess[str], _CapS1JunitCaseObservation]:
-            junit = mutant_root / f"{label}.xml"
-            completed = _run_cap_s1_python_observer_process(
-                bound_interpreter,
-                (
-                    "-m",
-                    "pytest",
-                    "-q",
-                    "--junitxml",
-                    str(junit),
-                    node,
-                ),
-                cwd=source_root,
-                timeout=600,
-                owned_state_path=mutant_root / f"{label}-fake-app-state.json",
-                cleanup_observations=process_cleanup,
-            )
-            junit.chmod(0o444)
-            return completed, _parse_cap_s1_mutation_junit(
-                junit,
-                expected_node=node,
-            )
-
-        control, control_case = _run("control")
-        if control.returncode != 0 or control_case.outcome != "PASSED":
-            raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
-
-        mutant: "subprocess.CompletedProcess[str] | None" = None
-        mutant_case: "_CapS1JunitCaseObservation | None" = None
-        mutant_digest: "str | None" = None
-        mutant_error: "BaseException | None" = None
-        restored: "subprocess.CompletedProcess[str] | None" = None
-        restored_case: "_CapS1JunitCaseObservation | None" = None
-        restore_error: "BaseException | None" = None
+        historical_commit, historical_package_tree, historical_files = (
+            _cap_s1_owned_git_package_expectation(source_root)
+        )
+        owned_git = _install_cap_s1_owned_git_context(
+            source_repository_root=REPO_ROOT,
+            source_root=source_root,
+            exact_head=exact_head,
+            historical_commit=historical_commit,
+            expected_package_tree=historical_package_tree,
+            expected_package_files=historical_files,
+            cleanup_observations=process_cleanup,
+        )
         try:
-            mutant_payload = decoded.replace(preimage, postimage).encode("utf-8")
-            mutant_digest = _write_cap_s1_owned_bytes(
-                target,
-                mutant_payload,
-                create=False,
+            target = source_root / relative_path
+            original = target.read_bytes()
+            original_digest = hashlib.sha256(original).hexdigest()
+            decoded = original.decode("utf-8")
+            if decoded.count(preimage) != 1 or postimage in decoded:
+                raise CapS1ResultError("cap_s1_result_mutation_preimage_invalid")
+            node = node_by_id[mutation_id]
+
+            def _run(
+                label: str,
+                *,
+                expected_canary_sha256: str,
+            ) -> tuple[
+                subprocess.CompletedProcess[str],
+                _CapS1JunitCaseObservation,
+                str,
+            ]:
+                junit = mutant_root / f"{label}.xml"
+                binding = _build_cap_s1_pytest_binding(
+                    source_root=source_root,
+                    source_manifest=source_manifest,
+                    interpreter=bound_interpreter,
+                    expected_canary_sha256=expected_canary_sha256,
+                )
+                completed = _run_cap_s1_python_observer_process(
+                    bound_interpreter,
+                    _cap_s1_pytest_argv(
+                        binding,
+                        (
+                            "-q",
+                            "--junitxml",
+                            str(junit),
+                            node,
+                        ),
+                    ),
+                    cwd=source_root,
+                    timeout=600,
+                    owned_state_path=mutant_root / f"{label}-fake-app-state.json",
+                    cleanup_observations=process_cleanup,
+                )
+                if completed.returncode == _CAP_S1_PYTEST_PROVENANCE_EXIT:
+                    raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+                try:
+                    junit.chmod(0o444)
+                except OSError as exc:
+                    raise CapS1ResultError(
+                        "cap_s1_result_mutation_proof_invalid"
+                    ) from exc
+                return (
+                    completed,
+                    _parse_cap_s1_mutation_junit(junit, expected_node=node),
+                    binding.evidence_digest,
+                )
+
+            control, control_case, control_provenance = _run(
+                "control", expected_canary_sha256=original_digest
             )
-            mutant, mutant_case = _run("mutant")
-        except BaseException as exc:  # restore even across an exceptional child path
-            mutant_error = exc
-        finally:
+            if control.returncode != 0 or control_case.outcome != "PASSED":
+                raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+
+            mutant: "subprocess.CompletedProcess[str] | None" = None
+            mutant_case: "_CapS1JunitCaseObservation | None" = None
+            mutant_provenance: "str | None" = None
+            mutant_digest: "str | None" = None
+            mutant_error: "BaseException | None" = None
+            restored: "subprocess.CompletedProcess[str] | None" = None
+            restored_case: "_CapS1JunitCaseObservation | None" = None
+            restored_provenance: "str | None" = None
+            restore_error: "BaseException | None" = None
             try:
-                restored_digest = _write_cap_s1_owned_bytes(
+                mutant_payload = decoded.replace(preimage, postimage).encode("utf-8")
+                mutant_digest = _write_cap_s1_owned_bytes(
                     target,
-                    original,
+                    mutant_payload,
                     create=False,
                 )
-                if restored_digest != original_digest or target.read_bytes() != original:
-                    raise CapS1ResultError("cap_s1_result_mutation_restore_invalid")
-                restored, restored_case = _run("restored")
-            except BaseException as exc:
-                restore_error = exc
-        if restore_error is not None:
-            raise CapS1ResultError("cap_s1_result_mutation_restore_invalid") from None
-        if (
-            restored is None
-            or restored_case is None
-            or restored.returncode != 0
-            or restored_case.outcome != "PASSED"
-        ):
-            raise CapS1ResultError("cap_s1_result_mutation_restore_invalid")
-        if mutant_error is not None:
-            raise CapS1ResultError("cap_s1_result_mutation_proof_invalid") from None
-        assertion_signature = assertion_by_id[mutation_id]
-        killed = (
-            mutant is not None
-            and mutant_case is not None
-            and mutant.returncode == 1
-            and mutant_case.outcome == "FAILURE"
-            and f"AssertionError: {assertion_signature}" in mutant_case.detail
-        )
-        if not killed or mutant_digest is None:
-            raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
-        rows.append(
-            (
-                mutation_id,
-                "KILLED",
-                _canonical_digest(
-                    {
-                        "mutation_id": mutation_id,
-                        "node": node,
-                        "preimage": hashlib.sha256(preimage.encode()).hexdigest(),
-                        "postimage": hashlib.sha256(postimage.encode()).hexdigest(),
-                        "source_preimage": original_digest,
-                        "source_postimage": mutant_digest,
-                        "assertion_signature": assertion_signature,
-                        "control": {
-                            "returncode": control.returncode,
-                            "case": _canonical_digest(dataclasses.asdict(control_case)),
-                        },
-                        "mutant": {
-                            "returncode": mutant.returncode,
-                            "case": _canonical_digest(dataclasses.asdict(mutant_case)),
-                        },
-                        "restored_control": {
-                            "returncode": restored.returncode,
-                            "case": _canonical_digest(dataclasses.asdict(restored_case)),
-                        },
-                        "restored": True,
-                    }
-                ),
+                mutant, mutant_case, mutant_provenance = _run(
+                    "mutant", expected_canary_sha256=mutant_digest
+                )
+            except BaseException as exc:  # restore across every child refusal
+                mutant_error = exc
+            finally:
+                try:
+                    restored_digest = _write_cap_s1_owned_bytes(
+                        target,
+                        original,
+                        create=False,
+                    )
+                    if restored_digest != original_digest or target.read_bytes() != original:
+                        raise CapS1ResultError("cap_s1_result_mutation_restore_invalid")
+                    restored, restored_case, restored_provenance = _run(
+                        "restored", expected_canary_sha256=original_digest
+                    )
+                except BaseException as exc:
+                    restore_error = exc
+            if restore_error is not None:
+                raise CapS1ResultError("cap_s1_result_mutation_restore_invalid") from None
+            if (
+                restored is None
+                or restored_case is None
+                or restored.returncode != 0
+                or restored_case.outcome != "PASSED"
+            ):
+                raise CapS1ResultError("cap_s1_result_mutation_restore_invalid")
+            if mutant_error is not None:
+                if isinstance(mutant_error, CapS1ResultError) and str(
+                    mutant_error
+                ) == "cap_s1_result_import_origin_invalid":
+                    raise mutant_error
+                raise CapS1ResultError("cap_s1_result_mutation_proof_invalid") from None
+            assertion_signature = assertion_by_id[mutation_id]
+            killed = (
+                mutant is not None
+                and mutant_case is not None
+                and mutant.returncode == 1
+                and mutant_case.outcome == "FAILURE"
+                and f"AssertionError: {assertion_signature}" in mutant_case.detail
             )
-        )
+            if (
+                not killed
+                or mutant_digest is None
+                or mutant_provenance is None
+                or restored_provenance is None
+            ):
+                raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+            rows.append(
+                (
+                    mutation_id,
+                    "KILLED",
+                    _canonical_digest(
+                        {
+                            "mutation_id": mutation_id,
+                            "node": node,
+                            "preimage": hashlib.sha256(preimage.encode()).hexdigest(),
+                            "postimage": hashlib.sha256(postimage.encode()).hexdigest(),
+                            "source_preimage": original_digest,
+                            "source_postimage": mutant_digest,
+                            "assertion_signature": assertion_signature,
+                            "control": {
+                                "returncode": control.returncode,
+                                "case": _canonical_digest(dataclasses.asdict(control_case)),
+                                "provenance": control_provenance,
+                            },
+                            "mutant": {
+                                "returncode": mutant.returncode,
+                                "case": _canonical_digest(dataclasses.asdict(mutant_case)),
+                                "provenance": mutant_provenance,
+                            },
+                            "restored_control": {
+                                "returncode": restored.returncode,
+                                "case": _canonical_digest(dataclasses.asdict(restored_case)),
+                                "provenance": restored_provenance,
+                            },
+                            "owned_git": {
+                                "objects": owned_git.object_manifest_digest,
+                                "filesystem": owned_git.filesystem_manifest_digest,
+                                "archive": owned_git.archive_digest,
+                                "archive_diagnostic": (
+                                    owned_git.archive_diagnostic_digest
+                                ),
+                                "archive_files": (
+                                    owned_git.archive_file_manifest_digest
+                                ),
+                                "historical_tree_paths": (
+                                    owned_git.historical_tree_path_manifest_digest
+                                ),
+                                "historical_tree_objects": (
+                                    owned_git.historical_tree_object_manifest_digest
+                                ),
+                                "environment": tuple(
+                                    sorted(_CAP_S1_GIT_ENVIRONMENT.items())
+                                ),
+                            },
+                            "restored": True,
+                        }
+                    ),
+                )
+            )
+            _verify_cap_s1_owned_git_context(
+                owned_git,
+                cleanup_observations=process_cleanup,
+            )
+        except BaseException:
+            raise
+        finally:
+            try:
+                _remove_cap_s1_owned_git_context(
+                    owned_git,
+                    cleanup_observations=process_cleanup,
+                )
+            except BaseException as exc:
+                raise CapS1ResultError("cap_s1_result_owned_git_invalid") from exc
+            _verify_cap_s1_owned_source_manifest(
+                source_root=source_root,
+                manifest=source_manifest,
+            )
     return tuple(sorted(rows))
 
 
@@ -5509,6 +7134,8 @@ def _parse_cap_s1_gitleaks_coverage(
         text = log_bytes.decode("utf-8")
     except UnicodeError as exc:
         raise CapS1ResultError("cap_s1_result_secret_scan_incomplete") from exc
+    if "\x1b" in text:
+        raise CapS1ResultError("cap_s1_result_secret_scan_incomplete")
     lowered = text.casefold()
     if any(marker in lowered for marker in _CAP_S1_GITLEAKS_INCOMPLETE_MARKERS):
         raise CapS1ResultError("cap_s1_result_secret_scan_incomplete")
@@ -5588,6 +7215,7 @@ def _run_cap_s1_gitleaks_dir(
         str(rule_path),
         "--redact=100",
         "--no-banner",
+        "--no-color",
         "--log-level",
         "trace",
         "--report-format",
@@ -6406,17 +8034,56 @@ def _run_cap_s1_source_observer(
         owned_roots.append(
             _register_cap_s1_owned_root(output_root, kind="observer-output")
         )
-        import_origin_digest = _observe_cap_s1_import_origins(
-            source_root=source_root,
-            interpreter=interpreter,
-            process_cleanup=process_cleanup,
+        historical_commit, historical_package_tree, historical_files = (
+            _cap_s1_owned_git_package_expectation(source_root)
         )
-        local_rows = _observe_cap_s1_local_suite(
+        local_git = _install_cap_s1_owned_git_context(
+            source_repository_root=REPO_ROOT,
             source_root=source_root,
-            output_root=output_root,
-            interpreter=interpreter,
-            process_cleanup=process_cleanup,
+            exact_head=exact_head,
+            historical_commit=historical_commit,
+            expected_package_tree=historical_package_tree,
+            expected_package_files=historical_files,
+            cleanup_observations=process_cleanup,
         )
+        try:
+            local_rows, local_binding_digest = _observe_cap_s1_local_suite(
+                source_root=source_root,
+                source_manifest=source_manifest,
+                output_root=output_root,
+                interpreter=interpreter,
+                process_cleanup=process_cleanup,
+            )
+            _verify_cap_s1_owned_git_context(
+                local_git,
+                cleanup_observations=process_cleanup,
+            )
+            import_origin_digest = _canonical_digest(
+                {
+                    "pytest_binding": local_binding_digest,
+                    "owned_git_objects": local_git.object_manifest_digest,
+                    "owned_git_filesystem": local_git.filesystem_manifest_digest,
+                    "owned_git_archive": local_git.archive_digest,
+                    "owned_git_archive_diagnostic": (
+                        local_git.archive_diagnostic_digest
+                    ),
+                    "owned_git_archive_files": (
+                        local_git.archive_file_manifest_digest
+                    ),
+                    "historical_tree_paths": (
+                        local_git.historical_tree_path_manifest_digest
+                    ),
+                    "historical_tree_objects": (
+                        local_git.historical_tree_object_manifest_digest
+                    ),
+                    "git_environment": tuple(sorted(_CAP_S1_GIT_ENVIRONMENT.items())),
+                }
+            )
+        finally:
+            _remove_cap_s1_owned_git_context(
+                local_git,
+                cleanup_observations=process_cleanup,
+            )
         diff_row = _observe_cap_s1_diff(
             exact_head=exact_head,
             protected_join=protected_join,
