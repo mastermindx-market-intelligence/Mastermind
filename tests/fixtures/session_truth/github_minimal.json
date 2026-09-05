@@ -1,0 +1,26 @@
+{
+  "schema": "mastermind.github_observation.v1",
+  "available": true,
+  "observed_at": "2026-08-27T08:00:00Z",
+  "pull_requests": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "number": 169,
+      "state": "open",
+      "draft": true,
+      "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "merge_sha": null,
+      "ci": "success",
+      "workstream": "WS:CHAIRMAN-CONTROL-ROOM",
+      "linear": null,
+      "portfolio_mode": "architecture_candidate",
+      "wave": "CROSS-PLANE-R0",
+      "authority": "architecture",
+      "completion": "acceptance-required",
+      "proof_state": "open",
+      "operation_key": "cross-plane-reconciliation-20260827-sol-001",
+      "pickup_head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ]
+}
