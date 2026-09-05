@@ -6647,9 +6647,47 @@ def test_cap_s1_secret_scan_policy_registry_is_exact_and_unobserved() -> None:
         "HOME",
         "LANG",
         "LC_ALL",
+        "NO_COLOR",
         "PATH",
         "TMPDIR",
     )
+
+
+@pytest.mark.parametrize("ambient_no_color", (None, "", "ambient-value"))
+def test_cap_s1_secret_process_fixes_closed_no_color_at_real_child_boundary(
+    tmp_path, monkeypatch, ambient_no_color
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    if ambient_no_color is None:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+    else:
+        monkeypatch.setenv("NO_COLOR", ambient_no_color)
+    monkeypatch.setenv("CAP_S1_AMBIENT_SENTINEL", "must-not-reach-child")
+
+    invocation = tmp_path / "invocation"
+    invocation.mkdir()
+    cleanup = []
+    expected_keys = ("HOME", "LANG", "LC_ALL", "NO_COLOR", "PATH", "TMPDIR")
+    child = (
+        "import os; "
+        f"assert all(key in os.environ for key in {expected_keys!r}); "
+        "assert os.environ['NO_COLOR'] == '1'; "
+        "assert 'CAP_S1_AMBIENT_SENTINEL' not in os.environ"
+    )
+    return_code = canary_module._run_cap_s1_secret_process(
+        (_sys.executable, "-I", "-c", child),
+        cwd=tmp_path,
+        environment_root=invocation / "environment",
+        stdout_path=invocation / "stdout",
+        stderr_path=invocation / "stderr",
+        timeout=30,
+        cleanup_observations=cleanup,
+    )
+
+    assert return_code == 0, (invocation / "stderr").read_text(encoding="utf-8")
+    assert len(cleanup) == 1
+    assert cleanup[0].removed and cleanup[0].verified_absent
 
 
 def test_cap_s1_gitleaks_runtime_argv_disables_color_exactly_once(

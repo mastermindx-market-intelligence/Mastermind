@@ -3849,7 +3849,14 @@ def cap_s1_observer_registry() -> dict[str, object]:
             "--timeout",
             "120",
         ),
-        "secret_environment_keys": ("HOME", "LANG", "LC_ALL", "PATH", "TMPDIR"),
+        "secret_environment_keys": (
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "NO_COLOR",
+            "PATH",
+            "TMPDIR",
+        ),
         "secret_controls": tuple(
             (
                 rule_id,
@@ -6837,6 +6844,7 @@ def _cap_s1_secret_child_environment(*, owned_root: Path) -> dict[str, str]:
         "HOME": str(home),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
+        "NO_COLOR": "1",
         "PATH": "/usr/bin:/bin",
         "TMPDIR": str(temporary),
     }
