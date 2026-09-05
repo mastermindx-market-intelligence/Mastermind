@@ -28,6 +28,7 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -35,9 +36,14 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from control_plane.ceo_request import AUTOMATED_REQUEST_REF_RE
-from integrations.business_mcp_auth.contracts import AuthError, VerifiedPrincipal
+from integrations.business_mcp_auth.contracts import (
+    AuthError,
+    ResourcePolicy,
+    VerifiedPrincipal,
+    validate_resource_policy,
+)
 from integrations.business_mcp_auth.jwt_verifier import JwksKeySource, JwtAuthenticator
-from integrations.business_mcp_auth.metadata import mcp_auth_error_result
+from integrations.business_mcp_auth.metadata import mcp_auth_error_result, protected_resource_metadata
 from integrations.mastermind_executive_app.admission import (
     STATUS_ACCEPTED,
     STATUS_CONFLICT,
@@ -61,6 +67,33 @@ from integrations.mastermind_executive_app.gateway import (
 __all__ = ["AppSettings", "create_app"]
 
 _MAX_BODY_BYTES = 65536
+
+
+def _metadata_policy_and_path(policies: AppPolicies) -> tuple[ResourcePolicy, str]:
+    """Return the one public metadata policy and its exact validated path.
+
+    The app has separate read and submit scopes, but one OAuth resource-server
+    identity.  Revalidate both immutable-looking policy objects because a
+    frozen dataclass can still be manually forged before process construction.
+    """
+
+    try:
+        read_policy = validate_resource_policy(policies.read)
+        submit_policy = validate_resource_policy(policies.submit)
+    except AuthError as exc:
+        raise ValueError("metadata policy refused") from exc
+    identity = (
+        "resource",
+        "resource_metadata_url",
+        "issuer",
+        "authorization_servers",
+    )
+    if any(getattr(read_policy, name) != getattr(submit_policy, name) for name in identity):
+        raise ValueError("read and submit policies must name the same resource identity")
+    path = urlsplit(read_policy.resource_metadata_url).path or "/"
+    if "%" in path or "//" in path:
+        raise ValueError("metadata policy route is not safely serveable")
+    return read_policy, path
 
 
 @dataclasses.dataclass(frozen=True)
@@ -191,8 +224,9 @@ class _RawPathFence:
     encoded/alternate separator, before routing or authentication ever runs.
     """
 
-    def __init__(self, app: Any) -> None:
+    def __init__(self, app: Any, *, metadata_path: str) -> None:
         self._app = app
+        self._metadata_path = metadata_path
 
     async def __call__(self, scope: Mapping[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") == "http":
@@ -211,6 +245,16 @@ class _RawPathFence:
                 )
                 await response(scope, receive, send)
                 return
+            if (
+                scope.get("path") == self._metadata_path
+                and (scope.get("method") != "GET" or scope.get("query_string"))
+            ):
+                response = JSONResponse(
+                    {"ok": False, "error": {"code": "not_found", "message": "not found"}},
+                    status_code=404,
+                )
+                await response(scope, receive, send)
+                return
         await self._app(scope, receive, send)
 
 
@@ -223,6 +267,7 @@ def create_app(settings: AppSettings) -> Any:
     session rows, no token cache, no job mirror, no result store).
     """
 
+    metadata_policy, metadata_path = _metadata_policy_and_path(settings.policies)
     read_authenticator, submit_authenticator = make_jwt_authenticators(
         settings.policies, jwks_cache=settings.jwks_cache
     )
@@ -308,7 +353,11 @@ def create_app(settings: AppSettings) -> Any:
             )
         return _outcome_response(outcome)
 
+    async def protected_resource_document(request: Request) -> JSONResponse:
+        return JSONResponse(protected_resource_metadata(metadata_policy), status_code=200)
+
     routes = [
+        Route(metadata_path, protected_resource_document, methods=["GET"]),
         Route("/v1/tools/submit_ceo_intent/reconcile", reconcile_submit_tool, methods=["POST"]),
         Route("/v1/tools/submit_ceo_intent", call_submit_tool, methods=["POST"]),
         Route("/v1/tools/{tool_name}", call_read_tool, methods=["POST"]),
@@ -318,4 +367,4 @@ def create_app(settings: AppSettings) -> Any:
     # an encoded/trailing-slash/raw-path ambiguity must refuse as a plain
     # 404, never be silently redirected before auth has even run.
     application.router.redirect_slashes = False
-    return _RawPathFence(application)
+    return _RawPathFence(application, metadata_path=metadata_path)
