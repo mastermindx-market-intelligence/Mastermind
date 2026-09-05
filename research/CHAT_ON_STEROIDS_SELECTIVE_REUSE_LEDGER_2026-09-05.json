@@ -1,0 +1,237 @@
+{
+  "document_type": "third_party_selective_reuse_ledger",
+  "schema_version": 1,
+  "date": "2026-09-05",
+  "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
+  "publication_carrier": "Mastermind PR #490",
+  "third_party_repository": "totec448-spec/chat-on-steroids",
+  "audited_commit": "dbff15b7296358102ee3e141f183e89a4a8d1e0e",
+  "license": {
+    "identifier": "MIT",
+    "license_blob": "4863f21719abdc21a635c77b9230c9e734a419a1",
+    "reuse_condition_summary": "Preserve the copyright and permission notice in copies or substantial portions; perform Mastermind dependency, provenance, security, and compatibility review independently.",
+    "not_a_warranty": true
+  },
+  "status": "RESEARCH_ONLY_NO_CODE_COPIED_NO_INSTALL_NO_ADOPTION_AUTHORIZED",
+  "global_decision": {
+    "unchanged_wholesale_install_on_live_mastermind_seats": "REJECTED_AS_DEFAULT_PRODUCTION_ARCHITECTURE",
+    "pinned_disposable_read_only_evaluation": "CANDIDATE_AFTER_CURRENT_OWNER_REVIEW_AND_HOST_AUTHORIZATION",
+    "selective_pattern_or_source_reuse": "CANDIDATE_ONLY_THROUGH_EXISTING_OWNER_AND_NEW_REVIEWED_GENERATION"
+  },
+  "decision_vocabulary": {
+    "ADOPT_PATTERN": "Reuse the interaction or contract idea with original Mastermind implementation unless exact source reuse is independently justified.",
+    "ADAPT_COMPONENT": "A bounded source component may be evaluated or reused behind an existing Mastermind owner after immutable pin, license, SBOM, tests, and security review.",
+    "DEBUG_ONLY": "Useful only as disposable local diagnostic evidence, never as canonical company state or production authority.",
+    "REJECT_AS_AUTHORITY": "May not own Mastermind lifecycle, identity, memory, retry, priority, session, or permission truth.",
+    "REJECT_FOR_LIVE_SEATS": "Do not enable on Chairman or production seats without a later explicit architecture and proof decision.",
+    "REQUIRES_FALSIFIER": "Value or safety must be established through the named bounded test before adoption."
+  },
+  "entries": [
+    {
+      "id": "COS-01",
+      "feature": "small capability-separated MCP surfaces",
+      "audited_sources": ["src/main/mcp/surfaces.ts", "docs/tool-surface.md"],
+      "observed_shape": "Core and Desktop are separate discovery surfaces; Core groups read/image/patch/terminal/session/agent tools and Desktop groups observe/computer.",
+      "disposition": ["ADOPT_PATTERN"],
+      "mastermind_owner": "Sol Capability Fabric and each existing app/tool owner",
+      "integration": "Keep Steward, Executive, Dialogue, Surface, worker workbench, and Admin separately versioned. Load only task-relevant families.",
+      "do_not_copy": "Do not collapse Mastermind's owner-specific public contracts into the upstream Core surface.",
+      "proof_required": "Actual ChatGPT tool-discovery and schema-cost benchmark with no lower tool-selection or authority accuracy."
+    },
+    {
+      "id": "COS-02",
+      "feature": "familiar read, image, patch, exec, and continue semantics",
+      "audited_sources": ["src/main/mcp/surfaces.ts", "docs/tool-surface.md", "src/main/codex/tool-specs.ts"],
+      "observed_shape": "Tool vocabulary is close to coding-agent workbenches and supports ongoing process interaction.",
+      "disposition": ["ADOPT_PATTERN", "REQUIRES_FALSIFIER"],
+      "mastermind_owner": "existing worker provider/runtime, Code Intelligence, Source Continuity",
+      "integration": "Expose bounded worker-local operations derived from the current Attempt/worktree/command policy, not a generic CEO command tool.",
+      "do_not_copy": "Do not accept arbitrary repository roots, executables, branches, credentials, or runtime bindings from model input.",
+      "proof_required": "One exact-worktree patch/build/test journey, process reconnect, cancellation distinction, strict result boundary, and zero survivor."
+    },
+    {
+      "id": "COS-03",
+      "feature": "approved-root file access",
+      "audited_sources": ["README.md", "SECURITY.md", "docs/tool-surface.md"],
+      "observed_shape": "File-oriented operations expose configured workspace roots, but this is not the shell isolation boundary.",
+      "disposition": ["ADOPT_PATTERN", "REQUIRES_FALSIFIER"],
+      "mastermind_owner": "existing worker sandbox and host security",
+      "integration": "Use exact Attempt-owned roots, realpath/symlink containment, file type/size limits, binary handling, and invocation-time permissions.",
+      "do_not_copy": "Never describe a root allowlist as proof that a general shell or desktop action is sandboxed.",
+      "proof_required": "Synthetic path traversal, symlink, rename/race, forbidden root, large/binary, and permission-revocation tests under the actual OS boundary."
+    },
+    {
+      "id": "COS-04",
+      "feature": "general terminal execution",
+      "audited_sources": ["SECURITY.md", "src/main/codex/tool-specs.ts", "docs/tool-error-rate-2026-08-24.md"],
+      "observed_shape": "Commands run with the logged-in user's normal privileges and are intentionally not confined to approved folders; the project contains shell-specific repair and guidance logic.",
+      "disposition": ["REJECT_FOR_LIVE_SEATS", "ADOPT_PATTERN", "REQUIRES_FALSIFIER"],
+      "mastermind_owner": "existing provider/Attempt process and sandbox owner",
+      "integration": "Where needed, implement reviewed command families or place arbitrary shell inside a dedicated isolated worker boundary with least-privilege environment and cleanup.",
+      "do_not_copy": "No unrestricted terminal for Chairman/CEO chats and no broad interactive-user privilege presented as autonomous safety.",
+      "proof_required": "OS-level containment, network/environment/credential controls, process group and survivor evidence, and exact command/effect attribution."
+    },
+    {
+      "id": "COS-05",
+      "feature": "ongoing process handles and output deltas",
+      "audited_sources": ["src/main/mcp/surfaces.ts", "docs/tool-surface.md", "src/main/codex/tool-specs.ts"],
+      "observed_shape": "A command may return a session identifier for continued interaction rather than blocking one call until completion.",
+      "disposition": ["ADOPT_PATTERN", "ADAPT_COMPONENT"],
+      "mastermind_owner": "Executive Attempt/Worker and existing provider process owner",
+      "integration": "Bind the provider/process handle to the canonical Attempt, exact workspace, command policy, output cursor, terminal state, cancellation and cleanup.",
+      "do_not_copy": "Do not create a plugin task/process registry or launch a replacement when the existing handle is temporarily unavailable.",
+      "proof_required": "Disconnect/reconnect, one-launch count, partial output, terminal exit, cancellation requested versus terminated, restart and cleanup."
+    },
+    {
+      "id": "COS-06",
+      "feature": "batched reads, bounded output, and cursors",
+      "audited_sources": ["README.md", "docs/tool-surface.md"],
+      "observed_shape": "The project emphasizes reducing repeated tool calls and constraining model-visible results.",
+      "disposition": ["ADOPT_PATTERN"],
+      "mastermind_owner": "Steward, GitHub/CodeIntel, and each immutable evidence owner",
+      "integration": "Batch exact immutable evidence, use owner-authored opaque continuations, emit coverage and truncation explicitly, and preserve decisive fields.",
+      "do_not_copy": "Do not change a frozen public schema silently or hide blockers/effect state through compaction.",
+      "proof_required": "Matched workflow benchmark, strict final-byte validation, invalid late data, missing coverage, and decisive-field retention."
+    },
+    {
+      "id": "COS-07",
+      "feature": "invocation-time permission enforcement",
+      "audited_sources": ["SECURITY.md", "docs/tool-surface.md"],
+      "observed_shape": "Runtime permissions are intended to gate calls even if a chat retains an older discovered schema.",
+      "disposition": ["ADOPT_PATTERN"],
+      "mastermind_owner": "each existing tool/app/provider owner",
+      "integration": "Every action rechecks current app policy, resource scope, Attempt/binding, source and host permission; cached schema metadata grants no continued access.",
+      "do_not_copy": "Do not centralize all permissions in a new plugin-owned registry.",
+      "proof_required": "Permission revoke/restore between discovery and invocation, stale connection, process restart, and no-effect refusal."
+    },
+    {
+      "id": "COS-08",
+      "feature": "desktop observation and action bound to recent state",
+      "audited_sources": ["src/main/mcp/surfaces.ts", "src/main/platform.ts", "docs/tool-surface.md"],
+      "observed_shape": "Desktop capabilities are separately gated and current source supports compatible Windows/macOS families; observation precedes bounded computer actions.",
+      "disposition": ["ADOPT_PATTERN", "DEBUG_ONLY", "REQUIRES_FALSIFIER"],
+      "mastermind_owner": "Worker Browser / Web-Sol / approved computer-use provider under their existing boundaries",
+      "integration": "Use recent-observation identity, exact approved app/window/profile, expected precondition, closed action and partial-effect reporting in disposable environments.",
+      "do_not_copy": "No generic click/type/JavaScript/transcript/account-selection surface for persistent Chairman seats.",
+      "proof_required": "Stale target, window change, coordinate/control mismatch, partial batch, cross-profile isolation, restart and secret-screen exclusion."
+    },
+    {
+      "id": "COS-09",
+      "feature": "clipboard access",
+      "audited_sources": ["src/main/mcp/surfaces.ts", "docs/tool-surface.md"],
+      "observed_shape": "Clipboard reads/writes are part of the optional Desktop surface.",
+      "disposition": ["REJECT_FOR_LIVE_SEATS", "DEBUG_ONLY"],
+      "mastermind_owner": "approved computer-use provider and host security",
+      "integration": "Keep independently permissioned and default disabled; use only for a reviewed non-secret disposable workflow when another structured channel is unavailable.",
+      "do_not_copy": "Never use the clipboard for tokens, credentials, Keychain material, or hidden cross-application data transfer.",
+      "proof_required": "Default denial, explicit narrow enablement, content classification, revoke behavior and cleanup."
+    },
+    {
+      "id": "COS-10",
+      "feature": "local session recording and search",
+      "audited_sources": ["README.md", "SECURITY.md", "extension/manifest.json", "docs/chatgpt-turn-signals.md"],
+      "observed_shape": "The extension/app records ChatGPT session and tool events for local lookup; project documentation distinguishes completed, failed, stopped, stalled and unknown turn outcomes.",
+      "disposition": ["DEBUG_ONLY", "REJECT_AS_AUTHORITY", "REQUIRES_FALSIFIER"],
+      "mastermind_owner": "Agent OS for durable organization, GitHub for evidence; any local recording remains host diagnostic only",
+      "integration": "At most use bounded, retention-limited, secret-excluding recordings for disposable debugging and adapter diagnosis.",
+      "do_not_copy": "No transcript memory database, workstream state, semantic ACK, lifecycle, completion, or succession authority.",
+      "proof_required": "Recording disabled-by-default or explicit consent, retention/deletion, cross-session isolation, secret and private-page exclusion, restart, and proof that canonical recovery does not depend on it."
+    },
+    {
+      "id": "COS-11",
+      "feature": "page and Fiber turn-completion signals",
+      "audited_sources": ["docs/chatgpt-turn-signals.md", "extension/fiber.js", "extension/content.js", "extension/chatgpt-dom.js"],
+      "observed_shape": "The project combines page-internal and DOM signals and deliberately treats unexplained detach as unknown rather than successful completion.",
+      "disposition": ["ADOPT_PATTERN", "DEBUG_ONLY", "REJECT_AS_AUTHORITY"],
+      "mastermind_owner": "Web-Sol/session-health observation; Dialogue and Executive remain semantic/lifecycle owners",
+      "integration": "Use browser signals as bounded surface-health evidence and preserve UNKNOWN; corroborate with exact owner receipts before semantic or modifying continuation.",
+      "do_not_copy": "Do not convert visible prose, missing Stop button, Fiber status, or quiet tools into PICKUP_ACK, START, RESULT, context exhaustion, or authority.",
+      "proof_required": "Provider UI/version variation, detach/reopen reconciliation, partial answer, error banner, user stop, long tool call and stale-page cases."
+    },
+    {
+      "id": "COS-12",
+      "feature": "multi-conversation prime and worker agents",
+      "audited_sources": ["README.md", "src/main/agents.ts", "src/main/mcp/surfaces.ts"],
+      "observed_shape": "The project can create and coordinate multiple ChatGPT conversations as prime/worker roles.",
+      "disposition": ["REJECT_AS_AUTHORITY", "ADAPT_COMPONENT", "REQUIRES_FALSIFIER"],
+      "mastermind_owner": "Executive OS, Capacity, RuntimeBinding, Chat-native hierarchy, provider-specific child execution",
+      "integration": "A provider may implement bounded child execution after an existing admitted operation and exact placement. Map provider conversations to current owner receipts rather than adopting its registry.",
+      "do_not_copy": "No second Job/Worker/session lifecycle, quota router, task queue, prime election, or model-created successor program.",
+      "proof_required": "Bounded concurrency/depth, exact assignment, no path collision, attributable outputs, cleanup, no self-created operation, and current parent consumption."
+    },
+    {
+      "id": "COS-13",
+      "feature": "goal and loop continuation controller",
+      "audited_sources": ["README.md", "src/main/loop-controller.ts", "extension/content.js"],
+      "observed_shape": "A separate model may evaluate prior user/final-answer content and submit follow-up prompts for continued work.",
+      "disposition": ["REJECT_AS_AUTHORITY", "REJECT_FOR_LIVE_SEATS"],
+      "mastermind_owner": "Executive OS, Agent OS, Wake/Dialogue, exact Chat continuation owners",
+      "integration": "Use deterministic material events and current canonical state to decide whether reasoning is required; any model recommendation is advisory and separately admitted.",
+      "do_not_copy": "No free-running arbitrary prompt loop, completion judgment from final prose alone, or third-party model receiving company context without a separate approved data/budget decision.",
+      "proof_required": "Not eligible for production adoption absent a new explicit architecture ruling and complete provider/data/budget/security proof."
+    },
+    {
+      "id": "COS-14",
+      "feature": "automatic compaction and continuation",
+      "audited_sources": ["README.md", "src/main/compaction.ts", "src/main/session/recorder.ts"],
+      "observed_shape": "The project can create a compressed continuation across conversations.",
+      "disposition": ["ADOPT_PATTERN", "REJECT_AS_AUTHORITY"],
+      "mastermind_owner": "Agent OS continuation, current context composition, Web-Sol CR ladder and RuntimeBinding",
+      "integration": "Preserve decision/evidence/next-action packets and exact successor semantics through existing owners. Use model summaries only as attributed synthesis.",
+      "do_not_copy": "No compaction output as canonical memory, effect truth, target identity, semantic readiness, or binding transfer.",
+      "proof_required": "Dead predecessor, omitted blocker/effect, contradictory source, duplicate successor, lost submit and stale revival cases."
+    },
+    {
+      "id": "COS-15",
+      "feature": "local bridge and companion extension",
+      "audited_sources": ["src/main/bridge.ts", "extension/manifest.json", "README.md"],
+      "observed_shape": "A localhost bridge connects the extension and desktop application and records/labels ChatGPT activity.",
+      "disposition": ["REJECT_AS_AUTHORITY", "ADAPT_COMPONENT", "REQUIRES_FALSIFIER"],
+      "mastermind_owner": "existing Web-Sol native host/extension, worker browser provider, host security",
+      "integration": "Reuse only a bounded transport or observation technique that fills a measured gap in the existing native host; preserve exact profile/session and closed protocol laws.",
+      "do_not_copy": "No second live-seat extension/native bridge, localhost trust assumption, transcript export, or generic browser control plane.",
+      "proof_required": "Port binding, authentication, origin, replay, extension update/restart, cross-profile, untrusted local process, payload bound, secret leakage and rollback tests."
+    },
+    {
+      "id": "COS-16",
+      "feature": "platform-specific desktop backends",
+      "audited_sources": ["src/main/platform.ts", "src/main/computer", "docs/tool-surface.md", "SECURITY.md"],
+      "observed_shape": "Current source contains Windows/macOS capability gates while one inspected security statement was stale about macOS support.",
+      "disposition": ["DEBUG_ONLY", "REQUIRES_FALSIFIER"],
+      "mastermind_owner": "approved computer-use provider and host release owner",
+      "integration": "Treat documentation as hypothesis; pin the actual build and prove each supported host/profile class independently.",
+      "do_not_copy": "No fleet support claim from source branching or one host canary.",
+      "proof_required": "Exact OS/release, permission ceremony, input behavior, display/window variations, swapped buttons where relevant, restart and rollback."
+    },
+    {
+      "id": "COS-17",
+      "feature": "tool error classification and repair",
+      "audited_sources": ["docs/tool-error-rate-2026-08-24.md"],
+      "observed_shape": "A historical snapshot separates expected RED validation events from quoting/glob/input failures and projects improvement only against the frozen corpus.",
+      "disposition": ["ADOPT_PATTERN"],
+      "mastermind_owner": "existing observability/evaluation and tool owners",
+      "integration": "Classify expected RED, protective refusal, model/input error, transport/auth/source drift, product defect and success separately; measure exact repairs on frozen inputs and live canaries.",
+      "do_not_copy": "No zero-error target, transferred benchmark percentage, or reliability claim before rebuild/relaunch/live observation.",
+      "proof_required": "Per-class counts, exact failure examples, mutation controls, new-generation live sample and no weakened safety tests."
+    },
+    {
+      "id": "COS-18",
+      "feature": "third-party release and update path",
+      "audited_sources": ["README.md", "SECURITY.md", "package.json", "LICENSE"],
+      "observed_shape": "The audited project is MIT-licensed; inspected security documentation notes unsigned/unnotarized releases at that source window.",
+      "disposition": ["REJECT_FOR_LIVE_SEATS", "REQUIRES_FALSIFIER"],
+      "mastermind_owner": "existing supply-chain, release, host and security owners",
+      "integration": "Build from an exact source pin or independently verify an immutable artifact, preserve notices, produce SBOM/provenance, disable auto-update, and retain rollback.",
+      "do_not_copy": "No automatic upstream-main or binary update into live seats.",
+      "proof_required": "Reproducible or attributable build, dependency and vulnerability review, artifact signing/notarization strategy, update attack, rollback and secret-free logs."
+    }
+  ],
+  "recommended_first_experiment": {
+    "name": "disposable_read_only_local_workbench_falsifier",
+    "source_packet": "CHATGPT_LONG_RUN_LEADER_EXISTING_OWNER_HANDOFF_PACKETS_2026-09-05.md Packet 3",
+    "entry": ["COS-01", "COS-03", "COS-06", "COS-07", "COS-10", "COS-11", "COS-15", "COS-16", "COS-18"],
+    "explicitly_disabled": ["COS-04", "COS-08", "COS-09", "COS-12", "COS-13", "COS-14"],
+    "promotion_condition": "Measured usefulness plus complete isolation, revocation, restart, persistence, secret, and cleanup proof; then propose one owner-specific component integration, not a wholesale production install."
+  },
+  "exact_next_action": "The existing worker/browser security and provider-runtime owners review this ledger and Packet 3, then either approve one pinned disposable read-only falsifier or record the specific unresolved owner/host/platform gate."
+}

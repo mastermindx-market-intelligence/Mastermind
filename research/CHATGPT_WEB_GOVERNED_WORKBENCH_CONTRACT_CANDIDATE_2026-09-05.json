@@ -1,0 +1,377 @@
+{
+  "document_type": "mastermind.governed_workbench_contract_candidate",
+  "version": 1,
+  "date": "2026-09-05",
+  "publication_carrier": "Mastermind PR #490",
+  "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
+  "authority": "RESEARCH_ONLY_NOT_A_RUNTIME_SCHEMA_OR_IMPLEMENTATION_COMMISSION",
+  "protected_source_basis": "8f3370e349ab8f1a54acac4c63697740f32715b1",
+  "capability_state": "SPEC_ONLY",
+  "principles": [
+    "The workbench is a facade over an existing exact Attempt/provider execution context, not a lifecycle, session, memory, retry, queue, permission, workspace, or evidence owner.",
+    "Leader and operator capability profiles are separate.",
+    "The model never supplies host, principal, credential, account, profile, absolute root, worktree, branch, lease, fence, capability generation, or effect state.",
+    "Every modifying call revalidates current owner predicates at invocation time.",
+    "EFFECT_UNKNOWN blocks retry and provider/account/carrier failover.",
+    "A durable process or MCP task handle is not proof that an inactive ChatGPT reasoning session can be awakened.",
+    "Existing frozen Mastermind tool contracts are not modified by this candidate.",
+    "All named tools below are proposed semantics, not callable or approved schemas."
+  ],
+  "capability_profiles": [
+    {
+      "id": "LEADER_READ",
+      "purpose": "Task-relevant source/evidence reads for a Sol leader.",
+      "allowed_surfaces": ["workspace_read"],
+      "forbidden_surfaces": ["workspace_change", "process", "desktop"],
+      "authority_note": "Use existing Steward, GitHub and CodeIntel owners where possible; no unrestricted local access."
+    },
+    {
+      "id": "EXACT_OPERATOR",
+      "purpose": "File and process capabilities for one host-injected Job/Attempt/worker/workspace binding.",
+      "allowed_surfaces": ["workspace_read", "workspace_change", "process"],
+      "forbidden_surfaces": ["desktop"],
+      "authority_note": "Requires exact Attempt binding, current source and an enforcing worker sandbox/provider owner."
+    },
+    {
+      "id": "EXACT_OPERATOR_DESKTOP",
+      "purpose": "Optional disposable worker-browser observation and bounded semantic actuation.",
+      "allowed_surfaces": ["workspace_read", "workspace_change", "process", "desktop"],
+      "forbidden_surfaces": [],
+      "authority_note": "Requires a separately reviewed Desktop capability generation and exact approved profile/window."
+    }
+  ],
+  "host_injected_context": [
+    "capability_generation",
+    "authenticated_principal_ref",
+    "resource_ref",
+    "granted_scopes",
+    "responsibility_ref",
+    "operation_key",
+    "job_ref",
+    "attempt_ref",
+    "worker_ref",
+    "provider_session_ref_when_required",
+    "runtime_binding_generation_when_required",
+    "repository_ref",
+    "workspace_ref",
+    "workspace_root_private",
+    "branch_private",
+    "source_head",
+    "source_base",
+    "allowed_read_paths",
+    "allowed_write_paths",
+    "allowed_recipe_ids",
+    "process_policy_ref",
+    "network_policy_ref",
+    "secret_policy_ref",
+    "desktop_policy_ref_when_enabled",
+    "observed_at",
+    "expires_at",
+    "reconciliation_owner_ref"
+  ],
+  "model_forbidden_fields": [
+    "actor_privilege",
+    "uid",
+    "credential",
+    "token",
+    "account_id",
+    "browser_profile_id",
+    "host",
+    "absolute_path",
+    "workspace_root",
+    "worktree",
+    "branch",
+    "raw_git_ref_update",
+    "lease",
+    "fence",
+    "capability_generation",
+    "effect_state",
+    "arbitrary_environment",
+    "arbitrary_shell_command",
+    "arbitrary_url",
+    "arbitrary_javascript"
+  ],
+  "effect_states": ["NOT_APPLIED", "APPLIED", "PARTIAL", "EFFECT_UNKNOWN", "REFUSED"],
+  "surfaces": [
+    {
+      "id": "workspace_read",
+      "separate_discovery_unit": true,
+      "default_enabled_for_leader": false,
+      "tools": [
+        {
+          "name": "workspace_manifest",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": [],
+          "minimum_output": ["workspace_ref", "source_head", "languages", "build_systems", "capabilities", "degraded", "source_refs", "observed_at"]
+        },
+        {
+          "name": "read_workspace_files",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": ["relative_paths", "ranges", "continuation"],
+          "minimum_output": ["path", "blob_or_content_hash", "content_or_artifact_ref", "truncated", "continuation", "source_head"]
+        },
+        {
+          "name": "search_workspace",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": ["query", "relative_path_filters", "language_filters", "requested_ref", "limit", "continuation"],
+          "minimum_output": ["matches", "requested_ref", "searched_ref", "coverage", "freshness", "truncated", "continuation", "source_refs"]
+        },
+        {
+          "name": "workspace_semantics",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": ["query_kind", "symbol_or_location", "language", "limit", "continuation"],
+          "minimum_output": ["results", "backend_generation", "workspace_ref", "source_head", "coverage", "issues", "continuation"]
+        },
+        {
+          "name": "view_workspace_image",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": ["relative_path"],
+          "minimum_output": ["artifact_ref", "media_type", "width", "height", "content_hash", "source_head"]
+        }
+      ]
+    },
+    {
+      "id": "workspace_change",
+      "separate_discovery_unit": true,
+      "default_enabled_for_leader": false,
+      "tools": [
+        {
+          "name": "prepare_workspace_patch",
+          "privilege": "W1_ROUTINE",
+          "mutating": false,
+          "model_input": ["operation_key", "patch", "expected_path_hashes"],
+          "minimum_output": ["preparation_ref", "expires_at", "candidate_paths", "candidate_diff_hash", "preconditions", "status", "issues"],
+          "notes": "Preparation performs no file write and creates no durable prepared-action database."
+        },
+        {
+          "name": "commit_workspace_patch",
+          "privilege": "W1_ROUTINE",
+          "mutating": true,
+          "model_input": ["preparation_ref"],
+          "minimum_output": ["effect_state", "changed_paths", "post_image_hashes", "workspace_diff_hash", "source_preconditions", "reconciliation_ref"],
+          "notes": "Revalidate current binding, permission and source; perform at most one patch effect."
+        },
+        {
+          "name": "workspace_diff",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": ["relative_path_filters", "limit", "continuation"],
+          "minimum_output": ["paths", "diff_or_artifact_ref", "diff_hash", "binary_paths", "truncated", "continuation", "workspace_ref"]
+        },
+        {
+          "name": "checkpoint_workspace",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": [],
+          "minimum_output": ["source_continuity_receipt", "workspace_ref", "local_head", "remote_head", "tree", "paths", "dirty_state", "issues"],
+          "notes": "Projects the existing Source Continuity owner and grants no commit, push, receiver transfer, Ready, merge or release authority."
+        }
+      ]
+    },
+    {
+      "id": "process",
+      "separate_discovery_unit": true,
+      "default_enabled_for_leader": false,
+      "tools": [
+        {
+          "name": "list_validation_recipes",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": [],
+          "minimum_output": ["recipes", "source_head", "process_policy_ref", "capability_generation"]
+        },
+        {
+          "name": "start_validation",
+          "privilege": "W1_ROUTINE",
+          "mutating": true,
+          "model_input": ["operation_key", "recipe_id", "bounded_targets", "expected_source_head"],
+          "minimum_output": ["effect_state", "process_ref", "attempt_ref", "recipe_id", "started_at", "state", "reconciliation_ref"],
+          "notes": "Owner derives argv, cwd, environment, network and resource policy. No raw shell text."
+        },
+        {
+          "name": "read_process",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": ["process_ref", "output_cursor", "limit"],
+          "minimum_output": ["process_ref", "state", "output_delta", "next_output_cursor", "exit_code", "truncated", "observed_at"]
+        },
+        {
+          "name": "send_process_input",
+          "privilege": "W1_ROUTINE",
+          "mutating": true,
+          "model_input": ["process_ref", "input_kind", "input"],
+          "minimum_output": ["effect_state", "accepted_bytes", "process_state", "reconciliation_ref"],
+          "notes": "Only for a process whose host policy declares the exact input kind."
+        },
+        {
+          "name": "request_process_cancel",
+          "privilege": "W1_ROUTINE",
+          "mutating": true,
+          "model_input": ["operation_key", "process_ref", "reason_code"],
+          "minimum_output": ["effect_state", "cancel_requested", "process_state", "terminal_proven", "reconciliation_ref"],
+          "notes": "A request receipt never proves terminal process state or reversal of completed effects."
+        },
+        {
+          "name": "reconcile_process",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": ["operation_key", "process_ref"],
+          "minimum_output": ["process_ref", "state", "effect_state", "exit_code", "cleanup_state", "evidence_refs", "observed_at"]
+        }
+      ]
+    },
+    {
+      "id": "desktop",
+      "separate_discovery_unit": true,
+      "default_enabled_for_leader": false,
+      "tools": [
+        {
+          "name": "observe_worker_desktop",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": ["approved_view_kind"],
+          "minimum_output": ["observation_ref", "expires_at", "approved_profile_ref", "window_ref", "controls", "redacted_artifact_ref", "issues"]
+        },
+        {
+          "name": "act_on_worker_observation",
+          "privilege": "W1_ROUTINE_OR_W2_BY_ACTION",
+          "mutating": true,
+          "model_input": ["operation_key", "observation_ref", "control_ref", "action_kind", "bounded_value"],
+          "minimum_output": ["effect_state", "completed_steps", "postcondition", "new_observation_ref", "uncertain_boundary", "reconciliation_ref"],
+          "notes": "No arbitrary coordinates, JavaScript, account switching, clipboard, credential/settings surface, or caller-selected native application in V1."
+        },
+        {
+          "name": "reconcile_desktop_action",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": ["operation_key", "observation_ref"],
+          "minimum_output": ["effect_state", "completed_steps", "current_window_ref", "postcondition", "issues", "observed_at"]
+        }
+      ]
+    }
+  ],
+  "required_response_fields": [
+    "operation_or_call_identity",
+    "status",
+    "effect_state",
+    "observed_at",
+    "source_or_capability_generation",
+    "target_owner",
+    "precondition_evidence",
+    "postcondition_evidence",
+    "completed_step_count_when_applicable",
+    "truncated",
+    "continuation_or_output_cursor",
+    "closed_error_code",
+    "reconciliation_ref"
+  ],
+  "error_codes": [
+    "CAPABILITY_UNAVAILABLE",
+    "CAPABILITY_GENERATION_MISMATCH",
+    "PRINCIPAL_OR_SCOPE_REFUSED",
+    "ATTEMPT_BINDING_MISSING",
+    "ATTEMPT_BINDING_STALE",
+    "WORKSPACE_IDENTITY_MISMATCH",
+    "SOURCE_PRECONDITION_FAILED",
+    "PATH_OUT_OF_SCOPE",
+    "CODEINTEL_COVERAGE_INCOMPLETE",
+    "OUTPUT_BOUNDED",
+    "OUTPUT_UNREPRESENTABLE",
+    "PROCESS_START_UNKNOWN",
+    "PROCESS_STILL_RUNNING",
+    "CANCEL_REQUESTED_NOT_TERMINAL",
+    "PROCESS_EFFECT_UNKNOWN",
+    "DESKTOP_OBSERVATION_STALE",
+    "DESKTOP_TARGET_CHANGED",
+    "DESKTOP_ACTION_PARTIAL",
+    "PROFILE_OR_PROJECT_MISMATCH",
+    "MODEL_MODE_UNVERIFIED",
+    "TARGET_DELIVERED_UNACKNOWLEDGED",
+    "SEMANTIC_READINESS_PENDING",
+    "RUNTIME_BINDING_STALE",
+    "WAKE_UNAVAILABLE",
+    "CONTEXT_ROTATION_REQUIRED",
+    "NATIVE_MUTATOR_COVERAGE_INCOMPLETE",
+    "EFFECT_UNKNOWN"
+  ],
+  "native_mutator_coverage": {
+    "route_families": [
+      "mastermind_executive",
+      "mastermind_dialogue",
+      "native_github",
+      "native_slack",
+      "native_linear",
+      "local_workbench_files",
+      "local_workbench_processes",
+      "desktop_or_browser",
+      "provider_native_coding",
+      "administrator_or_installation",
+      "other_connected_write_apps"
+    ],
+    "classifications": ["ENFORCED", "DENIED", "ATTENDED", "UNKNOWN"],
+    "autonomous_claim_rule": "Only ENFORCED and DENIED routes may be included in the stale-session technical-fencing claim. ATTENDED remains a supported human-confirmed route. Any UNKNOWN route blocks the stronger claim.",
+    "persistence_rule": "This is an evidence artifact from existing owners, not a mutable permissions registry."
+  },
+  "candidate_proof_slices": [
+    {
+      "id": "READ_ONE_COCKPIT",
+      "owner": "existing BSC/Steward/Integration owners",
+      "outcome": "One selected Business cockpit obtains useful authenticated source-attributed Steward results, then repeats after access-token expiry and proves rollback; two Personal-Pro controls remain unchanged.",
+      "state": "NOT_RUN_BY_THIS_RESEARCH"
+    },
+    {
+      "id": "READ_SYNTHETIC_WORKSPACE",
+      "owner": "existing CodeIntel/GitHub/worker-sandbox owners",
+      "outcome": "One exact synthetic Attempt performs file/symbol/image reads and refuses forbidden paths and incomplete-coverage absence conclusions.",
+      "state": "NOT_RUN_BY_THIS_RESEARCH"
+    },
+    {
+      "id": "PATCH_VALIDATE_SYNTHETIC",
+      "owner": "existing worker/provider execution and Source Continuity owners",
+      "outcome": "One exact synthetic Attempt prepares/applies one small patch and runs one reviewed validation recipe with lost-response and stale-source discriminators.",
+      "state": "NOT_RUN_BY_THIS_RESEARCH"
+    },
+    {
+      "id": "DURABLE_PROCESS_RETURN",
+      "owner": "existing Executive/provider/Dialog/Wake owners",
+      "outcome": "A process outlives the leader turn, remains one operation, and its result reaches the exact leader or truthfully reports wake unavailable.",
+      "state": "NOT_RUN_BY_THIS_RESEARCH"
+    },
+    {
+      "id": "DISPOSABLE_DESKTOP",
+      "owner": "existing Worker Browser/computer provider owner",
+      "outcome": "A disposable profile proves redacted observation, stale-target refusal, one bounded action and partial-effect reconciliation.",
+      "state": "NOT_RUN_BY_THIS_RESEARCH"
+    },
+    {
+      "id": "EXACT_SUCCESSION",
+      "owner": "existing Web-Sol/RuntimeBinding/Dialogue/Wake owners",
+      "outcome": "One responsibility recovers through one successor, accepted semantic readiness and binding advancement; the predecessor is refused on every included autonomous route.",
+      "state": "NOT_RUN_BY_THIS_RESEARCH"
+    },
+    {
+      "id": "REAL_PROGRAM_VERTICAL",
+      "owner": "owning Program CEO, workers, Sol acceptance and production proof owners",
+      "outcome": "One consequential capability completes from Chairman intent to real product/machine consumer and durable closeout without Chairman message shuttling.",
+      "state": "NOT_RUN_BY_THIS_RESEARCH"
+    }
+  ],
+  "rejected_designs": [
+    "one_giant_workbench_or_super_mcp",
+    "broad_logged_in_user_shell_for_unattended_chat",
+    "leader_mode_with_default_desktop_or_clipboard",
+    "plugin_owned_process_or_task_database",
+    "plugin_owned_session_recorder_as_company_memory",
+    "chat_title_or_newest_tab_as_identity",
+    "automatic_account_hopping_after_start",
+    "approval_setting_as_write_revocation",
+    "mcp_task_handle_as_exact_chat_wake_proof",
+    "automatic_context_compaction_as_runtime_binding_transfer",
+    "upstream_unsigned_binary_on_primary_authenticated_host"
+  ]
+}
