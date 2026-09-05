@@ -6,6 +6,7 @@ SOURCE_RESOLVED onto the existing Executive OS events table.
 """
 from __future__ import annotations
 
+import dataclasses
 import threading
 from pathlib import Path
 
@@ -450,6 +451,26 @@ def test_native_handles_and_next_actions_never_persist_as_authority(tmp_path, fr
                 created_at=_NOW,
             )
         )
+
+
+def test_physical_source_payload_is_closed_and_requested_only(tmp_path, frozen_git):
+    runtime = Runtime.at(tmp_path)
+    _completed_review_child(runtime)
+    _reconcile(runtime)
+    event = _requested_kind(runtime, "review_required")[0]
+
+    with pytest.raises(WakeLedgerError, match="physical source is malformed"):
+        wake_record_from_event(dataclasses.replace(
+            event, payload={**event.payload, "physical_source": None}
+        ))
+
+    with pytest.raises(WakeLedgerError, match="WAKE_REQUESTED-only"):
+        wake_record_from_event(dataclasses.replace(
+            event,
+            event_type="FAILED",
+            command_id=f"{event.aggregate_id}:A1:FAILED",
+            payload={"physical_source": {}},
+        ))
 
 
 def test_reconciliation_never_invokes_transport_or_delivery_attempt(tmp_path, frozen_git, monkeypatch):

@@ -7,6 +7,10 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from control_plane.session_targets import load_session_targets, route_obligation
+from control_plane.dialogue_source_resolution import (
+    DialogueSourceReconciler,
+    DialogueSourceSnapshot,
+)
 from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_SCHEMA_V2,
@@ -210,6 +214,24 @@ class RecordingWakeCarrier:
             raise WakeEffectUnknownError("provider result is ambiguous")
 
 
+class SourceAwareRecordingWakeCarrier(DialogueSourceReconciler, RecordingWakeCarrier):
+    def __init__(self, source_state: str) -> None:
+        RecordingWakeCarrier.__init__(self)
+        self.source_state = source_state
+        self.source_calls: list[DialogueSourceSnapshot] = []
+
+    async def reconcile_dialogue_sources(self, snapshot: object) -> object:
+        assert type(snapshot) is DialogueSourceSnapshot
+        self.source_calls.append(snapshot)
+        return {"state": self.source_state, "reason": "TEST_SOURCE_STATE"}
+
+    async def reconcile_from_source(self, _source, obligation, route) -> WakeCarrierState:
+        return await self.reconcile(obligation, route)
+
+    async def submit_from_source(self, _source, obligation, route) -> None:
+        await self.submit(obligation, route)
+
+
 def _attention() -> AgentDialogueAttention:
     return AgentDialogueAttention(
         schema="mastermind.agent_dialogue_attention.v1",
@@ -317,6 +339,54 @@ def test_observer_reconstructs_initial_turn_and_submits_one_canonical_wake() -> 
         assert result.route.target_seat == "coo"
         assert len(carrier.reconcile_calls) == 1
         assert carrier.submit_calls == [(result.obligation, result.route)]
+
+    asyncio.run(scenario())
+
+
+def test_nominal_source_reconciler_receives_exact_history_before_wake_decision() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        carrier = SourceAwareRecordingWakeCarrier("NO_RESOLUTION_REQUIRED")
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+            emitted_at=lambda: "2026-08-29T01:02:00Z",
+        )
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert result.outcome is ObservationOutcome.WAKE_SUBMITTED
+        assert len(carrier.source_calls) == 1
+        snapshot = carrier.source_calls[0]
+        assert snapshot.workspace_id == _policy().workspace_id
+        assert snapshot.channel_id == _policy().channel_id
+        assert snapshot.thread_ts == PARENT_TS
+        assert snapshot.parent_fingerprint == parent["fingerprint"]
+        assert snapshot.operation_key == parent["operation_key"]
+        assert snapshot.messages == ()
+        assert len(carrier.submit_calls) == 1
+
+        held = SourceAwareRecordingWakeCarrier("ACK_REQUIRED")
+        held_observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client_with_result(parent),
+            registry=_registry(),
+            wake_carrier=held,
+            emitted_at=lambda: "2026-08-29T01:02:00Z",
+        )
+        held_result = await held_observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert held_result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert held_result.reason == "DIALOGUE_SOURCE_RECONCILIATION_REQUIRED"
+        assert len(held.source_calls) == 1
+        assert [
+            item.to_dict()["message_key"] for item in held.source_calls[0].messages
+        ] == ["asd-result-00000002"]
+        assert held.reconcile_calls == []
+        assert held.submit_calls == []
 
     asyncio.run(scenario())
 

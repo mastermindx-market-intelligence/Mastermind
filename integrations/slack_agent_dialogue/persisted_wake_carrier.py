@@ -15,6 +15,7 @@ from control_plane.dialogue_wake_canary_activation import (
 )
 
 from control_plane.executive_runtime import StateConflict
+from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdentity
 from control_plane.session_targets import (
     RuntimeBinding,
     SessionTargetRegistry,
@@ -56,6 +57,7 @@ class PersistedWakeCarrier:
         historical_context_for: (
             Callable[[DeliveryAttempt], "HistoricalWakeContext"] | None
         ) = None,
+        physical_source: PhysicalDialogueSourceIdentity | None = None,
     ) -> None:
         if not isinstance(repository, WakeLedgerRepository):
             raise TypeError("repository must be WakeLedgerRepository")
@@ -78,6 +80,10 @@ class PersistedWakeCarrier:
             historical_context_for
         ):
             raise TypeError("historical_context_for must be callable or None")
+        if physical_source is not None and type(physical_source) is not PhysicalDialogueSourceIdentity:
+            raise TypeError("physical_source must be a closed physical identity")
+        if physical_source is not None and canary_profile is None:
+            raise TypeError("physical_source requires the closed canary profile")
         self._repository = repository
         self._dispatchers = dispatchers
         self._current_binding_for = current_binding_for
@@ -85,6 +91,7 @@ class PersistedWakeCarrier:
         self._target_registry = target_registry
         self._canary_profile = canary_profile
         self._historical_context_for = historical_context_for
+        self._physical_source = physical_source
 
     def has_persisted_attempt(self, obligation: WakeObligation) -> bool:
         """Classify effect presence without route resolution or provider access."""
@@ -92,7 +99,7 @@ class PersistedWakeCarrier:
         persisted = self._repository.list_records(obligation.obligation_id)
         if not persisted:
             return False
-        _assert_requested_replay(obligation, persisted)
+        _assert_requested_replay(obligation, persisted, self._physical_source)
         attempts = sum(
             item.record.phase is LedgerPhase.DELIVERY_ATTEMPT for item in persisted
         )
@@ -112,7 +119,7 @@ class PersistedWakeCarrier:
         if not persisted:
             return WakeCarrierState.MISSING
 
-        _assert_requested_replay(obligation, persisted)
+        _assert_requested_replay(obligation, persisted, self._physical_source)
         records = tuple(item.record for item in persisted)
         if self._canary_profile is not None:
             return await self._reconcile_canary(obligation, route, records)
@@ -174,7 +181,7 @@ class PersistedWakeCarrier:
         # append validates exact correlation and payload equivalence without
         # creating a second row for an identical replay.
         self._repository.append_record(
-            requested_record(obligation),
+            requested_record(obligation, physical_source=self._physical_source),
             obligation=obligation,
         )
 
@@ -387,6 +394,7 @@ def _assert_pair(obligation: WakeObligation, route: WakeRoute) -> None:
 def _assert_requested_replay(
     obligation: WakeObligation,
     persisted: Sequence[PersistedWakeEvent],
+    physical_source: PhysicalDialogueSourceIdentity | None,
 ) -> None:
     """Read-validate one supplied obligation against the frozen request envelope."""
 
@@ -396,7 +404,7 @@ def _assert_requested_replay(
     if len(requested) != 1:
         raise StateConflict("wake stream requires exactly one WAKE_REQUESTED event")
     proposed = event_payload_for(
-        requested_record(obligation),
+        requested_record(obligation, physical_source=physical_source),
         obligation=obligation,
     )
     if not payloads_equivalent(

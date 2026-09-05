@@ -21,6 +21,100 @@ from types import SimpleNamespace
 
 import pytest
 
+
+def _phase3_dialogue_material(parent, candidate, obligation, route):
+    from control_plane.dialogue_source_resolution import (
+        DialogueSourceObservation, PhysicalDialogueSourceIdentity,
+        attention_source_ref, correlated_source_ref,
+    )
+    from control_plane.session_targets import route_digest
+    from control_plane.wake_events import mint_obligation
+
+    _progress, continuation, _successor = _phase3_source_messages(parent, candidate)
+    source = DialogueSourceObservation(
+        workspace_id="T0BRD2AQXQV", channel_id="C0BSBM78V1N",
+        thread_ts="1788000000.123456",
+        predecessor_message_key=continuation["message_key"],
+        predecessor_message_fingerprint=continuation["fingerprint"],
+    )
+    attention = mint_obligation(
+        wake_kind=obligation.wake_kind, source_kind=obligation.source_kind,
+        source_ref=attention_source_ref(
+            parent_fingerprint=parent["fingerprint"],
+            message_key=source.predecessor_message_key,
+            target_seat=obligation.declared_target_seat,
+        ),
+        declared_target_seat=obligation.declared_target_seat,
+        job_id=candidate.job_id, attempt_id=candidate.attempt_id,
+        root_job_id=candidate.root_job_id, workstream=obligation.workstream,
+        source_workstream=parent["work_ref"],
+        source_created_at=obligation.source_created_at, emitted_at=obligation.emitted_at,
+    )
+    attention_route = dataclasses.replace(route, obligation_id=attention.obligation_id)
+    logical = correlated_source_ref(
+        attention_source_ref=attention.source_ref,
+        parent_fingerprint=parent["fingerprint"], operation_key=parent["operation_key"],
+        candidate=candidate.to_dict(),
+    )
+    correlated = mint_obligation(
+        wake_kind=attention.wake_kind, source_kind=attention.source_kind,
+        source_ref=logical, declared_target_seat=attention.declared_target_seat,
+        job_id=candidate.job_id, attempt_id=candidate.attempt_id,
+        root_job_id=candidate.root_job_id, workstream=attention.workstream,
+        source_workstream=attention.source_workstream,
+        source_created_at=attention.source_created_at, emitted_at=attention.emitted_at,
+    )
+    correlated_route = dataclasses.replace(
+        attention_route, obligation_id=correlated.obligation_id,
+        route_digest=route_digest(
+            obligation_id=correlated.obligation_id,
+            destination=attention_route.destination_digest,
+            policy_digest=attention_route.policy_digest,
+        ),
+    )
+    physical = PhysicalDialogueSourceIdentity.create(
+        logical_source_ref=logical, obligation_id=correlated.obligation_id,
+        observation=source, parent_fingerprint=parent["fingerprint"],
+        operation_key=parent["operation_key"], target_seat=correlated.declared_target_seat,
+        candidate=candidate.to_dict(),
+    )
+    return attention, attention_route, correlated, correlated_route, source, physical
+
+
+def _phase3_source_messages(parent, candidate):
+    from integrations.slack_agent_dialogue.contract_v2 import build_message_v2
+    common = {
+        "schema": "mastermind.agent_dialogue.v2",
+        "work_ref": parent["work_ref"], "commission_ref": parent["commission_ref"],
+        "session_ref": parent["session_ref"],
+        "applies_to": {"kind": "repository", "repository": "mastermindx-market-intelligence/Mastermind", "head_sha": "a" * 40, "pr": "mastermindx-market-intelligence/Mastermind#170"},
+        "summary": "Bounded source transition.", "evidence_refs": [],
+        "requires_response": False,
+    }
+    progress = build_message_v2({
+        **common, "message_key": "asd-progress-001", "message_type": "PROGRESS",
+        "actor_ref": {"kind": "executive_surface", "seat": "coo", "reasoning_surface": "codex"},
+        "reply_to_message_key": None,
+        "body": {"stage": "source", "completed": "Wake accepted.", "next": "Await Sol."},
+        "created_at": "2026-09-03T01:00:00Z",
+    })
+    continuation = build_message_v2({
+        **common, "message_key": "asd-continue-001", "message_type": "CONTINUE",
+        "actor_ref": {"kind": "executive_surface", "seat": "ceo", "reasoning_surface": "codex"},
+        "reply_to_message_key": progress["message_key"],
+        "body": {"instruction": "Continue the bounded source.", "stop_condition": "Stop on conflict.", "scope_change": False},
+        "created_at": "2026-09-03T01:00:01Z",
+    })
+    successor = build_message_v2({
+        **common, "message_key": "asd-progress-002", "message_type": "PROGRESS",
+        "actor_ref": {"kind": "worker_attempt", "job_id": candidate.job_id, "attempt_id": candidate.attempt_id, "worker_id": candidate.worker_id},
+        "applies_to": {"kind": "executive_attempt", "job_id": candidate.job_id, "attempt_id": candidate.attempt_id, "worker_id": candidate.worker_id},
+        "reply_to_message_key": continuation["message_key"],
+        "body": {"stage": "source", "completed": "Continuation consumed.", "next": "Continue."},
+        "created_at": "2026-09-03T01:00:02Z",
+    })
+    return progress, continuation, successor
+
 from common.redaction import TRUNCATION_MARKER
 from control_plane import ceo_intent as ceo_intent_mod
 from control_plane import executive_dialogue_observation as observation_mod
@@ -793,6 +887,7 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
         SCHEMA as TARGET_SCHEMA,
         SessionTarget,
         SessionTargetRegistry,
+        route_digest,
         route_obligation,
     )
     from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
@@ -1019,6 +1114,7 @@ def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
         SCHEMA as TARGET_SCHEMA,
         SessionTarget,
         SessionTargetRegistry,
+        route_digest,
         route_obligation,
     )
     from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
@@ -1072,6 +1168,10 @@ def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
         worker_id="worker-a",
         evidence_digest="4" * 64,
     )
+    (
+        attention_obligation, attention_route, obligation, route,
+        source_observation, physical_source,
+    ) = _phase3_dialogue_material(parent, candidate, obligation, route)
     grant = DialogueWakeCanaryActivationGrant(
         schema=CANARY_SCHEMA,
         installed_release_sha="a" * 40,
@@ -1127,6 +1227,7 @@ def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
                 retry_policy=kwargs["retry_policy"],
                 canary_profile=kwargs["canary_profile"],
                 historical_context_for=kwargs["historical_context_for"],
+                physical_source=kwargs.get("physical_source"),
             )
         client = CodexCurrentWriterWakeClient(
             operator_adapter=operator,
@@ -1145,6 +1246,7 @@ def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
             target_registry=registry,
             canary_profile=kwargs["canary_profile"],
             historical_context_for=kwargs["historical_context_for"],
+            physical_source=kwargs.get("physical_source"),
         )
 
     resolved = DialogueWakeTarget(
@@ -1170,6 +1272,9 @@ def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
         candidate=candidate,
         obligation=obligation,
         proposed_route=route,
+        source_observation=source_observation,
+        physical_source=physical_source,
+        transport_schema="mastermind.dialogue_wake_request/v2",
     )
 
     forged = dataclasses.replace(
@@ -1233,6 +1338,7 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         SCHEMA as TARGET_SCHEMA,
         SessionTarget,
         SessionTargetRegistry,
+        route_digest,
         route_obligation,
     )
     from control_plane.wake_ledger import (
@@ -1257,6 +1363,7 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
     from integrations.executive_wake.registry import WakeDispatcherRegistry
     from integrations.slack_agent_dialogue.contract_v2 import (
         PARENT_SCHEMA_V2,
+        build_message_v2,
         build_parent_v2,
     )
     from integrations.slack_agent_dialogue.persisted_wake_carrier import (
@@ -1481,6 +1588,10 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         emitted_at="2026-09-03T01:00:01Z",
     )
     route = route_obligation(obligation, registry, binding=binding)
+    (
+        attention_obligation, attention_route, obligation, route,
+        source_observation, physical_source,
+    ) = _phase3_dialogue_material(parent, candidate, obligation, route)
     grant = DialogueWakeCanaryActivationGrant(
         schema=CANARY_SCHEMA,
         installed_release_sha="a" * 40,
@@ -1585,6 +1696,7 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                 retry_policy=kwargs["retry_policy"],
                 canary_profile=kwargs["canary_profile"],
                 historical_context_for=historical_context,
+                physical_source=kwargs.get("physical_source"),
             )
         client = CodexCurrentWriterWakeClient(
             operator_adapter=kwargs["resolved"].operator_adapter,
@@ -1603,6 +1715,7 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
             target_registry=kwargs["resolved"].registry,
             canary_profile=kwargs["canary_profile"],
             historical_context_for=kwargs["historical_context_for"],
+            physical_source=kwargs.get("physical_source"),
         )
 
     clock = 1_700_000_100
@@ -1643,13 +1756,13 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
     monkeypatch.setattr(bridge, "_current_canary_facts", observed_current_facts)
     monkeypatch.setattr(bridge, "_resolve_historical_target", observed_historical_target)
     request = {
-        "schema": "mastermind.dialogue_wake_request/v1",
+        "schema": "mastermind.dialogue_wake_request/v2",
         "operation": SUBMIT_WAKE,
         "parent": parent,
-        "thread_ts": "1788000000.123456",
+        "source_observation": source_observation.to_dict(),
         "candidate": candidate.to_dict(),
-        "obligation": obligation.to_dict(),
-        "route": route.to_dict(),
+        "attention_obligation": attention_obligation.to_dict(),
+        "route": attention_route.to_dict(),
     }
 
     async def exchange(
@@ -1682,6 +1795,92 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                 "reason": "WAKE_RECORDED",
             }
             assert operator.deliver_calls == 1
+            source_progress, source_continuation, source_successor = (
+                _phase3_source_messages(parent, candidate)
+            )
+            source_frame = {
+                "schema": "mastermind.dialogue_source_reconcile_request/v1",
+                "operation": "RECONCILE_DIALOGUE_SOURCES",
+                "parent": parent,
+                "snapshot": {
+                    "workspace_id": source_observation.workspace_id,
+                    "channel_id": source_observation.channel_id,
+                    "thread_ts": source_observation.thread_ts,
+                    "parent_fingerprint": parent["fingerprint"],
+                    "operation_key": parent["operation_key"],
+                    "complete": True,
+                    "messages": [source_progress, source_continuation],
+                },
+            }
+            from control_plane.dialogue_source_resolution import (
+                DialogueSourceObservation,
+                PhysicalDialogueSourceIdentity,
+                attention_source_ref,
+                correlated_source_ref,
+            )
+            initial_key = f"asd-initial-{parent['fingerprint']}"
+            initial_attention = attention_source_ref(
+                parent_fingerprint=parent["fingerprint"],
+                message_key=initial_key,
+                target_seat="coo",
+            )
+            initial_logical = correlated_source_ref(
+                attention_source_ref=initial_attention,
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                candidate=candidate.to_dict(),
+            )
+            initial_obligation = mint_obligation(
+                wake_kind="dialogue_turn_pending",
+                source_kind="agent_dialogue_attention",
+                source_ref=initial_logical,
+                declared_target_seat="coo",
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                root_job_id=candidate.root_job_id,
+                source_workstream=parent["work_ref"],
+                source_created_at="2026-09-03T01:00:00Z",
+                emitted_at="2026-09-03T01:00:01Z",
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                dataclasses.replace(grant, obligation_id=initial_obligation.obligation_id)
+            )
+            initial_response = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {**source_frame["snapshot"], "messages": []},
+                },
+            )
+            assert initial_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "NO_RESOLUTION_REQUIRED",
+                "reason": "SOURCE_PRESENT",
+            }
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            provider_before_source = (operator.deliver_calls, operator.reconcile_calls)
+            present_source = await exchange(observation_path, source_frame)
+            assert present_source == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "NO_RESOLUTION_REQUIRED",
+                "reason": "SOURCE_PRESENT",
+            }
+            advanced_source = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
+                    },
+                },
+            )
+            assert advanced_source == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "ACK_REQUIRED",
+                "reason": "TARGET_ACK_REQUIRED",
+            }
+            assert (operator.deliver_calls, operator.reconcile_calls) == provider_before_source
             deliver_index = next(
                 index for index, item in enumerate(call_order) if item[0] == "deliver"
             )
@@ -2107,7 +2306,11 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                 )
                 service._dialogue_wake_handler = terminal_bridge
                 terminal_request = {
-                    **request,
+                    "schema": "mastermind.dialogue_wake_request/v1",
+                    "operation": SUBMIT_WAKE,
+                    "parent": parent,
+                    "thread_ts": "1788000000.123456",
+                    "candidate": candidate.to_dict(),
                     "obligation": terminal_obligation.to_dict(),
                     "route": terminal_route.to_dict(),
                 }
@@ -2147,6 +2350,244 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                     record.phase is LedgerPhase.DELIVERY_ATTEMPT
                     for record in after_terminal_socket
                 ) == 1
+            service._dialogue_wake_handler = bridge
+            main_records = tuple(
+                item.record for item in repository.list_records(obligation.obligation_id)
+            )
+            delivered = next(
+                record for record in main_records if record.phase is LedgerPhase.DELIVERED
+            )
+            ack = acknowledge(
+                obligation,
+                trusted=TrustedAckContext(
+                    ack_mode=AckMode.REASONING_SESSION,
+                    target_seat="coo",
+                    session_alias=binding.session_alias,
+                    reasoning_surface=binding.reasoning_surface,
+                    binding_id=binding.binding_id,
+                    binding_generation=binding.binding_generation,
+                    acknowledged_at="2026-09-03T01:02:00Z",
+                ),
+                claimed_obligation_ids=(obligation.obligation_id,),
+                delivered_command_id=delivered.command_id,
+            )
+            repository.append_record(ack_record(obligation, ack), obligation=obligation)
+            calls_before_resolution = (operator.deliver_calls, operator.reconcile_calls)
+            resolved_response = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
+                    },
+                },
+            )
+            assert resolved_response["state"] == "RECORDED"
+            resolution_history = tuple(
+                item.record for item in repository.list_records(obligation.obligation_id)
+            )
+            assert sum(record.phase is LedgerPhase.SOURCE_RESOLVED for record in resolution_history) == 1
+            replay_resolution = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
+                    },
+                },
+            )
+            assert replay_resolution == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED", "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            assert tuple(item.record for item in repository.list_records(obligation.obligation_id)) == resolution_history
+            assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
+
+            changed_grant = dataclasses.replace(
+                grant,
+                source_semantic_digest="f" * 64,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(changed_grant)
+            changed_grant_replay = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
+                    },
+                },
+            )
+            assert changed_grant_replay == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN", "reason": "SOURCE_GRANT_DISAGREES",
+            }
+            assert tuple(item.record for item in repository.list_records(obligation.obligation_id)) == resolution_history
+            assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+
+            result_message = build_message_v2(
+                {
+                    **source_progress,
+                    "message_key": "asd-result-invalid-interior",
+                    "message_type": "RESULT",
+                    "actor_ref": {
+                        "kind": "worker_attempt",
+                        "job_id": candidate.job_id,
+                        "attempt_id": candidate.attempt_id,
+                        "worker_id": candidate.worker_id,
+                    },
+                    "applies_to": {
+                        "kind": "executive_attempt",
+                        "job_id": candidate.job_id,
+                        "attempt_id": candidate.attempt_id,
+                        "worker_id": candidate.worker_id,
+                    },
+                    "reply_to_message_key": None,
+                    "body": {"status": "PASS", "result": "Result awaiting a Sol response."},
+                    "created_at": "2026-09-03T01:03:00Z",
+                    "fingerprint": "",
+                }
+            )
+            invalid_ruling = build_message_v2(
+                {
+                    **source_progress,
+                    "message_key": "asd-ruling-invalid-interior",
+                    "message_type": "RULING",
+                    "actor_ref": {
+                        "kind": "executive_surface",
+                        "seat": "ceo",
+                        "reasoning_surface": "codex",
+                    },
+                    "reply_to_message_key": result_message["message_key"],
+                    "body": {
+                        "authority_class": "WITHIN_COMMISSION",
+                        "selected_option": "opt-continue",
+                        "decision": "Continue.",
+                        "rationale": "Exercise the invalid interior transition.",
+                        "canonical_ref": None,
+                    },
+                    "created_at": "2026-09-03T01:03:01Z",
+                    "fingerprint": "",
+                }
+            )
+            later_progress = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-progress-after-invalid-interior",
+                    "reply_to_message_key": invalid_ruling["message_key"],
+                    "created_at": "2026-09-03T01:03:02Z",
+                    "fingerprint": "",
+                }
+            )
+            invalid_attention = attention_source_ref(
+                parent_fingerprint=parent["fingerprint"],
+                message_key=result_message["message_key"],
+                target_seat="ceo",
+            )
+            invalid_logical = correlated_source_ref(
+                attention_source_ref=invalid_attention,
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                candidate=candidate.to_dict(),
+            )
+            invalid_obligation = mint_obligation(
+                wake_kind="dialogue_turn_pending",
+                source_kind="agent_dialogue_attention",
+                source_ref=invalid_logical,
+                declared_target_seat="ceo",
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                root_job_id=candidate.root_job_id,
+                source_workstream=parent["work_ref"],
+                source_created_at="2026-09-03T01:03:00Z",
+                emitted_at="2026-09-03T01:03:01Z",
+            )
+            invalid_base_route = dataclasses.replace(
+                route,
+                obligation_id=invalid_obligation.obligation_id,
+                target_seat="ceo",
+                route_digest=route_digest(
+                    obligation_id=invalid_obligation.obligation_id,
+                    destination=route.destination_digest,
+                    policy_digest=route.policy_digest,
+                ),
+            )
+            invalid_grant = dataclasses.replace(
+                grant,
+                obligation_id=invalid_obligation.obligation_id,
+                target_seat="ceo",
+                policy_digest=invalid_base_route.policy_digest,
+            )
+            invalid_physical = PhysicalDialogueSourceIdentity.create(
+                logical_source_ref=invalid_logical,
+                obligation_id=invalid_obligation.obligation_id,
+                observation=DialogueSourceObservation(
+                    workspace_id=source_observation.workspace_id,
+                    channel_id=source_observation.channel_id,
+                    thread_ts=source_observation.thread_ts,
+                    predecessor_message_key=result_message["message_key"],
+                    predecessor_message_fingerprint=result_message["fingerprint"],
+                ),
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                target_seat="ceo",
+                candidate=candidate.to_dict(),
+            )
+            invalid_effective_route = effective_dialogue_wake_canary_route(
+                DialogueWakeCanaryProfile(invalid_grant), invalid_base_route
+            )
+            invalid_attempt = make_delivery_attempt(
+                invalid_obligation, invalid_effective_route, attempt_n=1
+            )
+            invalid_delivered = attempt_record(invalid_attempt, LedgerPhase.DELIVERED)
+            invalid_ack = acknowledge(
+                invalid_obligation,
+                trusted=TrustedAckContext(
+                    ack_mode=AckMode.REASONING_SESSION,
+                    target_seat="ceo",
+                    session_alias=binding.session_alias,
+                    reasoning_surface=binding.reasoning_surface,
+                    binding_id=binding.binding_id,
+                    binding_generation=binding.binding_generation,
+                    acknowledged_at="2026-09-03T01:04:00Z",
+                ),
+                claimed_obligation_ids=(invalid_obligation.obligation_id,),
+                delivered_command_id=invalid_delivered.command_id,
+            )
+            repository.append_records_atomic(
+                (
+                    (requested_record(invalid_obligation, physical_source=invalid_physical), invalid_obligation),
+                    (attempt_record(invalid_attempt, LedgerPhase.DELIVERY_ATTEMPT), invalid_obligation),
+                    (invalid_delivered, invalid_obligation),
+                    (ack_record(invalid_obligation, invalid_ack), invalid_obligation),
+                )
+            )
+            invalid_before = tuple(
+                item.record for item in repository.list_records(invalid_obligation.obligation_id)
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(invalid_grant)
+            invalid_response = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [result_message, invalid_ruling, later_progress],
+                    },
+                },
+            )
+            assert invalid_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN", "reason": "SOURCE_SUCCESSOR_REFUSED",
+            }
+            assert tuple(
+                item.record for item in repository.list_records(invalid_obligation.obligation_id)
+            ) == invalid_before
+            assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
         finally:
             await service.close()
 

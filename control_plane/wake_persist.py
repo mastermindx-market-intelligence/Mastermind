@@ -9,7 +9,7 @@ import dataclasses
 from typing import Sequence
 
 from control_plane.executive_runtime import Event, Runtime, RuntimeStore, StateConflict
-from control_plane.wake_events import WakeObligation, parse_obligation
+from control_plane.wake_events import WakeObligation
 from control_plane.wake_ledger import (
     ATTEMPT_PHASES,
     LedgerPhase,
@@ -212,7 +212,7 @@ class WakeLedgerRepository:
         record = wake_record_from_event(event)
         obligation = None
         if record.phase is LedgerPhase.WAKE_REQUESTED:
-            obligation = parse_obligation(event.payload)
+            obligation = record.obligation
         return PersistedWakeEvent(event=event, record=record, obligation=obligation)
 
     def _records_on_connection(self, connection, obligation_id: str) -> list[WakeLedgerRecord]:

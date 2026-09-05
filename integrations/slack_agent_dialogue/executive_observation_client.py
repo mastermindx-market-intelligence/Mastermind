@@ -12,7 +12,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+MAX_DIALOGUE_SOURCE_FRAME_BYTES = 64 * 1024
+
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
+from control_plane.dialogue_source_resolution import (
+    DialogueSourceObservation,
+    DialogueSourceReconciler,
+    DialogueSourceSnapshot,
+    attention_source_ref,
+)
 from control_plane.executive_dialogue_observation import (
     ACTIVE_CURRENT_WORKER,
     RECONCILE_WAKE,
@@ -24,7 +32,11 @@ from control_plane.executive_dialogue_observation import (
     TERMINAL_RESULT,
     TerminalProjectionReceiptReference,
     WAKE_REQUEST_SCHEMA,
+    WAKE_REQUEST_V2_SCHEMA,
     WAKE_RESPONSE_SCHEMA,
+    RECONCILE_DIALOGUE_SOURCES,
+    SOURCE_RECONCILE_REQUEST_SCHEMA,
+    SOURCE_RECONCILE_RESPONSE_SCHEMA,
 )
 from control_plane.executive_runtime import (
     AttemptStatus,
@@ -167,7 +179,7 @@ def _validated_thread_ts(value: str) -> str:
     return value
 
 
-class ExecutiveDialogueObservationClient:
+class ExecutiveDialogueObservationClient(DialogueSourceReconciler):
     """Perform exactly one request with one absolute timeout and no fallback."""
 
     def __init__(
@@ -218,6 +230,7 @@ class ExecutiveDialogueObservationClient:
         operation: str,
         obligation: WakeObligation,
         route: WakeRoute,
+        source_observation: DialogueSourceObservation | None = None,
     ) -> dict[str, Any]:
         if (
             operation not in {RECONCILE_WAKE, SUBMIT_WAKE}
@@ -227,6 +240,8 @@ class ExecutiveDialogueObservationClient:
             or self._wake_context is None
         ):
             raise WakePreSubmitError("dialogue Wake request is not bound")
+        attention_obligation = obligation
+        attention_route = route
         context = self._wake_context.get()
         try:
             if isinstance(context, Mapping):
@@ -292,6 +307,26 @@ class ExecutiveDialogueObservationClient:
             ValueError,
         ):
             raise WakePreSubmitError("dialogue Wake parent context is invalid") from None
+        if source_observation is not None:
+            if (
+                type(source_observation) is not DialogueSourceObservation
+                or source_observation.thread_ts != thread_ts
+                or attention_source_ref(
+                    parent_fingerprint=parent["fingerprint"],
+                    message_key=source_observation.predecessor_message_key,
+                    target_seat=attention_obligation.declared_target_seat,
+                ) != attention_obligation.source_ref
+            ):
+                raise WakePreSubmitError("dialogue Wake physical source is invalid")
+            return {
+                "schema": WAKE_REQUEST_V2_SCHEMA,
+                "operation": operation,
+                "parent": parent,
+                "source_observation": source_observation.to_dict(),
+                "candidate": candidate,
+                "attention_obligation": attention_obligation.to_dict(),
+                "route": attention_route.to_dict(),
+            }
         return {
             "schema": WAKE_REQUEST_SCHEMA,
             "operation": operation,
@@ -374,6 +409,21 @@ class ExecutiveDialogueObservationClient:
         )
         return WakeCarrierState(response["state"])
 
+    async def reconcile_from_source(
+        self,
+        source: DialogueSourceObservation,
+        obligation: WakeObligation,
+        route: WakeRoute,
+    ) -> WakeCarrierState:
+        response = await self._wake_exchange(
+            self._wake_request(
+                operation=RECONCILE_WAKE, obligation=obligation, route=route,
+                source_observation=source,
+            ),
+            submit=False,
+        )
+        return WakeCarrierState(response["state"])
+
     async def submit(
         self,
         obligation: WakeObligation,
@@ -392,6 +442,69 @@ class ExecutiveDialogueObservationClient:
         if response["state"] == "EFFECT_UNKNOWN":
             raise WakeEffectUnknownError("Executive recorded an unknown Wake effect")
         raise WakePreSubmitError("Executive proved no Wake submit effect")
+
+    async def submit_from_source(
+        self,
+        source: DialogueSourceObservation,
+        obligation: WakeObligation,
+        route: WakeRoute,
+    ) -> None:
+        response = await self._wake_exchange(
+            self._wake_request(
+                operation=SUBMIT_WAKE, obligation=obligation, route=route,
+                source_observation=source,
+            ),
+            submit=True,
+        )
+        if response["state"] == "RECORDED":
+            return
+        if response["state"] == "EFFECT_UNKNOWN":
+            raise WakeEffectUnknownError("Executive recorded an unknown Wake effect")
+        raise WakePreSubmitError("Executive proved no Wake submit effect")
+
+    async def reconcile_dialogue_sources(self, snapshot: object) -> object:
+        if type(snapshot) is not DialogueSourceSnapshot or self._wake_context is None:
+            raise ExecutiveObservationClientError("RESPONSE_REFUSED")
+        context = self._wake_context.get()
+        try:
+            parent_value = (
+                context["parent"] if isinstance(context, Mapping)
+                else context.dialogue_parent
+            )
+            thread_value = (
+                context["thread_ts"] if isinstance(context, Mapping)
+                else context.thread_ts
+            )
+            parent = _validated_parent(parent_value)
+            thread_ts = _validated_thread_ts(thread_value)
+            if (
+                snapshot.parent_fingerprint != parent["fingerprint"]
+                or snapshot.operation_key != parent["operation_key"]
+                or snapshot.thread_ts != thread_ts
+            ):
+                raise ValueError
+        except Exception:
+            raise ExecutiveObservationClientError("RESPONSE_REFUSED") from None
+        request = {
+            "schema": SOURCE_RECONCILE_REQUEST_SCHEMA,
+            "operation": RECONCILE_DIALOGUE_SOURCES,
+            "parent": parent,
+            "snapshot": snapshot.to_dict(),
+        }
+        if len(_canonical_json(request)) + 1 > MAX_DIALOGUE_SOURCE_FRAME_BYTES:
+            raise ExecutiveObservationClientError("RESPONSE_REFUSED")
+        response = await self._exchange(request)
+        if (
+            set(response) != {"schema", "state", "reason"}
+            or response.get("schema") != SOURCE_RECONCILE_RESPONSE_SCHEMA
+            or response.get("state") not in {
+                "NOT_APPLICABLE", "NO_RESOLUTION_REQUIRED", "ACK_REQUIRED",
+                "CARRIER_IDENTITY_UNAVAILABLE", "RECORDED", "UNKNOWN",
+            }
+            or not isinstance(response.get("reason"), str)
+        ):
+            raise ExecutiveObservationClientError("RESPONSE_REFUSED")
+        return response
 
     async def _exchange(self, request: Mapping[str, Any]) -> dict[str, Any]:
         writer: asyncio.StreamWriter | None = None

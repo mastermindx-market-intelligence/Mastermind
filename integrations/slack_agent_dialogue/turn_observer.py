@@ -17,6 +17,12 @@ from control_plane.session_targets import (
     WakeRoute,
     route_obligation,
 )
+from control_plane.dialogue_source_resolution import (
+    DialogueSourceObservation,
+    DialogueSourceMessage,
+    DialogueSourceReconciler,
+    DialogueSourceSnapshot,
+)
 from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
 from control_plane.wake_events import WakeObligation, utc_now_iso
 from integrations.slack_agent_dialogue.contract import DialogueContractError
@@ -153,7 +159,7 @@ class DialogueTurnObserver:
 
     async def _accepted_history(
         self, context: DialogueContextV2
-    ) -> tuple[dict[str, object], tuple[dict[str, object], ...]]:
+    ) -> tuple[dict[str, object], tuple[dict[str, object], ...], str]:
         normalized = context.normalized()
         channel = await self._page(
             self.client.fetch_channel_history(
@@ -244,7 +250,7 @@ class DialogueTurnObserver:
             ):
                 continue
             messages.append(message)
-        return parent, tuple(messages)
+        return parent, tuple(messages), parent_transport.ts
 
     @staticmethod
     def _receipt(
@@ -270,7 +276,7 @@ class DialogueTurnObserver:
         routing: TurnRoutingFacts,
     ) -> ObservationReceipt:
         try:
-            parent, messages = await self._accepted_history(context)
+            parent, messages, parent_thread_ts = await self._accepted_history(context)
         except _HistoryIncomplete as exc:
             return self._receipt(
                 ObservationOutcome.RECONCILIATION_INCOMPLETE, str(exc)
@@ -287,6 +293,30 @@ class DialogueTurnObserver:
                 decision.refusal_code or decision.reason,
                 decision=decision,
             )
+        if isinstance(self.wake_carrier, DialogueSourceReconciler):
+            try:
+                source_messages = tuple(
+                    DialogueSourceMessage.create(message) for message in messages
+                )
+                source_result = await self.wake_carrier.reconcile_dialogue_sources(
+                    DialogueSourceSnapshot(
+                        workspace_id=self.policy.workspace_id,
+                        channel_id=self.policy.channel_id,
+                        thread_ts=parent_thread_ts,
+                        parent_fingerprint=str(parent["fingerprint"]),
+                        operation_key=str(parent["operation_key"]),
+                        messages=source_messages,
+                    )
+                )
+                source_state = source_result.get("state")
+            except Exception:
+                source_state = "UNKNOWN"
+            if source_state not in {"NOT_APPLICABLE", "NO_RESOLUTION_REQUIRED", "RECORDED"}:
+                return self._receipt(
+                    ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                    "DIALOGUE_SOURCE_RECONCILIATION_REQUIRED",
+                    decision=decision,
+                )
         if decision.attention is None:
             return self._receipt(
                 ObservationOutcome.NO_ACTION,
@@ -295,6 +325,13 @@ class DialogueTurnObserver:
             )
 
         attention: AgentDialogueAttention = decision.attention
+        source_observation = DialogueSourceObservation(
+            workspace_id=self.policy.workspace_id,
+            channel_id=self.policy.channel_id,
+            thread_ts=parent_thread_ts,
+            predecessor_message_key=attention.message_key,
+            predecessor_message_fingerprint=attention.message_fingerprint,
+        )
         source_message = next(
             (
                 message
@@ -358,7 +395,12 @@ class DialogueTurnObserver:
             )
 
         try:
-            carrier_state = await self.wake_carrier.reconcile(obligation, route)
+            if isinstance(self.wake_carrier, DialogueSourceReconciler):
+                carrier_state = await self.wake_carrier.reconcile_from_source(
+                    source_observation, obligation, route
+                )
+            else:
+                carrier_state = await self.wake_carrier.reconcile(obligation, route)
         except Exception:
             return self._receipt(
                 ObservationOutcome.RECONCILIATION_INCOMPLETE,
@@ -394,7 +436,12 @@ class DialogueTurnObserver:
                 route=route,
             )
         try:
-            await self.wake_carrier.submit(obligation, route)
+            if isinstance(self.wake_carrier, DialogueSourceReconciler):
+                await self.wake_carrier.submit_from_source(
+                    source_observation, obligation, route
+                )
+            else:
+                await self.wake_carrier.submit(obligation, route)
         except WakePreSubmitError:
             return self._receipt(
                 ObservationOutcome.RECONCILIATION_INCOMPLETE,

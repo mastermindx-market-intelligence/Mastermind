@@ -10,6 +10,11 @@ from pathlib import Path
 
 import pytest
 
+from control_plane.dialogue_source_resolution import (
+    DialogueSourceMessage,
+    DialogueSourceSnapshot,
+)
+
 from control_plane.executive_dialogue_observation import (
     DialogueCandidateReference,
     RECONCILE_WAKE,
@@ -595,5 +600,45 @@ def test_coordination_submit_connection_failure_is_known_pre_submit(
         obligation, route = _wake_pair()
         with pytest.raises(WakePreSubmitError):
             await client.submit(obligation, route)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("mismatch", ["thread", "oversized"])
+def test_source_reconcile_refuses_context_drift_and_oversize_before_socket_io(
+    socket_root: Path,
+    mismatch: str,
+) -> None:
+    async def scenario() -> None:
+        parent = valid_parent()
+        context = ContextVar("source_reconcile_context", default=None)
+        context.set(
+            {
+                "parent": parent,
+                "thread_ts": THREAD_TS,
+                "candidate": DialogueCandidateReference(**_candidate_reference()),
+            }
+        )
+        client = ExecutiveDialogueObservationClient(socket_root / "never-opened.sock")
+        client.bind_wake_context(context)
+        messages = ()
+        thread_ts = "1787961600.000002" if mismatch == "thread" else THREAD_TS
+        if mismatch == "oversized":
+            messages = tuple(
+                DialogueSourceMessage.create(
+                    {"message_key": f"source-{index:02d}", "padding": "x" * 2000}
+                )
+                for index in range(40)
+            )
+        snapshot = DialogueSourceSnapshot(
+            workspace_id="T0BRD2AQXQV",
+            channel_id="C0BSBM78V1N",
+            thread_ts=thread_ts,
+            parent_fingerprint=parent["fingerprint"],
+            operation_key=parent["operation_key"],
+            messages=messages,
+        )
+        with pytest.raises(ExecutiveObservationClientError, match="RESPONSE_REFUSED"):
+            await client.reconcile_dialogue_sources(snapshot)
 
     asyncio.run(scenario())

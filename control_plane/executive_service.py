@@ -72,6 +72,7 @@ from control_plane.executive_dialogue_observation import (
     DialogueObservationFacts,
     DialogueObservationProtocolError,
     DialogueWakeRequest,
+    DialogueSourceReconcileRequest,
     RECONCILE_WAKE,
     SUBMIT_WAKE,
     PublicRuntimeBindingFacts,
@@ -84,9 +85,11 @@ from control_plane.executive_dialogue_observation import (
     TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT as _TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT,
     TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT as _TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT,
     parse_observation_request,
+    parse_source_reconcile_request,
     parse_wake_request,
     reduce_dialogue_observation,
     response_bytes as dialogue_observation_response_bytes,
+    SOURCE_RECONCILE_RESPONSE_SCHEMA,
 )
 from control_plane.executive_terminal_return import (
     TerminalReturnCandidate,
@@ -412,7 +415,246 @@ class ExecutiveDialogueWakeBridge:
     def canary_profile(self) -> Any:
         return self._canary_profile
 
-    def _historical_carrier(self, runtime: Runtime) -> Any:
+    def reconcile_dialogue_sources(
+        self, runtime: Runtime, request: DialogueSourceReconcileRequest
+    ) -> dict[str, str]:
+        """Reconcile one accepted source snapshot without provider access."""
+
+        from control_plane.dialogue_source_resolution import (
+            DialogueSourceSnapshot, attention_source_ref, correlated_source_ref,
+        )
+        from control_plane.executive_dialogue_observation import (
+            ACTIVE_CURRENT_WORKER, TERMINAL_RESULT,
+        )
+        from control_plane.wake_events import canonical_json_bytes, mint_obligation_id
+        from control_plane.wake_ledger import (
+            LedgerPhase, SourceReadHealth, SourceResolutionCode,
+            resolve_source, resolved_record,
+        )
+        from control_plane.wake_persist import WakeLedgerRepository
+        from control_plane.session_targets import route_digest
+        from integrations.slack_agent_dialogue.turn_watcher import (
+            TurnAction, TurnRoutingFacts, classify_turn,
+        )
+
+        profile = self._canary_profile
+        if profile is None:
+            return {"state": "NOT_APPLICABLE", "reason": "NONCANARY_PROFILE"}
+        grant = profile.grant
+        if grant is None or type(request.snapshot) is not DialogueSourceSnapshot:
+            return {"state": "UNKNOWN", "reason": "CANARY_GRANT_UNAVAILABLE"}
+        snapshot = request.snapshot
+        if (
+            request.parent.get("operation_key") != grant.operation_key
+            or snapshot.operation_key != grant.operation_key
+        ):
+            return {"state": "UNKNOWN", "reason": "SOURCE_IDENTITY_DISAGREES"}
+        messages = tuple(item.to_dict() for item in snapshot.messages)
+        decision = classify_turn(
+            parent=request.parent,
+            messages=messages,
+            routing=TurnRoutingFacts(
+                bound_operation_key=grant.operation_key,
+                bound_commission_fingerprint=snapshot.parent_fingerprint,
+                root_job_id=grant.source_root_job_id,
+                routing_workstream=None,
+                source_workstream=str(request.parent["work_ref"]),
+                ceo_target_bound=True,
+                coo_target_bound=True,
+            ),
+        )
+        if decision.action is TurnAction.REFUSE:
+            return {"state": "UNKNOWN", "reason": "SOURCE_SEMANTICS_REFUSED"}
+        repository = WakeLedgerRepository(runtime)
+        try:
+            with runtime.store.transaction() as connection:
+                records = repository.list_ledger_records_on_connection(
+                    connection, grant.obligation_id
+                )
+                if not records:
+                    matches = 0
+                    if decision.attention is not None:
+                        for mode in (ACTIVE_CURRENT_WORKER, TERMINAL_RESULT):
+                            candidate = {
+                                "mode": mode,
+                                "root_job_id": grant.source_root_job_id,
+                                "job_id": grant.source_job_id,
+                                "attempt_id": grant.source_attempt_id,
+                                "worker_id": grant.source_worker_id,
+                                "evidence_digest": grant.source_semantic_digest,
+                            }
+                            attention = attention_source_ref(
+                                parent_fingerprint=snapshot.parent_fingerprint,
+                                message_key=decision.attention.message_key,
+                                target_seat=grant.target_seat,
+                            )
+                            logical = correlated_source_ref(
+                                attention_source_ref=attention,
+                                parent_fingerprint=snapshot.parent_fingerprint,
+                                operation_key=snapshot.operation_key,
+                                candidate=candidate,
+                            )
+                            if mint_obligation_id(
+                                source_kind="agent_dialogue_attention",
+                                source_ref=logical,
+                                wake_kind="dialogue_turn_pending",
+                            ) == grant.obligation_id:
+                                matches += 1
+                    if matches == 1:
+                        return {"state": "NO_RESOLUTION_REQUIRED", "reason": "SOURCE_PRESENT"}
+                    return {"state": "ACK_REQUIRED", "reason": "ADVANCED_WITHOUT_REQUEST"}
+                requested = records[0]
+                obligation = requested.obligation
+                physical = requested.physical_source
+                if obligation is None or physical is None:
+                    return {"state": "CARRIER_IDENTITY_UNAVAILABLE", "reason": "LEGACY_SOURCE_IDENTITY"}
+                if (
+                    physical.workspace_id != snapshot.workspace_id
+                    or physical.channel_id != snapshot.channel_id
+                    or physical.thread_ts != snapshot.thread_ts
+                    or physical.parent_fingerprint != snapshot.parent_fingerprint
+                    or physical.operation_key != snapshot.operation_key
+                    or physical.obligation_id != grant.obligation_id
+                ):
+                    return {"state": "UNKNOWN", "reason": "SOURCE_CARRIER_DISAGREES"}
+                candidate = physical.candidate
+                if (
+                    candidate.root_job_id != grant.source_root_job_id
+                    or candidate.job_id != grant.source_job_id
+                    or candidate.attempt_id != grant.source_attempt_id
+                    or candidate.worker_id != grant.source_worker_id
+                    or candidate.evidence_digest != grant.source_semantic_digest
+                    or physical.target_seat != grant.target_seat
+                    or obligation.root_job_id != grant.source_root_job_id
+                    or obligation.job_id != grant.source_job_id
+                    or obligation.attempt_id != grant.source_attempt_id
+                    or obligation.declared_target_seat != grant.target_seat
+                    or obligation.source_workstream != request.parent["work_ref"]
+                ):
+                    return {"state": "UNKNOWN", "reason": "SOURCE_GRANT_DISAGREES"}
+                delivery_attempts = tuple(
+                    record for record in records
+                    if record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                )
+                if len(delivery_attempts) > 1:
+                    return {"state": "UNKNOWN", "reason": "SOURCE_ATTEMPT_AMBIGUOUS"}
+                if delivery_attempts:
+                    attempted = delivery_attempts[0]
+                    effective_policy = hashlib.sha256(
+                        canonical_json_bytes(
+                            {
+                                "base_policy_digest": grant.policy_digest,
+                                "grant_digest": grant.digest,
+                            }
+                        )
+                    ).hexdigest()[:16]
+                    expected_route_digest = route_digest(
+                        obligation_id=grant.obligation_id,
+                        destination=str(attempted.destination_digest),
+                        policy_digest=effective_policy,
+                    )
+                    if (
+                        attempted.attempt_n != 1
+                        or attempted.binding_id != grant.binding_id
+                        or attempted.binding_generation != grant.binding_generation
+                        or attempted.session_alias != grant.target_session_alias
+                        or attempted.route_digest != expected_route_digest
+                    ):
+                        return {"state": "UNKNOWN", "reason": "SOURCE_ATTEMPT_DISAGREES"}
+                phases = {record.phase for record in records}
+                if LedgerPhase.SOURCE_RESOLVED in phases:
+                    return {"state": "RECORDED", "reason": "SOURCE_ALREADY_RESOLVED"}
+                predecessor_documents = tuple(
+                    message for message in messages
+                    if message["message_key"] == physical.predecessor_message_key
+                    and message["fingerprint"] == physical.predecessor_message_fingerprint
+                )
+                initial_key = f"asd-initial-{snapshot.parent_fingerprint}"
+                predecessor_proven = bool(predecessor_documents) or (
+                    physical.predecessor_message_key == initial_key
+                    and physical.predecessor_message_fingerprint == snapshot.parent_fingerprint
+                )
+                expected_attention = attention_source_ref(
+                    parent_fingerprint=snapshot.parent_fingerprint,
+                    message_key=physical.predecessor_message_key,
+                    target_seat=physical.target_seat,
+                )
+                present = (
+                    predecessor_proven
+                    and decision.attention is not None
+                    and decision.attention.source_ref == expected_attention
+                )
+                if present:
+                    return {"state": "NO_RESOLUTION_REQUIRED", "reason": "SOURCE_PRESENT"}
+                if LedgerPhase.TARGET_ACKNOWLEDGED not in phases:
+                    return {"state": "ACK_REQUIRED", "reason": "TARGET_ACK_REQUIRED"}
+                successors = []
+                initial_predecessor = (
+                    physical.predecessor_message_key == initial_key
+                    and physical.predecessor_message_fingerprint == snapshot.parent_fingerprint
+                )
+                for message in messages:
+                    if (
+                        message["reply_to_message_key"]
+                        != (None if initial_predecessor else physical.predecessor_message_key)
+                    ):
+                        continue
+                    actor = message["actor_ref"]
+                    executive_target = (
+                        actor["kind"] == "executive_surface"
+                        and actor["seat"] == physical.target_seat
+                    )
+                    worker_target = (
+                        physical.target_seat == "coo"
+                        and actor["kind"] == "worker_attempt"
+                        and actor["job_id"] == physical.candidate.job_id
+                        and actor["attempt_id"] == physical.candidate.attempt_id
+                        and actor["worker_id"] == physical.candidate.worker_id
+                    )
+                    if executive_target or worker_target:
+                        successors.append(message)
+                if not predecessor_proven or len(successors) != 1:
+                    return {"state": "UNKNOWN", "reason": "SOURCE_SUCCESSOR_AMBIGUOUS"}
+                successor = successors[0]
+                by_key = {message["message_key"]: message for message in messages}
+                causal_prefix = []
+                cursor = successor
+                while cursor is not None:
+                    causal_prefix.append(cursor)
+                    reply_to = cursor["reply_to_message_key"]
+                    cursor = by_key.get(reply_to) if reply_to is not None else None
+                causal_prefix.reverse()
+                direct_decision = classify_turn(
+                    parent=request.parent,
+                    messages=causal_prefix,
+                    routing=TurnRoutingFacts(
+                        bound_operation_key=grant.operation_key,
+                        bound_commission_fingerprint=snapshot.parent_fingerprint,
+                        root_job_id=grant.source_root_job_id,
+                        routing_workstream=None,
+                        source_workstream=str(request.parent["work_ref"]),
+                        ceo_target_bound=True,
+                        coo_target_bound=True,
+                    ),
+                )
+                if direct_decision.action is TurnAction.REFUSE:
+                    return {"state": "UNKNOWN", "reason": "SOURCE_SUCCESSOR_REFUSED"}
+                resolution = resolve_source(
+                    obligation,
+                    code=SourceResolutionCode.DIALOGUE_ATTENTION_ABSENT,
+                    health=SourceReadHealth.HEALTHY,
+                    source_present=False,
+                    snapshot_digest=snapshot.digest,
+                    evidence_refs=(str(successor["fingerprint"]),),
+                )
+                repository.append_records_on_connection(
+                    connection, ((resolved_record(obligation, resolution), None),)
+                )
+                return {"state": "RECORDED", "reason": "SOURCE_RESOLVED"}
+        except Exception:
+            return {"state": "UNKNOWN", "reason": "SOURCE_RECONCILIATION_UNKNOWN"}
+
+    def _historical_carrier(self, runtime: Runtime, request: DialogueWakeRequest) -> Any:
         profile = self._canary_profile
         if profile is None:
             raise TypeError("historical carrier requires the closed canary profile")
@@ -434,6 +676,7 @@ class ExecutiveDialogueWakeBridge:
             pre_submit_guard=None,
             historical_context_for=resolve,
             historical_only=True,
+            physical_source=request.physical_source,
         )
 
     def _resolve_historical_target(self, runtime: Runtime, attempt: Any) -> Any:
@@ -627,7 +870,7 @@ class ExecutiveDialogueWakeBridge:
             )
         )
         try:
-            carrier = self._historical_carrier(runtime)
+            carrier = self._historical_carrier(runtime, request)
             has_attempt = carrier.has_persisted_attempt(request.obligation)
             if request_mismatch:
                 if has_attempt:
@@ -778,6 +1021,8 @@ class ExecutiveDialogueWakeBridge:
                 or historical.reason != "WAKE_NOT_RECORDED"
             ):
                 return historical
+            if request.physical_source is None:
+                return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
         provider = self._target_provider
         try:
             resolved = (
@@ -865,6 +1110,7 @@ class ExecutiveDialogueWakeBridge:
                         else self._resolve_historical_target(runtime, attempt)
                     ),
                     "historical_only": False,
+                    "physical_source": request.physical_source,
                 }
             carrier = self._carrier_factory(
                 runtime=runtime,
@@ -2945,6 +3191,34 @@ class ExecutiveControlService:
                 return
             provider = self._dialogue_observation_facts_provider
             runtime = self._require_runtime()
+            try:
+                source_request = parse_source_reconcile_request(raw)
+            except DialogueObservationProtocolError:
+                source_request = None
+            if source_request is not None:
+                wake_handler = self._dialogue_wake_handler
+                if (
+                    type(wake_handler) is ExecutiveDialogueWakeBridge
+                    and wake_handler.canary_profile is not None
+                ):
+                    source_result = await asyncio.to_thread(
+                        wake_handler.reconcile_dialogue_sources,
+                        runtime,
+                        source_request,
+                    )
+                else:
+                    source_result = {
+                        "state": "NOT_APPLICABLE",
+                        "reason": "NONCANARY_PROFILE",
+                    }
+                await self._send_dialogue_observation(
+                    writer,
+                    {
+                        "schema": SOURCE_RECONCILE_RESPONSE_SCHEMA,
+                        **source_result,
+                    },
+                )
+                return
             try:
                 request = parse_observation_request(raw)
             except DialogueObservationProtocolError:
