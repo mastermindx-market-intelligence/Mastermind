@@ -480,6 +480,20 @@ class ExecutiveDialogueWakeBridge:
                     matches = 0
                     matched_physical = None
                     if decision.attention is not None:
+                        classified_attention = attention_source_ref(
+                            parent_fingerprint=snapshot.parent_fingerprint,
+                            message_key=decision.attention.message_key,
+                            target_seat=grant.target_seat,
+                        )
+                        if (
+                            decision.attention.target_seat != grant.target_seat
+                            or decision.attention.source_ref
+                            != classified_attention
+                        ):
+                            return {
+                                "state": "UNKNOWN",
+                                "reason": "SOURCE_GRANT_DISAGREES",
+                            }
                         for mode in (ACTIVE_CURRENT_WORKER, TERMINAL_RESULT):
                             candidate = {
                                 "mode": mode,
@@ -489,13 +503,8 @@ class ExecutiveDialogueWakeBridge:
                                 "worker_id": grant.source_worker_id,
                                 "evidence_digest": grant.source_semantic_digest,
                             }
-                            attention = attention_source_ref(
-                                parent_fingerprint=snapshot.parent_fingerprint,
-                                message_key=decision.attention.message_key,
-                                target_seat=grant.target_seat,
-                            )
                             logical = correlated_source_ref(
-                                attention_source_ref=attention,
+                                attention_source_ref=classified_attention,
                                 parent_fingerprint=snapshot.parent_fingerprint,
                                 operation_key=snapshot.operation_key,
                                 candidate=candidate,

@@ -713,6 +713,58 @@ def test_incomplete_bounded_history_refuses_before_wake_carrier() -> None:
     asyncio.run(scenario())
 
 
+def test_source_outage_and_text_only_reply_cannot_prove_source_absence() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+
+        class OutageClient(InMemorySlackClient):
+            async def fetch_channel_history(self, *_args, **_kwargs):
+                raise TimeoutError("diagnostic Slack outage")
+
+        outage_carrier = SourceAwareRecordingWakeCarrier("RECORDED")
+        outage = DialogueTurnObserver(
+            policy=_policy(),
+            client=OutageClient(relay_bot_user_id=RELAY_USER),
+            registry=_registry(),
+            wake_carrier=outage_carrier,
+        )
+        outage_result = await outage.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert outage_result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert outage_result.reason == "TRANSPORT_UNAVAILABLE"
+        assert outage_carrier.source_calls == []
+        assert outage_carrier.reconcile_calls == []
+        assert outage_carrier.submit_calls == []
+
+        text_client = _client(parent)
+        text_client.add_reply(
+            SlackMessage(
+                ts="1787961600.000004",
+                author_user_id=RELAY_USER,
+                text="Completed successfully without a canonical V2 frame.",
+                thread_ts=PARENT_TS,
+            )
+        )
+        text_carrier = SourceAwareRecordingWakeCarrier("ACK_REQUIRED")
+        text_observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=text_client,
+            registry=_registry(),
+            wake_carrier=text_carrier,
+        )
+        text_result = await text_observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert text_result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert len(text_carrier.source_calls) == 1
+        assert text_carrier.source_calls[0].messages == ()
+        assert text_carrier.reconcile_calls == []
+        assert text_carrier.submit_calls == []
+
+    asyncio.run(scenario())
+
+
 def test_unbound_root_target_refuses_without_seat_fallback_or_carrier_call() -> None:
     async def scenario() -> None:
         parent = _parent()

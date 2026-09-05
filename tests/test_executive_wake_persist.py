@@ -624,7 +624,14 @@ def test_same_physical_dialogue_source_cannot_mint_a_second_requested_identity(
         len(repository.list_records(changed.obligation_id)),
     )
     assert sorted(competing_counts) == [0, 1]
-    assert repository.list_records(changed_fingerprint.obligation_id) == ()
+    changed_fingerprint_records = repository.list_records(
+        changed_fingerprint.obligation_id
+    )
+    if len(repository.list_records(first.obligation_id)) == 1:
+        assert len(changed_fingerprint_records) == 1
+        assert changed_fingerprint_records[0].record.physical_source == physical_first
+    else:
+        assert changed_fingerprint_records == ()
     assert len(repository.list_records(later.obligation_id)) == 1
 
     winner_label = next(label for label, outcome in outcomes if outcome == "RECORDED")

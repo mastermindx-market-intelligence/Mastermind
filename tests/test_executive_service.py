@@ -1389,6 +1389,7 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         resolved_record,
     )
     from control_plane.wake_persist import WakeLedgerRepository
+    from control_plane.wake_events import mint_obligation_id
     from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
     from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
     from integrations.executive_wake.registry import WakeDispatcherRegistry
@@ -1841,8 +1842,12 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         try:
             import integrations.slack_agent_dialogue.runtime as relay_runtime
             from control_plane.dialogue_source_resolution import (
+                DialogueSourceObservation,
                 DialogueSourceMessage,
                 DialogueSourceSnapshot,
+                PhysicalDialogueSourceIdentity,
+                attention_source_ref,
+                correlated_source_ref,
             )
             from integrations.slack_agent_dialogue.engine import (
                 DialogueEngine,
@@ -2142,6 +2147,94 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                     "messages": list(composition_messages),
                 },
             }
+            blocked_for_ceo = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-blocked-source-target",
+                    "message_type": "BLOCKED",
+                    "reply_to_message_key": None,
+                    "body": {
+                        "blocker_code": "SOURCE_MOVED",
+                        "reason": "The protected source moved.",
+                        "needed_from": "sol",
+                        "work_paused": True,
+                    },
+                    "requires_response": True,
+                    "created_at": "2026-09-03T01:00:03Z",
+                    "fingerprint": "",
+                }
+            )
+            from integrations.slack_agent_dialogue.turn_watcher import (
+                TurnRoutingFacts,
+                classify_turn,
+            )
+            blocked_decision = classify_turn(
+                parent=parent,
+                messages=[blocked_for_ceo],
+                routing=TurnRoutingFacts(
+                    bound_operation_key=parent["operation_key"],
+                    bound_commission_fingerprint=parent["fingerprint"],
+                    root_job_id=candidate.root_job_id,
+                    routing_workstream=None,
+                    source_workstream=parent["work_ref"],
+                    ceo_target_bound=True,
+                    coo_target_bound=True,
+                ),
+            )
+            assert blocked_decision.action.value == "WAKE_CEO", blocked_decision
+
+            def mismatched_target_grant(message, *, target_seat):
+                mismatched_attention = attention_source_ref(
+                    parent_fingerprint=parent["fingerprint"],
+                    message_key=message["message_key"],
+                    target_seat=target_seat,
+                )
+                mismatched_logical = correlated_source_ref(
+                    attention_source_ref=mismatched_attention,
+                    parent_fingerprint=parent["fingerprint"],
+                    operation_key=parent["operation_key"],
+                    candidate=candidate.to_dict(),
+                )
+                return dataclasses.replace(
+                    grant,
+                    obligation_id=mint_obligation_id(
+                        source_kind="agent_dialogue_attention",
+                        source_ref=mismatched_logical,
+                        wake_kind="dialogue_turn_pending",
+                    ),
+                    target_seat=target_seat,
+                )
+
+            target_mismatch_cases = (
+                (
+                    composition_source_frame,
+                    mismatched_target_grant(
+                        composition_messages[-1], target_seat="ceo"
+                    ),
+                ),
+                (
+                    {
+                        **composition_source_frame,
+                        "snapshot": {
+                            **composition_source_frame["snapshot"],
+                            "messages": [blocked_for_ceo],
+                        },
+                    },
+                    mismatched_target_grant(blocked_for_ceo, target_seat="coo"),
+                ),
+            )
+            for mismatch_frame, mismatch_grant in target_mismatch_cases:
+                bridge._canary_profile = DialogueWakeCanaryProfile(mismatch_grant)
+                assert await exchange(observation_path, mismatch_frame) == {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "UNKNOWN",
+                    "reason": "SOURCE_GRANT_DISAGREES",
+                }
+                assert WakeLedgerRepository(runtime).list_records(
+                    mismatch_grant.obligation_id
+                ) == ()
+                assert (operator.deliver_calls, operator.reconcile_calls) == (0, 0)
+
             terminal_mode_candidate = dataclasses.replace(
                 candidate,
                 mode="TERMINAL_RESULT",
@@ -2874,17 +2967,54 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                     operator.deliver_calls,
                     operator.reconcile_calls,
                 ) == calls_before_resolution
+            resolved_source_payload = {
+                **source_frame,
+                "snapshot": {
+                    **source_frame["snapshot"],
+                    "messages": [
+                        *source_frame["snapshot"]["messages"],
+                        source_successor,
+                    ],
+                },
+            }
+            original_source_send = service._send_dialogue_observation
+            dropped_resolution_response = False
+
+            async def drop_first_resolution_response(writer, payload):
+                nonlocal dropped_resolution_response
+                if (
+                    not dropped_resolution_response
+                    and payload.get("schema")
+                    == "mastermind.dialogue_source_reconcile_response/v1"
+                    and payload.get("state") == "RECORDED"
+                ):
+                    dropped_resolution_response = True
+                    writer.close()
+                    return
+                await original_source_send(writer, payload)
+
+            monkeypatch.setattr(
+                service,
+                "_send_dialogue_observation",
+                drop_first_resolution_response,
+            )
+            with pytest.raises(json.JSONDecodeError):
+                await exchange(observation_path, resolved_source_payload)
+            assert dropped_resolution_response
+            monkeypatch.setattr(
+                service,
+                "_send_dialogue_observation",
+                original_source_send,
+            )
             resolved_response = await exchange(
                 observation_path,
-                {
-                    **source_frame,
-                    "snapshot": {
-                        **source_frame["snapshot"],
-                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
-                    },
-                },
+                resolved_source_payload,
             )
-            assert resolved_response["state"] == "RECORDED"
+            assert resolved_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED",
+                "reason": "SOURCE_ALREADY_RESOLVED",
+            }
             resolution_history = tuple(
                 item.record for item in repository.list_records(obligation.obligation_id)
             )
@@ -2906,16 +3036,6 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
             assert tuple(item.record for item in repository.list_records(obligation.obligation_id)) == resolution_history
             assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
 
-            resolved_source_payload = {
-                **source_frame,
-                "snapshot": {
-                    **source_frame["snapshot"],
-                    "messages": [
-                        *source_frame["snapshot"]["messages"],
-                        source_successor,
-                    ],
-                },
-            }
             concurrent_resolution_replays = await asyncio.gather(
                 exchange(observation_path, resolved_source_payload),
                 exchange(observation_path, resolved_source_payload),
