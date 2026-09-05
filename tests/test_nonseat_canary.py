@@ -3451,6 +3451,240 @@ def test_peer_d10_hostile_leak_scan_vendor_error_body_never_escapes():
     assert _SECRET not in json.dumps(receipt)
 
 
+# --- REALM1-C1 source diagnostic: initial census only ----------------------
+
+
+def _initial_peer_census_http_receipt(handler, *, commit_intent=None):
+    """Run one initial create census through the real bounded transport."""
+    inner = httpx.Client(
+        transport=httpx.MockTransport(handler), trust_env=False, follow_redirects=False,
+    )
+    bounded = vendors.BoundedHttpClient(client=inner)
+    commit = commit_intent or (
+        lambda: (_ for _ in ()).throw(
+            AssertionError("an initial census refusal must not commit intent"),
+        )
+    )
+    try:
+        return vendors.MultiloginClient(
+            core.Credential(_SECRET, "stdin"), bounded,
+        ).create_peer_profile(
+            folder_id=_PEER_FOLDER,
+            anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False,
+            commit_intent=commit,
+        )
+    finally:
+        bounded.close()
+
+
+def _peer_search_payload(data):
+    return {
+        "status": {"error_code": "", "http_code": 200, "message": "advisory prose"},
+        "data": data,
+    }
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    (
+        ("transport", "TRANSPORT_FAILURE"),
+        ("body-limit", "RESPONSE_BODY_LIMIT"),
+        ("decode", "RESPONSE_DECODE_FAILURE"),
+    ),
+)
+def test_peer_initial_census_transport_failure_classes_are_closed_and_redacted(failure, expected):
+    secret = "private transport body url folder profile credential"
+
+    def _handler(_request):
+        if failure == "transport":
+            raise RuntimeError(secret)
+        if failure == "body-limit":
+            return httpx.Response(200, content=(secret.encode() + b"x" * vendors._MAX_RESPONSE_BYTES))
+        return httpx.Response(200, content=(secret + "{").encode())
+
+    receipt = _initial_peer_census_http_receipt(_handler)
+    assert receipt["schema"] == "mastermind.mas115_nonseat_peer_lifecycle.v2"
+    assert receipt["initial_peer_census_diagnostic"] == expected
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert secret not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "code", "diagnostic"),
+    (
+        (401, "AUTH_EXPIRED", "NONE"),
+        (403, "AUTH_EXPIRED", "NONE"),
+        (429, "VENDOR_ERROR", "HTTP_RATE_LIMITED"),
+        (400, "VENDOR_ERROR", "HTTP_REQUEST_REJECTED"),
+        (404, "VENDOR_ERROR", "HTTP_REQUEST_REJECTED"),
+        (500, "VENDOR_ERROR", "HTTP_SERVICE_UNAVAILABLE"),
+        (599, "VENDOR_ERROR", "HTTP_SERVICE_UNAVAILABLE"),
+        (302, "VENDOR_ERROR", "HTTP_UNEXPECTED"),
+    ),
+)
+def test_peer_initial_census_http_status_mapping_preserves_receipt_semantics(
+    status_code, code, diagnostic,
+):
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(status_code, json={"private": _SECRET}),
+    )
+    assert receipt["initial_peer_census_diagnostic"] == diagnostic
+    assert receipt["code"] == code
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert _SECRET not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize(
+    ("payload", "diagnostic"),
+    (
+        ({"status": {"message": _SECRET}, "data": {}, "extra": _SECRET},
+         "STATUS_ENVELOPE_INVALID"),
+        (_peer_search_payload(_SECRET), "DATA_SCHEMA_INVALID"),
+        (_peer_search_payload({"profiles": _SECRET, "total_count": 0}),
+         "DATA_SCHEMA_INVALID"),
+        (_peer_search_payload({
+            "profiles": [{"id": _SECRET, "folder_id": _PEER_FOLDER, "name": _SECRET}],
+            "total_count": 1,
+        }), "PROFILE_ITEM_INVALID"),
+        (_peer_search_payload({"profiles": [], "total_count": 1}),
+         "PAGINATION_INVALID"),
+    ),
+)
+def test_peer_initial_census_shape_failure_classes_are_closed_and_redacted(payload, diagnostic):
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(200, json=payload),
+    )
+    assert receipt["initial_peer_census_diagnostic"] == diagnostic
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["effect"] == "NONE"
+    assert _SECRET not in json.dumps(receipt)
+
+
+def test_peer_initial_census_valid_page_keeps_existing_behavior_and_none_is_not_success():
+    commit = _refusing_intent()
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            200, json=_peer_search_payload({"profiles": [], "total_count": 0}),
+        ),
+        commit_intent=commit,
+    )
+    assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    assert receipt["code"] == "PROVISION_MISSING"
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert commit.calls == [True]
+
+
+def test_peer_post_dispatch_census_failure_cannot_populate_initial_diagnostic():
+    calls = []
+
+    def _handler(request):
+        calls.append(request.url.path)
+        if request.url.path == "/profile/create":
+            return httpx.Response(201, json={"private": _SECRET})
+        if calls.count("/profile/search") == 1:
+            return httpx.Response(
+                200, json=_peer_search_payload({"profiles": [], "total_count": 0}),
+            )
+        return httpx.Response(429, json={"private": _SECRET})
+
+    receipt = _initial_peer_census_http_receipt(
+        _handler, commit_intent=_committing_intent(),
+    )
+    assert calls == ["/profile/search", "/profile/create", "/profile/search"]
+    assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["verdict"] == "HOLD"
+    assert _SECRET not in json.dumps(receipt)
+
+
+def test_peer_initial_census_diagnostic_is_invocation_local_not_last_error_state():
+    calls = []
+
+    def _handler(_request):
+        calls.append(True)
+        if len(calls) == 1:
+            return httpx.Response(429, json={"private": _SECRET})
+        return httpx.Response(
+            200, json=_peer_search_payload({"profiles": [], "total_count": 0}),
+        )
+
+    inner = httpx.Client(
+        transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False,
+    )
+    bounded = vendors.BoundedHttpClient(client=inner)
+    client = vendors.MultiloginClient(core.Credential(_SECRET, "stdin"), bounded)
+    try:
+        first = client.create_peer_profile(
+            folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False,
+            commit_intent=lambda: (_ for _ in ()).throw(
+                AssertionError("failed census must not commit"),
+            ),
+        )
+        commit = _refusing_intent()
+        second = client.create_peer_profile(
+            folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False, commit_intent=commit,
+        )
+    finally:
+        bounded.close()
+    assert first["initial_peer_census_diagnostic"] == "HTTP_RATE_LIMITED"
+    assert second["initial_peer_census_diagnostic"] == "NONE"
+    assert second["code"] == "PROVISION_MISSING"
+    assert commit.calls == [True]
+
+
+def test_peer_receipt_v2_diagnostic_is_additive_closed_and_defaults_none():
+    predicates = dict(vendors._PEER_BASE_PREDICATES)
+    digests = {
+        "folder": "a" * 64,
+        "peer_name": "b" * 64,
+        "peer_profile": None,
+        "anchor_profile": "c" * 64,
+    }
+    receipt = vendors.peer_receipt(
+        effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+        digests=digests, **predicates,
+    )
+    assert receipt["schema"] == "mastermind.mas115_nonseat_peer_lifecycle.v2"
+    assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    assert set(receipt) == {
+        "schema", "operation", "initial_peer_census_diagnostic", "verdict",
+        "effect", "effect_detail", "code", "detail", "removal_disposition",
+        "removal_disposition_detail", "digests", "predicates",
+    }
+    assert set(vendors.INITIAL_PEER_CENSUS_DIAGNOSTICS) == {
+        "NONE", "TRANSPORT_FAILURE", "RESPONSE_BODY_LIMIT",
+        "RESPONSE_DECODE_FAILURE", "HTTP_RATE_LIMITED",
+        "HTTP_REQUEST_REJECTED", "HTTP_SERVICE_UNAVAILABLE",
+        "HTTP_UNEXPECTED", "STATUS_ENVELOPE_INVALID", "DATA_SCHEMA_INVALID",
+        "PROFILE_ITEM_INVALID", "PAGINATION_INVALID",
+    }
+    with pytest.raises(ValueError):
+        vendors.peer_receipt(
+            effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+            digests=digests, initial_peer_census_diagnostic="SUCCESS", **predicates,
+        )
+    with pytest.raises(ValueError):
+        vendors.peer_receipt(
+            effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+            digests=digests, initial_peer_census_diagnostic=[], **predicates,
+        )
+
+
+def test_peer_diagnostic_does_not_change_generation_or_lifecycle_fence_contract():
+    assert vendors.PEER_SOURCE_GENERATION == _REALM1_GENERATION
+    assert vendors.PEER_INTENT_SCHEMA == "mastermind.mas115_nonseat_peer_lifecycle_state.v5"
+    assert vendors.PEER_GENESIS_WITNESS_SCHEMA == "mastermind.mas115_nonseat_peer_genesis_witness.v1"
+    assert vendors.PEER_BOOTSTRAP_FENCE_SCHEMA == "mastermind.mas115_nonseat_peer_bootstrap_fence.v1"
+
+
 # --- #385-11: provision-write failure after a known create ----------------
 
 
