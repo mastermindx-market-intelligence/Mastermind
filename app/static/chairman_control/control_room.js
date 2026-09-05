@@ -430,14 +430,45 @@
     document.getElementById("ccr-drawer-close").focus();
   }
 
-  function renderNeedsYou(items) {
+  function attentionReadState(doc, body) {
+    var attention = doc && doc.attention;
+    var rowsKnown = attention && typeof attention === "object" &&
+      Array.isArray(attention.chairman) && Array.isArray(attention.ceo) && Array.isArray(attention.coo);
+    if (!rowsKnown || (body && (body.state_refresh_error || body.refresh_in_flight))) return "unavailable";
+    if (REMOTE_READ_ONLY) {
+      var remoteRuntime = doc.source_freshness && doc.source_freshness.executive_runtime;
+      return remoteRuntime && remoteRuntime.state === "current" ? "current" : "unavailable";
+    }
+    var degraded = Array.isArray(doc.degraded) ? doc.degraded : [];
+    if (degraded.some(function (entry) { return typeof entry === "string" && entry.indexOf("executive_inbox:") === 0; })) {
+      return "unavailable";
+    }
+    if ((doc.sources || {}).runtime_db_present !== true || degraded.some(function (entry) {
+      return typeof entry === "string" && entry.indexOf("executive_runtime:") === 0;
+    })) return "runtime_unavailable";
+    return "current";
+  }
+
+  function emptyAttentionText(state, normalText) {
+    if (state === "unavailable") return "Attention unavailable — refresh canonical sources.";
+    if (state === "runtime_unavailable") return "No recorded Inbox items. Executive runtime unavailable.";
+    return normalText;
+  }
+
+  function appendAttentionFreshnessNote(list, state) {
+    if (state === "unavailable") {
+      list.appendChild(el("li", { text: "Attention may be stale — refresh canonical sources.", className: "ccr-empty-line" }));
+    }
+  }
+
+  function renderNeedsYou(items, readState) {
     var section = document.getElementById("needs-you");
     var list = section.querySelector(".ccr-attention-list");
     clear(list);
     var rows = items || [];
     section.className = rows.length ? "ccr-needs ccr-has-items" : "ccr-needs";
     if (!rows.length) {
-      list.appendChild(el("li", { text: "Nothing is waiting on you.", className: "ccr-empty-line" }));
+      list.appendChild(el("li", { text: emptyAttentionText(readState, "Nothing is waiting on you."), className: "ccr-empty-line" }));
       return;
     }
     rows.forEach(function (item) {
@@ -474,15 +505,16 @@
       li.appendChild(actions);
       list.appendChild(li);
     });
+    appendAttentionFreshnessNote(list, readState);
   }
 
-  function renderMiniAttention(containerId, items) {
+  function renderMiniAttention(containerId, items, readState) {
     var container = document.querySelector("#" + containerId + " .ccr-mini-list");
     clear(container);
     var rows = items || [];
     var target = containerId === "sol-attention" ? "ceo" : "coo";
     if (!rows.length) {
-      container.appendChild(el("li", { text: "Clear", className: "ccr-empty-line" }));
+      container.appendChild(el("li", { text: emptyAttentionText(readState, "Clear"), className: "ccr-empty-line" }));
       return;
     }
     rows.slice(0, 5).forEach(function (item) {
@@ -498,6 +530,7 @@
       container.appendChild(li);
     });
     if (rows.length > 5) container.appendChild(el("li", { text: "+" + (rows.length - 5) + " more", className: "ccr-empty-line" }));
+    appendAttentionFreshnessNote(container, readState);
   }
 
   // bindings --------------------------------------------------------------
@@ -2052,16 +2085,18 @@
     renderDegraded(degraded);
 
     var attention = doc.attention || {};
+    var attentionState = attentionReadState(doc, body);
     var chairman = attention.chairman || [];
     var ceo = attention.ceo || [];
     var coo = attention.coo || [];
-    renderNeedsYou(chairman);
-    renderMiniAttention("sol-attention", ceo);
-    renderMiniAttention("coo", coo);
-    setTally("chairman", chairman.length);
-    setTally("ceo", ceo.length);
-    setTally("coo", coo.length);
-    document.getElementById("nav-today-count").textContent = String(chairman.length);
+    renderNeedsYou(chairman, attentionState);
+    renderMiniAttention("sol-attention", ceo, attentionState);
+    renderMiniAttention("coo", coo, attentionState);
+    var attentionTally = attentionState === "current" ? chairman.length : "—";
+    setTally("chairman", attentionTally);
+    setTally("ceo", attentionState === "current" ? ceo.length : "—");
+    setTally("coo", attentionState === "current" ? coo.length : "—");
+    document.getElementById("nav-today-count").textContent = String(attentionTally);
 
     renderAutonomy(doc.autonomy);
     renderWork();
@@ -2083,6 +2118,15 @@
       return body;
     }).catch(function () {
       renderDegraded(["control_room_api: unavailable — this page could not reach the state endpoint"]);
+      var previous = STATE.doc && typeof STATE.doc === "object" ? STATE.doc : {};
+      var attention = previous.attention && typeof previous.attention === "object" ? previous.attention : {};
+      renderNeedsYou(Array.isArray(attention.chairman) ? attention.chairman : [], "unavailable");
+      renderMiniAttention("sol-attention", Array.isArray(attention.ceo) ? attention.ceo : [], "unavailable");
+      renderMiniAttention("coo", Array.isArray(attention.coo) ? attention.coo : [], "unavailable");
+      setTally("chairman", "—");
+      setTally("ceo", "—");
+      setTally("coo", "—");
+      document.getElementById("nav-today-count").textContent = "—";
       return null;
     });
   }

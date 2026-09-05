@@ -1092,6 +1092,96 @@ def _run_node(script: str):
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
+def test_attention_empty_copy_is_source_qualified_when_runtime_or_inbox_is_not_current() -> None:
+    """Empty Inbox arrays are not a complete operational-clear signal."""
+    harness = """
+    var REMOTE_READ_ONLY = false;
+    %s
+    %s
+    console.log(JSON.stringify({
+      healthy: [attentionReadState({attention:{chairman:[],ceo:[],coo:[]}, sources:{runtime_db_present:true}, degraded:[]}, {}), emptyAttentionText("current", "Clear")],
+      runtime: [attentionReadState({attention:{chairman:[],ceo:[],coo:[]}, sources:{runtime_db_present:false}, degraded:[]}, {}), emptyAttentionText("runtime_unavailable", "Clear")],
+      inbox: [attentionReadState({attention:{chairman:[],ceo:[],coo:[]}, sources:{runtime_db_present:true}, degraded:["executive_inbox: unavailable"]}, {}), emptyAttentionText("unavailable", "Clear")],
+      refresh: [attentionReadState({attention:{chairman:[],ceo:[],coo:[]}, sources:{runtime_db_present:true}, degraded:[]}, {refresh_in_flight:true}), emptyAttentionText("unavailable", "Clear")]
+    }));
+    """ % (_extract_fn("attentionReadState"), _extract_fn("emptyAttentionText"))
+    out = _run_node(harness)
+    assert out["healthy"] == ["current", "Clear"]
+    assert out["runtime"] == ["runtime_unavailable", "No recorded Inbox items. Executive runtime unavailable."]
+    assert out["inbox"] == ["unavailable", "Attention unavailable — refresh canonical sources."]
+    assert out["refresh"] == ["unavailable", "Attention unavailable — refresh canonical sources."]
+
+
+def test_remote_attention_uses_its_published_runtime_freshness_not_local_sources() -> None:
+    """A remote document has no local sources; only its closed freshness receipt decides clear copy."""
+    harness = """
+    var REMOTE_READ_ONLY = true;
+    %s
+    function state(value) { return attentionReadState({
+      attention:{chairman:[],ceo:[],coo:[]},
+      source_freshness:{executive_runtime:{state:value}}, degraded:[]
+    }, {}); }
+    console.log(JSON.stringify({current:state("current"), stale:state("stale"), unavailable:state("unavailable"), unknown:state("unknown")}));
+    """ % _extract_fn("attentionReadState")
+    assert _run_node(harness) == {
+        "current": "current", "stale": "unavailable",
+        "unavailable": "unavailable", "unknown": "unavailable",
+    }
+
+
+def test_attention_read_state_preserves_nonempty_current_attention() -> None:
+    """A real non-empty Inbox remains current even while the new empty-state guard exists."""
+    harness = """
+    var REMOTE_READ_ONLY = false;
+    %s
+    console.log(JSON.stringify(attentionReadState({
+      attention:{chairman:[{attention_id:"a"}],ceo:[],coo:[]},
+      sources:{runtime_db_present:true}, degraded:[]
+    }, {})));
+    """ % _extract_fn("attentionReadState")
+    assert _run_node(harness) == "current"
+
+
+def test_attention_empty_render_and_failed_refresh_withhold_clear_language() -> None:
+    """The actual empty renderers and API-failure path cannot leave a stale clear headline."""
+    source = JS.read_text(encoding="utf-8")
+    load_state = source[source.index("  function loadState()") : source.index("\n  function readTheme()")]
+    harness = """
+    var lists = { needs: [], sol: [], coo: [] };
+    lists.needs.appendChild = function(v) { lists.needs.push(v); };
+    lists.sol.appendChild = function(v) { lists.sol.push(v); };
+    lists.coo.appendChild = function(v) { lists.coo.push(v); };
+    function el(tag, opts) { return { tag:tag, text:(opts || {}).text || "", className:(opts || {}).className || "" }; }
+    function clear(list) { list.length = 0; }
+    var needs = { className:"", querySelector:function() { return lists.needs; } };
+    var sol = lists.sol;
+    var coo = lists.coo;
+    var tallies = {};
+    var nav = { textContent:"" };
+    var document = {
+      getElementById:function(id) { if (id === "needs-you") return needs; if (id === "nav-today-count") return nav; return { textContent:"" }; },
+      querySelector:function(id) { return id.indexOf("sol-attention") >= 0 ? sol : coo; },
+      querySelectorAll:function() { return []; }
+    };
+    function setTally(name, value) { tallies[name] = value; }
+    function renderDegraded() {}
+    var STATE = { doc:{attention:{chairman:[],ceo:[],coo:[]}} };
+    function getJSON() { return Promise.reject(new Error("offline")); }
+    %s
+    %s
+    %s
+    %s
+    renderNeedsYou([], "current");
+    renderMiniAttention("sol-attention", [], "current");
+    loadState().then(function() { console.log(JSON.stringify({needs:lists.needs.map(function(v){return v.text;}), sol:lists.sol.map(function(v){return v.text;}), tallies:tallies, nav:nav.textContent})); });
+    """ % (_extract_fn("emptyAttentionText"), _extract_fn("appendAttentionFreshnessNote"), _extract_fn("renderNeedsYou"), _extract_fn("renderMiniAttention")) + load_state
+    out = _run_node(harness)
+    assert out["needs"] == ["Attention unavailable — refresh canonical sources."]
+    assert out["sol"] == ["Attention unavailable — refresh canonical sources."]
+    assert out["tallies"] == {"chairman": "—", "ceo": "—", "coo": "—"}
+    assert out["nav"] == "—"
+
+
 def test_addendum_behavioural_owed_binding_is_withheld_from_stale_cards() -> None:
     """Repair B, executed: a non-actionable card yields NO destination."""
     harness = """
