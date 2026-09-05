@@ -209,6 +209,10 @@ def _assert_secret_free_app_fields(
 
 
 def _assert_family_contract(spec: AdministrationSpec) -> None:
+    if not isinstance(spec.family, AdministrationFamily):
+        raise GovernanceRefusal(
+            "administration family must be an AdministrationFamily"
+        )
     if spec.family not in _FAMILY_CONTRACTS:
         raise GovernanceRefusal("administration family is not allowlisted")
     endpoint_pattern, method, allowed_keys = _FAMILY_CONTRACTS[spec.family]
