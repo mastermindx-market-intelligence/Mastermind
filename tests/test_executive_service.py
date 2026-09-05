@@ -795,7 +795,7 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
         SessionTargetRegistry,
         route_obligation,
     )
-    from control_plane.wake_ledger import WakeRetryPolicy
+    from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
     from control_plane.executive_dialogue_observation import (
         DialogueWakeRequest,
     )
@@ -1001,6 +1001,202 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     writer_refused = asyncio.run(bridge(runtime, request))
     assert writer_refused == DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
     assert len(operator.calls) == 2
+
+
+def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
+    tmp_path: Path,
+) -> None:
+    from control_plane.dialogue_wake_canary_activation import (
+        DialogueWakeCanaryActivationGrant,
+        DialogueWakeCanaryCurrentFacts,
+        DialogueWakeCanaryProfile,
+        SCHEMA as CANARY_SCHEMA,
+    )
+    from control_plane.executive_dialogue_observation import DialogueWakeRequest
+    from control_plane.operator_harness_contract import AttentionTurnObservation
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
+    from control_plane.wake_persist import WakeLedgerRepository
+    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
+    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import PersistedWakeCarrier
+    from tests.test_wake_ack_ingress import _admitted_runtime
+
+    runtime, sealed, generation = _admitted_runtime(tmp_path / "canary-bridge")
+    parent = dialogue_parent()
+    target = SessionTarget(
+        session_alias="COO-CANARY",
+        target_seat="coo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=False,
+    )
+    registry = SessionTargetRegistry(
+        schema=TARGET_SCHEMA,
+        lifecycle_authority="executive_os",
+        production_armed=False,
+        policy_version="canary-test",
+        default_alias_by_seat={"coo": target.session_alias},
+        workstream_alias_by_seat={},
+        root_job_bindings={"JOB-100": {"coo": target.session_alias}},
+        targets={target.session_alias: target},
+    )
+    binding = project_runtime_binding(runtime, sealed.attempt_id, target)
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "e" * 64,
+        declared_target_seat="coo",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        root_job_id="JOB-100",
+        source_workstream=parent["work_ref"],
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+    candidate = DialogueCandidateReference(
+        mode="ACTIVE_CURRENT_WORKER",
+        root_job_id="JOB-100",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        worker_id="worker-a",
+        evidence_digest="4" * 64,
+    )
+    grant = DialogueWakeCanaryActivationGrant(
+        schema=CANARY_SCHEMA,
+        installed_release_sha="a" * 40,
+        operation_key=parent["operation_key"],
+        source_root_job_id=candidate.root_job_id,
+        source_job_id=candidate.job_id,
+        source_attempt_id=candidate.attempt_id,
+        source_worker_id=candidate.worker_id,
+        source_semantic_digest=candidate.evidence_digest,
+        obligation_id=obligation.obligation_id,
+        target_seat="coo",
+        target_session_alias=target.session_alias,
+        target_attempt_id=sealed.attempt_id,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+        process_generation_id=generation.process_generation_id,
+        policy_digest=route.policy_digest,
+        valid_from_epoch_seconds=1_700_000_000,
+        expires_at_epoch_seconds=1_700_000_600,
+    )
+    facts = DialogueWakeCanaryCurrentFacts(
+        **{name: getattr(grant, name) for name in (
+            "installed_release_sha", "operation_key", "source_root_job_id",
+            "source_job_id", "source_attempt_id", "source_worker_id",
+            "source_semantic_digest", "obligation_id", "target_seat",
+            "target_session_alias", "target_attempt_id", "binding_id",
+            "binding_generation", "process_generation_id", "policy_digest",
+        )}
+    )
+
+    class Operator:
+        calls = 0
+
+        def deliver_attention(self, **kwargs):
+            self.calls += 1
+            return AttentionTurnObservation(
+                process_generation_id=generation.process_generation_id,
+                provider_session_id=binding.native_handle,
+                nudge_id=kwargs["nudge_id"],
+                provider_native_turn_id="turn-canary-1",
+                accepted=True,
+                delivered=True,
+            )
+
+    operator = Operator()
+
+    def factory(**kwargs):
+        if kwargs["historical_only"]:
+            return PersistedWakeCarrier(
+                repository=WakeLedgerRepository(runtime),
+                dispatchers=WakeDispatcherRegistry(),
+                current_binding_for=lambda _route: None,
+                retry_policy=kwargs["retry_policy"],
+                canary_profile=kwargs["canary_profile"],
+                historical_context_for=kwargs["historical_context_for"],
+            )
+        client = CodexCurrentWriterWakeClient(
+            operator_adapter=operator,
+            generation=kwargs["generation"],
+            attempt_id=sealed.attempt_id,
+            runtime_binding=binding,
+            pre_submit_guard=kwargs["pre_submit_guard"],
+        )
+        return PersistedWakeCarrier(
+            repository=WakeLedgerRepository(runtime),
+            dispatchers=WakeDispatcherRegistry(
+                {"codex-app-server": CodexAppServerWakeDispatcher(client)}
+            ),
+            current_binding_for=lambda _route: binding,
+            retry_policy=kwargs["retry_policy"],
+            target_registry=registry,
+            canary_profile=kwargs["canary_profile"],
+            historical_context_for=kwargs["historical_context_for"],
+        )
+
+    resolved = DialogueWakeTarget(
+        registry=registry,
+        runtime_binding=binding,
+        target_attempt_id=sealed.attempt_id,
+        process_generation_id=generation.process_generation_id,
+        operator_adapter=operator,
+    )
+    bridge = ExecutiveDialogueWakeBridge(
+        target_provider=lambda *_args: resolved,
+        retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+        operator_adapter=operator,
+        carrier_factory=factory,
+        canary_profile=DialogueWakeCanaryProfile(grant),
+        canary_current_facts_for=lambda *_args: facts,
+        canary_now_epoch_seconds=lambda: 1_700_000_100,
+    )
+    request = DialogueWakeRequest(
+        operation=SUBMIT_WAKE,
+        parent=parent,
+        thread_ts="1788000000.123456",
+        candidate=candidate,
+        obligation=obligation,
+        proposed_route=route,
+    )
+
+    forged = dataclasses.replace(
+        request,
+        candidate=dataclasses.replace(request.candidate, evidence_digest="f" * 64),
+    )
+    assert asyncio.run(bridge(runtime, forged)) == DialogueWakeResult(
+        "MISSING", "WAKE_REQUEST_REFUSED"
+    )
+    assert asyncio.run(bridge(runtime, request)) == DialogueWakeResult(
+        "RECORDED", "WAKE_RECORDED"
+    )
+    assert asyncio.run(bridge(runtime, forged)) == DialogueWakeResult(
+        "EFFECT_UNKNOWN", "WAKE_EFFECT_UNKNOWN"
+    )
+    assert asyncio.run(bridge(runtime, request)) == DialogueWakeResult(
+        "RECORDED", "WAKE_RECORDED"
+    )
+    assert operator.calls == 1
+    phases = [
+        item.record.phase
+        for item in WakeLedgerRepository(runtime).list_records(
+            obligation.obligation_id
+        )
+    ]
+    assert phases.count(LedgerPhase.DELIVERY_ATTEMPT) == 1
+
 
 
 def test_dialogue_observation_shutdown_never_unlinks_replaced_inode(

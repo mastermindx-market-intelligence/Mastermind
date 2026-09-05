@@ -13,7 +13,12 @@ import re
 from enum import Enum
 from typing import Any
 
-from control_plane.session_targets import BINDING_ID_RE, SESSION_ALIAS_RE
+from control_plane.session_targets import (
+    BINDING_ID_RE,
+    SESSION_ALIAS_RE,
+    WakeRoute,
+    route_digest,
+)
 from control_plane.wake_events import (
     ATTEMPT_ID_RE,
     JOB_ID_RE,
@@ -294,6 +299,75 @@ class DialogueWakeCanaryActivationMatch:
     grant_digest: str
 
 
+@dataclasses.dataclass(frozen=True)
+class DialogueWakeCanaryProfile:
+    """Trusted composition marker for the one canary lane.
+
+    The profile is deliberately present even when the nullable grant is absent,
+    so removal of the grant cannot silently select generic carrier behavior.
+    """
+
+    grant: DialogueWakeCanaryActivationGrant | None
+
+    def __post_init__(self) -> None:
+        if (
+            self.grant is not None
+            and type(self.grant) is not DialogueWakeCanaryActivationGrant
+        ):
+            _refuse("canary profile grant must be parsed")
+
+
+def effective_dialogue_wake_canary_route(
+    profile: DialogueWakeCanaryProfile,
+    base_route: WakeRoute,
+) -> WakeRoute:
+    """Derive the sole armed route from a trusted disarmed base route and grant."""
+
+    if type(profile) is not DialogueWakeCanaryProfile or not isinstance(
+        base_route, WakeRoute
+    ):
+        _refuse("canary route inputs are malformed")
+    grant = profile.grant
+    if grant is None:
+        _refuse("canary activation grant is unavailable")
+    if base_route.production_armed or base_route.target_enabled:
+        _refuse("canary base route must remain explicitly disarmed")
+    expected = {
+        "obligation_id": grant.obligation_id,
+        "session_alias": grant.target_session_alias,
+        "target_seat": grant.target_seat,
+        "binding_id": grant.binding_id,
+        "binding_generation": grant.binding_generation,
+        "policy_digest": grant.policy_digest,
+    }
+    for field, value in expected.items():
+        if getattr(base_route, field) != value:
+            raise DialogueWakeCanaryActivationError(
+                ActivationRefusalCode.CURRENT_FACT_MISMATCH,
+                f"canary base route does not match {field}",
+                field=field,
+            )
+    effective_policy = hashlib.sha256(
+        _canonical_bytes(
+            {
+                "base_policy_digest": base_route.policy_digest,
+                "grant_digest": grant.digest,
+            }
+        )
+    ).hexdigest()[:16]
+    return dataclasses.replace(
+        base_route,
+        production_armed=True,
+        target_enabled=True,
+        policy_digest=effective_policy,
+        route_digest=route_digest(
+            obligation_id=base_route.obligation_id,
+            destination=base_route.destination_digest,
+            policy_digest=effective_policy,
+        ),
+    )
+
+
 def parse_dialogue_wake_canary_activation(
     value: Any | None,
 ) -> DialogueWakeCanaryActivationGrant | None:
@@ -345,6 +419,7 @@ __all__ = [
     "DialogueWakeCanaryActivationGrant",
     "DialogueWakeCanaryActivationMatch",
     "DialogueWakeCanaryCurrentFacts",
+    "DialogueWakeCanaryProfile",
     "GRANT_FIELDS",
     "IDENTITY_FIELDS",
     "MAX_CANONICAL_BYTES",
@@ -356,5 +431,6 @@ __all__ = [
     "MAX_VALIDITY_SECONDS",
     "SCHEMA",
     "match_dialogue_wake_canary_activation",
+    "effective_dialogue_wake_canary_route",
     "parse_dialogue_wake_canary_activation",
 ]

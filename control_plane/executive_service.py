@@ -29,6 +29,7 @@ import stat
 import struct
 import subprocess
 import sys
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Protocol
@@ -242,6 +243,16 @@ DialogueWakeTargetProvider = Callable[
 ]
 
 
+@dataclasses.dataclass(frozen=True)
+class DialogueWakeHistoricalTarget:
+    """Exact immutable OHF generation used only to reconcile an accepted attempt."""
+
+    runtime_binding: Any
+    generation: Any
+    target_attempt_id: str
+    operator_adapter: Any
+
+
 def _dialogue_candidate_from_response(
     response: Mapping[str, Any],
 ) -> DialogueCandidateReference | None:
@@ -352,6 +363,12 @@ class ExecutiveDialogueWakeBridge:
         retry_policy: Any,
         operator_adapter: Any = None,
         carrier_factory: Callable[..., Any] | None = None,
+        canary_profile: Any = None,
+        canary_current_facts_for: Callable[..., Any] | None = None,
+        canary_now_epoch_seconds: Callable[[], int] | None = None,
+        historical_target_for: Callable[..., Any] | None = None,
+        installed_release_sha: str | None = None,
+        operation_key: str | None = None,
     ) -> None:
         from control_plane.wake_ledger import WakeRetryPolicy
 
@@ -365,10 +382,271 @@ class ExecutiveDialogueWakeBridge:
             raise TypeError("operator_adapter must support deliver_attention")
         if not callable(carrier_factory):
             raise TypeError("carrier_factory must be callable")
+        from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
+
+        if canary_profile is not None and type(canary_profile) is not DialogueWakeCanaryProfile:
+            raise TypeError("canary_profile must be a closed DialogueWakeCanaryProfile")
+        if canary_profile is not None and not callable(canary_current_facts_for) and (
+            not isinstance(installed_release_sha, str)
+            or not installed_release_sha
+            or not isinstance(operation_key, str)
+            or not operation_key
+        ):
+            raise TypeError("canary composition requires attested release and operation")
+        if canary_profile is not None and not callable(canary_now_epoch_seconds):
+            raise TypeError("canary_now_epoch_seconds is required for current submission")
+        if historical_target_for is not None and not callable(historical_target_for):
+            raise TypeError("historical_target_for must be callable or None")
         self._target_provider = target_provider
         self._retry_policy = retry_policy
         self._operator_adapter = operator_adapter
         self._carrier_factory = carrier_factory
+        self._canary_profile = canary_profile
+        self._canary_current_facts_for = canary_current_facts_for
+        self._canary_now_epoch_seconds = canary_now_epoch_seconds
+        self._historical_target_for = historical_target_for
+        self._installed_release_sha = installed_release_sha
+        self._operation_key = operation_key
+
+    @property
+    def canary_profile(self) -> Any:
+        return self._canary_profile
+
+    def _historical_carrier(self, runtime: Runtime) -> Any:
+        profile = self._canary_profile
+        if profile is None:
+            raise TypeError("historical carrier requires the closed canary profile")
+
+        def resolve(attempt: Any) -> Any:
+            provider = self._historical_target_for
+            if callable(provider):
+                return provider(runtime, attempt)
+            return self._resolve_historical_target(runtime, attempt)
+
+        return self._carrier_factory(
+            runtime=runtime,
+            resolved=None,
+            target=None,
+            current_binding=None,
+            retry_policy=self._retry_policy,
+            generation=None,
+            canary_profile=profile,
+            pre_submit_guard=None,
+            historical_context_for=resolve,
+            historical_only=True,
+        )
+
+    def _resolve_historical_target(self, runtime: Runtime, attempt: Any) -> Any:
+        """Recover only the grant's immutable generation; never select a successor."""
+
+        from control_plane.operator_harness_contract import runtime_binding_id_for
+        from control_plane.session_targets import RuntimeBinding
+
+        profile = self._canary_profile
+        grant = None if profile is None else profile.grant
+        if grant is None or attempt.attempt_n != 1:
+            raise StateConflict("historical canary identity is unavailable")
+        epoch, generation = runtime.operator_harness.generation_refs(
+            grant.process_generation_id
+        )
+        if (
+            epoch.attempt_id != grant.target_attempt_id
+            or generation.process_generation_id != grant.process_generation_id
+            or generation.generation_number != grant.binding_generation
+            or runtime_binding_id_for(epoch.attempt_id, epoch.session_epoch_id)
+            != grant.binding_id
+        ):
+            raise StateConflict("historical canary generation identity disagrees")
+        with runtime.store.read() as connection:
+            rows = connection.execute(
+                """
+                SELECT e.provider_session_id AS epoch_provider_session,
+                       g.provider_session_id AS generation_provider_session
+                FROM process_generations AS g
+                JOIN harness_session_epochs AS e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                  AND e.attempt_id=?
+                  AND g.generation_number=?
+                """,
+                (
+                    grant.process_generation_id,
+                    grant.target_attempt_id,
+                    grant.binding_generation,
+                ),
+            ).fetchall()
+        if (
+            len(rows) != 1
+            or not rows[0]["epoch_provider_session"]
+            or rows[0]["generation_provider_session"]
+            != rows[0]["epoch_provider_session"]
+        ):
+            raise StateConflict("historical provider identity is unavailable")
+        binding = RuntimeBinding(
+            session_alias=grant.target_session_alias,
+            binding_id=grant.binding_id,
+            binding_generation=grant.binding_generation,
+            native_handle=str(rows[0]["epoch_provider_session"]),
+            reasoning_surface=str(attempt.reasoning_surface),
+        )
+        return DialogueWakeHistoricalTarget(
+            runtime_binding=binding,
+            generation=generation,
+            target_attempt_id=grant.target_attempt_id,
+            operator_adapter=self._operator_adapter,
+        )
+
+    def _current_canary_facts(
+        self,
+        runtime: Runtime,
+        request: DialogueWakeRequest,
+        resolved: DialogueWakeTarget,
+        base_route: Any,
+    ) -> Any:
+        """Derive all current admission facts from one fresh Runtime snapshot."""
+
+        from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryCurrentFacts
+        from control_plane.runtime_binding_projection import project_runtime_binding
+
+        profile = self._canary_profile
+        grant = None if profile is None else profile.grant
+        if grant is None:
+            raise StateConflict("current canary grant is unavailable")
+        if (
+            request.parent.get("operation_key") != self._operation_key
+            or self._operation_key != grant.operation_key
+            or request.candidate.root_job_id != grant.source_root_job_id
+            or request.candidate.job_id != grant.source_job_id
+            or request.candidate.attempt_id != grant.source_attempt_id
+            or request.candidate.worker_id != grant.source_worker_id
+            or request.candidate.evidence_digest != grant.source_semantic_digest
+        ):
+            raise StateConflict("current canary source grant disagrees")
+        now_provider = self._canary_now_epoch_seconds
+        assert callable(now_provider)
+        with runtime.store.read() as connection:
+            reader = object.__new__(ExecutiveControlService)
+            source_facts = reader._runtime_dialogue_observation_facts(
+                runtime,
+                request.parent,
+                connection=connection,
+            )
+            source_response = reduce_dialogue_observation(
+                parent=request.parent,
+                thread_ts=request.thread_ts,
+                facts=source_facts,
+            )
+            if _dialogue_candidate_from_response(source_response) != request.candidate:
+                raise StateConflict("current canary source candidate disagrees")
+            source = runtime.current_harness_binding_source(
+                resolved.target_attempt_id,
+                connection=connection,
+            )
+            target = resolved.registry.get(resolved.runtime_binding.session_alias)
+            binding = project_runtime_binding(
+                runtime,
+                resolved.target_attempt_id,
+                target,
+                connection=connection,
+            )
+            rows = connection.execute(
+                """
+                SELECT g.process_generation_id
+                FROM process_generations AS g
+                JOIN harness_session_epochs AS e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE e.attempt_id=? AND e.state='CURRENT'
+                  AND g.executive_writer_held=1
+                  AND g.ended_at_ms IS NULL
+                  AND g.generation_number=?
+                """,
+                (resolved.target_attempt_id, binding.binding_generation),
+            ).fetchall()
+            if (
+                len(rows) != 1
+                or source.owner_seat != grant.target_seat
+                or binding != resolved.runtime_binding
+                or str(rows[0]["process_generation_id"])
+                != resolved.process_generation_id
+            ):
+                raise StateConflict("current canary writer identity disagrees")
+            facts = DialogueWakeCanaryCurrentFacts(
+                installed_release_sha=str(self._installed_release_sha),
+                operation_key=str(self._operation_key),
+                source_root_job_id=request.candidate.root_job_id,
+                source_job_id=request.candidate.job_id,
+                source_attempt_id=request.candidate.attempt_id,
+                source_worker_id=request.candidate.worker_id,
+                source_semantic_digest=request.candidate.evidence_digest,
+                obligation_id=request.obligation.obligation_id,
+                target_seat=source.owner_seat,
+                target_session_alias=binding.session_alias,
+                target_attempt_id=resolved.target_attempt_id,
+                binding_id=binding.binding_id,
+                binding_generation=binding.binding_generation,
+                process_generation_id=str(rows[0]["process_generation_id"]),
+                policy_digest=base_route.policy_digest,
+            )
+            # The Executive clock is deliberately the final observation made
+            # while this fresh read snapshot is still owned by the worker thread.
+            now = now_provider()
+        return facts, now
+
+    async def historical_only(
+        self,
+        runtime: Runtime,
+        request: DialogueWakeRequest,
+    ) -> DialogueWakeResult:
+        """Read or reconcile exact persisted canary history without current gates."""
+
+        from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryActivationError
+        from control_plane.wake_dispatcher import WakeEffectUnknownError
+
+        if self._canary_profile is None or not isinstance(runtime, Runtime):
+            return DialogueWakeResult("MISSING", "CANDIDATE_BINDING_REQUIRED")
+        if request.operation not in {SUBMIT_WAKE, RECONCILE_WAKE}:
+            return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
+        grant = self._canary_profile.grant
+        request_mismatch = (
+            request.obligation.root_job_id != request.candidate.root_job_id
+            or request.obligation.job_id != request.candidate.job_id
+            or request.obligation.attempt_id != request.candidate.attempt_id
+            or request.obligation.source_workstream != request.parent.get("work_ref")
+            or (
+                grant is not None
+                and (
+                    request.parent.get("operation_key") != grant.operation_key
+                    or request.candidate.root_job_id != grant.source_root_job_id
+                    or request.candidate.job_id != grant.source_job_id
+                    or request.candidate.attempt_id != grant.source_attempt_id
+                    or request.candidate.worker_id != grant.source_worker_id
+                    or request.candidate.evidence_digest
+                    != grant.source_semantic_digest
+                    or request.obligation.obligation_id != grant.obligation_id
+                )
+            )
+        )
+        try:
+            carrier = self._historical_carrier(runtime)
+            has_attempt = carrier.has_persisted_attempt(request.obligation)
+            if request_mismatch:
+                if has_attempt:
+                    return DialogueWakeResult("EFFECT_UNKNOWN", "WAKE_EFFECT_UNKNOWN")
+                return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
+            state = await carrier.reconcile(
+                request.obligation,
+                request.proposed_route,
+            )
+        except (DialogueWakeCanaryActivationError, WakeEffectUnknownError):
+            return DialogueWakeResult("EFFECT_UNKNOWN", "WAKE_EFFECT_UNKNOWN")
+        except Exception:
+            return DialogueWakeResult("EFFECT_UNKNOWN", "WAKE_COORDINATION_EFFECT_UNKNOWN")
+        reasons = {
+            "MISSING": "WAKE_NOT_RECORDED",
+            "RECORDED": "WAKE_RECORDED",
+            "EFFECT_UNKNOWN": "WAKE_EFFECT_UNKNOWN",
+        }
+        return DialogueWakeResult(state.value, reasons[state.value])
 
     def _resolve_current_target(
         self,
@@ -474,6 +752,11 @@ class ExecutiveDialogueWakeBridge:
             WakeEffectUnknownError,
             WakePreSubmitError,
         )
+        from control_plane.dialogue_wake_canary_activation import (
+            DialogueWakeCanaryActivationError,
+            effective_dialogue_wake_canary_route,
+            match_dialogue_wake_canary_activation,
+        )
 
         if not isinstance(runtime, Runtime) or not isinstance(
             request, DialogueWakeRequest
@@ -486,6 +769,15 @@ class ExecutiveDialogueWakeBridge:
             or request.obligation.source_workstream != request.parent["work_ref"]
         ):
             return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
+        profile = self._canary_profile
+        if profile is not None:
+            historical = await self.historical_only(runtime, request)
+            if (
+                historical.state != "MISSING"
+                or request.operation == RECONCILE_WAKE
+                or historical.reason != "WAKE_NOT_RECORDED"
+            ):
+                return historical
         provider = self._target_provider
         try:
             resolved = (
@@ -526,10 +818,54 @@ class ExecutiveDialogueWakeBridge:
             )
             if (
                 epoch.attempt_id != resolved.target_attempt_id
-                or runtime.operator_harness.current_writer_generation(epoch)
-                != generation
+                or (
+                    profile is None
+                    and runtime.operator_harness.current_writer_generation(epoch)
+                    != generation
+                )
             ):
                 return DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
+            carrier_route = authoritative_route
+            extra_factory: dict[str, Any] = {}
+            if profile is not None:
+                current_provider = self._canary_current_facts_for
+                now_provider = self._canary_now_epoch_seconds
+                assert callable(now_provider)
+
+                def validate_current() -> None:
+                    if callable(current_provider):
+                        facts = current_provider(
+                            runtime, request, resolved, authoritative_route
+                        )
+                        now = now_provider()
+                    else:
+                        facts, now = self._current_canary_facts(
+                            runtime, request, resolved, authoritative_route
+                        )
+                    match_dialogue_wake_canary_activation(
+                        profile.grant,
+                        facts,
+                        now_epoch_seconds=now,
+                    )
+
+                validate_current()
+                carrier_route = effective_dialogue_wake_canary_route(
+                    profile, authoritative_route
+                )
+
+                def final_guard() -> None:
+                    validate_current()
+
+                extra_factory = {
+                    "canary_profile": profile,
+                    "pre_submit_guard": final_guard,
+                    "historical_context_for": lambda attempt: (
+                        self._historical_target_for(runtime, attempt)
+                        if callable(self._historical_target_for)
+                        else self._resolve_historical_target(runtime, attempt)
+                    ),
+                    "historical_only": False,
+                }
             carrier = self._carrier_factory(
                 runtime=runtime,
                 resolved=resolved,
@@ -537,7 +873,10 @@ class ExecutiveDialogueWakeBridge:
                 current_binding=current_binding,
                 retry_policy=self._retry_policy,
                 generation=generation,
+                **extra_factory,
             )
+        except DialogueWakeCanaryActivationError:
+            return DialogueWakeResult("MISSING", "WAKE_TARGET_UNAVAILABLE")
         except Exception:
             return DialogueWakeResult("MISSING", "WAKE_TARGET_UNAVAILABLE")
 
@@ -545,7 +884,7 @@ class ExecutiveDialogueWakeBridge:
             if request.operation == RECONCILE_WAKE:
                 state = await carrier.reconcile(
                     request.obligation,
-                    authoritative_route,
+                    carrier_route,
                 )
                 reasons = {
                     "MISSING": "WAKE_NOT_RECORDED",
@@ -555,7 +894,7 @@ class ExecutiveDialogueWakeBridge:
                 return DialogueWakeResult(state.value, reasons[state.value])
             if request.operation != SUBMIT_WAKE:
                 return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
-            await carrier.submit(request.obligation, authoritative_route)
+            await carrier.submit(request.obligation, carrier_route)
             return DialogueWakeResult("RECORDED", "WAKE_RECORDED")
         except WakePreSubmitError:
             return DialogueWakeResult("MISSING", "WAKE_TARGET_UNAVAILABLE")
@@ -2162,7 +2501,11 @@ class ExecutiveControlService:
             return False
 
     def _runtime_dialogue_observation_facts(
-        self, runtime: Runtime, parent: Mapping[str, Any]
+        self,
+        runtime: Runtime,
+        parent: Mapping[str, Any],
+        *,
+        connection: sqlite3.Connection | None = None,
     ) -> DialogueObservationFacts:
         """Prepare exact current Runtime facts without writing or caching.
 
@@ -2199,7 +2542,11 @@ class ExecutiveControlService:
             ).hexdigest()
         except (KeyError, RuntimeProofError, TypeError, ValueError):
             return DialogueObservationFacts(complete=False)
-        with runtime.store.read() as connection:
+        with (
+            runtime.store.read()
+            if connection is None
+            else nullcontext(connection)
+        ) as connection:
             root_rows = connection.execute(
                 """
                 SELECT j.job_id
@@ -2650,6 +2997,23 @@ class ExecutiveControlService:
                     else:
                         wake_result = DialogueWakeResult(
                             "MISSING", "CANDIDATE_BINDING_REQUIRED"
+                        )
+                        wake_handler = self._dialogue_wake_handler
+                        if (
+                            type(wake_handler) is ExecutiveDialogueWakeBridge
+                            and wake_handler.canary_profile is not None
+                        ):
+                            wake_result = await wake_handler.historical_only(
+                                runtime, wake_request
+                            )
+                else:
+                    wake_handler = self._dialogue_wake_handler
+                    if (
+                        type(wake_handler) is ExecutiveDialogueWakeBridge
+                        and wake_handler.canary_profile is not None
+                    ):
+                        wake_result = await wake_handler.historical_only(
+                            runtime, wake_request
                         )
                 response = {
                     "schema": DIALOGUE_WAKE_RESPONSE_SCHEMA,
@@ -5136,6 +5500,7 @@ __all__ = [
     "DEFAULT_MAX_REQUEST_BYTES",
     "DEFAULT_MAX_RESPONSE_BYTES",
     "DialogueWakeResult",
+    "DialogueWakeHistoricalTarget",
     "DialogueWakeTarget",
     "ExecutiveControlService",
     "ExecutiveDialogueWakeBridge",

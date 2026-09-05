@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import inspect
+import threading
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from types import SimpleNamespace
@@ -2033,6 +2034,85 @@ def test_broker_pre_submit_refusal_maps_to_wake_target_unavailable() -> None:
         _deliver_via_wake_client(fake)
 
     assert error.value.reason_code == "target_unavailable"
+
+
+def test_final_guard_runs_in_worker_thread_immediately_before_provider_io() -> None:
+    order: list[tuple[str, int]] = []
+
+    class Adapter(FakeRemoteAttentionAdapter):
+        def deliver_attention(self, **kwargs):
+            order.append(("provider", threading.get_ident()))
+            return super().deliver_attention(**kwargs)
+
+    fake = Adapter(
+        response=AttentionTurnObservation(
+            process_generation_id=GENERATION.process_generation_id,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            provider_native_turn_id="turn-wake-456",
+            accepted=True,
+            delivered=True,
+        )
+    )
+    client = CodexCurrentWriterWakeClient(
+        operator_adapter=fake,
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        runtime_binding=BINDING,
+        pre_submit_guard=lambda: order.append(("guard", threading.get_ident())),
+    )
+    caller_thread = threading.get_ident()
+
+    asyncio.run(
+        client.deliver_wake(
+            native_handle=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+        )
+    )
+
+    assert [name for name, _thread in order] == ["guard", "provider"]
+    assert order[0][1] == order[1][1]
+    assert order[0][1] != caller_thread
+
+
+def test_final_guard_refusal_is_typed_and_reconcile_never_calls_guard() -> None:
+    calls = 0
+
+    def refuse() -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("binding moved")
+
+    fake = FakeRemoteAttentionAdapter()
+    client = CodexCurrentWriterWakeClient(
+        operator_adapter=fake,
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        runtime_binding=BINDING,
+        pre_submit_guard=refuse,
+    )
+    with pytest.raises(WakePreSubmitError) as error:
+        asyncio.run(
+            client.deliver_wake(
+                native_handle=NATIVE_HANDLE,
+                nudge_id=NUDGE_ID,
+                opaque_ids=OPAQUE_IDS,
+                instruction=CODEX_WAKE_INSTRUCTION,
+            )
+        )
+    assert error.value.reason_code == "target_unavailable"
+    assert fake.calls == []
+    with pytest.raises(Exception):
+        asyncio.run(
+            client.reconcile_wake(
+                native_handle=NATIVE_HANDLE,
+                nudge_id=NUDGE_ID,
+                opaque_ids=OPAQUE_IDS,
+            )
+        )
+    assert calls == 1
 
 
 def test_broker_effect_unknown_never_maps_to_safe_refusal() -> None:

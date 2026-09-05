@@ -14,6 +14,8 @@ from control_plane.dialogue_wake_canary_activation import (
     DialogueWakeCanaryActivationError,
     DialogueWakeCanaryActivationGrant,
     DialogueWakeCanaryCurrentFacts,
+    DialogueWakeCanaryProfile,
+    effective_dialogue_wake_canary_route,
     GRANT_FIELDS,
     IDENTITY_FIELDS,
     MAX_CONTAINER_DEPTH,
@@ -25,6 +27,7 @@ from control_plane.dialogue_wake_canary_activation import (
     match_dialogue_wake_canary_activation,
     parse_dialogue_wake_canary_activation,
 )
+from control_plane.session_targets import WakeRoute
 
 
 NOW = 1_788_585_651
@@ -65,6 +68,67 @@ def facts(**overrides: Any) -> DialogueWakeCanaryCurrentFacts:
     value = {field: valid_wire()[field] for field in IDENTITY_FIELDS}
     value.update(overrides)
     return DialogueWakeCanaryCurrentFacts(**value)
+
+
+def _base_route(grant: DialogueWakeCanaryActivationGrant) -> WakeRoute:
+    from control_plane.session_targets import destination_digest, route_digest, SessionTarget
+
+    target = SessionTarget(
+        session_alias=grant.target_session_alias,
+        target_seat=grant.target_seat,
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=False,
+    )
+    destination = destination_digest(
+        target=target,
+        binding_id=grant.binding_id,
+        binding_generation=grant.binding_generation,
+    )
+    return WakeRoute(
+        obligation_id=grant.obligation_id,
+        session_alias=grant.target_session_alias,
+        target_seat=grant.target_seat,
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        binding_id=grant.binding_id,
+        binding_generation=grant.binding_generation,
+        route_digest=route_digest(obligation_id=grant.obligation_id, destination=destination, policy_digest=grant.policy_digest),
+        destination_digest=destination,
+        policy_digest=grant.policy_digest,
+        root_job_id=grant.source_root_job_id,
+        workstream="WS:TEST",
+        production_armed=False,
+        target_enabled=False,
+        transport_implemented=True,
+        requires_runtime_binding=True,
+        binding_ready=True,
+        human_required=False,
+        policy_version="test",
+        interface_version="wake/v1",
+    )
+
+
+def test_closed_profile_derives_one_effective_route_and_null_never_arms() -> None:
+    grant = parsed()
+    base = _base_route(grant)
+    effective = effective_dialogue_wake_canary_route(
+        DialogueWakeCanaryProfile(grant), base
+    )
+
+    assert effective.production_armed is True
+    assert effective.target_enabled is True
+    assert effective.policy_digest != base.policy_digest
+    assert effective.route_digest != base.route_digest
+    with pytest.raises(DialogueWakeCanaryActivationError, match="unavailable"):
+        effective_dialogue_wake_canary_route(DialogueWakeCanaryProfile(None), base)
+    with pytest.raises(DialogueWakeCanaryActivationError, match="disarmed"):
+        effective_dialogue_wake_canary_route(
+            DialogueWakeCanaryProfile(grant),
+            dataclasses.replace(base, production_armed=True),
+        )
 
 
 def test_nullable_absence_is_disarmed_and_no_match() -> None:
