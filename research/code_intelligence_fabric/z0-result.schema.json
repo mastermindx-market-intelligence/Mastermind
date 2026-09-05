@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mastermind CodeIntel Z0 Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision",
+    "generated_at",
+    "request_digest",
+    "toolchain_lock_sha256",
+    "bundle_sha256",
+    "bundle_manifest_sha256",
+    "manifest_digest",
+    "path_policy_digest",
+    "tool_schema_digest",
+    "zoekt_source_commit",
+    "binary_digests",
+    "repository_statuses",
+    "resource_observations"
+  ],
+  "properties": {
+    "schema_version": {"const": "mastermind.codeintel_z0_result.v1"},
+    "decision": {
+      "enum": [
+        "ZOEKT_FACADE_ACCEPTED_FOR_CI3",
+        "ZOEKT_REQUIRES_ARCHITECTURE_REVISION",
+        "NO_SAFE_GLOBAL_INDEX"
+      ]
+    },
+    "generated_at": {"type": "string"},
+    "request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "toolchain_lock_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "bundle_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "bundle_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "manifest_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "path_policy_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "tool_schema_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "zoekt_source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "binary_digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["zoekt_git_index", "zoekt_webserver"],
+      "properties": {
+        "zoekt_git_index": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "zoekt_webserver": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "repository_statuses": {"type": "array"},
+    "resource_observations": {"type": "object"}
+  }
+}
