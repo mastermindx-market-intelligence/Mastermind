@@ -1,0 +1,509 @@
+{
+  "capability_ledger": {
+    "ai_hub_f0_architecture": "SPEC_ONLY",
+    "ai_hub_h0_current_estate_freeze": "SPEC_ONLY",
+    "autonomy_responsibility_projection": "BUILT_NOT_PROVEN",
+    "chairman_control_room_workstream_overall": "PARTIAL",
+    "control_room_pure_compositor": "BUILT_NOT_PROVEN",
+    "cross_system_operational_identity": "NOT_BUILT",
+    "executive_attention_inbox_hub_owned": "NOT_BUILT",
+    "hub_workstream_room_real_data_consumer": "NOT_BUILT",
+    "learning_and_intervention_efficacy": "NOT_BUILT",
+    "llm_operational_synthesis": "SPEC_ONLY",
+    "local_p0a_accepted_path": "PROVEN_LIVE",
+    "parallel_hub_control_plane": "REJECTED_BY_DESIGN",
+    "protected_agent_dialogue_wake_runtime": "BUILT_NOT_PROVEN",
+    "remote_x1_accepted_local_proof": "PROVEN_LIVE",
+    "remote_x1_deployed_production": "NOT_BUILT",
+    "safe_ceo_action_preflight_receipt": "NOT_BUILT"
+  },
+  "capability_ledger_citations": {
+    "local_p0a_accepted_path": {
+      "claim": "P0A plus H0 is PROVEN_LIVE on the persistent Chairman path.",
+      "observed_at": "2026-09-03T16:59:38Z",
+      "receipts": [
+        "Mastermind PR #110 merged 90db9baf5bcc5f2221e3c9870c2aa09a95293c99",
+        "Mastermind PR #113 H0/H1 hardening merged 0f319c79a7b3373a96d4866412c734de12cbf701 (CI 32599272414, CodeQL 32599271255, Sol review 5001161545)",
+        "Mastermind PR #133 merged 7cba4ca74003a37064cf46650f4d931a324350ba",
+        "Mastermind PR #134 merged 591b7ace4dd9b2d46edccaa5e66eebf1ead8657f",
+        "Macro PR #6225 merged 5603972754e5320f06c04b08c24ed143bd30b2a2",
+        "Macro PR #6292 merged fc94d43ad4142e50ec808b2f1a8d6f922ff1fa7b"
+      ],
+      "source": "mastermindx-market-intelligence/macro@6d72b43777f84c9b8040cd641c8580b14876e34b:agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md"
+    },
+    "remote_x1_accepted_local_proof": {
+      "claim": "X1 is ACCEPTED / PROVEN_LIVE_LOCAL.",
+      "observed_at": "2026-09-03T16:59:38Z",
+      "receipts": [
+        "Mastermind PR #138 exact accepted head 55ec5069e653489541ef273fdb0e76f7df2598e7 merged 12117ca576cec2c4f054664dd62c4e0809f27e75 after the 261-test Control Room pack, 18/18 X1 suite, CI 32724498791, CodeQL 32724495498, and Sol real-browser product acceptance"
+      ],
+      "scope": "Acceptance evidence was gathered over the supervised loopback service at http://127.0.0.1:8787/ running that exact merge. This accepts X1's contract and code, not a deployed remote-socket production instance — see remote_x1_deployed_production.",
+      "source": "mastermindx-market-intelligence/macro@6d72b43777f84c9b8040cd641c8580b14876e34b:agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md"
+    },
+    "chairman_control_room_workstream_overall": {
+      "claim": "PARTIAL overall because final P0B real-seat Open Sol foreground reachability and the production ASD transport path remain unproven.",
+      "observed_at": "2026-09-03T16:59:38Z",
+      "source": "mastermindx-market-intelligence/macro@6d72b43777f84c9b8040cd641c8580b14876e34b:agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md"
+    }
+  },
+  "capability_ledger_discriminators": [
+    "an accepted capability in capability_ledger_citations must not be cosmetically downgraded merely because this carrier did not itself rerun its historical production proof",
+    "remote_x1_accepted_local_proof being PROVEN_LIVE must never promote remote_x1_deployed_production to PROVEN_LIVE without its own separate accepted evidence",
+    "chairman_control_room_workstream_overall being PARTIAL must not be read as demoting the accepted sub-capability rows, and the sub-capability rows must not be read as promoting the overall workstream past PARTIAL"
+  ],
+  "capability_vocabulary": [
+    "BROKEN",
+    "BUILT_NOT_PROVEN",
+    "DARK_OR_DISCONNECTED",
+    "NOT_BUILT",
+    "PARTIAL",
+    "PROVEN_LIVE",
+    "REJECTED_BY_DESIGN",
+    "SPEC_ONLY"
+  ],
+  "collision_census": {
+    "exact_branch": "sol/ai-operating-hub-h0-current-estate-freeze-20260903",
+    "exact_branch_present_before_start": false,
+    "exact_branch_present_on_remote_before_start": false,
+    "exact_operation_pr_present_before_start": false,
+    "owned_paths": [
+      "research/MASTERMIND_AI_OPERATING_HUB_H0_CURRENT_ESTATE_2026-09-03.md",
+      "research/evidence/ai_operating_hub_h0_archaeology_2026-09-03.json",
+      "docs/superpowers/plans/2026-09-03-ai-operating-hub-h1-read-only-workstream.md",
+      "tests/test_ai_operating_hub_h0_source_law.py"
+    ],
+    "owned_paths_present_on_protected_master_before_start": [],
+    "worktree_present_at_target_path_before_start": false,
+    "ws_ai_hub_present_on_protected_master": false
+  },
+  "contract_law": {
+    "dated_observation_fields": [
+      "protected_master",
+      "protected_master_tree",
+      "pr_archaeology",
+      "linear_portfolio",
+      "capability_ledger_citations"
+    ],
+    "immutable_contract_fields": [
+      "frozen_contract_values",
+      "owner_boundaries",
+      "h1_path_ceiling.forbidden_paths",
+      "h1_path_ceiling.may_create",
+      "h1_path_ceiling.may_modify_only_after_h0_and_pr_326_protect",
+      "h1_route_security_contract",
+      "h1_route_forward_compatible_closure",
+      "h1_field_redaction_law",
+      "reference_workstream"
+    ],
+    "rule": "Immutable contract fields are derived directly from source code via ast parsing and change only when the underlying source itself changes; the source law verifies them against real source, not against this record's prose. Dated observation fields are point-in-time receipts captured at an explicit observed_at and are expected to become stale as protected source moves. The source law proves internal consistency across this record, the evidence, and the H1 plan, and proves derivation from the cited snapshot, but it does not compare against a live-fetched origin/master, so a future path-disjoint protected-source movement does not itself turn this record red. A change to an immutable contract fact, a Control Room owner, the Agent Dialogue boundary, an H1 path owner, or a governing source still requires a fresh same-carrier repair before the next return."
+  },
+  "current_protected_at_delivery": "642fa62540f0f2565ccc484a350f2cd0a2259015",
+  "disjoint_protected_movements_folded_in": [
+    {
+      "classification": "path_disjoint_non_material",
+      "commit": "771a95586c7a31933ee612eafaa4d1471f57527b",
+      "files": [
+        "docs/CHAIRMAN_CONTROL_ROOM.md",
+        "integrations/chairman_surfaces/nonseat_canary_vendors.py",
+        "scripts/mas115_setup.py",
+        "tests/test_mas115_setup.py",
+        "tests/test_nonseat_canary.py"
+      ],
+      "pr": 396,
+      "title": "feat(mas115): protect exact Realm1 peer profile lifecycle"
+    },
+    {
+      "classification": "path_disjoint_non_material",
+      "commit": "e4bae07b15d8685bd8850c3cd73ed7b6a088acdc",
+      "files": ["tests/test_web_sol_extension_reconstitution.py"],
+      "pr": 428,
+      "title": "test(web-sol): remove content-probe timing race"
+    }
+  ],
+  "dialogue_reconciliation": {
+    "current_source_carrier": "C0BSBM78V1N/1788439512.753739",
+    "placement_receipt": "1788439512.753739 thread / PLACED effect=PLACEMENT_ONLY / receiver=Claude8 native-session-00536892-a16e-4c4a-bbcf-c3f44a3549c5",
+    "receiver_github_identity": "chriswong6031-creator",
+    "receiver_native_session": "Claude8 / Opus 5 / 00536892-a16e-4c4a-bbcf-c3f44a3549c5",
+    "sol_edges_consumed": [
+      "RESULT / HOLD-FOR-SOL @1788445441.262279",
+      "SOL REQUEST_REPAIR / CONTINUE @1788452549.529609",
+      "SOL RULING / CONTINUE ADDENDUM @1788453811.359239",
+      "SOL PRE-REVIEW ADDENDUM / CONTINUE @1788454107.719739",
+      "SECRETARY DELIVERY RECEIPT / EXACT-SESSION REENTRY (attention only, no new obligation)",
+      "GitHub PR #424 review 5104876709 / CHANGES_REQUESTED / mastermindx-3",
+      "GitHub PR #424 review 5104899502 / COMMENTED / mastermindx-3 (forward-compatible route law)",
+      "GitHub PR #424 review 5104907449 / COMMENTED / mastermindx-3 (real security-layer separation)",
+      "GitHub PR #424 review 5104924912 / COMMENTED / mastermindx-3 (closed field/redaction law)",
+      "GitHub PR #424 review 5105847510 / CHANGES_REQUESTED / mastermindx-3, independent, commit-anchored to head 54bd765b (stale #326 pin + unexecuted forward-compatible closure)",
+      "SOL REQUEST_REPAIR / CONTINUE @1788463112.229729",
+      "SOL H0 REVIEW ORACLE (support only, advisory) @1788464188.756879",
+      "Secretary exact-session continuation @1788464486.591739"
+    ],
+    "support_file_disposition": "F0C05PQJJG0 advisory only; not machine-readable through the available Slack reader (zip payload); not relied upon",
+    "worker_pickup_ack": "1788440085.758959",
+    "worker_start": "1788440235.427329"
+  },
+  "evidence_link_law": {
+    "example_real_deep_links": [
+      "https://github.com/mastermindx-market-intelligence/Mastermind/pull/110",
+      "https://github.com/mastermindx-market-intelligence/Mastermind/pull/113",
+      "https://github.com/mastermindx-market-intelligence/Mastermind/pull/133",
+      "https://github.com/mastermindx-market-intelligence/Mastermind/pull/134",
+      "https://github.com/mastermindx-market-intelligence/Mastermind/pull/138",
+      "https://github.com/mastermindx-market-intelligence/Mastermind/pull/326",
+      "https://github.com/mastermindx-market-intelligence/Mastermind/pull/357",
+      "https://github.com/mastermindx-market-intelligence/Mastermind/pull/421"
+    ],
+    "not_applicable_meaning": "no deep-link concept applies to this owner/fact at all",
+    "not_available_meaning": "a deep link is expected to exist at this owner but is not currently obtainable",
+    "rule": "Every composed claim links to its canonical owner. Where no lawful deep link exists, the field renders NOT_AVAILABLE or NOT_APPLICABLE with the owner/source identity attached rather than inventing a URL."
+  },
+  "frozen_contract_values": {
+    "collector_sources": [
+      "active_builds",
+      "agent_os_brief",
+      "agent_os_state",
+      "executive_runtime"
+    ],
+    "compositor_output_keys": [
+      "attention",
+      "binding_conflicts",
+      "degraded",
+      "generated_at",
+      "placement_selection",
+      "schema",
+      "sources",
+      "unbound_surfaces",
+      "unjoined_open_prs",
+      "work"
+    ],
+    "compositor_schema": "mastermind.chairman_control_room.v1",
+    "freshness_states": [
+      "fresh",
+      "stale",
+      "unavailable"
+    ],
+    "p0a_allowed_hostnames": [
+      "127.0.0.1",
+      "localhost"
+    ],
+    "p0a_default_port": 8787,
+    "p0a_host": "127.0.0.1",
+    "p0a_path_equality_routes": [
+      "/api/bind",
+      "/api/discover",
+      "/api/open",
+      "/api/refresh-builds",
+      "/api/state",
+      "/api/unbind",
+      "/favicon.ico"
+    ],
+    "release_schema": "mastermind.control_room_build.v1",
+    "remote_schema": "mastermind.chairman_control_room_remote.v1",
+    "required_runtime_paths": [
+      "app/static/chairman_control/control_room.css",
+      "app/static/chairman_control/control_room.js",
+      "app/static/chairman_control/remote.html",
+      "common/__init__.py",
+      "common/commission_ref.py",
+      "common/redaction.py",
+      "config/strategic_state.yml",
+      "control_plane/__init__.py",
+      "control_plane/ceo_boot_packet.py",
+      "control_plane/ceo_intent.py",
+      "control_plane/chairman_control_room.py",
+      "control_plane/chairman_control_room_remote.py",
+      "control_plane/codex_worker.py",
+      "control_plane/executive_agent_capabilities.py",
+      "control_plane/executive_ambient_process.py",
+      "control_plane/executive_authority.py",
+      "control_plane/executive_coo_policy.py",
+      "control_plane/executive_inbox.py",
+      "control_plane/executive_orchestration_principal.py",
+      "control_plane/executive_orchestration_result.py",
+      "control_plane/executive_retry_safety.py",
+      "control_plane/executive_runtime.py",
+      "control_plane/executive_supervisor.py",
+      "control_plane/executive_worker_broker.py",
+      "control_plane/executive_workspace.py",
+      "control_plane/flags.py",
+      "control_plane/operator_harness_contract.py",
+      "control_plane/operator_harness_wire.py",
+      "control_plane/strategic_state.py",
+      "control_plane/surface_bindings.py",
+      "control_plane/worker_adapter.py",
+      "control_plane/worker_browser_b1.py",
+      "ops/control_room_remote/mastermind-control-room-remote.service",
+      "scripts/__init__.py",
+      "scripts/chairman_control_room_remote.py",
+      "scripts/ohf/__init__.py",
+      "scripts/ohf/redaction.py"
+    ],
+    "x1_read_routes_extra_literals": [
+      "/api/state",
+      "/healthz"
+    ],
+    "x1_static_routes": [
+      "/",
+      "/static/control_room.css",
+      "/static/control_room.js"
+    ]
+  },
+  "h1_path_ceiling": {
+    "collision_proof_required": "a fresh collision census over all nine paths is required immediately before H1 START, since this ceiling is frozen in advance of PR #326 protecting",
+    "forbidden_paths": [
+      "app/static/chairman_control/control_room.css",
+      "app/static/chairman_control/control_room.js",
+      "app/static/chairman_control/remote.html",
+      "control_plane/autonomy_control_room_projection.py",
+      "control_plane/chairman_control_room.py",
+      "control_plane/chairman_control_room_remote.py",
+      "integrations/slack_agent_dialogue/engine_v2.py",
+      "integrations/slack_agent_dialogue/runtime.py",
+      "integrations/slack_agent_dialogue/turn_routing_facts.py",
+      "integrations/slack_agent_dialogue/turn_runtime_primitives.py",
+      "integrations/slack_agent_dialogue/wake_projection.py",
+      "ops/control_room_remote/install.sh",
+      "ops/control_room_remote/mastermind-control-room-remote.service",
+      "scripts/chairman_control_room_remote.py"
+    ],
+    "gate": "H1 source START (all nine paths, not a subset) is held until both this H0 record and PR #326 are independently reviewed and merged into protected master. Starting paths 1-7 early, before the real consumer paths 8-9 are unblocked, would create a dark foundation PR rather than one independently useful user capability, and is not authorized under any circumstance.",
+    "may_create": [
+      "control_plane/ai_operating_hub_workroom.py",
+      "app/static/chairman_control/hub_workroom.js",
+      "app/static/chairman_control/hub_workroom.css",
+      "tests/test_ai_operating_hub_workroom.py",
+      "tests/test_chairman_control_room_ai_hub.py",
+      "tests/test_chairman_control_room_ui_ai_hub.py",
+      "docs/superpowers/plans/2026-09-03-ai-operating-hub-h1-implementation-receipt.md"
+    ],
+    "may_modify_only_after_h0_and_pr_326_protect": [
+      "scripts/chairman_control_room.py",
+      "app/static/chairman_control/index.html"
+    ],
+    "path_boundary_disposition": "DECISION_REQUEST / PATH_BOUNDARY_REQUIRED effect=NONE before any path outside this nine-path ceiling"
+  },
+  "h1_route_security_contract": {
+    "cache_law": "derives from the existing process-memory cached mastermind.chairman_control_room.v1 composed document only",
+    "forbidden": [
+      "request-time re-gather",
+      "network call",
+      "subprocess",
+      "file discovery",
+      "arbitrary workstream query parameter",
+      "any non-empty query string",
+      "fuzzy match",
+      "second compositor"
+    ],
+    "html_shell_boundary": "Content-Security-Policy and same-origin static policy are properties of the HTML/static shell only (index.html via _serve_index, csp=True). _send_json() never sets CSP for any JSON route, including /api/state, /api/discover, or the new H1 route; H1 must not claim or invent a CSP response header on its JSON GET.",
+    "http_method": "GET",
+    "human_boundary_law": "H1 and its production receipt describe the Chairman or supervised local operator inside the accepted P0A host/account threat boundary -- never an authenticated/authorized human identity, public authorization, or protection from another same-user local process.",
+    "no_partial_write_law": "the canonical payload is fully serialized and length-checked before any byte is written to the response; on overflow the fixed route returns WORKROOM_RESPONSE_TOO_LARGE instead of a partial body",
+    "post_body_cap_boundary": "The existing 64 KiB _MAX_BODY_BYTES cap is enforced only inside _read_json_body(), which is called only from do_POST. The H1 fixed GET route reads no request body, so this cap does not apply to it and must never be described as an H1 GET protection.",
+    "preserved_from_p0a_json_routes": [
+      "loopback-only binding",
+      "Host header check",
+      "Origin header check",
+      "X-CCR-Token gate",
+      "Cache-Control: no-store"
+    ],
+    "h1_specific_refusal_state": "WORKROOM_RESPONSE_TOO_LARGE",
+    "h1_specific_response_cap_bytes": 262144,
+    "resolves_to_literal_workstream": "WS:CHAIRMAN-CONTROL-ROOM",
+    "route": "/api/hub/workstream/chairman-control-room",
+    "source_citation": "mastermindx-market-intelligence/macro@6d72b43777f84c9b8040cd641c8580b14876e34b:agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md (token honesty law, verbatim); scripts/chairman_control_room.py (real inherited-gate boundaries, verified by source-law AST discriminators)",
+    "token_honesty_law": "X-CCR-Token is a per-process browser-origin/CSRF capability nonce, not authentication against another same-user local process. H1 must not claim a verified user identity or public/remote authorization from this token."
+  },
+  "h1_route_forward_compatible_closure": {
+    "baseline_api_routes": [
+      "/api/bind",
+      "/api/discover",
+      "/api/open",
+      "/api/refresh-builds",
+      "/api/state",
+      "/api/unbind",
+      "/favicon.ico"
+    ],
+    "baseline_static_assets": ["index.html", "control_room.js", "control_room.css"],
+    "permitted_future_api_route_additions": ["/api/hub/workstream/chairman-control-room"],
+    "permitted_future_static_asset_additions": ["hub_workroom.js", "hub_workroom.css"],
+    "rule": "The current P0A route/asset set is a required baseline. The only permitted future additions, ever, are the exact H1 API route and the exact two H1 static asset names above. Any arbitrary workstream-parameterized route, any second Hub route, any new POST/mutation route, or any static asset name outside this closure fails. Remote X1's route allowlist is exact and unchanged by this law."
+  },
+  "h1_field_redaction_law": {
+    "allowed_value_categories": ["repository-relative source identities", "reviewed public GitHub links"],
+    "allowlist_rule": "H1's pure reducer uses explicit per-section field allowlists. It must not recursively pass through arbitrary work/executive/github/autonomy/sources/issues/error/receipt mappings into the browser contract.",
+    "browser_proof_requirement": "H1's browser proof must confirm every forbidden value category is absent from both the DOM and the serialized H1 JSON response.",
+    "error_output_rule": "Error output contains static reason codes, never the offending value.",
+    "forbidden_value_categories": [
+      "credentials",
+      "bearer/cookie/token material",
+      "hidden provider prompts",
+      "private reasoning/chain-of-thought",
+      "raw traceback/exception bodies",
+      "absolute host paths",
+      "browser profile/session secrets",
+      "other source-owner-private values"
+    ],
+    "no_second_service_rule": "This law is implemented inside H1's own pure reducer/route; it does not create a second redaction service, and it does not change remote X1.",
+    "no_waiver_rule": "The local P0A threat boundary does not waive protected F0's secret/private-evidence law.",
+    "source": "protected F0 architecture (research/MASTERMIND_AI_OPERATING_HUB_F0_ARCHITECTURE_2026-09-02.md); Sol review 5104924912",
+    "unknown_field_rule": "Unknown privileged or source fields fail closed or are omitted with a typed NOT_AVAILABLE. They never acquire authority merely by being present in an input mapping."
+  },
+  "linear_portfolio": {
+    "exceptions_unchanged": [
+      "WS:WATCHLIST-PORTFOLIO-CEO",
+      "Linear Project 9aef6461-306a-4a3c-911b-c6a4b6635a78"
+    ],
+    "group_membership_counts": [10, 17, 11, 6, 4, 8, 7],
+    "initiatives": 7,
+    "new_membership": "WS:TEMPORAL-GRAIN-INTELLIGENCE -> legendary-alpha-discovery-timing",
+    "observed_at": "2026-09-03T16:59:38Z",
+    "projects": 65,
+    "projects_with_one_primary_initiative": 63,
+    "ruling": "portfolio/source movement only; Linear remains a selected human projection, never runtime, completion, or Hub truth authority",
+    "source": "docs/superpowers/specs/2026-09-03-linear-initiative-portfolio-v1-temporal-grain-current-epoch-amendment.md (PR #421, merged 6c5c2a6225a3fa2c2ec3e3398dcc8b8629b3a988)",
+    "unassigned_exceptions": 2
+  },
+  "non_effects": [
+    "no H1 source or implementation",
+    "no Control Room compositor, P0A, or X1 change",
+    "no change to PR #326, PR #350, or PR #357",
+    "no WS:AI-HUB created",
+    "no Agent OS write",
+    "no Linear write",
+    "no Executive lifecycle or runtime effect",
+    "no Slack lifecycle mutation",
+    "no Mac or browser action",
+    "no deployment or production effect",
+    "no Ready, merge, or self-review"
+  ],
+  "observed_at": "2026-09-03T16:59:38Z",
+  "operation_key": "mastermind-ai-operating-hub-h0-current-estate-freeze-20260903-sol-001",
+  "owner_boundaries": {
+    "anti_collapse_law": "local P0A and remote X1 are separate accepted contracts; their contract schemas must never be equal",
+    "derived_status_owner": "control_plane/autonomy_control_room_projection.py (open Draft PR #326, head cb67f9fa4f73fce49aaf5d1267c3f4a98ab05d60, four unresolved CHANGES_REQUESTED reviews, absent from protected master)",
+    "dialogue_boundary_owner": "integrations/slack_agent_dialogue/* (PR #357, merged b28023f92458ba186937afa1e619f3b4464e149f); H1 is a read-only consumer via an accepting owner, never a second dialogue classifier",
+    "h1_misclassification_guards": [
+      "terminal Attempt state alone is never a worker return",
+      "nonblank watcher strings alone never prove a watcher",
+      "a STOP/CONTINUE decision edge must be causally after the return it claims to close"
+    ],
+    "join_law": "literal word-boundary WS:<KEY> token in PR title; byte-equal workstream for runtime jobs; no title-similarity matching",
+    "local_p0a": {
+      "compositor": "control_plane/chairman_control_room.py",
+      "contract_schema": "mastermind.chairman_control_room.v1",
+      "mutation": "navigation-only local binding writes",
+      "server_entrypoint": "scripts/chairman_control_room.py",
+      "shared_static_paths": [
+        "app/static/chairman_control/control_room.css",
+        "app/static/chairman_control/control_room.js"
+      ],
+      "transport": "TCP loopback 127.0.0.1:8787, allowlisted hostnames, CSP",
+      "ui_entry": "app/static/chairman_control/index.html"
+    },
+    "purity_law": "compose_control_room is pure (no file I/O, subprocess, clock, or environment read); build_control_room is the only gather layer and never raises",
+    "remote_x1": {
+      "contract_schema": "mastermind.chairman_control_room_remote.v1",
+      "mutation": "none - read-only by construction",
+      "projection": "control_plane/chairman_control_room_remote.py",
+      "release_paths": [
+        "ops/control_room_remote/install.sh",
+        "ops/control_room_remote/mastermind-control-room-remote.service"
+      ],
+      "release_schema": "mastermind.control_room_build.v1",
+      "required_runtime_paths_owner": "control_plane/chairman_control_room_remote.py:REQUIRED_RUNTIME_PATHS",
+      "server_entrypoint": "scripts/chairman_control_room_remote.py",
+      "shared_static_paths": [
+        "app/static/chairman_control/control_room.css",
+        "app/static/chairman_control/control_room.js"
+      ],
+      "transport": "Unix socket /run/mastermind-control-room/remote.sock, gid/uid gated",
+      "ui_entry": "app/static/chairman_control/remote.html"
+    }
+  },
+  "parent_program": "mastermind-ai-operating-hub-f0-architecture-freeze-20260902-sol-001",
+  "pr_archaeology": [
+    {
+      "head": "e2e8543b3a3bcd4edd33e5f95a611e3c945bbbe5",
+      "merge_commit": "812be940cec5db025a5ef8f99f71a0e30a92bb8e",
+      "number": 416,
+      "relevance": "F0 architecture protected; this H0 record is its successor",
+      "state": "MERGED"
+    },
+    {
+      "effective_delta_paths": 10,
+      "head": "cb67f9fa4f73fce49aaf5d1267c3f4a98ab05d60",
+      "number": 326,
+      "observed_at": "2026-09-03T20:30:00Z",
+      "owns": [
+        "control_plane/autonomy_control_room_projection.py",
+        "app/static/chairman_control/control_room.js",
+        "app/static/chairman_control/control_room.css",
+        "app/static/chairman_control/index.html"
+      ],
+      "relevance": "blocking for all nine H1 paths; owns mastermind.autonomy_control_room.v1 with its own OUTPUT_KEYS and query_status/is_actionable/_combine_status logic which H1 must consume and never re-derive, once protected. Under active concurrent development by another party -- its head has moved repeatedly during this H0 operation (2eb9d23b -> b59753a4 -> 6e4a5a89 -> 8639d7a3 -> cb67f9fa). The fourth review confirms the same four connectivity blockers survive three intervening validator-hardening commits: the real Agent-OS-to-Runtime-root join is still unreachable, root-only Attempt selection still misses child/carrier work, Wake lookup still conflates source Job with responsibility root, and the protected terminal-RESULT owner is still unconsumed. Reviewer explicitly ruled the current hardening 'preserved but not the critical path' -- green CI certifies the tests, not the Chairman outcome. This only reinforces H0's existing framing that its output is an unaccepted candidate.",
+      "reviews": [
+        {"id": 5100408653, "state": "CHANGES_REQUESTED", "submitted_at": "2026-09-03T09:51:23Z"},
+        {"id": 5103135217, "state": "CHANGES_REQUESTED", "submitted_at": "2026-09-03T14:24:15Z"},
+        {"id": 5105026300, "state": "CHANGES_REQUESTED", "submitted_at": "2026-09-03T17:43:56Z"},
+        {"id": 5106453403, "state": "CHANGES_REQUESTED", "submitted_at": "2026-09-03T20:21:57Z"}
+      ],
+      "review_classification": "FULL_REREVIEW_REQUIRED",
+      "state": "OPEN_DRAFT",
+      "unresolved": true
+    },
+    {
+      "head": "f0e681bf797522e09f2224fbc866f5aab2f62bb1",
+      "number": 350,
+      "relevance": "downstream of #326 on shared packaging paths",
+      "shared_paths_with_326": [
+        "control_plane/chairman_control_room_remote.py",
+        "ops/control_room_remote/install.sh"
+      ],
+      "state": "OPEN_DRAFT"
+    },
+    {
+      "head": "58c884c418ff6dc2603d7e0db153c20825499d4f",
+      "merge_commit": "b28023f92458ba186937afa1e619f3b4464e149f",
+      "number": 357,
+      "owns": [
+        "integrations/slack_agent_dialogue/engine_v2.py",
+        "integrations/slack_agent_dialogue/runtime.py",
+        "integrations/slack_agent_dialogue/turn_routing_facts.py",
+        "integrations/slack_agent_dialogue/turn_runtime_primitives.py",
+        "integrations/slack_agent_dialogue/wake_projection.py"
+      ],
+      "relevance": "protected Agent Dialogue Wake runtime; disjoint from H0's four owned paths and from every Control Room owner path; H1 consumes read-only via an accepting owner, never re-derives",
+      "state": "MERGED"
+    },
+    {
+      "head": "7a34f6c43e76c8a6cac565e11bde7f3eee703108",
+      "merge_commit": "6c5c2a6225a3fa2c2ec3e3398dcc8b8629b3a988",
+      "number": 421,
+      "owns": [
+        "docs/superpowers/specs/2026-09-03-linear-initiative-portfolio-v1-temporal-grain-current-epoch-amendment.md"
+      ],
+      "relevance": "records-only Linear current-epoch advance to 7/65/63/2; disjoint from H0's four owned paths",
+      "state": "MERGED"
+    }
+  ],
+  "protected_master": "e4bae07b15d8685bd8850c3cd73ed7b6a088acdc",
+  "protected_master_tree": "4405c496502b848bc471cbe945917412aabae5dd",
+  "reference_workstream": "WS:CHAIRMAN-CONTROL-ROOM",
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "ruling": "Select local P0A Chairman Control Room as the first real HUB-V1 consumer; fresh protected source proves no exact blocker, and this is corroborated by Agent OS's own PROVEN_LIVE acceptance of the P0A/H0 path. Preserve remote X1 unchanged as a separate smaller closed read-only surface with its own contract and release closure; its local acceptance evidence is never promoted into remote-production truth. Bind the existing WS:CHAIRMAN-CONTROL-ROOM and create no WS:AI-HUB. Freeze the nine-path H1 ceiling narrowed by the discovery that open, still-unresolved PR #326 already owns the derived status/dispatch projection and the shared UI paths; gate all nine paths on both this H0 record and PR #326 protecting. Record protected PR #357 (Agent Dialogue Wake runtime) and PR #421 (Linear 7/65/63/2 epoch) as disjoint source movement. H1 remains held pending independent review and protected merge of this H0 record and of PR #326.",
+  "schema": "mastermind.ai_operating_hub_h0_archaeology.v1",
+  "selected_first_consumer": {
+    "falsifier": "if protected source shows P0A cannot serve a Hub read view without adding a mutation route or a second auth layer, return DECISION_REQUEST / CONSUMER_BOUNDARY_REQUIRED effect=NONE rather than widening P0A's mutation surface",
+    "not_selected": "remote X1",
+    "not_selected_reason": "closed READ_ROUTES allowlist, mandatory redaction, and a release-attestation closure pinning 37 runtime paths plus installer and systemd unit; a Hub view there would force a release manifest change and a remote deployment, both outside the H1 read-only budget",
+    "selected": "local P0A Chairman Control Room",
+    "selected_reason": "existing live loopback server, real route surface, real static entry, shared JS/CSS, and a direct dependency on the pure compositor; loopback-private so an added read-only view carries no public exposure, no new auth layer, and no deployment step; corroborated by the accepted PROVEN_LIVE evidence in capability_ledger_citations"
+  },
+  "skillpack": {
+    "minimum_bootstrap_major": 1,
+    "schema": "mastermind.sol_skillpack.v1",
+    "version": "1.0.1"
+  }
+}
