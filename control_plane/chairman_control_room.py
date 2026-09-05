@@ -229,6 +229,12 @@ ACTIVE_BUILDS_SCHEMA = "project_active_builds.v1"
 #: "project_active_builds.json"``).
 ACTIVE_BUILDS_RELATIVE_PATH = Path("data") / "governance" / "project_active_builds.json"
 
+#: ``None`` is a meaningful, explicitly supplied unavailable active-builds
+#: value.  A distinct omitted sentinel is therefore required to retain the
+#: legacy artifact-acquisition path without replacing an explicit source
+#: state with a second, potentially newer read.
+_ACTIVE_BUILDS_SNAPSHOT_OMITTED = object()
+
 #: The compiled per-workstream Agent OS artifact this module reads (Wave A.1
 #: amendment).  Owned by Macro ``scripts/agentos.py`` (``STATE_SCHEMA``,
 #: pinned SHA ``5ad347240a1a744746e01a472f80d6698e73b413``, line 96).  Unlike
@@ -2002,7 +2008,7 @@ def build_control_room(
     timeout: float = DEFAULT_TIMEOUT,
     bindings_path: str | Path | None = None,
     placement_selection_path: str | Path | None = None,
-    active_builds_snapshot: dict[str, Any] | None = None,
+    active_builds_snapshot: Any = _ACTIVE_BUILDS_SNAPSHOT_OMITTED,
 ) -> dict[str, Any]:
     """Collect every source and hand them to :func:`compose_control_room`.
 
@@ -2017,9 +2023,11 @@ def build_control_room(
     database, a missing/invalid active-builds snapshot, or an absent/
     malformed bindings file each become a ``None`` input handed to
     :func:`compose_control_room`, which names the gap.  A caller that already
-    holds a validated process-memory active-builds snapshot may provide it via
-    ``active_builds_snapshot``; the rest of this canonical gather remains the
-    same as the artifact-backed path.
+    holds a process-memory active-builds snapshot may provide it via
+    ``active_builds_snapshot``; omission alone retains the artifact-backed
+    read, while an explicit unavailable or malformed value reaches the pure
+    compositor without a replacement read.  The rest of this canonical
+    gather remains the same on either path.
     """
     root = Path(repo_root) if repo_root is not None else _REPO_ROOT
     generated_at = now or _utc_now_z()
@@ -2067,7 +2075,7 @@ def build_control_room(
         if resolved is not None:
             macro_root = os.fspath(resolved)
 
-    if active_builds_snapshot is None:
+    if active_builds_snapshot is _ACTIVE_BUILDS_SNAPSHOT_OMITTED:
         active_builds, active_builds_failure = _read_active_builds(macro_root)
     else:
         active_builds = active_builds_snapshot

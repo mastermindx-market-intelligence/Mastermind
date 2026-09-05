@@ -39,10 +39,13 @@ subprocess, or Executive SQLite database is ever touched.
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
+import http.client
 import json
 import os
+import threading
 from pathlib import Path
 
 import pytest
@@ -1665,6 +1668,40 @@ def _server_config(tmp_path, facts_path=None):
     )
 
 
+@contextlib.contextmanager
+def _running_control_room_server(config):
+    """One hermetic loopback server, owned entirely by this test process."""
+    httpd = server_mod.ControlRoomServer(
+        ("127.0.0.1", 0), server_mod.ChairmanControlRoomHandler, config
+    )
+    port = httpd.server_address[1]
+    config.port = port
+    config.origin = f"http://127.0.0.1:{port}"
+    thread = threading.Thread(
+        target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    )
+    thread.start()
+    try:
+        yield port
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=10)
+
+
+def _control_room_request(port, method, path, *, token, body=None):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        headers = {"X-CCR-Token": token} if token is not None else {}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        connection.request(method, path, body=body, headers=headers)
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
+
+
 def _stub_gather(monkeypatch, boot_packet, inbox, bindings, *, agent_os_state=None):
     """Pin every gather call BOTH composition paths make, so a cold-vs-warm
     difference can only come from the placement seam itself."""
@@ -1845,6 +1882,399 @@ def test_warm_cache_path_preserves_canonical_dispatch_evidence(
     assert cold_dispatch["dispatch_state"] == "DELIVERY_SENT"
     assert warm_dispatch == cold_dispatch
     assert len(gather_calls) == 2  # one canonical gather for cold, one for warm
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "expected_degraded"),
+    [
+        (None, "active_builds: unavailable"),
+        (
+            {
+                "schema": ccr.ACTIVE_BUILDS_SCHEMA,
+                "collected_at": "2026-09-02T00:00:00Z",
+                "repositories": [],
+            },
+            None,
+        ),
+        ({}, f"active_builds: schema is None, expected {ccr.ACTIVE_BUILDS_SCHEMA!r}"),
+        (["not-an-active-builds-document"], "active_builds: expected an object, got list"),
+    ],
+    ids=["unavailable", "valid-empty", "malformed-object", "malformed-type"],
+)
+def test_explicit_active_builds_snapshot_never_falls_back_to_the_artifact(
+    monkeypatch,
+    tmp_path,
+    boot_packet,
+    inbox,
+    bindings,
+    snapshot,
+    expected_degraded,
+):
+    """An explicit cache value has different semantics from an omitted seam.
+
+    ``None`` is the meaningful unavailable value the server must be able to
+    carry without silently replacing it with a newly-read artifact.  Empty
+    and malformed explicit inputs likewise reach the pure compositor for its
+    named, fail-closed degradation rather than triggering a second source.
+    """
+    _stub_gather(monkeypatch, boot_packet, inbox, bindings)
+    artifact_reads = []
+    monkeypatch.setattr(
+        ccr,
+        "_read_active_builds",
+        lambda root: artifact_reads.append(root) or pytest.fail(
+            "an explicit active-builds value must never reread the artifact"
+        ),
+    )
+
+    doc = ccr.build_control_room(
+        repo_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        now="2026-09-02T00:00:00Z",
+        bindings_path=tmp_path / "bindings.json",
+        active_builds_snapshot=copy.deepcopy(snapshot),
+    )
+
+    assert artifact_reads == []
+    if expected_degraded is None:
+        assert not [row for row in doc["degraded"] if row.startswith("active_builds:")]
+    else:
+        assert expected_degraded in doc["degraded"]
+
+
+def test_omitted_active_builds_snapshot_retains_the_artifact_acquisition_path(
+    monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings,
+):
+    """Only an omitted override retains backwards-compatible artifact reads."""
+    _stub_gather(monkeypatch, boot_packet, inbox, bindings)
+    artifact_reads = []
+    monkeypatch.setattr(
+        ccr,
+        "_read_active_builds",
+        lambda root: (artifact_reads.append(root) or copy.deepcopy(active_builds), None),
+    )
+
+    doc = ccr.build_control_room(
+        repo_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        now="2026-09-02T00:00:00Z",
+        bindings_path=tmp_path / "bindings.json",
+    )
+
+    assert len(artifact_reads) == 1
+    assert doc["sources"]["active_builds_schema"] == ccr.ACTIVE_BUILDS_SCHEMA
+
+
+def _canonical_dispatch_fixture(
+    monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings, *, case,
+):
+    """Real gather topology plus a closed W3C read result for one source case.
+
+    The Runtime root, its completed orchestration child, and the separate C2
+    carrier are all real hermetic Runtime records.  Only W3C's protected
+    read facade is substituted with one of its public, closed result shapes;
+    the Control Room still reaches it only through the canonical gatherer.
+    """
+    from types import SimpleNamespace
+
+    workstream = "WS:WARM-CACHE-DISPATCH"
+    runtime, root, _planner, _planner_attempt, carrier, carrier_attempt = (
+        _cr1a_runtime_topology(tmp_path, workstream=workstream)
+    )
+    macro_root = tmp_path / "macro"
+    governance = macro_root / "data" / "governance"
+    governance.mkdir(parents=True)
+    artifact_snapshot = copy.deepcopy(active_builds)
+    (governance / "project_active_builds.json").write_text(
+        json.dumps(artifact_snapshot), encoding="utf-8"
+    )
+    (governance / "agent_os_state.json").write_text(
+        json.dumps(
+            {
+                "schema": ccr.AGENT_OS_STATE_SCHEMA,
+                "generated_at": "2026-09-03T12:00:00Z",
+                "workstreams": [
+                    {
+                        "key": "WARM-CACHE-DISPATCH",
+                        "title": "Warm cache dispatch probe",
+                        "status": "active",
+                        "owner": "coo-fable",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    refresh_script = macro_root / "scripts" / "build_project_active_build_map.py"
+    refresh_script.parent.mkdir(parents=True, exist_ok=True)
+    refresh_script.write_text(
+        "# runner is injected by this hermetic test\n", encoding="utf-8"
+    )
+
+    fixture_packet = copy.deepcopy(boot_packet)
+    fixture_packet["macro"]["root"] = str(macro_root)
+    fixture_inbox = copy.deepcopy(inbox)
+    fixture_inbox["grounding"]["macro"]["root"] = str(macro_root)
+    packet_calls = []
+    inbox_packets = []
+
+    def build_packet(**_kwargs):
+        packet_calls.append(fixture_packet)
+        return fixture_packet
+
+    def build_inbox(**kwargs):
+        inbox_packets.append(kwargs["boot_packet"])
+        return fixture_inbox
+
+    monkeypatch.setattr(ccr.ceo_boot_packet, "build_packet", build_packet)
+    monkeypatch.setattr(ccr.executive_inbox, "build_inbox", build_inbox)
+    monkeypatch.setattr(ccr.surface_bindings, "load_bindings", lambda _path: (bindings, ()))
+
+    real_provenance = ccr.executive_inbox.ceo_intent_provenance
+    monkeypatch.setattr(
+        ccr.executive_inbox,
+        "ceo_intent_provenance",
+        lambda observed_runtime, job_id: (
+            ({"workstream": workstream}, None)
+            if job_id == root.job_id
+            else real_provenance(observed_runtime, job_id)
+        ),
+    )
+    monkeypatch.setattr(
+        ccr.executive_runtime.Runtime,
+        "current_capacity_commitment",
+        lambda _runtime, source_root_job_id, *, connection=None: (
+            SimpleNamespace(
+                source_root_job_id=root.job_id,
+                responsibility_ref=workstream,
+                carrier_job_id=carrier.job_id,
+                committed_carrier_attempt_id=carrier_attempt.attempt_id,
+                selected_worker_id=carrier_attempt.worker_id,
+            )
+            if source_root_job_id == root.job_id
+            else None
+        ),
+        raising=False,
+    )
+
+    dialogue = ccr.executive_dialogue_observation
+    assert dialogue is not None
+    receipt_at = (
+        "2026-08-01T00:00:00Z" if case == "stale" else "2026-09-03T12:00:00Z"
+    )
+    receipt = dialogue.CanonicalSourceReceipt(
+        observed_at=receipt_at,
+        freshness="SOURCE_EVIDENCE_TIME",
+        snapshot_digest="a" * 64,
+    )
+    results = {
+        "available": dialogue.CanonicalTerminalWakeRead(
+            state="RESOLVED",
+            reason="CANONICAL_TERMINAL_WAKE_RESOLVED",
+            terminal_state="APPLIED",
+            wake_state="TARGET_ACKNOWLEDGED",
+            terminal_applied=True,
+            source_receipt=receipt,
+        ),
+        "missing": dialogue.CanonicalTerminalWakeRead(
+            state="ABSENT",
+            reason="CANONICAL_TERMINAL_ABSENT",
+            terminal_state="MISSING",
+            wake_state="ABSENT",
+            terminal_applied=False,
+        ),
+        "stale": dialogue.CanonicalTerminalWakeRead(
+            state="RESOLVED",
+            reason="CANONICAL_TERMINAL_WAKE_RESOLVED",
+            terminal_state="APPLIED",
+            wake_state="TARGET_ACKNOWLEDGED",
+            terminal_applied=True,
+            source_receipt=receipt,
+        ),
+        "conflict": dialogue.CanonicalTerminalWakeRead(
+            state="CONFLICT",
+            reason="CANONICAL_TERMINAL_CONFLICT",
+            terminal_state="CONFLICT",
+            wake_state="CONFLICT",
+            terminal_applied=False,
+        ),
+        "effect-unknown": dialogue.CanonicalTerminalWakeRead(
+            state="EFFECT_UNKNOWN",
+            reason="CANONICAL_TERMINAL_EFFECT_UNKNOWN",
+            terminal_state="EFFECT_UNKNOWN",
+            wake_state="UNAVAILABLE",
+            terminal_applied=False,
+        ),
+    }
+    result = object() if case == "malformed" else results[case]
+    w3c_calls = []
+
+    def canonical_read(**kwargs):
+        w3c_calls.append(kwargs)
+        return result
+
+    monkeypatch.setattr(
+        dialogue, "read_runtime_canonical_terminal_wake", canonical_read
+    )
+    real_gather = ccr._gather_dispatch_evidence
+    gather_calls = []
+
+    def count_real_gather(*args, **kwargs):
+        gather_calls.append(args[1])
+        return real_gather(*args, **kwargs)
+
+    monkeypatch.setattr(ccr, "_gather_dispatch_evidence", count_real_gather)
+    config = server_mod.ServerConfig(
+        repo_root=tmp_path,
+        macro_root=str(macro_root),
+        bindings_path=tmp_path / "bindings.json",
+        token="warm-cache-test-token",
+        origin="http://127.0.0.1:0",
+        port=0,
+        now_fn=lambda: "2026-09-03T12:00:00Z",
+    )
+    return config, root, artifact_snapshot, packet_calls, inbox_packets, gather_calls, w3c_calls
+
+
+def _dispatch_for(doc, responsibility_ref):
+    return next(
+        card["dispatch"]
+        for card in doc["autonomy"]["responsibilities"]
+        if card["responsibility_ref"] == responsibility_ref
+    )
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_state", "expected_historical"),
+    [
+        ("available", "RETURNED", False),
+        ("missing", "UNKNOWN", True),
+        ("malformed", "UNKNOWN", True),
+        ("stale", "RETURNED", True),
+        ("conflict", "RUNTIME_BINDING_RECONCILIATION_REQUIRED", True),
+        ("effect-unknown", "EFFECT_UNKNOWN", True),
+    ],
+)
+def test_actual_server_cold_and_warm_paths_preserve_canonical_dispatch_cases(
+    monkeypatch,
+    tmp_path,
+    boot_packet,
+    inbox,
+    active_builds,
+    bindings,
+    case,
+    expected_state,
+    expected_historical,
+):
+    """Both actual ``_compose_state_doc`` paths retain all closed outcomes."""
+    (
+        config,
+        root,
+        artifact_snapshot,
+        packet_calls,
+        inbox_packets,
+        gather_calls,
+        w3c_calls,
+    ) = _canonical_dispatch_fixture(
+        monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings, case=case
+    )
+
+    cold = server_mod._compose_state_doc(config)
+    supplied_snapshot = copy.deepcopy(artifact_snapshot)
+    supplied_before = copy.deepcopy(supplied_snapshot)
+    config.live_cache["active_builds"] = supplied_snapshot
+    monkeypatch.setattr(
+        ccr,
+        "_read_active_builds",
+        lambda _root: pytest.fail("a supplied live snapshot must not reread the artifact"),
+    )
+    warm = server_mod._compose_state_doc(config)
+
+    cold_dispatch = _dispatch_for(cold, "WS:WARM-CACHE-DISPATCH")
+    warm_dispatch = _dispatch_for(warm, "WS:WARM-CACHE-DISPATCH")
+    assert cold_dispatch == warm_dispatch
+    assert warm_dispatch["dispatch_state"] == expected_state
+    assert warm_dispatch["historical"] is expected_historical
+    assert supplied_snapshot == supplied_before
+    assert len(packet_calls) == 2
+    # One packet is acquired per composition and the exact acquired packet is
+    # reused by Inbox; no second Agent OS packet collection is possible.
+    assert inbox_packets == packet_calls
+    assert len(gather_calls) == 2
+    assert len(w3c_calls) == 2
+    assert all(
+        call["source_root_job_id"] == root.job_id for call in w3c_calls
+    )
+
+
+def test_refresh_builds_then_cached_state_retains_real_canonical_dispatch(
+    monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings,
+):
+    """The real refresh route publishes a warm document with the same evidence.
+
+    This is deliberately a real loopback POST then authenticated GET, not a
+    model of the cache handoff.  It remains hermetic: the refresh subprocess
+    seam returns a fixed compiled artifact, while the Runtime/W3C/C2 topology
+    comes from the sanctioned fixture above.
+    """
+    (
+        config,
+        _root,
+        artifact_snapshot,
+        _packet_calls,
+        _inbox_packets,
+        gather_calls,
+        _w3c_calls,
+    ) = _canonical_dispatch_fixture(
+        monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings, case="available"
+    )
+    monkeypatch.setattr(server_mod.capability, "census", lambda **_kwargs: {})
+    config.runner = lambda *_args, **_kwargs: {
+        "code": 0,
+        "stdout": json.dumps(artifact_snapshot),
+        "stderr": "",
+        "timed_out": False,
+    }
+    real_read_active_builds = ccr._read_active_builds
+    artifact_reads = []
+
+    def count_artifact_reads(root):
+        artifact_reads.append(root)
+        return real_read_active_builds(root)
+
+    monkeypatch.setattr(ccr, "_read_active_builds", count_artifact_reads)
+
+    with _running_control_room_server(config) as port:
+        cold_status, cold_body = _control_room_request(
+            port, "GET", "/api/state", token=config.token
+        )
+        refresh_status, refresh_body = _control_room_request(
+            port, "POST", "/api/refresh-builds", token=config.token, body=b"{}"
+        )
+        warm_status, warm_body = _control_room_request(
+            port, "GET", "/api/state", token=config.token
+        )
+        denied_status, _denied_body = _control_room_request(
+            port, "GET", "/api/state", token=None
+        )
+
+    assert cold_status == refresh_status == warm_status == 200
+    assert denied_status == 403
+    assert json.loads(refresh_body)["ok"] is True, refresh_body.decode("utf-8")
+    cold = json.loads(cold_body)["control_room"]
+    warm_payload = json.loads(warm_body)
+    warm = warm_payload["control_room"]
+    assert warm_payload["live_builds_active"] is True
+    assert _dispatch_for(cold, "WS:WARM-CACHE-DISPATCH") == _dispatch_for(
+        warm, "WS:WARM-CACHE-DISPATCH"
+    )
+    assert _dispatch_for(warm, "WS:WARM-CACHE-DISPATCH")["dispatch_state"] == "RETURNED"
+    assert config.live_cache["active_builds"] == artifact_snapshot
+    assert len(artifact_reads) == 1  # cold only; POST's warm compose never rereads it
+    assert len(gather_calls) == 2  # one canonical gather for each composition
 
 
 # ---------------------------------------------------------------------------

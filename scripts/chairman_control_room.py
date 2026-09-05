@@ -383,17 +383,22 @@ def _compose_state_doc(
     always timed out on the request path (F1/F2).
     """
     generated_at = config.now_fn()
-    live_active_builds = config.live_cache.get("active_builds")
-    return ccr.build_control_room(
-        repo_root=config.repo_root,
-        macro_root_flag=config.macro_root,
-        environ=os.environ,
-        now=generated_at,
-        timeout=timeout,
-        bindings_path=config.bindings_path,
-        placement_selection_path=config.placement_selection_path,
-        active_builds_snapshot=live_active_builds,
-    )
+    build_kwargs: dict[str, Any] = {
+        "repo_root": config.repo_root,
+        "macro_root_flag": config.macro_root,
+        "environ": os.environ,
+        "now": generated_at,
+        "timeout": timeout,
+        "bindings_path": config.bindings_path,
+        "placement_selection_path": config.placement_selection_path,
+    }
+    # Absence means the cold artifact path remains the caller's source.  A
+    # present cache key, including an explicitly unavailable/malformed value,
+    # is a supplied source state and must reach the canonical builder without
+    # a second artifact read.
+    if "active_builds" in config.live_cache:
+        build_kwargs["active_builds_snapshot"] = config.live_cache["active_builds"]
+    return ccr.build_control_room(**build_kwargs)
 
 
 # ---------------------------------------------------------------------------
