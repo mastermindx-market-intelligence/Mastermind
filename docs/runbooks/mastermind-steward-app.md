@@ -1,9 +1,10 @@
 # Mastermind Steward Business App
 
-The Steward app is the read-only company cockpit for Sol and the Chairman. It
-projects the existing Chairman Control Room through the protected six-tool
-Secretary contract. It owns no lifecycle, queue, identity directory, session,
-crawler, cache, retry ledger, or organizational state.
+The Steward app is a read-only, partial company-cockpit source for Sol and the
+Chairman. It projects only facts present in the existing Chairman Control Room
+through the protected six-tool Secretary contract. It owns no lifecycle,
+queue, identity directory, session, crawler, cache, retry ledger, or
+organizational state.
 
 ## Capability surface
 
@@ -18,6 +19,37 @@ resolve_surface
 
 Every tool is read-only, idempotent, closed-world, structured, and requires
 `mastermind.steward.read` in authenticated HTTP mode.
+
+## Truthful capability ledger
+
+The advertised server identity remains `mastermind-steward`. Its current
+source capability is intentionally narrower than a complete six-tool Business
+cockpit:
+
+| Surface | Maximum truthful claim |
+|---|---|
+| Grouped-v2 six-tool protocol, exact A1 app/verifier policy binding, Host/raw-path/media/body guards, structured/JSON-text fallback, and inert UI source | `BUILT_NOT_PROVEN / PRODUCTION_INERT` |
+| `list_responsibilities` | Complete `FACTS` when its current Agent OS source bundle is complete |
+| `explain_blocker` | Complete `FACTS` when the blocker source bundle is complete |
+| `get_responsibility` | `PARTIAL / DEGRADED`: the current Control Room source carries no authoritative objective |
+| `get_attention` | `PARTIAL / DEGRADED`: the current Control Room source carries no authoritative `requested_action` |
+| `get_current_runtime` | `PARTIAL / DEGRADED`: the current producer supplies no Attempt, Worker, RuntimeBinding, or continuation facts; effect remains unknown where applicable |
+| `resolve_surface` | `PARTIAL / DEGRADED`: no authoritative `surface.ref`, review-state, or health bundle exists |
+| Full six-tool Business cockpit and live one-cockpit read canary | OPEN and not production-proven |
+
+These limits are source limits, not transport defects. The adapter must not
+alias `program` to objective, relabel a runtime next-action list as
+`requested_action`, manufacture Job/Attempt/Worker/RuntimeBinding or
+continuation references, invent `surface.ref`, or turn unknown review or
+health state into approval. Missing owner-native facts remain honestly
+`DEGRADED`, `UNKNOWN`, or `REFUSED` until a separately authorized producer-to-
+consumer vertical supplies them.
+
+HTTP success, MCP `ok=true`, a rendered UI, or a `DEGRADED` result proves only
+that the request crossed the applicable transport and schema boundary. It does
+not prove that every originally desired fact exists. A tool may report
+`FACTS` only when its protected required predicate family is actually present;
+otherwise the explicit partial state and reason codes are part of the result.
 
 ## Public result generation
 
@@ -35,8 +67,8 @@ public generation. Structured results and their matching JSON text fallback
 remain usable when the optional UI cannot render.
 
 Passing source, transport, and UI checks is not production proof. This carrier
-remains `BUILT_NOT_PROVEN / PRODUCTION_INERT` until the separately authorized
-Business installation and read canary completes.
+remains `BUILT_NOT_PROVEN / PRODUCTION_INERT`; the full cockpit and the
+separately authorized Business installation/read canary both remain open.
 
 ## Install the isolated app runtime
 
