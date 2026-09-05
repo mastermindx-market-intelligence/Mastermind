@@ -1,6 +1,7 @@
 """Authenticated stateless Streamable HTTP host for Mastermind Steward."""
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
@@ -69,6 +70,23 @@ def _ascii(value: bytes) -> str | None:
     ):
         return None
     return token
+
+
+def _accepts_json(value: bytes) -> bool:
+    try:
+        token = value.decode("ascii")
+    except UnicodeDecodeError:
+        return False
+    if (
+        not token
+        or token != token.strip()
+        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in token)
+    ):
+        return False
+    return any(
+        media_type.partition(";")[0].strip().lower() == "application/json"
+        for media_type in token.split(",")
+    )
 
 
 def _canonical_raw_path(scope: Scope) -> bytes:
@@ -218,6 +236,21 @@ class _StewardTransportGuard:
             await _reply(scope, receive, send, 415, "unsupported_media_type")
             return
 
+        accepts = _headers(scope, b"accept")
+        if len(accepts) != 1:
+            status = 400 if accepts else 406
+            await _reply(
+                scope,
+                receive,
+                send,
+                status,
+                "invalid_request" if status == 400 else "not_acceptable",
+            )
+            return
+        if not _accepts_json(accepts[0]):
+            await _reply(scope, receive, send, 406, "not_acceptable")
+            return
+
         lengths = _headers(scope, b"content-length")
         if len(lengths) > 1:
             await _reply(scope, receive, send, 400, "invalid_request")
@@ -247,6 +280,11 @@ class _StewardTransportGuard:
                 return
             if not message.get("more_body", False):
                 break
+        try:
+            json.loads(bytes(body))
+        except (RecursionError, UnicodeDecodeError, ValueError):
+            await _reply(scope, receive, send, 400, "invalid_request")
+            return
         sent = False
 
         async def replay() -> Message:
@@ -345,6 +383,9 @@ def build_authenticated_app(
         raise ValueError("Steward policy must require exactly mastermind.steward.read")
     if type(token_verifier) is not MastermindTokenVerifier:
         raise TypeError("token_verifier must be MastermindTokenVerifier")
+    verifier_policy = MastermindTokenVerifier._validated_composition(token_verifier)
+    if verifier_policy != policy:
+        raise ValueError("token_verifier policy must match Steward policy")
 
     mcp_server = build_mcp_server(contract)
     hosts = _allowed_hosts(policy)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import inspect
 import json
 import time
@@ -21,6 +22,7 @@ from integrations.business_mcp_auth.contracts import (
     AuthErrorCode,
     load_resource_policy,
     subject_digest,
+    validate_resource_policy,
 )
 from integrations.business_mcp_auth.jwks import BoundedJwksCache
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
@@ -550,6 +552,14 @@ def test_valid_token_without_steward_scope_gets_a1_insufficient_scope_challenge(
             b"{}",
             415,
         ),
+        (
+            "POST",
+            MCP_PATH,
+            {"accept": "text/plain", "content-type": "application/json"},
+            b"{}",
+            406,
+        ),
+        ("POST", MCP_PATH, MCP_HEADERS, b"{", 400),
     ],
 )
 def test_transport_alias_method_and_content_type_refuse_before_authentication(
@@ -723,6 +733,39 @@ def test_authenticated_app_refuses_cross_realm_scope_policy():
             policy=policy,
             token_verifier=verifier,
         )
+
+
+def test_authenticated_app_refuses_a1_verifier_bound_to_foreign_policy(
+    rsa_key: rsa.RSAPrivateKey,
+):
+    steward_policy = _policy()
+    foreign_issuer = "https://other-identity.example.test/"
+    foreign_policy = validate_resource_policy(dataclasses.replace(
+        steward_policy,
+        policy_id="other-app-v1",
+        resource="https://other-app.example.test/mcp/executive/v1",
+        resource_metadata_url=(
+            "https://other-app.example.test/.well-known/"
+            "oauth-protected-resource/mcp/executive/v1"
+        ),
+        issuer=foreign_issuer,
+        authorization_servers=(foreign_issuer,),
+        jwks_uri="https://other-identity.example.test/.well-known/jwks.json",
+        allowed_subject_digests=(
+            subject_digest(issuer=foreign_issuer, subject=SUBJECT),
+        ),
+    ))
+    foreign_verifier, fetcher, sink = _real_verifier(foreign_policy, rsa_key)
+
+    with pytest.raises(ValueError, match="policy"):
+        build_authenticated_app(
+            build_contract_server(_Port()),
+            policy=steward_policy,
+            token_verifier=foreign_verifier,
+        )
+
+    assert fetcher.calls == []
+    assert sink.events == []
 
 
 def test_authenticated_app_refuses_non_a1_verifier():
