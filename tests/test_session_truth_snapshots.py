@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -428,3 +429,18 @@ def test_load_snapshot_maps_parser_integer_limit_to_contract_error(tmp_path):
     )
     with pytest.raises(SessionTruthContractError, match="not valid JSON"):
         load_snapshot(path, GITHUB_SCHEMA)
+
+
+def test_load_snapshot_keeps_integer_limit_when_global_guard_is_disabled(tmp_path):
+    path = tmp_path / "oversized-integer-global-guard-disabled.json"
+    path.write_text(
+        '{"schema":"' + GITHUB_SCHEMA + '","value":' + "9" * 5000 + "}",
+        encoding="utf-8",
+    )
+    previous = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(0)
+        with pytest.raises(SessionTruthContractError, match="not valid JSON"):
+            load_snapshot(path, GITHUB_SCHEMA)
+    finally:
+        sys.set_int_max_str_digits(previous)

@@ -54,6 +54,8 @@ RECORDS_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 MAX_JSON_BYTES = 16 * 1024 * 1024
 MAX_JSON_DEPTH = 128
 MAX_JSON_NODES = 250_000
+MAX_JSON_INTEGER_DIGITS = 256
+_MAX_JSON_INTEGER_ABS = 10**MAX_JSON_INTEGER_DIGITS
 
 
 class SessionTruthContractError(ValueError):
@@ -64,6 +66,62 @@ def valid_source_records_digest(value: object) -> bool:
     """True only for an exact owner-produced ``sha256:<64 lowercase hex>`` digest."""
 
     return isinstance(value, str) and bool(RECORDS_DIGEST_RE.fullmatch(value))
+
+
+def parse_bounded_json_int(value: str) -> int:
+    """Parse one JSON integer independently of Python's process-global digit cap."""
+
+    digits = value[1:] if value.startswith("-") else value
+    if len(digits) > MAX_JSON_INTEGER_DIGITS:
+        raise ValueError(
+            f"JSON integer exceeds {MAX_JSON_INTEGER_DIGITS} decimal digits"
+        )
+    return int(value)
+
+
+def _json_string_encoded_bytes(
+    value: str,
+    *,
+    path: str,
+    byte_budget: int,
+    root_label: str,
+    key: bool = False,
+) -> int:
+    """Return exact UTF-8 JSON string bytes without materializing an encoding."""
+
+    # Every code point costs at least one encoded byte, plus two quotes.  This
+    # constant-time lower bound refuses an obviously oversized in-memory string
+    # before walking it.  Escapes and multibyte characters are checked while
+    # walking so the work stops as soon as the remaining aggregate budget is spent.
+    if byte_budget < 2 or len(value) > byte_budget - 2:
+        raise SessionTruthContractError(
+            f"{root_label} exceeds the maximum encoded byte size of {MAX_JSON_BYTES}"
+        )
+    total = 2  # quotes
+    for char in value:
+        codepoint = ord(char)
+        if char in {'"', "\\"} or char in "\b\f\n\r\t":
+            total += 2
+        elif codepoint <= 0x1F:
+            total += 6
+        elif codepoint <= 0x7F:
+            total += 1
+        elif codepoint <= 0x7FF:
+            total += 2
+        elif 0xD800 <= codepoint <= 0xDFFF:
+            kind = "mapping key" if key else "text"
+            raise SessionTruthContractError(
+                f"{path} contains {kind} that is not valid UTF-8"
+            )
+        elif codepoint <= 0xFFFF:
+            total += 3
+        else:
+            total += 4
+        if total > byte_budget:
+            raise SessionTruthContractError(
+                f"{root_label} exceeds the maximum encoded byte size of {MAX_JSON_BYTES}"
+            )
+    return total
 
 
 def validate_json_tree(value: object, label: str = "value") -> None:
@@ -78,9 +136,19 @@ def validate_json_tree(value: object, label: str = "value") -> None:
     # Each frame retains only an iterator over one active container.  Siblings
     # are never all enqueued, so traversal memory is bounded by depth rather than
     # by the product of depth and a wide, aliased input graph.
-    stack: list[tuple[object, object, str, int, bool]] = []
+    stack: list[tuple[object, object, str, int, bool, int]] = []
     active_containers: set[int] = set()
     nodes = 0
+    encoded_bytes = 0
+
+    def add_bytes(amount: int) -> None:
+        nonlocal encoded_bytes
+        encoded_bytes += amount
+        if encoded_bytes > MAX_JSON_BYTES:
+            raise SessionTruthContractError(
+                f"{label} exceeds the maximum encoded byte size of {MAX_JSON_BYTES}"
+            )
+
     current: tuple[object, str, int] | None = (value, label, 1)
     while current is not None or stack:
         if current is not None:
@@ -104,43 +172,73 @@ def validate_json_tree(value: object, label: str = "value") -> None:
                     )
                 active_containers.add(marker)
                 children = iter(item.items()) if isinstance(item, Mapping) else enumerate(item)
-                stack.append((item, children, path, depth, isinstance(item, Mapping)))
+                add_bytes(2)  # opening and closing delimiter
+                stack.append(
+                    (item, children, path, depth, isinstance(item, Mapping), 0)
+                )
             elif isinstance(item, str):
-                try:
-                    item.encode("utf-8", errors="strict")
-                except UnicodeEncodeError as exc:
-                    raise SessionTruthContractError(
-                        f"{path} contains text that is not valid UTF-8"
-                    ) from exc
+                add_bytes(
+                    _json_string_encoded_bytes(
+                        item,
+                        path=path,
+                        byte_budget=MAX_JSON_BYTES - encoded_bytes,
+                        root_label=label,
+                    )
+                )
             elif isinstance(item, float):
                 if not math.isfinite(item):
                     raise SessionTruthContractError(
                         f"{path} contains a forbidden non-finite number"
                     )
-            elif item is not None and not isinstance(item, (int, bool)):
+                add_bytes(len(repr(item)))
+            elif type(item) is bool:
+                add_bytes(4 if item else 5)
+            elif type(item) is int:
+                if item <= -_MAX_JSON_INTEGER_ABS or item >= _MAX_JSON_INTEGER_ABS:
+                    raise SessionTruthContractError(
+                        f"{path} exceeds the maximum JSON integer size of "
+                        f"{MAX_JSON_INTEGER_DIGITS} decimal digits"
+                    )
+                add_bytes(len(str(item)))
+            elif item is None:
+                add_bytes(4)
+            else:
                 raise SessionTruthContractError(
                     f"{path} contains a non-JSON value of type {type(item).__name__}"
                 )
             continue
 
-        container, children, path, depth, is_mapping = stack[-1]
+        container, children, path, depth, is_mapping, child_count = stack[-1]
         try:
             key, child = next(children)  # type: ignore[arg-type]
         except StopIteration:
             stack.pop()
             active_containers.remove(id(container))
             continue
+        add_bytes(1 if child_count else 0)  # comma
+        stack[-1] = (
+            container,
+            children,
+            path,
+            depth,
+            is_mapping,
+            child_count + 1,
+        )
         if is_mapping:
             if not isinstance(key, str):
                 raise SessionTruthContractError(
                     f"{path} contains a non-string mapping key: {key!r}"
                 )
-            try:
-                key.encode("utf-8", errors="strict")
-            except UnicodeEncodeError as exc:
-                raise SessionTruthContractError(
-                    f"{path} contains a mapping key that is not valid UTF-8"
-                ) from exc
+            add_bytes(
+                _json_string_encoded_bytes(
+                    key,
+                    path=path,
+                    byte_budget=MAX_JSON_BYTES - encoded_bytes,
+                    root_label=label,
+                    key=True,
+                )
+            )
+            add_bytes(1)  # colon
             child_path = f"{path}.{key}"
         else:
             child_path = f"{path}[{key}]"

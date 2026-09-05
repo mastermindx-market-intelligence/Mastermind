@@ -940,6 +940,54 @@ def test_derived_workstream_context_does_not_become_broad_selector(healthy):
     assert "MULTIPLE_ACTIVE_CARRIERS" not in codes
 
 
+@pytest.mark.parametrize(
+    ("context_defect", "forbidden_code"),
+    [
+        ("stale", "STALE_HANDOFF"),
+        ("superseded", "SUPERSEDED_NEXT_ACTION"),
+    ],
+)
+def test_derived_workstream_does_not_select_agentos_context(
+    healthy, context_defect, forbidden_code
+):
+    changed = copy.deepcopy(healthy)
+    derived_workstream = copy.deepcopy(_workstream())
+    derived_workstream.update({"key": "DERIVED", "prs": []})
+    changed["agentos"]["state"]["workstreams"].append(derived_workstream)
+
+    selected_issue = _issue("MAS-998")
+    selected_issue.update(
+        {"workstream": "WS:DERIVED", "github_relations": []}
+    )
+    changed["linear"]["issues"].append(selected_issue)
+    changed["scope"]["linear"].append("MAS-998")
+
+    derived_context = copy.deepcopy(_handoff_context())
+    derived_context["target"]["workstream"] = "WS:DERIVED"
+    if context_defect == "stale":
+        derived_context["sections"][0]["items"][0].update(
+            {
+                "path": "agentos/handoffs/WS-DERIVED-STALE.md",
+                "updated": "2026-08-20",
+            }
+        )
+    else:
+        derived_context["excluded"].append(
+            {
+                "kind": "handoff",
+                "path": "agentos/handoffs/WS-DERIVED-SUPERSEDED.md",
+                "reason": "superseded_next_action",
+            }
+        )
+    changed["agentos"]["contexts"].append(derived_context)
+
+    selection = select_session_truth_scope(changed)
+
+    assert "WS:DERIVED" in selection.workstreams
+    assert selection.agentos_context_indexes == frozenset({0})
+    assert forbidden_code not in _codes(changed)
+
+
 def test_selected_message_missing_sender_identity_remains_unknown(healthy):
     changed = copy.deepcopy(healthy)
     changed["identities"]["bindings"][0]["slack_principal"] = None

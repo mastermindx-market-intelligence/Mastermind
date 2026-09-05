@@ -18,6 +18,7 @@ from typing import Any
 from control_plane.session_truth_contract import (
     MAX_JSON_BYTES,
     SessionTruthContractError,
+    parse_bounded_json_int,
     validate_json_tree,
 )
 
@@ -435,7 +436,11 @@ def load_snapshot(path: Path | str, expected_schema: str) -> dict[str, Any]:
     except UnicodeDecodeError as exc:
         raise _error("snapshot is not valid UTF-8") from exc
     try:
-        parsed = json.loads(text, parse_constant=_reject_non_finite_constant)
+        parsed = json.loads(
+            text,
+            parse_constant=_reject_non_finite_constant,
+            parse_int=parse_bounded_json_int,
+        )
     except (RecursionError, ValueError) as exc:
         raise _error("snapshot is not valid JSON") from exc
     root = _mapping(parsed, "snapshot")

@@ -24,6 +24,7 @@ from control_plane.ceo_boot_packet import git_sha, resolve_macro_root
 from control_plane.session_truth_contract import (
     MAX_JSON_BYTES,
     SessionTruthContractError,
+    parse_bounded_json_int,
     validate_json_tree,
 )
 
@@ -226,7 +227,8 @@ def _decode_leading_json(text: str, label: str) -> tuple[dict[str, Any], str]:
         raise AcquisitionError(f"{label} emitted empty output")
     try:
         value, end = json.JSONDecoder(
-            parse_constant=_reject_non_finite_constant
+            parse_constant=_reject_non_finite_constant,
+            parse_int=parse_bounded_json_int,
         ).raw_decode(stripped)
     except (RecursionError, ValueError) as exc:
         raise AcquisitionError(f"{label} emitted malformed JSON") from exc
@@ -339,7 +341,9 @@ def collect_agentos(
         )
         try:
             context = json.loads(
-                context_text, parse_constant=_reject_non_finite_constant
+                context_text,
+                parse_constant=_reject_non_finite_constant,
+                parse_int=parse_bounded_json_int,
             )
         except (RecursionError, ValueError) as exc:
             raise AcquisitionError("Agent OS compile-context emitted malformed JSON") from exc

@@ -242,7 +242,7 @@ def select_session_truth_scope(
         )
         if isinstance(context, Mapping)
         and isinstance(context.get("target"), Mapping)
-        and context["target"].get("workstream") in workstreams
+        and context["target"].get("workstream") in requested_workstreams
     }
 
     return SessionTruthScopeSelection(

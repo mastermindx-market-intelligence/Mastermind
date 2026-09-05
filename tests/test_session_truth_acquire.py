@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 
 import pytest
@@ -354,3 +355,51 @@ def test_decode_leading_json_still_accepts_finite_numbers():
     )
     assert value["age"] == 1.5
     assert trailing == "trailing"
+
+
+def test_decode_leading_json_rejects_huge_integer_with_global_guard_disabled():
+    module = _acquire()
+    previous = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(0)
+        with pytest.raises(module.AcquisitionError, match="malformed JSON"):
+            module._decode_leading_json(
+                '{"schema":"agent_os_state.v1","huge":' + "9" * 5000 + "}",
+                "Agent OS status",
+            )
+    finally:
+        sys.set_int_max_str_digits(previous)
+
+
+def test_compile_context_rejects_huge_integer_with_global_guard_disabled(
+    tmp_path, monkeypatch
+):
+    module = _acquire()
+    macro = _macro_fixture(tmp_path)
+
+    def fake_run_agentos(_macro_root, args, *, timeout):
+        del timeout
+        if args[0] == "status":
+            return '{"schema":"agent_os_state.v1","workstreams":[{"key":"TARGET"}]}'
+        return (
+            '{"schema":"context_bundle.v1","target":{"workstream":"WS:TARGET"},'
+            '"huge":' + "9" * 5000 + "}"
+        )
+
+    monkeypatch.setattr(module, "_run_agentos", fake_run_agentos)
+    previous = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(0)
+        with pytest.raises(
+            module.AcquisitionError,
+            match="compile-context emitted malformed JSON",
+        ):
+            module.collect_agentos(
+                str(macro),
+                ["WS:TARGET"],
+                environ={},
+                now="2026-08-27T05:00:00Z",
+                timeout=5,
+            )
+    finally:
+        sys.set_int_max_str_digits(previous)

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 import importlib
+import json
 import re
+import sys
 
 import pytest
 
@@ -280,6 +282,57 @@ def test_json_tree_node_boundary_is_inclusive():
         module.validate_json_tree([0] * module.MAX_JSON_NODES)
 
 
+def test_json_tree_encoded_byte_accounting_matches_canonical_utf8(monkeypatch):
+    module = _contract()
+    value = {"é": ["line\n", "astral-😀", 'quote-"', "slash-\\"]}
+    expected = len(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+    monkeypatch.setattr(module, "MAX_JSON_BYTES", expected)
+    module.validate_json_tree(value)
+    monkeypatch.setattr(module, "MAX_JSON_BYTES", expected - 1)
+    with pytest.raises(module.SessionTruthContractError, match="encoded byte"):
+        module.validate_json_tree(value)
+
+
+def test_json_tree_string_precheck_and_multibyte_increment_stop_at_small_ceiling(
+    monkeypatch,
+):
+    module = _contract()
+    monkeypatch.setattr(module, "MAX_JSON_BYTES", 8)
+    with pytest.raises(module.SessionTruthContractError, match="encoded byte"):
+        module.validate_json_tree("x" * 7)  # lower bound is nine bytes with quotes
+
+    monkeypatch.setattr(module, "MAX_JSON_BYTES", 4)
+    module.validate_json_tree("é")
+    monkeypatch.setattr(module, "MAX_JSON_BYTES", 3)
+    with pytest.raises(module.SessionTruthContractError, match="encoded byte"):
+        module.validate_json_tree("é")
+
+
+def test_bounded_json_integer_parser_and_in_memory_boundary_are_explicit():
+    module = _contract()
+    accepted = "9" * module.MAX_JSON_INTEGER_DIGITS
+    assert module.parse_bounded_json_int(accepted) == int(accepted)
+    with pytest.raises(ValueError, match="decimal digits"):
+        module.parse_bounded_json_int("9" * (module.MAX_JSON_INTEGER_DIGITS + 1))
+
+    previous = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(0)
+        huge = int("9" * 5000)
+        with pytest.raises(module.SessionTruthContractError, match="integer size"):
+            module.validate_json_tree({"huge": huge})
+    finally:
+        sys.set_int_max_str_digits(previous)
+
+
 def test_json_tree_rejects_cycles_before_copy_or_hash():
     module = _contract()
     cycle = []
@@ -311,3 +364,39 @@ def test_agentos_interior_depth_fails_through_contract_error():
     doc["agentos"]["state"]["workstreams"] = _nested_list(module.MAX_JSON_DEPTH)
     with pytest.raises(module.SessionTruthContractError, match="maximum JSON depth"):
         module.validate_input_document(doc)
+
+
+def test_build_receipt_rejects_one_agentos_string_over_aggregate_byte_ceiling(monkeypatch):
+    module = _contract()
+    receipt = importlib.import_module("control_plane.session_truth")
+    doc = _minimal_input(module)
+    doc["agentos"]["state"]["oversized"] = "x" * (module.MAX_JSON_BYTES + 1)
+
+    def forbid_unbounded_dump(*_args, **_kwargs):
+        raise AssertionError("validator attempted an unbounded JSON serialization")
+
+    monkeypatch.setattr(module.json, "dumps", forbid_unbounded_dump)
+    with pytest.raises(module.SessionTruthContractError, match="encoded byte"):
+        receipt.build_receipt(
+            doc,
+            observed_started_at="2026-08-27T05:00:00Z",
+            observed_ended_at="2026-08-27T05:00:01Z",
+        )
+
+
+def test_build_receipt_rejects_aggregate_of_individually_bounded_sources():
+    module = _contract()
+    receipt = importlib.import_module("control_plane.session_truth")
+    doc = _minimal_input(module)
+    chunk = "x" * (module.MAX_JSON_BYTES // 6)
+    for source in ("agentos", "github", "linear", "slack", "executive", "identities"):
+        doc[source] = {"available": False, "reason": chunk}
+
+    for source in ("agentos", "github", "linear", "slack", "executive", "identities"):
+        module.validate_json_tree(doc[source], source)
+    with pytest.raises(module.SessionTruthContractError, match="encoded byte"):
+        receipt.build_receipt(
+            doc,
+            observed_started_at="2026-08-27T05:00:00Z",
+            observed_ended_at="2026-08-27T05:00:01Z",
+        )
