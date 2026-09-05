@@ -32,6 +32,7 @@ from control_plane.executive_dialogue_observation import (
     TerminalObservationFacts,
     TerminalProjectionReceiptFacts,
     parse_observation_request,
+    parse_source_reconcile_request,
     parse_wake_request,
     reduce_dialogue_observation,
     read_canonical_terminal_wake,
@@ -40,7 +41,12 @@ from control_plane.executive_dialogue_observation import (
 from control_plane.session_targets import WakeRoute
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.wake_events import mint_obligation
-from control_plane.dialogue_source_resolution import attention_source_ref
+from control_plane.dialogue_source_resolution import (
+    DialogueSourceMessage,
+    DialogueSourceResolutionError,
+    DialogueSourceSnapshot,
+    attention_source_ref,
+)
 from control_plane.wake_ledger import (
     LedgerPhase,
     WAKE_AGGREGATE_TYPE,
@@ -61,6 +67,28 @@ def _request(parent: dict | None = None) -> bytes:
             "schema": REQUEST_SCHEMA,
             "request_id": "observation-request-001",
             "parent": parent or valid_parent(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _source_reconcile_request() -> bytes:
+    parent = valid_parent()
+    return json.dumps(
+        {
+            "schema": "mastermind.dialogue_source_reconcile_request/v1",
+            "operation": "RECONCILE_DIALOGUE_SOURCES",
+            "parent": parent,
+            "snapshot": {
+                "workspace_id": "T0BRD2AQXQV",
+                "channel_id": "C0BSBM78V1N",
+                "thread_ts": "1788000000.123456",
+                "parent_fingerprint": parent["fingerprint"],
+                "operation_key": parent["operation_key"],
+                "messages": [],
+                "complete": True,
+            },
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -246,6 +274,42 @@ def test_strict_request_reuses_canonical_v2_parent_parser() -> None:
         legacy[forbidden_key] = forbidden_value
         with pytest.raises(DialogueObservationProtocolError, match="REQUEST_REFUSED"):
             parse_observation_request(json.dumps(legacy).encode("utf-8"))
+
+
+def test_source_reconcile_frame_is_strict_bounded_and_closed() -> None:
+    raw = _source_reconcile_request()
+    parsed = parse_source_reconcile_request(raw)
+    assert parsed.snapshot.messages == ()
+
+    duplicate = raw.decode("utf-8").replace(
+        '"operation":"RECONCILE_DIALOGUE_SOURCES"',
+        '"operation":"RECONCILE_DIALOGUE_SOURCES",'
+        '"operation":"RECONCILE_DIALOGUE_SOURCES"',
+        1,
+    ).encode("utf-8")
+    nonfinite = raw.replace(b'"messages":[]', b'"messages":[],"poison":NaN')
+    extra = json.loads(raw)
+    extra["authority"] = "caller"
+    hostile = (
+        duplicate,
+        nonfinite,
+        json.dumps(extra).encode("utf-8"),
+        raw + b" " * (64 * 1024),
+    )
+    for payload in hostile:
+        with pytest.raises(DialogueObservationProtocolError, match="REQUEST_REFUSED"):
+            parse_source_reconcile_request(payload)
+
+    message = DialogueSourceMessage.create({"message_key": "source-00"})
+    with pytest.raises(DialogueSourceResolutionError, match="edge bound"):
+        DialogueSourceSnapshot(
+            workspace_id="T0BRD2AQXQV",
+            channel_id="C0BSBM78V1N",
+            thread_ts="1788000000.123456",
+            parent_fingerprint=valid_parent()["fingerprint"],
+            operation_key=valid_parent()["operation_key"],
+            messages=tuple(message for _ in range(65)),
+        )
 
 
 def test_raw_v2_wake_request_preserves_physical_source_proposal() -> None:

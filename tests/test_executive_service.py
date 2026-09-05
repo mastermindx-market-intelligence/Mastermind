@@ -891,6 +891,7 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
         route_obligation,
     )
     from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
+    from control_plane.wake_persist import WakeLedgerRepository
     from control_plane.executive_dialogue_observation import (
         DialogueWakeRequest,
     )
@@ -1062,13 +1063,43 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     assert production_result == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
     assert len(operator.calls) == 2
 
+    (
+        _generic_attention,
+        _generic_attention_route,
+        generic_v2_obligation,
+        generic_v2_route,
+        generic_v2_source,
+        generic_v2_physical,
+    ) = _phase3_dialogue_material(
+        production_request.parent,
+        production_request.candidate,
+        production_obligation,
+        production_request.proposed_route,
+    )
+    generic_v2_request = dataclasses.replace(
+        production_request,
+        obligation=generic_v2_obligation,
+        proposed_route=generic_v2_route,
+        source_observation=generic_v2_source,
+        physical_source=generic_v2_physical,
+        transport_schema="mastermind.dialogue_wake_request/v2",
+    )
+    assert asyncio.run(
+        production_bridge(runtime, generic_v2_request)
+    ) == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+    generic_v2_history = WakeLedgerRepository(runtime).list_records(
+        generic_v2_obligation.obligation_id
+    )
+    assert generic_v2_history[0].record.physical_source is None
+    assert len(operator.calls) == 3
+
     moved = dataclasses.replace(
         request,
         proposed_route=dataclasses.replace(route, binding_generation=99),
     )
     refused = asyncio.run(bridge(runtime, moved))
     assert refused == DialogueWakeResult("MISSING", "WAKE_ROUTE_REFUSED")
-    assert len(operator.calls) == 2
+    assert len(operator.calls) == 3
 
     stale_binding_bridge = ExecutiveDialogueWakeBridge(
         target_provider=lambda *_args: dataclasses.replace(
@@ -1083,7 +1114,7 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     )
     stale = asyncio.run(stale_binding_bridge(runtime, request))
     assert stale == DialogueWakeResult("MISSING", "CURRENT_BINDING_REFUSED")
-    assert len(operator.calls) == 2
+    assert len(operator.calls) == 3
 
     monkeypatch.setattr(
         runtime.operator_harness,
@@ -1095,7 +1126,7 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     )
     writer_refused = asyncio.run(bridge(runtime, request))
     assert writer_refused == DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
-    assert len(operator.calls) == 2
+    assert len(operator.calls) == 3
 
 
 def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
@@ -1541,15 +1572,35 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         workstream=None,
         target_enabled=False,
     )
+    ceo_target = SessionTarget(
+        session_alias="CEO-CANARY",
+        target_seat="ceo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=False,
+    )
     registry = SessionTargetRegistry(
         schema=TARGET_SCHEMA,
         lifecycle_authority="executive_os",
         production_armed=False,
         policy_version="canary-socket-test",
-        default_alias_by_seat={"coo": target.session_alias},
+        default_alias_by_seat={
+            "coo": target.session_alias,
+            "ceo": ceo_target.session_alias,
+        },
         workstream_alias_by_seat={},
-        root_job_bindings={root.job_id: {"coo": target.session_alias}},
-        targets={target.session_alias: target},
+        root_job_bindings={
+            root.job_id: {
+                "coo": target.session_alias,
+                "ceo": ceo_target.session_alias,
+            }
+        },
+        targets={
+            target.session_alias: target,
+            ceo_target.session_alias: ceo_target,
+        },
     )
     monkeypatch.setattr(
         "control_plane.session_targets.load_session_targets", lambda: registry
@@ -1788,6 +1839,381 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         )
         await service.start()
         try:
+            import integrations.slack_agent_dialogue.runtime as relay_runtime
+            from control_plane.dialogue_source_resolution import (
+                DialogueSourceMessage,
+                DialogueSourceSnapshot,
+            )
+            from integrations.slack_agent_dialogue.engine import (
+                DialogueEngine,
+                DialoguePolicy,
+                SlackMessage,
+            )
+            from integrations.slack_agent_dialogue.engine_v2 import DialogueEngineV2
+            from integrations.slack_agent_dialogue.executive_observation_client import (
+                ExecutiveDialogueObservationClient,
+                ExecutiveObservationClientError,
+            )
+            from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
+            from integrations.slack_agent_dialogue.service import (
+                AgentDialogueService,
+                ServiceConfig as RelayServiceConfig,
+            )
+            from integrations.slack_agent_dialogue.contract_v2 import (
+                render_message_v2,
+                render_parent_v2,
+            )
+            from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+                ActiveWaiterKey,
+            )
+            from tests.test_slack_agent_dialogue_engine_v2 import (
+                ExactV2AuthorityPolicy,
+            )
+
+            source_progress, source_continuation, source_successor = (
+                _phase3_source_messages(parent, candidate)
+            )
+            composition_messages = tuple(
+                build_message_v2(
+                    {
+                        **message,
+                        "applies_to": {
+                            "kind": "executive_attempt",
+                            "job_id": candidate.job_id,
+                            "attempt_id": candidate.attempt_id,
+                            "worker_id": candidate.worker_id,
+                        },
+                        "fingerprint": "",
+                    }
+                )
+                for message in (source_progress, source_continuation)
+            )
+            slack_client = InMemorySlackClient(
+                relay_bot_user_id="U0RELAY001"
+            )
+            slack_client.add_parent(
+                SlackMessage(
+                    ts="1788000000.123456",
+                    author_user_id="U0RELAY001",
+                    text=render_parent_v2(parent),
+                )
+            )
+            for index, message in enumerate(
+                composition_messages,
+                start=1,
+            ):
+                slack_client.add_reply(
+                    SlackMessage(
+                        ts=f"178800000{index}.123456",
+                        author_user_id="U0RELAY001",
+                        text=render_message_v2(message),
+                        thread_ts="1788000000.123456",
+                    )
+                )
+            dialogue_policy = DialoguePolicy(
+                workspace_id=source_observation.workspace_id,
+                channel_id=source_observation.channel_id,
+                relay_bot_user_id="U0RELAY001",
+                allowed_sol_user_ids=("U0BRETDUAS2",),
+                allowed_parent_user_ids=("U0RELAY001",),
+                poll_interval_seconds=0,
+                method_timeout_seconds=1,
+            )
+            authority = ExactV2AuthorityPolicy()
+            active_waiters = relay_runtime.ActiveWaiterRegistry()
+            dialogue_service = AgentDialogueService(
+                RelayServiceConfig(
+                    socket_path=short_socket_root / "relay" / "agent-relay.sock",
+                    allowed_peer_uids=(os.geteuid(),),
+                ),
+                DialogueEngine(
+                    dialogue_policy,
+                    slack_client,
+                    authority_policy=authority,
+                ),
+                engine_v2=DialogueEngineV2(
+                    dialogue_policy,
+                    slack_client,
+                    authority_policy=authority,
+                    active_waiter_registry=active_waiters,
+                ),
+            )
+            monkeypatch.setattr(
+                relay_runtime,
+                "EXECUTIVE_OBSERVATION_SOCKET_PATH",
+                observation_path,
+            )
+            observation_client = ExecutiveDialogueObservationClient(
+                observation_path,
+                timeout_seconds=1,
+            )
+            turn_runtime = relay_runtime.build_turn_runtime(
+                dialogue_service,
+                registry=registry,
+                observation_client=observation_client,
+                emitted_at=lambda: "2026-09-03T01:00:02Z",
+            )
+            active_waiters.register(
+                ActiveWaiterKey.from_parent(parent, target_seat="coo")
+            )
+            source_rpc_calls = 0
+            actual_source_reconcile = bridge.reconcile_dialogue_sources
+
+            def observed_source_reconcile(*args):
+                nonlocal source_rpc_calls
+                source_rpc_calls += 1
+                return actual_source_reconcile(*args)
+
+            monkeypatch.setattr(
+                bridge,
+                "reconcile_dialogue_sources",
+                observed_source_reconcile,
+            )
+            composition_receipts = await turn_runtime.reconcile_once()
+            assert len(composition_receipts) == 1
+            assert source_rpc_calls == 1, composition_receipts
+            assert (operator.deliver_calls, operator.reconcile_calls) == (0, 0)
+            with pytest.raises(
+                ExecutiveObservationClientError,
+                match="RESPONSE_REFUSED",
+            ):
+                await observation_client.reconcile_dialogue_sources(
+                    DialogueSourceSnapshot(
+                        workspace_id=source_observation.workspace_id,
+                        channel_id=source_observation.channel_id,
+                        thread_ts=source_observation.thread_ts,
+                        parent_fingerprint=parent["fingerprint"],
+                        operation_key=parent["operation_key"],
+                        messages=tuple(
+                            DialogueSourceMessage.create(message)
+                            for message in composition_messages
+                        ),
+                    )
+                )
+
+            # The concrete observation client is bound to the Runtime's one
+            # invocation-local ContextVar.  Prove that exceptional and
+            # cancelled candidates reset it, and concurrent candidates cannot
+            # observe one another's thread scope.
+            candidate_batch = await turn_runtime._candidate_collector.collect()
+            assert len(candidate_batch) == 1
+            composition_candidate = candidate_batch[0]
+            wake_context = observation_client._wake_context
+            assert wake_context is not None and wake_context.get() is None
+            original_candidate_inner = turn_runtime._reconcile_candidate_inner
+
+            async def failing_candidate_inner(_candidate):
+                assert wake_context.get() is not None
+                raise RuntimeError("diagnostic candidate failure")
+
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                failing_candidate_inner,
+            )
+            failed_receipt = await turn_runtime._reconcile_candidate(
+                composition_candidate
+            )
+            assert failed_receipt.reason == "TURN_CANDIDATE_PROCESSING_FAILED"
+            assert wake_context.get() is None
+
+            candidate_started = asyncio.Event()
+            candidate_release = asyncio.Event()
+
+            async def cancelled_candidate_inner(_candidate):
+                assert wake_context.get() is not None
+                candidate_started.set()
+                await candidate_release.wait()
+
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                cancelled_candidate_inner,
+            )
+            async def cancelled_scope_probe():
+                try:
+                    return await turn_runtime._reconcile_candidate(
+                        composition_candidate
+                    )
+                except asyncio.CancelledError:
+                    assert wake_context.get() is None
+                    with pytest.raises(
+                        ExecutiveObservationClientError,
+                        match="RESPONSE_REFUSED",
+                    ):
+                        await observation_client.reconcile_dialogue_sources(
+                            DialogueSourceSnapshot(
+                                workspace_id=source_observation.workspace_id,
+                                channel_id=source_observation.channel_id,
+                                thread_ts=source_observation.thread_ts,
+                                parent_fingerprint=parent["fingerprint"],
+                                operation_key=parent["operation_key"],
+                                messages=(),
+                            )
+                        )
+                    raise
+
+            cancelled_task = asyncio.create_task(cancelled_scope_probe())
+            await candidate_started.wait()
+            cancelled_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await cancelled_task
+            assert wake_context.get() is None
+
+            parallel_seen: list[tuple[str, str]] = []
+            parallel_ready = asyncio.Event()
+            parallel_count = 0
+
+            async def parallel_exchange(source_request):
+                nonlocal parallel_count
+                own_thread = wake_context.get().thread_ts
+                sent_thread = source_request["snapshot"]["thread_ts"]
+                parallel_count += 1
+                if parallel_count == 2:
+                    parallel_ready.set()
+                await parallel_ready.wait()
+                parallel_seen.append((own_thread, sent_thread))
+                return {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "NOT_APPLICABLE",
+                    "reason": "TEST_PARALLEL_SCOPE",
+                }
+
+            async def parallel_candidate_inner(_candidate):
+                scope = wake_context.get()
+                await observation_client.reconcile_dialogue_sources(
+                    DialogueSourceSnapshot(
+                        workspace_id=source_observation.workspace_id,
+                        channel_id=source_observation.channel_id,
+                        thread_ts=scope.thread_ts,
+                        parent_fingerprint=scope.parent_fingerprint,
+                        operation_key=scope.operation_key,
+                        messages=(),
+                    )
+                )
+                return composition_receipts[0]
+
+            original_exchange = observation_client._exchange
+            monkeypatch.setattr(
+                observation_client,
+                "_exchange",
+                parallel_exchange,
+            )
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                parallel_candidate_inner,
+            )
+            second_candidate = dataclasses.replace(
+                composition_candidate,
+                thread_ts="1788000000.123457",
+            )
+            await asyncio.gather(
+                turn_runtime._reconcile_candidate(composition_candidate),
+                turn_runtime._reconcile_candidate(second_candidate),
+            )
+            assert sorted(parallel_seen) == [
+                ("1788000000.123456", "1788000000.123456"),
+                ("1788000000.123457", "1788000000.123457"),
+            ]
+            assert wake_context.get() is None
+            monkeypatch.setattr(
+                observation_client,
+                "_exchange",
+                original_exchange,
+            )
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                original_candidate_inner,
+            )
+
+            composition_source_frame = {
+                "schema": "mastermind.dialogue_source_reconcile_request/v1",
+                "operation": "RECONCILE_DIALOGUE_SOURCES",
+                "parent": parent,
+                "snapshot": {
+                    "workspace_id": source_observation.workspace_id,
+                    "channel_id": source_observation.channel_id,
+                    "thread_ts": source_observation.thread_ts,
+                    "parent_fingerprint": parent["fingerprint"],
+                    "operation_key": parent["operation_key"],
+                    "complete": True,
+                    "messages": list(composition_messages),
+                },
+            }
+            terminal_mode_candidate = dataclasses.replace(
+                candidate,
+                mode="TERMINAL_RESULT",
+            )
+            (
+                _terminal_attention,
+                _terminal_attention_route,
+                terminal_mode_obligation,
+                _terminal_mode_route,
+                _terminal_source,
+                _terminal_physical,
+            ) = _phase3_dialogue_material(
+                parent,
+                terminal_mode_candidate,
+                obligation,
+                route,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                dataclasses.replace(
+                    grant,
+                    obligation_id=terminal_mode_obligation.obligation_id,
+                )
+            )
+            assert await exchange(observation_path, composition_source_frame) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "NO_RESOLUTION_REQUIRED",
+                "reason": "SOURCE_PRESENT",
+            }
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                dataclasses.replace(
+                    grant,
+                    obligation_id="WAKE-" + "f" * 32,
+                )
+            )
+            assert await exchange(observation_path, composition_source_frame) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "ACK_REQUIRED",
+                "reason": "ADVANCED_WITHOUT_REQUEST",
+            }
+            import control_plane.dialogue_source_resolution as source_resolution_mod
+            import control_plane.wake_events as wake_events_mod
+
+            actual_dialogue_mint = source_resolution_mod.mint_obligation_id
+            actual_wake_mint = wake_events_mod.mint_obligation_id
+            monkeypatch.setattr(
+                source_resolution_mod,
+                "mint_obligation_id",
+                lambda **_kwargs: grant.obligation_id,
+            )
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                lambda **_kwargs: grant.obligation_id,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            dual_mode = await exchange(observation_path, composition_source_frame)
+            assert dual_mode == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN",
+                "reason": "SOURCE_CANDIDATE_AMBIGUOUS",
+            }
+            monkeypatch.setattr(
+                source_resolution_mod,
+                "mint_obligation_id",
+                actual_dialogue_mint,
+            )
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                actual_wake_mint,
+            )
+
             first = await exchange(observation_path)
             assert first == {
                 "schema": WAKE_RESPONSE_SCHEMA,
@@ -1795,9 +2221,6 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                 "reason": "WAKE_RECORDED",
             }
             assert operator.deliver_calls == 1
-            source_progress, source_continuation, source_successor = (
-                _phase3_source_messages(parent, candidate)
-            )
             source_frame = {
                 "schema": "mastermind.dialogue_source_reconcile_request/v1",
                 "operation": "RECONCILE_DIALOGUE_SOURCES",
@@ -2373,6 +2796,84 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
             )
             repository.append_record(ack_record(obligation, ack), obligation=obligation)
             calls_before_resolution = (operator.deliver_calls, operator.reconcile_calls)
+            history_before_false_absence = tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            )
+            edited_predecessor = build_message_v2(
+                {
+                    **source_continuation,
+                    "body": {
+                        "instruction": "Edited after delivery.",
+                        "stop_condition": "Stop on conflict.",
+                        "scope_change": False,
+                    },
+                    "fingerprint": "",
+                }
+            )
+            fork_successor = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-progress-fork",
+                    "created_at": "2026-09-03T01:00:03Z",
+                    "fingerprint": "",
+                }
+            )
+            wrong_actor_successor = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-progress-wrong-actor",
+                    "actor_ref": {
+                        "kind": "executive_surface",
+                        "seat": "ceo",
+                        "reasoning_surface": "codex",
+                    },
+                    "applies_to": source_progress["applies_to"],
+                    "created_at": "2026-09-03T01:00:04Z",
+                    "fingerprint": "",
+                }
+            )
+            false_absence_histories = {
+                "deleted_predecessor": [source_progress, source_successor],
+                "orphan_successor": [source_successor],
+                "edited_predecessor": [
+                    source_progress,
+                    edited_predecessor,
+                    source_successor,
+                ],
+                "forked_successor": [
+                    *source_frame["snapshot"]["messages"],
+                    source_successor,
+                    fork_successor,
+                ],
+                "wrong_actor_successor": [
+                    *source_frame["snapshot"]["messages"],
+                    wrong_actor_successor,
+                ],
+            }
+            for false_case, false_messages in false_absence_histories.items():
+                false_response = await exchange(
+                    observation_path,
+                    {
+                        **source_frame,
+                        "snapshot": {
+                            **source_frame["snapshot"],
+                            "messages": false_messages,
+                        },
+                    },
+                )
+                assert false_response["state"] != "RECORDED", (
+                    false_case,
+                    false_response,
+                )
+                assert tuple(
+                    item.record
+                    for item in repository.list_records(obligation.obligation_id)
+                ) == history_before_false_absence
+                assert (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                ) == calls_before_resolution
             resolved_response = await exchange(
                 observation_path,
                 {
@@ -2405,6 +2906,181 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
             assert tuple(item.record for item in repository.list_records(obligation.obligation_id)) == resolution_history
             assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
 
+            resolved_source_payload = {
+                **source_frame,
+                "snapshot": {
+                    **source_frame["snapshot"],
+                    "messages": [
+                        *source_frame["snapshot"]["messages"],
+                        source_successor,
+                    ],
+                },
+            }
+            concurrent_resolution_replays = await asyncio.gather(
+                exchange(observation_path, resolved_source_payload),
+                exchange(observation_path, resolved_source_payload),
+            )
+            assert concurrent_resolution_replays == [
+                {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "RECORDED",
+                    "reason": "SOURCE_ALREADY_RESOLVED",
+                },
+                {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "RECORDED",
+                    "reason": "SOURCE_ALREADY_RESOLVED",
+                },
+            ]
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            await service.close()
+            reopened_runtime = Runtime.at(tmp_path / "runtime")
+            reopened_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(grant),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant.installed_release_sha,
+                operation_key=grant.operation_key,
+            )
+            service._runtime_factory = lambda _root: reopened_runtime
+            service._dialogue_wake_handler = reopened_bridge
+            await service.start()
+            assert await exchange(
+                observation_path,
+                resolved_source_payload,
+            ) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED",
+                "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            assert tuple(
+                item.record
+                for item in WakeLedgerRepository(reopened_runtime).list_records(
+                    obligation.obligation_id
+                )
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+            service._dialogue_wake_handler = bridge
+
+            actual_wake_mint_after_request = wake_events_mod.mint_obligation_id
+            post_request_mints = []
+
+            def observed_post_request_mint(**kwargs):
+                post_request_mints.append(kwargs)
+                return actual_wake_mint_after_request(**kwargs)
+
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                observed_post_request_mint,
+            )
+            assert await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [
+                            *source_frame["snapshot"]["messages"],
+                            source_successor,
+                        ],
+                    },
+                },
+            ) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED",
+                "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            # Four calls are the closed obligation/physical hydration checks.
+            # Re-entering the two-mode pre-request branch adds two more.
+            assert len(post_request_mints) == 4
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                actual_wake_mint_after_request,
+            )
+
+            for wake_operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                assert await exchange(
+                    observation_path,
+                    {**request, "operation": wake_operation},
+                ) == {
+                    "schema": WAKE_RESPONSE_SCHEMA,
+                    "state": "RECORDED",
+                    "reason": "WAKE_RECORDED",
+                }
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+
+            original_connection_read = (
+                WakeLedgerRepository.list_ledger_records_on_connection
+            )
+            noncausal_history = tuple(
+                record
+                for record in resolution_history
+                if record.phase in {
+                    LedgerPhase.WAKE_REQUESTED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                }
+            )
+
+            def noncausal_connection_read(self, connection, obligation_id):
+                if obligation_id == obligation.obligation_id:
+                    return noncausal_history
+                return original_connection_read(self, connection, obligation_id)
+
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_ledger_records_on_connection",
+                noncausal_connection_read,
+            )
+            noncausal_replay = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [
+                            *source_frame["snapshot"]["messages"],
+                            source_successor,
+                        ],
+                    },
+                },
+            )
+            assert noncausal_replay == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN",
+                "reason": "SOURCE_RECONCILIATION_UNKNOWN",
+            }
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_ledger_records_on_connection",
+                original_connection_read,
+            )
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+
             changed_grant = dataclasses.replace(
                 grant,
                 source_semantic_digest="f" * 64,
@@ -2426,6 +3102,52 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
             }
             assert tuple(item.record for item in repository.list_records(obligation.obligation_id)) == resolution_history
             assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+
+            changed_candidate = dataclasses.replace(
+                candidate,
+                evidence_digest="9" * 64,
+            )
+            (
+                _changed_attention,
+                _changed_attention_route,
+                changed_obligation,
+                changed_route,
+                _changed_source_observation,
+                _changed_physical_source,
+            ) = _phase3_dialogue_material(
+                parent,
+                changed_candidate,
+                obligation,
+                route,
+            )
+            changed_identity_grant = dataclasses.replace(
+                grant,
+                source_semantic_digest=changed_candidate.evidence_digest,
+                obligation_id=changed_obligation.obligation_id,
+                policy_digest=changed_route.policy_digest,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                changed_identity_grant
+            )
+            changed_identity_source = await exchange(
+                observation_path,
+                source_frame,
+            )
+            assert changed_identity_source == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN",
+                "reason": "SOURCE_RECONCILIATION_UNKNOWN",
+            }
+            assert repository.list_records(changed_obligation.obligation_id) == ()
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
             bridge._canary_profile = DialogueWakeCanaryProfile(grant)
 
             result_message = build_message_v2(

@@ -421,7 +421,11 @@ class ExecutiveDialogueWakeBridge:
         """Reconcile one accepted source snapshot without provider access."""
 
         from control_plane.dialogue_source_resolution import (
-            DialogueSourceSnapshot, attention_source_ref, correlated_source_ref,
+            DialogueSourceObservation,
+            DialogueSourceSnapshot,
+            PhysicalDialogueSourceIdentity,
+            attention_source_ref,
+            correlated_source_ref,
         )
         from control_plane.executive_dialogue_observation import (
             ACTIVE_CURRENT_WORKER, TERMINAL_RESULT,
@@ -429,7 +433,7 @@ class ExecutiveDialogueWakeBridge:
         from control_plane.wake_events import canonical_json_bytes, mint_obligation_id
         from control_plane.wake_ledger import (
             LedgerPhase, SourceReadHealth, SourceResolutionCode,
-            resolve_source, resolved_record,
+            assert_causal, resolve_source, resolved_record,
         )
         from control_plane.wake_persist import WakeLedgerRepository
         from control_plane.session_targets import route_digest
@@ -471,8 +475,10 @@ class ExecutiveDialogueWakeBridge:
                 records = repository.list_ledger_records_on_connection(
                     connection, grant.obligation_id
                 )
+                assert_causal(records)
                 if not records:
                     matches = 0
+                    matched_physical = None
                     if decision.attention is not None:
                         for mode in (ACTIVE_CURRENT_WORKER, TERMINAL_RESULT):
                             candidate = {
@@ -500,8 +506,42 @@ class ExecutiveDialogueWakeBridge:
                                 wake_kind="dialogue_turn_pending",
                             ) == grant.obligation_id:
                                 matches += 1
+                                matched_physical = (
+                                    PhysicalDialogueSourceIdentity.create(
+                                        logical_source_ref=logical,
+                                        obligation_id=grant.obligation_id,
+                                        observation=DialogueSourceObservation(
+                                            workspace_id=snapshot.workspace_id,
+                                            channel_id=snapshot.channel_id,
+                                            thread_ts=snapshot.thread_ts,
+                                            predecessor_message_key=(
+                                                decision.attention.message_key
+                                            ),
+                                            predecessor_message_fingerprint=(
+                                                decision.attention.message_fingerprint
+                                            ),
+                                        ),
+                                        parent_fingerprint=(
+                                            snapshot.parent_fingerprint
+                                        ),
+                                        operation_key=snapshot.operation_key,
+                                        target_seat=grant.target_seat,
+                                        candidate=candidate,
+                                    )
+                                )
                     if matches == 1:
+                        assert matched_physical is not None
+                        repository.assert_physical_source_request_available_on_connection(
+                            connection,
+                            matched_physical,
+                            obligation_id=grant.obligation_id,
+                        )
                         return {"state": "NO_RESOLUTION_REQUIRED", "reason": "SOURCE_PRESENT"}
+                    if matches > 1:
+                        return {
+                            "state": "UNKNOWN",
+                            "reason": "SOURCE_CANDIDATE_AMBIGUOUS",
+                        }
                     return {"state": "ACK_REQUIRED", "reason": "ADVANCED_WITHOUT_REQUEST"}
                 requested = records[0]
                 obligation = requested.obligation

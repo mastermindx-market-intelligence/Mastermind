@@ -87,3 +87,44 @@ def test_physical_identity_rederives_logical_reference_and_obligation_id() -> No
 
     with pytest.raises(DialogueSourceResolutionError, match="logical source"):
         PhysicalDialogueSourceIdentity.from_dict(wire)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("schema", "mastermind.dialogue_physical_source/v3"),
+        ("logical_source_ref", "agent_dialogue_attention:" + "d" * 64),
+        ("obligation_id", "WAKE-" + "d" * 32),
+        ("workspace_id", "T0BRD2AQXQW"),
+        ("channel_id", "C0BSBM78V1P"),
+        ("thread_ts", "1788000001.123456"),
+        ("parent_fingerprint", "d" * 64),
+        ("operation_key", "runtime-continuity-r2-other"),
+        ("predecessor_message_key", "asd-progress-002"),
+        ("predecessor_message_fingerprint", "d" * 64),
+        ("target_seat", "coo"),
+        ("candidate", {**CANDIDATE, "worker_id": "worker-02"}),
+        ("digest", "d" * 64),
+    ],
+)
+def test_every_physical_identity_field_is_integrity_checked(
+    field: str,
+    replacement: object,
+) -> None:
+    wire = _identity().to_dict()
+    wire[field] = replacement
+
+    with pytest.raises(DialogueSourceResolutionError):
+        PhysicalDialogueSourceIdentity.from_dict(wire)
+
+
+@pytest.mark.parametrize("mutation", ["omit", "add"])
+def test_physical_identity_wire_is_closed(mutation: str) -> None:
+    wire = _identity().to_dict()
+    if mutation == "omit":
+        del wire["workspace_id"]
+    else:
+        wire["carrier_alias"] = "forbidden"
+
+    with pytest.raises(DialogueSourceResolutionError, match="fields drifted"):
+        PhysicalDialogueSourceIdentity.from_dict(wire)
