@@ -534,6 +534,10 @@ class _RunState:
     cancel_reason: str | None = None
     timed_out: bool = False
     escalated: bool = False
+    # Set once the verified original process group has been *proven* absent.
+    # A group cannot come back, so this latches: no later sweep may re-probe or
+    # signal that PGID, which the host may already have recycled to a stranger.
+    group_proven_absent: bool = False
     finished_at: str | None = None
     receipt: CollectionReceipt | None = None
 
@@ -2511,7 +2515,14 @@ class CodexWorkerAdapter:
         start_identity: str,
         boot_id: str,
         grace_seconds: float,
-    ) -> None:
+    ) -> bool:
+        """Return True when the verified original group was *proven* absent.
+
+        The caller must not probe or signal that PGID afterwards: the host may
+        already have recycled it to a foreign group.
+        """
+
+        group_vanished = False
         if not wait_task.done():
             if self.inspector.boot_session_id() != boot_id:
                 raise ProcessIdentityError("validation process boot identity changed")
@@ -2533,23 +2544,38 @@ class CodexWorkerAdapter:
                     try:
                         identity, observed_pgid = self.inspector.identity(pid)
                     except ProcessIdentityError:
-                        if not _process_group_exists(pgid):
-                            raise ProcessIdentityError(
-                                "validation leader disappeared with no residual group"
-                            )
+                        # Symmetric with _terminate: a *proven* absent group means
+                        # the verified original leader and every remaining member
+                        # already exited, so the SIGTERM above reached the
+                        # terminated postcondition and there is nothing to
+                        # escalate against.  Absence is proof, not inference --
+                        # _process_group_exists raises when the observation itself
+                        # is unavailable, so an unreadable group stays fail-closed.
+                        # The result is carried forward rather than re-probed: a
+                        # second probe could observe a PGID the host has already
+                        # recycled to a foreign group, and an absent leader must
+                        # never authorise signalling a reused group.
+                        group_vanished = not _process_group_exists(pgid)
                     else:
                         if identity != start_identity or observed_pgid != pgid:
                             raise ProcessIdentityError(
                                 "validation process identity changed before SIGKILL"
                             )
-        if _process_group_exists(pgid):
+        if not group_vanished and _process_group_exists(pgid):
             try:
                 os.killpg(pgid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
         await wait_task
+        if group_vanished:
+            # Nothing was signalled and the group was already proven absent, so
+            # there is no exit to wait for and no SIGKILL that could have been
+            # survived.  Re-probing here would reopen the same reused-PGID
+            # window the branch above exists to close.
+            return True
         if not await _wait_for_process_group_exit(pgid):
             raise ProcessIdentityError("validation process group survived SIGKILL")
+        return False
 
     async def run_validation_argv(
         self,
@@ -2681,6 +2707,7 @@ class CodexWorkerAdapter:
         )
         exceeded_task = asyncio.create_task(output_exceeded.wait())
         timed_out = False
+        group_proven_absent = False
         error: str | None = None
         try:
             done, _ = await asyncio.wait(
@@ -2691,7 +2718,7 @@ class CodexWorkerAdapter:
             if not done:
                 timed_out = True
                 error = f"validation timed out after {timeout:g}s"
-                await self._terminate_validation_process(
+                group_proven_absent = await self._terminate_validation_process(
                     process,
                     wait_task,
                     pid=process.pid,
@@ -2702,7 +2729,7 @@ class CodexWorkerAdapter:
                 )
             elif exceeded_task in done and output_exceeded.is_set() and not wait_task.done():
                 error = "validation output exceeded its byte cap"
-                await self._terminate_validation_process(
+                group_proven_absent = await self._terminate_validation_process(
                     process,
                     wait_task,
                     pid=process.pid,
@@ -2712,7 +2739,11 @@ class CodexWorkerAdapter:
                     grace_seconds=min(float(spec.cancel_grace_seconds), 5.0),
                 )
             await wait_task
-            if _process_group_exists(pgid):
+            # A group already proven absent during termination is never probed
+            # or signalled again: the PGID may since have been recycled to a
+            # foreign group, and proven absence already means no descendant of
+            # the original group survives.
+            if not group_proven_absent and _process_group_exists(pgid):
                 os.killpg(pgid, signal.SIGKILL)
                 if not await _wait_for_process_group_exit(pgid):
                     raise ProcessIdentityError(
@@ -2965,6 +2996,13 @@ class CodexWorkerAdapter:
     async def _kill_residual_process_group(self, state: _RunState) -> bool:
         """Kill descendants that outlive the already-reaped group leader."""
 
+        if state.group_proven_absent:
+            # Termination already proved this exact group absent.  Every member
+            # including the leader had exited, so there is no descendant to
+            # reap; probing again could only observe a PGID the host has since
+            # recycled to a foreign group, and an absent leader must never
+            # authorise signalling a reused group.
+            return False
         if not _process_group_exists(state.ref.pgid):
             return False
         try:
@@ -2983,6 +3021,7 @@ class CodexWorkerAdapter:
             leader_already_exited = state.process_wait_task.done()
             sent = False
             escalated = False
+            group_vanished = False
             if not leader_already_exited:
                 if not self._identity_matches(state.ref):
                     raise ProcessIdentityError(
@@ -3012,10 +3051,19 @@ class CodexWorkerAdapter:
                     try:
                         identity, observed_pgid = self.inspector.identity(state.ref.pid)
                     except ProcessIdentityError:
-                        if not _process_group_exists(state.ref.pgid):
-                            raise ProcessIdentityError(
-                                "process leader disappeared with no residual group"
-                            )
+                        # The leader can no longer be resolved.  A *proven* absent
+                        # group means the verified original group leader and every
+                        # remaining member have already exited, so the SIGTERM above
+                        # reached the terminated postcondition and there is nothing
+                        # left to escalate against; signalling that PGID now could
+                        # only ever reach a reused group.  This is proof rather than
+                        # inference: _process_group_exists reports absence only for
+                        # ProcessLookupError and raises when the observation itself
+                        # is unavailable, so an unreadable group still fails closed.
+                        group_vanished = not _process_group_exists(state.ref.pgid)
+                        state.group_proven_absent = (
+                            state.group_proven_absent or group_vanished
+                        )
                     else:
                         if (
                             identity != state.ref.process_start_identity
@@ -3024,13 +3072,14 @@ class CodexWorkerAdapter:
                             raise ProcessIdentityError(
                                 "process identity changed before SIGKILL escalation"
                             )
-                    try:
-                        os.killpg(state.ref.pgid, signal.SIGKILL)
-                        sent = True
-                    except ProcessLookupError:
-                        pass
-                    escalated = True
-                    state.escalated = True
+                    if not group_vanished:
+                        try:
+                            os.killpg(state.ref.pgid, signal.SIGKILL)
+                            sent = True
+                        except ProcessLookupError:
+                            pass
+                        escalated = True
+                        state.escalated = True
                     await state.process_wait_task
 
             await state.process_wait_task
@@ -3038,7 +3087,15 @@ class CodexWorkerAdapter:
             if residual_killed:
                 sent = True
                 escalated = True
-            return sent, escalated, leader_already_exited and not residual_killed
+            already_exited = leader_already_exited and not residual_killed
+            if group_vanished and not sent:
+                # No signal ever left this process and the verified original
+                # group is proven absent, so the worker had already exited on
+                # its own.  Reporting "not already exited" here would describe a
+                # termination this adapter never performed.  When SIGTERM *was*
+                # delivered the flag stays False: that exit is ours.
+                already_exited = True
+            return sent, escalated, already_exited
 
     async def _monitor(self, state: _RunState) -> None:
         violation_task = asyncio.create_task(state.violation.wait())
