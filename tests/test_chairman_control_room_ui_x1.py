@@ -12,6 +12,8 @@ import subprocess
 
 import pytest
 
+from control_plane import chairman_control_room_remote as remote
+
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "app" / "static" / "chairman_control"
@@ -1114,6 +1116,9 @@ def test_attention_empty_copy_is_source_qualified_when_runtime_or_inbox_is_not_c
 
 def test_remote_attention_uses_its_published_runtime_freshness_not_local_sources() -> None:
     """A remote document has no local sources; only its closed freshness receipt decides clear copy."""
+    fresh = remote.SourceFreshness("fresh", "2026-09-04T00:00:00Z", "2026-09-04T00:00:00Z", None).state
+    stale = remote.SourceFreshness("stale", "2026-09-04T00:00:00Z", "2026-09-03T00:00:00Z", "over_age").state
+    unavailable = remote.SourceFreshness("unavailable", "2026-09-04T00:00:00Z", None, "missing").state
     harness = """
     var REMOTE_READ_ONLY = true;
     %s
@@ -1121,12 +1126,40 @@ def test_remote_attention_uses_its_published_runtime_freshness_not_local_sources
       attention:{chairman:[],ceo:[],coo:[]},
       source_freshness:{executive_runtime:{state:value}}, degraded:[]
     }, {}); }
-    console.log(JSON.stringify({current:state("current"), stale:state("stale"), unavailable:state("unavailable"), unknown:state("unknown")}));
-    """ % _extract_fn("attentionReadState")
+    console.log(JSON.stringify({fresh:state(%r), stale:state(%r), unavailable:state(%r), invalidCurrent:state("current")}));
+    """ % (_extract_fn("attentionReadState"), fresh, stale, unavailable)
     assert _run_node(harness) == {
-        "current": "current", "stale": "unavailable",
-        "unavailable": "unavailable", "unknown": "unavailable",
+        "fresh": "current", "stale": "unavailable",
+        "unavailable": "unavailable", "invalidCurrent": "unavailable",
     }
+
+
+def test_runtime_unavailable_nonempty_attention_stays_visible_with_a_qualification() -> None:
+    """An existing row survives degraded Runtime proof and receives the actual qualifier."""
+    harness = """
+    var rows = [];
+    rows.appendChild = function(v) { rows.push(v); };
+    function el(tag, opts) {
+      var node = {tag:tag, text:(opts || {}).text || "", className:(opts || {}).className || "", children:[]};
+      node.appendChild = function(v) { this.children.push(v); };
+      node.addEventListener = function() {};
+      return node;
+    }
+    function clear(list) { list.length = 0; }
+    var document = { querySelector:function() { return rows; } };
+    function attentionSummary(item) { return item.summary; }
+    function findCardForAttention() { return null; }
+    function safeText(value, fallback) { return value || fallback; }
+    function openAttentionDetail() {}
+    %s
+    %s
+    renderMiniAttention("sol-attention", [{summary:"existing item", workstream:"WS:X"}], "runtime_unavailable");
+    console.log(JSON.stringify(rows.map(function(row) { return {text:row.text, className:row.className, children:row.children.length}; })));
+    """ % (_extract_fn("appendAttentionFreshnessNote"), _extract_fn("renderMiniAttention"))
+    out = _run_node(harness)
+    assert out[0]["className"] == "ccr-mini-item"
+    assert out[0]["children"] == 2
+    assert out[1]["text"] == "Attention may be incomplete — Executive runtime unavailable."
 
 
 def test_attention_read_state_preserves_nonempty_current_attention() -> None:

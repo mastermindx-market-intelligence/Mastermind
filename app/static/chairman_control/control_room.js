@@ -435,13 +435,13 @@
     var rowsKnown = attention && typeof attention === "object" &&
       Array.isArray(attention.chairman) && Array.isArray(attention.ceo) && Array.isArray(attention.coo);
     if (!rowsKnown || (body && (body.state_refresh_error || body.refresh_in_flight))) return "unavailable";
-    if (REMOTE_READ_ONLY) {
-      var remoteRuntime = doc.source_freshness && doc.source_freshness.executive_runtime;
-      return remoteRuntime && remoteRuntime.state === "current" ? "current" : "unavailable";
-    }
     var degraded = Array.isArray(doc.degraded) ? doc.degraded : [];
     if (degraded.some(function (entry) { return typeof entry === "string" && entry.indexOf("executive_inbox:") === 0; })) {
       return "unavailable";
+    }
+    if (REMOTE_READ_ONLY) {
+      var remoteRuntime = doc.source_freshness && doc.source_freshness.executive_runtime;
+      return remoteRuntime && remoteRuntime.state === "fresh" ? "current" : "unavailable";
     }
     if ((doc.sources || {}).runtime_db_present !== true || degraded.some(function (entry) {
       return typeof entry === "string" && entry.indexOf("executive_runtime:") === 0;
@@ -458,6 +458,8 @@
   function appendAttentionFreshnessNote(list, state) {
     if (state === "unavailable") {
       list.appendChild(el("li", { text: "Attention may be stale — refresh canonical sources.", className: "ccr-empty-line" }));
+    } else if (state === "runtime_unavailable") {
+      list.appendChild(el("li", { text: "Attention may be incomplete — Executive runtime unavailable.", className: "ccr-empty-line" }));
     }
   }
 
