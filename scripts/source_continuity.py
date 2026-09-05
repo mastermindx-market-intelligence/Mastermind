@@ -14,8 +14,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
+import stat
 import subprocess
 import sys
 from typing import Callable, Mapping, Sequence
@@ -50,11 +51,57 @@ _API_VERSION = "2022-11-28"
 _COMMAND_TIMEOUT_SECONDS = 20.0
 _HTTP_TIMEOUT_SECONDS = 20.0
 _MAX_HTTP_BODY_BYTES = 5_000_000
+_MAX_GIT_CONFIG_CENSUS_BYTES = 65_536
+_MAX_GIT_PATH_BYTES = 4_096
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 _MAX_COLLISION_PRS = 100
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _HOLD_LABELS = frozenset({"hold", "hold-for-sol", "hold_for_sol"})
+_PR_FILE_STATUSES = frozenset(
+    {"added", "changed", "copied", "modified", "removed", "renamed", "unchanged"}
+)
+_GIT_CONFIG_OVERRIDES = (
+    "core.fsmonitor=false",
+    "core.untrackedCache=false",
+    "core.hooksPath=/dev/null",
+    "core.attributesFile=/dev/null",
+    "core.excludesFile=/dev/null",
+    "diff.external=",
+    "diff.renames=false",
+    "core.fileMode=true",
+    "core.ignoreStat=false",
+    "core.checkStat=default",
+    "core.trustctime=true",
+    "core.symlinks=true",
+    "credential.helper=",
+    "protocol.allow=never",
+    "protocol.file.allow=always",
+)
+_GIT_ENV = {
+    "LANG": "C",
+    "LC_ALL": "C",
+    "TZ": "UTC",
+    "PATH": "/usr/bin:/bin",
+    "HOME": "/",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_ATTR_NOSYSTEM": "1",
+    "GIT_LITERAL_PATHSPECS": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_GRAFT_FILE": os.devnull,
+    "GIT_PAGER": "cat",
+    "GIT_EDITOR": "/usr/bin/false",
+    "GIT_SEQUENCE_EDITOR": "/usr/bin/false",
+    "GIT_ASKPASS": "/usr/bin/false",
+    "SSH_ASKPASS": "/usr/bin/false",
+    "GIT_SSH": "/usr/bin/false",
+    "GIT_SSH_COMMAND": "/usr/bin/false",
+    "GIT_CONFIG_COUNT": "0",
+}
 
 
 class _SafeArgumentParser(argparse.ArgumentParser):
@@ -101,26 +148,53 @@ def _is_sha(value: object) -> bool:
     return isinstance(value, str) and _SHA_RE.fullmatch(value) is not None
 
 
+def _is_safe_remote_path(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    if len(encoded) > 4096:
+        return False
+    if value.startswith("/") or "\\" in value or "//" in value or "\x00" in value:
+        return False
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        return False
+    parsed = PurePosixPath(value)
+    if parsed.is_absolute() or any(part in {"", ".", ".."} for part in parsed.parts):
+        return False
+    if parsed.parts and parsed.parts[0] == ".git":
+        return False
+    return str(parsed) == value
+
+
 def _invoke_git(
     runner: Runner,
     workspace: str,
     *arguments: str,
 ) -> _CommandResult | None:
-    env = dict(os.environ)
-    env.pop("GITHUB_TOKEN", None)
-    env["GIT_OPTIONAL_LOCKS"] = "0"
-    env["GIT_NO_LAZY_FETCH"] = "1"
-    env["GIT_TERMINAL_PROMPT"] = "0"
+    command = [_GIT, "--no-pager", "--no-replace-objects"]
+    for setting in _GIT_CONFIG_OVERRIDES:
+        command.extend(("-c", setting))
+    command.append("--work-tree=.")
+    command.extend(arguments)
+    runner_kwargs = {
+        "cwd": workspace,
+        "env": dict(_GIT_ENV),
+        "text": True,
+        "capture_output": True,
+        "check": False,
+        "timeout": _COMMAND_TIMEOUT_SECONDS,
+    }
     try:
         completed = runner(
-            [_GIT, *arguments],
-            cwd=workspace,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=_COMMAND_TIMEOUT_SECONDS,
+            command,
+            **runner_kwargs,
         )
+    except Exception:
+        return None
+    try:
         returncode = getattr(completed, "returncode")
         stdout = getattr(completed, "stdout")
     except Exception:
@@ -243,10 +317,35 @@ def _changed_paths(
         lambda page: _pull_files_endpoint(repository, pr_number, page),
     )
     paths: list[str] = []
+    seen: set[str] = set()
     for item in raw_items:
-        if not isinstance(item, dict) or not isinstance(item.get("filename"), str):
+        if not isinstance(item, dict):
             raise _RemoteProbeError()
-        paths.append(item["filename"])
+        filename = item.get("filename")
+        if not isinstance(filename, str) or not _is_safe_remote_path(filename):
+            raise _RemoteProbeError()
+        status = item.get("status")
+        if not isinstance(status, str) or status not in _PR_FILE_STATUSES:
+            raise _RemoteProbeError()
+        row_paths: tuple[str, ...]
+        if status == "renamed":
+            previous_filename = item.get("previous_filename")
+            if (
+                not isinstance(previous_filename, str)
+                or not _is_safe_remote_path(previous_filename)
+                or previous_filename == filename
+            ):
+                raise _RemoteProbeError()
+            row_paths = (previous_filename, filename)
+        else:
+            if "previous_filename" in item:
+                raise _RemoteProbeError()
+            row_paths = (filename,)
+        for path in row_paths:
+            if path in seen:
+                raise _RemoteProbeError()
+            seen.add(path)
+            paths.append(path)
     return tuple(paths), complete
 
 
@@ -256,7 +355,12 @@ def _collision_census(
     repository: str,
     target_pr: int,
     owned_paths: tuple[str, ...],
-) -> tuple[CollisionState, tuple[int, ...], bool]:
+) -> tuple[
+    CollisionState,
+    tuple[int, ...],
+    bool,
+    tuple[tuple[int, tuple[str, ...]], ...],
+]:
     pulls: list[object] = []
     complete = False
     for page in range(1, _MAX_PAGES + 1):
@@ -269,36 +373,44 @@ def _collision_census(
             raise _RemoteProbeError()
         pulls.extend(payload)
         if len(pulls) > _MAX_COLLISION_PRS:
-            return CollisionState.INCOMPLETE, (), False
+            return CollisionState.INCOMPLETE, (), False, ()
         if len(payload) < _PAGE_SIZE:
             complete = True
             break
     if not complete:
-        return CollisionState.INCOMPLETE, (), False
+        return CollisionState.INCOMPLETE, (), False, ()
 
     owned = set(owned_paths)
     other_pr_count = 0
     colliding: list[int] = []
+    seen_numbers: set[int] = set()
+    census: list[tuple[int, tuple[str, ...]]] = []
     for raw_pr in pulls:
         if not isinstance(raw_pr, dict):
             raise _RemoteProbeError()
         number = raw_pr.get("number")
         if type(number) is not int or number <= 0:
             raise _RemoteProbeError()
+        if number in seen_numbers:
+            raise _RemoteProbeError()
+        seen_numbers.add(number)
         if number == target_pr:
+            census.append((number, ()))
             continue
         other_pr_count += 1
         paths, paths_complete = _changed_paths(http_get, token, repository, number)
         if not paths_complete:
-            return CollisionState.INCOMPLETE, (), False
+            return CollisionState.INCOMPLETE, (), False, ()
+        census.append((number, paths))
         if owned.intersection(paths):
             colliding.append(number)
 
+    snapshot = tuple(sorted(census, key=lambda item: item[0]))
     if colliding:
-        return CollisionState.OVERLAP, tuple(sorted(set(colliding))), True
+        return CollisionState.OVERLAP, tuple(sorted(colliding)), True, snapshot
     if other_pr_count:
-        return CollisionState.DISJOINT, (), True
-    return CollisionState.NONE, (), True
+        return CollisionState.DISJOINT, (), True, snapshot
+    return CollisionState.NONE, (), True, snapshot
 
 
 def _probe_remote_prefix(
@@ -317,6 +429,7 @@ def _probe_remote_prefix(
     CollisionState,
     tuple[int, ...],
     bool,
+    tuple[tuple[int, tuple[str, ...]], ...],
 ] | SourceContinuityRefusal:
     pr_endpoint = f"repos/{request.repository}/pulls/{request.pr_number}"
     first_pr = _api(http_get, token, pr_endpoint)
@@ -383,7 +496,12 @@ def _probe_remote_prefix(
         request.repository,
         request.pr_number,
     )
-    collision_state, colliding_pr_numbers, collisions_complete = _collision_census(
+    (
+        collision_state,
+        colliding_pr_numbers,
+        collisions_complete,
+        collision_snapshot,
+    ) = _collision_census(
         http_get,
         token,
         request.repository,
@@ -404,6 +522,7 @@ def _probe_remote_prefix(
         collision_state,
         colliding_pr_numbers,
         collisions_complete,
+        collision_snapshot,
     )
 
 
@@ -440,6 +559,64 @@ def _parse_ls_tree(value: str) -> tuple[RemotePathEntry, ...] | None:
             )
         )
     return tuple(entries)
+
+
+def _index_has_concealed_paths(value: str) -> bool | None:
+    for record in (item for item in value.split("\0") if item):
+        if len(record) < 3 or record[1] != " ":
+            return None
+        tag = record[0]
+        if tag.upper() not in {"H", "S", "M", "R", "C", "K", "?"}:
+            return None
+        if tag != tag.upper() or tag == "S":
+            return True
+    return False
+
+
+def _grafts_path_if_safe(runner: Runner, workspace: str) -> str | None:
+    common_dir_result = _invoke_git(
+        runner,
+        workspace,
+        "rev-parse",
+        "--git-common-dir",
+    )
+    if common_dir_result is None or common_dir_result.returncode != 0:
+        return None
+    raw_common_dir = common_dir_result.stdout
+    if (
+        not raw_common_dir.endswith("\n")
+        or raw_common_dir.count("\n") != 1
+        or "\0" in raw_common_dir
+    ):
+        return None
+    common_dir_text = raw_common_dir[:-1]
+    try:
+        encoded = common_dir_text.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+    if not encoded or len(encoded) > _MAX_GIT_PATH_BYTES:
+        return None
+
+    common_dir = Path(common_dir_text)
+    if not common_dir.is_absolute():
+        common_dir = Path(workspace) / common_dir
+    grafts_path = os.path.normpath(str(common_dir / "info" / "grafts"))
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        file_descriptor = os.open(grafts_path, flags)
+    except FileNotFoundError:
+        return grafts_path
+    except OSError:
+        return None
+    try:
+        grafts_stat = os.fstat(file_descriptor)
+        if not stat.S_ISREG(grafts_stat.st_mode) or grafts_stat.st_size != 0:
+            return None
+    except OSError:
+        return None
+    finally:
+        os.close(file_descriptor)
+    return grafts_path
 
 
 def _probe_local_and_entries(
@@ -491,6 +668,10 @@ def _probe_local_and_entries(
     if merge_base_object is None or merge_base_object.returncode != 0:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
+    first_grafts_path = _grafts_path_if_safe(runner, workspace)
+    if first_grafts_path is None:
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
     ancestor_result = _invoke_git(
         runner,
         workspace,
@@ -521,19 +702,53 @@ def _probe_local_and_entries(
         if unpushed_count < 0:
             return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
-    unstaged = _invoke_git(runner, workspace, "diff", "--name-only", "-z", "HEAD")
-    staged = _invoke_git(runner, workspace, "diff", "--cached", "--name-only", "-z")
-    untracked = _invoke_git(runner, workspace, "ls-files", "--others", "--exclude-standard", "-z")
-    if any(result is None or result.returncode != 0 for result in (unstaged, staged, untracked)):
+    diff_controls = (
+        "--no-renames",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--ignore-submodules=none",
+        "--name-only",
+        "-z",
+    )
+    filter_config = _invoke_git(
+        runner,
+        workspace,
+        "config",
+        "--null",
+        "--name-only",
+        "--get-regexp",
+        r"^filter\..*\.(clean|process)$",
+    )
+    if filter_config is None or filter_config.returncode not in {0, 1}:
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+    if (
+        len(filter_config.stdout.encode("utf-8")) > _MAX_GIT_CONFIG_CENSUS_BYTES
+        or filter_config.returncode == 0
+        or filter_config.stdout
+    ):
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
+    unstaged = _invoke_git(runner, workspace, "diff", *diff_controls, "HEAD", "--")
+    staged = _invoke_git(runner, workspace, "diff", "--cached", *diff_controls, "--")
+    untracked = _invoke_git(runner, workspace, "ls-files", "--others", "-z", "--")
+    index_flags = _invoke_git(runner, workspace, "ls-files", "-v", "-z")
+    if any(
+        result is None or result.returncode != 0
+        for result in (unstaged, staged, untracked, index_flags)
+    ):
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+    assert index_flags is not None
+    concealed_paths = _index_has_concealed_paths(index_flags.stdout)
+    if concealed_paths is None or concealed_paths:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     local_diff = _invoke_git(
         runner,
         workspace,
         "diff",
-        "--name-only",
-        "-z",
+        *diff_controls,
         f"{merge_base_sha}..{remote_head}",
+        "--",
     )
     if local_diff is None or local_diff.returncode != 0:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
@@ -555,6 +770,10 @@ def _probe_local_and_entries(
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
     path_entries = _parse_ls_tree(tree_result.stdout)
     if path_entries is None:
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
+    second_grafts_path = _grafts_path_if_safe(runner, workspace)
+    if second_grafts_path is None or second_grafts_path != first_grafts_path:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     tracked_paths = set(_parse_nul_paths(unstaged.stdout)) | set(_parse_nul_paths(staged.stdout))
@@ -582,9 +801,12 @@ def _remote_still_matches(
     first_identity: tuple[object, ...],
     remote_head: str,
     current_base_head: str,
+    first_changed_paths: tuple[str, ...],
+    first_files_complete: bool,
     first_collision_state: CollisionState,
     first_colliding_pr_numbers: tuple[int, ...],
     first_collisions_complete: bool,
+    first_collision_snapshot: tuple[tuple[int, tuple[str, ...]], ...],
 ) -> SourceContinuityRefusal | None:
     pr_endpoint = f"repos/{request.repository}/pulls/{request.pr_number}"
     second_pr = _api(http_get, token, pr_endpoint)
@@ -616,10 +838,22 @@ def _remote_still_matches(
     ):
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
+    second_changed_paths, second_files_complete = _changed_paths(
+        http_get,
+        token,
+        request.repository,
+        request.pr_number,
+    )
+    if not first_files_complete or not second_files_complete:
+        return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+    if second_changed_paths != first_changed_paths:
+        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+
     (
         second_collision_state,
         second_colliding_pr_numbers,
         second_collisions_complete,
+        second_collision_snapshot,
     ) = _collision_census(
         http_get,
         token,
@@ -637,6 +871,7 @@ def _remote_still_matches(
     if (
         second_collision_state is not first_collision_state
         or second_colliding_pr_numbers != first_colliding_pr_numbers
+        or second_collision_snapshot != first_collision_snapshot
     ):
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
     return None
@@ -725,7 +960,15 @@ def main(
             collision_state,
             colliding_pr_numbers,
             collisions_complete,
+            collision_snapshot,
         ) = remote_prefix
+
+        if not files_complete or not collisions_complete:
+            return _emit(_refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2))
+        if not changed_paths:
+            return _emit(_refusal(RefusalCode.REMOTE_FACTS_INVALID, 2))
+        if any(path not in set(request.owned_paths) for path in changed_paths):
+            return _emit(_refusal(RefusalCode.PATH_OUTSIDE_OWNERSHIP, 1))
 
         local_probe = _probe_local_and_entries(
             runner,
@@ -746,9 +989,12 @@ def main(
             first_identity,
             remote_head,
             current_base_head,
+            changed_paths,
+            files_complete,
             collision_state,
             colliding_pr_numbers,
             collisions_complete,
+            collision_snapshot,
         )
         if remote_refusal is not None:
             return _emit(remote_refusal)
