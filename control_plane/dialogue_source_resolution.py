@@ -92,9 +92,9 @@ def attention_source_ref(*, parent_fingerprint: str, message_key: str, target_se
     _text(message_key, "message_key", _MESSAGE_KEY)
     if target_seat not in {"ceo", "coo"}:
         raise DialogueSourceResolutionError("target_seat is unknown")
-    # Lazy by design: turn_observer imports this module while turn_watcher owns
-    # the frozen v1 identity algorithm.
-    from integrations.slack_agent_dialogue.turn_watcher import _canonical_identity
+    # Lazy by design: the neutral dialogue semantics module owns the frozen identity
+    # algorithm shared by the observer and Executive control plane.
+    from common.agent_dialogue_turn_watcher import _canonical_identity
 
     material = _canonical_identity(
         commission_fingerprint=parent_fingerprint,

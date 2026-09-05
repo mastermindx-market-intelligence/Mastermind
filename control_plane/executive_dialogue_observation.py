@@ -745,7 +745,7 @@ def parse_source_reconcile_request(raw: bytes) -> DialogueSourceReconcileRequest
             raise DialogueObservationProtocolError()
         parent = _validate_parent(value.get("parent"))
         snapshot = DialogueSourceSnapshot.from_dict(value.get("snapshot"))
-        from integrations.slack_agent_dialogue.contract_v2 import validate_message_v2
+        from common.agent_dialogue_contract_v2 import validate_message_v2
         normalized_messages = tuple(
             validate_message_v2(message.to_dict()) for message in snapshot.messages
         )

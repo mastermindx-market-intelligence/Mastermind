@@ -745,9 +745,8 @@ def test_attention_shape_contains_no_transport_provider_or_session_authority() -
 def test_module_has_only_pure_imports_and_no_control_plane_or_write_surface() -> None:
     source_path = (
         Path(__file__).parents[1]
-        / "integrations"
-        / "slack_agent_dialogue"
-        / "turn_watcher.py"
+        / "common"
+        / "agent_dialogue_turn_watcher.py"
     )
     source = source_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -768,8 +767,8 @@ def test_module_has_only_pure_imports_and_no_control_plane_or_write_surface() ->
         "hashlib",
         "json",
         "typing",
-        "integrations.slack_agent_dialogue.contract",
-        "integrations.slack_agent_dialogue.contract_v2",
+        "common.agent_dialogue_contract",
+        "common.agent_dialogue_contract_v2",
     }
     forbidden_fragments = {
         "sqlite3",

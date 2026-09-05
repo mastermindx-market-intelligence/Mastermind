@@ -562,25 +562,6 @@ def test_resolver_stays_owned_by_agent_dialogue_and_reuses_shared_id_contracts()
     }
     assert wake_event_names == {"ATTEMPT_ID_RE", "JOB_ID_RE"}
 
-    allowed_integration_imports = {
-        "dialogue_source_resolution.py": {
-            (
-                "integrations.slack_agent_dialogue.turn_watcher",
-                "_canonical_identity",
-            ),
-        },
-        "executive_dialogue_observation.py": {
-            (
-                "integrations.slack_agent_dialogue.contract_v2",
-                "validate_message_v2",
-            ),
-        },
-        "executive_service.py": {
-            ("integrations.slack_agent_dialogue.turn_watcher", "TurnAction"),
-            ("integrations.slack_agent_dialogue.turn_watcher", "TurnRoutingFacts"),
-            ("integrations.slack_agent_dialogue.turn_watcher", "classify_turn"),
-        },
-    }
     for control_path in sorted((ROOT / "control_plane").glob("*.py")):
         control_tree = ast.parse(control_path.read_text(encoding="utf-8"))
         observed = {
@@ -598,7 +579,4 @@ def test_resolver_stays_owned_by_agent_dialogue_and_reuses_shared_id_contracts()
             if alias.name.startswith("integrations.")
         }
         assert direct == set(), control_path
-        assert observed == allowed_integration_imports.get(control_path.name, set()), (
-            control_path,
-            observed,
-        )
+        assert observed == set(), (control_path, observed)

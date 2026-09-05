@@ -437,7 +437,7 @@ class ExecutiveDialogueWakeBridge:
         )
         from control_plane.wake_persist import WakeLedgerRepository
         from control_plane.session_targets import route_digest
-        from integrations.slack_agent_dialogue.turn_watcher import (
+        from common.agent_dialogue_turn_watcher import (
             TurnAction, TurnRoutingFacts, classify_turn,
         )
 
