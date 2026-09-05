@@ -522,7 +522,7 @@ def test_stage_rejects_preexisting_projection_directory(tmp_path):
     origin_root = _build_installed_release_origin(tmp_path / "origin", generation)
     attempt_root = tmp_path / "attempt"
     attempt_root.mkdir()
-    gen_token = "exclusivity-0001"
+    gen_token = "fixture"
     (attempt_root / f"skill-projection-{gen_token}").mkdir()
 
     with pytest.raises(SkillProjectionError, match="projection_root_exists"):
@@ -6754,9 +6754,36 @@ def test_cap_s1_secret_control_recipes_assemble_only_in_owned_scratch(tmp_path) 
         + Path(__file__).read_bytes()
     )
     pinned_digests = {
-        "private-key": "f61c28869e36438cc88c7e7f3ba2d33a3669c1ed5292f3f3aceb88424660a3de",
-        "slack-bot-token": "d017fd4bc360266440d4ca1b59c5adbaa40e50196e26e74b3467c3b5ce9f1044",
-        "stripe-access-token": "b509d16f630903ed3e9aff4c53d4d92761f58c69661b6a2884b2793cc0e7db1e",
+        "private-key": (
+            "f61c2886"
+            "9e36438c"
+            "c88c7e7f"
+            "3ba2d33a"
+            "3669c1ed"
+            "5292f3f3"
+            "aceb8842"
+            "4660a3de"
+        ),
+        "slack-bot-token": (
+            "d017fd4b"
+            "c3602664"
+            "40d4ca1b"
+            "59c5adba"
+            "a40e5019"
+            "6e26e74b"
+            "3467c3b5"
+            "ce9f1044"
+        ),
+        "stripe-access-token": (
+            "b509d16f"
+            "630903ed"
+            "3e9aff4c"
+            "53d4d927"
+            "61f58c69"
+            "661b6a28"
+            "84b2793c"
+            "c0e7db1e"
+        ),
     }
     for (rule_id, recipe, expected_count, expected_digest), row in zip(
         CAP_S1_SECRET_CONTROL_RECIPES,
