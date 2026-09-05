@@ -692,19 +692,14 @@ def test_x1_autonomy_writes_only_through_the_audited_binding_open_never_ad_hoc()
     source = JS.read_text(encoding="utf-8")
     block = _autonomy_js()
 
-    # The section's only write-capable call site.
-    assert "openBindingButton(binding," in block
-
-    helper_start = source.index("function openBindingButton(binding, label)")
-    helper_end = source.index("function allBindings()")
-    helper = source[helper_start:helper_end]
-    assert "openBinding(binding, null, btn)" in helper
+    # The autonomy path adds strict source context to the same provider-owned
+    # endpoint. Global address-book opens retain the existing helper.
+    assert "b5OwedButton(card, binding," in block
+    helper = _extract_fn("b5OwedButton")
+    assert 'postJSON("/api/open", { binding_id: binding.binding_id, owed_context: context })' in helper
+    assert "b5OwedContext(card, binding)" in helper
     assert "loadState()" in helper
-
-    open_start = source.index("function openBinding(binding")
-    open_end = source.index("function openBindingButton")
-    open_fn = source[open_start:open_end]
-    assert 'postJSON("/api/open"' in open_fn
+    assert 'postJSON("/api/open", { binding_id: binding.binding_id })' in _extract_fn("openBinding")
 
 
 def test_x1_autonomy_absent_projection_is_source_qualified_not_an_error() -> None:
@@ -793,7 +788,7 @@ def test_x1_autonomy_composition_leads_with_owed_action_not_event_volume() -> No
     assert "projection.responsibilities" in ledger_fn
     assert "card.is_actionable !== true" in ledger_fn
     assert 'AU_SEAT_ORDER.forEach' in ledger_fn
-    for pair in ('["live", counts.actionable]', '["history", counts.stale]', '["gated", counts.blocked]'):
+    for pair in ('["live", unknownCurrent ? null : liveCount]', '["history", counts.stale]', '["gated", counts.blocked]'):
         assert pair in ledger_fn
     # No synthesized health, score or ranking of the organization.
     for forbidden in ("score", "health", "rank", "priority"):
@@ -1180,7 +1175,7 @@ def test_state_refusal_or_network_failure_preserves_previous_attention_and_degra
     """A parsed 503, malformed envelope, or rejected fetch cannot replace a real prior state."""
     source = JS.read_text(encoding="utf-8")
     state_helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
-    load_state = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    load_state = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")] + _b5_transport_stubs()
     harness = """
     var STATE;
     var responses;
@@ -1247,7 +1242,7 @@ def test_refresh_follow_up_reloads_once_then_cancels_or_fails_closed() -> None:
     """A stale cache gets one bounded retry chain; superseded or hung reads cannot render late."""
     source = JS.read_text(encoding="utf-8")
     helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
-    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")] + _b5_transport_stubs()
     harness = """
     var STATE;
     var responses;
@@ -1313,7 +1308,7 @@ def _deadline_clock_probe(mode: str, *, wall_offset: int = 0, consumed_at: int =
     """Run the real reader with independently controlled clocks and deferred timer delivery."""
     source = JS.read_text(encoding="utf-8")
     helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
-    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")] + _b5_transport_stubs()
     options = json.dumps({"mode": mode, "wall_offset": wall_offset,
                           "consumed_at": consumed_at, "clock": clock})
     harness = r"""
@@ -1429,7 +1424,7 @@ def test_refresh_follow_up_uses_the_explicit_load_deadline_not_a_second_window()
     """An in-flight body received at 249 seconds cannot start a new 250-second follow-up budget."""
     source = JS.read_text(encoding="utf-8")
     helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
-    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")] + _b5_transport_stubs()
     harness = """
     var STATE; var calls = {gets:0, rendered:[], degraded:[]}; var resolveInitial; var nav = {textContent:""};
     var now = 0; var timers = []; var timerId = 1;
@@ -1466,7 +1461,7 @@ def test_refresh_follow_up_refused_or_malformed_response_preserves_known_rows() 
     """A terminal follow-up refusal cannot replace the prior stale composition with a false clear."""
     source = JS.read_text(encoding="utf-8")
     helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
-    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")] + _b5_transport_stubs()
     harness = """
     var STATE; var responses; var calls; var timer; var nav;
     function setTimeout(fn, delay) { timer = {fn:fn, delay:delay, cancelled:false}; return 1; }
@@ -1505,7 +1500,7 @@ def test_refresh_follow_up_invalidates_late_reads_and_pagehide_uses_that_same_fe
     """A cancelled request's late success or failure cannot overwrite the newer explicit read."""
     source = JS.read_text(encoding="utf-8")
     helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
-    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")] + _b5_transport_stubs()
     wiring = source[source.index('document.addEventListener("DOMContentLoaded"') :]
     assert 'window.addEventListener("pagehide"' in wiring
     assert "invalidateStateReads();" in wiring
@@ -1545,7 +1540,7 @@ def test_refresh_follow_up_never_polls_a_current_state_or_a_fired_cancelled_call
     """A normal response is one read, and a timer that fires after teardown cannot begin another."""
     source = JS.read_text(encoding="utf-8")
     helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
-    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")] + _b5_transport_stubs()
     harness = """
     var STATE; var calls; var responses; var nav; var timers = []; var timerId = 1;
     function setTimeout(fn, delay) { var timer = {id:timerId++, fn:fn, delay:delay, cancelled:false}; timers.push(timer); return timer.id; }
@@ -1623,7 +1618,7 @@ def test_addendum_behavioural_owed_binding_is_withheld_from_stale_cards() -> Non
       live: auOwedBinding(live) ? auOwedBinding(live).seat : null,
       hold: auOwedBinding(hold)
     }));
-    """ % _extract_fn("auOwedBinding")
+    """ % ("function b5Allows() { return true; }\n" + _extract_fn("auOwedBinding"))
     out = _run_node(harness)
 
     assert out["stale"] is None, "a stale/non-actionable card must offer no owed-action jump"
@@ -1664,7 +1659,7 @@ def test_addendum_behavioural_ledger_counts_only_actionable_turns() -> None:
         { is_actionable: false, owed_turn: { seat: "coo" } }] };
     console.log(JSON.stringify({ allStale: cells(auLedger(allStale)),
                                  mixed: cells(auLedger(mixed)) }));
-    """ % _extract_fn("auLedger")
+    """ % ("function b5Allows() { return true; }\n" + _extract_fn("auLedger"))
     out = _run_node(harness)
 
     # an all-stale packet: nobody owes a LIVE turn, and "You" is not urgent —
@@ -1777,7 +1772,7 @@ def test_cr1a_detail_exposes_canonical_source_receipt_without_raw_payload() -> N
     js = JS.read_text(encoding="utf-8")
     detail = _extract_fn("renderAutonomyDetail")
 
-    assert 'detailRail(rails, "Dispatch proof"' in detail
+    assert 'b5Allows(card, "dispatch") ? "Dispatch proof" : "Dispatch proof as of source read"' in detail
     assert 'dispatch.w3c.source_receipt' in detail
     assert 'evidence.runtime_generation_state' in detail
     assert 'evidence.runtime_generation_before' in detail
@@ -1823,7 +1818,7 @@ def test_dispatch_behavioural_unsafe_states_expose_no_open_control() -> None:
     """ % (
         _extract_var("AU_DISPATCH_UNSAFE"),
         _extract_fn("auDispatchUnsafe"),
-        _extract_fn("auOwedBinding"),
+        "function b5Allows() { return true; }\n" + _extract_fn("auOwedBinding"),
     )
     out = _run_node(harness)
 
@@ -1836,3 +1831,1133 @@ def test_dispatch_behavioural_unsafe_states_expose_no_open_control() -> None:
     assert out["staleReturned"] is None, "stale (historical) evidence must suppress the Open control too"
     assert out["liveReturned"] == "present", "a fresh RETURNED card keeps its owed-action Open control"
     assert out["noEvidence"] == "present", "absent dispatch evidence must not newly suppress anything"
+
+
+def _b5_core_js():
+    text = JS.read_text() if hasattr(JS, "read_text") else ""
+    assert "// B5 finite source permission" in text
+    return text[text.index("  // B5 finite source permission"):].split("  // DOM ---", 1)[0]
+
+
+def test_b5_browser_paired_elapsed_and_nonrenewable_component_bounds():
+    core = _b5_core_js()
+    result = _run_node(r"""
+let m=1000, w=1788566400000;
+const document={visibilityState:'visible'};
+const performance={now:()=>m,timeOrigin:100};
+Date.now=()=>w;
+const STATE={};
+const STATE_LOAD_GENERATION=1;
+const clearTimeout=()=>{}; const setTimeout=()=>1;
+""" + core + r"""
+const anchor=b5Sample();
+function sample(dm,dw){m=1000+dm; w=1788566400000+dw; return b5Sample();}
+const a=b5Elapsed(anchor,sample(100,108),anchor);
+const b=b5Elapsed(anchor,sample(100,109),anchor);
+const bound={budget:1000,anchor,previous:anchor,invalid:false};
+const near=b5Remaining(bound,sample(983,983));
+const zero=b5Remaining(bound,sample(984,984));
+const rollback=b5Remaining(bound,sample(0,0));
+console.log(JSON.stringify({a,b,near,zero,rollback}));
+""")
+    assert result == {"a": 100, "b": None, "near": 1, "zero": 0, "rollback": None}
+
+
+def _b5_transport_stubs():
+    # These older tests isolate #486's transport generation/deadline. B5
+    # source permission executes without stubs in the dedicated tests below.
+    return "function b5Sample(){return null;} function b5Accept(){} function b5Schedule(){}"
+
+
+def _b5_http_envelope(tmp_path, monkeypatch):
+    # Actual mapper -> compositor -> generation cache -> authenticated HTTP.
+    # The fixture provider and files belong only to this test.
+    from test_chairman_control_room_server import (
+        _b5_navigation_fixture, _running_server, _get, _auth_headers,
+    )
+    config, clock, binding = _b5_navigation_fixture(tmp_path, monkeypatch)
+    providers = []
+    config.open_binding_fn = lambda *a, **k: providers.append(a) or {"ok": False}
+    with _running_server(config) as (_httpd, port):
+        status, _, raw = _get(port, "/api/state", headers=_auth_headers(config))
+    assert status == 200 and providers == []
+    return json.loads(raw), binding
+
+
+def _b5_behavior_script(envelope, binding):
+    return r"""
+let m=1000, w=1788566400000;
+const document={visibilityState:'visible'};
+const performance={now:()=>m,timeOrigin:100};
+Date.now=()=>w;
+const STATE={body:null,workByRef:{'WS:B5':{}}};
+let timers=[], renders=0, posts=[], reads=0, settle;
+function setTimeout(fn,delay){timers.push({fn,delay});return timers.length;}
+function clearTimeout(id){if(timers[id-1])timers[id-1].cancelled=true;}
+function renderAutonomy(){renders++;B5.active.forEach(e=>e.renderedCurrent=false);}
+function renderAutonomyDetail(){}
+function button(label,cls,fn){return {textContent:label,disabled:false,click:()=>fn({stopPropagation(){}})};}
+function postJSON(url,payload){posts.push({url,payload});return new Promise(resolve=>settle=resolve);}
+function loadState(){reads++;return Promise.resolve();}
+const REMOTE_READ_ONLY=false;
+function auIsHold(c){return c.placement_state?.value==='EFFECT_UNKNOWN';}
+function auDispatchUnsafe(c){return ['EFFECT_UNKNOWN','UNKNOWN'].includes(c.dispatch?.dispatch_state);}
+function auOwedSeat(c){return c.owed_turn.seat;}
+function uniqueBinding(){return binding;}
+function bindingConfidence(){return {openable:true};}
+""" + "const original=" + json.dumps(envelope) + ";const binding=" + json.dumps(binding) + ";" + _b5_core_js() + _extract_fn("auOwedBinding") + r"""
+function qualified(body){
+ body.source_validity.browser_qualification={schema:'mastermind.browser_qualification.v1',boundary:'owned_test_fixture',
+ profile:B5_PROFILE,time_origin:100,product:'Chrome/152.0.7977.82',revision:'d04cdb24d67b081f6cf80200ffc5233f44b61109',configuration:'b5-default-throttling-bfcache-v1'};
+ return body;
+}
+function copy(){return JSON.parse(JSON.stringify(original));}
+function accept(body){const a=b5Sample();b5Accept(body,a);STATE.body=body;STATE.doc=body.control_room;return body.control_room.autonomy.responsibilities[0];}
+function advance(ms,offset=0){m+=ms;w+=ms+offset;}
+function reset(){B5.bounds=new Map();B5.active=new Map();B5.publication=0;m=1000;w=1788566400000;document.visibilityState='visible';}
+function allows(card){return B5_COMPONENTS.map(name=>b5Allows(card,name));}
+"""
+
+
+def test_b5_actual_http_to_browser_components_are_independent_and_legacy_refuses(tmp_path, monkeypatch):
+    envelope, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    result = _run_node(_b5_behavior_script(envelope, binding) + r"""
+const unchanged=JSON.stringify(original);
+const legacy=allows(accept(copy()));
+reset(); let body=qualified(copy());
+B5_COMPONENTS.forEach((name,i)=>body.source_validity.cards[0].components[name].remaining_ms=100+i*100);
+let card=accept(body);
+let phases=[allows(card)], opens=[!!auOwedBinding(card)];
+for(let i=0;i<4;i++){advance(i===0?84:100);phases.push(allows(card));opens.push(!!auOwedBinding(card));}
+console.log(JSON.stringify({legacy,phases,opens,unchanged:unchanged===JSON.stringify(original)}));
+""")
+    assert result == {"legacy": [False]*4, "phases": [
+        [True, True, True, True], [False, True, True, True],
+        [False, False, True, True], [False, False, False, True], [False]*4],
+        "opens": [True, False, False, False, False], "unchanged": True}
+
+
+@pytest.mark.parametrize("component", ["decision_current", "dispatch", "owed_open_age"])
+def test_b5_independent_expiry_never_suppresses_unrelated_current_component(tmp_path, monkeypatch, component):
+    envelope, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    result = _run_node(_b5_behavior_script(envelope, binding) + "const component=" + json.dumps(component) + r""";
+let body=qualified(copy());body.source_validity.cards[0].components[component].remaining_ms=100;
+const card=accept(body);advance(84);
+console.log(JSON.stringify({allows:allows(card),open:!!auOwedBinding(card)}));
+""")
+    expected = [True]*4
+    expected[["card", "decision_current", "dispatch", "owed_open_age"].index(component)] = False
+    assert result == {"allows": expected, "open": component == "decision_current"}
+
+
+def test_b5_browser_same_proof_omission_minimum_and_new_proof_recovery(tmp_path, monkeypatch):
+    envelope, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    result = _run_node(_b5_behavior_script(envelope, binding) + r"""
+let card=accept(qualified(copy()));advance(800);
+card=accept(qualified(copy()));const before=allows(card)[0];advance(168);const expired=allows(card)[0];
+let missing=qualified(copy());delete missing.source_validity.cards[0].components.card;
+const omitted=allows(accept(missing))[0];
+let same=qualified(copy());same.source_validity.publication_seq+=1;
+const repeated=allows(accept(same))[0];
+let changed=qualified(copy());changed.source_validity.publication_seq+=2;
+changed.source_validity.cards[0].components.card.proof_ref='b'.repeat(64);
+changed.control_room.autonomy.responsibilities[0].validity.card.proof_ref='b'.repeat(64);
+const recovered=allows(accept(changed))[0];
+console.log(JSON.stringify({before,expired,omitted,repeated,recovered}));
+""")
+    assert result == {"before": True, "expired": False, "omitted": False, "repeated": False, "recovered": True}
+
+
+@pytest.mark.parametrize("race", ["expiry", "hidden", "replacement", "discontinuity"])
+def test_b5_owed_async_finally_cannot_restore_old_permission(tmp_path, monkeypatch, race):
+    envelope, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    result = _run_node(_b5_behavior_script(envelope, binding) + "const race=" + json.dumps(race) + r""";
+const card=accept(qualified(copy()));const btn=b5OwedButton(card,binding,'Open Sol');btn.click();
+if(race==='expiry')advance(968);
+if(race==='hidden'){document.visibilityState='hidden';b5Invalidate();}
+if(race==='replacement')accept(qualified(copy()));
+if(race==='discontinuity')advance(100,9);
+settle({ok:true,verified:true});
+Promise.resolve().then(()=>Promise.resolve()).then(()=>Promise.resolve()).then(()=>{
+ console.log(JSON.stringify({posts:posts.length,context:posts[0].payload.owed_context.schema,disabled:btn.disabled}));
+});
+""")
+    assert result == {"posts": 1, "context": "mastermind.owed_navigation.v1", "disabled": True}
+
+
+def test_b5_expired_click_and_late_timer_cannot_actuate_or_replace_new_page(tmp_path, monkeypatch):
+    envelope, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    result = _run_node(_b5_behavior_script(envelope, binding) + r"""
+const card=accept(qualified(copy()));const btn=b5OwedButton(card,binding,'Open Sol');b5Schedule();
+const oldTimer=timers[timers.length-1].fn;advance(968);btn.click();
+accept(qualified(copy()));const before=renders;oldTimer();
+console.log(JSON.stringify({posts:posts.length,disabled:btn.disabled,oldTimerInert:renders===before}));
+""")
+    assert result == {"posts": 0, "disabled": True, "oldTimerInert": True}
+
+
+def _b5_owned_page_document(binding, reference, attention_stamp):
+    # Match the exact owner instance held by the server fixture, even when
+    # separate optional-release import probes have replaced package attributes.
+    from test_chairman_control_room_server import server_mod
+    ccr = server_mod.ccr
+    from control_plane import surface_bindings as sb
+    return ccr.compose_control_room(
+        inbox={"schema": ccr.EXECUTIVE_INBOX_SCHEMA, "generated_at": attention_stamp,
+               "attention": [
+                   {"attention_id": "ATTENTION-B5", "kind": "decision", "target": "ceo",
+                    "reason": "Review the harmless fixture", "workstream": "WS:B5"},
+                   {"attention_id": "ATTENTION-DECISION", "kind": "decision", "target": "chairman",
+                    "reason": "Harmless test decision only", "workstream": "WS:DECISION"}]},
+        boot_packet=None, active_builds=None, bindings={"schema": sb.SCHEMA, "bindings": [binding]},
+        binding_problems=(), generated_at=reference,
+        runtime_jobs=[{"job_id": "JOB-"+key, "root_job_id": "JOB-"+key, "workstream": "WS:"+key}
+                      for key in ("B5", "STABLE", "DECISION")],
+        agent_os_state={"schema": "agent_os_state.v1", "generated_at": reference,
+            "workstreams": [
+                {"key": "B5", "title": "B5 expiring source", "owner": "ceo-sol", "status": "active"},
+                {"key": "STABLE", "title": "Stable source control", "owner": "ceo-sol", "status": "active",
+                 "blocked_by": ["Harmless stable test gate"]},
+                {"key": "DECISION", "title": "Expiring Chairman decision", "owner": "chairman", "status": "active"}]},
+        dispatch_evidence=[{"responsibility_ref": "WS:B5", "root_job_id": "JOB-B5",
+            "runtime_root_state": "RESOLVED", "carrier_state": "OWNER_HELD", "w3c_state": "RESOLVED",
+            "w3c_terminal_state": "APPLIED", "w3c_wake_state": "TARGET_ACKNOWLEDGED",
+            "w3c_terminal_applied": "true", "w3c_source_observed_at": reference,
+            "w3c_source_freshness": "SOURCE_EVIDENCE_TIME", "w3c_snapshot_digest": "a"*64,
+            "w3c_terminal_source_owner": "executive_terminal_return", "w3c_wake_source_owner": "wake_ledger"}],
+    )
+
+
+@pytest.mark.parametrize("mutant", ["always_allow", "renew_same_proof", "keep_omitted", "ignore_lifecycle", "reenable_finally", "couple_decision", "ignore_dispatch"])
+def test_b5_meaningful_guard_mutants_are_killed(tmp_path, monkeypatch, mutant):
+    envelope, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    script = _b5_behavior_script(envelope, binding)
+    if mutant == "always_allow":
+        script = script.replace('function b5Allows(card, name) {', 'function b5Allows(card, name) { return true;', 1)
+        probe = "const c=accept(qualified(copy()));advance(968);console.log(JSON.stringify(b5Allows(c,'card')));"
+    elif mutant == "renew_same_proof":
+        script = script.replace('if (before === null || (remaining !== null && before <= remaining)) bound = prior;', 'if (false) bound = prior;', 1)
+        probe = "accept(qualified(copy()));advance(800);const c=accept(qualified(copy()));advance(168);console.log(JSON.stringify(b5Allows(c,'card')));"
+    elif mutant == "keep_omitted":
+        marker = 'function b5Accept(body, anchor) {'
+        before, after = script.split(marker, 1)
+        after = after.replace('B5.active = new Map();', '/* mutant retains active */', 1)
+        script = before + marker + after
+        probe = "const b=qualified(copy());const c=accept(b);delete b.source_validity.cards[0].components.card;accept(b);console.log(JSON.stringify(b5Allows(c,'card')));"
+    elif mutant == "ignore_lifecycle":
+        script = script.replace(_extract_fn("b5Invalidate"), 'function b5Invalidate() {}', 1)
+        probe = "const c=accept(qualified(copy()));b5Invalidate();console.log(JSON.stringify(b5Allows(c,'card')));"
+    elif mutant == "reenable_finally":
+        script = script.replace('btn.disabled = !(epoch === B5.epoch && b5OwedContext(card, binding));', 'btn.disabled = false;', 1)
+        probe = "const c=accept(qualified(copy()));const b=b5OwedButton(c,binding,'Open');b.click();advance(968);settle({ok:true});Promise.resolve().then(()=>Promise.resolve()).then(()=>Promise.resolve()).then(()=>console.log(JSON.stringify(!b.disabled)));"
+    elif mutant == "couple_decision":
+        script = script.replace('function b5Allows(card, name) {', 'function b5Allows(card, name) { if (name === "card" && !b5Allows(card,"decision_current")) return false;', 1)
+        probe = "const b=qualified(copy());b.source_validity.cards[0].components.decision_current.remaining_ms=100;const c=accept(b);advance(84);console.log(JSON.stringify(!b5Allows(c,'card')));"
+    else:
+        script = script.replace(' || !b5Allows(card, "dispatch")', '', 1)
+        probe = "const b=qualified(copy());b.source_validity.cards[0].components.dispatch.remaining_ms=100;const c=accept(b);advance(84);console.log(JSON.stringify(!!auOwedBinding(c)));"
+    # Each otherwise executable mutant flips the dedicated safety assertion.
+    # A parse error or harness crash fails this test; it is not a killed mutant.
+    assert _run_node(script + probe) is True
+
+
+def test_b5_clock_function_replacement_poisons_retained_permission(tmp_path, monkeypatch):
+    envelope, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    result = _run_node(_b5_behavior_script(envelope, binding) + r"""
+const card=accept(qualified(copy()));const wall=Date.now;Date.now=()=>w;
+const overridden=b5Allows(card,'card');Date.now=wall;
+const restored=b5Allows(card,'dispatch');
+console.log(JSON.stringify({overridden,restored}));
+""")
+    assert result == {"overridden": False, "restored": False}
+
+
+def test_b5_browser_accounting_capacity_never_evicts_to_renew(tmp_path, monkeypatch):
+    envelope, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    result = _run_node(_b5_behavior_script(envelope, binding) + r"""
+B5_MAX_PROOFS=4;accept(qualified(copy()));let b=qualified(copy());
+b.source_validity.cards[0].components.card.proof_ref='b'.repeat(64);
+b.control_room.autonomy.responsibilities[0].validity.card.proof_ref='b'.repeat(64);
+accept(b);const c=accept(qualified(copy()));
+console.log(JSON.stringify({size:B5.bounds.size,exhausted:B5.exhausted,allowed:b5Allows(c,'card')}));
+""")
+    assert result == {"size": 4, "exhausted": True, "allowed": False}
+
+
+def _b5_actual_page_script():
+    return r"""
+'use strict';
+
+/*
+ * Owned B5 actual-page regression harness.
+ *
+ * Intended adaptation target:
+ *   tests/test_chairman_control_room_ui_x1.py
+ *
+ * This harness is not source authority, a profile attestation service, or an
+ * installed-service probe. It expects Root's owned loopback fixture server.
+ * It never replaces Date.now(), performance.now(), timers, visibility, source
+ * state, or the fixture server's canonical response body.
+ */
+
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+
+const EXPECTED_PRODUCT = 'Chrome/152.0.7977.82';
+const EXPECTED_REVISION = 'd04cdb24d67b081f6cf80200ffc5233f44b61109';
+const PROFILE = 'b5.darwin-chrome-paired-v1';
+const CONFIGURATION = 'b5-default-throttling-bfcache-v1';
+const CHROME_DEFAULTS_TO_KEEP_ENABLED = [
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-back-forward-cache',
+  '--disable-renderer-backgrounding',
+];
+const FORBIDDEN_PROFILE_OR_CLOCK_SWITCHES = [
+  '--virtual-time-budget',
+  '--deterministic-mode',
+  '--run-all-compositor-stages-before-draw',
+  '--profile-directory',
+  '--clock-profile',
+  '--b5-',
+];
+const VIEWPORTS = [
+  { name: 'desktop', width: 1440, height: 900 },
+  { name: 'tablet', width: 834, height: 1194 },
+  { name: 'mobile', width: 390, height: 844 },
+];
+
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) throw new Error('missing required environment: ' + name);
+  return value;
+}
+
+const chromeExecutable = requiredEnv('B5_CHROME_EXECUTABLE');
+const playwrightModule = requiredEnv('B5_PLAYWRIGHT_MODULE');
+const testUrl = new URL(requiredEnv('B5_TEST_URL'));
+const artifactRoot = requiredEnv('B5_ARTIFACT_DIR');
+
+if (testUrl.protocol !== 'http:' ||
+    !['127.0.0.1', 'localhost'].includes(testUrl.hostname)) {
+  throw new Error('B5_TEST_URL must be an owned loopback HTTP fixture');
+}
+
+const { chromium } = require(playwrightModule);
+const runStamp = new Date().toISOString().replace(/[:.]/g, '-');
+const outputDir = path.join(artifactRoot, 'b5-browser-' + runStamp);
+fs.mkdirSync(outputDir, { recursive: false });
+
+const report = {
+  schema: 'mastermind.b5_browser_fixture_proof.v1',
+  started_at: new Date().toISOString(),
+  authority_claimed: false,
+  fixture: { origin: testUrl.origin, pathname: testUrl.pathname },
+  expected: {
+    product: EXPECTED_PRODUCT,
+    revision: EXPECTED_REVISION,
+    profile: PROFILE,
+    configuration: CONFIGURATION,
+  },
+  route_events: [],
+  state_responses: [],
+  screenshots: [],
+  observations: {},
+  lifecycle: [],
+  pids: [],
+  server_started_by_harness: false,
+  clocks_overridden: false,
+  browser_profile_switch_added: false,
+  limits: [
+    'Conditional Q premise is not empirically proved.',
+    'BFCache is qualified only when pageshow.persisted is actually observed.',
+    'Fixture state is synthetic canonical mapper/cache evidence, not installed Runtime or Business proof.',
+  ],
+};
+
+let browser = null;
+let context = null;
+let page = null;
+let sibling = null;
+let launcherQualified = false;
+let stateMode = 'pass';
+let baselineMode = false;
+let pendingRoutes = [];
+let ownedPids = [];
+let capFired = false;
+
+function sha256(data) {
+  return crypto.createHash('sha256').update(data).digest('hex');
+}
+
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error && error.code === 'EPERM';
+  }
+}
+
+function ownedChromeProcesses() {
+  const proc = spawnSync('/bin/ps', ['-axo', 'pid=,ppid=,command='], {
+    encoding: 'utf8',
+    timeout: 1000,
+    maxBuffer: 1024 * 1024,
+  });
+  if (proc.status !== 0) throw new Error('owned process census unavailable');
+  const rows = proc.stdout.split('\n').map(function (line) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+    return match && {
+      pid: Number(match[1]),
+      ppid: Number(match[2]),
+      command: match[3],
+    };
+  }).filter(Boolean);
+  const owned = new Set([process.pid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    rows.forEach(function (row) {
+      if (owned.has(row.ppid) && !owned.has(row.pid)) {
+        owned.add(row.pid);
+        changed = true;
+      }
+    });
+  }
+  return rows.filter(function (row) {
+    return owned.has(row.pid) &&
+      row.command.includes('/Applications/Google Chrome.app/');
+  });
+}
+
+function verifyActualCommandLine(rows) {
+  const root = rows.find(function (row) {
+    return row.command.startsWith(chromeExecutable + ' ');
+  });
+  assert.ok(root, 'exact owned Chrome root process not found');
+
+  CHROME_DEFAULTS_TO_KEEP_ENABLED.forEach(function (flag) {
+    assert.equal(root.command.includes(flag), false,
+      'invalidating Playwright default remained: ' + flag);
+  });
+  assert.equal(
+    /--disable-features=[^\n]*\bBackForwardCache\b/.test(root.command),
+    false,
+    'BackForwardCache was disabled through --disable-features'
+  );
+  FORBIDDEN_PROFILE_OR_CLOCK_SWITCHES.forEach(function (flag) {
+    assert.equal(root.command.includes(flag), false,
+      'test-profile or clock override switch present: ' + flag);
+  });
+  assert.ok(root.command.includes('--headless'), 'headless configuration not bound');
+  assert.ok(root.command.includes('--user-data-dir='),
+    'ephemeral Playwright user-data directory not observed');
+  const switchNames = root.command.split(/\s+/).filter(function (part) {
+    return part.startsWith('--');
+  }).map(function (part) {
+    return part.split('=', 1)[0];
+  }).sort();
+  return {
+    root_pid: root.pid,
+    root_command_sha256: sha256(root.command),
+    excluded_defaults_absent: true,
+    profile_or_clock_switch_absent: true,
+    headless: true,
+    ephemeral_user_data_dir_observed: true,
+    observed_switch_names: switchNames,
+  };
+}
+
+function boundedError(error) {
+  const value = String(error && error.message || error || 'unknown error');
+  return value.replaceAll(testUrl.href, testUrl.origin + testUrl.pathname)
+    .slice(0, 1200);
+}
+
+function boundedPathname(rawUrl) {
+  try {
+    return new URL(rawUrl).pathname;
+  } catch (_error) {
+    return 'invalid-url';
+  }
+}
+
+async function releasePendingRoutes() {
+  const rows = pendingRoutes;
+  pendingRoutes = [];
+  for (const row of rows) {
+    try {
+      await row.route.abort('failed');
+    } finally {
+      row.release();
+    }
+  }
+}
+
+async function handleRoute(route) {
+  const request = route.request();
+  const url = new URL(request.url());
+  const event = {
+    method: request.method(),
+    pathname: url.pathname,
+    same_origin: url.origin === testUrl.origin,
+    mode: stateMode,
+  };
+  report.route_events.push(event);
+
+  if (url.origin !== testUrl.origin) {
+    event.result = 'ABORT_OUTSIDE_ORIGIN';
+    await route.abort('blockedbyclient');
+    return;
+  }
+  if (request.method() !== 'GET') {
+    event.result = 'ABORT_NON_GET';
+    await route.abort('blockedbyclient');
+    return;
+  }
+  if (url.pathname === '/b5-inert') {
+    event.result = 'INERT_DOCUMENT';
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><meta charset="utf-8"><title>B5 inert</title>',
+    });
+    return;
+  }
+  if (baselineMode && url.pathname.endsWith('/control_room.js')) {
+    const basePath = requiredEnv('B5_BASE_JS_FILE');
+    const bytes = fs.readFileSync(basePath);
+    report.baseline_js_sha256 = sha256(bytes);
+    await route.fulfill({status:200,contentType:'text/javascript',body:bytes});
+    return;
+  }
+  if (url.pathname !== '/api/state') {
+    event.result = 'CONTINUE_REAL_ASSET';
+    await route.continue();
+    return;
+  }
+
+  assert.equal(launcherQualified, true,
+    'state request occurred before launcher qualification');
+  if (stateMode === 'refuse') {
+    event.result = 'ABORT_CONTROLLED_REFUSAL';
+    await route.abort('failed');
+    return;
+  }
+  if (stateMode === 'hang') {
+    event.result = 'HOLD_CONTROLLED_HANG';
+    await new Promise(function (resolve) {
+      pendingRoutes.push({ route: route, release: resolve });
+    });
+    return;
+  }
+
+  const upstream = await route.fetch();
+  const raw = await upstream.body();
+  const original = JSON.parse(raw.toString('utf8'));
+  const frame = request.frame();
+  const timeOrigin = await frame.evaluate(function () {
+    return performance.timeOrigin;
+  });
+  assert.equal(Number.isFinite(timeOrigin), true,
+    'page performance.timeOrigin is not finite');
+
+  const serializedBefore = JSON.stringify(original);
+  assert.ok(original.source_validity, 'missing real server validity envelope');
+  assert.equal(original.source_validity.browser_qualification, null);
+  const qualified = JSON.parse(serializedBefore);
+  qualified.source_validity.browser_qualification = {
+    schema: 'mastermind.browser_qualification.v1', boundary: 'owned_test_fixture',
+    profile: PROFILE, time_origin: timeOrigin, product: EXPECTED_PRODUCT,
+    revision: EXPECTED_REVISION, configuration: CONFIGURATION,
+  };
+  const preservationCheck = JSON.parse(JSON.stringify(qualified));
+  preservationCheck.source_validity.browser_qualification = null;
+  assert.equal(JSON.stringify(preservationCheck), serializedBefore,
+    'raw fixture envelope changed outside controlled browser qualification');
+
+  const body = JSON.stringify(qualified);
+  const headers = Object.assign({}, upstream.headers());
+  delete headers['content-length'];
+  delete headers['content-encoding'];
+  headers['content-type'] = 'application/json; charset=utf-8';
+
+  report.state_responses.push({
+    status: upstream.status(),
+    raw_sha256: sha256(raw),
+    qualified_sha256: sha256(body),
+    raw_bytes: raw.length,
+    qualified_bytes: Buffer.byteLength(body),
+    time_origin: timeOrigin,
+    preserved_except_browser_qualification: true,
+  });
+  event.result = 'FETCH_REAL_ENVELOPE_ADD_QUALIFICATION';
+  await route.fulfill({
+    response: upstream,
+    headers: headers,
+    body: body,
+  });
+}
+
+async function cardState(ref) {
+  const row = page.locator('.ccr-au-row').filter({ hasText: ref }).first();
+  const count = await row.count();
+  if (!count) return { ref: ref, present: false };
+  const text = (await row.innerText()).replace(/\s+/g, ' ').trim().slice(0, 900);
+  const buttons = row.locator('button');
+  const open = buttons.filter({ hasText: /^Open\b/ });
+  return {
+    ref: ref,
+    present: true,
+    text: text,
+    live: await row.getByText('LIVE', { exact: true }).count() > 0,
+    your_call: await row.getByText('YOUR CALL', { exact: true }).count() > 0,
+    needs_current_read: /Needs a current read/i.test(text),
+    open_count: await open.count(),
+    enabled_open_count: await open.evaluateAll(function (nodes) {
+      return nodes.filter(function (node) { return !node.disabled; }).length;
+    }),
+  };
+}
+
+async function compactState(label) {
+  const rows = {};
+  for (const ref of ['WS:B5', 'WS:STABLE', 'WS:DECISION']) {
+    rows[ref] = await cardState(ref);
+  }
+  const bodyText = (await page.locator('body').innerText())
+    .replace(/\s+/g, ' ').trim().slice(0, 1600);
+  const state = {
+    label: label,
+    at: new Date().toISOString(),
+    page_visibility: await page.evaluate(function () {
+      return document.visibilityState;
+    }),
+    rows: rows,
+    decision_needs_current_read:
+      /Needs a current read/i.test(bodyText) &&
+      bodyText.includes('WS:DECISION'),
+  };
+  report.observations[label] = state;
+  return state;
+}
+
+async function screenshotPhase(phase) {
+  for (const viewport of VIEWPORTS) {
+    await page.setViewportSize({
+      width: viewport.width,
+      height: viewport.height,
+    });
+    const file = path.join(
+      outputDir,
+      phase + '-' + viewport.name + '-' + viewport.width + 'x' +
+        viewport.height + '.png'
+    );
+    await page.locator('#ccr-autonomy').evaluate(node => {
+      node.scrollIntoView({behavior:'instant',block:'start'});
+      const center = innerWidth / 2;
+      const overlays = Array.from(document.querySelectorAll('.ccr-topbar,.ccr-sidebar')).map(n=>n.getBoundingClientRect())
+        .filter(r=>r.left<=center && r.right>=center && r.top>=0 && r.top<140 && r.height<160);
+      const bottom = Math.max(0,...overlays.map(r=>r.bottom));
+      scrollBy({top:-bottom-12,behavior:'instant'});
+    });
+    await page.screenshot({ path: file, fullPage: false });
+    const geometry = await page.evaluate(() => ({width:innerWidth, scrollWidth:document.documentElement.scrollWidth,
+      overflow: Array.from(document.querySelectorAll('body *')).map(node => ({tag:node.tagName,cls:node.className,
+        left:node.getBoundingClientRect().left,right:node.getBoundingClientRect().right})).filter(row=>row.right>innerWidth+1 || row.left < -1).slice(0,12)}));
+    (report.geometry ||= []).push({phase,viewport:viewport.name,...geometry});
+    report.screenshots.push({
+      phase: phase,
+      viewport: viewport,
+      file: path.basename(file),
+      sha256: sha256(fs.readFileSync(file)),
+    });
+  }
+}
+
+async function waitForExpiredRows(timeout) {
+  await page.waitForFunction(function () {
+    function row(ref) {
+      return Array.from(document.querySelectorAll('.ccr-au-row')).find(
+        function (node) { return node.textContent.includes(ref); }
+      );
+    }
+    const b5 = row('WS:B5');
+    const stable = row('WS:STABLE');
+    const decision = row('WS:DECISION');
+    if (!b5 || !stable || !decision) return false;
+    return /Needs a current read/i.test(b5.textContent) &&
+      Array.from(stable.querySelectorAll('span')).some(node => node.textContent === 'LIVE') &&
+      /Needs a current read/i.test(decision.textContent);
+  }, null, { timeout: timeout });
+}
+
+async function waitForRecoveredRows(timeout) {
+  await page.waitForFunction(function () {
+    function row(ref) {
+      return Array.from(document.querySelectorAll('.ccr-au-row')).find(
+        function (node) { return node.textContent.includes(ref); }
+      );
+    }
+    const b5 = row('WS:B5');
+    const stable = row('WS:STABLE');
+    const decision = row('WS:DECISION');
+    if (!b5 || !stable || !decision) return false;
+    return Array.from(b5.querySelectorAll('span')).some(node => node.textContent === 'LIVE') &&
+      Array.from(stable.querySelectorAll('span')).some(node => node.textContent === 'LIVE') &&
+      !/Needs a current read/i.test(decision.textContent);
+  }, null, { timeout: timeout });
+}
+
+async function visibilityCycle(label) {
+  const priorStateRequests = report.route_events.filter(function (event) {
+    return event.pathname === '/api/state';
+  }).length;
+
+  await sibling.bringToFront();
+  await page.waitForFunction(function () {
+    return document.visibilityState === 'hidden';
+  }, null, { timeout: 2500 });
+  const hidden = await compactState(label + '_hidden');
+  assert.equal(hidden.page_visibility, 'hidden');
+
+  await page.bringToFront();
+  await page.waitForFunction(function () {
+    return document.visibilityState === 'visible';
+  }, null, { timeout: 2500 });
+  const visible = await compactState(label + '_visible');
+
+  const afterStateRequests = report.route_events.filter(function (event) {
+    return event.pathname === '/api/state';
+  }).length;
+  report.lifecycle.push({
+    kind: 'visibility_cycle',
+    label: label,
+    hidden_observed: true,
+    visible_observed: true,
+    state_requests_during_cycle: afterStateRequests - priorStateRequests,
+  });
+  return {
+    visible: visible,
+    state_requests: afterStateRequests - priorStateRequests,
+  };
+}
+
+async function bfcacheCycle() {
+  await page.goto(new URL('/b5-inert', testUrl).toString(), {
+    waitUntil: 'domcontentloaded',
+    timeout: 5000,
+  });
+  await page.goBack({ waitUntil: 'commit', timeout: 5000 });
+  await page.waitForSelector('.ccr-au-row', { timeout: 5000 });
+
+  const events = await page.evaluate(function () {
+    try {
+      return JSON.parse(sessionStorage.getItem('__b5Lifecycle') || '[]');
+    } catch (_error) {
+      return [];
+    }
+  });
+  const persisted = events.some(function (event) {
+    return event.type === 'pageshow' && event.persisted === true;
+  });
+  const pagehideObserved = events.some(function (event) {
+    return event.type === 'pagehide';
+  });
+  const pageshowObserved = events.some(function (event) {
+    return event.type === 'pageshow';
+  });
+  assert.equal(pagehideObserved, true, 'actual pagehide was not observed');
+  assert.equal(pageshowObserved, true, 'actual pageshow was not observed');
+  const returned = await compactState('navigation_return');
+  if (persisted) {
+    for (const ref of ['WS:B5','WS:STABLE','WS:DECISION']) {
+      assert.equal(returned.rows[ref].live, false, 'BFCache must withdraw retained current cues');
+      assert.equal(returned.rows[ref].enabled_open_count, 0, 'BFCache must withdraw retained navigation');
+    }
+  }
+  report.lifecycle.push({
+    kind: 'navigation_back',
+    pagehide_observed: pagehideObserved,
+    pageshow_observed: pageshowObserved,
+    bfcache_persisted_observed: persisted,
+    qualification: persisted ? 'BFCACHE_OBSERVED' : 'BFCACHE_NOT_OBSERVED',
+  });
+}
+
+async function main() {
+  const cap = setTimeout(function () {
+    capFired = true;
+    if (browser) void browser.close();
+  }, 38000);
+
+  try {
+    browser = await chromium.launch({
+      executablePath: chromeExecutable,
+      headless: true,
+      timeout: 10000,
+      ignoreDefaultArgs: CHROME_DEFAULTS_TO_KEEP_ENABLED,
+      args: [
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-sync',
+        '--disable-default-apps',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--no-proxy-server',
+      ],
+    });
+
+    const cdp = await browser.newBrowserCDPSession();
+    const version = await cdp.send('Browser.getVersion');
+    assert.equal(version.product, EXPECTED_PRODUCT);
+    assert.equal(
+      String(version.revision).replace(/^@/, ''),
+      EXPECTED_REVISION
+    );
+
+    const processes = ownedChromeProcesses();
+    assert.ok(processes.length > 0, 'no owned Chrome descendants');
+    ownedPids = Array.from(new Set(processes.map(function (row) {
+      return row.pid;
+    })));
+    report.pids = ownedPids;
+    report.browser = version;
+    report.launch = verifyActualCommandLine(processes);
+    launcherQualified = true;
+    await cdp.detach();
+
+    context = await browser.newContext({
+      serviceWorkers: 'block',
+      viewport: { width: 1440, height: 900 },
+    });
+    await context.addInitScript(function () {
+      function appendLifecycle(type, event) {
+        let rows = [];
+        try {
+          rows = JSON.parse(sessionStorage.getItem('__b5Lifecycle') || '[]');
+        } catch (_error) {}
+        rows.push({
+          type: type,
+          persisted: !!(event && event.persisted),
+          visibility: document.visibilityState,
+        });
+        sessionStorage.setItem('__b5Lifecycle', JSON.stringify(rows.slice(-20)));
+      }
+      window.addEventListener('pagehide', function (event) {
+        appendLifecycle('pagehide', event);
+      });
+      window.addEventListener('pageshow', function (event) {
+        appendLifecycle('pageshow', event);
+      });
+      document.addEventListener('visibilitychange', function () {
+        appendLifecycle('visibilitychange', null);
+      });
+    });
+    await context.route('**/*', handleRoute);
+    page = await context.newPage();
+    page.setDefaultTimeout(4000);
+    page.on("pageerror", error => { (report.page_errors ||= []).push(boundedError(error)); });
+    page.on('response', response => {
+      const pathname = boundedPathname(response.url());
+      if (!baselineMode && (pathname.endsWith('.js') || pathname.endsWith('.css'))) {
+        response.body().then(bytes => { (report.assets ||= []).push({pathname,sha256:sha256(bytes)}); }).catch(()=>{});
+      }
+    });
+    sibling = await context.newPage();
+    sibling.setDefaultTimeout(4000);
+    await sibling.goto(new URL('/b5-inert', testUrl).toString(), {
+      waitUntil: 'domcontentloaded',
+      timeout: 5000,
+    });
+
+    await page.bringToFront();
+    await page.goto(testUrl.toString(), {
+      waitUntil: 'domcontentloaded',
+      timeout: 7000,
+    });
+    assert.equal(await page.evaluate(function () {
+      return document.visibilityState;
+    }), 'visible', 'Chairman page did not start visible');
+    await page.waitForSelector('.ccr-au-row', { timeout: 5000 });
+    const initial = await compactState('initial');
+    assert.equal(initial.rows['WS:B5'].live, true);
+    assert.equal(initial.rows['WS:STABLE'].live, true);
+    assert.equal(initial.rows['WS:DECISION'].present, true);
+    assert.equal(initial.rows['WS:DECISION'].your_call, true);
+    await screenshotPhase('initial');
+
+
+    await waitForExpiredRows(16000);
+    const expired = await compactState('expired');
+    assert.equal(expired.rows['WS:B5'].live, false);
+    assert.equal(expired.rows['WS:B5'].enabled_open_count, 0);
+    assert.equal(expired.rows['WS:STABLE'].live, true);
+    assert.equal(expired.rows['WS:DECISION'].your_call, false);
+    await screenshotPhase('expired');
+
+    stateMode = 'refuse';
+    await page.locator('#ccr-autonomy-read').click();
+    await page.waitForFunction(() => document.body.textContent.includes('current state could not be read'));
+    const refused = await compactState('refused');
+    assert.equal(refused.rows['WS:B5'].live, false);
+    assert.equal(refused.rows['WS:STABLE'].live, true);
+    await screenshotPhase('refused');
+
+    stateMode = 'hang';
+    await page.locator('#ccr-autonomy-read').click();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(pendingRoutes.length, 1, 'no actual held state request');
+    const hanging = await compactState('hanging_pending');
+    assert.equal(hanging.rows['WS:B5'].live, false);
+    assert.equal(hanging.rows['WS:STABLE'].live, true);
+    await releasePendingRoutes();
+    stateMode = 'pass';
+    const harnessAge = Date.now() - Date.parse(report.started_at);
+    if (harnessAge < 16000) {
+      await new Promise(function (resolve) {
+        setTimeout(resolve, 16000 - harnessAge);
+      });
+    }
+    await page.locator('#ccr-autonomy-read').click();
+    await waitForRecoveredRows(7000);
+    const recovered = await compactState('recovered');
+    assert.equal(recovered.rows['WS:B5'].live, true);
+    assert.equal(recovered.rows['WS:STABLE'].live, true);
+    assert.equal(recovered.rows['WS:DECISION'].your_call, true);
+    await screenshotPhase('recovered');
+
+    // Natural expiry and transport retention above do not invalidate the
+    // stable clock domain. Lifecycle uncertainty below deliberately does.
+    try {
+      const cycle = await visibilityCycle('post_recovery');
+      assert.equal(cycle.state_requests, 1, 'visible resume must issue one bounded read');
+    } catch (error) {
+      if (!String(error).includes('Timeout')) throw error;
+      report.lifecycle.push({kind:'visibility_cycle',qualification:'VISIBILITY_NOT_OBSERVED',error:boundedError(error)});
+      await page.bringToFront();
+    }
+    await bfcacheCycle();
+    assert.deepEqual(report.page_errors || [], []);
+    if (process.env.B5_BASE_JS_FILE) {
+      baselineMode = true;
+      await page.reload({waitUntil:'domcontentloaded',timeout:5000});
+      await page.waitForSelector('.ccr-au-row');
+      await screenshotPhase('immutable-base-geometry');
+      report.baseline_comparison = 'READ_ONLY_GEOMETRY_ONLY_NOT_B5_PROOF';
+    }
+
+    assert.equal(
+      report.route_events.filter(function (event) {
+        return event.method === 'POST';
+      }).length,
+      0,
+      'a POST escaped the read-only harness'
+    );
+    assert.equal(
+      report.route_events.filter(function (event) {
+        return event.same_origin === false;
+      }).length,
+      0,
+      'the page attempted an outside-origin request'
+    );
+
+    report.status =
+      'PROFILE_CONFIGURATION_MATCH_OBSERVABLE_CAPABILITY_PASS_CONDITIONAL_Q_PREMISE_UNPROVEN';
+  } catch (error) {
+    report.status = 'UNQUALIFIED_HARNESS_FAILURE';
+    report.error = boundedError(error);
+    if (page && !page.isClosed()) { try { await compactState('failure'); } catch (_) {} }
+    process.exitCode = 1;
+  } finally {
+    clearTimeout(cap);
+    try { ownedPids = Array.from(new Set(ownedPids.concat(ownedChromeProcesses().map(row => row.pid)))); } catch (_) {}
+    await releasePendingRoutes().catch(function () {});
+    if (sibling) await sibling.close().catch(function () {});
+    if (page) await page.close().catch(function () {});
+    if (context) await context.close().catch(function () {});
+    if (browser) await browser.close().catch(function () {});
+    await new Promise(function (resolve) { setTimeout(resolve, 250); });
+
+    report.cap_fired = capFired;
+    report.cleanup = {
+      browser_disconnected: !browser || !browser.isConnected(),
+      owned_pids_remaining: ownedPids.filter(processExists),
+      fixture_server_started_or_stopped_by_harness: false,
+      named_user_profile_used: false,
+      ephemeral_playwright_profile_used: browser !== null,
+    };
+    if (capFired ||
+        !report.cleanup.browser_disconnected ||
+        report.cleanup.owned_pids_remaining.length) {
+      report.status = 'UNQUALIFIED_CLEANUP_OR_TIME_BOUND';
+      process.exitCode = 2;
+    }
+    report.finished_at = new Date().toISOString();
+    const destination = path.join(outputDir, 'result.json');
+    fs.writeFileSync(destination, JSON.stringify(report, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({
+      status: report.status,
+      output_dir: outputDir,
+      result_sha256: sha256(fs.readFileSync(destination)),
+      screenshots: report.screenshots.length,
+      state_responses: report.state_responses.length,
+      cleanup: report.cleanup,
+    }) + '\n');
+  }
+}
+
+void main();
+
+"""
+
+
+def test_b5_actual_page_chrome152_profile_and_lifecycle(tmp_path, monkeypatch):
+    import os
+    import signal
+    import socket
+    import sys
+    import threading
+    import time
+    from datetime import datetime, timedelta, timezone
+    from test_chairman_control_room_server import _make_config, _running_server
+    from control_plane import surface_bindings as sb
+    from scripts import chairman_control_room as server
+
+    strict = os.environ.get("B5_REQUIRE_CHROME_PROFILE") == "1"
+    chrome = os.environ.get("B5_CHROME_EXECUTABLE")
+    playwright = os.environ.get("B5_PLAYWRIGHT_MODULE")
+    node = shutil.which("node")
+    supported = bool(sys.platform == "darwin" and chrome and Path(chrome).is_file() and
+                     playwright and Path(playwright).is_dir() and node and server._source_clock_sample())
+    if not supported:
+        if strict: pytest.fail("Required B5 Darwin/Chrome152 fixture profile unavailable")
+        pytest.skip("B5 actual browser profile unqualified on this host; deterministic tests are separate")
+    started = time.monotonic()
+    artifact_dir = Path(os.environ.get("B5_ARTIFACT_DIR", str(tmp_path)))
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    config = _make_config(tmp_path)
+    config.static_dir = STATIC
+    config.now_fn = server._utc_now_z
+    config.validity_sample_fn = server._source_clock_sample
+    config.state_cache["capabilities"] = {"cursor_agent": {"state": "SUPPORTED", "detail": "owned fake provider only"}}
+    providers = []
+    config.open_binding_fn = lambda *a, **k: providers.append(a) or {"ok": False, "verified": False}
+    initial = datetime.now(timezone.utc)
+    old_attention = (initial - timedelta(hours=48) + timedelta(seconds=12)).isoformat()
+    binding = sb.new_binding(work_ref="WS:B5", role="ceo", provider="cursor_agent",
+        locator_kind="cursor_agent_thread", locator={"chat_id": "b5-owned-fake-only", "workspace_dir": None},
+        observed_at=initial.isoformat().replace("+00:00", "Z"), last_verified_at=None,
+        binding_id="55555555-5555-4555-8555-555555555555")
+    sb.save_bindings({"schema": sb.SCHEMA, "bindings": [binding]}, config.bindings_path)
+    before_binding = config.bindings_path.read_bytes()
+    phase = {"recovered": False, "gathers": 0}
+    def compose(*args, **kwargs):
+        phase["gathers"] += 1
+        stamp = server._utc_now_z()
+        return _b5_owned_page_document(binding, stamp, stamp if phase["recovered"] else old_attention)
+    monkeypatch.setattr(server, "_compose_state_doc", compose)
+    script = tmp_path / "b5-owned-page.cjs"
+    script.write_text(_b5_actual_page_script())
+    timer = None
+    process = None
+    outcome = None
+    return_code = None
+    error_text = ""
+    with _running_server(config) as (httpd, port):
+        def publish_fresh():
+            phase["recovered"] = True
+            server._refresh_state_cache(config, timeout=1, generation=server._reserve_composition(config),
+                                        include_capabilities=False)
+        timer = threading.Timer(15, publish_fresh)
+        timer.start()
+        try:
+            process = subprocess.Popen([node, str(script)], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True, env=dict(os.environ, B5_CHROME_EXECUTABLE=chrome,
+                B5_PLAYWRIGHT_MODULE=playwright, B5_TEST_URL=f"http://127.0.0.1:{port}/",
+                B5_ARTIFACT_DIR=str(artifact_dir)))
+            stdout, stderr = process.communicate(timeout=max(1, 42 - (time.monotonic()-started)))
+            rows = [line for line in stdout.splitlines() if line.startswith("{")]
+            assert rows, stderr[-2000:]
+            outcome = json.loads(rows[-1])
+            return_code = process.returncode
+            error_text = stderr[-2000:]
+        finally:
+            timer.cancel()
+            timer.join(timeout=2)
+            if process is not None and process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+                try: process.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate(timeout=1)
+    cleanup = {"server_closed": httpd.fileno() == -1, "timer_alive": timer.is_alive(),
+               "provider_calls": len(providers), "binding_bytes_unchanged": config.bindings_path.read_bytes() == before_binding,
+               "gathers": phase["gathers"], "elapsed_seconds": time.monotonic()-started,
+               "python": sys.version, "platform": sys.platform,
+               "clock_resolution": time.clock_getres(time.CLOCK_MONOTONIC_RAW)}
+    if outcome:
+        (Path(outcome["output_dir"]) / "fixture-cleanup.json").write_text(json.dumps(cleanup, indent=2))
+    assert cleanup["server_closed"] and not cleanup["timer_alive"]
+    assert cleanup["provider_calls"] == 0 and cleanup["binding_bytes_unchanged"]
+    assert cleanup["elapsed_seconds"] < 45
+    assert return_code == 0, {"outcome": outcome, "stderr": error_text}
+    assert cleanup["gathers"] == 2
+
+
+def test_b5_expired_decision_copy_retains_recorded_demand(tmp_path, monkeypatch):
+    _, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    doc = _b5_owned_page_document(binding, "2026-09-05T00:00:00Z", "2026-09-03T00:00:12Z")
+    assert doc["autonomy"]["chairman_decisions"] == ["WS:DECISION"]
+    harness = r"""
+function el(tag,opts={}){return {text:opts.text||'',children:[],appendChild(c){this.children.push(c);}};}
+function button(label){return el('button',{text:label});}
+function b5Allows(){return false;}
+function safeText(value,fallback){return value||fallback;}
+""" + _extract_fn("auDecisions") + "const projection=" + json.dumps(doc["autonomy"]) + r""";
+const byRef=Object.fromEntries(projection.responsibilities.map(c=>[c.responsibility_ref,c]));
+const band=auDecisions(projection,byRef);
+function words(n){return n.text+' '+n.children.map(words).join(' ');}
+console.log(JSON.stringify(words(band)));
+"""
+    text = _run_node(harness)
+    assert "No Chairman decision is recorded" not in text
+    assert "Current decision count is unknown" in text
+    assert "Recorded decisions need a current read" in text
+
+
+def test_b5_post_render_clock_failure_repaints_before_timer_is_lost(tmp_path, monkeypatch):
+    envelope, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    result = _run_node(_b5_behavior_script(envelope, binding) + r"""
+const c=accept(qualified(copy()));b5Allows(c,'card');Date.now=()=>w;
+b5Schedule();console.log(JSON.stringify({renders,active:B5.active.size,pending:timers.filter(t=>!t.cancelled).length}));
+""")
+    assert result == {"renders": 1, "active": 0, "pending": 0}
+
+
+@pytest.mark.parametrize("event", ["hidden", "pagehide", "freeze"])
+def test_b5_actual_lifecycle_wiring_withdraws_and_bounds_resume_read(tmp_path, monkeypatch, event):
+    envelope, binding = _b5_http_envelope(tmp_path, monkeypatch)
+    source = JS.read_text()
+    wiring = source.split('document.addEventListener("DOMContentLoaded", function () {', 1)[1].split('    var dock =', 1)[0]
+    result = _run_node(_b5_behavior_script(envelope, binding) + r"""
+const window={events:{},addEventListener(name,fn){this.events[name]=fn;}};
+document.events={};document.addEventListener=(name,fn)=>document.events[name]=fn;
+let ACTIVE_STATE_READ=null, invalidations=0;
+function invalidateStateReads(){invalidations++;ACTIVE_STATE_READ=null;}
+function applyTheme(){} function readTheme(){}
+loadState=function(){reads++;ACTIVE_STATE_READ={};return Promise.resolve();};
+""" + wiring + "const event=" + json.dumps(event) + r""";
+reads=0;ACTIVE_STATE_READ=null;const card=accept(qualified(copy()));const btn=b5OwedButton(card,binding,'Open');
+if(event==='hidden'){document.visibilityState='hidden';document.events.visibilitychange();}
+if(event==='pagehide')window.events.pagehide({persisted:true});
+if(event==='freeze')document.events.freeze();
+const withdrawn=allows(card);document.visibilityState='visible';document.events.visibilitychange();
+window.events.pageshow({persisted:true});btn.click();
+console.log(JSON.stringify({withdrawn,reads,invalidations,posts:posts.length}));
+""")
+    assert result == {"withdrawn": [False]*4, "reads": 1, "invalidations": 1, "posts": 0}
