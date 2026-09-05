@@ -1154,6 +1154,29 @@ def _validate_model_usage(
             )
 
 
+def _validate_terminal_permission_denials(value: Any) -> bool:
+    """Validate the one provider-free denial shape reviewed for PF1-F0."""
+
+    if not isinstance(value, list) or len(value) > 1:
+        raise _StreamViolation(
+            "RESULT_INVALID",
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+            "terminal permission evidence was invalid",
+        )
+    for denial in value:
+        if (
+            not isinstance(denial, dict)
+            or set(denial) != {"tool_name"}
+            or denial.get("tool_name") != "Read"
+        ):
+            raise _StreamViolation(
+                "RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "terminal permission evidence was invalid",
+            )
+    return bool(value)
+
+
 class _StreamParser:
     def __init__(self, command: ClaudeCliCommand) -> None:
         self.command = command
@@ -1957,6 +1980,26 @@ class _StreamParser:
             code="RESULT_INVALID",
             message="terminal result omitted required current-contract fields",
         )
+        subtype = value.get("subtype")
+        is_error = value.get("is_error")
+        if subtype not in {"success", "error_during_execution"}:
+            raise _StreamViolation(
+                "RESULT_VARIANT_UNSUPPORTED",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "terminal result variant was not reviewed",
+            )
+        if type(is_error) is not bool:
+            raise _StreamViolation(
+                "RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "terminal error marker was invalid",
+            )
+        if (subtype == "success") != (is_error is False):
+            raise _StreamViolation(
+                "RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "terminal variant contradicted its error marker",
+            )
         _expect_session(value, self.command.session_id)
         _expect_uuid(
             value.get("uuid"),
@@ -2012,27 +2055,6 @@ class _StreamParser:
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "terminal origin was not accepted for a closed prompt",
             )
-        subtype = value.get("subtype")
-        is_error = value.get("is_error")
-        denials = value.get("permission_denials", [])
-        if not isinstance(denials, list):
-            raise _StreamViolation(
-                "PERMISSION_DENIED",
-                ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED,
-                "terminal permission evidence was invalid",
-            )
-        if denials:
-            raise _StreamViolation(
-                "PERMISSION_DENIED",
-                ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED,
-                "terminal result reported a permission denial",
-            )
-        if subtype != "success" or is_error is not False:
-            raise _StreamViolation(
-                "PROVIDER_FAILURE",
-                ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED,
-                "terminal provider failure was observed",
-            )
         if value.get("stop_reason") != "end_turn":
             raise _StreamViolation(
                 "RESULT_INVALID",
@@ -2055,7 +2077,11 @@ class _StreamParser:
                 "terminal turn count was invalid",
             )
         result = value.get("result")
-        if not isinstance(result, str) or _sha256_bytes(result.encode("utf-8")) != self.command.expected_result_sha256:
+        if not isinstance(result, str) or (
+            subtype == "success"
+            and _sha256_bytes(result.encode("utf-8"))
+            != self.command.expected_result_sha256
+        ):
             raise _StreamViolation(
                 "STRUCTURED_RESULT_MISMATCH",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
@@ -2069,16 +2095,16 @@ class _StreamParser:
                 "terminal cost estimate was invalid",
             )
         (
-            self.input_tokens,
-            self.output_tokens,
+            input_tokens,
+            output_tokens,
             cache_creation_input_tokens,
             cache_read_input_tokens,
         ) = _consume_usage_payload(value.get("usage"))
         _validate_model_usage(
             value.get("modelUsage"),
             command=self.command,
-            input_tokens=self.input_tokens,
-            output_tokens=self.output_tokens,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             cache_creation_input_tokens=cache_creation_input_tokens,
             cache_read_input_tokens=cache_read_input_tokens,
             total_cost_usd=float(cost),
@@ -2101,6 +2127,12 @@ class _StreamParser:
             )
         structured_output = value.get("structured_output")
         if structured_output is not None:
+            if subtype != "success":
+                raise _StreamViolation(
+                    "RESULT_INVALID",
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                    "error terminal carried unreviewed structured output",
+                )
             try:
                 expected_structured = json.loads(result)
             except json.JSONDecodeError:  # pragma: no cover - result is compiler-derived JSON
@@ -2111,6 +2143,29 @@ class _StreamParser:
                     ClaudeCliObservation.OUTCOME_UNRECONCILED,
                     "structured output contradicted the terminal result",
                 )
+        has_permission_denial = _validate_terminal_permission_denials(
+            value.get("permission_denials")
+        )
+        if subtype == "error_during_execution":
+            if has_permission_denial:
+                raise _StreamViolation(
+                    "PERMISSION_DENIED",
+                    ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED,
+                    "terminal result reported a permission denial",
+                )
+            raise _StreamViolation(
+                "PROVIDER_FAILURE",
+                ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED,
+                "terminal provider failure was observed",
+            )
+        if has_permission_denial:
+            raise _StreamViolation(
+                "RESULT_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "successful terminal result contradicted permission evidence",
+            )
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
         self.cost_microusd = int(round(float(cost) * 1_000_000))
         self.result_sha256 = self.command.expected_result_sha256
         self.terminal = True

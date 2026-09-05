@@ -744,6 +744,55 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
     assert "evidence.txt" not in serialized
 
 
+def test_phase4_missing_result_error_is_unreconciled_without_a_success_stream_prefix(
+    tmp_path: Path,
+) -> None:
+    policy, _, _, _ = _policy(tmp_path)
+    command = compile_claude_cli_command(policy)
+    parser = protocol._StreamParser(command)
+    parser.phase = 4
+    usage = {
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "input_tokens": 11,
+        "output_tokens": 7,
+    }
+    terminal = {
+        "type": "result",
+        "subtype": "error_during_execution",
+        "is_error": True,
+        "duration_ms": 25,
+        "duration_api_ms": 10,
+        "num_turns": 1,
+        "stop_reason": "end_turn",
+        "session_id": SESSION_ID,
+        "total_cost_usd": 0.001,
+        "usage": usage,
+        "modelUsage": {
+            MODEL: {
+                "cacheCreationInputTokens": 0,
+                "cacheReadInputTokens": 0,
+                "contextWindow": 200_000,
+                "costUSD": 0.001,
+                "inputTokens": 11,
+                "maxOutputTokens": 32_000,
+                "outputTokens": 7,
+                "webSearchRequests": 0,
+            }
+        },
+        "permission_denials": [],
+        "uuid": "55555555-5555-4555-8555-555555555555",
+    }
+
+    with pytest.raises(protocol._StreamViolation) as captured:
+        parser.consume(json.dumps(terminal, separators=(",", ":")).encode("utf-8"))
+
+    assert captured.value.code == "RESULT_INVALID"
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert parser.phase == 4
+    assert parser.terminal is False
+
+
 @pytest.mark.parametrize(
     "scenario,code,observation",
     [
@@ -800,6 +849,22 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
         ("result_session_drift", "SESSION_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_failure", "PROVIDER_FAILURE", ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED),
         ("result_permission_denial", "PERMISSION_DENIED", ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED),
+        ("result_error_missing_after_init", "EVENT_ORDER_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_error_missing_after_tool", "EVENT_ORDER_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_unknown_subtype", "RESULT_VARIANT_UNSUPPORTED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_is_error_int_zero", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_is_error_string_false", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_denials_not_list", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_denial_member_invalid", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_failure_negative_duration", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_failure_timing_invalid", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_failure_cost_invalid", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_failure_usage_invalid", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_failure_model_usage_invalid", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_success_error_true", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_failure_error_false", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_failure_session_drift", "SESSION_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_failure_uuid_invalid", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_mismatch", "STRUCTURED_RESULT_MISMATCH", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_invalid_cost", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_stop_reason_missing", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),

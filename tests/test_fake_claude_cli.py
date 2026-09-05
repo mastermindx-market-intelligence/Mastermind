@@ -229,6 +229,133 @@ def test_exact_compiled_command_emits_canonical_stream_and_counters(tmp_path: Pa
 
 
 @pytest.mark.parametrize(
+    "scenario,field_path,expected",
+    [
+        ("result_unknown_subtype", ("subtype",), "error_unreviewed"),
+        ("result_is_error_int_zero", ("is_error",), 0),
+        ("result_is_error_string_false", ("is_error",), "false"),
+        ("result_denials_not_list", ("permission_denials",), "invalid"),
+        ("result_denial_member_invalid", ("permission_denials",), [7]),
+        ("result_failure_negative_duration", ("duration_ms",), -1),
+        ("result_failure_timing_invalid", ("ttft_ms",), -1),
+        ("result_failure_cost_invalid", ("total_cost_usd",), -1),
+        ("result_failure_usage_invalid", ("usage",), "invalid"),
+        (
+            "result_failure_model_usage_invalid",
+            ("modelUsage", "claude-opus-4-6", "provider"),
+            7,
+        ),
+        ("result_success_error_true", ("is_error",), True),
+        ("result_failure_error_false", ("is_error",), False),
+        (
+            "result_failure_session_drift",
+            ("session_id",),
+            "00000000-0000-4000-8000-000000000000",
+        ),
+        ("result_failure_uuid_invalid", ("uuid",), "not-a-uuid"),
+    ],
+)
+def test_terminal_adversary_scenarios_emit_exact_single_attempt_mutations(
+    tmp_path: Path,
+    scenario: str,
+    field_path: tuple[str, ...],
+    expected: object,
+) -> None:
+    command = _command(tmp_path)
+    completed = _run(
+        command.argv,
+        cwd=Path(command.working_directory),
+        environment=_environment(
+            command,
+            tmp_path,
+            MMX_FAKE_CLAUDE_SCENARIO=scenario,
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert completed.stderr == b""
+    events = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert [(event["type"], event.get("subtype")) for event in events[:4]] == [
+        ("system", "init"),
+        ("assistant", None),
+        ("user", None),
+        ("assistant", None),
+    ]
+    terminal = events[-1]
+    assert terminal["type"] == "result"
+    actual: object = terminal
+    for field in field_path:
+        assert isinstance(actual, dict)
+        actual = actual[field]
+    assert type(actual) is type(expected)
+    assert actual == expected
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["starts"] == 1
+    assert state["reads"] == 1
+    assert state["submissions"] == 1
+    assert state["network_attempts"] == 0
+    assert state["writes"] == 0
+    assert state["shells"] == 0
+    assert state["mcp_calls"] == 0
+    assert state["subagents"] == 0
+
+
+@pytest.mark.parametrize(
+    "scenario,expected_types",
+    [
+        (
+            "result_error_missing_after_init",
+            (("system", "init"), ("result", "error_during_execution")),
+        ),
+        (
+            "result_error_missing_after_tool",
+            (
+                ("system", "init"),
+                ("assistant", None),
+                ("user", None),
+                ("result", "error_during_execution"),
+            ),
+        ),
+    ],
+)
+def test_missing_result_error_scenarios_emit_no_success_assistant(
+    tmp_path: Path,
+    scenario: str,
+    expected_types: tuple[tuple[str, str | None], ...],
+) -> None:
+    command = _command(tmp_path)
+    completed = _run(
+        command.argv,
+        cwd=Path(command.working_directory),
+        environment=_environment(
+            command,
+            tmp_path,
+            MMX_FAKE_CLAUDE_SCENARIO=scenario,
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert completed.stderr == b""
+    events = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert tuple((event["type"], event.get("subtype")) for event in events) == expected_types
+    assert events[-1]["is_error"] is True
+    assert "result" not in events[-1]
+    assert all(
+        block.get("type") != "text"
+        for event in events
+        if event.get("type") == "assistant"
+        for block in event["message"]["content"]
+    )
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["starts"] == state["reads"] == state["submissions"] == 1
+    assert state["network_attempts"] == 0
+    assert state["writes"] == 0
+    assert state["shells"] == 0
+    assert state["mcp_calls"] == 0
+    assert state["subagents"] == 0
+
+
+@pytest.mark.parametrize(
     "mutation",
     [
         "remove_restricted",

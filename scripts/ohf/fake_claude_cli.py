@@ -1050,6 +1050,120 @@ def _main() -> int:
                 "permission_denials": [{"tool_name": "Read"}],
             }
         )
+    elif scenario in {
+        "result_error_missing_after_init",
+        "result_error_missing_after_tool",
+    }:
+        terminal = json.loads(json.dumps(events[-1]))
+        terminal.update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+            }
+        )
+        del terminal["result"]
+        prefix = events[:1] if scenario.endswith("after_init") else events[:3]
+        events = [*prefix, terminal]
+    elif scenario == "result_unknown_subtype":
+        events[-1].update(
+            {
+                "subtype": "error_unreviewed",
+                "is_error": True,
+            }
+        )
+    elif scenario == "result_is_error_int_zero":
+        events[-1]["is_error"] = 0
+    elif scenario == "result_is_error_string_false":
+        events[-1]["is_error"] = "false"
+    elif scenario == "result_denials_not_list":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "permission_denials": "invalid",
+            }
+        )
+    elif scenario == "result_denial_member_invalid":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "permission_denials": [7],
+            }
+        )
+    elif scenario == "result_failure_negative_duration":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "result": "bounded provider failure",
+                "duration_ms": -1,
+            }
+        )
+    elif scenario == "result_failure_timing_invalid":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "result": "bounded provider failure",
+                "ttft_ms": -1,
+            }
+        )
+    elif scenario == "result_failure_cost_invalid":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "result": "bounded provider failure",
+                "total_cost_usd": -1,
+            }
+        )
+    elif scenario == "result_failure_usage_invalid":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "result": "bounded provider failure",
+                "usage": "invalid",
+            }
+        )
+    elif scenario == "result_failure_model_usage_invalid":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "result": "bounded provider failure",
+            }
+        )
+        events[-1]["modelUsage"][model]["provider"] = 7
+    elif scenario == "result_success_error_true":
+        events[-1]["is_error"] = True
+    elif scenario == "result_failure_error_false":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": False,
+                "result": "bounded provider failure",
+            }
+        )
+    elif scenario == "result_failure_session_drift":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "result": "bounded provider failure",
+                "session_id": "00000000-0000-4000-8000-000000000000",
+            }
+        )
+    elif scenario == "result_failure_uuid_invalid":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "result": "bounded provider failure",
+                "uuid": "not-a-uuid",
+            }
+        )
     elif scenario == "result_mismatch":
         events[3]["message"]["content"][0]["text"] = '{"decision":"BUY"}'
         events[-1]["result"] = '{"decision":"BUY"}'
