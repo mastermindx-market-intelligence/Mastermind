@@ -706,11 +706,11 @@ def test_x1_autonomy_writes_only_through_the_audited_binding_open_never_ad_hoc()
     assert 'postJSON("/api/open"' in open_fn
 
 
-def test_x1_autonomy_absent_projection_is_calm_and_truthful_not_an_error() -> None:
+def test_x1_autonomy_absent_projection_is_source_qualified_not_an_error() -> None:
     block = _autonomy_js()
     assert "function auNotWired(mount)" in block
     assert "Not wired yet" in block
-    assert "Nothing is hidden and nothing has failed" in block
+    assert "No autonomy projection was returned. Its availability and current responsibility state are unknown." in block
     assert "ccr-au-quiet" in block
     assert 'if (!STATE.autonomy) {' in block
     # The not-yet-wired branch must not borrow the degraded-source alarm.
@@ -820,7 +820,7 @@ def test_x1_autonomy_chairman_decision_band_names_the_reason() -> None:
     band = block[block.index("function auDecisions(projection, byRef)") : block.index("function auGapFold")]
     assert "projection.chairman_decisions" in band
     assert "card.chairman_decision_reason" in band
-    assert "Nothing here needs your decision." in band
+    assert "No Chairman decision is recorded in this projection. Check source-read issues before treating it as current." in band
     assert "This reference is not in the loaded responsibility list." in band
 
 

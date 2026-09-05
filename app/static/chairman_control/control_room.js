@@ -1716,7 +1716,7 @@
     band.appendChild(head);
 
     if (!refs.length) {
-      band.appendChild(el("p", { text: "Nothing here needs your decision. Every recorded turn belongs to an actor that can proceed on its own.", className: "ccr-empty-line" }));
+      band.appendChild(el("p", { text: "No Chairman decision is recorded in this projection. Check source-read issues before treating it as current.", className: "ccr-empty-line" }));
       return band;
     }
     var list = el("ul", { className: "ccr-au-decision-list" });
@@ -2011,7 +2011,7 @@
     var panel = el("section", { className: "ccr-au-quiet" });
     panel.appendChild(el("p", { text: "Not wired yet", className: "ccr-au-quiet-title" }));
     panel.appendChild(el("p", {
-      text: "The Control Room is not serving an autonomy projection on this state document. Nothing is hidden and nothing has failed — this surface stays blank until the server publishes it.",
+      text: "No autonomy projection was returned. Its availability and current responsibility state are unknown.",
       className: "ccr-au-quiet-text",
     }));
     mount.appendChild(panel);
@@ -2040,7 +2040,7 @@
     var list = el("div", { className: "ccr-au-list" });
     if (!cards.length) {
       list.appendChild(el("p", {
-        text: "No responsibility is being carried right now. The projection answered and returned an empty list.",
+        text: "No responsibilities were returned by this projection. Check source-read issues below.",
         className: "ccr-au-list-empty",
       }));
     } else {
