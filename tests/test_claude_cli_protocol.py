@@ -875,7 +875,6 @@ def test_phase4_missing_result_error_is_unreconciled_without_a_success_stream_pr
         ("result_turn_count_float", "TURN_COUNT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("nonzero_after_success", "PROCESS_EXIT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("secret_output", "SENSITIVE_OUTPUT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
-        ("private_path_output", "PRIVATE_LOCATOR_OUTPUT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
     ],
 )
 def test_hostile_streams_fail_closed_and_leave_no_workspace_effect(
@@ -919,6 +918,229 @@ def test_total_stdout_cap_terminates_and_reaps_process_group(tmp_path: Path) -> 
     assert captured.value.code == "STDOUT_BYTE_LIMIT"
     assert captured.value.cleanup is not None
     assert captured.value.cleanup.process_group_empty is True
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_private_locator_refusal_remains_distinct_from_semantic_stream_drift(
+    tmp_path: Path,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, "private_path_output"),
+        )
+
+    assert captured.value.code == "PRIVATE_LOCATOR_OUTPUT"
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert captured.value.cleanup is not None
+    assert str(tmp_path) not in "".join(traceback.format_exception(captured.value))
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+@pytest.mark.parametrize(
+    "scenario,code",
+    [
+        ("result_failure_duplicate_same_emission", "TERMINAL_RESULT_DUPLICATE"),
+        ("result_failure_retry_same_emission", "POST_TERMINAL_EVENT"),
+        ("result_failure_duplicate_later", "TERMINAL_RESULT_DUPLICATE"),
+        ("result_failure_retry_later", "POST_TERMINAL_EVENT"),
+        ("result_failure_post_event", "POST_TERMINAL_EVENT"),
+        ("result_failure_stderr", "STDERR_NOT_EMPTY"),
+        ("result_failure_unterminated", "STREAM_LINE_UNTERMINATED"),
+    ],
+)
+def test_error_terminal_never_hides_later_stream_evidence(
+    tmp_path: Path,
+    scenario: str,
+    code: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, scenario),
+        )
+
+    error = captured.value
+    assert error.code == code
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.process_group_empty is True
+    assert error.cleanup.leader_reaped is True
+    assert error.cleanup.marked_descendants_empty is True
+    assert error.cleanup.reader_closed is True
+    assert error.cleanup.scratch_empty is True
+    assert error.cleanup.residue_rows == ()
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_error_terminal_exit_mismatch_remains_unreconciled(tmp_path: Path) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, "result_failure_nonzero"),
+        )
+
+    error = captured.value
+    assert error.code == "PROCESS_EXIT_INVALID"
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.process_group_empty is True
+    assert error.cleanup.leader_reaped is True
+    assert error.cleanup.residue_rows == ()
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_error_terminal_hang_times_out_instead_of_becoming_a_known_failure(
+    tmp_path: Path,
+) -> None:
+    policy, workspace, head, status = _policy(
+        tmp_path,
+        idle_timeout_seconds=0.3,
+        absolute_timeout_seconds=1.0,
+    )
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, "result_failure_hang"),
+        )
+
+    error = captured.value
+    assert error.code == "IDLE_TIMEOUT"
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.process_group_empty is True
+    assert error.cleanup.leader_reaped is True
+    assert error.cleanup.term_sent or error.cleanup.kill_sent
+    assert error.cleanup.residue_rows == ()
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_error_terminal_cancellation_wins_after_the_terminal_was_emitted(
+    tmp_path: Path,
+) -> None:
+    policy, workspace, head, status = _policy(
+        tmp_path,
+        idle_timeout_seconds=1.0,
+        absolute_timeout_seconds=2.0,
+    )
+    state = tmp_path / "fake-state.json"
+    cancelled = threading.Event()
+    stop_canceller = threading.Event()
+
+    def cancel_after_post_terminal_heartbeat() -> None:
+        baseline_mtime_ns: int | None = None
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline and not stop_canceller.is_set():
+            try:
+                payload = json.loads(state.read_text(encoding="utf-8"))
+                current_mtime_ns = state.stat().st_mtime_ns
+            except (FileNotFoundError, json.JSONDecodeError, OSError):
+                time.sleep(0.01)
+                continue
+            if payload.get("submissions") == 1:
+                if baseline_mtime_ns is None:
+                    baseline_mtime_ns = current_mtime_ns
+                elif current_mtime_ns != baseline_mtime_ns:
+                    cancelled.set()
+                    return
+            time.sleep(0.01)
+
+    canceller = threading.Thread(target=cancel_after_post_terminal_heartbeat, daemon=True)
+    canceller.start()
+    try:
+        with pytest.raises(ClaudeCliProtocolError) as captured:
+            ClaudeCliRunner().run(
+                compile_claude_cli_command(policy),
+                cancel_event=cancelled,
+                fake_controls=_fake_controls(tmp_path, "result_failure_hang"),
+            )
+    finally:
+        stop_canceller.set()
+        canceller.join(timeout=2)
+
+    error = captured.value
+    assert cancelled.is_set(), "fake never exposed a post-terminal state heartbeat"
+    assert error.code == "CANCELLED_AFTER_START"
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.process_group_empty is True
+    assert error.cleanup.leader_reaped is True
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+@pytest.mark.parametrize(
+    "scenario,state_key",
+    [
+        ("result_failure_child_after_result", "children"),
+        ("result_failure_escaped_child_after_result", "escaped_children"),
+    ],
+)
+def test_error_terminal_marked_descendant_forces_termination_and_unreconciled_outcome(
+    tmp_path: Path,
+    scenario: str,
+    state_key: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    state = tmp_path / "fake-state.json"
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, scenario),
+        )
+
+    error = captured.value
+    assert error.code == "PROCESS_RESIDUE_OBSERVED"
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.process_group_empty is True
+    assert error.cleanup.marked_descendants_empty is True
+    assert error.cleanup.leader_reaped is True
+    assert error.cleanup.term_sent or error.cleanup.kill_sent
+    payload = json.loads(state.read_text(encoding="utf-8"))
+    for record in payload[state_key]:
+        child_pid = record if isinstance(record, int) else record["pid"]
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+@pytest.mark.parametrize(
+    "scenario,residue_row,scratch_empty,marked_descendants_empty",
+    [
+        ("result_failure_scratch_residue", "SCRATCH_RESIDUE", False, True),
+        (
+            "result_failure_cleanup_uncertain",
+            "MARKED_DESCENDANTS_UNPROVEN",
+            True,
+            False,
+        ),
+    ],
+)
+def test_error_terminal_cleanup_uncertainty_overrides_known_failure_classification(
+    tmp_path: Path,
+    scenario: str,
+    residue_row: str,
+    scratch_empty: bool,
+    marked_descendants_empty: bool,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, scenario),
+        )
+
+    error = captured.value
+    assert error.code == "PROCESS_RESIDUE_UNPROVEN"
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.scratch_empty is scratch_empty
+    assert error.cleanup.marked_descendants_empty is marked_descendants_empty
+    assert residue_row in error.cleanup.residue_rows
+    assert str(tmp_path) not in json.dumps(error.cleanup.to_dict(), sort_keys=True)
     _assert_workspace_unchanged(workspace, head, status)
 
 

@@ -1190,6 +1190,7 @@ class _StreamParser:
         self.input_tokens = 0
         self.output_tokens = 0
         self.cost_microusd = 0
+        self._provisional_failure: tuple[str, ClaudeCliObservation, str] | None = None
         self.events: list[ClaudeCliEvent] = []
 
     def consume(self, raw_line: bytes) -> None:
@@ -2146,19 +2147,7 @@ class _StreamParser:
         has_permission_denial = _validate_terminal_permission_denials(
             value.get("permission_denials")
         )
-        if subtype == "error_during_execution":
-            if has_permission_denial:
-                raise _StreamViolation(
-                    "PERMISSION_DENIED",
-                    ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED,
-                    "terminal result reported a permission denial",
-                )
-            raise _StreamViolation(
-                "PROVIDER_FAILURE",
-                ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED,
-                "terminal provider failure was observed",
-            )
-        if has_permission_denial:
+        if subtype == "success" and has_permission_denial:
             raise _StreamViolation(
                 "RESULT_INVALID",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
@@ -2167,7 +2156,17 @@ class _StreamParser:
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.cost_microusd = int(round(float(cost) * 1_000_000))
-        self.result_sha256 = self.command.expected_result_sha256
+        self.result_sha256 = _sha256_bytes(result.encode("utf-8"))
+        if subtype == "error_during_execution":
+            # Classification stays provisional until the runner proves that
+            # no later stream, exit, cancellation, or cleanup evidence exists.
+            self._provisional_failure = (
+                "PERMISSION_DENIED" if has_permission_denial else "PROVIDER_FAILURE",
+                ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED,
+                "terminal result reported a permission denial"
+                if has_permission_denial
+                else "terminal provider failure was observed",
+            )
         self.terminal = True
         self.phase = 5
 
@@ -3298,7 +3297,13 @@ class ClaudeCliRunner:
                 "Claude CLI exit status was unavailable",
                 cleanup=cleanup,
             ) from None
-
+        if parser._provisional_failure is not None:
+            raise ClaudeCliProtocolError(
+                parser._provisional_failure[0],
+                parser._provisional_failure[1],
+                parser._provisional_failure[2],
+                cleanup=cleanup,
+            ) from None
         receipt_body = {
             "observation": ClaudeCliObservation.TERMINAL_RESULT_OBSERVED.value,
             "session_id": command.session_id,

@@ -951,7 +951,7 @@ def _main() -> int:
     elif scenario == "init_optional_type_invalid":
         events[0]["fast_mode_state"] = {"state": "on"}
     elif scenario == "init_cwd_drift":
-        events[0]["cwd"] = str(workspace.parent)
+        events[0]["cwd"] = "cwd-mismatch"
     elif scenario == "init_version_drift":
         events[0]["claude_code_version"] = "2.1.258"
     elif scenario == "assistant_parent_tool":
@@ -1034,7 +1034,22 @@ def _main() -> int:
         events.append({"type": "system", "subtype": "usage", "session_id": session_id, "usage": {"input_tokens": 1, "output_tokens": 1}})
     elif scenario == "result_session_drift":
         events[-1]["session_id"] = "00000000-0000-4000-8000-000000000000"
-    elif scenario == "result_failure":
+    elif scenario in {
+        "result_failure",
+        "result_failure_cleanup_uncertain",
+        "result_failure_child_after_result",
+        "result_failure_duplicate_later",
+        "result_failure_duplicate_same_emission",
+        "result_failure_escaped_child_after_result",
+        "result_failure_hang",
+        "result_failure_nonzero",
+        "result_failure_post_event",
+        "result_failure_retry_later",
+        "result_failure_retry_same_emission",
+        "result_failure_scratch_residue",
+        "result_failure_stderr",
+        "result_failure_unterminated",
+    }:
         events[-1].update(
             {
                 "subtype": "error_during_execution",
@@ -1197,7 +1212,11 @@ def _main() -> int:
     }:
         _reject("scenario", 75)
 
-    if scenario == "child_after_result":
+    if scenario == "result_failure_scratch_residue":
+        scratch_residue = Path(os.environ["TMPDIR"]) / "fake-residue"
+        descriptor = os.open(scratch_residue, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(descriptor)
+    if scenario in {"child_after_result", "result_failure_child_after_result"}:
         signal.signal(signal.SIGCHLD, signal.SIG_IGN)
         child = subprocess.Popen(
             [
@@ -1212,7 +1231,10 @@ def _main() -> int:
         )
         state["children"] = [child.pid]
         _write_state(state_path, state, state_descriptor)
-    if scenario == "escaped_child_after_result":
+    if scenario in {
+        "escaped_child_after_result",
+        "result_failure_escaped_child_after_result",
+    }:
         spawned_at_ns = time.monotonic_ns()
         child = subprocess.Popen(
             [
@@ -1253,9 +1275,69 @@ def _main() -> int:
         else:
             state["escaped_children"] = [child.pid]
         _write_state(state_path, state, state_descriptor)
-    for event in events:
-        _emit(event)
-    return 7 if scenario == "nonzero_after_success" else 0
+
+    trailing_event: dict[str, Any] | None = None
+    if scenario in {
+        "result_failure_duplicate_same_emission",
+        "result_failure_duplicate_later",
+    }:
+        trailing_event = json.loads(json.dumps(events[-1]))
+    elif scenario in {
+        "result_failure_retry_same_emission",
+        "result_failure_retry_later",
+    }:
+        trailing_event = {
+            "type": "system",
+            "subtype": "api_retry",
+            "attempt": 1,
+            "max_retries": 1,
+            "session_id": session_id,
+        }
+    elif scenario == "result_failure_post_event":
+        trailing_event = {
+            "type": "system",
+            "subtype": "usage",
+            "session_id": session_id,
+            "usage": {
+                "input_tokens": 11,
+                "output_tokens": 7,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            },
+        }
+
+    if scenario in {
+        "result_failure_duplicate_same_emission",
+        "result_failure_retry_same_emission",
+    }:
+        assert trailing_event is not None
+        sys.stdout.buffer.write(
+            b"".join(_event(event) for event in (*events, trailing_event))
+        )
+        sys.stdout.buffer.flush()
+    else:
+        for event in events:
+            _emit(event)
+        if trailing_event is not None:
+            time.sleep(0.1)
+            _emit(trailing_event)
+
+    if scenario == "result_failure_stderr":
+        time.sleep(0.1)
+        sys.stderr.write("bounded post-terminal diagnostic\n")
+        sys.stderr.flush()
+    elif scenario == "result_failure_unterminated":
+        sys.stdout.buffer.write(b"unterminated-post-terminal-fragment")
+        sys.stdout.buffer.flush()
+    elif scenario == "result_failure_cleanup_uncertain":
+        state["unexpected"] = True
+        _write_state(state_path, state, state_descriptor)
+    elif scenario == "result_failure_hang":
+        while True:
+            os.utime(state_path, follow_symlinks=False)
+            time.sleep(0.05)
+
+    return 7 if scenario in {"nonzero_after_success", "result_failure_nonzero"} else 0
 
 
 if __name__ == "__main__":

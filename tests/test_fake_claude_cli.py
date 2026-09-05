@@ -6,6 +6,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import select
 import signal
 import subprocess
 import time
@@ -298,6 +299,278 @@ def test_terminal_adversary_scenarios_emit_exact_single_attempt_mutations(
     assert state["shells"] == 0
     assert state["mcp_calls"] == 0
     assert state["subagents"] == 0
+
+
+def test_cwd_drift_scenario_uses_a_location_independent_nonprivate_token(
+    tmp_path: Path,
+) -> None:
+    command = _command(tmp_path)
+    completed = _run(
+        command.argv,
+        cwd=Path(command.working_directory),
+        environment=_environment(
+            command,
+            tmp_path,
+            MMX_FAKE_CLAUDE_SCENARIO="init_cwd_drift",
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert completed.stderr == b""
+    init = json.loads(completed.stdout.splitlines()[0])
+    assert init["cwd"] == "cwd-mismatch"
+    assert "/Users/" not in init["cwd"]
+
+
+@pytest.mark.parametrize(
+    "scenario,trailing_identity",
+    [
+        (
+            "result_failure_duplicate_same_emission",
+            ("result", "error_during_execution"),
+        ),
+        (
+            "result_failure_retry_same_emission",
+            ("system", "api_retry"),
+        ),
+        (
+            "result_failure_duplicate_later",
+            ("result", "error_during_execution"),
+        ),
+        (
+            "result_failure_retry_later",
+            ("system", "api_retry"),
+        ),
+        (
+            "result_failure_post_event",
+            ("system", "usage"),
+        ),
+    ],
+)
+def test_error_terminal_followup_scenarios_emit_the_exact_adversarial_order(
+    tmp_path: Path,
+    scenario: str,
+    trailing_identity: tuple[str, str],
+) -> None:
+    command = _command(tmp_path)
+    completed = _run(
+        command.argv,
+        cwd=Path(command.working_directory),
+        environment=_environment(
+            command,
+            tmp_path,
+            MMX_FAKE_CLAUDE_SCENARIO=scenario,
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert completed.stderr == b""
+    events = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert len(events) == 6
+    assert (events[-2]["type"], events[-2].get("subtype")) == (
+        "result",
+        "error_during_execution",
+    )
+    assert events[-2]["is_error"] is True
+    assert (events[-1]["type"], events[-1].get("subtype")) == trailing_identity
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["starts"] == state["reads"] == state["submissions"] == 1
+    assert state["network_attempts"] == state["writes"] == state["shells"] == 0
+    assert state["mcp_calls"] == state["subagents"] == 0
+
+
+def test_error_terminal_stderr_scenario_writes_only_after_the_terminal_stream(
+    tmp_path: Path,
+) -> None:
+    command = _command(tmp_path)
+    completed = _run(
+        command.argv,
+        cwd=Path(command.working_directory),
+        environment=_environment(
+            command,
+            tmp_path,
+            MMX_FAKE_CLAUDE_SCENARIO="result_failure_stderr",
+        ),
+    )
+
+    assert completed.returncode == 0
+    assert completed.stderr == b"bounded post-terminal diagnostic\n"
+    events = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert len(events) == 5
+    assert events[-1]["subtype"] == "error_during_execution"
+
+
+def test_error_terminal_unterminated_scenario_appends_one_raw_fragment(
+    tmp_path: Path,
+) -> None:
+    command = _command(tmp_path)
+    completed = _run(
+        command.argv,
+        cwd=Path(command.working_directory),
+        environment=_environment(
+            command,
+            tmp_path,
+            MMX_FAKE_CLAUDE_SCENARIO="result_failure_unterminated",
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert completed.stderr == b""
+    complete_lines, fragment = completed.stdout.rsplit(b"\n", 1)
+    events = [json.loads(line) for line in complete_lines.splitlines()]
+    assert len(events) == 5
+    assert events[-1]["subtype"] == "error_during_execution"
+    assert fragment == b"unterminated-post-terminal-fragment"
+
+
+def test_error_terminal_nonzero_scenario_preserves_the_fake_only_exit_rule(
+    tmp_path: Path,
+) -> None:
+    command = _command(tmp_path)
+    completed = _run(
+        command.argv,
+        cwd=Path(command.working_directory),
+        environment=_environment(
+            command,
+            tmp_path,
+            MMX_FAKE_CLAUDE_SCENARIO="result_failure_nonzero",
+        ),
+    )
+
+    assert completed.returncode == 7
+    assert completed.stderr == b""
+    events = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert len(events) == 5
+    assert events[-1]["subtype"] == "error_during_execution"
+
+
+@pytest.mark.parametrize(
+    "scenario,state_marker,scratch_marker",
+    [
+        ("result_failure_scratch_residue", None, "fake-residue"),
+        ("result_failure_cleanup_uncertain", "unexpected", None),
+    ],
+)
+def test_error_terminal_cleanup_adversaries_leave_only_the_declared_fake_marker(
+    tmp_path: Path,
+    scenario: str,
+    state_marker: str | None,
+    scratch_marker: str | None,
+) -> None:
+    command = _command(tmp_path)
+    completed = _run(
+        command.argv,
+        cwd=Path(command.working_directory),
+        environment=_environment(
+            command,
+            tmp_path,
+            MMX_FAKE_CLAUDE_SCENARIO=scenario,
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert completed.stderr == b""
+    events = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert events[-1]["subtype"] == "error_during_execution"
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert ("unexpected" in state) is (state_marker == "unexpected")
+    assert ((tmp_path / "tmp" / "fake-residue").exists()) is (
+        scratch_marker == "fake-residue"
+    )
+
+
+@pytest.mark.parametrize(
+    "scenario,state_key",
+    [
+        ("result_failure_child_after_result", "children"),
+        ("result_failure_escaped_child_after_result", "escaped_children"),
+    ],
+)
+def test_error_terminal_descendant_scenarios_record_one_bounded_process(
+    tmp_path: Path,
+    scenario: str,
+    state_key: str,
+) -> None:
+    command = _command(tmp_path)
+    child_pids: list[int] = []
+    try:
+        completed = _run(
+            command.argv,
+            cwd=Path(command.working_directory),
+            environment=_environment(
+                command,
+                tmp_path,
+                MMX_FAKE_CLAUDE_SCENARIO=scenario,
+            ),
+        )
+        assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+        assert completed.stderr == b""
+        events = [json.loads(line) for line in completed.stdout.splitlines()]
+        assert events[-1]["subtype"] == "error_during_execution"
+        state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+        assert len(state[state_key]) == 1
+        child_pids = [
+            record if isinstance(record, int) else record["pid"]
+            for record in state[state_key]
+        ]
+    finally:
+        for child_pid in child_pids:
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_error_terminal_hang_scenario_emits_the_terminal_before_remaining_alive(
+    tmp_path: Path,
+) -> None:
+    command = _command(tmp_path)
+    process = subprocess.Popen(
+        command.argv,
+        cwd=command.working_directory,
+        env=_environment(
+            command,
+            tmp_path,
+            MMX_FAKE_CLAUDE_SCENARIO="result_failure_hang",
+        ),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        close_fds=True,
+        bufsize=0,
+    )
+    lines: list[bytes] = []
+    try:
+        assert process.stdout is not None
+        deadline = time.monotonic() + 2.0
+        while len(lines) < 5:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0
+            readable, _, _ = select.select([process.stdout], [], [], remaining)
+            assert readable
+            line = process.stdout.readline()
+            assert line
+            lines.append(line)
+        with pytest.raises(subprocess.TimeoutExpired):
+            process.wait(timeout=0.1)
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait(timeout=2)
+    assert process.stdout is not None
+    assert process.stderr is not None
+    stdout = b"".join(lines) + process.stdout.read()
+    stderr = process.stderr.read()
+    process.stdout.close()
+    process.stderr.close()
+    assert process.returncode == -signal.SIGKILL
+    assert stderr == b""
+    events = [json.loads(line) for line in stdout.splitlines()]
+    assert len(events) == 5
+    assert events[-1]["subtype"] == "error_during_execution"
 
 
 @pytest.mark.parametrize(
