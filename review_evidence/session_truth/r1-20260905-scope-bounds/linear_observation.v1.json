@@ -1,0 +1,27 @@
+{
+  "schema": "mastermind.linear_observation.v1",
+  "available": true,
+  "observed_at": "2026-09-05T05:35:09Z",
+  "issues": [
+    {
+      "id": "MAS-177",
+      "status": "In Review",
+      "parent_id": null,
+      "workstream": "WS:CHAIRMAN-CONTROL-ROOM",
+      "completion": null,
+      "projection_revision": null,
+      "github_relations": [],
+      "updated_at": "2026-09-05T05:27:49.739Z"
+    },
+    {
+      "id": "MAS-228",
+      "status": "Done",
+      "parent_id": "MAS-177",
+      "workstream": null,
+      "completion": null,
+      "projection_revision": null,
+      "github_relations": [],
+      "updated_at": "2026-09-04T05:06:34.209Z"
+    }
+  ]
+}
