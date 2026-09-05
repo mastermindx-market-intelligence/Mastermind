@@ -1661,30 +1661,36 @@ def _server_config(tmp_path, facts_path=None):
         repo_root=tmp_path, macro_root=None, bindings_path=tmp_path / "bindings.json",
         token="t", origin="http://localhost", port=0,
         placement_selection_path=facts_path,
+        now_fn=lambda: "2026-09-02T00:00:00Z",
     )
 
 
-def _stub_gather(monkeypatch, boot_packet, inbox, bindings):
+def _stub_gather(monkeypatch, boot_packet, inbox, bindings, *, agent_os_state=None):
     """Pin every gather call BOTH composition paths make, so a cold-vs-warm
     difference can only come from the placement seam itself."""
-    monkeypatch.setattr(server_mod.ceo_boot_packet, "build_packet",
-                        lambda **kw: boot_packet)
-    monkeypatch.setattr(server_mod.executive_inbox, "build_inbox",
-                        lambda **kw: inbox)
-    monkeypatch.setattr(server_mod.ccr, "_read_agent_os_state", lambda root: (None, None))
+    monkeypatch.setattr(ccr.ceo_boot_packet, "build_packet", lambda **kw: boot_packet)
+    monkeypatch.setattr(ccr.executive_inbox, "build_inbox", lambda **kw: inbox)
+    monkeypatch.setattr(
+        server_mod.ccr, "_read_agent_os_state", lambda root: (agent_os_state, None)
+    )
     monkeypatch.setattr(server_mod.ccr, "_read_runtime_jobs", lambda root: (None, None))
     monkeypatch.setattr(server_mod.sb, "load_bindings", lambda path: (bindings, ()))
 
 
-def _warm_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds):
-    _stub_gather(monkeypatch, boot_packet, inbox, bindings)
+def _warm_doc(
+    monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds,
+    *, agent_os_state=None,
+):
+    _stub_gather(monkeypatch, boot_packet, inbox, bindings, agent_os_state=agent_os_state)
     config = _server_config(tmp_path, facts_path)
-    return server_mod._compose_with_live_active_builds(
-        config, active_builds, "2026-09-02T00:00:00Z",
-    )
+    config.live_cache["active_builds"] = active_builds
+    return server_mod._compose_state_doc(config)
 
 
-def _cold_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds):
+def _cold_doc(
+    monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds,
+    *, agent_os_state=None,
+):
     """The REAL cold path — `ccr.build_control_room()` itself.
 
     Review of head dcc5661c (minor): this used to be a hand-written MODEL of
@@ -1694,7 +1700,7 @@ def _cold_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, a
     without reddening this test. Calling the real function is the whole
     point of a parity test.
     """
-    _stub_gather(monkeypatch, boot_packet, inbox, bindings)
+    _stub_gather(monkeypatch, boot_packet, inbox, bindings, agent_os_state=agent_os_state)
     monkeypatch.setattr(ccr, "_read_active_builds", lambda root: (active_builds, None))
     return ccr.build_control_room(
         repo_root=tmp_path, macro_root_flag=None, environ={},
@@ -1783,6 +1789,62 @@ def test_server_config_placement_path_is_actually_read_by_the_warm_path(
     warm = _warm_doc(monkeypatch, tmp_path, facts_path, boot_packet, inbox, bindings, active_builds)
     assert warm["placement_selection"] is not None
     assert warm["placement_selection"]["state"] == "reconciliation_required"
+
+
+def test_warm_cache_path_preserves_canonical_dispatch_evidence(
+    monkeypatch, tmp_path, boot_packet, inbox, active_builds, bindings,
+):
+    """A cached active-build snapshot must retain the canonical dispatch result.
+
+    This fails if the warm server path bypasses ``build_control_room`` and
+    calls the pure compositor without the gatherer's evidence, even while the
+    cold path remains correct.
+    """
+    agent_os_state = {
+        "schema": "agent_os_state.v1",
+        "generated_at": "2026-09-02T00:00:00Z",
+        "workstreams": [{
+            "key": "CR1A-DISPATCH-PARITY",
+            "title": "Dispatch parity probe",
+            "status": "active",
+            "owner": "chairman",
+        }],
+    }
+    gather_calls = []
+
+    def gather_dispatch_evidence(_root, cards, _generated_at):
+        gather_calls.append(cards)
+        card = next(
+            card for card in cards
+            if card["responsibility_ref"] == "WS:CR1A-DISPATCH-PARITY"
+        )
+        return [{
+            "responsibility_ref": card["responsibility_ref"],
+            "root_job_id": card["root_job_id"],
+            "observed_at": "2026-09-02T00:00:00Z",
+            "obligation_status": "ACCEPTED",
+        }]
+
+    monkeypatch.setattr(ccr, "_gather_dispatch_evidence", gather_dispatch_evidence)
+    cold = _cold_doc(
+        monkeypatch, tmp_path, None, boot_packet, inbox, bindings, active_builds,
+        agent_os_state=agent_os_state,
+    )
+    monkeypatch.setattr(
+        ccr,
+        "_read_active_builds",
+        lambda _root: pytest.fail("a live active-build snapshot must not reread the artifact"),
+    )
+    warm = _warm_doc(
+        monkeypatch, tmp_path, None, boot_packet, inbox, bindings, active_builds,
+        agent_os_state=agent_os_state,
+    )
+
+    cold_dispatch = cold["autonomy"]["responsibilities"][0]["dispatch"]
+    warm_dispatch = warm["autonomy"]["responsibilities"][0]["dispatch"]
+    assert cold_dispatch["dispatch_state"] == "DELIVERY_SENT"
+    assert warm_dispatch == cold_dispatch
+    assert len(gather_calls) == 2  # one canonical gather for cold, one for warm
 
 
 # ---------------------------------------------------------------------------

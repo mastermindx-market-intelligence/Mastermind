@@ -99,7 +99,6 @@ if os.fspath(_REPO_ROOT) not in sys.path:
 
 from control_plane import ceo_boot_packet  # noqa: E402  (after sys.path bootstrap)
 from control_plane import chairman_control_room as ccr  # noqa: E402
-from control_plane import executive_inbox  # noqa: E402
 from control_plane import surface_bindings as sb  # noqa: E402
 from integrations.chairman_surfaces import capability, chatgpt, contract  # noqa: E402
 from integrations.chairman_surfaces import runner as surfaces_runner  # noqa: E402
@@ -368,17 +367,11 @@ def _compose_state_doc(
 ) -> dict[str, Any]:
     """Fresh ``mastermind.chairman_control_room.v1`` document for ``/api/state``.
 
-    No live-active-builds cache -> a plain, un-duplicated call to
-    :func:`control_plane.chairman_control_room.build_control_room` (the
-    common case; zero gather-layer duplication).
-
-    A live cache present (from a prior ``/api/refresh-builds``) -> hand it to
-    :func:`control_plane.chairman_control_room.compose_control_room` IN PLACE
-    of a fresh active-builds file read (frozen spec: "passes it INTO the
-    composition in place of the artifact read"). ``build_control_room``
-    exposes no injection point for this (and ``chairman_control_room.py`` is
-    out of this packet's edit scope), so :func:`_compose_with_live_active_builds`
-    replicates that function's own gather-layer sequencing for this one path.
+    The common artifact path and the process-memory live-cache path both call
+    :func:`control_plane.chairman_control_room.build_control_room`.  The
+    latter passes its validated active-build snapshot through the builder's
+    explicit snapshot seam, retaining the one canonical gather sequence for
+    dispatch evidence and every other source.
 
     ``timeout`` defaults to ``ceo_boot_packet.DEFAULT_TIMEOUT`` (60s) — the
     library default, unchanged, and exactly what every existing caller
@@ -391,106 +384,16 @@ def _compose_state_doc(
     """
     generated_at = config.now_fn()
     live_active_builds = config.live_cache.get("active_builds")
-    if live_active_builds is None:
-        return ccr.build_control_room(
-            repo_root=config.repo_root,
-            macro_root_flag=config.macro_root,
-            environ=os.environ,
-            now=generated_at,
-            timeout=timeout,
-            bindings_path=config.bindings_path,
-            placement_selection_path=config.placement_selection_path,
-        )
-    return _compose_with_live_active_builds(config, live_active_builds, generated_at, timeout=timeout)
-
-
-def _compose_with_live_active_builds(
-    config: ServerConfig,
-    live_active_builds: dict[str, Any],
-    generated_at: str,
-    *,
-    timeout: float = ceo_boot_packet.DEFAULT_TIMEOUT,
-) -> dict[str, Any]:
-    root = config.repo_root
-
-    packet: dict[str, Any] | None = None
-    packet_failure: str | None = None
-    try:
-        packet = ceo_boot_packet.build_packet(
-            repo_root=root, macro_root_flag=config.macro_root, environ=os.environ,
-            now=generated_at, timeout=timeout,
-        )
-    except Exception as exc:  # noqa: BLE001 — gather layer never raises
-        packet_failure = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
-
-    inbox: dict[str, Any] | None = None
-    inbox_failure: str | None = None
-    try:
-        inbox = executive_inbox.build_inbox(
-            repo_root=root, boot_packet=packet, environ=os.environ,
-            now=generated_at, timeout=timeout,
-        )
-    except Exception as exc:  # noqa: BLE001 — gather layer never raises
-        inbox_failure = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
-
-    # Same macro-root preference ccr.build_control_room itself uses: reuse the
-    # packet's own reported root first, fall back to Macro's own ladder
-    # function only when the packet gave us nothing (receipt: chairman_
-    # control_room.py build_control_room(), "Resolve the Macro root exactly
-    # like the packet does").
-    macro_root_resolved: str | None = None
-    if isinstance(packet, dict):
-        macro = packet.get("macro")
-        if isinstance(macro, dict):
-            macro_root_resolved = macro.get("root")
-    if not macro_root_resolved:
-        resolved, _via, _candidates = ceo_boot_packet.resolve_macro_root(
-            config.macro_root, os.environ, root
-        )
-        if resolved is not None:
-            macro_root_resolved = os.fspath(resolved)
-
-    agent_os_state, agent_os_state_failure = ccr._read_agent_os_state(macro_root_resolved)
-    runtime_jobs, runtime_jobs_failure = ccr._read_runtime_jobs(root)
-    bindings, binding_problems = sb.load_bindings(config.bindings_path)
-    # CAP-C1 (review 5086941171 BLOCKER 3): this warm path replicates
-    # build_control_room()'s gather sequencing, and the placement read was
-    # the one step it never replicated. Without it a populated live
-    # active-build cache silently dropped a CONFIGURED placement selection
-    # from /api/state — no section and no degradation, so the omission was
-    # invisible. Same reader, same argument, same degraded row as the cold
-    # path; `placement_selection_path=None` stays a true no-op on both.
-    placement_selection, placement_selection_failure = ccr._read_placement_selection(
-        config.placement_selection_path
+    return ccr.build_control_room(
+        repo_root=config.repo_root,
+        macro_root_flag=config.macro_root,
+        environ=os.environ,
+        now=generated_at,
+        timeout=timeout,
+        bindings_path=config.bindings_path,
+        placement_selection_path=config.placement_selection_path,
+        active_builds_snapshot=live_active_builds,
     )
-
-    doc = ccr.compose_control_room(
-        inbox=inbox,
-        boot_packet=packet,
-        active_builds=live_active_builds,
-        agent_os_state=agent_os_state,
-        runtime_jobs=runtime_jobs,
-        bindings=bindings,
-        binding_problems=binding_problems,
-        generated_at=generated_at,
-        placement_selection=placement_selection,
-    )
-
-    extra_degraded: list[str] = []
-    if packet_failure:
-        extra_degraded.append(f"boot_packet: unavailable — {packet_failure}")
-    if inbox_failure:
-        extra_degraded.append(f"executive_inbox: unavailable — {inbox_failure}")
-    if agent_os_state_failure:
-        extra_degraded.append(f"agent_os_state: {agent_os_state_failure}")
-    if runtime_jobs_failure:
-        extra_degraded.append(f"executive_runtime: {runtime_jobs_failure}")
-    if placement_selection_failure:
-        extra_degraded.append(f"placement_selection: {placement_selection_failure}")
-    if extra_degraded:
-        doc = dict(doc)
-        doc["degraded"] = sorted(list(doc["degraded"]) + extra_degraded)
-    return doc
 
 
 # ---------------------------------------------------------------------------

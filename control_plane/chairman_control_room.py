@@ -2002,6 +2002,7 @@ def build_control_room(
     timeout: float = DEFAULT_TIMEOUT,
     bindings_path: str | Path | None = None,
     placement_selection_path: str | Path | None = None,
+    active_builds_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect every source and hand them to :func:`compose_control_room`.
 
@@ -2015,7 +2016,10 @@ def build_control_room(
     Macro checkout, a failing Agent OS brief, an absent Executive runtime
     database, a missing/invalid active-builds snapshot, or an absent/
     malformed bindings file each become a ``None`` input handed to
-    :func:`compose_control_room`, which names the gap.
+    :func:`compose_control_room`, which names the gap.  A caller that already
+    holds a validated process-memory active-builds snapshot may provide it via
+    ``active_builds_snapshot``; the rest of this canonical gather remains the
+    same as the artifact-backed path.
     """
     root = Path(repo_root) if repo_root is not None else _REPO_ROOT
     generated_at = now or _utc_now_z()
@@ -2063,7 +2067,11 @@ def build_control_room(
         if resolved is not None:
             macro_root = os.fspath(resolved)
 
-    active_builds, active_builds_failure = _read_active_builds(macro_root)
+    if active_builds_snapshot is None:
+        active_builds, active_builds_failure = _read_active_builds(macro_root)
+    else:
+        active_builds = active_builds_snapshot
+        active_builds_failure = None
     agent_os_state, agent_os_state_failure = _read_agent_os_state(macro_root)
     runtime_jobs, runtime_jobs_failure = _read_runtime_jobs(root)
 
