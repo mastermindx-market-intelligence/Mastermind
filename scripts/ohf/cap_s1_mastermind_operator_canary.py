@@ -2195,10 +2195,10 @@ CAP_S1_SECRET_CONTROL_RECIPES = (
         "private-key",
         ((b"control = \"private-key\"\n", 1), (b"-----BE", 1),
          (b"GIN PRIVATE KEY-----\n", 1),
-         (b"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n", 1),
+         (b"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n", 2),
          (b"-----EN", 1), (b"D PRIVATE KEY-----\n", 1)),
         1,
-        "5a0f3778f8ac6fd93ef9dc6d454a45197c195fa9a1084a4ccd88d87d5a420bee",
+        "f61c28869e36438cc88c7e7f3ba2d33a3669c1ed5292f3f3aceb88424660a3de",
     ),
     (
         "slack-bot-token",
@@ -2210,9 +2210,10 @@ CAP_S1_SECRET_CONTROL_RECIPES = (
     (
         "stripe-access-token",
         ((b"control = \"stripe-access-token\"\nstripe_key = \"", 1),
-         (b"sk_", 1), (b"test_", 1), (b"A", 24), (b"\"\n", 1)),
+         (b"sk_", 1), (b"test_", 1), (b"0123456789", 1),
+         (b"AbCdEfGhIjKlMnOpQrStUv", 1), (b"\"\n", 1)),
         1,
-        "cf57b04b5dd70da2928e7d72684e0ba2054cf1f0e02ccdd866d6e45be31b84f0",
+        "b509d16f630903ed3e9aff4c53d4d92761f58c69661b6a2884b2793cc0e7db1e",
     ),
 )
 CAP_S1_SECRET_SCAN_TEST_NODES = (

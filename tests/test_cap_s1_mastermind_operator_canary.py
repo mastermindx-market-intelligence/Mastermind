@@ -19,6 +19,7 @@ import gc
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -6740,10 +6741,23 @@ def test_cap_s1_secret_control_recipes_assemble_only_in_owned_scratch(tmp_path) 
         "slack-bot-token",
         "stripe-access-token",
     )
+    assert tuple(
+        (rule_id, expected_count)
+        for rule_id, _recipe, expected_count, _digest in CAP_S1_SECRET_CONTROL_RECIPES
+    ) == (
+        ("private-key", 1),
+        ("slack-bot-token", 1),
+        ("stripe-access-token", 1),
+    )
     committed = (
         (REPO_ROOT / "scripts/ohf/cap_s1_mastermind_operator_canary.py").read_bytes()
         + Path(__file__).read_bytes()
     )
+    pinned_digests = {
+        "private-key": "f61c28869e36438cc88c7e7f3ba2d33a3669c1ed5292f3f3aceb88424660a3de",
+        "slack-bot-token": "d017fd4bc360266440d4ca1b59c5adbaa40e50196e26e74b3467c3b5ce9f1044",
+        "stripe-access-token": "b509d16f630903ed3e9aff4c53d4d92761f58c69661b6a2884b2793cc0e7db1e",
+    }
     for (rule_id, recipe, expected_count, expected_digest), row in zip(
         CAP_S1_SECRET_CONTROL_RECIPES,
         rows,
@@ -6753,9 +6767,53 @@ def test_cap_s1_secret_control_recipes_assemble_only_in_owned_scratch(tmp_path) 
         assert observed_rule == rule_id
         assert observed_count == expected_count == 1
         assert observed_digest == expected_digest
+        assert expected_digest == pinned_digests[rule_id]
         assert path.read_bytes() == payload
         assert payload not in committed
         assert path.is_relative_to(owner)
+
+
+def _cap_s1_shannon_entropy(value: bytes) -> float:
+    return -sum(
+        (value.count(character) / len(value))
+        * math.log2(value.count(character) / len(value))
+        for character in set(value)
+    )
+
+
+@pytest.mark.parametrize("rule_id", ("private-key", "stripe-access-token"))
+def test_cap_s1_secret_control_recipes_match_pinned_public_source_predicates(
+    rule_id,
+) -> None:
+    recipe = next(
+        recipe
+        for observed_rule, recipe, _expected_count, _digest in CAP_S1_SECRET_CONTROL_RECIPES
+        if observed_rule == rule_id
+    )
+    payload = b"".join(segment * repeats for segment, repeats in recipe)
+
+    if rule_id == "private-key":
+        match = re.search(
+            rb"(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----"
+            rb"([\s\S-]{64,}?)KEY(?: BLOCK)?-----",
+            payload,
+        )
+        assert match is not None
+        assert len(match.group(1)) >= 80
+        return
+
+    match = re.search(
+        rb"\b((?:sk|rk)_(?:test|live|prod)_[a-zA-Z0-9]{10,99})"
+        rb"(?:[`'\"\s;]|\\[nr]|$)",
+        payload,
+    )
+    assert match is not None
+    assert _cap_s1_shannon_entropy(match.group(1)) > 3.0
+    ignored_payload = b"# gitleaks:allow\n" + payload
+    assert ignored_payload.removeprefix(b"# gitleaks:allow\n") == payload
+    assert hashlib.sha256(ignored_payload).hexdigest() == (
+        "b1e6ad2be35d722576b97aee0770906a9e4c2b8fc8919444a0e3608d084cec05"
+    )
 
 
 def _secret_test_archive(members) -> bytes:
