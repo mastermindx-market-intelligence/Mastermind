@@ -47,16 +47,20 @@ the runtime API cannot produce — never to read, and never inside the projector
 from __future__ import annotations
 
 import ast
+import dataclasses
 import hashlib
 import json
 import os
 import sqlite3
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
 
 from control_plane import ceo_boot_packet
+from control_plane import chairman_control_room
 from control_plane import executive_inbox as mod
+from control_plane.ceo_intent import submit_intent
 from control_plane.executive_inbox import (
     BOOT_PACKET_SCHEMA,
     BRIEF_SCHEMA,
@@ -172,6 +176,95 @@ def _payload(**kwargs) -> JobPayload:
         artifacts=kwargs.get("artifacts", []),
         next_actions=kwargs.get("next_actions", []),
         errors=kwargs.get("errors", []),
+    )
+
+
+def _strict_v2_intent() -> dict:
+    """A real strict-v2 envelope whose Runtime root carries a workstream."""
+
+    return {
+        "schema": "mastermind.ceo_intent.v2",
+        "intent_kind": "executive_coo_cycle",
+        "business_impact": "material",
+        "intent_id": "CEO-EXEC-OS-1F-1",
+        "actor": "ceo-sol",
+        "objective": "Project one authentic strict-v2 CEO intent.",
+        "department": "executive-infrastructure",
+        "priority": 5,
+        "workstream": "WS:EXECUTIVE_OS",
+        "grounding": {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40},
+        "execution_contract": {"requested_authorities": ["READ"], "attempt_limit": 2},
+    }
+
+
+def _trusted_dialogue_source() -> dict:
+    return {
+        "schema_version": "mastermind.executive_dialogue_source/v1",
+        "work_ref": "WS:EXECUTIVE-OS",
+        "commission_ref": {
+            "repository": "mastermindx-market-intelligence/Mastermind",
+            "commit": "c" * 40,
+            "path": "docs/commissions/executive-inbox.md",
+            "content_sha256": "d" * 64,
+        },
+        "watch_mode": "turn_watch_v1",
+    }
+
+
+def _strict_v2_failed_root(root: Path) -> tuple[Runtime, str]:
+    """Create a real strict-v2 root and select the existing failed read branch."""
+
+    runtime = Runtime.at(root, clock=_Clock(), lease_seconds=_LONG_LEASE_SECONDS)
+    receipt = submit_intent(runtime, _strict_v2_intent(), workspace_root=root)
+    job_id = receipt["job_id"]
+    # A real aggregation root cannot be claimed or failed until the unrelated
+    # COO cycle has built its immutable handoff.  This test's subject is the
+    # read-only provenance projection, so use the suite's test-only corruption
+    # seam to place that real root on the existing FAILED attention branch.
+    _raw(
+        root / DB_RELATIVE_PATH,
+        "UPDATE jobs SET status='FAILED' WHERE job_id=?",
+        (job_id,),
+        ignore_checks=True,
+    )
+    return runtime, job_id
+
+
+def _strict_v2_read_view(
+    runtime: Runtime,
+    job_id: str,
+    *,
+    event_change=lambda event: event,
+    job_change=lambda job: job,
+):
+    """One corruptible read view over a real persisted strict-v2 root."""
+
+    event = next(
+        event
+        for event in runtime.events.list_events(job_id=job_id)
+        if event.event_type == "JOB_CREATED"
+    )
+    job = runtime.jobs.get_job(job_id)
+    assert job is not None
+    return SimpleNamespace(
+        events=SimpleNamespace(list_events=lambda **_kwargs: [event_change(event)]),
+        jobs=SimpleNamespace(get_job=lambda _job_id: job_change(job)),
+    )
+
+
+def _event_with_provenance(event, **changes):
+    payload = dict(event.payload)
+    payload["provenance"] = dict(payload["provenance"], **changes)
+    return dataclasses.replace(event, payload=payload)
+
+
+def _event_with_payload(event, **changes):
+    return dataclasses.replace(event, payload=dict(event.payload, **changes))
+
+
+def _job_with_cycle(job, **changes):
+    return dataclasses.replace(
+        job, orchestration_provenance=dict(job.orchestration_provenance, **changes)
     )
 
 
@@ -1440,6 +1533,247 @@ def test_a_versioned_sibling_provenance_is_named_not_silently_dropped(
     item = next(i for i in inbox["attention"] if i["job_id"] == "JOB-001")
     assert item["target"] == "coo" and item["workstream"] is None
     assert not [e for e in item["evidence"] if e["field"].startswith("provenance.")]
+
+
+def test_an_authentic_strict_v2_root_retains_its_workstream_in_both_readers(
+    tmp_path, frozen_git
+):
+    """Removing strict-v2 admission must break both existing read projections."""
+
+    _runtime, job_id = _strict_v2_failed_root(tmp_path)
+    db_path = tmp_path / DB_RELATIVE_PATH
+    before = logical_dump(db_path)
+
+    inbox = inbox_for(tmp_path)
+    control_room_jobs, failure = chairman_control_room._read_runtime_jobs(tmp_path)
+
+    assert logical_dump(db_path) == before
+    assert failure is None
+    item = next(item for item in inbox["attention"] if item["job_id"] == job_id)
+    assert item["target"] == "coo"
+    assert item["kind"] == "job_failed"
+    assert item["workstream"] == "WS:EXECUTIVE_OS"
+    assert {entry["field"] for entry in item["evidence"]} >= {
+        "provenance.actor",
+        "provenance.intent_id",
+    }
+    assert not [entry for entry in inbox["degraded"] if "unrecognized" in entry]
+    assert control_room_jobs == [
+        {
+            "job_id": job_id,
+            "status": "FAILED",
+            "workstream": "WS:EXECUTIVE_OS",
+            "root_job_id": job_id,
+        }
+    ]
+
+
+def test_strict_v2_without_a_workstream_does_not_invent_one(tmp_path):
+    runtime = Runtime.at(tmp_path, clock=_Clock(), lease_seconds=_LONG_LEASE_SECONDS)
+    intent = _strict_v2_intent()
+    intent.pop("workstream")
+    receipt = submit_intent(runtime, intent, workspace_root=tmp_path)
+
+    provenance, warning = mod.ceo_intent_provenance(runtime, receipt["job_id"])
+
+    assert warning is None
+    assert provenance is not None
+    assert "workstream" not in provenance
+
+
+def test_strict_v2_projection_omits_host_dialogue_source_metadata(tmp_path):
+    runtime = Runtime.at(tmp_path, clock=_Clock(), lease_seconds=_LONG_LEASE_SECONDS)
+    intent = _strict_v2_intent()
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+    receipt = submit_intent(
+        runtime,
+        intent,
+        workspace_root=tmp_path,
+        dialogue_source=_trusted_dialogue_source(),
+    )
+
+    provenance, warning = mod.ceo_intent_provenance(runtime, receipt["job_id"])
+
+    assert warning is None
+    assert provenance is not None
+    assert set(provenance) == {
+        "schema",
+        "intent_id",
+        "actor",
+        "fingerprint",
+        "grounding",
+        "workstream",
+    }
+    assert "dialogue_source" not in provenance
+    assert "dialogue_source_digest" not in provenance
+
+
+def test_strict_v2_provenance_requires_one_immutable_creation_event(tmp_path):
+    runtime = Runtime.at(tmp_path, clock=_Clock(), lease_seconds=_LONG_LEASE_SECONDS)
+    receipt = submit_intent(runtime, _strict_v2_intent(), workspace_root=tmp_path)
+    job_id = receipt["job_id"]
+    event = next(
+        event
+        for event in runtime.events.list_events(job_id=job_id)
+        if event.event_type == "JOB_CREATED"
+    )
+    job = runtime.jobs.get_job(job_id)
+    assert job is not None
+    duplicate_creation_view = SimpleNamespace(
+        events=SimpleNamespace(list_events=lambda **_kwargs: [event, event]),
+        jobs=SimpleNamespace(get_job=lambda _job_id: job),
+    )
+
+    provenance, warning = mod.ceo_intent_provenance(duplicate_creation_view, job_id)
+
+    assert provenance is None
+    assert warning is not None and warning.endswith("intent evidence not attached")
+
+
+@pytest.mark.parametrize(
+    ("event_change", "job_change"),
+    [
+        pytest.param(
+            lambda event: _event_with_provenance(event, intent_id="CEO-OTHER-001"),
+            lambda job: job,
+            id="changed-intent-id",
+        ),
+        pytest.param(
+            lambda event: _event_with_provenance(event, intent_id=""),
+            lambda job: job,
+            id="missing-intent-id",
+        ),
+        pytest.param(
+            lambda event: _event_with_provenance(event, fingerprint="b" * 64),
+            lambda job: job,
+            id="changed-fingerprint",
+        ),
+        pytest.param(
+            lambda event: _event_with_provenance(event, fingerprint=None),
+            lambda job: job,
+            id="missing-fingerprint",
+        ),
+        pytest.param(
+            lambda event: _event_with_provenance(event, grounding=[]),
+            lambda job: job,
+            id="hostile-grounding",
+        ),
+        pytest.param(
+            lambda event: _event_with_provenance(event, workstream="not-a-workstream"),
+            lambda job: job,
+            id="malformed-workstream",
+        ),
+        pytest.param(
+            lambda event: dataclasses.replace(event, command_id="ceo-intent:other"),
+            lambda job: job,
+            id="changed-command",
+        ),
+        pytest.param(
+            lambda event: dataclasses.replace(event, job_id="JOB-OTHER"),
+            lambda job: job,
+            id="changed-event-job",
+        ),
+        pytest.param(
+            lambda event: dataclasses.replace(event, aggregate_id="JOB-OTHER"),
+            lambda job: job,
+            id="changed-event-aggregate",
+        ),
+        pytest.param(
+            lambda event: _event_with_payload(event, orchestration_role="work"),
+            lambda job: job,
+            id="changed-event-role",
+        ),
+        pytest.param(
+            lambda event: _event_with_payload(
+                event, orchestration_provenance_digest="c" * 64
+            ),
+            lambda job: job,
+            id="changed-event-digest",
+        ),
+        pytest.param(
+            lambda event: _event_with_payload(
+                event, orchestration_provenance_digest="e" * 64
+            ),
+            lambda job: dataclasses.replace(
+                job, orchestration_provenance_digest="e" * 64
+            ),
+            id="paired-foreign-digest",
+        ),
+        pytest.param(
+            lambda event: event,
+            lambda job: dataclasses.replace(job, parent_job_id="JOB-PARENT"),
+            id="child-job",
+        ),
+        pytest.param(
+            lambda event: event,
+            lambda job: dataclasses.replace(job, root_job_id="JOB-OTHER"),
+            id="wrong-root",
+        ),
+        pytest.param(
+            lambda event: event,
+            lambda job: dataclasses.replace(job, orchestration_role="work"),
+            id="wrong-job-role",
+        ),
+        pytest.param(
+            lambda event: event,
+            lambda job: _job_with_cycle(job, creator="other"),
+            id="changed-creator",
+        ),
+        pytest.param(
+            lambda event: event,
+            lambda job: _job_with_cycle(job, source_id="CEO-OTHER-001"),
+            id="changed-source-id",
+        ),
+        pytest.param(
+            lambda event: event,
+            lambda job: _job_with_cycle(job, source_digest="d" * 64),
+            id="changed-source-digest",
+        ),
+        pytest.param(
+            lambda event: event,
+            lambda job: _job_with_cycle(job, command_id="ceo-intent:other"),
+            id="changed-cycle-command",
+        ),
+        pytest.param(
+            lambda event: event,
+            lambda job: _job_with_cycle(job, job_id="JOB-OTHER"),
+            id="changed-cycle-job",
+        ),
+        pytest.param(
+            lambda event: event,
+            lambda job: _job_with_cycle(job, root_job_id="JOB-OTHER"),
+            id="changed-cycle-root",
+        ),
+        pytest.param(
+            lambda event: event,
+            lambda job: _job_with_cycle(job, role="work"),
+            id="changed-cycle-role",
+        ),
+        pytest.param(
+            lambda event: _event_with_provenance(
+                event, schema="mastermind.ceo_intent.v3"
+            ),
+            lambda job: job,
+            id="future-v3",
+        ),
+    ],
+)
+def test_strict_v2_provenance_rejects_each_mismatched_immutable_binding(
+    tmp_path, event_change, job_change
+):
+    """Each admission binding catches a real-root mutation, never guessing a join."""
+
+    runtime, job_id = _strict_v2_failed_root(tmp_path)
+    view = _strict_v2_read_view(
+        runtime, job_id, event_change=event_change, job_change=job_change
+    )
+
+    provenance, warning = mod.ceo_intent_provenance(view, job_id)
+
+    assert provenance is None
+    assert warning is not None
+    assert warning.startswith(f"{job_id} provenance schema 'mastermind.ceo_intent.v")
+    assert warning.endswith("intent evidence not attached")
 
 
 def test_the_fleet_line_makes_a_dead_worker_visible(store, frozen_git):
