@@ -127,7 +127,9 @@ def _json_string_encoded_bytes(
 def validate_json_tree(value: object, label: str = "value") -> None:
     """Iteratively bound a value to finite, acyclic strict-JSON content.
 
-    Invalid mapping keys or non-JSON values fail through the typed R1 error path
+    Only built-in JSON containers/scalars are accepted; subclass hooks are never
+    invoked while inspecting rejected values. Invalid keys and non-JSON values fail
+    through the typed R1 error path
     instead of being coerced by the serializer (amendment §5: no coercion to
     null/string/zero).  Containers at exactly ``MAX_JSON_DEPTH`` and trees at
     exactly ``MAX_JSON_NODES`` are accepted; the next value is refused.
@@ -164,19 +166,19 @@ def validate_json_tree(value: object, label: str = "value") -> None:
                     f"{label} exceeds the maximum JSON depth of {MAX_JSON_DEPTH}"
                 )
 
-            if isinstance(item, Mapping) or isinstance(item, list):
+            if type(item) in (dict, list):
                 marker = id(item)
                 if marker in active_containers:
                     raise SessionTruthContractError(
                         f"{label} contains a container cycle"
                     )
                 active_containers.add(marker)
-                children = iter(item.items()) if isinstance(item, Mapping) else enumerate(item)
+                children = iter(item.items()) if type(item) is dict else enumerate(item)
                 add_bytes(2)  # opening and closing delimiter
                 stack.append(
-                    (item, children, path, depth, isinstance(item, Mapping), 0)
+                    (item, children, path, depth, type(item) is dict, 0)
                 )
-            elif isinstance(item, str):
+            elif type(item) is str:
                 add_bytes(
                     _json_string_encoded_bytes(
                         item,
@@ -185,7 +187,7 @@ def validate_json_tree(value: object, label: str = "value") -> None:
                         root_label=label,
                     )
                 )
-            elif isinstance(item, float):
+            elif type(item) is float:
                 if not math.isfinite(item):
                     raise SessionTruthContractError(
                         f"{path} contains a forbidden non-finite number"
@@ -204,7 +206,7 @@ def validate_json_tree(value: object, label: str = "value") -> None:
                 add_bytes(4)
             else:
                 raise SessionTruthContractError(
-                    f"{path} contains a non-JSON value of type {type(item).__name__}"
+                    f"{path} contains a non-JSON value"
                 )
             continue
 
@@ -225,9 +227,9 @@ def validate_json_tree(value: object, label: str = "value") -> None:
             child_count + 1,
         )
         if is_mapping:
-            if not isinstance(key, str):
+            if type(key) is not str:
                 raise SessionTruthContractError(
-                    f"{path} contains a non-string mapping key: {key!r}"
+                    f"{path} contains a non-string mapping key"
                 )
             add_bytes(
                 _json_string_encoded_bytes(

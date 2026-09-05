@@ -301,6 +301,53 @@ def test_json_tree_encoded_byte_accounting_matches_canonical_utf8(monkeypatch):
         module.validate_json_tree(value)
 
 
+@pytest.mark.parametrize("entrypoint", ["validate", "canonical", "receipt"])
+@pytest.mark.parametrize("hostile", ["key", "huge_key", "string", "float", "dict", "list"])
+def test_json_boundary_never_invokes_rejected_object_hooks(entrypoint, hostile):
+    module = _contract()
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("hostile object hook was invoked")
+
+    class BadKey:
+        __repr__ = fail
+
+    class BadString(str):
+        __len__ = fail
+
+    class BadFloat(float):
+        __repr__ = fail
+
+    class BadDict(dict):
+        items = fail
+
+    class BadList(list):
+        __iter__ = fail
+
+    values = {
+        "key": {BadKey(): None},
+        "huge_key": {10**5000: None},
+        "string": BadString("value"),
+        "float": BadFloat(1.0),
+        "dict": BadDict(value=1),
+        "list": BadList([1]),
+    }
+    value = values[hostile]
+    with pytest.raises(module.SessionTruthContractError):
+        if entrypoint == "validate":
+            module.validate_json_tree(value)
+        elif entrypoint == "canonical":
+            module.canonical_json(value)
+        else:
+            receipt = importlib.import_module("control_plane.session_truth")
+            doc = _minimal_input(module)
+            doc["agentos"]["state"]["hostile"] = value
+            receipt.build_receipt(
+                doc, observed_started_at="2026-08-27T05:00:00Z",
+                observed_ended_at="2026-08-27T05:00:00Z",
+            )
+
+
 def test_json_tree_string_precheck_and_multibyte_increment_stop_at_small_ceiling(
     monkeypatch,
 ):
