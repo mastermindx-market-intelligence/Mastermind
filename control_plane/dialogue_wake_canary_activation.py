@@ -314,9 +314,9 @@ def match_dialogue_wake_canary_activation(
 
     if grant is None:
         return None
-    if not isinstance(grant, DialogueWakeCanaryActivationGrant):
+    if type(grant) is not DialogueWakeCanaryActivationGrant:
         _refuse("activation grant must be parsed before matching")
-    if not isinstance(current, DialogueWakeCanaryCurrentFacts):
+    if type(current) is not DialogueWakeCanaryCurrentFacts:
         _refuse("current facts must be trusted typed facts")
     now = _epoch(now_epoch_seconds, field="now_epoch_seconds")
     if now < grant.valid_from_epoch_seconds:

@@ -72,6 +72,28 @@ def test_nullable_absence_is_disarmed_and_no_match() -> None:
     assert match_dialogue_wake_canary_activation(None, facts(), now_epoch_seconds=NOW) is None
 
 
+@pytest.mark.parametrize("forged", ["grant", "current"])
+def test_matching_refuses_subclasses_that_bypass_construction(forged: str) -> None:
+    class ForgedGrant(DialogueWakeCanaryActivationGrant):
+        def __post_init__(self) -> None:
+            pass
+
+    class ForgedCurrent(DialogueWakeCanaryCurrentFacts):
+        def __post_init__(self) -> None:
+            pass
+
+    grant = (
+        ForgedGrant(**valid_wire(schema="mastermind.dialogue_wake_canary_activation.v2"))
+        if forged == "grant" else parsed()
+    )
+    current = (
+        ForgedCurrent(**facts().to_dict()) if forged == "current" else facts()
+    )
+    with pytest.raises(DialogueWakeCanaryActivationError) as raised:
+        match_dialogue_wake_canary_activation(grant, current, now_epoch_seconds=NOW)
+    assert raised.value.code is ActivationRefusalCode.MALFORMED
+
+
 def test_exact_closed_grant_matches_one_obligation_without_authority_flags() -> None:
     grant = parsed()
     result = match_dialogue_wake_canary_activation(grant, facts(), now_epoch_seconds=NOW)
