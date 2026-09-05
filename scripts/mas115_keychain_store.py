@@ -101,9 +101,8 @@ class _SecurityFramework:
 
     @staticmethod
     def _secret_pointer(secret: bytes):
-        buffer, pointer = ctypes.create_string_buffer(secret), None
-        pointer = ctypes.cast(buffer, ctypes.c_void_p)
-        return buffer, pointer
+        buffer = ctypes.create_string_buffer(secret)
+        return buffer, ctypes.cast(buffer, ctypes.c_void_p)
 
     def add_item(self, secret: bytes) -> None:
         buffer, pointer = self._secret_pointer(secret)
