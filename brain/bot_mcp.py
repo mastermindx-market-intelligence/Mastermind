@@ -34,10 +34,31 @@ _READ_ROOTS = [_V / "site", _V / "data", _ROOT / "data"]
 # the latent autonomous→flagship peek path (data/portfolio/* lives under the _ROOT/data root).
 _DENY_ROOTS = [(_ROOT / "data" / "portfolio").resolve(), (_ROOT / "data" / "portfolios").resolve()]
 _LEAK_AUDIT = _ROOT / "data" / "brain" / "read_signal_denied.jsonl"
+_JSON_TRANSPORT_LIMIT_BYTES = 8_000
+_JSON_TRANSPORT_ERRORS = {
+    "too_large": '{"error":"MCP_RESPONSE_TOO_LARGE"}',
+    "not_json": '{"error":"MCP_RESPONSE_NOT_JSON"}',
+}
 
 
 def _ok(text: str) -> dict:
     return {"content": [{"type": "text", "text": text}]}
+
+
+def _json_transport_error(kind: str) -> dict:
+    return {
+        "content": [{"type": "text", "text": _JSON_TRANSPORT_ERRORS[kind]}],
+        "is_error": True,
+    }
+
+
+def _serialize_json_transport(value):
+    """Serialize strict JSON and return its UTF-8 transport status."""
+    try:
+        payload = json.dumps(value, default=str, ensure_ascii=False, allow_nan=False)
+        return payload, "ok" if len(payload.encode("utf-8")) <= _JSON_TRANSPORT_LIMIT_BYTES else "too_large"
+    except BaseException:
+        return None, "not_json"
 
 
 def _compact_json_value(
@@ -58,7 +79,8 @@ def _compact_json_value(
                 str_limit=str_limit,
                 depth=depth + 1,
             )
-            for k, v in value.items()
+            for index, (k, v) in enumerate(value.items())
+            if index < list_limit
         }
     if isinstance(value, list):
         return [
@@ -83,34 +105,29 @@ def _compact_json_value(
 
 
 def _json(obj) -> dict:
-    """Return a valid JSON tool result under the 8k transport budget.
-
-    The old implementation sliced serialized bytes, which emitted malformed JSON.  Progressive
-    structural compaction keeps top-level keys and the highest-ranked list rows instead.
-    """
-    payload = json.dumps(obj, default=str, ensure_ascii=False)
-    if len(payload) <= 8000:
-        return _ok(payload)
-    for list_limit, str_limit in ((20, 400), (10, 240), (5, 160), (3, 100), (1, 72)):
-        compact = _compact_json_value(
-            obj,
-            list_limit=list_limit,
-            str_limit=str_limit,
-        )
-        if isinstance(compact, dict):
-            compact["_transport_truncated"] = True
-        payload = json.dumps(compact, default=str, ensure_ascii=False)
-        if len(payload) <= 8000:
+    """Return strict, UTF-8-bounded JSON or a fixed transport error result."""
+    try:
+        payload, status = _serialize_json_transport(obj)
+        if status == "ok":
             return _ok(payload)
-    # Extremely wide objects still return valid JSON with their top-level scalar contract.
-    fallback = {
-        str(k): v
-        for k, v in (obj.items() if isinstance(obj, dict) else [])
-        if v is None or isinstance(v, (bool, int, float, str))
-    }
-    fallback["_transport_truncated"] = True
-    fallback["_note"] = "Nested payload exceeded the MCP transport budget."
-    return _ok(json.dumps(fallback, default=str, ensure_ascii=False))
+        if status == "not_json":
+            return _json_transport_error("not_json")
+        for list_limit, str_limit in ((20, 400), (10, 240), (5, 160), (3, 100), (1, 72)):
+            compact = _compact_json_value(
+                obj,
+                list_limit=list_limit,
+                str_limit=str_limit,
+            )
+            if isinstance(compact, dict):
+                compact["_transport_truncated"] = True
+            payload, status = _serialize_json_transport(compact)
+            if status == "ok":
+                return _ok(payload)
+            if status == "not_json":
+                return _json_transport_error("not_json")
+        return _json_transport_error("too_large")
+    except BaseException:
+        return _json_transport_error("not_json")
 
 
 def _read_json(p: Path):
