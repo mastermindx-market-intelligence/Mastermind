@@ -1377,6 +1377,167 @@ def test_cancellation_after_spawn_is_unreconciled_but_contained(tmp_path: Path) 
     _assert_workspace_unchanged(workspace, head, status)
 
 
+@pytest.mark.parametrize(
+    "scenario",
+    ["ok", "result_failure", "result_permission_denial"],
+)
+@pytest.mark.parametrize("boundary", ["final_eof", "exit_wait", "cleanup"])
+def test_post_drain_cancellation_boundary_is_unreconciled_and_contained(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    boundary: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    command = compile_claude_cli_command(policy)
+    cancelled = threading.Event()
+    boundary_observations: list[str] = []
+
+    if boundary == "final_eof":
+        real_selector_factory = protocol.selectors.DefaultSelector
+
+        class CancelOnFinalEofSelector:
+            def __init__(self) -> None:
+                self._selector = real_selector_factory()
+
+            def unregister(self, fileobj: object) -> object:
+                key = self._selector.unregister(fileobj)
+                if not self._selector.get_map():
+                    boundary_observations.append(boundary)
+                    cancelled.set()
+                return key
+
+            def __getattr__(self, name: str) -> object:
+                return getattr(self._selector, name)
+
+        monkeypatch.setattr(
+            protocol.selectors,
+            "DefaultSelector",
+            CancelOnFinalEofSelector,
+        )
+    elif boundary == "exit_wait":
+        real_wait = protocol.subprocess.Popen.wait
+
+        def wait_and_cancel(
+            process: subprocess.Popen[bytes],
+            *args: object,
+            **kwargs: object,
+        ) -> int:
+            process_args = process.args
+            if (
+                not boundary_observations
+                and isinstance(process_args, (list, tuple))
+                and len(process_args) > 1
+                and str(process_args[1]).startswith("/dev/fd/")
+            ):
+                boundary_observations.append(boundary)
+                cancelled.set()
+            return real_wait(process, *args, **kwargs)
+
+        monkeypatch.setattr(protocol.subprocess.Popen, "wait", wait_and_cancel)
+    else:
+        real_cleanup = protocol._cleanup_process
+
+        def cleanup_then_cancel(*args: object, **kwargs: object) -> object:
+            boundary_observations.append(boundary)
+            cancelled.set()
+            return real_cleanup(*args, **kwargs)
+
+        monkeypatch.setattr(protocol, "_cleanup_process", cleanup_then_cancel)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            command,
+            cancel_event=cancelled,
+            fake_controls=_fake_controls(tmp_path, scenario),
+        )
+
+    error = captured.value
+    assert boundary_observations == [boundary]
+    assert cancelled.is_set()
+    assert error.code == "CANCELLED_AFTER_START"
+    assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert error.cleanup is not None
+    assert error.cleanup.process_group_empty is True
+    assert error.cleanup.marked_descendants_empty is True
+    assert error.cleanup.leader_reaped is True
+    assert error.cleanup.reader_closed is True
+    assert error.cleanup.scratch_empty is True
+    assert error.cleanup.residue_rows == ()
+    state = json.loads((tmp_path / "fake-state.json").read_text(encoding="utf-8"))
+    assert state["starts"] == 1
+    assert state["reads"] == 1
+    assert state["submissions"] == 1
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_error"),
+    [
+        ("ok", None),
+        ("result_failure", "PROVIDER_FAILURE"),
+        ("result_permission_denial", "PERMISSION_DENIED"),
+    ],
+)
+def test_post_drain_cancellation_controls_preserve_uninterrupted_classification(
+    tmp_path: Path,
+    scenario: str,
+    expected_error: str | None,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    cancelled = threading.Event()
+
+    if expected_error is None:
+        receipt = ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            cancel_event=cancelled,
+            fake_controls=_fake_controls(tmp_path, scenario),
+        )
+        assert receipt.observation is ClaudeCliObservation.TERMINAL_RESULT_OBSERVED
+        assert receipt.cleanup.process_group_empty is True
+        assert receipt.cleanup.leader_reaped is True
+        assert receipt.cleanup.residue_rows == ()
+    else:
+        with pytest.raises(ClaudeCliProtocolError) as captured:
+            ClaudeCliRunner().run(
+                compile_claude_cli_command(policy),
+                cancel_event=cancelled,
+                fake_controls=_fake_controls(tmp_path, scenario),
+            )
+        assert captured.value.code == expected_error
+        assert (
+            captured.value.observation
+            is ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED
+        )
+        assert captured.value.cleanup is not None
+        assert captured.value.cleanup.process_group_empty is True
+        assert captured.value.cleanup.leader_reaped is True
+        assert captured.value.cleanup.residue_rows == ()
+
+    assert not cancelled.is_set()
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_cancellation_after_success_return_is_outside_final_observation_commit_point(
+    tmp_path: Path,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    cancelled = threading.Event()
+
+    receipt = ClaudeCliRunner().run(
+        compile_claude_cli_command(policy),
+        cancel_event=cancelled,
+        fake_controls=_fake_controls(tmp_path),
+    )
+    cancelled.set()
+
+    assert receipt.observation is ClaudeCliObservation.TERMINAL_RESULT_OBSERVED
+    assert receipt.cleanup.process_group_empty is True
+    assert receipt.cleanup.leader_reaped is True
+    assert receipt.cleanup.residue_rows == ()
+    _assert_workspace_unchanged(workspace, head, status)
+
+
 def test_runner_is_an_exactly_once_invocation_guard(tmp_path: Path) -> None:
     first_policy, _, _, _ = _policy(tmp_path / "first")
     second_policy, _, _, _ = _policy(tmp_path / "second")

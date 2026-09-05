@@ -3166,6 +3166,12 @@ class ClaudeCliRunner:
                             "stream ended with an unterminated line",
                         )
                     parser.finalize()
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise _StreamViolation(
+                            "CANCELLED_AFTER_START",
+                            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                            "invocation was cancelled after process start",
+                        )
                 finally:
                     try:
                         selector.close()
@@ -3183,6 +3189,12 @@ class ClaudeCliRunner:
                         ClaudeCliObservation.OUTCOME_UNRECONCILED,
                         "Claude CLI did not exit after its terminal result",
                     ) from None
+                if cancel_event is not None and cancel_event.is_set():
+                    raise _StreamViolation(
+                        "CANCELLED_AFTER_START",
+                        ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                        "invocation was cancelled after process start",
+                    )
                 if returncode != 0:
                     raise _StreamViolation(
                         "PROCESS_EXIT_INVALID",
@@ -3295,6 +3307,16 @@ class ClaudeCliRunner:
                 "PROCESS_EXIT_UNPROVEN",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "Claude CLI exit status was unavailable",
+                cleanup=cleanup,
+            ) from None
+        # This is the final cancellation observation commit point. A concurrent
+        # caller set after this read returns false cannot retroactively change
+        # the already-qualified invocation outcome.
+        if cancel_event is not None and cancel_event.is_set():
+            raise ClaudeCliProtocolError(
+                "CANCELLED_AFTER_START",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "invocation was cancelled after process start",
                 cleanup=cleanup,
             ) from None
         if parser._provisional_failure is not None:
