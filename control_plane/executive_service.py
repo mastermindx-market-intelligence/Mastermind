@@ -736,9 +736,11 @@ class ExecutiveDialogueWakeBridge:
         from control_plane.wake_persist import WakeLedgerRepository
 
         profile = self._canary_profile
-        grant = None if profile is None else profile.grant
-        if grant is None:
+        if profile is None:
             return {"state": "NOT_APPLICABLE", "reason": "NONCANARY_PROFILE"}
+        grant = profile.grant
+        if grant is None:
+            return {"state": "HOLD", "reason": "ACK_GRANT_UNAVAILABLE"}
         if request.parent.get("operation_key") != grant.operation_key:
             return {"state": "HOLD", "reason": "ACK_SOURCE_REFUSED"}
         repository = WakeLedgerRepository(runtime)
@@ -780,19 +782,6 @@ class ExecutiveDialogueWakeBridge:
             or physical.candidate.evidence_digest != grant.source_semantic_digest
         ):
             return {"state": "HOLD", "reason": "ACK_SOURCE_REFUSED"}
-        phases = tuple(record.phase for record in records)
-        if (
-            LedgerPhase.TARGET_ACKNOWLEDGED in phases
-            or LedgerPhase.SOURCE_RESOLVED in phases
-        ):
-            return {"state": "RECORDED", "reason": "ACK_ALREADY_RECORDED"}
-        if (
-            phases.count(LedgerPhase.DELIVERY_ATTEMPT) != 1
-            or phases.count(LedgerPhase.DELIVERED) != 1
-            or LedgerPhase.FAILED in phases
-            or LedgerPhase.TARGET_UNAVAILABLE in phases
-        ):
-            return {"state": "HOLD", "reason": "ACK_HISTORY_INELIGIBLE"}
         carrier = self._carrier_factory(
             runtime=runtime,
             resolved=None,
@@ -810,6 +799,20 @@ class ExecutiveDialogueWakeBridge:
             historical_only=True,
             physical_source=physical,
         )
+        history_matches = getattr(carrier, "delayed_ack_history_matches", None)
+        if not callable(history_matches) or not history_matches(obligation):
+            return {"state": "HOLD", "reason": "ACK_HISTORY_REFUSED"}
+        phases = tuple(record.phase for record in records)
+        if (
+            LedgerPhase.TARGET_ACKNOWLEDGED in phases
+            or LedgerPhase.SOURCE_RESOLVED in phases
+        ):
+            return {"state": "RECORDED", "reason": "ACK_ALREADY_RECORDED"}
+        if (
+            LedgerPhase.FAILED in phases
+            or LedgerPhase.TARGET_UNAVAILABLE in phases
+        ):
+            return {"state": "HOLD", "reason": "ACK_HISTORY_INELIGIBLE"}
         method = getattr(carrier, "reconcile_delivered_ack", None)
         if not callable(method):
             return {"state": "HOLD", "reason": "ACK_CARRIER_UNAVAILABLE"}

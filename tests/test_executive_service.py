@@ -2767,6 +2767,50 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                     operator.deliver_calls,
                     operator.reconcile_calls,
                 ) == provider_before_delayed_ack, mutation_name
+
+            # A freshly installed grant with the same source and target
+            # identities but a different policy must not reuse the persisted
+            # G1 route or enter the historical provider resolver.
+            changed_policy_grant = dataclasses.replace(
+                grant,
+                policy_digest="c" * 16,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                changed_policy_grant
+            )
+            historical_before_policy_change = [
+                name for name, _thread_id in call_order
+            ].count("historical-enter")
+            changed_policy_ack = await exchange(
+                observation_path,
+                canonical_ack_frame,
+            )
+            assert changed_policy_ack["schema"] == (
+                "mastermind.dialogue_delayed_ack_response/v1"
+            )
+            assert changed_policy_ack["state"] in {"HOLD", "EFFECT_UNKNOWN"}
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_before_delayed_ack
+            assert [name for name, _thread_id in call_order].count(
+                "historical-enter"
+            ) == historical_before_policy_change
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            # A present closed canary profile whose grant was removed is a
+            # fail-closed canary state, not the generic/non-canary path.
+            service._dialogue_wake_handler = null_bridge
+            null_grant_ack = await exchange(observation_path, canonical_ack_frame)
+            assert null_grant_ack == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "HOLD",
+                "reason": "ACK_GRANT_UNAVAILABLE",
+            }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_before_delayed_ack
+            service._dialogue_wake_handler = bridge
             operator.emit_ack = True
             delayed_ack = await exchange(
                 observation_path,
@@ -3187,6 +3231,12 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                     obligation2.obligation_id
                 )
             ) == 1
+            assert sum(
+                item.record.phase is LedgerPhase.SOURCE_RESOLVED
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation2.obligation_id
+                )
+            ) == 0
             monkeypatch.setattr(
                 service, "_send_dialogue_observation", original_ack_sender
             )
@@ -3231,6 +3281,58 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                 "reason": "ACK_ALREADY_RECORDED",
             }
             assert operator.reconcile_calls == replay_calls
+            terminal_policy_grant = dataclasses.replace(
+                grant2,
+                policy_digest="d" * 16,
+            )
+            bridge2._canary_profile = DialogueWakeCanaryProfile(
+                terminal_policy_grant
+            )
+            assert await exchange(observation_path, ack2) == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "HOLD",
+                "reason": "ACK_HISTORY_REFUSED",
+            }
+            assert operator.reconcile_calls == replay_calls
+            bridge2._canary_profile = DialogueWakeCanaryProfile(grant2)
+
+            # The same validator that gates the terminal replay refuses a
+            # second attempt and an incomplete nudge command group.
+            from integrations.slack_agent_dialogue import (
+                persisted_wake_carrier as carrier_mod,
+            )
+
+            persisted_ack2 = WakeLedgerRepository(runtime).list_records(
+                obligation2.obligation_id
+            )
+            attempt_event = next(
+                item
+                for item in persisted_ack2
+                if item.record.phase is LedgerPhase.DELIVERY_ATTEMPT
+            )
+            assert carrier_mod._validated_delayed_ack_attempt(
+                obligation2,
+                (*persisted_ack2, attempt_event),
+                grant2,
+            ) is None
+            malformed_attempt = dataclasses.replace(
+                attempt_event,
+                record=dataclasses.replace(
+                    attempt_event.record,
+                    nudge_attempt_command_ids=(
+                        *attempt_event.record.nudge_attempt_command_ids,
+                        f"{obligation2.obligation_id}:A2",
+                    ),
+                ),
+            )
+            assert carrier_mod._validated_delayed_ack_attempt(
+                obligation2,
+                tuple(
+                    malformed_attempt if item is attempt_event else item
+                    for item in persisted_ack2
+                ),
+                grant2,
+            ) is None
             second_connected_pass = await turn_runtime.reconcile_once()
             assert len(second_connected_pass) == 1
             assert second_connected_pass[0].outcome.value == "NO_ACTION"

@@ -10,6 +10,7 @@ import hashlib
 from collections.abc import Callable, Sequence
 
 from control_plane.dialogue_wake_canary_activation import (
+    DialogueWakeCanaryActivationGrant,
     DialogueWakeCanaryActivationError,
     DialogueWakeCanaryProfile,
     effective_dialogue_wake_canary_route,
@@ -22,8 +23,10 @@ from control_plane.dialogue_source_resolution import (
 )
 from control_plane.session_targets import (
     RuntimeBinding,
+    SessionTarget,
     SessionTargetRegistry,
     WakeRoute,
+    destination_digest,
 )
 from control_plane.wake_dispatcher import (
     PersistedNudgeState,
@@ -251,45 +254,15 @@ class PersistedWakeCarrier:
             return WakeCarrierState.MISSING
         try:
             _assert_requested_replay(obligation, persisted, physical)
-            attempt_records = tuple(
-                item.record for item in persisted
-                if item.record.phase is LedgerPhase.DELIVERY_ATTEMPT
-            )
-            if len(attempt_records) != 1:
-                return WakeCarrierState.EFFECT_UNKNOWN
-            attempt = _delivery_attempt(attempt_records[0])
             grant = self._canary_profile.grant
             if grant is None:
                 return WakeCarrierState.EFFECT_UNKNOWN
-            effective_route = WakeRoute(
-                obligation_id=obligation.obligation_id,
-                session_alias=attempt.session_alias,
-                target_seat=grant.target_seat,
-                reasoning_surface=attempt.reasoning_surface,
-                wake_transport=attempt.wake_transport,
-                binding_id=attempt.binding_id,
-                binding_generation=attempt.binding_generation,
-                route_digest=attempt.route_digest,
-                destination_digest=attempt.destination_digest,
-                policy_digest=hashlib.sha256(
-                    canonical_json_bytes({
-                        "base_policy_digest": grant.policy_digest,
-                        "grant_digest": grant.digest,
-                    })
-                ).hexdigest()[:16],
-                root_job_id=obligation.root_job_id,
-                workstream=obligation.workstream,
-                production_armed=True,
-                target_enabled=True,
-                transport_implemented=True,
-                requires_runtime_binding=True,
-                binding_ready=True,
-                human_required=False,
-                policy_version="dialogue-canary-v1",
-                interface_version="mastermind.wake_dispatcher/v1",
+            matched = _validated_delayed_ack_attempt(
+                obligation, persisted, grant
             )
-            if not attempt.matches_route(effective_route):
+            if matched is None:
                 return WakeCarrierState.EFFECT_UNKNOWN
+            attempt, effective_route = matched
             resolver = self._historical_context_for
             if not callable(resolver):
                 return WakeCarrierState.EFFECT_UNKNOWN
@@ -314,6 +287,26 @@ class PersistedWakeCarrier:
         if result.state is PersistedDeliveredAckState.HOLD:
             return WakeCarrierState.MISSING
         return WakeCarrierState.EFFECT_UNKNOWN
+
+    def delayed_ack_history_matches(self, obligation: WakeObligation) -> bool:
+        """Validate terminal replay identity without entering a provider seam."""
+
+        profile = self._canary_profile
+        physical = self._physical_source
+        if (
+            type(profile) is not DialogueWakeCanaryProfile
+            or profile.grant is None
+            or type(physical) is not PhysicalDialogueSourceIdentity
+        ):
+            return False
+        persisted = self._repository.list_records(obligation.obligation_id)
+        try:
+            _assert_requested_replay(obligation, persisted, physical)
+            return _validated_delayed_ack_attempt(
+                obligation, persisted, profile.grant
+            ) is not None
+        except Exception:
+            return False
 
     async def _reconcile_canary(
         self,
@@ -439,6 +432,90 @@ def _delivery_attempt(record: object) -> DeliveryAttempt:
         nudge_id=parsed.nudge_id,
         nudge_attempt_command_ids=tuple(parsed.nudge_attempt_command_ids),
     )
+
+
+def _validated_delayed_ack_attempt(
+    obligation: WakeObligation,
+    persisted: Sequence[PersistedWakeEvent],
+    grant: DialogueWakeCanaryActivationGrant,
+) -> tuple[DeliveryAttempt, WakeRoute] | None:
+    """Bind a stored singleton delivery to the currently installed grant."""
+
+    attempts = tuple(
+        item.record
+        for item in persisted
+        if item.record.phase is LedgerPhase.DELIVERY_ATTEMPT
+    )
+    delivered = tuple(
+        item.record
+        for item in persisted
+        if item.record.phase is LedgerPhase.DELIVERED
+    )
+    if len(attempts) != 1 or len(delivered) != 1:
+        return None
+    attempt = _delivery_attempt(attempts[0])
+    if (
+        not delivered[0].matches_attempt(attempt)
+        or not attempt.nudge_id
+        or attempt.nudge_attempt_command_ids != (attempt.attempt_command_id,)
+        or attempt.session_alias != grant.target_session_alias
+        or attempt.binding_id != grant.binding_id
+        or attempt.binding_generation != grant.binding_generation
+    ):
+        return None
+    expected_destination = destination_digest(
+        target=SessionTarget(
+            session_alias=grant.target_session_alias,
+            target_seat=grant.target_seat,
+            reasoning_surface=attempt.reasoning_surface,
+            wake_transport=attempt.wake_transport,
+            allowed_transports=(attempt.wake_transport,),
+            workstream=obligation.workstream,
+            target_enabled=False,
+        ),
+        binding_id=grant.binding_id,
+        binding_generation=grant.binding_generation,
+    )
+    if attempt.destination_digest != expected_destination:
+        return None
+    effective_policy = hashlib.sha256(
+        canonical_json_bytes({
+            "base_policy_digest": grant.policy_digest,
+            "grant_digest": grant.digest,
+        })
+    ).hexdigest()[:16]
+    from control_plane.session_targets import route_digest
+
+    expected_route_digest = route_digest(
+        obligation_id=obligation.obligation_id,
+        destination=expected_destination,
+        policy_digest=effective_policy,
+    )
+    if attempt.route_digest != expected_route_digest:
+        return None
+    route = WakeRoute(
+        obligation_id=obligation.obligation_id,
+        session_alias=grant.target_session_alias,
+        target_seat=grant.target_seat,
+        reasoning_surface=attempt.reasoning_surface,
+        wake_transport=attempt.wake_transport,
+        binding_id=grant.binding_id,
+        binding_generation=grant.binding_generation,
+        route_digest=expected_route_digest,
+        destination_digest=expected_destination,
+        policy_digest=effective_policy,
+        root_job_id=obligation.root_job_id,
+        workstream=obligation.workstream,
+        production_armed=True,
+        target_enabled=True,
+        transport_implemented=True,
+        requires_runtime_binding=True,
+        binding_ready=True,
+        human_required=False,
+        policy_version="dialogue-canary-v1",
+        interface_version="mastermind.wake_dispatcher/v1",
+    )
+    return attempt, route
 
 
 def _canary_effective_route(
