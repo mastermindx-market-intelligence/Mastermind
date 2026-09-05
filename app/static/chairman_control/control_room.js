@@ -2145,6 +2145,7 @@
   }
 
   function hasUsableStateEnvelope(body) {
+    if (body && body.ok === false) return false;
     var doc = body && body.control_room;
     var attention = doc && typeof doc === "object" && !Array.isArray(doc) && doc.attention;
     return !!(attention && typeof attention === "object" &&

@@ -1249,12 +1249,14 @@ def test_state_envelope_accepts_local_and_remote_success_contracts_only_when_inb
     console.log(JSON.stringify({
       local:hasUsableStateEnvelope({control_room:document, capabilities:{}}),
       remote:hasUsableStateEnvelope({ok:true, control_room:document}),
+      refusedWithDocument:hasUsableStateEnvelope({ok:false, control_room:document}),
       missingInbox:hasUsableStateEnvelope({control_room:{attention:{chairman:[], ceo:[]}}}),
       emptyDocument:hasUsableStateEnvelope({control_room:{}})
     }));
     """ % _extract_fn("hasUsableStateEnvelope")
     assert _run_node(harness) == {
-        "local": True, "remote": True, "missingInbox": False, "emptyDocument": False,
+        "local": True, "remote": True, "refusedWithDocument": False,
+        "missingInbox": False, "emptyDocument": False,
     }
 
 
