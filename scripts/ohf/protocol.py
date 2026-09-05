@@ -58,6 +58,81 @@ def skill_names(result: Mapping[str, Any] | None) -> list[str]:
     return sorted({str(item["name"]) for item in parse_skills_list(result)})
 
 
+class SkillProtocolShapeError(ValueError):
+    """Raised when a ``skills/list`` result violates the strict CAP-S1 shape.
+
+    Messages are bounded and never echo caller-supplied values (names, paths,
+    or any other row content) — only the fixed, generic reason.
+    """
+
+
+_STRICT_MAX_NAME_BYTES = 256
+_STRICT_MAX_PATH_BYTES = 4096
+
+
+def parse_skills_list_strict(
+    result: Mapping[str, Any] | None, *, expected_cwd: str
+) -> list[dict[str, object]]:
+    """Strict CAP-S1 ``skills/list`` parser.
+
+    Unlike :func:`parse_skills_list`, this refuses (raises
+    ``SkillProtocolShapeError``) rather than silently degrading to an empty
+    list, preserves row order and multiplicity exactly as served (no
+    name-keyed dedup, no sort), and enforces the amendment's per-row shape
+    law: a real boolean ``enabled``, a bounded nonblank ``name``, and an
+    optional ``path`` that — when present — must be absolute, bounded, and
+    NUL-free. Unknown extra keys on a row are preserved.
+    """
+    if not isinstance(result, Mapping):
+        raise SkillProtocolShapeError("skills/list result must be a mapping")
+    data = result.get("data")
+    if not isinstance(data, list) or not data:
+        raise SkillProtocolShapeError("skills/list data must be a non-empty list of groups")
+    if len(data) != 1:
+        raise SkillProtocolShapeError("skills/list data must contain exactly one group")
+    group = data[0]
+    if not isinstance(group, dict):
+        raise SkillProtocolShapeError("skills/list group must be a mapping")
+    if "cwd" not in group or "skills" not in group:
+        raise SkillProtocolShapeError("skills/list group must carry cwd and skills")
+    cwd = group.get("cwd")
+    if not isinstance(cwd, str) or cwd != expected_cwd:
+        raise SkillProtocolShapeError("skills/list group cwd does not match expected cwd")
+    rows = group.get("skills")
+    if not isinstance(rows, list):
+        raise SkillProtocolShapeError("skills/list skills field must be a list")
+    return [_parse_skill_row_strict(row) for row in rows]
+
+
+def _parse_skill_row_strict(row: Any) -> dict[str, object]:
+    if not isinstance(row, dict):
+        raise SkillProtocolShapeError("skill row must be a mapping")
+    name = row.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise SkillProtocolShapeError("skill row name must be a nonblank string")
+    if len(name.strip().encode("utf-8")) > _STRICT_MAX_NAME_BYTES:
+        raise SkillProtocolShapeError("skill row name exceeds the bounded maximum length")
+    if "enabled" not in row or not isinstance(row.get("enabled"), bool):
+        raise SkillProtocolShapeError("skill row enabled state must be a real boolean")
+    if "path" in row:
+        path = row.get("path")
+        if not isinstance(path, str) or not path.startswith("/") or "\x00" in path:
+            raise SkillProtocolShapeError("skill row path must be an absolute, NUL-free string")
+        if len(path.encode("utf-8")) > _STRICT_MAX_PATH_BYTES:
+            raise SkillProtocolShapeError("skill row path exceeds the bounded maximum length")
+    return dict(row)
+
+
+def enabled_skill_names(rows: list[dict[str, object]]) -> list[str]:
+    """Names of rows whose ``enabled`` is exactly ``True``.
+
+    Order and multiplicity are preserved — a duplicate-name row that is
+    enabled in both roots appears twice, which the exactly-one comparator
+    upstream needs to see.
+    """
+    return [str(row.get("name")) for row in rows if row.get("enabled") is True]
+
+
 def parse_account_read(result: Mapping[str, Any] | None) -> dict[str, Any]:
     """Record only safe identity facts.  Never persist email or token bytes.
 

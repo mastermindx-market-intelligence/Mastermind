@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import json
 import os
 import shutil
@@ -434,7 +435,7 @@ def test_installer_exact_extracted_allowlist_boots_under_isolated_python(tmp_pat
     assert sum(
         path.startswith("control_plane/") and path.endswith(".py")
         for path in manifest["files"]
-    ) == 26
+    ) == 27
     assert "config/strategic_state.yml" in manifest["files"]
     assert not any(path.startswith(".git/") for path in manifest["files"])
     for unrelated in (
@@ -638,6 +639,23 @@ def test_installer_is_archive_based_atomic_and_install_only():
     assert "python3 -m venv" not in source
     assert "stat -f %u" not in source
     assert "stage_parent_foreign_owner" in source
+
+
+def test_installer_release_tracked_paths_equal_python_required_runtime_paths():
+    """The shell archive allowlist and the Python required-runtime set must
+    stay one list. CAP-S1 proved the failure mode: a required import added to
+    ``REQUIRED_RUNTIME_PATHS`` without the matching ``RELEASE_TRACKED_PATHS``
+    entry makes every staged release refuse ``required_runtime_path_missing``
+    before any closure comparison runs (Sol CI root-cause ruling, PR #350)."""
+    source = INSTALLER.read_text(encoding="utf-8")
+    match = re.search(r"RELEASE_TRACKED_PATHS=\((.*?)\)", source, re.S)
+    assert match is not None
+    shell_paths = {
+        line.strip()
+        for line in match.group(1).splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    assert shell_paths == set(remote.REQUIRED_RUNTIME_PATHS)
 
 
 def _validate_installer_directory(path: Path, *, mode: str):
