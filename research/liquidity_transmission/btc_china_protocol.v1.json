@@ -1,0 +1,72 @@
+{
+  "schema": "btc_china_transmission_protocol.v1",
+  "authority": "research_shadow_only",
+  "canonical_architecture_pr": 117,
+  "canonical_control_issue": 123,
+  "work_issue": 120,
+  "upstream_dependency_issue": 118,
+  "upstream_contract": "global_liquidity_transmission.v1",
+  "producer_state_ownership": "W-LIQ.1 / Macro; W-LIQ.3 must not derive or backfill liquidity state",
+  "questions": [
+    "Does BTC add incremental information for later China/HK returns after conditioning on upstream liquidity?",
+    "Is BTC a causal driver or a fast confirmation sensor?",
+    "Is early China/HK weakness during the initial BTC leg systematic?",
+    "What is the precommitted peak-lag distribution rather than a hand-fit 12-14 week lag?",
+    "Does a later ChinaGate add precision once W-LIQ.4 supplies a PIT-safe gate?"
+  ],
+  "horizons_bdays": [1, 5, 10, 20, 40, 60, 90, 120],
+  "leader_candidates": [
+    "upstream_global_liquidity_state",
+    "btc",
+    "qqq",
+    "smh",
+    "dxy_or_usd_funding_state",
+    "real_yield_state"
+  ],
+  "china_hk_targets": ["fxi", "mchi", "kweb", "baba"],
+  "required_baselines": [
+    "unconditional_return_response",
+    "target_own_momentum",
+    "target_mean_reversion",
+    "dxy",
+    "global_liquidity_state_alone",
+    "qqq_or_high_beta_risk_proxy",
+    "btc_lead_alone",
+    "prophet_or_technical_state_alone"
+  ],
+  "required_condition_families": [
+    "shock_type_magnitude_breadth",
+    "usd_funding",
+    "real_yields",
+    "credit",
+    "growth_inflation_regime",
+    "volatility_regime",
+    "regional_gate_when_available",
+    "starting_extension_or_positioning_when_pit_safe"
+  ],
+  "validation_law": {
+    "unit": "independent_liquidity_shock_episode",
+    "split": "expanding_purged_walk_forward_with_untouched_holdout",
+    "multiple_testing": "BH-FDR through canonical Macro engine.validation",
+    "overlap": "effective_n uses non-overlapping shock windows per horizon",
+    "comparison": "incremental predictive value over every named baseline",
+    "recent_case_use": "sanity_and_replay_only_not_threshold_optimization",
+    "nulls": "reported_as_first_class_results"
+  },
+  "historical_episode_fixture": {
+    "status": "chronology_not_frozen",
+    "episodes": [],
+    "reason": "PR #117 describes visible 2023-2026 arrows qualitatively but does not provide exact first-known timestamps. W-LIQ.3 refuses to invent episode dates or optimize to chart arrows.",
+    "unblock": "Sol or the W-LIQ.1 handoff supplies an exact PIT chronology with source receipts; add it as a new fixture version and retain this empty version."
+  },
+  "holdout": {
+    "start": null,
+    "status": "requires_sol_preregistration_before_data_inspection",
+    "law": "The holdout boundary is frozen before historical GLT state and return panels are inspected."
+  },
+  "china_gate": {
+    "status": "external_future_dependency_W-LIQ.4",
+    "allowed_values": ["closed", "opening", "open", "conflicted", "unknown"],
+    "current_behavior": "preserve an opaque regional_gates snapshot; do not implement or infer the gate"
+  }
+}
