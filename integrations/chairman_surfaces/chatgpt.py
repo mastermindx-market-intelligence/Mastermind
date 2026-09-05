@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 from pathlib import Path
 
 from control_plane import surface_bindings as sb
@@ -109,6 +110,345 @@ _USER_DATA_DIR_RE = re.compile(r"--user-data-dir=(\S+)")
 #: exceeds 64 KiB), so a running seat read as stopped — measured live
 #: 2026-08-22.  4 MiB comfortably holds any real process table.
 _PS_SNAPSHOT_MAX_BYTES = 4 * 1024 * 1024
+
+_STRICT_INVENTORY_MAX_IDENTITIES = 1000
+_STRICT_INVENTORY_REFUSAL = "strict local environment inventory unavailable"
+_HEX24_SHAPE_RE = re.compile(r"^[0-9a-fA-F]{24}$")
+_STRICT_USER_DATA_DIR_RE = re.compile(r"(?:^|\s)--user-data-dir=(\S+)")
+
+
+class _StrictInventoryRefusal(Exception):
+    """Internal marker whose details never cross the strict producer seam."""
+
+
+class _StrictInventoryUnavailable(RuntimeError):
+    """Fixed, detail-free refusal exposed only by the private producer."""
+
+
+def _strict_refuse():
+    raise _StrictInventoryRefusal
+
+
+def _same_file_identity(left, right) -> bool:
+    return (left.st_dev, left.st_ino) == (right.st_dev, right.st_ino)
+
+
+def _strict_open_root(root: str):
+    """Open one root without following links; a never-present root is empty."""
+    try:
+        observed = os.lstat(root)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        _strict_refuse()
+    if not stat.S_ISDIR(observed.st_mode):
+        _strict_refuse()
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(root, flags)
+    except OSError:
+        _strict_refuse()
+    try:
+        opened = os.fstat(fd)
+        current = os.lstat(root)
+        if not _same_file_identity(observed, opened) or not _same_file_identity(opened, current):
+            _strict_refuse()
+    except Exception:
+        os.close(fd)
+        raise
+    return fd, opened
+
+
+def _strict_open_child(parent_fd: int, name: str, observed):
+    if not stat.S_ISDIR(observed.st_mode):
+        _strict_refuse()
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(name, flags, dir_fd=parent_fd)
+        opened = os.fstat(fd)
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError:
+        try:
+            os.close(fd)
+        except (OSError, UnboundLocalError):
+            pass
+        _strict_refuse()
+    if not _same_file_identity(observed, opened) or not _same_file_identity(opened, current):
+        os.close(fd)
+        _strict_refuse()
+    return fd, opened
+
+
+def _strict_entries(fd: int):
+    try:
+        with os.scandir(fd) as iterator:
+            return sorted(iterator, key=lambda entry: entry.name)
+    except OSError:
+        _strict_refuse()
+
+
+def _strict_revalidate_root(root: str, fd: int, opened) -> None:
+    try:
+        current = os.lstat(root)
+        held = os.fstat(fd)
+    except OSError:
+        _strict_refuse()
+    if not _same_file_identity(opened, held) or not _same_file_identity(held, current):
+        _strict_refuse()
+
+
+def _strict_revalidate_child(parent_fd: int, name: str, fd: int, opened) -> None:
+    try:
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        held = os.fstat(fd)
+    except OSError:
+        _strict_refuse()
+    if not _same_file_identity(opened, held) or not _same_file_identity(held, current):
+        _strict_refuse()
+
+
+def _strict_entry_stat(entry):
+    try:
+        return entry.stat(follow_symlinks=False)
+    except OSError:
+        _strict_refuse()
+
+
+def _strict_count_identity(counter: list[int]) -> None:
+    counter[0] += 1
+    if counter[0] > _STRICT_INVENTORY_MAX_IDENTITIES:
+        _strict_refuse()
+
+
+def _strict_scan_multilogin(root: str, counter: list[int]) -> list[dict]:
+    opened_root = _strict_open_root(root)
+    if opened_root is None:
+        return []
+    root_fd, root_identity = opened_root
+    rows = []
+    authority_identities = set()
+    try:
+        for workspace_entry in _strict_entries(root_fd):
+            if not sb.UUID_RE.fullmatch(workspace_entry.name):
+                continue
+            workspace_stat = _strict_entry_stat(workspace_entry)
+            workspace_fd, workspace_identity = _strict_open_child(
+                root_fd, workspace_entry.name, workspace_stat,
+            )
+            try:
+                for folder_entry in _strict_entries(workspace_fd):
+                    if not sb.UUID_RE.fullmatch(folder_entry.name):
+                        continue
+                    folder_stat = _strict_entry_stat(folder_entry)
+                    folder_fd, folder_identity = _strict_open_child(
+                        workspace_fd, folder_entry.name, folder_stat,
+                    )
+                    try:
+                        for profile_entry in _strict_entries(folder_fd):
+                            if not sb.UUID_RE.fullmatch(profile_entry.name):
+                                continue
+                            profile_stat = _strict_entry_stat(profile_entry)
+                            profile_fd, profile_identity = _strict_open_child(
+                                folder_fd, profile_entry.name, profile_stat,
+                            )
+                            try:
+                                _strict_revalidate_child(
+                                    folder_fd, profile_entry.name, profile_fd, profile_identity,
+                                )
+                            finally:
+                                os.close(profile_fd)
+                            workspace_id = workspace_entry.name.lower()
+                            folder_id = folder_entry.name.lower()
+                            profile_id = profile_entry.name.lower()
+                            authority_identity = (folder_id, profile_id)
+                            if authority_identity in authority_identities:
+                                _strict_refuse()
+                            authority_identities.add(authority_identity)
+                            _strict_count_identity(counter)
+                            rows.append({
+                                "workspace_id": workspace_id,
+                                "folder_id": folder_id,
+                                "profile_id": profile_id,
+                                "running": False,
+                            })
+                        _strict_revalidate_child(
+                            workspace_fd, folder_entry.name, folder_fd, folder_identity,
+                        )
+                    finally:
+                        os.close(folder_fd)
+                _strict_revalidate_child(
+                    root_fd, workspace_entry.name, workspace_fd, workspace_identity,
+                )
+            finally:
+                os.close(workspace_fd)
+        _strict_revalidate_root(root, root_fd, root_identity)
+    finally:
+        os.close(root_fd)
+    return rows
+
+
+def _strict_scan_gologin(root: str, counter: list[int]) -> list[dict]:
+    opened_root = _strict_open_root(root)
+    if opened_root is None:
+        return []
+    root_fd, root_identity = opened_root
+    rows = []
+    try:
+        for profile_entry in _strict_entries(root_fd):
+            if _HEX24_SHAPE_RE.fullmatch(profile_entry.name) and not sb.GOLOGIN_PROFILE_ID_RE.fullmatch(
+                profile_entry.name
+            ):
+                _strict_refuse()
+            if not sb.GOLOGIN_PROFILE_ID_RE.fullmatch(profile_entry.name):
+                continue
+            profile_stat = _strict_entry_stat(profile_entry)
+            profile_fd, profile_identity = _strict_open_child(
+                root_fd, profile_entry.name, profile_stat,
+            )
+            try:
+                _strict_revalidate_child(
+                    root_fd, profile_entry.name, profile_fd, profile_identity,
+                )
+            finally:
+                os.close(profile_fd)
+            _strict_count_identity(counter)
+            rows.append({"profile_id": profile_entry.name, "running": False})
+        _strict_revalidate_root(root, root_fd, root_identity)
+    finally:
+        os.close(root_fd)
+    return rows
+
+
+def _strict_managed_identity(value: str, mlx_root: str, gologin_root: str):
+    if (
+        not os.path.isabs(value)
+        or value.startswith(os.sep * 2)
+        or os.path.normpath(value) != value
+    ):
+        for root in (mlx_root, gologin_root):
+            if root in value:
+                _strict_refuse()
+        return None
+    for manager, root in (("multilogin", mlx_root), ("gologin", gologin_root)):
+        try:
+            inside = os.path.commonpath((value, root)) == root
+        except ValueError:
+            inside = False
+        if not inside:
+            continue
+        relative = os.path.relpath(value, root)
+        parts = relative.split(os.sep)
+        if manager == "gologin":
+            if len(parts) != 1 or not sb.GOLOGIN_PROFILE_ID_RE.fullmatch(parts[0]):
+                _strict_refuse()
+            return manager, parts[0]
+        if len(parts) != 3 or not all(sb.UUID_RE.fullmatch(part) for part in parts):
+            _strict_refuse()
+        return manager, parts[0].lower(), parts[1].lower(), parts[2].lower()
+    return None
+
+
+def _strict_reconcile_processes(stdout: str, mlx_root: str, gologin_root: str, rows: dict) -> None:
+    known = {
+        ("multilogin", row["workspace_id"], row["folder_id"], row["profile_id"])
+        for row in rows["multilogin"]
+    }
+    known.update(("gologin", row["profile_id"]) for row in rows["gologin"])
+    running = set()
+    for line in stdout.splitlines():
+        matches = list(_STRICT_USER_DATA_DIR_RE.finditer(line))
+        recognized_spans = {match.span() for match in matches}
+        for occurrence in re.finditer(r"(?:^|\s)--user-data-dir(?:=\S*)?", line):
+            if occurrence.span() not in recognized_spans and (
+                mlx_root in line or gologin_root in line
+            ):
+                _strict_refuse()
+        managed = []
+        for match in matches:
+            identity = _strict_managed_identity(match.group(1), mlx_root, gologin_root)
+            if identity is not None:
+                managed.append(identity)
+        if len(managed) > 1:
+            _strict_refuse()
+        if not managed:
+            continue
+        identity = managed[0]
+        if identity not in known:
+            _strict_refuse()
+        running.add(identity)
+    for row in rows["multilogin"]:
+        row["running"] = (
+            "multilogin", row["workspace_id"], row["folder_id"], row["profile_id"],
+        ) in running
+    for row in rows["gologin"]:
+        row["running"] = ("gologin", row["profile_id"]) in running
+
+
+def _strict_list_local_environments_impl(
+    *, mlx_profiles_root=None, gologin_profiles_root=None, process_runner=None,
+) -> dict:
+    runner = process_runner or _runner_module.run_argv
+    result = runner(
+        ["/bin/ps", "-axo", "args="],
+        timeout=5.0,
+        max_bytes=_PS_SNAPSHOT_MAX_BYTES + 4,
+    )
+    if (
+        type(result) is not dict
+        or set(result) != {"code", "stdout", "stderr", "timed_out"}
+        or type(result["code"]) is not int
+        or result["code"] != 0
+        or type(result["stdout"]) is not str
+        or type(result["stderr"]) is not str
+        or type(result["timed_out"]) is not bool
+        or result["timed_out"] is not False
+        or "\ufffd" in result["stdout"]
+        or "\ufffd" in result["stderr"]
+        or len(result["stdout"].encode("utf-8")) > _PS_SNAPSHOT_MAX_BYTES
+    ):
+        _strict_refuse()
+    mlx_root = os.path.abspath(os.path.expanduser(
+        mlx_profiles_root if mlx_profiles_root is not None else MLX_PROFILES_ROOT
+    ))
+    gologin_root = os.path.abspath(os.path.expanduser(
+        gologin_profiles_root if gologin_profiles_root is not None else GOLOGIN_PROFILES_ROOT
+    ))
+    try:
+        roots_overlap = os.path.commonpath((mlx_root, gologin_root)) in (mlx_root, gologin_root)
+    except ValueError:
+        roots_overlap = True
+    if roots_overlap:
+        _strict_refuse()
+    identity_count = [0]
+    rows = {
+        "multilogin": _strict_scan_multilogin(mlx_root, identity_count),
+        "gologin": _strict_scan_gologin(gologin_root, identity_count),
+    }
+    _strict_reconcile_processes(result["stdout"], mlx_root, gologin_root, rows)
+    return rows
+
+
+def _strict_list_local_environments(
+    *, mlx_profiles_root=None, gologin_profiles_root=None, process_runner=None,
+) -> dict:
+    """Return one complete, reconciled census or one fixed private refusal.
+
+    Unlike :func:`list_local_environments`, this private producer is an
+    all-or-nothing authority input for secret-capable callers.  Production
+    callers cannot forward roots or a runner; those seams exist only for
+    hermetic tests.
+    """
+    try:
+        return _strict_list_local_environments_impl(
+            mlx_profiles_root=mlx_profiles_root,
+            gologin_profiles_root=gologin_profiles_root,
+            process_runner=process_runner,
+        )
+    except Exception:  # noqa: BLE001 — collapse every probe detail
+        pass
+    raise _StrictInventoryUnavailable(_STRICT_INVENTORY_REFUSAL) from None
 
 
 def _default_process_args_reader() -> list[str]:

@@ -1,0 +1,15 @@
+{
+  "source_head": "839162b7bbe97ddc65cb4cd4878383e8c94c0fa5",
+  "source_tree": "15262ff8b8aabe126147f10d7fcca06e47dbb722",
+  "protected_master": "a3440f21a0d6df7666bd9ed9f3b02385dac23588",
+  "protected_tree": "d19477261b1b9fafb9b2360cef16effae0b59b43",
+  "macro_current": "88af13cfedd1e4baba11e9dbcf410e35875312fe",
+  "macro_tree": "1f780403b752e9bb18d8797a1d4e92df63bb1332",
+  "macro_historical": "a1b3d9eab5ba0b024a7008e64e44a16767348849",
+  "macro_owner_script_blob": "f3f85a50caeae1bab14e78ed919e5254557d0e2e",
+  "macro_restored_clean": true,
+  "production_execution": false,
+  "external_mutations_by_receipt_cli": false,
+  "operation_key": "session-truth-r1-scope-bounds-repair-20260905-runtime-continuity-001",
+  "scope_operation_key": "session-truth-r1-project-watch-20260827-sol-001"
+}
