@@ -261,12 +261,22 @@ malformed.
 
 ### CEO-intent provenance
 
-A CEO-submitted job is recognizable **only** by its `JOB_CREATED` event carrying
-`payload.provenance.schema == "mastermind.ceo_intent.v1"`. The `ceo-intent:`
-command-id prefix is a namespace any caller could type, not proof of origin, and the
-job row itself carries nothing. When the record is present, the item gains evidence
-refs for `provenance.actor` and `provenance.intent_id` and takes its `workstream` from
-`provenance.workstream`.
+A CEO-submitted job is recognizable **only** by its `JOB_CREATED` event. The pinned
+`mastermind.ceo_intent.v1` provenance contract remains readable as before. A strict
+`mastermind.ceo_intent.v2` record is readable only when that immutable creation event
+is the one `JOB_CREATED` record for the Job and it and the current typed Job agree on
+one root-self `aggregation` Job: the exact
+`ceo-intent:<intent_id>` command, intent id, actor, 64-hex fingerprint, mapping
+grounding, optional `WS:` workstream, aggregation role, and the complete existing
+`mastermind.executive_orchestration_provenance/v1` binding must all match. The
+`ceo-intent:` prefix alone remains a namespace any caller could type, not proof of
+origin.
+
+For either accepted provenance form, the item gains evidence refs for
+`provenance.actor` and `provenance.intent_id` and takes its `workstream` only from the
+recorded optional pointer. A missing pointer stays absent; no Agent OS join is guessed.
+Strict-v2 host dialogue-source fields, if persisted for another owner, are not returned
+to this projection or copied into browser/attention evidence.
 
 Events are fetched **only for jobs already selected as attention**, so the read stays
 bounded by the attention list rather than by the ledger.
@@ -274,10 +284,12 @@ bounded by the attention list rather than by the ledger.
 Provenance never changes the target. A failed CEO-submitted job is a COO operational
 exception exactly like any other.
 
-A provenance record on a **versioned sibling** of that schema (`…ceo_intent.v2`) is
-named in `degraded` rather than ignored. After a `ceo_intent` schema bump, silently
-dropping the evidence would turn every CEO-submitted job anonymous without a sound.
-A test pins `CEO_INTENT_PROVENANCE_SCHEMA` equal to `ceo_intent.INTENT_SCHEMA`.
+An incomplete, mismatched, forged, or future provenance sibling is named in `degraded`
+rather than accepted or silently ignored. This includes a v2 schema string on an
+ordinary/child/non-root Job, binding drift, malformed workstream, and `v3+` siblings.
+After an intentional schema bump, silently dropping the evidence would turn every
+CEO-submitted job anonymous without a sound. A test pins
+`CEO_INTENT_PROVENANCE_SCHEMA` equal to `ceo_intent.INTENT_SCHEMA`.
 
 ### What creates CEO attention
 

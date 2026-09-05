@@ -75,6 +75,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -638,7 +639,8 @@ def ceo_intent_provenance(
     than nothing: after a ``ceo_intent`` schema bump, silently dropping the
     evidence would turn every CEO-submitted job anonymous without a sound.
     """
-    for event in runtime.events.list_events(job_id=job_id):
+    events = runtime.events.list_events(job_id=job_id)
+    for event in events:
         if event.event_type != "JOB_CREATED":
             continue
         payload = event.payload if isinstance(event.payload, Mapping) else {}
@@ -648,6 +650,95 @@ def ceo_intent_provenance(
         found = provenance.get("schema")
         if found == CEO_INTENT_PROVENANCE_SCHEMA:
             return dict(provenance), None
+        if found == "mastermind.ceo_intent.v2":
+            if sum(candidate.event_type == "JOB_CREATED" for candidate in events) != 1:
+                return None, (
+                    f"{job_id} provenance schema {found!r} unrecognized (this build reads "
+                    f"{CEO_INTENT_PROVENANCE_SCHEMA!r}); intent evidence not attached"
+                )
+            intent_id = provenance.get("intent_id")
+            actor = provenance.get("actor")
+            fingerprint = provenance.get("fingerprint")
+            grounding = provenance.get("grounding")
+            workstream = provenance.get("workstream")
+            command_id = (
+                f"ceo-intent:{intent_id}" if isinstance(intent_id, str) else ""
+            )
+            job = runtime.jobs.get_job(job_id)
+            cycle = job.orchestration_provenance if job is not None else None
+            valid = (
+                event.job_id == job_id
+                and event.aggregate_type == "job"
+                and event.aggregate_id == job_id
+                and event.command_id == command_id
+                and isinstance(intent_id, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", intent_id)
+                is not None
+                and isinstance(actor, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}", actor)
+                is not None
+                and isinstance(fingerprint, str)
+                and re.fullmatch(r"[0-9a-f]{64}", fingerprint) is not None
+                and isinstance(grounding, Mapping)
+                and (
+                    "workstream" not in provenance
+                    or (
+                        isinstance(workstream, str)
+                        and re.fullmatch(
+                            r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}", workstream
+                        )
+                        is not None
+                    )
+                )
+                and job is not None
+                and job.job_id == job_id
+                and job.parent_job_id is None
+                and job.root_job_id == job_id
+                and job.orchestration_role == "aggregation"
+                and isinstance(job.orchestration_provenance_digest, str)
+                and re.fullmatch(r"[0-9a-f]{64}", job.orchestration_provenance_digest)
+                is not None
+                and isinstance(cycle, Mapping)
+                and set(cycle)
+                == {
+                    "schema_version",
+                    "creator",
+                    "source_id",
+                    "source_digest",
+                    "command_id",
+                    "job_id",
+                    "parent_job_id",
+                    "root_job_id",
+                    "role",
+                }
+                and cycle.get("schema_version")
+                == "mastermind.executive_orchestration_provenance/v1"
+                and cycle.get("creator") == "ceo_intent"
+                and cycle.get("source_id") == intent_id
+                and cycle.get("source_digest") == fingerprint
+                and cycle.get("command_id") == command_id
+                and cycle.get("job_id") == job_id
+                and cycle.get("parent_job_id") is None
+                and cycle.get("root_job_id") == job_id
+                and cycle.get("role") == "aggregation"
+                and payload.get("orchestration_role") == job.orchestration_role
+                and payload.get("orchestration_provenance_digest")
+                == job.orchestration_provenance_digest
+            )
+            if valid:
+                projected = {
+                    key: provenance[key]
+                    for key in (
+                        "schema",
+                        "intent_id",
+                        "actor",
+                        "fingerprint",
+                        "grounding",
+                        "workstream",
+                    )
+                    if key in provenance
+                }
+                return projected, None
         if isinstance(found, str) and found.startswith(CEO_INTENT_SCHEMA_PREFIX):
             return None, (
                 f"{job_id} provenance schema {found!r} unrecognized (this build reads "
