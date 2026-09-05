@@ -161,6 +161,14 @@ def test_json_transport_accepts_exactly_8000_bytes_and_compacts_8001():
     assert _strict_json(_text(overflow))["_transport_truncated"] is True
 
 
+def test_json_transport_measures_final_unicode_payload_after_metadata():
+    result = bot_mcp._json({"rows": ["電" * 240 for _ in range(20)]})
+    text = _text(result)
+
+    assert _utf8_bytes(text) == 7_280
+    assert _strict_json(text)["_transport_truncated"] is True
+
+
 @pytest.mark.parametrize(
     "payload",
     (
@@ -235,6 +243,38 @@ def test_real_decorated_handler_sets_sdk_wire_error_once(monkeypatch):
     assert producer_calls == 1
     assert wire["isError"] is True
     assert _strict_json(wire["content"][0]["text"]) == {"error": "MCP_RESPONSE_NOT_JSON"}
+
+
+@pytest.mark.parametrize("invalid", (float("nan"), "\ud800"))
+def test_real_handler_rejects_invalid_data_before_compaction_can_omit_it(monkeypatch, invalid):
+    producer_calls = 0
+    handler_calls = 0
+    original_handler = bot_mcp.get_themes.handler
+    retained_control = {"id": "late-control", "name": None, "category": False, "n_members": 0}
+    baskets = [
+        {"id": f"basket-{index}", "name": "電" * 400, "category": "research", "n_members": index}
+        for index in range(24)
+    ] + [retained_control, {"id": "invalid-late", "perf": {"20d": {"rel": invalid}}}]
+
+    def oversized_fixture(_path):
+        nonlocal producer_calls
+        producer_calls += 1
+        return {"as_of": "2026-09-05", "baskets": baskets}
+
+    async def counted_handler(args):
+        nonlocal handler_calls
+        handler_calls += 1
+        return await original_handler(args)
+
+    monkeypatch.setattr(bot_mcp, "_read_json", oversized_fixture)
+    monkeypatch.setattr(bot_mcp.get_themes, "handler", counted_handler)
+
+    wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_themes", {}))
+
+    assert handler_calls == producer_calls == 1
+    assert wire["isError"] is True
+    assert _strict_json(wire["content"][0]["text"]) == {"error": "MCP_RESPONSE_NOT_JSON"}
+    assert retained_control == {"id": "late-control", "name": None, "category": False, "n_members": 0}
 
 
 def test_sdk_does_not_treat_camel_case_handler_error_as_an_error():
