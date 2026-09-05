@@ -134,6 +134,29 @@ def test_remote_projection_is_closed_and_omits_local_authority(canonical_doc):
         assert forbidden not in encoded
 
 
+def test_remote_projection_never_exposes_the_autonomy_key(canonical_doc):
+    """The AD-CR1A Phase A ``autonomy`` key never reaches the remote surface.
+
+    ``canonical_doc`` is a REAL ``compose_control_room`` output — it
+    genuinely carries an ``autonomy`` key (``ccr.OUTPUT_KEYS`` includes it,
+    and this fixture would already fail the ``_require_exact_keys(canonical,
+    ccr.OUTPUT_KEYS)`` check inside ``project_remote_document`` if it did
+    not).  The remote projector still accepts it and still projects through
+    its own closed allowlist, which was never extended: ``autonomy`` is
+    absent from both the projected key set and the encoded JSON body.
+    """
+    assert "autonomy" in canonical_doc
+    assert "autonomy" in ccr.OUTPUT_KEYS
+
+    projected = _project(canonical_doc)
+    assert "autonomy" not in projected
+    assert set(projected) == {
+        "schema", "observed_at", "code_identity", "source_freshness",
+        "degraded", "attention", "work", "unjoined_open_prs",
+    }
+    assert "autonomy" not in json.dumps(projected, sort_keys=True)
+
+
 @pytest.mark.parametrize(
     ("mutation", "code"),
     [

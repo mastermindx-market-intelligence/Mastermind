@@ -121,10 +121,12 @@ def resolve_macro_root(
 ) -> tuple[Path | None, str | None, list[dict[str, Any]]]:
     """Locate a Macro checkout to read Agent OS from.
 
-    Returns ``(resolved_path, resolved_via, candidates_tried)``.  The ladder is
-    ``flag -> MASTERMIND_MACRO_ROOT -> sibling ../Macro Dashboard -> vendor/macro``
-    and the first *usable* candidate wins; a candidate is usable only when the
-    directory exists and carries both ``scripts/agentos.py`` and an ``agentos/`` store.
+    Returns ``(resolved_path, resolved_via, candidates_tried)``.  A non-null explicit
+    flag is authoritative and never falls through when unusable.  Without a flag, the
+    discovery ladder is ``MASTERMIND_MACRO_ROOT -> sibling ../Macro Dashboard ->
+    vendor/macro`` and the first *usable* candidate wins; a candidate is usable only
+    when the directory exists and carries both ``scripts/agentos.py`` and an
+    ``agentos/`` store.
 
     The sibling checkout deliberately outranks ``vendor/macro``.  The vendor pin exists
     so app code can import a *fixed* Macro engine revision and is therefore stale by
@@ -135,14 +137,16 @@ def resolve_macro_root(
     Every candidate tried is recorded (path + why it was rejected) so an unresolved
     packet can be diagnosed without re-running anything.
     """
-    sources: list[tuple[str, Path | None]] = [
-        ("flag", Path(explicit) if explicit else None),
-        ("env", Path(environ[ENV_MACRO_ROOT]) if environ.get(ENV_MACRO_ROOT) else None),
-        ("sibling", repo_root.parent / "Macro Dashboard"),
-        # `vendor/macro` is a tracked symlink; resolve it so the recorded path names
-        # the real target rather than the link.
-        ("vendor", (repo_root / "vendor" / "macro").resolve()),
-    ]
+    if explicit is not None:
+        sources: list[tuple[str, Path | None]] = [("flag", Path(explicit))]
+    else:
+        sources = [
+            ("env", Path(environ[ENV_MACRO_ROOT]) if environ.get(ENV_MACRO_ROOT) else None),
+            ("sibling", repo_root.parent / "Macro Dashboard"),
+            # `vendor/macro` is a tracked symlink; resolve it so the recorded path names
+            # the real target rather than the link.
+            ("vendor", (repo_root / "vendor" / "macro").resolve()),
+        ]
 
     candidates: list[dict[str, Any]] = []
     for via, path in sources:
