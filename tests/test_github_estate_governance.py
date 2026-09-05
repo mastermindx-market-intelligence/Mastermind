@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from enum import Enum
 
 import pytest
 
@@ -768,3 +769,182 @@ def test_disposable_private_repository_canary_fails_closed(
             security_and_analysis=security,
             actions_permissions=actions,
         )
+
+
+class _ForeignAdministrationFamily(str, Enum):
+    REPOSITORY_MERGE_POLICY = "repository_merge_policy"
+    ACTIONS_DEFAULT_PERMISSIONS = "actions_default_permissions"
+    SECURITY_AND_ANALYSIS = "security_and_analysis"
+
+
+def _spec_with_family(spec: AdministrationSpec, family: object) -> AdministrationSpec:
+    return AdministrationSpec(**{**spec.__dict__, "family": family})  # type: ignore[arg-type]
+
+
+def _family_lookalike_cases():
+    configured = _configured_cases()
+    by_family = {
+        AdministrationFamily.REPOSITORY_MERGE_POLICY: configured[0].values,
+        AdministrationFamily.ACTIONS_DEFAULT_PERMISSIONS: configured[1].values,
+        AdministrationFamily.SECURITY_AND_ANALYSIS: configured[2].values,
+    }
+    foreign = {
+        AdministrationFamily.REPOSITORY_MERGE_POLICY: (
+            _ForeignAdministrationFamily.REPOSITORY_MERGE_POLICY
+        ),
+        AdministrationFamily.ACTIONS_DEFAULT_PERMISSIONS: (
+            _ForeignAdministrationFamily.ACTIONS_DEFAULT_PERMISSIONS
+        ),
+        AdministrationFamily.SECURITY_AND_ANALYSIS: (
+            _ForeignAdministrationFamily.SECURITY_AND_ANALYSIS
+        ),
+    }
+    cases = []
+    for family, (current, spec) in by_family.items():
+        cases.append(
+            pytest.param(
+                current,
+                _spec_with_family(spec, family.value),
+                id=f"plain-string-{family.value}",
+            )
+        )
+        cases.append(
+            pytest.param(
+                current,
+                _spec_with_family(spec, foreign[family]),
+                id=f"foreign-enum-{family.value}",
+            )
+        )
+    return cases
+
+
+@pytest.mark.parametrize(("current", "spec"), _family_lookalike_cases())
+def test_family_lookalikes_refuse_before_transport(
+    current: dict,
+    spec: AdministrationSpec,
+):
+    transport = FakeTransport(current)
+
+    with pytest.raises(
+        GovernanceRefusal,
+        match="AdministrationFamily",
+    ):
+        apply_administration_family(transport, spec)
+
+    assert transport.read_count == 0
+    assert transport.mutations == []
+
+
+@pytest.mark.parametrize(
+    "invalid_family",
+    [
+        None,
+        True,
+        1,
+        1.5,
+        [],
+        {},
+        "",
+        "not-a-family",
+        b"bytes",
+    ],
+)
+def test_invalid_family_values_are_typed_refusals_before_transport(invalid_family):
+    current, spec = _configured_cases()[0].values
+    transport = FakeTransport(current)
+
+    with pytest.raises(
+        GovernanceRefusal,
+        match="AdministrationFamily",
+    ):
+        apply_administration_family(
+            transport,
+            _spec_with_family(spec, invalid_family),
+        )
+
+    assert transport.read_count == 0
+    assert transport.mutations == []
+
+
+def _unsafe_family_cases():
+    repo_before, repo_spec = _drift_cases()[0].values
+    repo_payload = {
+        **repo_spec.payload,
+        "allow_merge_commit": True,
+    }
+    actions_before, actions_spec = _drift_cases()[1].values
+    actions_payload = {
+        **actions_spec.payload,
+        "default_workflow_permissions": "write",
+    }
+    security_before, security_spec = _drift_cases()[2].values
+    security_payload = {
+        "security_and_analysis": {
+            "dependabot_security_updates": {"status": "enabled"},
+        }
+    }
+    return [
+        pytest.param(
+            repo_before,
+            AdministrationSpec(
+                **{
+                    **repo_spec.__dict__,
+                    "payload": repo_payload,
+                    "expected_after": repo_payload,
+                }
+            ),
+            id="repository-merge-policy",
+        ),
+        pytest.param(
+            actions_before,
+            AdministrationSpec(
+                **{
+                    **actions_spec.__dict__,
+                    "payload": actions_payload,
+                    "expected_after": actions_payload,
+                }
+            ),
+            id="actions-default-permissions",
+        ),
+        pytest.param(
+            security_before,
+            AdministrationSpec(
+                **{
+                    **security_spec.__dict__,
+                    "payload": security_payload,
+                    "expected_after": security_payload,
+                }
+            ),
+            id="security-and-analysis",
+        ),
+    ]
+
+
+@pytest.mark.parametrize(("before", "spec"), _unsafe_family_cases())
+def test_real_family_values_still_enforce_family_specific_restrictions(
+    before: dict,
+    spec: AdministrationSpec,
+):
+    transport = FakeTransport(before)
+
+    with pytest.raises(GovernanceRefusal):
+        apply_administration_family(transport, spec)
+
+    assert transport.read_count == 0
+    assert transport.mutations == []
+
+
+@pytest.mark.parametrize(("current", "spec"), _configured_cases())
+def test_real_family_values_remain_useful_zero_write_assessments(
+    current: dict,
+    spec: AdministrationSpec,
+):
+    transport = FakeTransport(current)
+
+    receipt = apply_administration_family(transport, spec)
+
+    assert receipt["verdict"] == "ALREADY_CONFIGURED"
+    assert receipt["effect"] == "NONE"
+    assert receipt["mutation_attempts"] == 0
+    assert transport.read_count == 1
+    assert transport.mutations == []
