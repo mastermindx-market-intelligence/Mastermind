@@ -41,6 +41,7 @@ from control_plane.session_truth_contract import (
     validate_input_document,
 )
 from control_plane.session_truth_rules import detect_findings
+from control_plane.session_truth_scope import select_session_truth_scope
 
 
 _SOURCE_ORDER = (
@@ -101,6 +102,7 @@ def _required_sources(inputs: Mapping[str, Any]) -> set[str]:
     # even when scope.linear names no exact identity. A declared binding that
     # cannot be read may never resolve to an empty index or negative testimony.
     if "linear" not in required:
+        selection = select_session_truth_scope(inputs)
         github = inputs.get("github")
         if _source_available(github):
             pull_requests = github.get("pull_requests")
@@ -108,7 +110,14 @@ def _required_sources(inputs: Mapping[str, Any]) -> set[str]:
                 pull_requests, (str, bytes)
             ):
                 for pull_request in pull_requests:
-                    if isinstance(pull_request, Mapping):
+                    identity = (
+                        pull_request.get("repository"),
+                        pull_request.get("number"),
+                    ) if isinstance(pull_request, Mapping) else None
+                    if (
+                        isinstance(pull_request, Mapping)
+                        and identity in selection.github_pull_requests
+                    ):
                         declared = pull_request.get("linear")
                         if isinstance(declared, str) and declared:
                             required.add("linear")

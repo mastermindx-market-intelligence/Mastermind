@@ -47,6 +47,14 @@ _MAS_RE = re.compile(r"^MAS-[0-9]+$")
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 RECORDS_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
+# These are input-safety ceilings, not business-data truncation limits.  The
+# largest accepted R1 proof observed before this contract was about 1.1 MiB,
+# 17,718 JSON values and depth 10.  The limits retain ample headroom while
+# making parser/copy/hash work finite and deterministic.
+MAX_JSON_BYTES = 16 * 1024 * 1024
+MAX_JSON_DEPTH = 128
+MAX_JSON_NODES = 250_000
+
 
 class SessionTruthContractError(ValueError):
     """Raised when an observation envelope violates the frozen R1 contract."""
@@ -58,33 +66,85 @@ def valid_source_records_digest(value: object) -> bool:
     return isinstance(value, str) and bool(RECORDS_DIGEST_RE.fullmatch(value))
 
 
-def _ensure_json_tree(value: object, label: str) -> None:
-    """Recursively bound ``value`` to string-keyed, finite, JSON-compatible content.
+def validate_json_tree(value: object, label: str = "value") -> None:
+    """Iteratively bound a value to finite, acyclic strict-JSON content.
 
     Invalid mapping keys or non-JSON values fail through the typed R1 error path
     instead of being coerced by the serializer (amendment §5: no coercion to
-    null/string/zero).
+    null/string/zero).  Containers at exactly ``MAX_JSON_DEPTH`` and trees at
+    exactly ``MAX_JSON_NODES`` are accepted; the next value is refused.
     """
 
-    if isinstance(value, Mapping):
-        for key, item in value.items():
+    # Each frame retains only an iterator over one active container.  Siblings
+    # are never all enqueued, so traversal memory is bounded by depth rather than
+    # by the product of depth and a wide, aliased input graph.
+    stack: list[tuple[object, object, str, int, bool]] = []
+    active_containers: set[int] = set()
+    nodes = 0
+    current: tuple[object, str, int] | None = (value, label, 1)
+    while current is not None or stack:
+        if current is not None:
+            item, path, depth = current
+            current = None
+            nodes += 1
+            if nodes > MAX_JSON_NODES:
+                raise SessionTruthContractError(
+                    f"{label} exceeds the maximum JSON node count of {MAX_JSON_NODES}"
+                )
+            if depth > MAX_JSON_DEPTH:
+                raise SessionTruthContractError(
+                    f"{label} exceeds the maximum JSON depth of {MAX_JSON_DEPTH}"
+                )
+
+            if isinstance(item, Mapping) or isinstance(item, list):
+                marker = id(item)
+                if marker in active_containers:
+                    raise SessionTruthContractError(
+                        f"{label} contains a container cycle"
+                    )
+                active_containers.add(marker)
+                children = iter(item.items()) if isinstance(item, Mapping) else enumerate(item)
+                stack.append((item, children, path, depth, isinstance(item, Mapping)))
+            elif isinstance(item, str):
+                try:
+                    item.encode("utf-8", errors="strict")
+                except UnicodeEncodeError as exc:
+                    raise SessionTruthContractError(
+                        f"{path} contains text that is not valid UTF-8"
+                    ) from exc
+            elif isinstance(item, float):
+                if not math.isfinite(item):
+                    raise SessionTruthContractError(
+                        f"{path} contains a forbidden non-finite number"
+                    )
+            elif item is not None and not isinstance(item, (int, bool)):
+                raise SessionTruthContractError(
+                    f"{path} contains a non-JSON value of type {type(item).__name__}"
+                )
+            continue
+
+        container, children, path, depth, is_mapping = stack[-1]
+        try:
+            key, child = next(children)  # type: ignore[arg-type]
+        except StopIteration:
+            stack.pop()
+            active_containers.remove(id(container))
+            continue
+        if is_mapping:
             if not isinstance(key, str):
                 raise SessionTruthContractError(
-                    f"{label} contains a non-string mapping key: {key!r}"
+                    f"{path} contains a non-string mapping key: {key!r}"
                 )
-            _ensure_json_tree(item, f"{label}.{key}")
-    elif isinstance(value, list):
-        for index, item in enumerate(value):
-            _ensure_json_tree(item, f"{label}[{index}]")
-    elif isinstance(value, float):
-        if not math.isfinite(value):
-            raise SessionTruthContractError(
-                f"{label} contains a forbidden non-finite number"
-            )
-    elif value is not None and not isinstance(value, (str, int, bool)):
-        raise SessionTruthContractError(
-            f"{label} contains a non-JSON value of type {type(value).__name__}"
-        )
+            try:
+                key.encode("utf-8", errors="strict")
+            except UnicodeEncodeError as exc:
+                raise SessionTruthContractError(
+                    f"{path} contains a mapping key that is not valid UTF-8"
+                ) from exc
+            child_path = f"{path}.{key}"
+        else:
+            child_path = f"{path}[{key}]"
+        current = (child, child_path, depth + 1)
 
 
 def canonical_json(value: object) -> str:
@@ -95,7 +155,7 @@ def canonical_json(value: object) -> str:
     coerced or emitted as non-RFC JSON.
     """
 
-    _ensure_json_tree(value, "value")
+    validate_json_tree(value, "value")
     try:
         return json.dumps(
             value,
@@ -104,7 +164,7 @@ def canonical_json(value: object) -> str:
             ensure_ascii=False,
             allow_nan=False,
         )
-    except (TypeError, ValueError) as exc:
+    except (RecursionError, TypeError, ValueError) as exc:
         raise SessionTruthContractError(
             f"value is not strict-JSON serializable: {exc}"
         ) from exc
@@ -113,7 +173,11 @@ def canonical_json(value: object) -> str:
 def semantic_hash(value: object) -> str:
     """Return the SHA-256 digest of canonical JSON with an explicit algorithm prefix."""
 
-    digest = hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+    try:
+        encoded = canonical_json(value).encode("utf-8", errors="strict")
+    except UnicodeEncodeError as exc:  # defensive if the encoder contract changes
+        raise SessionTruthContractError("value contains text that is not valid UTF-8") from exc
+    digest = hashlib.sha256(encoded).hexdigest()
     return f"sha256:{digest}"
 
 
@@ -248,13 +312,13 @@ def _validate_source(raw: Any, label: str) -> None:
         # Agent OS interior values are owner passthrough: bound them to strict
         # JSON up front and validate any present owner record digest exactly.
         state = source.get("state")
-        _ensure_json_tree(state, "agentos.state")
+        validate_json_tree(state, "agentos.state")
         if isinstance(state, Mapping) and "source_records_digest" in state:
             _records_digest(
                 state["source_records_digest"], "agentos.state.source_records_digest"
             )
         contexts = source.get("contexts")
-        _ensure_json_tree(contexts, "agentos.contexts")
+        validate_json_tree(contexts, "agentos.contexts")
         if isinstance(contexts, list):
             for index, context in enumerate(contexts):
                 if isinstance(context, Mapping) and "source_records_digest" in context:
@@ -273,6 +337,7 @@ def validate_input_document(doc: Mapping[str, Any]) -> dict[str, Any]:
     """
 
     root = _mapping(doc, "input")
+    validate_json_tree(root, "input")
     _exact_keys(root, _TOP_LEVEL_KEYS, "input")
     if root["schema"] != INPUT_SCHEMA:
         raise SessionTruthContractError(

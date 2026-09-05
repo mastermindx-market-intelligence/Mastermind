@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from control_plane.session_truth_contract import SessionTruthContractError
+from control_plane.session_truth_contract import MAX_JSON_BYTES, SessionTruthContractError
 
 try:
     from control_plane.session_truth_snapshots import (
@@ -385,3 +385,46 @@ def test_load_snapshot_still_accepts_finite_numbers(tmp_path):
     path = tmp_path / "finite.json"
     path.write_text(text, encoding="utf-8")
     assert load_snapshot(path, GITHUB_SCHEMA)["observed_delay_hours"] == 1.5
+
+
+def test_load_snapshot_byte_boundary_is_inclusive(tmp_path):
+    document = json.dumps(
+        {"schema": GITHUB_SCHEMA, "available": False, "reason": "UNAVAILABLE"}
+    ).encode("utf-8")
+    raw = document + b" " * (MAX_JSON_BYTES - len(document))
+    path = tmp_path / "boundary.json"
+    path.write_bytes(raw)
+    assert load_snapshot(path, GITHUB_SCHEMA)["schema"] == GITHUB_SCHEMA
+
+    path.write_bytes(raw + b" ")
+    with pytest.raises(SessionTruthContractError, match="maximum size"):
+        load_snapshot(path, GITHUB_SCHEMA)
+
+
+def test_load_snapshot_rejects_invalid_utf8(tmp_path):
+    path = tmp_path / "invalid-utf8.json"
+    path.write_bytes(b'{"schema":"' + GITHUB_SCHEMA.encode() + b'","x":"\xff"}')
+    with pytest.raises(SessionTruthContractError, match="valid UTF-8"):
+        load_snapshot(path, GITHUB_SCHEMA)
+
+
+def test_load_snapshot_rejects_excessive_json_depth(tmp_path):
+    value = 0
+    for _ in range(140):
+        value = [value]
+    path = tmp_path / "deep.json"
+    path.write_text(
+        json.dumps({"schema": GITHUB_SCHEMA, "payload": value}), encoding="utf-8"
+    )
+    with pytest.raises(SessionTruthContractError, match="maximum JSON depth"):
+        load_snapshot(path, GITHUB_SCHEMA)
+
+
+def test_load_snapshot_maps_parser_integer_limit_to_contract_error(tmp_path):
+    path = tmp_path / "oversized-integer.json"
+    path.write_text(
+        '{"schema":"' + GITHUB_SCHEMA + '","value":' + "9" * 5000 + "}",
+        encoding="utf-8",
+    )
+    with pytest.raises(SessionTruthContractError, match="not valid JSON"):
+        load_snapshot(path, GITHUB_SCHEMA)

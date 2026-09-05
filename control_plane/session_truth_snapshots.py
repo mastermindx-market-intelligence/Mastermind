@@ -15,7 +15,11 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from control_plane.session_truth_contract import SessionTruthContractError
+from control_plane.session_truth_contract import (
+    MAX_JSON_BYTES,
+    SessionTruthContractError,
+    validate_json_tree,
+)
 
 
 GITHUB_SCHEMA = "mastermind.github_observation.v1"
@@ -401,6 +405,7 @@ def _unavailable(doc: Mapping[str, Any], schema: str, label: str) -> dict[str, A
 
 def _prepare(doc: Any, schema: str, label: str) -> Mapping[str, Any]:
     root = _mapping(doc, label)
+    validate_json_tree(root, label)
     _reject_secret_keys(root)
     if root.get("schema") != schema:
         raise _error(f"{label}.schema must be exactly {schema!r}")
@@ -419,14 +424,22 @@ def load_snapshot(path: Path | str, expected_schema: str) -> dict[str, Any]:
     if not isinstance(expected_schema, str) or not expected_schema:
         raise _error("expected_schema must be a non-empty string")
     try:
-        text = Path(path).read_text(encoding="utf-8")
+        with Path(path).open("rb") as stream:
+            raw = stream.read(MAX_JSON_BYTES + 1)
     except OSError as exc:
         raise _error(f"snapshot could not be read: {exc}") from exc
+    if len(raw) > MAX_JSON_BYTES:
+        raise _error(f"snapshot exceeds the maximum size of {MAX_JSON_BYTES} bytes")
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise _error("snapshot is not valid UTF-8") from exc
     try:
         parsed = json.loads(text, parse_constant=_reject_non_finite_constant)
-    except json.JSONDecodeError as exc:
+    except (RecursionError, ValueError) as exc:
         raise _error("snapshot is not valid JSON") from exc
     root = _mapping(parsed, "snapshot")
+    validate_json_tree(root, "snapshot")
     _reject_secret_keys(root)
     if root.get("schema") != expected_schema:
         raise _error(f"snapshot schema must be exactly {expected_schema!r}")

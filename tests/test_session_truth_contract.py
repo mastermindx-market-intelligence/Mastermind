@@ -82,6 +82,9 @@ def test_contract_constants_are_exact():
         "MODIFICATION_REFUSED",
     }
     assert module.FINDING_SEVERITIES == {"FATAL", "BLOCKING", "WARNING", "INFO"}
+    assert module.MAX_JSON_BYTES == 16 * 1024 * 1024
+    assert module.MAX_JSON_DEPTH == 128
+    assert module.MAX_JSON_NODES == 250_000
 
 
 def test_canonical_json_and_hash_are_order_independent():
@@ -251,4 +254,60 @@ def test_validate_rejects_non_string_keys_inside_agentos_interior():
     doc = _minimal_input(module)
     doc["agentos"]["state"]["workstreams"] = [{1: "not-a-string-key"}]
     with pytest.raises(module.SessionTruthContractError):
+        module.validate_input_document(doc)
+
+
+def _nested_list(wrappers):
+    value = 0
+    for _ in range(wrappers):
+        value = [value]
+    return value
+
+
+def test_json_tree_depth_boundary_is_inclusive_and_iterative():
+    module = _contract()
+    # The scalar is one node below each wrapper: 127 wrappers reach depth 128.
+    assert module.canonical_json(_nested_list(module.MAX_JSON_DEPTH - 1))
+    with pytest.raises(module.SessionTruthContractError, match="maximum JSON depth"):
+        module.canonical_json(_nested_list(module.MAX_JSON_DEPTH))
+
+
+def test_json_tree_node_boundary_is_inclusive():
+    module = _contract()
+    # The list container is one node and each scalar element is one node.
+    module.validate_json_tree([0] * (module.MAX_JSON_NODES - 1))
+    with pytest.raises(module.SessionTruthContractError, match="node count"):
+        module.validate_json_tree([0] * module.MAX_JSON_NODES)
+
+
+def test_json_tree_rejects_cycles_before_copy_or_hash():
+    module = _contract()
+    cycle = []
+    cycle.append(cycle)
+    with pytest.raises(module.SessionTruthContractError, match="container cycle"):
+        module.canonical_json(cycle)
+
+
+def test_json_tree_counts_wide_aliased_values_without_sibling_enqueuing(monkeypatch):
+    module = _contract()
+    monkeypatch.setattr(module, "MAX_JSON_NODES", 8)
+    shared = [0, 1, 2, 3, 4, 5]
+    with pytest.raises(module.SessionTruthContractError, match="node count"):
+        module.validate_json_tree([shared, shared])
+
+
+@pytest.mark.parametrize("value", ["\ud800", {"\udfff": "x"}, {"x": "\ud800"}])
+def test_json_tree_rejects_lone_surrogates_as_invalid_utf8(value):
+    module = _contract()
+    with pytest.raises(module.SessionTruthContractError, match="valid UTF-8"):
+        module.canonical_json(value)
+    with pytest.raises(module.SessionTruthContractError, match="valid UTF-8"):
+        module.semantic_hash(value)
+
+
+def test_agentos_interior_depth_fails_through_contract_error():
+    module = _contract()
+    doc = _minimal_input(module)
+    doc["agentos"]["state"]["workstreams"] = _nested_list(module.MAX_JSON_DEPTH)
+    with pytest.raises(module.SessionTruthContractError, match="maximum JSON depth"):
         module.validate_input_document(doc)

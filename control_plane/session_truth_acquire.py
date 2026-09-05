@@ -21,6 +21,11 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from control_plane.ceo_boot_packet import git_sha, resolve_macro_root
+from control_plane.session_truth_contract import (
+    MAX_JSON_BYTES,
+    SessionTruthContractError,
+    validate_json_tree,
+)
 
 
 _CANONICAL_SKILLPACK_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
@@ -56,7 +61,7 @@ def _git_text(repo_root: Path, *args: str) -> str | None:
             timeout=_GIT_TIMEOUT,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
         return None
     if proc.returncode != 0:
         return None
@@ -181,7 +186,7 @@ def _run_agentos(
             cmd,
             cwd=os.fspath(macro_root),
             capture_output=True,
-            text=True,
+            text=False,
             timeout=timeout,
             check=False,
         )
@@ -193,11 +198,26 @@ def _run_agentos(
         raise AcquisitionError(f"Agent OS read could not be launched: {exc}") from exc
 
     if proc.returncode != 0:
-        tail = (proc.stderr or "").strip()[-200:]
+        tail = (proc.stderr or b"").decode("utf-8", errors="replace").strip()[-200:]
         raise AcquisitionError(
             f"Agent OS read exited {proc.returncode}: {tail or '<no stderr>'}"
         )
-    return proc.stdout or ""
+    raw = proc.stdout or b""
+    if len(raw) > MAX_JSON_BYTES:
+        raise AcquisitionError(
+            f"Agent OS read exceeds the maximum size of {MAX_JSON_BYTES} bytes"
+        )
+    try:
+        return raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise AcquisitionError("Agent OS read emitted invalid UTF-8") from exc
+
+
+def _validate_agentos_json_tree(value: object, label: str) -> None:
+    try:
+        validate_json_tree(value, label)
+    except SessionTruthContractError as exc:
+        raise AcquisitionError(f"{label} exceeds the strict JSON boundary") from exc
 
 
 def _decode_leading_json(text: str, label: str) -> tuple[dict[str, Any], str]:
@@ -208,10 +228,11 @@ def _decode_leading_json(text: str, label: str) -> tuple[dict[str, Any], str]:
         value, end = json.JSONDecoder(
             parse_constant=_reject_non_finite_constant
         ).raw_decode(stripped)
-    except json.JSONDecodeError as exc:
+    except (RecursionError, ValueError) as exc:
         raise AcquisitionError(f"{label} emitted malformed JSON") from exc
     if not isinstance(value, dict):
         raise AcquisitionError(f"{label} must emit a JSON object")
+    _validate_agentos_json_tree(value, label)
     return value, stripped[end:].strip()
 
 
@@ -320,10 +341,11 @@ def collect_agentos(
             context = json.loads(
                 context_text, parse_constant=_reject_non_finite_constant
             )
-        except json.JSONDecodeError as exc:
+        except (RecursionError, ValueError) as exc:
             raise AcquisitionError("Agent OS compile-context emitted malformed JSON") from exc
         if not isinstance(context, dict):
             raise AcquisitionError("Agent OS compile-context must emit a JSON object")
+        _validate_agentos_json_tree(context, "Agent OS compile-context")
         _validate_context(context, workstream)
         contexts.append(context)
 

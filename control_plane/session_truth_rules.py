@@ -14,6 +14,7 @@ from datetime import date, datetime
 from typing import Any
 
 from control_plane.session_truth_contract import valid_source_records_digest
+from control_plane.session_truth_scope import select_session_truth_scope
 
 FINDING_REGISTRY = {
     "AGENTOS_RECORD_IDENTITY_UNAVAILABLE": ("BLOCKING", "agentos", "agentos"),
@@ -294,6 +295,7 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Return deterministic drift findings without mutating or consulting any source."""
 
     indexes = build_indexes(inputs)
+    selection = select_session_truth_scope(inputs)
     workstreams = indexes["workstreams"]
     linear = indexes["linear"]
     linear_available = indexes["linear_available"]
@@ -316,6 +318,8 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
             )
 
     for issue_id, issue in linear.items():
+        if issue_id not in selection.linear_issues:
+            continue
         workstream_key = issue.get("workstream")
         if isinstance(workstream_key, str) and workstream_key and workstream_key not in workstreams:
             _append(
@@ -386,6 +390,8 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                 )
 
     for issue_id, issue in linear.items():
+        if issue_id not in selection.linear_issues:
+            continue
         parent_id = issue.get("parent_id")
         parent = linear.get(parent_id) if isinstance(parent_id, str) else None
         if (
@@ -403,7 +409,11 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
             )
 
     slack = inputs.get("slack")
-    if isinstance(slack, Mapping) and slack.get("available"):
+    if (
+        selection.slack_messages
+        and isinstance(slack, Mapping)
+        and slack.get("available")
+    ):
         slack_time = _timestamp(slack.get("observed_at"))
         owner_times: list[tuple[str, datetime, str]] = []
         for source_name in ("github", "linear"):
@@ -427,6 +437,8 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
 
     active_by_workstream_wave: dict[tuple[str, object], list[dict[str, Any]]] = defaultdict(list)
     for (repository, number), pr in github.items():
+        if (repository, number) not in selection.github_pull_requests:
+            continue
         subject = f"{repository}#{number}"
         workstream_key = pr.get("workstream")
         if not workstream_key:
@@ -531,6 +543,8 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
         scope_repositories[0] if len(scope_repositories) == 1 else None
     )
     for workstream_key, workstream in workstreams.items():
+        if workstream_key not in selection.workstreams:
+            continue
         for agentos_pr in workstream.get("prs") or []:
             if not isinstance(agentos_pr, Mapping) or type(agentos_pr.get("number")) is not int:
                 continue
@@ -574,6 +588,7 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
             contexts_missing = [
                 index
                 for index, context in enumerate(raw_contexts)
+                if index in selection.agentos_context_indexes
                 if not (
                     isinstance(context, Mapping)
                     and valid_source_records_digest(context.get("source_records_digest"))
@@ -591,7 +606,11 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                 source_b={"contexts_missing_source_records_digest": contexts_missing},
             )
 
-    if isinstance(agentos, Mapping) and agentos.get("available"):
+    if (
+        bool(scope.get("workstreams"))
+        and isinstance(agentos, Mapping)
+        and agentos.get("available")
+    ):
         state = agentos.get("state")
         if isinstance(state, Mapping):
             direct_hash = state.get("direct_state_hash")
@@ -606,7 +625,9 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                     source_b={"generated_state_hash": generated_hash},
                 )
 
-        for context in agentos.get("contexts") or []:
+        for context_index, context in enumerate(agentos.get("contexts") or []):
+            if context_index not in selection.agentos_context_indexes:
+                continue
             if not isinstance(context, Mapping):
                 continue
             target = context.get("target")
@@ -657,7 +678,16 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
             "executive_worker",
         )
         namespace_values: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        scoped_bindings = []
         for binding in _rows(identities, "bindings"):
+            binding_values = {
+                (field, binding.get(field))
+                for field in namespace_fields
+                if isinstance(binding.get(field), str) and binding.get(field)
+            }
+            if binding_values & selection.identity_references:
+                scoped_bindings.append(binding)
+        for binding in scoped_bindings:
             if binding.get("role") == "sol_ceo" and not binding.get("slack_principal"):
                 _append(
                     findings,
@@ -724,7 +754,8 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
         )
     skillpack = inputs.get("skillpack")
     if (
-        isinstance(executive, Mapping)
+        (requires_executive or bool(selection.executive_operations))
+        and isinstance(executive, Mapping)
         and executive.get("available")
         and isinstance(skillpack, Mapping)
         and skillpack.get("available")
@@ -746,6 +777,9 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
             if isinstance(channel.get("channel_id"), str)
         }
         for message in _rows(slack, "messages"):
+            message_identity = (message.get("channel_id"), message.get("ts"))
+            if message_identity not in selection.slack_messages:
+                continue
             subject = f"{message.get('channel_id')}@{message.get('ts')}"
             runnable = _is_runnable(message)
             target = message.get("target_principal_id")
@@ -788,17 +822,27 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                     source_b={"acked": False},
                 )
 
-            if runnable and isinstance(target, str) and target:
-                bindings = indexes["identities_by_slack"].get(target, [])
-                if not bindings:
+            # Both logical sender and requested target are identity dependencies
+            # of this selected message.  A malformed binding must not disappear
+            # merely because its missing namespace value prevents a reverse join.
+            for identity_field in ("sender_id", "target_principal_id"):
+                principal = message.get(identity_field)
+                if (
+                    isinstance(principal, str)
+                    and principal
+                    and not indexes["identities_by_slack"].get(principal, [])
+                ):
                     _append(
                         findings,
                         seen,
                         "UNKNOWN_SEAT_IDENTITY",
-                        target,
-                        source_a={"target_principal_id": target},
+                        principal,
+                        source_a={identity_field: principal},
                         source_b=None,
                     )
+
+            if runnable and isinstance(target, str) and target:
+                bindings = indexes["identities_by_slack"].get(target, [])
                 if any(binding.get("role") == "sol_ceo" for binding in bindings):
                     _append(
                         findings,
@@ -868,6 +912,14 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                     )
 
     for operation_key, carriers in indexes["github_by_operation"].items():
+        if operation_key not in selection.operation_keys:
+            continue
+        carriers = [
+            carrier
+            for carrier in carriers
+            if (carrier.get("repository"), carrier.get("number"))
+            in selection.github_pull_requests
+        ]
         active = [carrier for carrier in carriers if carrier.get("state") == "open"]
         if len(active) > 1:
             _append(
@@ -882,6 +934,14 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
             )
 
     for operation_key, messages in indexes["slack_by_operation"].items():
+        if operation_key not in selection.operation_keys:
+            continue
+        messages = [
+            message
+            for message in messages
+            if (message.get("channel_id"), message.get("ts"))
+            in selection.slack_messages
+        ]
         hashes = {
             message.get("payload_hash")
             for message in messages

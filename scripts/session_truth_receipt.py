@@ -167,10 +167,15 @@ def main(
     except SessionTruthContractError:
         return _error(err, "invalid session truth input")
 
-    if args.emit_json:
-        out.write(canonical_json(receipt) + "\n")
-    else:
-        out.write(render_receipt(receipt))
+    try:
+        rendered = (
+            canonical_json(receipt) + "\n"
+            if args.emit_json
+            else render_receipt(receipt)
+        )
+    except SessionTruthContractError:
+        return _error(err, "invalid session truth output")
+    out.write(rendered)
     return 0
 
 

@@ -4,6 +4,8 @@ import copy
 
 import pytest
 
+from control_plane.session_truth_contract import SessionTruthContractError
+
 try:
     from control_plane.session_truth import (
         build_receipt,
@@ -164,6 +166,84 @@ def test_optional_source_unavailable_is_partial(source):
     assert source in admission["optional_sources_unavailable"]
 
 
+def test_scope_without_row_selection_seed_fails_closed():
+    doc = healthy_inputs()
+    doc["scope"]["workstreams"] = []
+    doc["scope"]["linear"] = []
+    doc["scope"]["operation_key"] = None
+
+    with pytest.raises(
+        SessionTruthContractError,
+        match="scope requires a workstream, Linear issue or operation key seed",
+    ):
+        compute_admission(doc, [])
+
+
+def test_unrelated_pr_linear_binding_does_not_make_linear_required():
+    doc = healthy_inputs()
+    doc["linear"] = {"available": False, "reason": "LINEAR_UNAVAILABLE"}
+    doc["github"]["pull_requests"] = [
+        {
+            "repository": MASTER,
+            "number": 999,
+            "state": "open",
+            "draft": True,
+            "head_sha": SHA_A,
+            "base_sha": SHA_B,
+            "merge_sha": None,
+            "ci": "pending",
+            "workstream": "WS:OTHER",
+            "linear": "MAS-999",
+            "portfolio_mode": "implementation",
+            "wave": "OTHER",
+            "authority": "implementation",
+            "completion": "merge-is-done",
+            "proof_state": "open",
+            "operation_key": "op-unrelated",
+            "pickup_head_sha": SHA_A,
+        }
+    ]
+
+    admission = compute_admission(doc, [])
+
+    assert admission["mode"] == "GROUNDING_PARTIAL"
+    assert admission["modification_safe"] is True
+    assert admission["required_sources_unavailable"] == []
+    assert "linear" in admission["optional_sources_unavailable"]
+
+
+def test_scoped_pr_linear_binding_still_makes_linear_required():
+    doc = healthy_inputs()
+    doc["linear"] = {"available": False, "reason": "LINEAR_UNAVAILABLE"}
+    doc["github"]["pull_requests"] = [
+        {
+            "repository": MASTER,
+            "number": 170,
+            "state": "open",
+            "draft": True,
+            "head_sha": SHA_A,
+            "base_sha": SHA_B,
+            "merge_sha": None,
+            "ci": "pending",
+            "workstream": "WS:TARGET",
+            "linear": "MAS-170",
+            "portfolio_mode": "implementation",
+            "wave": "R1",
+            "authority": "implementation",
+            "completion": "merge-is-done",
+            "proof_state": "open",
+            "operation_key": "op-r1",
+            "pickup_head_sha": SHA_A,
+        }
+    ]
+
+    admission = compute_admission(doc, [])
+
+    assert admission["mode"] == "DIALOGUE_ONLY"
+    assert admission["modification_safe"] is False
+    assert admission["required_sources_unavailable"] == ["linear"]
+
+
 def test_envelope_clock_does_not_change_semantic_hash():
     inputs = healthy_inputs()
     one = build_receipt(
@@ -187,6 +267,21 @@ def test_source_revision_change_changes_semantic_hash():
     two_inputs["github"]["observed_at"] = "2026-08-27T08:01:00Z"
     one = build_receipt(one_inputs, observed_started_at=NOW, observed_ended_at=NOW)
     two = build_receipt(two_inputs, observed_started_at=NOW, observed_ended_at=NOW)
+    assert one["semantic_hash"] != two["semantic_hash"]
+
+
+def test_global_agentos_owner_digest_remains_in_semantic_identity():
+    one_inputs = healthy_inputs()
+    two_inputs = healthy_inputs()
+    two_inputs["agentos"]["state"]["source_records_digest"] = (
+        "sha256:" + "5" * 64
+    )
+
+    one = build_receipt(one_inputs, observed_started_at=NOW, observed_ended_at=NOW)
+    two = build_receipt(two_inputs, observed_started_at=NOW, observed_ended_at=NOW)
+
+    assert one["observations"]["agentos"]["state"]["source_records_digest"] == STATE_DIGEST
+    assert two["observations"]["agentos"]["state"]["source_records_digest"] == "sha256:" + "5" * 64
     assert one["semantic_hash"] != two["semantic_hash"]
 
 
@@ -597,6 +692,7 @@ def test_missing_owner_digest_blocks_when_agentos_required():
 def test_missing_owner_digest_with_optional_agentos_never_blocks():
     inputs = acquired_inputs(CLOCK_ONE)
     inputs["scope"]["workstreams"] = []
+    inputs["scope"]["operation_key"] = "op-optional-agentos"
     receipt = build_receipt(inputs, observed_started_at=CLOCK_ONE, observed_ended_at=CLOCK_ONE)
     codes = {finding["code"] for finding in receipt["findings"]}
     assert "AGENTOS_RECORD_IDENTITY_UNAVAILABLE" not in codes

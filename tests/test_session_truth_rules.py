@@ -11,6 +11,7 @@ try:
         build_indexes,
         detect_findings,
     )
+    from control_plane.session_truth_scope import select_session_truth_scope
 except ModuleNotFoundError as exc:
     if exc.name != "control_plane.session_truth_rules":
         raise
@@ -22,6 +23,7 @@ except ModuleNotFoundError as exc:
     compute_admission = _missing
     build_indexes = _missing
     detect_findings = _missing
+    select_session_truth_scope = _missing
 
 
 MASTER = "mastermindx-market-intelligence/Mastermind"
@@ -387,6 +389,7 @@ def _mutate(code: str, doc: dict) -> None:
     elif code == "UNKNOWN_SEAT_IDENTITY":
         doc["identities"]["bindings"][0]["slack_principal"] = None
     elif code == "SERVICE_ACTOR_UNBOUND":
+        doc["slack"]["messages"][0]["sender_id"] = "U-SERVICE"
         doc["identities"]["bindings"][2]["service_actor"] = None
     elif code == "ACTOR_ROLE_COLLISION":
         collision = copy.deepcopy(doc["identities"]["bindings"][1])
@@ -662,6 +665,321 @@ def test_rules_never_mutate_input(healthy):
     build_indexes(healthy)
     detect_findings(healthy)
     assert healthy == before
+
+
+def _unrelated_pr(number: int, *, operation_key: str) -> dict:
+    row = _pr(number, operation_key=operation_key)
+    row.update(
+        {
+            "workstream": "WS:OTHER",
+            "linear": "MAS-999",
+            "wave": "OTHER",
+        }
+    )
+    return row
+
+
+def test_unrelated_pr_linear_binding_does_not_enter_scope(healthy):
+    changed = copy.deepcopy(healthy)
+    changed["scope"]["linear"] = []
+    changed["github"]["pull_requests"][0]["linear"] = None
+    changed["github"]["pull_requests"].append(
+        _unrelated_pr(999, operation_key="op-unrelated")
+    )
+
+    selection = select_session_truth_scope(changed)
+
+    assert (MASTER, 170) in selection.github_pull_requests
+    assert (MASTER, 999) not in selection.github_pull_requests
+    assert "MAS-999" not in selection.linear_issues
+    assert "op-unrelated" not in selection.operation_keys
+    assert "ORPHAN_GITHUB_CARRIER" not in _codes(changed)
+
+
+def test_unrelated_done_issue_does_not_block_selected_scope(healthy):
+    changed = copy.deepcopy(healthy)
+    unrelated = _issue("MAS-999")
+    unrelated.update(
+        {"status": "Done", "workstream": "WS:OTHER", "github_relations": []}
+    )
+    changed["linear"]["issues"].append(unrelated)
+
+    assert "MAS-999" not in select_session_truth_scope(changed).linear_issues
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" not in _codes(changed)
+    assert "ORPHAN_LINEAR_ISSUE" not in _codes(changed)
+
+
+def test_unrelated_active_carriers_do_not_refuse_selected_scope(healthy):
+    changed = copy.deepcopy(healthy)
+    for number in (998, 999):
+        row = _unrelated_pr(number, operation_key=f"op-unrelated-{number}")
+        row["linear"] = None
+        changed["github"]["pull_requests"].append(row)
+
+    selection = select_session_truth_scope(changed)
+
+    assert selection.github_pull_requests == frozenset({(MASTER, 170)})
+    assert "MULTIPLE_ACTIVE_CARRIERS" not in _codes(changed)
+    assert "ORPHAN_GITHUB_CARRIER" not in _codes(changed)
+
+
+def test_selected_agentos_pr_number_reaches_exact_repository_pr(healthy):
+    changed = copy.deepcopy(healthy)
+    pr = changed["github"]["pull_requests"][0]
+    pr.update({"workstream": None, "linear": None, "operation_key": "op-other"})
+    changed["scope"]["linear"] = []
+    changed["scope"]["operation_key"] = None
+
+    selection = select_session_truth_scope(changed)
+
+    assert selection.github_pull_requests == frozenset({(MASTER, 170)})
+    assert "GITHUB_PR_UNBOUND" in _codes(changed)
+
+
+def test_explicit_linear_and_operation_seeds_form_a_union(healthy):
+    changed = copy.deepcopy(healthy)
+    selected_by_linear = _unrelated_pr(998, operation_key="op-linear-neighbor")
+    selected_by_linear["linear"] = "MAS-998"
+    selected_by_operation = _unrelated_pr(999, operation_key="op-selected")
+    selected_by_operation["linear"] = None
+    changed["github"]["pull_requests"].extend(
+        [selected_by_linear, selected_by_operation]
+    )
+    issue = _issue("MAS-998")
+    issue.update(
+        {
+            "workstream": "WS:LINEAR",
+            "github_relations": [
+                {
+                    "repository": MASTER,
+                    "number": 998,
+                    "relation": "contributing",
+                }
+            ],
+        }
+    )
+    changed["linear"]["issues"].append(issue)
+    changed["scope"]["linear"].append("MAS-998")
+    changed["scope"]["operation_key"] = "op-selected"
+
+    selection = select_session_truth_scope(changed)
+
+    assert {(MASTER, 170), (MASTER, 998), (MASTER, 999)} <= set(
+        selection.github_pull_requests
+    )
+    assert {"WS:TARGET", "WS:LINEAR", "WS:OTHER"} <= set(selection.workstreams)
+    assert {"MAS-10", "MAS-998"} <= set(selection.linear_issues)
+    assert {"op-main", "op-linear-neighbor", "op-selected"} <= set(
+        selection.operation_keys
+    )
+
+
+def test_exact_parent_child_of_selected_linear_issue_is_in_scope(healthy):
+    changed = copy.deepcopy(healthy)
+    parent = _issue("MAS-20")
+    parent.update({"status": "Done", "workstream": "WS:PARENT", "github_relations": []})
+    child = _issue("MAS-21")
+    child.update(
+        {
+            "parent_id": "MAS-20",
+            "workstream": "WS:CHILD",
+            "github_relations": [],
+        }
+    )
+    changed["linear"]["issues"].extend([parent, child])
+    changed["scope"]["linear"].append("MAS-20")
+
+    selection = select_session_truth_scope(changed)
+
+    assert {"MAS-20", "MAS-21"} <= set(selection.linear_issues)
+    assert "LINEAR_PARENT_CHILD_DIVERGENCE" in _codes(changed)
+
+
+def test_unrelated_slack_and_identity_conflicts_do_not_enter_scope(healthy):
+    changed = copy.deepcopy(healthy)
+    message = _slack_message(operation_key="op-unrelated")
+    message.update(
+        {
+            "ts": "1787817956.208049",
+            "sender_id": "U-OTHER",
+            "target_principal_id": "U-OTHER-WORKER",
+            "receiver_eligible": False,
+            "acked": False,
+        }
+    )
+    changed["slack"]["messages"].append(message)
+    changed["identities"]["bindings"].extend(
+        [
+            {
+                "seat": "OtherOne",
+                "slack_principal": "U-OTHER",
+                "github_account": None,
+                "linear_actor": None,
+                "executive_worker": None,
+                "provider_realm": "other-one",
+                "role": "worker",
+                "service_actor": None,
+            },
+            {
+                "seat": "OtherTwo",
+                "slack_principal": "U-OTHER",
+                "github_account": None,
+                "linear_actor": None,
+                "executive_worker": None,
+                "provider_realm": "other-two",
+                "role": "sol_ceo",
+                "service_actor": None,
+            },
+        ]
+    )
+
+    codes = _codes(changed)
+
+    assert "SLACK_TRANSPORT_WITHOUT_RECEIVER" not in codes
+    assert "ACTOR_ROLE_COLLISION" not in codes
+
+
+def test_unrelated_same_channel_member_does_not_select_identity(healthy):
+    changed = copy.deepcopy(healthy)
+    changed["slack"]["channels"][0]["member_ids"].append("U-OTHER")
+    changed["identities"]["bindings"].extend(
+        [
+            {
+                "seat": "OtherService",
+                "slack_principal": "U-OTHER",
+                "github_account": None,
+                "linear_actor": None,
+                "executive_worker": None,
+                "provider_realm": "other-service",
+                "role": "service_actor",
+                "service_actor": None,
+            },
+            {
+                "seat": "OtherCollision",
+                "slack_principal": "U-OTHER",
+                "github_account": None,
+                "linear_actor": None,
+                "executive_worker": None,
+                "provider_realm": "other-collision",
+                "role": "worker",
+                "service_actor": None,
+            },
+        ]
+    )
+
+    selection = select_session_truth_scope(changed)
+    codes = _codes(changed)
+
+    assert ("slack_principal", "U-OTHER") not in selection.identity_references
+    assert "SERVICE_ACTOR_UNBOUND" not in codes
+    assert "ACTOR_ROLE_COLLISION" not in codes
+
+
+def test_identity_reference_namespace_is_not_flattened(healthy):
+    changed = copy.deepcopy(healthy)
+    changed["identities"]["bindings"].append(
+        {
+            "seat": "NamespaceCollision",
+            "slack_principal": None,
+            "github_account": None,
+            "linear_actor": None,
+            "executive_worker": "U-SOL",
+            "provider_realm": "namespace-collision",
+            "role": "worker",
+            "service_actor": None,
+        }
+    )
+
+    selection = select_session_truth_scope(changed)
+
+    assert ("slack_principal", "U-SOL") in selection.identity_references
+    assert ("executive_worker", "U-SOL") not in selection.identity_references
+    assert "ACTOR_ROLE_COLLISION" not in _codes(changed)
+
+
+def test_derived_workstream_context_does_not_become_broad_selector(healthy):
+    changed = copy.deepcopy(healthy)
+    selected_issue = _issue("MAS-998")
+    selected_issue.update(
+        {
+            "workstream": "WS:DERIVED",
+            "github_relations": [
+                {
+                    "repository": MASTER,
+                    "number": 998,
+                    "relation": "program_gate",
+                }
+            ],
+        }
+    )
+    unrelated_issue = _issue("MAS-999")
+    unrelated_issue.update(
+        {
+            "status": "Done",
+            "workstream": "WS:DERIVED",
+            "github_relations": [],
+        }
+    )
+    selected_pr = _unrelated_pr(998, operation_key="op-derived-selected")
+    selected_pr.update({"workstream": "WS:DERIVED", "linear": "MAS-998"})
+    unrelated_pr = _unrelated_pr(999, operation_key="op-derived-unrelated")
+    unrelated_pr.update({"workstream": "WS:DERIVED", "linear": "MAS-999"})
+    changed["linear"]["issues"].extend([selected_issue, unrelated_issue])
+    changed["github"]["pull_requests"].extend([selected_pr, unrelated_pr])
+    changed["scope"]["linear"].append("MAS-998")
+
+    selection = select_session_truth_scope(changed)
+    codes = _codes(changed)
+
+    assert "WS:DERIVED" in selection.workstreams
+    assert (MASTER, 998) in selection.github_pull_requests
+    assert "MAS-998" in selection.linear_issues
+    assert (MASTER, 999) not in selection.github_pull_requests
+    assert "MAS-999" not in selection.linear_issues
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" not in codes
+    assert "MULTIPLE_ACTIVE_CARRIERS" not in codes
+
+
+def test_selected_message_missing_sender_identity_remains_unknown(healthy):
+    changed = copy.deepcopy(healthy)
+    changed["identities"]["bindings"][0]["slack_principal"] = None
+
+    findings = [
+        finding
+        for finding in detect_findings(changed)
+        if finding["code"] == "UNKNOWN_SEAT_IDENTITY"
+    ]
+
+    assert len(findings) == 1
+    assert findings[0]["subject"] == "U-SOL"
+
+
+def test_scope_selection_is_input_order_independent(healthy):
+    changed = copy.deepcopy(healthy)
+    second_pr = _unrelated_pr(999, operation_key="op-unrelated")
+    second_issue = _issue("MAS-999")
+    second_issue.update({"workstream": "WS:OTHER", "github_relations": []})
+    changed["github"]["pull_requests"].append(second_pr)
+    changed["linear"]["issues"].append(second_issue)
+    changed["slack"]["messages"].append(
+        {
+            **_slack_message(operation_key="op-unrelated"),
+            "ts": "1787817956.208049",
+        }
+    )
+    reversed_rows = copy.deepcopy(changed)
+    for source, key in (
+        ("github", "pull_requests"),
+        ("linear", "issues"),
+        ("slack", "messages"),
+        ("identities", "bindings"),
+    ):
+        reversed_rows[source][key].reverse()
+
+    assert select_session_truth_scope(changed) == select_session_truth_scope(
+        reversed_rows
+    )
+    assert detect_findings(changed) == detect_findings(reversed_rows)
 
 
 UNAVAILABLE_LINEAR = {"available": False, "reason": "LINEAR_READ_PATH_UNAVAILABLE"}

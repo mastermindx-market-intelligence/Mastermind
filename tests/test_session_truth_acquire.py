@@ -77,6 +77,15 @@ def _snapshot_files(root: Path) -> dict[str, bytes]:
     return out
 
 
+def test_agentos_leading_json_depth_is_typed():
+    module = _acquire()
+    value = 0
+    for _ in range(140):
+        value = [value]
+    with pytest.raises(module.AcquisitionError, match="strict JSON boundary"):
+        module._decode_leading_json(json.dumps({"payload": value}), "Agent OS status")
+
+
 def _macro_fixture(tmp_path: Path, *, status_delay: float = 0.0) -> Path:
     macro = tmp_path / "macro"
     _init_git(macro)

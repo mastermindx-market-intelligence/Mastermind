@@ -383,6 +383,80 @@ def test_malformed_secret_bearing_snapshot_exits_2_without_echo(tmp_path):
     assert "\n" not in stderr.rstrip("\n")
 
 
+def test_invalid_utf8_snapshot_exits_2_without_traceback_or_partial_receipt(tmp_path):
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+    (snapshots / "github_minimal.json").write_bytes(
+        b'{"schema":"mastermind.github_observation.v1","payload":"\xff"}'
+    )
+
+    code, stdout, stderr = _run(cli, _argv(snapshots, macro, protected), repo)
+
+    assert code == 2
+    assert stdout == ""
+    assert stderr == "session-truth error: invalid session truth input\n"
+    assert "Traceback" not in stderr
+
+
+def test_excessively_deep_snapshot_exits_2_without_traceback_or_partial_receipt(tmp_path):
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+    value = 0
+    for _ in range(140):
+        value = [value]
+    (snapshots / "github_minimal.json").write_text(
+        json.dumps({"schema": "mastermind.github_observation.v1", "payload": value}),
+        encoding="utf-8",
+    )
+
+    code, stdout, stderr = _run(cli, _argv(snapshots, macro, protected), repo)
+
+    assert code == 2
+    assert stdout == ""
+    assert stderr == "session-truth error: invalid session truth input\n"
+    assert "Traceback" not in stderr
+
+
+def test_escaped_lone_surrogate_exits_2_without_traceback_or_partial_receipt(tmp_path):
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+    path = snapshots / "executive_unavailable.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["reason"] = "\ud800"
+    path.write_text(json.dumps(doc, ensure_ascii=True), encoding="utf-8")
+
+    code, stdout, stderr = _run(cli, _argv(snapshots, macro, protected), repo)
+
+    assert code == 2
+    assert stdout == ""
+    assert stderr == "session-truth error: invalid session truth input\n"
+    assert "Traceback" not in stderr
+
+
+def test_final_json_render_failure_uses_opaque_error_path(tmp_path, monkeypatch):
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+
+    def refuse_render(_value):
+        raise cli.SessionTruthContractError("private path SHOULD-NOT-LEAK")
+
+    monkeypatch.setattr(cli, "canonical_json", refuse_render)
+    code, stdout, stderr = _run(cli, _argv(snapshots, macro, protected), repo)
+
+    assert code == 2
+    assert stdout == ""
+    assert stderr == "session-truth error: invalid session truth output\n"
+    assert "SHOULD-NOT-LEAK" not in stderr
+
+
 def test_direct_agentos_identity_error_exits_2_without_running_invalid_command(tmp_path):
     cli = _cli()
     repo, protected = _skillpack_repo(tmp_path)
