@@ -91,6 +91,7 @@ from control_plane.executive_runtime import (
     Runtime,
     RuntimeProofError,
     WorkerStatus,
+    orchestration_digest,
 )
 
 #: Schema version of the document this module emits.  A bump means a migration.
@@ -711,6 +712,7 @@ def ceo_intent_provenance(
                     "root_job_id",
                     "role",
                 }
+                and job.orchestration_provenance_digest == orchestration_digest(cycle)
                 and cycle.get("schema_version")
                 == "mastermind.executive_orchestration_provenance/v1"
                 and cycle.get("creator") == "ceo_intent"

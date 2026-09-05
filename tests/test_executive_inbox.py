@@ -1691,6 +1691,15 @@ def test_strict_v2_provenance_requires_one_immutable_creation_event(tmp_path):
             id="changed-event-digest",
         ),
         pytest.param(
+            lambda event: _event_with_payload(
+                event, orchestration_provenance_digest="e" * 64
+            ),
+            lambda job: dataclasses.replace(
+                job, orchestration_provenance_digest="e" * 64
+            ),
+            id="paired-foreign-digest",
+        ),
+        pytest.param(
             lambda event: event,
             lambda job: dataclasses.replace(job, parent_job_id="JOB-PARENT"),
             id="child-job",

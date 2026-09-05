@@ -268,7 +268,8 @@ is the one `JOB_CREATED` record for the Job and it and the current typed Job agr
 one root-self `aggregation` Job: the exact
 `ceo-intent:<intent_id>` command, intent id, actor, 64-hex fingerprint, mapping
 grounding, optional `WS:` workstream, aggregation role, and the complete existing
-`mastermind.executive_orchestration_provenance/v1` binding must all match. The
+`mastermind.executive_orchestration_provenance/v1` binding must all match, including
+its canonical digest recomputed from that closed binding. The
 `ceo-intent:` prefix alone remains a namespace any caller could type, not proof of
 origin.
 
