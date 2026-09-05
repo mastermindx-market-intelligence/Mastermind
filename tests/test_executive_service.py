@@ -1927,10 +1927,38 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
             ].count(LedgerPhase.DELIVERY_ATTEMPT) == 1
 
             resolver_calls = operator.reconcile_calls
+            historical_calls = [
+                name for name, _thread_id in call_order
+            ].count("historical-enter")
+            delivered_history = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
             terminal_replay = await exchange(observation_path)
             assert terminal_replay == replay
+            terminal_reconcile = await exchange(
+                observation_path,
+                {**request, "operation": RECONCILE_WAKE},
+            )
+            assert terminal_reconcile == replay
             assert operator.reconcile_calls == resolver_calls
             assert operator.deliver_calls == 1
+            assert [name for name, _thread_id in call_order].count(
+                "historical-enter"
+            ) == historical_calls
+            replayed_history = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            assert replayed_history == delivered_history
+            assert sum(
+                record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                for record in replayed_history
+            ) == 1
 
             repository = WakeLedgerRepository(runtime)
             for index, terminal_phase in enumerate(
