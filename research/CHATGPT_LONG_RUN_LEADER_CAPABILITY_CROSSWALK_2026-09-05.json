@@ -1,0 +1,214 @@
+{
+  "document_type": "research_capability_crosswalk",
+  "schema_version": 1,
+  "date": "2026-09-05",
+  "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
+  "publication_carrier": "Mastermind PR #490",
+  "authority": "ADVISORY_SNAPSHOT_NOT_CANONICAL_STATE_OR_ASSIGNMENT",
+  "refresh_law": "Every current-state, carrier, entitlement, source, host, permission, and proof fact must be refreshed from its canonical owner before action.",
+  "capabilities": [
+    {
+      "id": "LRL-C01",
+      "name": "fresh_leader_bootstrap",
+      "user_outcome": "A fresh Sol reconstructs the current responsibility and exact next action without prior-chat dependence.",
+      "canonical_owners": ["Agent OS", "protected Sol Skillpack", "Executive boot packet"],
+      "existing_surfaces": ["docs/CEO_BOOT_PACKET.md", "control_plane/ceo_boot_packet.py", "scripts/ceo_boot_packet.py", "plugins/mastermind-sol/skills/bootstrap-mastermind/SKILL.md"],
+      "research_state": "PARTIAL",
+      "evidence_interpretation": "Source and historical workstation acceptance exist; cross-account current production experience and measured recovery remain separate.",
+      "next_useful_proof": "One fresh eligible leader reconstructs an unfamiliar responsibility from current owners, catches one stale projection, and reaches the correct first decision without a predecessor transcript.",
+      "must_not_build": ["second boot service", "transcript memory database", "plugin-owned live-state cache"]
+    },
+    {
+      "id": "LRL-C02",
+      "name": "business_steward_read",
+      "user_outcome": "One Business cockpit reads useful source-attributed responsibility, attention, runtime, blocker, and surface facts.",
+      "canonical_owners": ["Business Sol Surface Convergence", "Secretary/Steward", "Control Room", "OAuth and deployment owners"],
+      "existing_surfaces": ["integrations/mastermind_secretary_mcp", "integrations/mastermind_steward_app", "plugins/mastermind-sol", "MAS-243"],
+      "observed_carrier": "Mastermind PR #463 at inspected head 7ffc3821004ab4bf4a63d56f88d18cb5165424d6; refresh before action",
+      "research_state": "PARTIAL_DRAFT_HOLD",
+      "next_useful_proof": "Exact package/app generation, one nonempty authenticated read, explicit degraded state, post-token-expiry refresh read, H1 acceptance, rollback, and two unchanged Personal-Pro controls.",
+      "must_not_build": ["new Steward", "direct Agent OS write MCP", "Business session database", "super-MCP"]
+    },
+    {
+      "id": "LRL-C03",
+      "name": "personal_pro_company_read",
+      "user_outcome": "A Personal-Pro leader can obtain current company evidence even where custom write tools are unavailable.",
+      "canonical_owners": ["Personal-Pro Executive Shell", "Steward/read owners", "native approved apps"],
+      "existing_surfaces": ["Mastermind PR #99 architecture", "protected plugin workflows", "GitHub/Slack/Linear connectors where separately authorized"],
+      "research_state": "PARTIAL",
+      "next_useful_proof": "One Personal-Pro chat consumes the same allowed source-attributed evidence needed for a correct decision, with unsupported writes explicitly unavailable.",
+      "must_not_build": ["write disguised as fetch", "browser transcript scrape", "mandatory Business dependency for all reasoning"]
+    },
+    {
+      "id": "LRL-C04",
+      "name": "bounded_ceo_root_admission",
+      "user_outcome": "An authorized Chairman/Sol instruction creates one canonical root intent and truthful QUEUED receipt.",
+      "canonical_owners": ["Executive OS", "CeoIngress", "Executive MCP or approved relay"],
+      "existing_surfaces": ["integrations/executive_mcp", "control_plane.ceo_request", "Personal-Pro Slack relay lineage"],
+      "research_state": "PARTIAL_PRODUCTION_WRITE_NOT_ASSUMED",
+      "evidence_interpretation": "The inspected Executive MCP exposes readonly/fixture modes; source architecture is not a production-write toggle.",
+      "next_useful_proof": "One separately confirmed harmless admission returns one idempotent QUEUED root with dispatched=false and zero unintended Attempt/Worker/Wake effect.",
+      "must_not_build": ["generic command tool", "caller-authored actor/argv/branch/worktree/grounding", "admission-equals-execution claim"]
+    },
+    {
+      "id": "LRL-C05",
+      "name": "exact_company_dialogue",
+      "user_outcome": "A worker and its exact parent exchange ACK, progress, blocker, decision, result, continuation, and terminal stop without generic Slack authority.",
+      "canonical_owners": ["Company Dialogue", "Agent Relay", "Executive Attempt/Worker context", "Slack transport"],
+      "existing_surfaces": ["integrations/mastermind_company_mcp", "integrations/slack_agent_dialogue", "AGENT_DIALOGUE_SESSION_CLOSE_LAW"],
+      "research_state": "BUILT_NOT_PROVEN_AS_COMPLETE_CHATGPT_RETURN_LOOP",
+      "next_useful_proof": "A real returned child is consumed by the exact parent and receives an explicit CONTINUE or STOP, with child-only watcher cleanup and no lifecycle inference from delivery.",
+      "must_not_build": ["generic Slack command bus", "dialogue queue", "worker-selected thread", "notification-only completion"]
+    },
+    {
+      "id": "LRL-C06",
+      "name": "global_code_discovery",
+      "user_outcome": "A leader or worker locates relevant code across the company with honest coverage, source, and freshness.",
+      "canonical_owners": ["Code Intelligence Fabric", "macro-context-index", "GitHub"],
+      "existing_surfaces": ["WS:CODE-INTELLIGENCE-FABRIC", "B0 and Z0 carriers", "SCF code_discovery catalog"],
+      "research_state": "PARTIAL_ACTIVE_EXISTING_CARRIERS",
+      "next_useful_proof": "A real task finds owner/code evidence faster without treating stale, missing, or truncated coverage as proof of absence.",
+      "must_not_build": ["second code index", "direct upstream semantic MCP as authority", "new source-truth database"]
+    },
+    {
+      "id": "LRL-C07",
+      "name": "exact_worktree_semantics",
+      "user_outcome": "A bound worker understands symbols, references, types, and changes in the exact current Attempt worktree.",
+      "canonical_owners": ["Code Intelligence Fabric", "Executive Attempt/workspace", "worker provider"],
+      "existing_surfaces": ["WS:CODE-INTELLIGENCE-FABRIC C0", "SCF workspace_semantics catalog"],
+      "research_state": "PARTIAL_REQUEST_REPAIR_AT_OBSERVED_AGENT_OS_SNAPSHOT",
+      "next_useful_proof": "Python and TypeScript/TSX exact-worktree semantic canary with closed source/result validation, containment, cleanup, and current owner binding.",
+      "must_not_build": ["workspace registry", "ambient binary selection", "semantic result as action authority"]
+    },
+    {
+      "id": "LRL-C08",
+      "name": "isolated_local_workbench_read",
+      "user_outcome": "A worker reads files/images and inspects an exact repository without exposing unrelated machine state.",
+      "canonical_owners": ["existing worker runtime/provider", "Code Intelligence", "host security"],
+      "existing_surfaces": ["current worker sandbox/process owners", "third-party Chat On Steroids patterns as non-authoritative research"],
+      "research_state": "NOT_PROVEN_FOR_MASTERMIND_CHAT_WEB",
+      "next_useful_proof": "Pinned disposable read-only canary over synthetic files/images, including symlink/path denial, permission revocation, persistence and managed-browser compatibility.",
+      "must_not_build": ["CEO home-directory access", "recording as Agent OS", "cosmetic folder allowlist presented as shell sandbox"]
+    },
+    {
+      "id": "LRL-C09",
+      "name": "isolated_local_workbench_write",
+      "user_outcome": "A bound worker patches, builds, and tests one bounded change with attributable effects and cleanup.",
+      "canonical_owners": ["Executive Job/Attempt/Worker", "provider runtime", "Source Continuity", "GitHub"],
+      "existing_surfaces": ["current Codex/worker execution paths", "GitHub PR/evidence contracts"],
+      "research_state": "PARTIAL_BY_EXISTING_WORKER_PATHS_NOT_PROVEN_AS_GENERIC_CHATGPT_WEB_CAPABILITY",
+      "next_useful_proof": "One disposable producer-to-PR result with exact worktree, path collision fence, reviewed command family, process identity, strict result boundary, cleanup, immutable evidence, and parent review.",
+      "must_not_build": ["plugin process database", "arbitrary shell in Steward/Executive", "replacement writer after unknown effect"]
+    },
+    {
+      "id": "LRL-C10",
+      "name": "durable_execution_and_result_retrieval",
+      "user_outcome": "Work continues after the leader turn and its result can be recovered without duplicate launch.",
+      "canonical_owners": ["Executive Attempt/Worker", "provider adapter", "existing process/session owner"],
+      "existing_surfaces": ["Codex App Server/provider adapter lineage", "MCP Tasks as optional negotiated protocol research"],
+      "research_state": "PARTIAL_PROVIDER_SPECIFIC",
+      "next_useful_proof": "One long command/worker survives client disconnect and is retrieved once under the same owner and process identity; cancellation request and actual termination remain distinct.",
+      "must_not_build": ["plugin task store", "task handle as exact Chat wake proof", "silent replacement process"]
+    },
+    {
+      "id": "LRL-C11",
+      "name": "material_return_exact_reentry",
+      "user_outcome": "A result or decision request wakes the exact responsible leader or reports exact wake unavailability.",
+      "canonical_owners": ["Wake", "Company Dialogue", "RuntimeBinding", "provider-native continuation"],
+      "existing_surfaces": ["responsibility-aware watcher projection lineage", "Wake Fabric", "Agent Relay"],
+      "research_state": "PARTIAL_BUILT_NOT_PROVEN",
+      "next_useful_proof": "Worker completes while leader is inactive; one material event reaches the exact bound leader, which fresh-reads and acts on the same operation, or emits a typed unavailable result.",
+      "must_not_build": ["model polling daemon", "new watcher registry", "newest-tab fallback", "Slack-delivered-equals-consumed"]
+    },
+    {
+      "id": "LRL-C12",
+      "name": "exact_chat_inspect_and_foreground",
+      "user_outcome": "The Chairman or system can locate and foreground the exact approved Chat surface without hunting windows.",
+      "canonical_owners": ["Web-Sol", "surface navigation", "RuntimeBinding"],
+      "existing_surfaces": ["protected Web-Sol source lineage", "WS:CHAIRMAN-CONTROL-ROOM"],
+      "research_state": "BUILT_NOT_PROVEN_PRODUCTION_NOT_ASSUMED",
+      "next_useful_proof": "Installed disposable managed-profile canary demonstrates exact identity, foreground postcondition, restart/reconstitution, transport faults, cross-profile isolation, and rollback.",
+      "must_not_build": ["title/newest-tab election", "generic click/type/JS surface", "navigation as authority"]
+    },
+    {
+      "id": "LRL-C13",
+      "name": "exact_chat_succession",
+      "user_outcome": "One logical responsibility survives retirement or failure of its conversation through exactly one verified successor.",
+      "canonical_owners": ["Web-Sol CR ladder", "RuntimeBinding writer", "Company Dialogue semantic readiness", "Agent OS continuation"],
+      "existing_surfaces": ["EXECUTIVE_WEB_SOL_CONTEXT_ROTATION_LAW", "CR-P1/CR-B1/CR-D1/CR-PROD1 lineage"],
+      "research_state": "PARTIAL_SPEC_AND_SOURCE_LINEAGE_NOT_PROVEN_END_TO_END",
+      "next_useful_proof": "Dead predecessor, exact same profile/Project successor, one bootstrap, semantic readiness, generation transition, stale refusal, lost receipt handling, and next governed action.",
+      "must_not_build": ["rollover queue", "transcript store", "blind second successor", "visible-text-as-ACK"]
+    },
+    {
+      "id": "LRL-C14",
+      "name": "all_reachable_mutator_coverage",
+      "user_outcome": "A claim that an old chat cannot perform a given autonomous action is technically supported across every route included in the claim.",
+      "canonical_owners": ["RuntimeBinding", "each native/custom action owner", "security and audit owners"],
+      "existing_surfaces": ["existing permission/app/provider facts", "new research falsifier in PR #490"],
+      "research_state": "NOT_BUILT_AS_PROVEN_CAPABILITY",
+      "next_useful_proof": "Two synthetic chats sharing a principal; one binding transition; inventory and test each enabled mutator; preserve current actor and unrelated siblings; label gaps attended-only or unknown.",
+      "must_not_build": ["second permission registry", "connector revocation without rollback", "approval-setting-as-write-fence"]
+    },
+    {
+      "id": "LRL-C15",
+      "name": "pro_reasoning_portfolio",
+      "user_outcome": "Included Pro capacity is spent on enough high-value architecture, research, debugging, and audit work to materially accelerate the company.",
+      "canonical_owners": ["Chat-native Sol hierarchy", "Capacity", "strategic and Agent OS priority owners", "worker routing"],
+      "existing_surfaces": ["EXECUTIVE_CHAT_NATIVE_SOL_HIERARCHY_LAW", "WORKER_AVENUE_ROUTING", "Control Room"],
+      "research_state": "PARTIAL_AS_LAW_NOT_PROVEN_AS_AUTOMATED_FLEET",
+      "next_useful_proof": "One bounded council of independent Sol responsibilities, Integrator, Auditor, parking/backpressure, exact placement, and measured accepted-decision improvement without routine Pro polling or account hopping.",
+      "must_not_build": ["quota database", "automatic account sharing", "duration padding", "model-driven scheduling loop"]
+    },
+    {
+      "id": "LRL-C16",
+      "name": "evidence_based_acceptance",
+      "user_outcome": "A leader can tell whether a capability works in the real product or machine path, not merely whether source and CI exist.",
+      "canonical_owners": ["GitHub", "production/deployment owner", "product consumer", "Sol acceptance"],
+      "existing_surfaces": ["REVIEW_RETURN", "SCF proof-packet/release-assessment catalog", "existing browser/machine proof laws"],
+      "research_state": "PARTIAL_BY_PROGRAM",
+      "next_useful_proof": "One real producer-to-consumer program slice with exact source/deployment, independent review, negative states, visible product/machine result, durable acceptance, and learning instrumentation.",
+      "must_not_build": ["CI-equals-production", "worker self-certification", "spec-called-shipped"]
+    },
+    {
+      "id": "LRL-C17",
+      "name": "chairman_control_room",
+      "user_outcome": "Chris sees current outcomes, obligations, evidence, surfaces, serviceability, and next actions without manual tab archaeology.",
+      "canonical_owners": ["Chairman Control Room and Steward composition", "underlying source owners"],
+      "existing_surfaces": ["WS:CHAIRMAN-CONTROL-ROOM", "Control Room UI/product lineage", "Steward app UI candidate"],
+      "research_state": "PARTIAL",
+      "next_useful_proof": "A real company-state consumer renders honest current/degraded/unknown states, opens exact evidence/surfaces, and reduces Chairman navigation burden without owning state or actions.",
+      "must_not_build": ["cockpit-owned inbox/lifecycle", "surface navigation as authority", "empty-source-failure rendered all-clear"]
+    },
+    {
+      "id": "LRL-C18",
+      "name": "measured_workflow_improvement",
+      "user_outcome": "Mastermind knows whether the improved ChatGPT workflow produces better outcomes for less avoidable overhead.",
+      "canonical_owners": ["existing evaluation/observability owners", "Sol acceptance", "GitHub evidence"],
+      "existing_surfaces": ["PR #490 24-task protocol", "PR #490 40-case casebook"],
+      "research_state": "SPEC_ONLY_NOT_RUN",
+      "next_useful_proof": "Freeze one candidate change and run the paired 24-task protocol with zero catastrophic failures, direct measurements, independent grading, and full per-task reporting.",
+      "must_not_build": ["new telemetry truth store", "GPU-hours inferred from wall time", "single-score override of safety/product failure"]
+    }
+  ],
+  "recommended_order": [
+    "LRL-C02",
+    "LRL-C01",
+    "LRL-C16",
+    "LRL-C06",
+    "LRL-C07",
+    "LRL-C08",
+    "LRL-C09",
+    "LRL-C10",
+    "LRL-C05",
+    "LRL-C11",
+    "LRL-C12",
+    "LRL-C14",
+    "LRL-C13",
+    "LRL-C15",
+    "LRL-C17",
+    "LRL-C18"
+  ],
+  "ordering_note": "This is a research dependency/value hypothesis, not company priority or an execution queue. Existing owners decide current order after refreshing collisions, gates, capacity, and Chairman intent.",
+  "primary_next_capability": "LRL-C02 one-cockpit authenticated Steward read under the existing BSC/Integration owner and current source/admin gates"
+}
