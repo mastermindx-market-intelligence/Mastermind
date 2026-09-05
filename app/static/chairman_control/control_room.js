@@ -2054,21 +2054,27 @@
 
   // state -----------------------------------------------------------------
   var STATE_LOAD_GENERATION = 0;
-  var REFRESH_FOLLOW_UP = { generation: 0, timer: null, deadlineTimer: null, attempt: 0 };
+  var REFRESH_FOLLOW_UP = { generation: 0, timer: null, attempt: 0 };
   var ACTIVE_STATE_READ = null;
   var REFRESH_FOLLOW_UP_BACKOFF_MS = [1000, 2000, 5000, 10000, 20000, 30000];
   // The local server gives a background composition up to 240 seconds. Leave
   // a small final-read window, but never keep a browser-side poll alive.
-  var REFRESH_FOLLOW_UP_DEADLINE_MS = 250000;
-  var STATE_READ_TIMEOUT_MS = 250000;
+  var STATE_READ_DEADLINE_MS = 250000;
+  var STATE_READ_DEADLINE_AT = 0;
 
   function clearRefreshFollowUp() {
     if (REFRESH_FOLLOW_UP.timer !== null) clearTimeout(REFRESH_FOLLOW_UP.timer);
-    if (REFRESH_FOLLOW_UP.deadlineTimer !== null) clearTimeout(REFRESH_FOLLOW_UP.deadlineTimer);
     REFRESH_FOLLOW_UP.generation = 0;
     REFRESH_FOLLOW_UP.timer = null;
-    REFRESH_FOLLOW_UP.deadlineTimer = null;
     REFRESH_FOLLOW_UP.attempt = 0;
+  }
+
+  function remainingStateReadBudget() {
+    return Math.max(0, STATE_READ_DEADLINE_AT - Date.now());
+  }
+
+  function clearStateReadDeadline() {
+    STATE_READ_DEADLINE_AT = 0;
   }
 
   function refreshFollowUpIsCurrent(generation) {
@@ -2122,16 +2128,33 @@
     STATE_LOAD_GENERATION += 1;
     clearRefreshFollowUp();
     abortActiveStateRead();
+    clearStateReadDeadline();
+  }
+
+  function expireStateReads(generation, refreshStopped) {
+    if (STATE_LOAD_GENERATION !== generation) return;
+    invalidateStateReads();
+    renderStateUnavailable("control_room_api: state read timed out — current state could not be read", refreshStopped);
   }
 
   function scheduleRefreshFollowUp(generation) {
     if (!refreshFollowUpIsCurrent(generation)) return;
+    var remaining = remainingStateReadBudget();
+    if (remaining <= 0) {
+      expireStateReads(generation, true);
+      return;
+    }
     var delay = REFRESH_FOLLOW_UP_BACKOFF_MS[Math.min(
       REFRESH_FOLLOW_UP.attempt, REFRESH_FOLLOW_UP_BACKOFF_MS.length - 1
     )];
+    delay = Math.min(delay, remaining);
     REFRESH_FOLLOW_UP.attempt += 1;
     REFRESH_FOLLOW_UP.timer = setTimeout(function () {
       REFRESH_FOLLOW_UP.timer = null;
+      if (remainingStateReadBudget() <= 0) {
+        expireStateReads(generation, true);
+        return;
+      }
       readState(generation, true);
     }, delay);
   }
@@ -2141,12 +2164,6 @@
     clearRefreshFollowUp();
     if (STATE_LOAD_GENERATION !== generation) return;
     REFRESH_FOLLOW_UP.generation = generation;
-    REFRESH_FOLLOW_UP.deadlineTimer = setTimeout(function () {
-      if (!refreshFollowUpIsCurrent(generation)) return;
-      abortActiveStateRead();
-      clearRefreshFollowUp();
-      renderStateUnavailable("control_room_api: refresh follow-up timed out — current state could not be read", true);
-    }, REFRESH_FOLLOW_UP_DEADLINE_MS);
     scheduleRefreshFollowUp(generation);
   }
 
@@ -2214,6 +2231,11 @@
 
   function readState(generation, followUp) {
     if (!stateReadIsCurrent(generation, followUp)) return Promise.resolve(null);
+    var remaining = remainingStateReadBudget();
+    if (remaining <= 0) {
+      expireStateReads(generation, followUp);
+      return Promise.resolve(null);
+    }
     var controller = typeof AbortController === "function" ? new AbortController() : null;
     var request = { generation: generation, followUp: followUp, controller: controller, timeout: null, expired: false };
     ACTIVE_STATE_READ = request;
@@ -2224,7 +2246,7 @@
       if (followUp) clearRefreshFollowUp();
       if (request.controller) request.controller.abort();
       renderStateUnavailable("control_room_api: state read timed out — current state could not be read", followUp);
-    }, STATE_READ_TIMEOUT_MS);
+    }, remaining);
     return getJSON("/api/state", controller && controller.signal).then(function (body) {
       clearActiveStateRead(request);
       if (!stateReadIsCurrent(generation, followUp, request)) return null;
@@ -2240,18 +2262,23 @@
       renderEverything(body);
       if (body.state_refresh_error) {
         if (followUp) clearRefreshFollowUp();
+        clearStateReadDeadline();
         renderRefreshStopped();
       } else if (body.refresh_in_flight) {
         if (followUp) scheduleRefreshFollowUp(generation);
         else beginRefreshFollowUp(generation);
       } else if (followUp) {
         clearRefreshFollowUp();
+        clearStateReadDeadline();
+      } else {
+        clearStateReadDeadline();
       }
       return body;
     }).catch(function () {
       clearActiveStateRead(request);
       if (!stateReadIsCurrent(generation, followUp, request)) return null;
       clearRefreshFollowUp();
+      clearStateReadDeadline();
       renderStateUnavailable(null, followUp);
       return null;
     });
@@ -2259,6 +2286,7 @@
 
   function loadState() {
     invalidateStateReads();
+    STATE_READ_DEADLINE_AT = Date.now() + STATE_READ_DEADLINE_MS;
     return readState(STATE_LOAD_GENERATION, false);
   }
 

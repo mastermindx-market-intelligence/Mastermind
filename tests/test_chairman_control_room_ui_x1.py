@@ -1303,7 +1303,43 @@ def test_refresh_follow_up_reloads_once_then_cancels_or_fails_closed() -> None:
     assert out["superseded"] == {"gets": 2, "rendered": ["refreshing", "fresh"], "pending": 0}
     assert out["timedOut"] == {
         "gets": 2, "rendered": ["refreshing"],
-        "degraded": ["control_room_api: refresh follow-up timed out — current state could not be read"], "pending": 0,
+        "degraded": ["control_room_api: state read timed out — current state could not be read"], "pending": 0,
+    }
+
+
+def test_refresh_follow_up_uses_the_explicit_load_deadline_not_a_second_window() -> None:
+    """An in-flight body received at 249 seconds cannot start a new 250-second follow-up budget."""
+    source = JS.read_text(encoding="utf-8")
+    helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    harness = """
+    var STATE; var calls = {gets:0, rendered:[], degraded:[]}; var resolveInitial; var nav = {textContent:""};
+    var now = 0; var timers = []; var timerId = 1;
+    Date.now = function() { return now; };
+    function setTimeout(fn, delay) { var timer = {id:timerId++, fn:fn, due:now + delay, cancelled:false}; timers.push(timer); return timer.id; }
+    function clearTimeout(id) { timers.forEach(function(timer) { if (timer.id === id) timer.cancelled = true; }); }
+    function runNextTimer() { var timer = timers.filter(function(item){return !item.cancelled;}).sort(function(a,b){return a.due-b.due;})[0]; now = timer.due; timer.cancelled = true; timer.fn(); }
+    var document = {getElementById:function(id) { return id === "nav-today-count" ? nav : {textContent:""}; }};
+    function getJSON() { calls.gets += 1; return new Promise(function(resolve) { resolveInitial = resolve; }); }
+    function renderEverything(body) { calls.rendered.push(body.tag); STATE.doc = body.control_room; }
+    function renderDegraded(items) { calls.degraded.push(items[items.length - 1]); }
+    function renderNeedsYou() {} function renderMiniAttention() {} function setTally() {}
+    var refreshing = {tag:"refreshing", refresh_in_flight:true, control_room:{attention:{chairman:[],ceo:[],coo:[]}, degraded:[]}};
+    %s
+    %s
+    %s
+    STATE = {doc:{}};
+    loadState();
+    now = 249000;
+    resolveInitial(refreshing);
+    Promise.resolve().then(function() {
+      runNextTimer();
+      return Promise.resolve().then(function() { console.log(JSON.stringify({now:now, gets:calls.gets, rendered:calls.rendered, degraded:calls.degraded, pending:timers.filter(function(timer){return !timer.cancelled;}).length})); });
+    });
+    """ % (helpers, reader, _extract_fn("hasUsableStateEnvelope"))
+    assert _run_node(harness) == {
+        "now": 250000, "gets": 1, "rendered": ["refreshing"],
+        "degraded": ["control_room_api: state read timed out — current state could not be read"], "pending": 0,
     }
 
 
