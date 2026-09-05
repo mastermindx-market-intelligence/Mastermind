@@ -162,12 +162,13 @@
   }
 
   // transport -------------------------------------------------------------
-  function getJSON(path) {
+  function getJSON(path, signal) {
     var options = {
       method: "GET",
       credentials: "same-origin",
       headers: {},
     };
+    if (signal) options.signal = signal;
     if (!REMOTE_READ_ONLY) options.headers["X-CCR-Token"] = TOKEN;
     return fetch(path, options).then(function (resp) {
       return resp.json();
@@ -2052,6 +2053,103 @@
   }
 
   // state -----------------------------------------------------------------
+  var STATE_LOAD_GENERATION = 0;
+  var REFRESH_FOLLOW_UP = { generation: 0, timer: null, deadlineTimer: null, attempt: 0 };
+  var ACTIVE_STATE_READ = null;
+  var REFRESH_FOLLOW_UP_BACKOFF_MS = [1000, 2000, 5000, 10000, 20000, 30000];
+  // The local server gives a background composition up to 240 seconds. Leave
+  // a small final-read window, but never keep a browser-side poll alive.
+  var REFRESH_FOLLOW_UP_DEADLINE_MS = 250000;
+  var STATE_READ_TIMEOUT_MS = 250000;
+
+  function clearRefreshFollowUp() {
+    if (REFRESH_FOLLOW_UP.timer !== null) clearTimeout(REFRESH_FOLLOW_UP.timer);
+    if (REFRESH_FOLLOW_UP.deadlineTimer !== null) clearTimeout(REFRESH_FOLLOW_UP.deadlineTimer);
+    REFRESH_FOLLOW_UP.generation = 0;
+    REFRESH_FOLLOW_UP.timer = null;
+    REFRESH_FOLLOW_UP.deadlineTimer = null;
+    REFRESH_FOLLOW_UP.attempt = 0;
+  }
+
+  function refreshFollowUpIsCurrent(generation) {
+    return STATE_LOAD_GENERATION === generation && REFRESH_FOLLOW_UP.generation === generation;
+  }
+
+  function stateReadIsCurrent(generation, followUp, request) {
+    return STATE_LOAD_GENERATION === generation && (!followUp || refreshFollowUpIsCurrent(generation)) &&
+      (!request || !request.expired);
+  }
+
+  function renderRefreshStopped() {
+    var banner = document.getElementById("ccr-refresh-banner");
+    if (!banner) return;
+    banner.hidden = false;
+    document.getElementById("ccr-refresh-banner-text").textContent =
+      "Refresh did not complete — showing last good composition";
+  }
+
+  function renderStateUnavailable(reason, refreshStopped) {
+    var previous = STATE.doc && typeof STATE.doc === "object" ? STATE.doc : {};
+    var previousDegraded = Array.isArray(previous.degraded) ? previous.degraded.slice() : [];
+    previousDegraded.push(reason || "control_room_api: unavailable — current state could not be read");
+    renderDegraded(previousDegraded);
+    var attention = previous.attention && typeof previous.attention === "object" ? previous.attention : {};
+    renderNeedsYou(Array.isArray(attention.chairman) ? attention.chairman : [], "unavailable");
+    renderMiniAttention("sol-attention", Array.isArray(attention.ceo) ? attention.ceo : [], "unavailable");
+    renderMiniAttention("coo", Array.isArray(attention.coo) ? attention.coo : [], "unavailable");
+    setTally("chairman", "—");
+    setTally("ceo", "—");
+    setTally("coo", "—");
+    document.getElementById("nav-today-count").textContent = "—";
+    if (refreshStopped) renderRefreshStopped();
+  }
+
+  function clearActiveStateRead(request) {
+    if (ACTIVE_STATE_READ !== request) return;
+    if (request.timeout !== null) clearTimeout(request.timeout);
+    ACTIVE_STATE_READ = null;
+  }
+
+  function abortActiveStateRead() {
+    var request = ACTIVE_STATE_READ;
+    if (!request) return;
+    request.expired = true;
+    clearActiveStateRead(request);
+    if (request.controller) request.controller.abort();
+  }
+
+  function invalidateStateReads() {
+    STATE_LOAD_GENERATION += 1;
+    clearRefreshFollowUp();
+    abortActiveStateRead();
+  }
+
+  function scheduleRefreshFollowUp(generation) {
+    if (!refreshFollowUpIsCurrent(generation)) return;
+    var delay = REFRESH_FOLLOW_UP_BACKOFF_MS[Math.min(
+      REFRESH_FOLLOW_UP.attempt, REFRESH_FOLLOW_UP_BACKOFF_MS.length - 1
+    )];
+    REFRESH_FOLLOW_UP.attempt += 1;
+    REFRESH_FOLLOW_UP.timer = setTimeout(function () {
+      REFRESH_FOLLOW_UP.timer = null;
+      readState(generation, true);
+    }, delay);
+  }
+
+  function beginRefreshFollowUp(generation) {
+    if (refreshFollowUpIsCurrent(generation)) return;
+    clearRefreshFollowUp();
+    if (STATE_LOAD_GENERATION !== generation) return;
+    REFRESH_FOLLOW_UP.generation = generation;
+    REFRESH_FOLLOW_UP.deadlineTimer = setTimeout(function () {
+      if (!refreshFollowUpIsCurrent(generation)) return;
+      abortActiveStateRead();
+      clearRefreshFollowUp();
+      renderStateUnavailable("control_room_api: refresh follow-up timed out — current state could not be read", true);
+    }, REFRESH_FOLLOW_UP_DEADLINE_MS);
+    scheduleRefreshFollowUp(generation);
+  }
+
   function indexState(doc) {
     STATE.work = doc.work || [];
     STATE.workByRef = {};
@@ -2114,8 +2212,22 @@
     document.getElementById("nav-system-count").textContent = degraded.length || loose ? String(degraded.length + loose) : "";
   }
 
-  function loadState() {
-    return getJSON("/api/state").then(function (body) {
+  function readState(generation, followUp) {
+    if (!stateReadIsCurrent(generation, followUp)) return Promise.resolve(null);
+    var controller = typeof AbortController === "function" ? new AbortController() : null;
+    var request = { generation: generation, followUp: followUp, controller: controller, timeout: null, expired: false };
+    ACTIVE_STATE_READ = request;
+    request.timeout = setTimeout(function () {
+      if (!stateReadIsCurrent(generation, followUp, request)) return;
+      request.expired = true;
+      clearActiveStateRead(request);
+      if (followUp) clearRefreshFollowUp();
+      if (request.controller) request.controller.abort();
+      renderStateUnavailable("control_room_api: state read timed out — current state could not be read", followUp);
+    }, STATE_READ_TIMEOUT_MS);
+    return getJSON("/api/state", controller && controller.signal).then(function (body) {
+      clearActiveStateRead(request);
+      if (!stateReadIsCurrent(generation, followUp, request)) return null;
       // Local state envelopes intentionally have no `ok` member, while the
       // remote read-only relay uses `{ok:true, control_room:…}`.  Both must
       // contain the Control Room's essential Inbox arrays before replacing
@@ -2126,22 +2238,28 @@
         return Promise.reject(new Error("control_room_state_unavailable"));
       }
       renderEverything(body);
+      if (body.state_refresh_error) {
+        if (followUp) clearRefreshFollowUp();
+        renderRefreshStopped();
+      } else if (body.refresh_in_flight) {
+        if (followUp) scheduleRefreshFollowUp(generation);
+        else beginRefreshFollowUp(generation);
+      } else if (followUp) {
+        clearRefreshFollowUp();
+      }
       return body;
     }).catch(function () {
-      var previous = STATE.doc && typeof STATE.doc === "object" ? STATE.doc : {};
-      var previousDegraded = Array.isArray(previous.degraded) ? previous.degraded.slice() : [];
-      previousDegraded.push("control_room_api: unavailable — current state could not be read");
-      renderDegraded(previousDegraded);
-      var attention = previous.attention && typeof previous.attention === "object" ? previous.attention : {};
-      renderNeedsYou(Array.isArray(attention.chairman) ? attention.chairman : [], "unavailable");
-      renderMiniAttention("sol-attention", Array.isArray(attention.ceo) ? attention.ceo : [], "unavailable");
-      renderMiniAttention("coo", Array.isArray(attention.coo) ? attention.coo : [], "unavailable");
-      setTally("chairman", "—");
-      setTally("ceo", "—");
-      setTally("coo", "—");
-      document.getElementById("nav-today-count").textContent = "—";
+      clearActiveStateRead(request);
+      if (!stateReadIsCurrent(generation, followUp, request)) return null;
+      clearRefreshFollowUp();
+      renderStateUnavailable(null, followUp);
       return null;
     });
+  }
+
+  function loadState() {
+    invalidateStateReads();
+    return readState(STATE_LOAD_GENERATION, false);
   }
 
   function hasUsableStateEnvelope(body) {
@@ -2195,6 +2313,9 @@
   document.addEventListener("DOMContentLoaded", function () {
     applyTheme(readTheme());
     loadState();
+    window.addEventListener("pagehide", function () {
+      invalidateStateReads();
+    });
 
     var dock = document.getElementById("ccr-surface-dock");
     var layout = document.querySelector(".ccr-layout");
