@@ -111,6 +111,11 @@ def test_launchd_templates_are_two_non_root_persistent_system_jobs() -> None:
         assert set(value["EnvironmentVariables"]) == expected_environment
 
     _assert_private_unix_socket(control["Sockets"]["Operator"], mode=0o660)
+    _assert_private_unix_socket(
+        control["Sockets"]["DialogueObservation"], mode=0o660
+    )
+    assert control["Sockets"]["DialogueObservation"]["SockPathOwner"] == 450
+    assert control["Sockets"]["DialogueObservation"]["SockPathGroup"] == 457
     _assert_private_unix_socket(worker["Sockets"]["WorkerBroker"], mode=0o600)
     assert worker["Sockets"]["WorkerBroker"]["SockPathOwner"] == 450
     assert worker["Sockets"]["WorkerBroker"]["SockPathGroup"] == 450
@@ -199,6 +204,23 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
     plutil("-replace", "Sockets.Operator.SockPathOwner", "-integer", "450", str(control))
     plutil("-replace", "Sockets.Operator.SockPathGroup", "-integer", "453", str(control))
     plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathName", "-string",
+        "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+        str(control),
+    )
+    plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathOwner", "-integer",
+        "450", str(control),
+    )
+    plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathGroup", "-integer",
+        "457", str(control),
+    )
+    plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathMode", "-integer",
+        "432", str(control),
+    )
+    plutil(
         "-replace", "StandardOutPath", "-string",
         "/var/log/mastermind-executive/control/stdout.log", str(control),
     )
@@ -253,6 +275,24 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
         text=True,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    rendered_control = plistlib.loads(control.read_bytes())
+    assert set(rendered_control["Sockets"]) == {
+        "Operator",
+        "CeoIngress",
+        "DialogueObservation",
+    }
+    assert rendered_control["Sockets"]["DialogueObservation"] == {
+        "SockPathName": (
+            "/var/run/mastermind-dialogue-observation/"
+            "dialogue-observation.sock"
+        ),
+        "SockType": "stream",
+        "SockPassive": True,
+        "SockPathOwner": 450,
+        "SockPathGroup": 457,
+        "SockPathMode": 0o660,
+    }
 
     for rendered_path in (control, worker):
         with rendered_path.open("rb") as handle:
@@ -564,16 +604,40 @@ def test_control_wrapper_post_exec_argv_contains_no_canary_name(
 def test_installer_replaces_whole_program_argument_arrays() -> None:
     install = (OPS / "install.sh").read_text(encoding="utf-8")
     assert "render_launchd_program_arguments.py" in install
-    assert install.count("render_launchd_program_arguments.py") == 2
+    # DR-B1 (off-host disaster recovery) added a third rendered daemon,
+    # com.mastermind.executive.backup -- extending this pin rather than
+    # dropping it, per the same discipline the control/worker pair already
+    # enforced: install.sh must keep replacing ProgramArguments wholesale via
+    # the reviewed renderer, never piecemeal via `plutil -replace
+    # ProgramArguments.N`.
+    assert install.count("render_launchd_program_arguments.py") == 3
     assert "plutil -replace ProgramArguments." not in install
     assert '"$CONTROL_PLIST" --' in install
     assert '"$WORKER_PLIST" --' in install
+    assert '"$BACKUP_PLIST" --' in install
     assert 'scripts/executive_os_phase1c_worker.py"' in install
+    assert 'ops/executive_os/run_nightly_backup.sh"' in install
     assert 'plutil -replace UserName -string "$WORKER_USER" "$WORKER_PLIST"' in install
     assert 'plutil -replace GroupName -string "$WORKER_GROUP" "$WORKER_PLIST"' in install
+    assert 'plutil -replace UserName -string "$CONTROL_USER" "$BACKUP_PLIST"' in install
     assert 'WORKER_SUPPLEMENTARY_GIDS' in install
     assert 'worker account has an unreviewed macOS directory group vector' in install
     assert 'verify_reviewed_system_group com.apple.access_disabled 396' in install
+
+
+def test_installer_ships_the_backup_daemon_disabled_like_the_others() -> None:
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    assert 'BACKUP_LABEL="com.mastermind.executive.backup"' in install
+    for line in (
+        '/bin/launchctl disable "system/$BACKUP_LABEL"',
+        '/bin/launchctl bootout "system/$BACKUP_LABEL"',
+    ):
+        assert line in install
+    assert 'if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then' in install
+    assert (
+        '/usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$BACKUP_LABEL.plist.template" "$BACKUP_PLIST"'
+        in install
+    )
 
 
 def test_worker_config_requires_sorted_exact_ambient_group_allowlist(

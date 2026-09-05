@@ -297,18 +297,28 @@ def _route_for(obligation, *, registry=None, binding=None):
     return route_obligation(obligation, registry, binding=binding)
 
 
-def _ack_row(obligation, alias="PROPHET-COO-A"):
+def _ack_row(obligation, alias="PROPHET-COO-A", *, route=None, attempt_n=1):
+    route = route or _route_for(
+        obligation,
+        binding=_binding(alias=alias),
+    )
     ack = acknowledge(
         obligation,
         trusted=TrustedAckContext(
             ack_mode=AckMode.REASONING_SESSION,
             target_seat=obligation.declared_target_seat,
-            session_alias=alias,
-            reasoning_surface="chatgpt-sol",
-            binding_id=_BIND,
+            session_alias=route.session_alias,
+            reasoning_surface=route.reasoning_surface,
+            binding_id=route.binding_id,
+            binding_generation=route.binding_generation,
             acknowledged_at=_FROZEN,
         ),
         claimed_obligation_ids=[obligation.obligation_id],
+        delivered_command_id=ledger_command_id(
+            obligation.obligation_id,
+            LedgerPhase.DELIVERED,
+            attempt_n=attempt_n,
+        ),
     )
     return ack_record(obligation, ack)
 
@@ -793,12 +803,54 @@ def test_request_without_delivery_is_pending_retryable():
     requested = delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation)
     assert requested.command_id == oid
     assert reconstruct_status(oid, [requested], route=route) is ObligationStatus.PENDING_RETRYABLE
-    attempted = delivery_record(
-        oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=route
-    )
-    assert reconstruct_status(oid, [requested, attempted], route=route) is ObligationStatus.ATTEMPTED
     with pytest.raises(WakeDispatchError, match="no delivery evidence"):
         already_delivered_receipt(obligation, route, found=requested)
+
+
+def test_unfinished_delivery_attempt_requires_reconciliation():
+    obligation = _obligation_from_inbox()
+    oid = obligation.obligation_id
+    route = _route_for(obligation)
+    records = [
+        delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation),
+        delivery_record(oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=route),
+    ]
+
+    assert (
+        reconstruct_status(oid, records, route=route)
+        is ObligationStatus.RECONCILIATION_REQUIRED
+    )
+
+
+def test_failed_delivery_attempt_is_effect_known_and_retryable():
+    obligation = _obligation_from_inbox()
+    oid = obligation.obligation_id
+    route = _route_for(obligation)
+    records = [
+        delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation),
+        delivery_record(oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=route),
+        delivery_record(oid, LedgerPhase.FAILED, attempt_n=1, route=route),
+    ]
+
+    assert reconstruct_status(oid, records, route=route) is ObligationStatus.ATTEMPTED
+
+
+def test_target_unavailable_attempt_is_effect_known_and_retryable():
+    obligation = _obligation_from_inbox()
+    oid = obligation.obligation_id
+    route = _route_for(obligation)
+    records = [
+        delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation),
+        delivery_record(oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=route),
+        delivery_record(
+            oid,
+            LedgerPhase.TARGET_UNAVAILABLE,
+            attempt_n=1,
+            route=route,
+        ),
+    ]
+
+    assert reconstruct_status(oid, records, route=route) is ObligationStatus.ATTEMPTED
 
 
 def test_accepted_is_not_delivered():
@@ -825,7 +877,7 @@ def test_accepted_is_not_delivered():
 def test_delivery_and_acknowledgement_are_separate():
     obligation = _obligation_from_inbox()
     oid = obligation.obligation_id
-    route = _route_for(obligation)
+    route = _route_for(obligation, binding=_binding())
     delivered = ledger_command_id(oid, LedgerPhase.DELIVERED, attempt_n=1)
     accepted = ledger_command_id(oid, LedgerPhase.ACCEPTED, attempt_n=1)
     ack = ledger_command_id(oid, LedgerPhase.TARGET_ACKNOWLEDGED)
@@ -837,7 +889,7 @@ def test_delivery_and_acknowledgement_are_separate():
         delivery_record(oid, LedgerPhase.DELIVERED, attempt_n=1, route=route),
     ]
     assert reconstruct_status(oid, records, route=route) is ObligationStatus.DELIVERED_UNACKNOWLEDGED
-    records_ack = records + [_ack_row(obligation)]
+    records_ack = records + [_ack_row(obligation, route=route)]
     assert reconstruct_status(oid, records_ack, route=route) is ObligationStatus.TARGET_ACKNOWLEDGED
     replay = already_delivered_receipt(
         obligation,
@@ -1092,10 +1144,13 @@ def test_sibling_review_pointer_suppresses_duplicate_wake():
 
 
 def test_one_transport_implementation_authority():
-    assert all(
-        descriptor.transport_implemented is False
-        for descriptor in WAKE_TRANSPORT_DESCRIPTORS.values()
-    )
+    implemented = {
+        transport_id
+        for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
+        if descriptor.transport_implemented
+    }
+    assert implemented == {"codex-app-server"}
+    assert WAKE_TRANSPORT_DESCRIPTORS["claude-code-session"].transport_implemented is False
     sources = []
     for path in _WAKE_MODULES:
         text = path.read_text(encoding="utf-8")
@@ -1141,7 +1196,7 @@ def test_route_rotation_allows_second_delivery_until_ack():
         a2_delivered,
     ]
     assert reconstruct_status(oid, records2, route=r2) is ObligationStatus.DELIVERED_UNACKNOWLEDGED
-    closed = records2 + [_ack_row(obligation)]
+    closed = records2 + [_ack_row(obligation, route=r2, attempt_n=2)]
     assert reconstruct_status(oid, closed, route=r1) is ObligationStatus.TARGET_ACKNOWLEDGED
     assert reconstruct_status(oid, closed, route=r2) is ObligationStatus.TARGET_ACKNOWLEDGED
 

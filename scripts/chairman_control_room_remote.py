@@ -241,14 +241,47 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _resolve_release_launch_paths(
+    repo_root: Path, build_metadata: Path
+) -> tuple[Path, Path]:
+    """Bind mutable CLI aliases to this entrypoint's immutable release."""
+
+    configured_root = Path(repo_root)
+    configured_metadata = Path(build_metadata)
+    if not configured_root.is_absolute():
+        raise remote.ReleaseError("release_root_invalid")
+    if (
+        not configured_metadata.is_absolute()
+        or configured_metadata.parent != configured_root
+        or configured_metadata.name != remote.BUILD_METADATA_FILENAME
+    ):
+        raise remote.ReleaseError("build_metadata_path_mismatch")
+    try:
+        resolved_root = configured_root.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise remote.ReleaseError("release_root_invalid") from exc
+    if resolved_root != _RELEASE_ROOT:
+        raise remote.ReleaseError("release_root_mismatch")
+    try:
+        resolved_metadata = configured_metadata.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise remote.ReleaseError("build_metadata_path_mismatch") from exc
+    if resolved_metadata != _RELEASE_ROOT / remote.BUILD_METADATA_FILENAME:
+        raise remote.ReleaseError("build_metadata_path_mismatch")
+    return resolved_root, resolved_metadata
+
+
 def _load_build_identity(
     repo_root: Path, path: Path, expected_commit: str
 ) -> remote.BuildIdentity:
     try:
+        release_root, build_metadata = _resolve_release_launch_paths(
+            repo_root, path
+        )
         return remote.verify_release_identity(
-            repo_root,
+            release_root,
             expected_commit=expected_commit,
-            build_metadata=path,
+            build_metadata=build_metadata,
         )
     except remote.ReleaseError as exc:
         raise RuntimeError("build_identity_unavailable") from exc
@@ -261,7 +294,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     caddy_gid = grp.getgrnam("caddy").gr_gid
     collector = remote.CollectorConfig(
-        repo_root=args.repo_root,
+        repo_root=_RELEASE_ROOT,
         macro_root=args.macro_root,
         active_builds_directory_group_gid=caddy_gid,
         active_builds_group_gid=caddy_gid,

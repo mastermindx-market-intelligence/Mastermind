@@ -4,7 +4,7 @@ A persisted WAKE *request* is not a delivered wake.  Delivery attempts are
 route-specific.  The external transport unit is a :class:`NudgeAttempt`.
 Acknowledgement and source resolution are obligation-global.
 
-Guarantee: at-least-once external nudge + idempotent consumption.
+Guarantee: at-most-one provider submission per durable nudge identity.
 ``ALREADY_DELIVERED`` is a fabric reconciliation result, never a transport
 result.
 """
@@ -17,7 +17,12 @@ from enum import Enum
 from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 from common.redaction import sanitize_external_text
-from control_plane.session_targets import RuntimeBinding, WakeRoute
+from control_plane.session_targets import RuntimeBinding, SessionTargetRegistry, WakeRoute
+from control_plane.wake_ack_ingress import (
+    TrustedWorkerWakeAckProjection,
+    WakeAckClaim,
+    acknowledge_consumed_wakes,
+)
 from control_plane.wake_events import (
     ISO_UTC_RE,
     WAKE_ID_RE,
@@ -40,7 +45,9 @@ from control_plane.wake_ledger import (
     parse_ledger_record,
     reconstruct_status,
     requested_record,
+    unfinished_attempt_n,
 )
+from control_plane.wake_persist import WakeLedgerRepository
 from control_plane.wake_transport import (
     DISPATCHER_INTERFACE_VERSION,
     WAKE_TRANSPORT_DESCRIPTORS,
@@ -52,6 +59,7 @@ from control_plane.wake_transport import (
 
 RECEIPT_SCHEMA = "mastermind.wake_receipt.v1"
 _DETAIL_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_NUDGE_ID_RE = re.compile(r"^NUDGE-[0-9a-f]{32}$")
 ALLOWED_DETAIL_KEYS = frozenset(
     {
         "ledger_command_id",
@@ -115,11 +123,45 @@ class WakeDispatchError(ValueError):
     """The dispatcher refused the call or an adapter forged a success receipt."""
 
 
+class WakeEffectUnknownError(WakeDispatchError):
+    """A provider submission may have started and must not be retried."""
+
+
 class TransportOutcome(str, Enum):
     ACCEPTED = "ACCEPTED"
     DELIVERED = "DELIVERED"
     TARGET_UNAVAILABLE = "TARGET_UNAVAILABLE"
     FAILED = "FAILED"
+
+
+class WakePreSubmitError(WakeDispatchError):
+    """Typed proof that a provider submission did not begin."""
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        outcome: TransportOutcome = TransportOutcome.TARGET_UNAVAILABLE,
+        reason_code: str = "target_unavailable",
+    ) -> None:
+        super().__init__(reason)
+        if outcome not in {
+            TransportOutcome.TARGET_UNAVAILABLE,
+            TransportOutcome.FAILED,
+        }:
+            raise ValueError("pre-submit failures cannot claim provider success")
+        if reason_code not in OUTCOME_REASONS[outcome.value]:
+            raise ValueError("pre-submit outcome/reason is contradictory")
+        self.outcome = outcome
+        self.reason_code = reason_code
+
+
+class PersistedNudgeState(str, Enum):
+    ACCEPTED = "ACCEPTED"
+    DELIVERED = "DELIVERED"
+    TARGET_UNAVAILABLE = "TARGET_UNAVAILABLE"
+    FAILED = "FAILED"
+    RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
 
 
 class FabricOutcome(str, Enum):
@@ -257,6 +299,55 @@ class TransportReceipt:
     reason_code: str
     created_at: str
     details: tuple[tuple[str, str], ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class WakeTransportCompletion:
+    """Transient non-wire transport result; the projection is never receipt data."""
+
+    receipt: TransportReceipt
+    target_ack_projection: TrustedWorkerWakeAckProjection | None = dataclasses.field(
+        default=None,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.receipt, TransportReceipt):
+            raise WakeDispatchError("Wake transport completion requires a receipt")
+        projection = self.target_ack_projection
+        if projection is not None:
+            if not isinstance(projection, TrustedWorkerWakeAckProjection):
+                raise WakeDispatchError(
+                    "Wake transport completion ACK projection must be trusted and typed"
+                )
+            if self.receipt.outcome is not TransportOutcome.DELIVERED:
+                raise WakeDispatchError(
+                    "Wake transport completion ACK projection requires DELIVERED"
+                )
+
+
+def normalize_transport_completion(
+    value: TransportReceipt | WakeTransportCompletion,
+) -> tuple[TransportReceipt, TrustedWorkerWakeAckProjection | None]:
+    if isinstance(value, TransportReceipt):
+        return value, None
+    if isinstance(value, WakeTransportCompletion):
+        return value.receipt, value.target_ack_projection
+    raise WakeDispatchError("adapter returned an invalid Wake transport completion")
+
+
+@dataclasses.dataclass(frozen=True)
+class PersistedNudgeResult:
+    """Non-wire result of the persist-before-provider coordinator."""
+
+    state: PersistedNudgeState
+    nudge_attempt: NudgeAttempt
+    transport_receipt: TransportReceipt | None = None
+    receipts: tuple[WakeReceipt, ...] = ()
+
+    @property
+    def nudge_id(self) -> str:
+        return self.nudge_attempt.nudge_id
 
 
 def coalesce_nudge(routes: Sequence[WakeRoute]) -> NudgePlan:
@@ -474,9 +565,7 @@ def already_delivered_receipt(
         obligation_id=obligation.obligation_id,
         attempt_n=parsed.attempt_n or 0,
         attempt_command_id=ledger_command_id(
-            obligation.obligation_id,
-            LedgerPhase.DELIVERY_ATTEMPT,
-            attempt_n=parsed.attempt_n,
+            obligation.obligation_id, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=parsed.attempt_n,
         ),
         destination_digest=str(parsed.destination_digest),
         route_digest=str(parsed.route_digest),
@@ -510,12 +599,18 @@ def already_delivered_receipt(
 
 @runtime_checkable
 class WakeDispatcher(Protocol):
-    async def nudge(self, wake: WakeNudge) -> TransportReceipt: ...
+    transport_id: str
+
+    async def nudge(
+        self,
+        wake: WakeNudge,
+    ) -> TransportReceipt | WakeTransportCompletion: ...
 
 
 class UnsupportedWakeDispatcher:
     def __init__(self, transport_id: str) -> None:
         self.descriptor = _descriptor(transport_id)
+        self.transport_id = self.descriptor.transport_id
 
     async def nudge(self, wake: WakeNudge) -> TransportReceipt:
         if wake.wake_transport != self.descriptor.transport_id:
@@ -524,6 +619,11 @@ class UnsupportedWakeDispatcher:
             outcome=TransportOutcome.FAILED,
             reason_code="unsupported_transport",
             created_at=utc_now_iso(),
+        )
+
+    async def reconcile(self, wake: WakeNudge) -> TransportReceipt:
+        raise WakeEffectUnknownError(
+            "unsupported transport has no accepted-attempt reconciliation path"
         )
 
     async def wake(self, obligation: WakeObligation, route: WakeRoute) -> WakeReceipt:
@@ -607,6 +707,386 @@ def _nudge_from(
     )
 
 
+def _attempt_from_record(record: WakeLedgerRecord) -> DeliveryAttempt:
+    parsed = parse_ledger_record(record)
+    if parsed.phase not in {
+        LedgerPhase.DELIVERY_ATTEMPT,
+        LedgerPhase.ACCEPTED,
+        LedgerPhase.DELIVERED,
+        LedgerPhase.FAILED,
+        LedgerPhase.TARGET_UNAVAILABLE,
+    }:
+        raise WakeDispatchError("persisted nudge identity requires an attempt record")
+    return DeliveryAttempt(
+        obligation_id=str(parsed.command_id).split(":", 1)[0],
+        attempt_n=int(parsed.attempt_n or 0),
+        attempt_command_id=ledger_command_id(
+            str(parsed.command_id).split(":", 1)[0],
+            LedgerPhase.DELIVERY_ATTEMPT,
+            attempt_n=parsed.attempt_n,
+        ),
+        destination_digest=str(parsed.destination_digest),
+        route_digest=str(parsed.route_digest),
+        binding_id=str(parsed.binding_id),
+        binding_generation=int(parsed.binding_generation or 0),
+        session_alias=str(parsed.session_alias),
+        reasoning_surface=str(parsed.reasoning_surface),
+        wake_transport=str(parsed.wake_transport),
+        nudge_id=parsed.nudge_id,
+        nudge_attempt_command_ids=tuple(parsed.nudge_attempt_command_ids),
+    )
+
+
+def _nudge_attempt_from(attempts: Sequence[DeliveryAttempt]) -> NudgeAttempt:
+    if not attempts:
+        raise WakeDispatchError("persisted nudge requires at least one attempt")
+    first = attempts[0]
+    for attempt in attempts:
+        if (
+            attempt.destination_digest != first.destination_digest
+            or attempt.session_alias != first.session_alias
+            or attempt.reasoning_surface != first.reasoning_surface
+            or attempt.wake_transport != first.wake_transport
+            or attempt.binding_id != first.binding_id
+            or attempt.binding_generation != first.binding_generation
+        ):
+            raise WakeDispatchError("persisted nudge group has mixed route identity")
+    nudge = NudgeAttempt(
+        destination_digest=first.destination_digest,
+        session_alias=first.session_alias,
+        reasoning_surface=first.reasoning_surface,
+        wake_transport=first.wake_transport,
+        binding_id=first.binding_id,
+        binding_generation=first.binding_generation,
+        attempts=tuple(attempts),
+    )
+    expected_group = tuple(sorted(item.attempt_command_id for item in attempts))
+    for attempt in attempts:
+        if attempt.nudge_id != nudge.nudge_id:
+            raise WakeDispatchError("persisted nudge_id does not match its attempts")
+        if attempt.nudge_attempt_command_ids != expected_group:
+            raise WakeDispatchError("persisted nudge group identity is incomplete")
+    return nudge
+
+
+def _load_persisted_nudge(
+    repo: WakeLedgerRepository, record: WakeLedgerRecord
+) -> NudgeAttempt:
+    parsed = parse_ledger_record(record)
+    if not parsed.nudge_id or not parsed.nudge_attempt_command_ids:
+        raise WakeDispatchError(
+            "unfinished attempt lacks durable nudge reconciliation identity"
+        )
+    attempts: list[DeliveryAttempt] = []
+    for command_id in parsed.nudge_attempt_command_ids:
+        persisted = repo.get_by_command_id(command_id)
+        if persisted is None:
+            raise WakeDispatchError("persisted nudge group is missing an attempt")
+        attempt = _attempt_from_record(persisted.record)
+        if (
+            attempt.nudge_id != parsed.nudge_id
+            or attempt.nudge_attempt_command_ids
+            != parsed.nudge_attempt_command_ids
+        ):
+            raise WakeDispatchError("persisted nudge group identity disagrees")
+        attempts.append(attempt)
+    return _nudge_attempt_from(attempts)
+
+
+def _latest_attempt_phase(
+    records: Sequence[WakeLedgerRecord], attempt_n: int
+) -> LedgerPhase | None:
+    phases = [
+        record.phase
+        for record in records
+        if record.attempt_n == attempt_n
+        and record.phase
+        in {
+            LedgerPhase.ACCEPTED,
+            LedgerPhase.DELIVERED,
+            LedgerPhase.FAILED,
+            LedgerPhase.TARGET_UNAVAILABLE,
+        }
+    ]
+    return phases[-1] if phases else None
+
+
+def _state_for_phase(phase: LedgerPhase) -> PersistedNudgeState:
+    return PersistedNudgeState(phase.value)
+
+
+def _reconciliation_required(
+    nudge_attempt: NudgeAttempt,
+) -> PersistedNudgeResult:
+    return PersistedNudgeResult(
+        state=PersistedNudgeState.RECONCILIATION_REQUIRED,
+        nudge_attempt=nudge_attempt,
+    )
+
+
+def _persist_transport_result(
+    repo: WakeLedgerRepository,
+    pairs: Sequence[tuple[WakeObligation, WakeRoute]],
+    *,
+    nudge_attempt: NudgeAttempt,
+    descriptor: WakeTransportDescriptor,
+    transport: TransportReceipt,
+    target_ack_projection: TrustedWorkerWakeAckProjection | None,
+    target_registry: SessionTargetRegistry | None,
+) -> PersistedNudgeResult:
+    attempts = nudge_attempt.attempts
+    phase = LedgerPhase(transport.outcome.value)
+    terminal_persisted = repo.append_records_atomic(
+        tuple(
+            (attempt_record(attempt, phase), obligation)
+            for attempt, (obligation, _route) in zip(attempts, pairs, strict=True)
+        )
+    )
+    if target_ack_projection is not None:
+        if phase is not LedgerPhase.DELIVERED:
+            raise WakeDispatchError(
+                "Wake ACK projection cannot accompany a non-delivered transport"
+            )
+        if not all(item.inserted for item in terminal_persisted):
+            raise WakeDispatchError(
+                "Wake ACK projection requires newly persisted DELIVERED evidence"
+            )
+        if target_registry is None:
+            raise WakeDispatchError(
+                "Wake ACK projection requires the current SessionTargetRegistry"
+            )
+        acknowledge_consumed_wakes(
+            repo.runtime,
+            target_registry,
+            claim=WakeAckClaim(target_ack_projection.obligation_ids),
+            trusted=target_ack_projection,
+        )
+    receipts: list[WakeReceipt] = []
+    for attempt, (obligation, route) in zip(attempts, pairs, strict=True):
+        receipt = make_receipt(
+            outcome=WakeOutcome(transport.outcome.value),
+            obligation=obligation,
+            route=route,
+            reason_code=transport.reason_code,
+            created_at=transport.created_at,
+            details=dict(transport.details),
+            attempt=attempt,
+        )
+        receipts.append(
+            authenticate_receipt(
+                receipt,
+                obligation=obligation,
+                route=route,
+                descriptor=descriptor,
+                attempt=attempt,
+            )
+        )
+    return PersistedNudgeResult(
+        state=PersistedNudgeState(transport.outcome.value),
+        nudge_attempt=nudge_attempt,
+        transport_receipt=transport,
+        receipts=tuple(receipts),
+    )
+
+
+async def dispatch_persisted_nudge(
+    repo: WakeLedgerRepository,
+    pairs: Sequence[tuple[WakeObligation, WakeRoute]],
+    *,
+    dispatcher: WakeDispatcher,
+    binding: RuntimeBinding | None = None,
+    descriptor: WakeTransportDescriptor | None = None,
+    retry_policy: WakeRetryPolicy | None = None,
+    target_registry: SessionTargetRegistry | None = None,
+) -> PersistedNudgeResult:
+    """Persist one exact nudge before making at most one provider submission."""
+
+    if not isinstance(repo, WakeLedgerRepository):
+        raise WakeDispatchError("persisted dispatch requires WakeLedgerRepository")
+    if not pairs:
+        raise WakeDispatchError("persisted dispatch requires at least one route")
+    obligation_ids = [obligation.obligation_id for obligation, _route in pairs]
+    if len(obligation_ids) != len(set(obligation_ids)):
+        raise WakeDispatchError("persisted dispatch refuses duplicate obligations")
+    first_obligation, first_route = pairs[0]
+    resolved_descriptor = descriptor or _descriptor(first_route.wake_transport)
+    if str(getattr(dispatcher, "transport_id", "") or "") != first_route.wake_transport:
+        raise WakeDispatchError(
+            "dispatcher transport identity does not match the canonical route"
+        )
+    policy = retry_policy if retry_policy is not None else UNARMED_RETRY_POLICY
+    if not policy.armed:
+        raise WakeDispatchError("automated dispatch refuses an unarmed retry policy")
+
+    records_by_obligation: dict[str, tuple[WakeLedgerRecord, ...]] = {}
+    unfinished: WakeLedgerRecord | None = None
+    terminal_seed: WakeLedgerRecord | None = None
+    terminal_phases: list[LedgerPhase] = []
+    for obligation, route in pairs:
+        if route.obligation_id != obligation.obligation_id:
+            raise WakeDispatchError("route obligation_id does not match the wake")
+        records = tuple(
+            item.record for item in repo.list_records(obligation.obligation_id)
+        )
+        records_by_obligation[obligation.obligation_id] = records
+        if not any(record.phase is LedgerPhase.WAKE_REQUESTED for record in records):
+            raise WakeDispatchError("persisted dispatch requires WAKE_REQUESTED")
+        pending_n = unfinished_attempt_n(records)
+        if pending_n is not None:
+            candidate = next(
+                record
+                for record in records
+                if record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                and record.attempt_n == pending_n
+            )
+            unfinished = unfinished or candidate
+        attempt_records = [
+            record for record in records if record.phase is LedgerPhase.DELIVERY_ATTEMPT
+        ]
+        if attempt_records:
+            latest = attempt_records[-1]
+            terminal = _latest_attempt_phase(records, int(latest.attempt_n or 0))
+            if terminal is not None:
+                terminal_seed = terminal_seed or latest
+                terminal_phases.append(terminal)
+
+    if unfinished is not None:
+        nudge_attempt = _load_persisted_nudge(repo, unfinished)
+        return _reconciliation_required(nudge_attempt)
+
+    if terminal_seed is not None:
+        if len(terminal_phases) != len(pairs):
+            raise WakeDispatchError(
+                "persisted nudge group has partial terminal evidence"
+            )
+        if len(set(terminal_phases)) != 1:
+            raise WakeDispatchError("persisted nudge terminal phases disagree")
+        nudge_attempt = _load_persisted_nudge(repo, terminal_seed)
+        terminal_phase = terminal_phases[0]
+        if terminal_phase is not LedgerPhase.ACCEPTED:
+            return PersistedNudgeResult(
+                state=_state_for_phase(terminal_phase),
+                nudge_attempt=nudge_attempt,
+            )
+        if first_route.human_required or not first_route.delivery_allowed:
+            return _reconciliation_required(nudge_attempt)
+        _assert_binding_ready(binding, first_route, resolved_descriptor)
+        attempts_by_obligation = {
+            attempt.obligation_id: attempt for attempt in nudge_attempt.attempts
+        }
+        if set(attempts_by_obligation) != set(obligation_ids) or any(
+            not attempts_by_obligation[obligation.obligation_id].matches_route(route)
+            for obligation, route in pairs
+        ):
+            raise WakeDispatchError(
+                "persisted ACCEPTED nudge does not match the supplied route set"
+            )
+        nudge_attempt = _nudge_attempt_from(
+            tuple(
+                attempts_by_obligation[obligation.obligation_id]
+                for obligation, _route in pairs
+            )
+        )
+        wake = _nudge_from(
+            nudge_attempt.attempts,
+            binding=binding,
+            first_route=first_route,
+        )
+        reconcile = getattr(dispatcher, "reconcile", None)
+        if not callable(reconcile):
+            return _reconciliation_required(nudge_attempt)
+        try:
+            raw_completion = await reconcile(wake)
+            raw_transport, target_ack_projection = normalize_transport_completion(
+                raw_completion
+            )
+            transport = authenticate_transport_receipt(
+                raw_transport,
+                expected_nudge_id=wake.nudge_id,
+            )
+        except Exception:
+            return _reconciliation_required(nudge_attempt)
+        if transport.outcome not in {
+            TransportOutcome.ACCEPTED,
+            TransportOutcome.DELIVERED,
+        }:
+            return _reconciliation_required(nudge_attempt)
+        return _persist_transport_result(
+            repo,
+            pairs,
+            nudge_attempt=nudge_attempt,
+            descriptor=resolved_descriptor,
+            transport=transport,
+            target_ack_projection=target_ack_projection,
+            target_registry=target_registry,
+        )
+
+    if first_route.human_required or not first_route.delivery_allowed:
+        raise WakeDispatchError("persisted provider path requires an allowed route")
+    _assert_binding_ready(binding, first_route, resolved_descriptor)
+    plan = coalesce_nudge([route for _obligation, route in pairs])
+    base_attempts = tuple(
+        make_delivery_attempt(
+            obligation,
+            route,
+            attempt_n=next_attempt_n(records_by_obligation[obligation.obligation_id]),
+        )
+        for obligation, route in pairs
+    )
+    command_ids = tuple(sorted(item.attempt_command_id for item in base_attempts))
+    nudge_id = mint_nudge_id(plan.destination_digest, command_ids)
+    attempts = tuple(
+        dataclasses.replace(
+            attempt,
+            nudge_id=nudge_id,
+            nudge_attempt_command_ids=command_ids,
+        )
+        for attempt in base_attempts
+    )
+    nudge_attempt = _nudge_attempt_from(attempts)
+    persisted = repo.append_records_atomic(
+        tuple(
+            (attempt_record(attempt, LedgerPhase.DELIVERY_ATTEMPT), obligation)
+            for attempt, (obligation, _route) in zip(attempts, pairs, strict=True)
+        )
+    )
+    if not all(item.inserted for item in persisted):
+        return _reconciliation_required(nudge_attempt)
+
+    wake = _nudge_from(attempts, binding=binding, first_route=first_route)
+    target_ack_projection: TrustedWorkerWakeAckProjection | None = None
+    try:
+        raw_completion = await dispatcher.nudge(wake)
+        raw_transport, target_ack_projection = normalize_transport_completion(
+            raw_completion
+        )
+        transport = authenticate_transport_receipt(
+            raw_transport, expected_nudge_id=wake.nudge_id
+        )
+    except WakePreSubmitError as exc:
+        transport = TransportReceipt(
+            outcome=exc.outcome,
+            reason_code=exc.reason_code,
+            created_at=utc_now_iso(),
+            details=(("nudge_id", wake.nudge_id),),
+        )
+    except Exception:
+        return PersistedNudgeResult(
+            state=PersistedNudgeState.RECONCILIATION_REQUIRED,
+            nudge_attempt=nudge_attempt,
+        )
+
+    return _persist_transport_result(
+        repo,
+        pairs,
+        nudge_attempt=nudge_attempt,
+        descriptor=resolved_descriptor,
+        transport=transport,
+        target_ack_projection=target_ack_projection,
+        target_registry=target_registry,
+    )
+
+
 async def dispatch_nudge(
     pairs: Sequence[tuple[WakeObligation, WakeRoute]],
     *,
@@ -634,7 +1114,7 @@ async def dispatch_nudge(
         raise WakeDispatchError("no eligible obligations remain for this nudge")
     first_obligation, first_route = eligible_pairs[0]
     resolved_descriptor = descriptor or _descriptor(first_route.wake_transport)
-    preflight = dispatcher_for(first_route.wake_transport)
+    preflight = UnsupportedWakeDispatcher(first_route.wake_transport)
     if first_route.human_required or not first_route.delivery_allowed:
         fabric = await preflight.wake(first_obligation, first_route)
         authenticated = authenticate_receipt(
@@ -671,9 +1151,18 @@ async def dispatch_nudge(
         binding_generation=plan.binding_generation,
         attempts=attempts,
     )
-    resolved = dispatcher if dispatcher is not None else preflight
+    resolved = (
+        dispatcher
+        if dispatcher is not None
+        else dispatcher_for(first_route.wake_transport)
+    )
+    if str(getattr(resolved, "transport_id", "") or "") != first_route.wake_transport:
+        raise WakeDispatchError(
+            "dispatcher transport identity does not match the canonical route"
+        )
     wake = _nudge_from(attempts, binding=binding, first_route=first_route)
-    transport = await resolved.nudge(wake)
+    raw_completion = await resolved.nudge(wake)
+    transport, _discarded_projection = normalize_transport_completion(raw_completion)
     authenticated_transport = authenticate_transport_receipt(
         transport, expected_nudge_id=wake.nudge_id
     )
@@ -823,7 +1312,12 @@ def _bounded_details(
         token = str(key).strip()
         if token not in ALLOWED_DETAIL_KEYS or _DETAIL_KEY_RE.fullmatch(token) is None:
             raise WakeDispatchError("receipt detail keys must be the closed typed set")
-        text = sanitize_external_text(value, limit=128)
+        if token == "nudge_id":
+            text = str(value or "").strip()
+            if _NUDGE_ID_RE.fullmatch(text) is None:
+                raise WakeDispatchError("receipt nudge_id detail is malformed")
+        else:
+            text = sanitize_external_text(value, limit=128)
         if not text:
             continue
         bounded.append((token, text))
@@ -839,6 +1333,8 @@ __all__ = [
     "NudgeAttempt",
     "NudgePlan",
     "ObligationStatus",
+    "PersistedNudgeResult",
+    "PersistedNudgeState",
     "RECEIPT_SCHEMA",
     "SUCCESS_OUTCOMES",
     "TRANSPORT_OUTCOMES",
@@ -849,22 +1345,27 @@ __all__ = [
     "WAKE_TRANSPORT_DESCRIPTORS",
     "WakeDispatchError",
     "WakeDispatcher",
+    "WakeEffectUnknownError",
     "WakeLedgerRecord",
     "WakeNudge",
     "WakeOutcome",
+    "WakePreSubmitError",
     "WakeReceipt",
     "WakeTransportDescriptor",
+    "WakeTransportCompletion",
     "already_delivered_receipt",
     "authenticate_receipt",
     "authenticate_transport_receipt",
     "coalesce_nudge",
     "delivery_record",
     "dispatch_nudge",
+    "dispatch_persisted_nudge",
     "dispatch_wake",
     "dispatcher_for",
     "ledger_command_id",
     "make_receipt",
     "mint_nudge_id",
+    "normalize_transport_completion",
     "plan_eligible_nudge",
     "reconstruct_status",
     "wake_transport_descriptor",

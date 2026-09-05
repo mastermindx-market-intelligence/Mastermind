@@ -56,6 +56,9 @@ Usage
 """
 from __future__ import annotations
 
+import hashlib
+import importlib
+import importlib.util
 import json
 import os
 import re
@@ -64,7 +67,138 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from control_plane import ceo_boot_packet, executive_inbox, executive_runtime, surface_bindings
+from control_plane import (
+    ceo_boot_packet,
+    executive_inbox,
+    executive_runtime,
+    surface_bindings,
+)
+
+# CAP-C1 placement selection is an OPTIONAL capability: an extracted
+# control-room-remote release stages an exact runtime file allowlist, and
+# that allowlist may omit the selector modules or a genuinely optional
+# dependency of theirs. This module must therefore boot — and compose a
+# complete document — when they are absent. The import is DELIBERATELY
+# dynamic, not static: a static import would both crash the extracted boot
+# and widen the release's audited import closure.
+#
+# Genuine optional absence fails SOFT, by name, into the
+# "placement_selection: unavailable (module not shipped)" degraded path.
+#
+# That softness has an exact limit. It applies only to a module the audited
+# allowlist can actually omit — one this file does not already require. A
+# dependency that is reachable through this module's own MANDATORY imports
+# is not optional in any release: its absence raises before the optional
+# block below is ever reached, and that hard failure is correct rather than
+# a gap to paper over. See _SELECTOR_CONTROL_PLANE_REQUIRES for which
+# dependencies fall on which side of that line.
+
+
+def _optional_control_plane_module(name: str, *, requires: tuple[str, ...] = ()):
+    """``None`` when the module is genuinely not shipped; loud otherwise.
+
+    ``find_spec`` distinguishes the two failure classes: a missing file
+    yields a ``None`` spec (→ optional capability absent, degrade by name),
+    while a module that IS shipped but broken imports without a net so it
+    fails loudly instead of masquerading as "not shipped".
+
+    ``requires`` names this module's own STATIC control-plane dependencies,
+    and they are resolved BEFORE the import (review 5086941171 BLOCKER 4).
+    Resolving only ``name`` was not enough: in a release that ships the
+    selector but not the steward, the selector's spec resolves fine, and the
+    unguarded ``import_module`` below then raises ``ModuleNotFoundError``
+    from the selector's own ``from control_plane.executive_steward import
+    ...`` — aborting the import of THIS module entirely instead of degrading
+    by name. Checking the dependency's spec turns that asymmetric packaging
+    into the same fail-closed "not shipped" answer.
+
+    This deliberately checks SPEC PRESENCE only. A dependency that is
+    present but broken still raises from ``import_module``, so a genuine
+    fault inside a shipped module keeps failing loudly rather than
+    masquerading as absent.
+    """
+    qualified = f"control_plane.{name}"
+    for dependency in (name, *requires):
+        try:
+            spec = importlib.util.find_spec(f"control_plane.{dependency}")
+        except ModuleNotFoundError:
+            spec = None
+        if spec is None:
+            return None
+    return importlib.import_module(qualified)
+
+
+#: Every control-plane module :mod:`control_plane.executive_placement_selection`
+#: STATICALLY imports, derived from its own AST by
+#: ``tests/test_chairman_control_room.py::
+#: test_declared_selector_dependencies_match_its_actual_static_imports`` so
+#: the list cannot silently drift if a STATIC import is added later.
+#:
+#: Scope of that guarantee, stated exactly, because the unqualified version
+#: of this sentence was falsifiable: the derivation sees STATIC import forms
+#: only. A DYNAMIC import (``importlib.import_module``, ``__import__``, or an
+#: attribute reached off a bare ``import control_plane``) is invisible to any
+#: AST walk and would leave this list stale while the guard stayed green.
+#: Rather than claim a completeness the derivation cannot deliver, the guard
+#: additionally REFUSES a dynamic import in the selector — turning that
+#: silent gap into a loud one.
+#:
+#: What this buys, stated exactly — because an earlier pass over-claimed it:
+#: declaring a dependency here converts its absence into the documented
+#: "not shipped" degrade ONLY IF the dependency is not ALREADY reachable
+#: from this module's own mandatory imports. ``executive_steward`` is such a
+#: case and genuinely degrades. ``executive_orchestration_principal`` is NOT:
+#: the unconditional ``from control_plane import (...)`` above pulls it
+#: transitively. The observed traceback runs ``chairman_control_room ->
+#: executive_inbox -> executive_runtime -> executive_orchestration_principal``;
+#: ``executive_runtime`` is also imported directly here, so BOTH routes are
+#: mandatory. Its absence therefore raises long before this optional block
+#: is reached. It is listed here because it IS a
+#: static import of the selector and the AST guard is the source of truth —
+#: but a mandatory transitive dependency cannot be softened from here, and
+#: ``test_a_mandatory_transitive_dependency_is_a_hard_failure_not_a_degrade``
+#: pins that hard failure as the correct behaviour rather than pretending
+#: otherwise.
+_SELECTOR_CONTROL_PLANE_REQUIRES: tuple[str, ...] = (
+    "executive_orchestration_principal",
+    "executive_steward",
+)
+
+executive_placement_selection = _optional_control_plane_module(
+    "executive_placement_selection", requires=_SELECTOR_CONTROL_PLANE_REQUIRES
+)
+executive_steward = _optional_control_plane_module("executive_steward")
+
+#: CR1A's autonomy consumer is loaded through the SAME protected mechanism as
+#: the selector above, and for the same reason.  A static
+#: ``from control_plane import autonomy_control_room_projection`` at the top of
+#: this module made ``executive_steward`` MANDATORY — the projection imports it
+#: at module scope — which silently converted C1's optional capability into a
+#: hard requirement and defeated the degraded-boot contract this file
+#: documents.  Measured before the repair: with only ``executive_steward``
+#: blocked, importing this module raised ``ModuleNotFoundError`` where master
+#: booted with ``executive_steward is None``.  Packaging closure is NOT
+#: permission to narrow that contract (Sol ruling, 2026-09-03), so the
+#: dependency is declared here and absence degrades by name instead.
+autonomy_control_room_projection = _optional_control_plane_module(
+    "autonomy_control_room_projection", requires=("executive_steward",)
+)
+
+#: W3C owns terminal/Wake reconstruction.  The remote Control Room package
+#: intentionally omits this capability and must continue to boot without it,
+#: so the owner is loaded through the existing optional-module fence.  When
+#: present, its public facade is the only terminal/Wake read used below.
+executive_dialogue_observation = _optional_control_plane_module(
+    "executive_dialogue_observation",
+    requires=(
+        "executive_delegation_identity",
+        "executive_terminal_return",
+        "operator_harness_contract",
+        "session_targets",
+        "wake_events",
+        "wake_transport",
+    ),
+)
 
 #: Schema version of the document this module emits.
 SCHEMA = "mastermind.chairman_control_room.v1"
@@ -164,6 +298,7 @@ _BINDING_SUMMARY_KEYS = (
 OUTPUT_KEYS = frozenset({
     "schema", "generated_at", "sources", "degraded", "attention", "work",
     "unjoined_open_prs", "unbound_surfaces", "binding_conflicts",
+    "placement_selection", "autonomy",
 })
 
 
@@ -649,6 +784,8 @@ def compose_control_room(
     runtime_jobs: list[dict[str, Any]] | None = None,
     bindings: dict[str, Any] | None,
     binding_problems: Sequence[str] = (),
+    placement_selection: dict[str, Any] | None = None,
+    dispatch_evidence: Sequence[Mapping[str, Any]] | None = None,
     generated_at: str,
 ) -> dict[str, Any]:
     """Pure, deterministic projection of every already-collected source.
@@ -898,6 +1035,113 @@ def compose_control_room(
             "disagreements": _disagreements(agent_os_entry, jobs, prs),
         })
 
+    # --- placement selection (CAP-C1) ---------------------------------------
+    # Optional pure input: a wire dict already produced by
+    # executive_placement_selection.select_placement().to_dict() (or `None`
+    # when no facts document was supplied — the common case). A well-typed
+    # `None` renders no section and degrades nothing, matching how every
+    # other optional source in this module behaves. A present-but-invalid
+    # dict degrades by name, exactly like a malformed boot_packet/inbox/
+    # active_builds/agent_os_state input — this function still returns a
+    # complete, well-formed document rather than raising.
+    placement_selection_out: dict[str, Any] | None = None
+    if placement_selection is not None and executive_placement_selection is None:
+        degraded.append("placement_selection: unavailable (module not shipped)")
+    elif placement_selection is not None:
+        try:
+            placement_selection_out = executive_placement_selection.validate_placement_selection(
+                placement_selection
+            )
+        except (ValueError, TypeError) as exc:
+            degraded.append(f"placement_selection: {exc}")
+            placement_selection_out = None
+
+    # --- autonomy responsibility projection ---------------------------------
+    # Optional exactly like placement_selection above: a release that does not
+    # ship the projection (or its required steward) still composes a complete
+    # document.  The closed `autonomy` output key is RETAINED with a
+    # non-actionable unavailable value and the absence degrades BY NAME, using
+    # the same vocabulary this module already uses for the selector.
+    autonomy: dict[str, Any] | None = None
+    if autonomy_control_room_projection is None:
+        degraded.append("autonomy: unavailable (module not shipped)")
+    else:
+        # --- autonomy responsibility projection ---------------------------------
+        # Additive: control_plane.autonomy_control_room_projection.
+        # build_autonomy_snapshot maps these same already-gathered plain-data
+        # inputs into an ExecutiveStewardSnapshot, and project_autonomy renders
+        # it — this compositor's own generated_at is passed straight through so
+        # the whole document stays deterministic and clock-free.  Fix 1
+        # (adversarial-review repair packet, 2026-09-01): that same
+        # generated_at is now ALSO the reference timestamp every constructed
+        # fact's freshness is judged against — threaded into
+        # build_autonomy_snapshot and its two mapper siblings below, not just
+        # into project_autonomy — so a real, aged Agent OS/inbox/bindings
+        # document reads honestly STALE instead of unconditionally CURRENT.
+        autonomy_snapshot = autonomy_control_room_projection.build_autonomy_snapshot(
+            inbox=inbox,
+            boot_packet=boot_packet,
+            active_builds=active_builds,
+            agent_os_state=agent_os_state,
+            runtime_jobs=runtime_jobs,
+            bindings=bindings,
+            generated_at=generated_at,
+        )
+        # Agent-OS-declared blockers travel beside the snapshot rather than inside
+        # it: the Steward's BlockerFact contract admits only Executive OS / Inbox /
+        # Wake owners, so an agent_os-owned blocker cannot lawfully be a BlockerFact
+        # and is carried as separately-attributed plain data instead.
+        autonomy_declared_blockers = (
+            autonomy_control_room_projection.declared_blockers_from_agent_os_state(
+                agent_os_state, generated_at
+            )
+        )
+        # Blast-radius repair packet, 2026-09-01: an unrecognized workstream
+        # owner is a bounded, per-row mapping gap, never a SourceFailure — see
+        # autonomy_control_room_projection.unmapped_responsibilities_from_
+        # agent_os_state.  Threaded the same additive way as declared_blockers.
+        autonomy_unmapped_responsibilities = (
+            autonomy_control_room_projection.unmapped_responsibilities_from_agent_os_state(
+                agent_os_state, generated_at
+            )
+        )
+        # Blocker 1 (review 5106453403): the same runtime_jobs already
+        # threaded into build_autonomy_snapshot above, grouped by workstream
+        # into its full candidate-root set -- threaded the same additive
+        # way as declared_blockers/unmapped_responsibilities so a card can
+        # render "ambiguous, reconciliation required" distinctly from "no
+        # Runtime evidence at all" (both leave root_job_id null).
+        autonomy_runtime_root_candidates = (
+            autonomy_control_room_projection.runtime_root_candidates_from_runtime_jobs(
+                runtime_jobs
+            )
+        )
+        autonomy = autonomy_control_room_projection.project_autonomy(
+            autonomy_snapshot,
+            generated_at=generated_at,
+            declared_blockers=autonomy_declared_blockers,
+            unmapped_responsibilities=autonomy_unmapped_responsibilities,
+            runtime_root_candidates=autonomy_runtime_root_candidates,
+        )
+        # Dispatch-consumption is a SECOND pure pass over the cards just
+        # produced, joined on the same exact (responsibility_ref, root_job_id)
+        # key the projection already owns.  Review 5103135217 BLOCKER 1: the
+        # real evidence itself is GATHERED by the I/O layer
+        # (:func:`_gather_dispatch_evidence`, called from
+        # :func:`build_control_room`) and handed in here as the
+        # ``dispatch_evidence`` argument — this pure path only joins it, it
+        # never fetches it.  A caller with no evidence to supply (offline
+        # tests, an older gather layer) passes ``None`` and every card reads
+        # UNKNOWN and non-actionable — ignorance, never a fabricated stage.
+        autonomy = autonomy_control_room_projection.attach_dispatch_consumption(
+            autonomy,
+            autonomy_control_room_projection.project_dispatch_consumption(
+                autonomy["responsibilities"],
+                generated_at=generated_at,
+                dispatch_evidence=dispatch_evidence,
+            ),
+        )
+
     doc = {
         "schema": SCHEMA,
         "generated_at": generated_at,
@@ -921,6 +1165,8 @@ def compose_control_room(
         "unjoined_open_prs": _unjoined_open_prs(open_prs, joined_pr_identities),
         "unbound_surfaces": unbound_surfaces,
         "binding_conflicts": binding_conflicts,
+        "placement_selection": placement_selection_out,
+        "autonomy": autonomy,
     }
     assert set(doc.keys()) == OUTPUT_KEYS  # self-check: no "overall" field, closed set
     return doc
@@ -986,6 +1232,41 @@ def _read_agent_os_state(macro_root: str | None) -> tuple[dict[str, Any] | None,
     return loaded, None
 
 
+def _read_runtime_jobs_from_runtime(
+    runtime: Any,
+) -> tuple[list[Any] | None, list[dict[str, Any]] | None, str | None]:
+    """Read public Job objects plus the existing safe workstream projection."""
+
+    try:
+        jobs = runtime.jobs.list_jobs()
+    except (executive_runtime.RuntimeProofError, ValueError, KeyError) as exc:
+        return None, None, (
+            f"jobs unreadable: {str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__}"
+        )
+
+    result: list[dict[str, Any]] = []
+    for job in jobs:
+        try:
+            provenance, _warning = executive_inbox.ceo_intent_provenance(
+                runtime, job.job_id
+            )
+        except (executive_runtime.RuntimeProofError, ValueError, KeyError):
+            continue
+        if provenance is None:
+            continue
+        workstream = provenance.get("workstream")
+        if not isinstance(workstream, str) or not workstream:
+            continue
+        status = getattr(job.status, "value", None) or str(job.status)
+        result.append({
+            "job_id": job.job_id,
+            "status": status,
+            "workstream": workstream,
+            "root_job_id": job.root_job_id,
+        })
+    return list(jobs), result, None
+
+
 def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | None]:
     """Runtime jobs whose CEO-intent provenance carries a workstream.
 
@@ -1000,6 +1281,14 @@ def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | N
     report a quiet, job-free company — this never does that.  Distinct
     "executive_runtime:" degraded prefix from "executive_inbox:" so a caller
     can tell which read failed.
+
+    Each row also carries the Job's own ``root_job_id`` (review 5106453403,
+    Blocker 1) — the same public ``Job`` field
+    :func:`autonomy_control_room_projection.build_autonomy_snapshot` needs
+    to resolve ONE unique deduplicated Runtime root per workstream.
+    :func:`_group_jobs_by_ref` deliberately reconstructs its OWN
+    ``{job_id, status, workstream}`` shape and drops this extra key, so
+    adding it here changes nothing about ``work[].executive.jobs``.
     """
     db_path = root / executive_inbox.DB_RELATIVE_PATH
     if not db_path.is_file():
@@ -1010,27 +1299,698 @@ def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | N
     except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError) as exc:
         return None, f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
 
+    _jobs, result, failure = _read_runtime_jobs_from_runtime(runtime)
+    return result, failure
+
+
+# ---------------------------------------------------------------------------
+# dispatch-consumption evidence gather (CR1A W3C-owner repair) — the ONE
+# place this module joins a responsibility to the protected canonical
+# terminal/Wake observer.  It is bounded, read-only, and fail-closed.
+#
+# The responsibility projection owns the WS-to-root relation. C2 owns the
+# exact current carrier commitment. W3C owns terminal/Wake reconstruction.
+# This module neither walks the Runtime tree nor scans raw Events, elects a
+# newest/highest attempt, parses APPLIED material, or manufactures a watcher.
+# When C2's public positive reader is not protected at this base, the carrier
+# is explicitly OWNER_HELD and W3C remains unavailable.
+# ---------------------------------------------------------------------------
+
+#: Blocker 1: "The gather must be bounded (cap the rows and the per-row
+#: work)."  A control room with an unbounded number of responsibility cards
+#: must never turn this gather into unbounded per-request Runtime work.
+_DISPATCH_EVIDENCE_MAX_CARDS = 200
+
+
+def _runtime_root_state(card: Mapping[str, Any]) -> str:
+    """Classify the already-projected public Runtime-root join.
+
+    The Agent-OS responsibility mapper owns the exact WS-to-Runtime-root
+    relation. This gatherer consumes that answer; it never walks descendants,
+    compares titles, or elects a carrier from tree shape.
+    """
+
+    raw_candidates = card.get("root_job_candidates")
+    if isinstance(raw_candidates, Sequence) and not isinstance(
+        raw_candidates, (str, bytes)
+    ):
+        candidates = {
+            item for item in raw_candidates if isinstance(item, str) and item
+        }
+    else:
+        candidates = set()
+    if card.get("root_job_ambiguous") is True or len(candidates) > 1:
+        return "CONFLICT"
+    root_job_id = card.get("root_job_id")
+    if isinstance(root_job_id, str) and root_job_id:
+        if candidates and candidates != {root_job_id}:
+            return "CONFLICT"
+        return "RESOLVED"
+    return "UNKNOWN"
+
+
+def _owner_held_dispatch_row(
+    *,
+    responsibility_ref: str,
+    root_job_id: str | None,
+    runtime_root_state: str,
+) -> dict[str, Any]:
+    """The honest current-base row while C2's positive reader is unprotected."""
+
+    return {
+        "responsibility_ref": responsibility_ref,
+        "root_job_id": root_job_id,
+        "runtime_root_state": runtime_root_state,
+        "carrier_state": "OWNER_HELD",
+        "carrier_reason": "C2_POSITIVE_OWNER_HELD",
+        "w3c_state": "UNAVAILABLE",
+        "w3c_reason": "W3C_CANDIDATE_OWNER_SEAM_REQUIRED",
+        "w3c_terminal_state": "UNAVAILABLE",
+        "w3c_wake_state": "UNAVAILABLE",
+        "w3c_terminal_applied": "false",
+    }
+
+
+def _current_capacity_commitment_reader(runtime: Any) -> Any:
+    """Return only the Runtime class-owned C2 reader, never a callback.
+
+    Looking in the Runtime class dictionary deliberately ignores instance
+    attributes and caller callbacks, so a fixture cannot manufacture positive
+    production authority. Older compatible protected bases without C2 retain
+    the explicit owner-held state.
+    """
+
+    runtime_type = type(runtime)
+    if runtime_type is not executive_runtime.Runtime:
+        return None
+    reader = vars(runtime_type).get("current_capacity_commitment")
+    return reader if callable(reader) else None
+
+
+def _capacity_commitment_is_exact(
+    commitment: Any,
+    *,
+    responsibility_ref: str,
+    root_job_id: str,
+) -> bool:
+    """Validate C2 identity without treating it as W3C candidate identity."""
+
+    if commitment is None:
+        return False
+    expected = {
+        "source_root_job_id": root_job_id,
+        "responsibility_ref": responsibility_ref,
+    }
+    for name, value in expected.items():
+        if getattr(commitment, name, None) != value:
+            return False
+    values = {
+        "carrier_job_id": getattr(commitment, "carrier_job_id", None),
+        "committed_carrier_attempt_id": getattr(
+            commitment, "committed_carrier_attempt_id", None
+        ),
+        "selected_worker_id": getattr(commitment, "selected_worker_id", None),
+    }
+    return all(isinstance(value, str) and value for value in values.values())
+
+
+_W3C_ORCHESTRATION_ROLES = frozenset({"plan", "work", "review", "repair"})
+
+
+def _exact_w3c_candidate(
+    jobs: Sequence[Any],
+    attempts: Sequence[Any],
+    *,
+    root_job_id: str,
+) -> tuple[Any | None, str]:
+    """Return the one ordinary completed orchestration candidate, or close.
+
+    Public Job/Attempt registries own the identities.  This function applies
+    only exact-root, exact-current-attempt and cardinality gates; it never
+    chooses by role preference, title, depth, recency, numeric id, provider,
+    or C2 carrier identity.  W3C remains the owner of terminal/Wake validity.
+    """
+
+    if executive_dialogue_observation is None:
+        return None, "W3C_OWNER_UNAVAILABLE"
+    attempts_by_id = {
+        getattr(attempt, "attempt_id", None): attempt
+        for attempt in attempts
+        if isinstance(getattr(attempt, "attempt_id", None), str)
+    }
+    candidates: list[Any] = []
+    malformed = False
+    for job in jobs:
+        status = getattr(getattr(job, "status", None), "value", None) or str(
+            getattr(job, "status", "")
+        )
+        if (
+            getattr(job, "root_job_id", None) != root_job_id
+            or getattr(job, "orchestration_role", None)
+            not in _W3C_ORCHESTRATION_ROLES
+            or status != "COMPLETED"
+        ):
+            continue
+        job_id = getattr(job, "job_id", None)
+        attempt_id = getattr(job, "current_attempt_id", None)
+        attempt = attempts_by_id.get(attempt_id)
+        worker_id = getattr(attempt, "worker_id", None)
+        if (
+            not isinstance(job_id, str)
+            or not job_id
+            or not isinstance(attempt_id, str)
+            or not attempt_id
+            or attempt is None
+            or getattr(attempt, "job_id", None) != job_id
+            or not isinstance(worker_id, str)
+            or not worker_id
+        ):
+            malformed = True
+            continue
+        try:
+            candidates.append(
+                executive_dialogue_observation.CanonicalTerminalWakeCandidate(
+                    root_job_id=root_job_id,
+                    job_id=job_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                )
+            )
+        except (TypeError, ValueError):
+            malformed = True
+    if malformed or len(candidates) > 1:
+        return None, "W3C_CANDIDATE_CONFLICT"
+    if not candidates:
+        return None, "W3C_CANDIDATE_OWNER_SEAM_REQUIRED"
+    return candidates[0], "W3C_EXACT_ORCHESTRATION_CANDIDATE"
+
+
+def _runtime_generation_digest(
+    jobs: Sequence[Any],
+    attempts: Sequence[Any],
+    runtime_jobs: Sequence[Mapping[str, Any]],
+) -> str:
+    """Secret-safe digest of only public load-bearing Runtime identities."""
+
+    job_rows = [
+        {
+            "job_id": getattr(job, "job_id", None),
+            "status": getattr(getattr(job, "status", None), "value", None)
+            or str(getattr(job, "status", "")),
+            "root_job_id": getattr(job, "root_job_id", None),
+            "orchestration_role": getattr(job, "orchestration_role", None),
+            "current_attempt_id": getattr(job, "current_attempt_id", None),
+            "assigned_worker_id": getattr(job, "assigned_worker_id", None),
+        }
+        for job in jobs
+    ]
+    attempt_rows = [
+        {
+            "attempt_id": getattr(attempt, "attempt_id", None),
+            "job_id": getattr(attempt, "job_id", None),
+            "worker_id": getattr(attempt, "worker_id", None),
+            "status": getattr(getattr(attempt, "status", None), "value", None)
+            or str(getattr(attempt, "status", "")),
+        }
+        for attempt in attempts
+    ]
+    material = {
+        "jobs": sorted(job_rows, key=lambda row: str(row["job_id"] or "")),
+        "attempts": sorted(
+            attempt_rows, key=lambda row: str(row["attempt_id"] or "")
+        ),
+        "workstreams": sorted(
+            [dict(row) for row in runtime_jobs],
+            key=lambda row: (
+                str(row.get("workstream") or ""),
+                str(row.get("job_id") or ""),
+            ),
+        ),
+    }
+    return hashlib.sha256(
+        json.dumps(
+            material,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _generation_receipt(data_version: str, snapshot_digest: str) -> str:
+    return hashlib.sha256(
+        f"{data_version}:{snapshot_digest}".encode("ascii")
+    ).hexdigest()
+
+
+def _apply_w3c_read(
+    row: dict[str, Any],
+    *,
+    runtime: Any,
+    root_job_id: str,
+    candidate: Any,
+    connection: Any,
+) -> None:
+    """Delegate one exact candidate to W3C and copy only its closed projection."""
+
+    if executive_dialogue_observation is None:
+        row["w3c_reason"] = "W3C_OWNER_UNAVAILABLE"
+        return
     try:
-        jobs = runtime.jobs.list_jobs()
-    except (executive_runtime.RuntimeProofError, ValueError, KeyError) as exc:
-        return None, (
-            f"jobs unreadable: {str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__}"
+        result = (
+            executive_dialogue_observation.read_runtime_canonical_terminal_wake(
+                runtime=runtime,
+                source_root_job_id=root_job_id,
+                candidate=candidate,
+                connection=connection,
+            )
+        )
+    except Exception:
+        row.update(
+            w3c_state="UNAVAILABLE",
+            w3c_reason="W3C_OWNER_UNAVAILABLE",
+            w3c_terminal_state="UNAVAILABLE",
+            w3c_wake_state="UNAVAILABLE",
+            w3c_terminal_applied="false",
+        )
+        return
+
+    for field in ("state", "reason", "terminal_state", "wake_state"):
+        if not isinstance(getattr(result, field, None), str):
+            row.update(
+                w3c_state="UNAVAILABLE",
+                w3c_reason="W3C_RESULT_INVALID",
+                w3c_terminal_state="UNAVAILABLE",
+                w3c_wake_state="UNAVAILABLE",
+                w3c_terminal_applied="false",
+            )
+            return
+    row.update(
+        w3c_state=result.state,
+        w3c_reason=result.reason,
+        w3c_terminal_state=result.terminal_state,
+        w3c_wake_state=result.wake_state,
+        w3c_terminal_applied="true" if result.terminal_applied is True else "false",
+    )
+    if result.state == "EFFECT_UNKNOWN":
+        row["effect_state"] = "effect_unknown"
+
+    receipt = getattr(result, "source_receipt", None)
+    if receipt is None:
+        return
+    receipt_fields = {
+        "w3c_source_observed_at": getattr(receipt, "observed_at", None),
+        "w3c_source_freshness": getattr(receipt, "freshness", None),
+        "w3c_snapshot_digest": getattr(receipt, "snapshot_digest", None),
+        "w3c_terminal_source_owner": getattr(
+            receipt, "terminal_source_owner", None
+        ),
+        "w3c_wake_source_owner": getattr(receipt, "wake_source_owner", None),
+    }
+    if all(isinstance(value, str) and value for value in receipt_fields.values()):
+        row.update(receipt_fields)
+
+
+def _gather_dispatch_evidence(
+    root: Path,
+    cards: Sequence[Mapping[str, Any]],
+    generated_at: str,
+) -> list[dict[str, Any]]:
+    """Bounded, generation-guarded, read-only W3C/C2 evidence gather.
+
+    The public Runtime registries provide two explicit generations around the
+    supplied C2/W3C read transaction.  If either the database generation or
+    the load-bearing public projection changes, every row fails closed.  The
+    C2 capacity carrier is deliberately independent from W3C's one ordinary
+    completed orchestration child; neither identity can substitute for the
+    other.
+    """
+
+    del generated_at
+    try:
+        db_path = root / executive_inbox.DB_RELATIVE_PATH
+        if not db_path.is_file():
+            return []
+        runtime = executive_runtime.Runtime.at(root, create=False)
+    except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    seen_keys: set[tuple[Any, Any]] = set()
+    for card in list(cards)[:_DISPATCH_EVIDENCE_MAX_CARDS]:
+        if not isinstance(card, Mapping):
+            continue
+        ref = card.get("responsibility_ref")
+        root_job_id = card.get("root_job_id")
+        if not isinstance(ref, str) or not ref:
+            continue
+        if root_job_id is not None and (
+            not isinstance(root_job_id, str) or not root_job_id
+        ):
+            continue
+        key = (ref, root_job_id)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        rows.append(
+            _owner_held_dispatch_row(
+                responsibility_ref=ref,
+                root_job_id=root_job_id,
+                runtime_root_state=_runtime_root_state(card),
+            )
         )
 
-    result: list[dict[str, Any]] = []
-    for job in jobs:
-        try:
-            provenance, _warning = executive_inbox.ceo_intent_provenance(runtime, job.job_id)
-        except (executive_runtime.RuntimeProofError, ValueError, KeyError):
-            continue
-        if provenance is None:
-            continue
-        workstream = provenance.get("workstream")
-        if not isinstance(workstream, str) or not workstream:
-            continue
-        status = getattr(job.status, "value", None) or str(job.status)
-        result.append({"job_id": job.job_id, "status": status, "workstream": workstream})
-    return result, None
+    try:
+        with runtime.store.read() as connection:
+            # PRAGMA data_version alone does not establish a SQLite snapshot.
+            # This schema-only read does, without reading semantic owner data.
+            connection.execute(
+                "SELECT name FROM sqlite_master ORDER BY name LIMIT 1"
+            ).fetchone()
+            before_data_version = str(
+                int(connection.execute("PRAGMA data_version").fetchone()[0])
+            )
+            jobs, runtime_jobs, initial_failure = (
+                _read_runtime_jobs_from_runtime(runtime)
+            )
+            if initial_failure is not None or jobs is None or runtime_jobs is None:
+                raise executive_runtime.RuntimeProofError(
+                    initial_failure or "public Runtime jobs unavailable"
+                )
+            attempts = runtime.attempts.list_attempts()
+            before_digest = _runtime_generation_digest(
+                jobs, attempts, runtime_jobs
+            )
+            current_roots = (
+                autonomy_control_room_projection
+                .runtime_root_candidates_from_runtime_jobs(runtime_jobs)
+            )
+
+            cards_by_key = {
+                (card.get("responsibility_ref"), card.get("root_job_id")): card
+                for card in list(cards)[:_DISPATCH_EVIDENCE_MAX_CARDS]
+                if isinstance(card, Mapping)
+            }
+            reader = _current_capacity_commitment_reader(runtime)
+            for row in rows:
+                ref = row["responsibility_ref"]
+                root_job_id = row["root_job_id"]
+                card = cards_by_key.get((ref, root_job_id), {})
+                candidates = tuple(current_roots.get(ref, ()))
+                precursor_candidates = card.get("root_job_candidates")
+                if isinstance(precursor_candidates, Sequence) and not isinstance(
+                    precursor_candidates, (str, bytes)
+                ):
+                    precursor_set = {
+                        item
+                        for item in precursor_candidates
+                        if isinstance(item, str) and item
+                    }
+                else:
+                    precursor_set = {root_job_id} if root_job_id else set()
+
+                if (
+                    card.get("root_job_ambiguous") is True
+                    or len(candidates) > 1
+                    or len(precursor_set) > 1
+                    or (
+                        candidates
+                        and precursor_set
+                        and set(candidates) != precursor_set
+                    )
+                ):
+                    row.update(
+                        runtime_root_state="CONFLICT",
+                        carrier_state="UNKNOWN",
+                        carrier_reason="RUNTIME_ROOT_CONFLICT",
+                        w3c_state="CONFLICT",
+                        w3c_reason="RUNTIME_ROOT_CONFLICT",
+                    )
+                    continue
+                if len(candidates) != 1 or candidates[0] != root_job_id:
+                    row["runtime_root_state"] = "UNKNOWN"
+                    continue
+                row["runtime_root_state"] = "RESOLVED"
+                assert isinstance(root_job_id, str)
+                if reader is not None:
+                    try:
+                        commitment = reader(
+                            runtime, root_job_id, connection=connection
+                        )
+                    except Exception:
+                        row.update(
+                            carrier_state="UNKNOWN",
+                            carrier_reason="C2_COMMITMENT_UNAVAILABLE",
+                        )
+                    else:
+                        if commitment is None:
+                            row.update(
+                                carrier_state="UNKNOWN",
+                                carrier_reason="C2_COMMITMENT_ABSENT",
+                            )
+                        elif _capacity_commitment_is_exact(
+                            commitment,
+                            responsibility_ref=ref,
+                            root_job_id=root_job_id,
+                        ):
+                            row.update(
+                                carrier_state="RESOLVED",
+                                carrier_reason="C2_CURRENT_CAPACITY_COMMITMENT",
+                            )
+                        else:
+                            row.update(
+                                carrier_state="UNKNOWN",
+                                carrier_reason="C2_COMMITMENT_CONFLICT",
+                            )
+
+                candidate, candidate_reason = _exact_w3c_candidate(
+                    jobs, attempts, root_job_id=root_job_id
+                )
+                if candidate is None:
+                    row["w3c_reason"] = candidate_reason
+                    if candidate_reason == "W3C_CANDIDATE_CONFLICT":
+                        row["w3c_state"] = "CONFLICT"
+                    continue
+                _apply_w3c_read(
+                    row,
+                    runtime=runtime,
+                    root_job_id=root_job_id,
+                    candidate=candidate,
+                    connection=connection,
+                )
+
+            final_jobs, final_runtime_jobs, final_failure = (
+                _read_runtime_jobs_from_runtime(runtime)
+            )
+            final_attempts = runtime.attempts.list_attempts()
+            if (
+                final_failure is not None
+                or final_jobs is None
+                or final_runtime_jobs is None
+            ):
+                raise executive_runtime.RuntimeProofError(
+                    final_failure or "final public Runtime jobs unavailable"
+                )
+            after_digest = _runtime_generation_digest(
+                final_jobs, final_attempts, final_runtime_jobs
+            )
+            # End the sentinel snapshot, then let the same connection observe
+            # commits that occurred while the public registries were read.
+            connection.commit()
+            after_data_version = str(
+                int(connection.execute("PRAGMA data_version").fetchone()[0])
+            )
+
+            generation_conflict = (
+                before_data_version != after_data_version
+                or before_digest != after_digest
+            )
+            before_receipt = _generation_receipt(
+                before_data_version, before_digest
+            )
+            after_receipt = _generation_receipt(
+                after_data_version, after_digest
+            )
+            for row in rows:
+                row.update(
+                    runtime_generation_state=(
+                        "CONFLICT" if generation_conflict else "SAME"
+                    ),
+                    runtime_generation_before=before_receipt,
+                    runtime_generation_after=after_receipt,
+                )
+                if not generation_conflict:
+                    continue
+                for field in (
+                    "w3c_source_observed_at",
+                    "w3c_source_freshness",
+                    "w3c_snapshot_digest",
+                    "w3c_terminal_source_owner",
+                    "w3c_wake_source_owner",
+                    "effect_state",
+                ):
+                    row.pop(field, None)
+                row.update(
+                    runtime_root_state="CONFLICT",
+                    carrier_state="UNKNOWN",
+                    carrier_reason="RUNTIME_GENERATION_CONFLICT",
+                    w3c_state="CONFLICT",
+                    w3c_reason="RUNTIME_GENERATION_CONFLICT",
+                    w3c_terminal_state="UNAVAILABLE",
+                    w3c_wake_state="UNAVAILABLE",
+                    w3c_terminal_applied="false",
+                )
+    except Exception:
+        for row in rows:
+            row.update(
+                carrier_state="UNKNOWN",
+                carrier_reason="C2_COMMITMENT_UNAVAILABLE",
+                w3c_state="UNAVAILABLE",
+                w3c_reason="W3C_OWNER_UNAVAILABLE",
+                w3c_terminal_state="UNAVAILABLE",
+                w3c_wake_state="UNAVAILABLE",
+                w3c_terminal_applied="false",
+            )
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# placement selection facts document (CAP-C1) — read + parse + select, never
+# raises. This is the ONE gather-layer seam for
+# :mod:`control_plane.executive_placement_selection`: a caller-supplied JSON
+# document is parsed into the module's own typed, secret-safe facts, handed
+# to the pure :func:`control_plane.executive_placement_selection.
+# select_placement`, and the resulting decision's closed wire dict is what
+# flows into :func:`compose_control_room`. No file is ever written here.
+# ---------------------------------------------------------------------------
+
+def _parse_source_ref(raw: Any) -> executive_steward.SourceRef:
+    if not isinstance(raw, Mapping):
+        raise ValueError("source must be an object")
+    return executive_steward.SourceRef(
+        owner=executive_steward.SourceOwner(raw["owner"]),
+        ref=raw["ref"],
+        observed_at=raw.get("observed_at"),
+        freshness=executive_steward.Freshness(raw["freshness"]),
+    )
+
+
+def _parse_responsibility_fact(raw: Any) -> executive_steward.ResponsibilityFact:
+    if not isinstance(raw, Mapping):
+        raise ValueError("responsibility must be an object")
+    return executive_steward.ResponsibilityFact(
+        responsibility_ref=raw["responsibility_ref"],
+        title=raw["title"],
+        accountable_seat=executive_steward.Seat(raw["accountable_seat"]),
+        state=raw.get("state"),
+        root_job_id=raw.get("root_job_id"),
+        source=_parse_source_ref(raw["source"]),
+    )
+
+
+def _parse_placement_demand(raw: Any) -> executive_placement_selection.PlacementDemand:
+    if not isinstance(raw, Mapping):
+        raise ValueError("demand must be an object")
+    capabilities = raw["required_capabilities"]
+    if not isinstance(capabilities, list):
+        raise ValueError("demand.required_capabilities must be a list")
+    # Mode wave: allowed_modes is required (no soft default — an omitted
+    # or empty set would silently mean "no candidate can ever satisfy
+    # this", which PlacementDemand itself already refuses).
+    allowed_modes_raw = raw["allowed_modes"]
+    if not isinstance(allowed_modes_raw, list):
+        raise ValueError("demand.allowed_modes must be a list")
+    return executive_placement_selection.PlacementDemand(
+        required_capabilities=frozenset(capabilities),
+        quota_class=raw["quota_class"],
+        provider=raw.get("provider"),
+        allowed_modes=frozenset(
+            executive_placement_selection.PlacementMode(item) for item in allowed_modes_raw
+        ),
+    )
+
+
+def _parse_placement_candidate(raw: Any) -> executive_placement_selection.PlacementCandidateFact:
+    if not isinstance(raw, Mapping):
+        raise ValueError("candidate must be an object")
+    capabilities = raw["capabilities"]
+    if not isinstance(capabilities, list):
+        raise ValueError("candidate.capabilities must be a list")
+    return executive_placement_selection.PlacementCandidateFact(
+        worker_id=raw["worker_id"],
+        provider=raw["provider"],
+        account_label=raw["account_label"],
+        quota_class=raw["quota_class"],
+        capabilities=frozenset(capabilities),
+        observed_at_ms=raw["observed_at_ms"],
+        occupancy=executive_placement_selection.OccupancyState(raw["occupancy"]),
+        occupancy_source=_parse_source_ref(raw["occupancy_source"]),
+        capacity_state=executive_steward.CapacityState(raw["capacity_state"]),
+        capacity_source=_parse_source_ref(raw["capacity_source"]),
+        host_source_closure_proven=raw["host_source_closure_proven"],
+        closure_source=_parse_source_ref(raw["closure_source"]),
+        effect_state=executive_steward.EffectState(raw["effect_state"]),
+        # Mode wave: mode is required; the two creation bools default to
+        # None where absent — the exact shape a reuse candidate's facts
+        # document naturally omits them in (PlacementCandidateFact itself
+        # still refuses a fresh-lane candidate whose bools were left None).
+        mode=executive_placement_selection.PlacementMode(raw["mode"]),
+        creation_surface_accessible=raw.get("creation_surface_accessible"),
+        session_creation_allowed=raw.get("session_creation_allowed"),
+    )
+
+
+def _read_placement_selection(
+    path: str | Path | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Read one placement-selection facts document and run ``select_placement``.
+
+    ``path`` is ``None`` in the common case (no ``--placement-selection``
+    flag) — that returns ``(None, None)`` with no degraded entry at all,
+    exactly like an optional feature that was never asked for. Any other
+    failure (missing file, invalid JSON, wrong shape, a typed fact that
+    fails its own secret-safe validation, or ``select_placement`` itself
+    refusing the input) becomes ``(None, "<reason>")`` — this function never
+    raises, matching every other gather-layer reader in this module.
+
+    Reviewer m-7: unlike this module's other gather-layer readers (whose
+    ``degraded`` rows may embed ``str(exc)``/a path — an inherited,
+    out-of-scope idiom), this ONE reader's failure reason names only the
+    exception CLASS, never ``str(exc)`` or ``path`` itself. The facts
+    document this reads can carry caller-supplied enum/token values (an
+    invalid ``SourceOwner``/``Freshness``/... raises a stdlib ``ValueError``
+    whose message echoes the bad value verbatim), and the ``degraded`` list
+    is user-visible product surface — it must never become a channel for
+    replaying facts-document content or filesystem paths back out.
+    """
+    if not path:
+        return None, None
+    if executive_placement_selection is None:
+        return None, "unavailable (module not shipped)"
+    try:
+        raw_text = Path(path).read_text(encoding="utf-8")
+        raw = json.loads(raw_text)
+        if not isinstance(raw, Mapping):
+            raise ValueError("placement selection facts document must be a JSON object")
+        responsibility = _parse_responsibility_fact(raw["responsibility"])
+        demand = _parse_placement_demand(raw["demand"])
+        candidates_raw = raw["candidates"]
+        if not isinstance(candidates_raw, list):
+            raise ValueError("candidates must be a list")
+        candidates = tuple(_parse_placement_candidate(item) for item in candidates_raw)
+        accepted_tie_breaker = raw.get("accepted_tie_breaker")
+        decision = executive_placement_selection.select_placement(
+            responsibility=responsibility,
+            demand=demand,
+            candidates=candidates,
+            accepted_tie_breaker=accepted_tie_breaker,
+        )
+        return decision.to_dict(), None
+    except Exception as exc:  # noqa: BLE001 — gather layer never raises
+        # Name only the exception CLASS — never str(exc), never `path` — see
+        # the leak-safety note above.
+        return None, f"unreadable ({exc.__class__.__name__})"
 
 
 def build_control_room(
@@ -1041,6 +2001,7 @@ def build_control_room(
     now: str | None = None,
     timeout: float = DEFAULT_TIMEOUT,
     bindings_path: str | Path | None = None,
+    placement_selection_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Collect every source and hand them to :func:`compose_control_room`.
 
@@ -1108,6 +2069,46 @@ def build_control_room(
 
     bindings, binding_problems = surface_bindings.load_bindings(bindings_path)
 
+    placement_selection, placement_selection_failure = _read_placement_selection(
+        placement_selection_path
+    )
+
+    # Review 5103135217 BLOCKER 1: real dispatch evidence is gathered here
+    # (the I/O layer), never inside the pure `compose_control_room`.  The
+    # exact (responsibility_ref, root_job_id) join keys the gather needs to
+    # target aren't known until the Autonomy responsibility cards are
+    # projected — which `compose_control_room` itself does, purely, from
+    # the sources already collected above.  Rather than duplicate that pure
+    # join logic here, this calls the pure composer ONCE with no dispatch
+    # evidence to learn the card list (byte-identical, deterministic,
+    # zero I/O — cheap to redo), runs the bounded real gather against it,
+    # then composes the FINAL document with the real evidence attached.
+    dispatch_evidence: list[dict[str, Any]] | None = None
+    if autonomy_control_room_projection is not None:
+        try:
+            precursor = compose_control_room(
+                inbox=inbox,
+                boot_packet=packet,
+                active_builds=active_builds,
+                agent_os_state=agent_os_state,
+                runtime_jobs=runtime_jobs,
+                bindings=bindings,
+                binding_problems=binding_problems,
+                placement_selection=placement_selection,
+                generated_at=generated_at,
+            )
+            precursor_autonomy = precursor.get("autonomy")
+            if isinstance(precursor_autonomy, Mapping):
+                precursor_cards = precursor_autonomy.get("responsibilities")
+                if isinstance(precursor_cards, Sequence) and not isinstance(
+                    precursor_cards, (str, bytes)
+                ):
+                    dispatch_evidence = _gather_dispatch_evidence(
+                        root, precursor_cards, generated_at
+                    )
+        except Exception:  # noqa: BLE001 — gather layer never raises
+            dispatch_evidence = None
+
     doc = compose_control_room(
         inbox=inbox,
         boot_packet=packet,
@@ -1116,6 +2117,8 @@ def build_control_room(
         runtime_jobs=runtime_jobs,
         bindings=bindings,
         binding_problems=binding_problems,
+        placement_selection=placement_selection,
+        dispatch_evidence=dispatch_evidence,
         generated_at=generated_at,
     )
 
@@ -1130,6 +2133,8 @@ def build_control_room(
         extra_degraded.append(f"agent_os_state: {agent_os_state_failure}")
     if runtime_jobs_failure:
         extra_degraded.append(f"executive_runtime: {runtime_jobs_failure}")
+    if placement_selection_failure:
+        extra_degraded.append(f"placement_selection: {placement_selection_failure}")
     if extra_degraded:
         doc = dict(doc)
         doc["degraded"] = sorted(list(doc["degraded"]) + extra_degraded)

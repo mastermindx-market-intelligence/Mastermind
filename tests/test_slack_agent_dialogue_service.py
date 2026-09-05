@@ -23,14 +23,17 @@ from integrations.slack_agent_dialogue.contract import (
 from integrations.slack_agent_dialogue.engine import (
     DialogueEngine,
     DialoguePolicy,
+    MessageReceipt,
     SlackMessage,
 )
+from integrations.slack_agent_dialogue.engine_v2 import PreparedMessageSend
 from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
 from integrations.slack_agent_dialogue.service import (
     AF_UNIX_PATH_MAX_BYTES,
     AgentDialogueService,
     CONTROL_VERSION,
     DialogueServiceError,
+    EXACT_SEND_PROTOCOL,
     ServiceConfig,
     call_service,
 )
@@ -69,6 +72,8 @@ class FakeV2Engine:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
+        self.relay_parent_thread_ts = THREAD_TS
+        self.prepare_duplicate = False
 
     def status(self) -> dict[str, object]:
         self.calls.append(("status", None))
@@ -86,6 +91,29 @@ class FakeV2Engine:
             "operation_key": normalized["operation_key"],
         }
 
+    async def bind_or_verify_relay_parent_thread(self, context) -> dict[str, object]:
+        normalized = context.normalized()
+        self.calls.append(("bind_or_verify_relay_parent_thread", normalized))
+        return {
+            "thread_ts": self.relay_parent_thread_ts,
+            "parent_author_user_id": BOT,
+            "parent_fingerprint": "a" * 64,
+        }
+
+    async def ensure_thread(self, context, *, created_at: str) -> dict[str, object]:
+        normalized = context.normalized()
+        self.calls.append(
+            (
+                "ensure_thread",
+                {"context": normalized, "created_at": created_at},
+            )
+        )
+        return {
+            "action": "REUSED",
+            "thread_ts": THREAD_TS,
+            "operation_key": normalized["operation_key"],
+        }
+
     async def send_message(self, *, thread_ts: str, context, message) -> dict[str, object]:
         normalized = context.normalized()
         self.calls.append(
@@ -99,6 +127,50 @@ class FakeV2Engine:
             )
         )
         return {"action": "DUPLICATE", "message_key": message["message_key"]}
+
+    async def prepare_send_message(self, *, thread_ts: str, context, message):
+        normalized = context.normalized()
+        self.calls.append(
+            (
+                "prepare_send_message",
+                {
+                    "thread_ts": thread_ts,
+                    "context": normalized,
+                    "message": dict(message),
+                },
+            )
+        )
+        if self.prepare_duplicate:
+            return MessageReceipt(
+                action="DUPLICATE",
+                message_key=message["message_key"],
+                fingerprint=message["fingerprint"],
+                message_ts="1787471000.000002",
+                duplicate_timestamps=(),
+            )
+        return PreparedMessageSend(
+            thread_ts=thread_ts,
+            context=context,
+            message=dict(message),
+            text="frozen fake frame",
+            message_key=message["message_key"],
+            fingerprint=message["fingerprint"],
+        )
+
+    async def commit_send_message(self, prepared, *, fingerprint: str):
+        self.calls.append(
+            (
+                "commit_send_message",
+                {"prepared": prepared, "fingerprint": fingerprint},
+            )
+        )
+        return {
+            "action": "POSTED",
+            "message_key": prepared.message_key,
+            "fingerprint": prepared.fingerprint,
+            "message_ts": "1787471000.000002",
+            "duplicate_timestamps": [],
+        }
 
     async def read_thread(self, *, thread_ts: str, context) -> dict[str, object]:
         normalized = context.normalized()
@@ -172,7 +244,11 @@ def multibyte_oversize_socket_path(root: Path) -> Path:
 
 
 async def wait_for_service_start(
-    task: asyncio.Task[None], socket_path: Path, *, timeout_seconds: float = 1.0
+    task: asyncio.Task[None],
+    socket_path: Path,
+    *,
+    expected_mode: int = 0o600,
+    timeout_seconds: float = 1.0,
 ) -> None:
     """Observe startup success, task failure, or a bounded timeout."""
 
@@ -186,7 +262,10 @@ async def wait_for_service_start(
             except FileNotFoundError:
                 pass
             else:
-                if stat.S_ISSOCK(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600:
+                if (
+                    stat.S_ISSOCK(info.st_mode)
+                    and stat.S_IMODE(info.st_mode) == expected_mode
+                ):
                     return
             await asyncio.sleep(0)
 
@@ -400,12 +479,52 @@ def service_with_v2(
     )
 
 
+def shared_relay_service(
+    socket_root: Path, *, socket_path: Path | None = None
+) -> tuple[AgentDialogueService, InMemorySlackClient]:
+    engine, client = engine_and_client()
+    return (
+        AgentDialogueService(
+            ServiceConfig(
+                socket_path=socket_path or socket_root / "agent-relay.sock",
+                allowed_peer_uids=(450,),
+                request_timeout_seconds=1,
+                socket_parent_mode=0o710,
+                socket_mode=0o660,
+                socket_group_gid=os.getegid(),
+            ),
+            engine,
+        ),
+        client,
+    )
+
+
+def prepare_shared_socket_root(socket_root: Path) -> Path:
+    shared_root = socket_root / "shared"
+    shared_root.mkdir(mode=0o710)
+    os.chown(shared_root, os.geteuid(), os.getegid())
+    shared_root.chmod(0o710)
+    return shared_root
+
+
 def request_envelope(operation: str, args: dict[str, object]) -> dict[str, object]:
     return {"version": CONTROL_VERSION, "operation": operation, "args": args}
 
 
 def request_envelope_v2(operation: str, args: dict[str, object]) -> dict[str, object]:
     return {"version": CONTROL_VERSION_V2_TEXT, "operation": operation, "args": args}
+
+
+def exact_send_request_v2() -> dict[str, object]:
+    return request_envelope_v2(
+        "send_message",
+        {
+            "context": context_v2_dict(),
+            "thread_ts": THREAD_TS,
+            "message": v2_message_dict(),
+            "send_protocol": EXACT_SEND_PROTOCOL,
+        },
+    )
 
 
 def test_real_unix_status_and_one_shot_cleanup(socket_root: Path) -> None:
@@ -420,6 +539,602 @@ def test_real_unix_status_and_one_shot_cleanup(socket_root: Path) -> None:
         assert response["result"]["status"] == "DEVELOPMENT_UNARMED"
         await task
         assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+def test_v2_send_response_loss_after_dispatch_is_effect_unknown(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "lost-send-response.sock"
+        received = asyncio.Event()
+
+        async def close_without_response(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            await reader.readuntil(b"\n")
+            received.set()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(close_without_response, path)
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(
+                    path,
+                    request_envelope_v2("send_message", {"opaque": "request"}),
+                    timeout_seconds=1,
+                )
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+            await asyncio.wait_for(received.wait(), timeout=1)
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_call_service_runs_before_write_hook_after_unix_connect(
+    socket_root: Path,
+) -> None:
+    """Moving the hook before connect or after request bytes must fail."""
+
+    async def scenario() -> None:
+        path = socket_root / "before-write-order.sock"
+        accepted = asyncio.Event()
+        received = asyncio.Event()
+        order: list[str] = []
+
+        async def respond(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            order.append("connected")
+            accepted.set()
+            await reader.readuntil(b"\n")
+            order.append("bytes")
+            writer.write(b'{"ok":true,"result":{"accepted":true}}\n')
+            await writer.drain()
+            received.set()
+            writer.close()
+            await writer.wait_closed()
+
+        async def before_write() -> None:
+            await asyncio.wait_for(accepted.wait(), timeout=1)
+            order.append("hook")
+
+        server = await asyncio.start_unix_server(respond, path)
+        try:
+            response = await call_service(
+                path,
+                request_envelope_v2("send_message", {"opaque": "request"}),
+                timeout_seconds=1,
+                before_write=before_write,
+            )
+            await asyncio.wait_for(received.wait(), timeout=1)
+            assert response == {"ok": True, "result": {"accepted": True}}
+            assert order == ["connected", "hook", "bytes"]
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_call_service_before_write_refusal_is_definite_and_sends_zero_bytes(
+    socket_root: Path,
+) -> None:
+    """Translating a pre-write refusal to SEND_EFFECT_UNKNOWN must fail."""
+
+    class BeforeWriteRefused(RuntimeError):
+        pass
+
+    async def scenario() -> None:
+        path = socket_root / "before-write-refusal.sock"
+        accepted = asyncio.Event()
+        observed_eof = asyncio.Event()
+        received = bytearray()
+
+        async def observe(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            accepted.set()
+            received.extend(await reader.read())
+            observed_eof.set()
+            writer.close()
+            await writer.wait_closed()
+
+        async def before_write() -> None:
+            await asyncio.wait_for(accepted.wait(), timeout=1)
+            raise BeforeWriteRefused("durable ATTEMPTED marker was refused")
+
+        server = await asyncio.start_unix_server(observe, path)
+        try:
+            with pytest.raises(BeforeWriteRefused, match="durable ATTEMPTED"):
+                await call_service(
+                    path,
+                    request_envelope_v2("send_message", {"opaque": "request"}),
+                    timeout_seconds=1,
+                    before_write=before_write,
+                )
+            await asyncio.wait_for(observed_eof.wait(), timeout=1)
+            assert bytes(received) == b""
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_calls_hook_only_after_ready_then_commits_same_fingerprint(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-send-order.sock"
+        request = exact_send_request_v2()
+        fingerprint = request["args"]["message"]["fingerprint"]
+        order: list[str] = []
+
+        async def exact_server(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            observed = json.loads(await reader.readline())
+            assert observed == request
+            order.append("prepare")
+            writer.write(
+                json.dumps(
+                    {"ok": True, "ready": {"fingerprint": fingerprint}},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            order.append("ready")
+            commit = json.loads(await reader.readline())
+            order.append("commit")
+            assert commit == {
+                "commit": "COMMIT",
+                "fingerprint": fingerprint,
+            }
+            writer.write(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "action": "POSTED",
+                            "message_key": request["args"]["message"]["message_key"],
+                            "fingerprint": fingerprint,
+                            "message_ts": "1787471000.000002",
+                            "duplicate_timestamps": [],
+                        },
+                    },
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        async def before_write() -> None:
+            order.append("callback")
+
+        server = await asyncio.start_unix_server(exact_server, path)
+        try:
+            response = await call_service(
+                path,
+                request,
+                timeout_seconds=1,
+                before_write=before_write,
+            )
+            assert response["ok"] is True
+            assert order == ["prepare", "ready", "callback", "commit"]
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_committed_receipt_is_closed_over_verified_relay_parent(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        request = exact_send_request_v2()
+        message = request["args"]["message"]
+        try:
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {
+                "ok": True,
+                "result": {
+                    "action": "POSTED",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787471000.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": THREAD_TS,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "a" * 64,
+                },
+            }
+            assert [name for name, _value in fake.calls] == [
+                "bind_or_verify_relay_parent_thread",
+                "prepare_send_message",
+                "commit_send_message",
+            ]
+        finally:
+            await task
+
+    run(scenario())
+
+
+def test_exact_send_duplicate_receipt_is_closed_over_verified_relay_parent(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        fake.prepare_duplicate = True
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        request = exact_send_request_v2()
+        message = request["args"]["message"]
+        try:
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {
+                "ok": True,
+                "result": {
+                    "action": "DUPLICATE",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787471000.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": THREAD_TS,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "a" * 64,
+                },
+            }
+            assert [name for name, _value in fake.calls] == [
+                "bind_or_verify_relay_parent_thread",
+                "prepare_send_message",
+            ]
+        finally:
+            await task
+
+    run(scenario())
+
+
+def test_exact_send_refuses_request_thread_not_owned_by_verified_relay_parent(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        fake.relay_parent_thread_ts = "1787471000.000099"
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        try:
+            response = await call_service(srv.config.socket_path, exact_send_request_v2())
+            assert response == {
+                "ok": False,
+                "error": {"code": "THREAD_CONTEXT_MISMATCH"},
+            }
+            assert [name for name, _value in fake.calls] == [
+                "bind_or_verify_relay_parent_thread",
+            ]
+        finally:
+            await task
+
+    run(scenario())
+
+
+def test_exact_send_deep_snapshots_request_before_ready_callback_mutation(
+    socket_root: Path,
+) -> None:
+    """The COMMIT fingerprint is fixed before the first await ignores mutation."""
+
+    async def scenario() -> None:
+        path = socket_root / "exact-send-deep-snapshot.sock"
+        request = exact_send_request_v2()
+        original_fingerprint = request["args"]["message"]["fingerprint"]
+        commit_seen = asyncio.Event()
+        prepare_seen = asyncio.Event()
+        release_ready = asyncio.Event()
+
+        async def exact_server(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            observed = json.loads(await reader.readline())
+            assert observed["args"]["message"]["fingerprint"] == original_fingerprint
+            prepare_seen.set()
+            await release_ready.wait()
+            writer.write(
+                json.dumps(
+                    {"ok": True, "ready": {"fingerprint": original_fingerprint}},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            assert json.loads(await reader.readline()) == {
+                "commit": "COMMIT",
+                "fingerprint": original_fingerprint,
+            }
+            commit_seen.set()
+            writer.write(
+                b'{"ok":true,"result":{"accepted":true}}\n'
+            )
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(exact_server, path)
+        try:
+            caller = asyncio.create_task(
+                call_service(path, request, timeout_seconds=1)
+            )
+            await asyncio.wait_for(prepare_seen.wait(), timeout=1)
+            request["args"]["message"]["fingerprint"] = "f" * 64
+            release_ready.set()
+            response = await caller
+            assert response == {"ok": True, "result": {"accepted": True}}
+            await asyncio.wait_for(commit_seen.wait(), timeout=1)
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_ready_disconnect_runs_no_commit_or_provider_dispatch(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+
+        reader, writer = await asyncio.open_unix_connection(str(srv.config.socket_path))
+        writer.write(
+            json.dumps(exact_send_request_v2(), separators=(",", ":")).encode()
+            + b"\n"
+        )
+        await writer.drain()
+        ready = json.loads(await reader.readline())
+        assert ready == {
+            "ok": True,
+            "ready": {"fingerprint": v2_message_dict()["fingerprint"]},
+        }
+        writer.close()
+        await writer.wait_closed()
+        await task
+
+        assert [name for name, _value in fake.calls] == [
+            "bind_or_verify_relay_parent_thread",
+            "prepare_send_message",
+        ]
+
+    run(scenario())
+
+
+def test_exact_send_commit_fingerprint_mismatch_dispatches_zero_times(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+
+        reader, writer = await asyncio.open_unix_connection(str(srv.config.socket_path))
+        writer.write(
+            json.dumps(exact_send_request_v2(), separators=(",", ":")).encode()
+            + b"\n"
+        )
+        await writer.drain()
+        assert json.loads(await reader.readline())["ready"]["fingerprint"] == "0" * 64
+        writer.write(
+            json.dumps(
+                {"commit": "COMMIT", "fingerprint": "f" * 64},
+                separators=(",", ":"),
+            ).encode()
+            + b"\n"
+        )
+        await writer.drain()
+        assert json.loads(await reader.readline()) == {
+            "ok": False,
+            "error": {"code": "REQUEST_INVALID"},
+        }
+        writer.close()
+        await writer.wait_closed()
+        await task
+
+        assert [name for name, _value in fake.calls] == [
+            "bind_or_verify_relay_parent_thread",
+            "prepare_send_message",
+        ]
+
+    run(scenario())
+
+
+def test_exact_send_pre_ready_refusal_never_runs_callback(socket_root: Path) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-send-refused.sock"
+        callback_called = False
+
+        async def refuse(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            await reader.readline()
+            writer.write(
+                b'{"ok":false,"error":{"code":"THREAD_CONTEXT_MISMATCH"}}\n'
+            )
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        async def before_write() -> None:
+            nonlocal callback_called
+            callback_called = True
+
+        server = await asyncio.start_unix_server(refuse, path)
+        try:
+            response = await call_service(
+                path,
+                exact_send_request_v2(),
+                timeout_seconds=1,
+                before_write=before_write,
+            )
+            assert response == {
+                "ok": False,
+                "error": {"code": "THREAD_CONTEXT_MISMATCH"},
+            }
+            assert callback_called is False
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_ready_fingerprint_drift_runs_no_callback_or_commit(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-send-ready-drift.sock"
+        observed_after_ready = bytearray()
+        callback_called = False
+
+        async def drift(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            await reader.readline()
+            writer.write(
+                b'{"ok":true,"ready":{"fingerprint":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}}\n'
+            )
+            await writer.drain()
+            observed_after_ready.extend(await reader.read())
+            writer.close()
+            await writer.wait_closed()
+
+        async def before_write() -> None:
+            nonlocal callback_called
+            callback_called = True
+
+        server = await asyncio.start_unix_server(drift, path)
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(
+                    path,
+                    exact_send_request_v2(),
+                    timeout_seconds=1,
+                    before_write=before_write,
+                )
+            assert exc.value.code == "SERVICE_UNAVAILABLE"
+            assert callback_called is False
+            assert bytes(observed_after_ready) == b""
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_lost_reply_after_commit_is_effect_unknown(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-send-lost-reply.sock"
+        request = exact_send_request_v2()
+        fingerprint = request["args"]["message"]["fingerprint"]
+        commit_seen = asyncio.Event()
+
+        async def lose_reply(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            await reader.readline()
+            writer.write(
+                json.dumps(
+                    {"ok": True, "ready": {"fingerprint": fingerprint}},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            commit = json.loads(await reader.readline())
+            assert commit == {"commit": "COMMIT", "fingerprint": fingerprint}
+            commit_seen.set()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(lose_reply, path)
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(path, request, timeout_seconds=1)
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+            await asyncio.wait_for(commit_seen.wait(), timeout=1)
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_exact_send_unproven_server_error_after_commit_is_effect_unknown(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "exact-send-internal-after-commit.sock"
+        request = exact_send_request_v2()
+        fingerprint = request["args"]["message"]["fingerprint"]
+
+        async def unproven_error(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            await reader.readline()
+            writer.write(
+                json.dumps(
+                    {"ok": True, "ready": {"fingerprint": fingerprint}},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            assert json.loads(await reader.readline()) == {
+                "commit": "COMMIT",
+                "fingerprint": fingerprint,
+            }
+            writer.write(b'{"ok":false,"error":{"code":"INTERNAL_ERROR"}}\n')
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(unproven_error, path)
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(path, request, timeout_seconds=1)
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
 
     run(scenario())
 
@@ -463,6 +1178,526 @@ def test_target_max_encoded_path_real_bind_connect_and_cleanup(
         assert response["ok"] is True
         await task
         assert not path.exists()
+
+    run(scenario())
+
+
+def test_service_config_default_modes_remain_private_and_shared_is_exact(
+    socket_root: Path,
+) -> None:
+    private = ServiceConfig(
+        socket_path=socket_root / "private.sock",
+        allowed_peer_uids=(os.geteuid(),),
+    )
+    assert private.socket_parent_mode == 0o700
+    assert private.socket_mode == 0o600
+    assert private.socket_group_gid is None
+
+    shared = ServiceConfig(
+        socket_path=socket_root / "shared.sock",
+        allowed_peer_uids=(450,),
+        socket_parent_mode=0o710,
+        socket_mode=0o660,
+        socket_group_gid=os.getegid(),
+    )
+    assert shared.socket_parent_mode == 0o710
+    assert shared.socket_mode == 0o660
+    assert shared.socket_group_gid == os.getegid()
+
+    invalid = (
+        {
+            "socket_parent_mode": 0o711,
+            "socket_mode": 0o660,
+            "socket_group_gid": os.getegid(),
+        },
+        {
+            "socket_parent_mode": 0o710,
+            "socket_mode": 0o600,
+            "socket_group_gid": os.getegid(),
+        },
+        {
+            "socket_parent_mode": 0o710,
+            "socket_mode": 0o660,
+            "socket_group_gid": None,
+        },
+        {
+            "socket_parent_mode": 0o700,
+            "socket_mode": 0o600,
+            "socket_group_gid": os.getegid(),
+        },
+    )
+    for values in invalid:
+        with pytest.raises(ValueError):
+            ServiceConfig(
+                socket_path=socket_root / "invalid.sock",
+                allowed_peer_uids=(450,),
+                **values,
+            )
+
+
+def test_shared_relay_exact_peer_450_uses_0710_0660_and_cleans_on_cancel(
+    monkeypatch, socket_root: Path
+) -> None:
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        monkeypatch.setattr(service_module, "_peer_uid", lambda connection: 450)
+
+        task = asyncio.create_task(srv.serve_forever())
+        await wait_for_service_start(
+            task, srv.config.socket_path, expected_mode=0o660
+        )
+        socket_info = srv.config.socket_path.lstat()
+        parent_info = shared_root.lstat()
+        assert stat.S_ISSOCK(socket_info.st_mode)
+        assert stat.S_IMODE(socket_info.st_mode) == 0o660
+        assert socket_info.st_uid == os.geteuid()
+        assert socket_info.st_gid == os.getegid()
+        assert stat.S_IMODE(parent_info.st_mode) == 0o710
+        assert parent_info.st_uid == os.geteuid()
+        assert parent_info.st_gid == os.getegid()
+        assert (
+            await call_service(srv.config.socket_path, request_envelope("status", {}))
+        )["ok"] is True
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await srv.close()
+        assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+def test_shared_relay_cancel_never_unlinks_same_metadata_replacement_inode(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        task = asyncio.create_task(srv.serve_forever())
+        await wait_for_service_start(
+            task, srv.config.socket_path, expected_mode=0o660
+        )
+
+        original_path = shared_root / "original-agent-relay.sock"
+        srv.config.socket_path.rename(original_path)
+        original_identity = (
+            original_path.lstat().st_dev,
+            original_path.lstat().st_ino,
+        )
+
+        replacement = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        replacement.bind(os.fspath(srv.config.socket_path))
+        srv.config.socket_path.chmod(0o660)
+        replacement_info = srv.config.socket_path.lstat()
+        replacement_identity = (replacement_info.st_dev, replacement_info.st_ino)
+        assert replacement_identity != original_identity
+        assert replacement_info.st_uid == os.geteuid()
+        assert replacement_info.st_gid == os.getegid()
+        assert stat.S_IMODE(replacement_info.st_mode) == 0o660
+
+        try:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await srv.close()
+
+            surviving_info = srv.config.socket_path.lstat()
+            assert (
+                surviving_info.st_dev,
+                surviving_info.st_ino,
+            ) == replacement_identity
+            assert original_path.exists()
+            assert (
+                original_path.lstat().st_dev,
+                original_path.lstat().st_ino,
+            ) == original_identity
+        finally:
+            replacement.close()
+            srv.config.socket_path.unlink(missing_ok=True)
+            original_path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_shared_relay_close_cancellation_does_not_strand_owned_socket(
+    socket_root: Path,
+) -> None:
+    class SuspendedClose:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.wait_calls = 0
+            self.wait_started = asyncio.Event()
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                self.wait_started.set()
+                await asyncio.Future()
+
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+        bound_info = srv.config.socket_path.lstat()
+        bound_identity = (bound_info.st_dev, bound_info.st_ino)
+        assert srv._bound_socket_identity == bound_identity
+
+        suspended = SuspendedClose()
+        srv._server = suspended  # type: ignore[assignment]
+        close_task = asyncio.create_task(srv.close())
+        await suspended.wait_started.wait()
+        concurrent_close = asyncio.create_task(srv.close())
+        await asyncio.sleep(0)
+        close_task.cancel()
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await close_task
+            await concurrent_close
+
+            assert not srv.config.socket_path.exists()
+            assert srv._server is None
+            assert srv._bound_socket_identity is None
+            await srv.close()
+            assert suspended.close_calls == 1
+            assert not srv.config.socket_path.exists()
+        finally:
+            if not concurrent_close.done():
+                concurrent_close.cancel()
+            await asyncio.gather(concurrent_close, return_exceptions=True)
+            real_server.close()
+            await real_server.wait_closed()
+            srv.config.socket_path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_cancelled_wait_preserves_primary_and_retries_refused_cleanup(
+    monkeypatch, socket_root: Path
+) -> None:
+    class CancelOnceServer:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.wait_calls = 0
+            self.wait_started = asyncio.Event()
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                self.wait_started.set()
+                await asyncio.Future()
+
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+        controlled = CancelOnceServer()
+        srv._server = controlled  # type: ignore[assignment]
+
+        real_unlink = Path.unlink
+        refused = False
+
+        def refuse_once(path: Path, *args, **kwargs) -> None:
+            nonlocal refused
+            if path == srv.config.socket_path and not refused:
+                refused = True
+                raise PermissionError("cleanup refused")
+            real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", refuse_once)
+        close_task = asyncio.create_task(srv.close())
+        await controlled.wait_started.wait()
+        close_task.cancel()
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await close_task
+            assert srv.config.socket_path.exists()
+
+            await srv.close()
+            assert controlled.close_calls == 1
+            assert controlled.wait_calls == 2
+            assert not srv.config.socket_path.exists()
+        finally:
+            real_server.close()
+            await real_server.wait_closed()
+            real_unlink(srv.config.socket_path, missing_ok=True)
+
+    run(scenario())
+
+
+def test_wait_failure_preserves_primary_and_retries_refused_cleanup(
+    monkeypatch, socket_root: Path
+) -> None:
+    class FailWaitOnceServer:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.wait_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                raise RuntimeError("wait failed")
+
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+        controlled = FailWaitOnceServer()
+        srv._server = controlled  # type: ignore[assignment]
+
+        real_unlink = Path.unlink
+        refused = False
+
+        def refuse_once(path: Path, *args, **kwargs) -> None:
+            nonlocal refused
+            if path == srv.config.socket_path and not refused:
+                refused = True
+                raise PermissionError("cleanup refused")
+            real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", refuse_once)
+        try:
+            with pytest.raises(RuntimeError, match="wait failed"):
+                await srv.close()
+            assert srv.config.socket_path.exists()
+
+            await srv.close()
+            assert controlled.close_calls == 1
+            assert controlled.wait_calls == 2
+            assert not srv.config.socket_path.exists()
+        finally:
+            real_server.close()
+            await real_server.wait_closed()
+            real_unlink(srv.config.socket_path, missing_ok=True)
+
+    run(scenario())
+
+
+def test_unprovable_cleanup_refuses_then_cleanup_only_retry_succeeds(
+    monkeypatch, socket_root: Path
+) -> None:
+    class ClosedServer:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            return None
+
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+        controlled = ClosedServer()
+        srv._server = controlled  # type: ignore[assignment]
+
+        real_lstat = Path.lstat
+        refused = False
+
+        def refuse_once(path: Path):
+            nonlocal refused
+            if path == srv.config.socket_path and not refused:
+                refused = True
+                raise PermissionError("lstat refused")
+            return real_lstat(path)
+
+        monkeypatch.setattr(Path, "lstat", refuse_once)
+        try:
+            with pytest.raises(DialogueServiceError, match="SERVICE_UNAVAILABLE"):
+                await srv.close()
+            assert srv.config.socket_path.exists()
+
+            await srv.close()
+            assert controlled.close_calls == 1
+            assert not srv.config.socket_path.exists()
+        finally:
+            real_server.close()
+            await real_server.wait_closed()
+            srv.config.socket_path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_close_failure_before_issue_retains_lifecycle_for_retry(
+    socket_root: Path,
+) -> None:
+    class FailCloseOnceServer:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.wait_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise RuntimeError("close failed")
+
+        async def wait_closed(self) -> None:
+            self.wait_calls += 1
+
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+        controlled = FailCloseOnceServer()
+        srv._server = controlled  # type: ignore[assignment]
+        try:
+            with pytest.raises(RuntimeError, match="close failed"):
+                await srv.close()
+            assert srv.config.socket_path.exists()
+
+            await srv.close()
+            assert controlled.close_calls == 2
+            assert controlled.wait_calls == 1
+            assert not srv.config.socket_path.exists()
+        finally:
+            real_server.close()
+            await real_server.wait_closed()
+            srv.config.socket_path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_restart_uses_loop_local_close_serialization(socket_root: Path) -> None:
+    srv, _client = shared_relay_service(prepare_shared_socket_root(socket_root))
+
+    async def lifecycle() -> None:
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+
+        class BlockingServer:
+            def __init__(self) -> None:
+                self.close_calls = 0
+                self.wait_started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            def close(self) -> None:
+                self.close_calls += 1
+
+            async def wait_closed(self) -> None:
+                self.wait_started.set()
+                await self.release.wait()
+
+        controlled = BlockingServer()
+        srv._server = controlled  # type: ignore[assignment]
+        first = asyncio.create_task(srv.close())
+        await controlled.wait_started.wait()
+        second = asyncio.create_task(srv.close())
+        await asyncio.sleep(0)
+        controlled.release.set()
+        try:
+            await asyncio.gather(first, second)
+            assert controlled.close_calls == 1
+            assert not srv.config.socket_path.exists()
+        finally:
+            for task in (first, second):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(first, second, return_exceptions=True)
+            real_server.close()
+            await real_server.wait_closed()
+            srv.config.socket_path.unlink(missing_ok=True)
+
+    run(lifecycle())
+    run(lifecycle())
+
+
+@pytest.mark.parametrize("invalid_metadata", ["owner", "group", "mode"])
+def test_shared_relay_refuses_wrong_parent_metadata_before_bind(
+    monkeypatch, socket_root: Path, invalid_metadata: str
+) -> None:
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        expected_gid = os.getegid()
+        if invalid_metadata == "owner":
+            monkeypatch.setattr(service_module.os, "geteuid", lambda: os.getuid() + 1000)
+        elif invalid_metadata == "group":
+            expected_gid += 1000
+        else:
+            shared_root.chmod(0o700)
+
+        engine, _client = engine_and_client()
+        srv = AgentDialogueService(
+            ServiceConfig(
+                socket_path=shared_root / "agent-relay.sock",
+                allowed_peer_uids=(450,),
+                socket_parent_mode=0o710,
+                socket_mode=0o660,
+                socket_group_gid=expected_gid,
+            ),
+            engine,
+        )
+        with pytest.raises(DialogueServiceError) as exc:
+            await srv.start()
+        assert exc.value.code == "SERVICE_UNAVAILABLE"
+        assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+def test_shared_relay_refuses_wrong_stale_socket_metadata_without_unlink(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        socket_path = shared_root / "agent-relay.sock"
+        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stale.bind(os.fspath(socket_path))
+        socket_path.chmod(0o600)
+        try:
+            srv, _client = shared_relay_service(
+                shared_root, socket_path=socket_path
+            )
+            with pytest.raises(DialogueServiceError) as exc:
+                await srv.start()
+            assert exc.value.code == "SERVICE_UNAVAILABLE"
+            assert socket_path.exists()
+            assert stat.S_IMODE(socket_path.lstat().st_mode) == 0o600
+        finally:
+            stale.close()
+            socket_path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_shared_relay_foreign_peer_remains_denied(monkeypatch, socket_root: Path) -> None:
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        monkeypatch.setattr(service_module, "_peer_uid", lambda connection: 999999)
+        await srv.start()
+        try:
+            reader, writer = await asyncio.open_unix_connection(
+                os.fspath(srv.config.socket_path)
+            )
+            response = json.loads(await reader.readline())
+            assert response == {"ok": False, "error": {"code": "PEER_DENIED"}}
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await srv.close()
 
     run(scenario())
 
@@ -675,7 +1910,7 @@ def test_v2_without_engine_returns_existing_fixed_request_invalid(socket_root: P
     assert str(exc.value) == "REQUEST_INVALID"
 
 
-def test_v2_dispatches_only_the_five_closed_operations(socket_root: Path) -> None:
+def test_v2_dispatches_only_the_seven_closed_operations(socket_root: Path) -> None:
     srv, fake = service_with_v2(socket_root)
     context = context_v2_dict()
     message = v2_message_dict()
@@ -689,6 +1924,34 @@ def test_v2_dispatches_only_the_five_closed_operations(socket_root: Path) -> Non
         )
     )
     assert bound == {
+        "thread_ts": THREAD_TS,
+        "operation_key": context["operation_key"],
+    }
+
+    relay_bound = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "bind_or_verify_relay_parent_thread", {"context": context}
+            )
+        )
+    )
+    assert relay_bound == {
+        "attestation": "mastermind.agent_dialogue.relay_parent/v1",
+        "thread_ts": THREAD_TS,
+        "parent_author_user_id": BOT,
+        "parent_fingerprint": "a" * 64,
+    }
+
+    ensured = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "ensure_thread",
+                {"context": context, "created_at": "2026-08-29T18:00:00Z"},
+            )
+        )
+    )
+    assert ensured == {
+        "action": "REUSED",
         "thread_ts": THREAD_TS,
         "operation_key": context["operation_key"],
     }
@@ -733,10 +1996,36 @@ def test_v2_dispatches_only_the_five_closed_operations(socket_root: Path) -> Non
     assert [call[0] for call in fake.calls] == [
         "status",
         "bind_or_verify_thread",
+        "bind_or_verify_relay_parent_thread",
+        "ensure_thread",
         "send_message",
         "read_thread",
         "wait_for_reply",
     ]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"context": {}},
+        {"context": {}, "created_at": 123},
+        {
+            "context": {},
+            "created_at": "2026-08-29T18:00:00Z",
+            "channel_id": "C0000000000",
+        },
+    ],
+)
+def test_v2_ensure_thread_service_arguments_are_closed(
+    args: dict[str, object], socket_root: Path
+) -> None:
+    srv, fake = service_with_v2(socket_root)
+
+    with pytest.raises(DialogueServiceError) as exc:
+        run(srv._dispatch(request_envelope_v2("ensure_thread", args)))
+
+    assert exc.value.code == "REQUEST_INVALID"
+    assert fake.calls == []
 
 
 @pytest.mark.parametrize(
@@ -800,6 +2089,34 @@ def test_v2_bool_max_attempts_refuses_at_service_boundary(socket_root: Path) -> 
     assert exc.value.code == "REQUEST_INVALID"
 
 
+def test_serve_forever_accepts_sequential_v2_calls_and_cleans_up_on_cancel(
+    socket_root: Path,
+) -> None:
+    """Closing after one request, or leaking the socket on stop, must fail."""
+
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_forever())
+        await wait_for_service_start(task, srv.config.socket_path)
+        try:
+            first = await call_service(
+                srv.config.socket_path, request_envelope_v2("status", {})
+            )
+            second = await call_service(
+                srv.config.socket_path, request_envelope_v2("status", {})
+            )
+            assert first["ok"] is True
+            assert second == first
+            assert [name for name, _value in fake.calls] == ["status", "status"]
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
 def test_v2_real_unix_status_uses_same_one_shot_boundary(socket_root: Path) -> None:
     async def scenario() -> None:
         srv, _fake = service_with_v2(socket_root)
@@ -819,6 +2136,68 @@ def test_v2_real_unix_status_uses_same_one_shot_boundary(socket_root: Path) -> N
         }
         await task
         assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+def test_v2_active_waiter_conflict_is_explicit_at_service_boundary(
+    socket_root: Path,
+) -> None:
+    from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+        ActiveWaiterConflict,
+    )
+
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+
+        async def conflict(**_kwargs):
+            raise ActiveWaiterConflict()
+
+        fake.wait_for_reply = conflict
+        await srv.start()
+        try:
+            response = await call_service(
+                srv.config.socket_path,
+                request_envelope_v2(
+                    "wait_for_reply",
+                    {
+                        "context": context_v2_dict(),
+                        "thread_ts": THREAD_TS,
+                        "request_message_key": "asd-request-v2-service-wait",
+                        "expected_types": ["STOP"],
+                        "max_attempts": 1,
+                    },
+                ),
+            )
+            assert response == {
+                "ok": False,
+                "error": {"code": "ACTIVE_WAITER_CONFLICT"},
+            }
+
+            async def unknown(**_kwargs):
+                raise RuntimeError("private waiter detail")
+
+            fake.wait_for_reply = unknown
+            unknown_response = await call_service(
+                srv.config.socket_path,
+                request_envelope_v2(
+                    "wait_for_reply",
+                    {
+                        "context": context_v2_dict(),
+                        "thread_ts": THREAD_TS,
+                        "request_message_key": "asd-request-v2-service-wait",
+                        "expected_types": ["STOP"],
+                        "max_attempts": 1,
+                    },
+                ),
+            )
+            assert unknown_response == {
+                "ok": False,
+                "error": {"code": "INTERNAL_ERROR"},
+            }
+            assert "private waiter detail" not in repr(unknown_response)
+        finally:
+            await srv.close()
 
     run(scenario())
 

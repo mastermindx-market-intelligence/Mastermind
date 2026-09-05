@@ -30,6 +30,7 @@ class PersistedWakeEvent:
     event: Event
     record: WakeLedgerRecord
     obligation: WakeObligation | None = None
+    inserted: bool = False
 
 
 class WakeLedgerRepository:
@@ -81,31 +82,61 @@ class WakeLedgerRepository:
         *,
         actor: str = WAKE_EVENT_ACTOR,
     ) -> tuple[PersistedWakeEvent, ...]:
+        with self.store.transaction() as connection:
+            return self.append_records_on_connection(
+                connection,
+                items,
+                actor=actor,
+            )
+
+    def list_ledger_records_on_connection(
+        self,
+        connection,
+        obligation_id: str,
+    ) -> tuple[WakeLedgerRecord, ...]:
+        if not connection.in_transaction:
+            raise StateConflict(
+                "Wake ledger connection read requires an active transaction"
+            )
+        return tuple(self._records_on_connection(connection, obligation_id))
+
+    def append_records_on_connection(
+        self,
+        connection,
+        items: Sequence[tuple[WakeLedgerRecord, WakeObligation | None]],
+        *,
+        actor: str = WAKE_EVENT_ACTOR,
+    ) -> tuple[PersistedWakeEvent, ...]:
+        if not connection.in_transaction:
+            raise StateConflict(
+                "Wake ledger connection append requires an active transaction"
+            )
         if not items:
             raise WakeLedgerError("append_records_atomic requires at least one record")
-        out: list[PersistedWakeEvent] = []
-        with self.store.transaction() as connection:
-            proposed_by_oid: dict[str, list[WakeLedgerRecord]] = {}
-            for record, obligation in items:
-                parse_ledger_record(record)
-                oid = record.command_id.split(":", 1)[0]
-                proposed_by_oid.setdefault(oid, []).append(record)
-            for oid, proposed in proposed_by_oid.items():
-                existing = self._records_on_connection(connection, oid)
-                existing_commands = {item.command_id for item in existing}
-                combined = list(existing) + [
-                    record for record in proposed if record.command_id not in existing_commands
-                ]
-                assert_causal(combined)
-            for record, obligation in items:
-                out.append(
-                    self._append_one(
-                        connection,
-                        record,
-                        obligation=obligation,
-                        actor=actor,
-                    )
+        proposed_by_oid: dict[str, list[WakeLedgerRecord]] = {}
+        for record, _obligation in items:
+            parse_ledger_record(record)
+            oid = record.command_id.split(":", 1)[0]
+            proposed_by_oid.setdefault(oid, []).append(record)
+        for oid, proposed in proposed_by_oid.items():
+            existing = self._records_on_connection(connection, oid)
+            existing_commands = {item.command_id for item in existing}
+            combined = list(existing) + [
+                record
+                for record in proposed
+                if record.command_id not in existing_commands
+            ]
+            assert_causal(combined)
+        out = []
+        for record, obligation in items:
+            out.append(
+                self._append_one(
+                    connection,
+                    record,
+                    obligation=obligation,
+                    actor=actor,
                 )
+            )
         return tuple(out)
 
     def _append_one(
@@ -141,7 +172,7 @@ class WakeLedgerRepository:
         )
         if written is None:
             raise StateConflict("wake event did not persist")
-        return self._hydrate(written)
+        return dataclasses.replace(self._hydrate(written), inserted=True)
 
     def _assert_replay(
         self,

@@ -2,9 +2,10 @@
 
 This module preserves the closed submit/status validator, trusted-grounding/
 replay/admission law, and dedicated response/error law for the future Slack
-transport's local ingress, while adding only R0's no-input diagnostic state
-read (adjudication §3, §7-§14; R1 security correction; R2 lifecycle
-correction).  It is deliberately narrow:
+transport's local ingress, while adding R0's no-input diagnostic state read
+and AD-ID1's separately versioned transport-neutral automated request frames
+(adjudication §3, §7-§14; R1 security correction; R2 lifecycle correction).
+It is deliberately narrow:
 
 * **No generic dispatcher.**  There is no ``command/version/args`` shape here
   (unlike the broad Operator control protocol).  PR-A's submit/status schemas
@@ -49,7 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -57,7 +58,11 @@ from control_plane import ceo_intent
 from control_plane import ceo_request
 from control_plane import executive_hot_state as hot_state
 from control_plane.executive_authority import AuthorityPolicyError
-from control_plane.executive_runtime import StateConflict
+from control_plane.executive_runtime import (
+    ExecutiveDialogueSource,
+    StateConflict,
+    normalize_executive_dialogue_source,
+)
 
 __all__ = [
     "BOOT_PACKET_SCHEMA",
@@ -69,7 +74,9 @@ __all__ = [
     "STATE_SCHEMA",
     "STATUS_ID_RE",
     "STATUS_SCHEMA",
+    "STATUS_SCHEMA_V2",
     "SUBMIT_SCHEMA",
+    "SUBMIT_SCHEMA_V2",
     "handle_frame",
 ]
 
@@ -82,6 +89,9 @@ __all__ = [
 SUBMIT_SCHEMA = "mastermind.executive_ceo_ingress_submit.v1"
 #: §7.2.
 STATUS_SCHEMA = "mastermind.executive_ceo_ingress_status.v1"
+#: AD-ID1 separately versioned, transport-neutral automated admission.
+SUBMIT_SCHEMA_V2 = "mastermind.executive_ceo_ingress_submit.v2"
+STATUS_SCHEMA_V2 = "mastermind.executive_ceo_ingress_status.v2"
 #: R0 §3 — the only post-PR-A additive diagnostic frame.
 STATE_SCHEMA = hot_state.STATE_REQUEST_SCHEMA
 
@@ -103,6 +113,10 @@ BOOT_PACKET_SCHEMA = "mastermind.ceo_boot_packet.v1"
 
 _SUBMIT_TOP_KEYS = frozenset({"schema", "observed_grounding", "request"})
 _STATUS_TOP_KEYS = frozenset({"schema", "intent_id"})
+_SUBMIT_V2_TOP_KEYS = frozenset(
+    {"schema", "request_ref", "observed_grounding", "request"}
+)
+_STATUS_V2_TOP_KEYS = frozenset({"schema", "request_ref"})
 _STATE_TOP_KEYS = frozenset({"schema"})
 _GROUNDING_KEYS = frozenset({"mastermind_sha", "macro_sha", "boot_packet_schema"})
 
@@ -288,7 +302,10 @@ async def _backend_call(func: Any, *args: Any, **kwargs: Any) -> Any:
         raise _dependency_failure("backend_unavailable") from exc
 
 
-async def _resolve_or_refuse(runtime: Any, intent_id: str) -> dict[str, Any]:
+async def _resolve_or_refuse(
+    runtime: Any,
+    intent_id: str,
+) -> dict[str, Any]:
     """``ceo_intent.resolve_intent`` off the event loop; corrupt event -> refusal.
 
     §11.1 step 5 / §17.3: "corrupted durable event is backend/integrity
@@ -299,7 +316,11 @@ async def _resolve_or_refuse(runtime: Any, intent_id: str) -> dict[str, Any]:
     """
 
     try:
-        return await asyncio.to_thread(ceo_intent.resolve_intent, runtime, intent_id)
+        return await asyncio.to_thread(
+            ceo_intent.resolve_intent,
+            runtime,
+            intent_id,
+        )
     except ceo_intent.CeoIntentError as exc:
         raise _dependency_failure("backend_refused") from exc
     except Exception as exc:
@@ -331,14 +352,38 @@ def _finalize_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
 
 
 async def _submit(
-    runtime: Any, envelope: Mapping[str, Any], workspace_root: "Path | str"
+    runtime: Any,
+    envelope: Mapping[str, Any],
+    workspace_root: "Path | str",
+    *,
+    execution_binding: Mapping[str, Any] | None = None,
+    dialogue_source: ExecutiveDialogueSource | None = None,
+    require_dialogue_source: bool = False,
 ) -> dict[str, Any]:
     """Call the one v1 mutation sink; classify a raised refusal per §11.3/§12.1."""
 
     try:
+        submit_kwargs: dict[str, Any] = {
+            "workspace_root": str(workspace_root),
+        }
+        if execution_binding is not None:
+            submit_kwargs["execution_binding"] = dict(execution_binding)
+        if dialogue_source is not None:
+            submit_kwargs["dialogue_source"] = dialogue_source.to_dict()
+        if require_dialogue_source:
+            submit_kwargs["require_dialogue_source"] = True
         return await asyncio.to_thread(
-            ceo_intent.submit_intent, runtime, envelope, workspace_root=str(workspace_root)
+            ceo_intent.submit_intent,
+            runtime,
+            envelope,
+            **submit_kwargs,
         )
+    except ceo_intent.CeoIntentConflict as exc:
+        # A durable sibling with the same request fingerprint may still carry
+        # different immutable admission provenance.  That is a real identity
+        # conflict, never a concurrency winner that can be reconciled by the
+        # envelope fingerprint alone.
+        raise _classification_failure("operation_conflict") from exc
     except ceo_intent.CeoIntentError as exc:
         # §11.3 concurrent winner: repeat the exact command-id lookup and
         # canonical resolve; classify from the DURABLE fingerprint, never from
@@ -365,14 +410,22 @@ def _build_envelope(
     intent_id: str,
     workspace_root: "Path | str",
     grounding: Mapping[str, str],
+    strict_v2: bool = False,
 ) -> dict[str, Any]:
     try:
-        return ceo_request.build_trusted_envelope(
+        envelope = ceo_request.build_trusted_envelope(
             normalized,
             intent_id=intent_id,
             workspace_root=str(workspace_root),
             grounding=grounding,
         )
+        if strict_v2:
+            envelope["schema"] = ceo_intent.INTENT_SCHEMA_V2
+            envelope["intent_kind"] = "executive_coo_cycle"
+            envelope["business_impact"] = "routine"
+        return ceo_intent.validate_intent(envelope)
+    except ceo_intent.CeoIntentError as exc:
+        raise CeoIngressError("invalid_input", str(exc)) from exc
     except ceo_request.CeoRequestError as exc:
         # Input was already normalized/validated above; reaching here is a
         # defect in trusted derivation itself, never the caller's fault.
@@ -409,28 +462,113 @@ async def _handle_submit(
     except ceo_request.CeoRequestError as exc:
         raise _dependency_failure("internal_error") from exc
 
-    # 3. construct the candidate envelope/fingerprint using the CALLER's
-    #    observed_grounding claim ONLY for comparison (never for submission).
-    candidate_envelope = _build_envelope(
-        normalized, intent_id=intent_id, workspace_root=workspace_root, grounding=observed
+    return await _handle_normalized_submit(
+        normalized,
+        observed=observed,
+        intent_id=intent_id,
+        runtime=runtime,
+        grounding_provider=grounding_provider,
+        workspace_root=workspace_root,
     )
-    candidate_fingerprint = ceo_intent.intent_fingerprint(candidate_envelope)
 
+
+async def _handle_submit_v2(
+    parsed: Mapping[str, Any],
+    *,
+    runtime: Any,
+    grounding_provider: GroundingProvider,
+    workspace_root: "Path | str",
+    strict_v2_admission: bool = False,
+    execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    dialogue_source_provider: (
+        Callable[[str, str], Mapping[str, Any] | None] | None
+    ) = None,
+) -> dict[str, Any]:
+    """AD-ID1 automated submit with the same load-bearing v1 order.
+
+    The transport schema predates strict-v2 COO admission.  A trusted host
+    composition may opt the source-free public request into that sink; the
+    request itself has no field that can select or forge the stricter path.
+    """
+
+    # 1. validate the caller frame and semantic request before deriving the
+    #    canonical request-instance identity.
+    observed = _validate_observed_grounding(parsed["observed_grounding"])
+    try:
+        normalized = ceo_request.normalize_automated_request(parsed["request"])
+        intent_id = ceo_request.automated_intent_id(parsed["request_ref"])
+    except ceo_request.CeoRequestInvalid as exc:
+        raise CeoIngressError("invalid_input", exc.message) from exc
+    except ceo_request.CeoRequestInternalError as exc:
+        raise _dependency_failure("internal_error") from exc
+
+    return await _handle_normalized_submit(
+        normalized,
+        observed=observed,
+        intent_id=intent_id,
+        runtime=runtime,
+        grounding_provider=grounding_provider,
+        workspace_root=workspace_root,
+        strict_v2=strict_v2_admission,
+        execution_binding_provider=execution_binding_provider,
+        dialogue_source_provider=dialogue_source_provider,
+    )
+
+
+async def _observe_dialogue_source(
+    provider: Callable[[str, str], Mapping[str, Any] | None],
+    *,
+    intent_id: str,
+    work_ref: str,
+) -> ExecutiveDialogueSource:
+    """Snapshot one trusted host admission source without leaking provider text."""
+
+    try:
+        raw = await asyncio.to_thread(provider, intent_id, work_ref)
+        if raw is None:
+            raise StateConflict("dialogue source is absent")
+        return normalize_executive_dialogue_source(raw, work_ref=work_ref)
+    except Exception as exc:
+        raise _dependency_failure("backend_unavailable") from exc
+
+
+async def _handle_normalized_submit(
+    normalized: Mapping[str, Any],
+    *,
+    observed: Mapping[str, str],
+    intent_id: str,
+    runtime: Any,
+    grounding_provider: GroundingProvider,
+    workspace_root: "Path | str",
+    strict_v2: bool = False,
+    execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    dialogue_source_provider: (
+        Callable[[str, str], Mapping[str, Any] | None] | None
+    ) = None,
+) -> dict[str, Any]:
+    """Shared replay/grounding/sink law after version-specific validation."""
+
+    # 3. construct the candidate envelope using the CALLER's observed_grounding
+    #    claim ONLY for identity comparison (never for a new submission).
+    candidate_envelope = _build_envelope(
+        normalized,
+        intent_id=intent_id,
+        workspace_root=workspace_root,
+        grounding=observed,
+        strict_v2=strict_v2,
+    )
     # 4. exact command-id lookup.
     command_id = ceo_intent.command_id_for(intent_id)
     existing = await _backend_call(runtime.store.find_event_by_command_id, command_id)
 
-    # 5. a durable event already exists: resolve it canonically BEFORE any
-    #    current grounding-provider call.
+    # 5. a durable event already exists: re-enter the one canonical CeoIntent
+    #    sink BEFORE any current grounding/source-provider call.  The sink's
+    #    omitted-source replay law validates and preserves the admitted durable
+    #    source while returning the canonical duplicate receipt.
     if existing is not None:
-        resolved = await _resolve_or_refuse(runtime, intent_id)
-        if resolved.get("fingerprint") != candidate_fingerprint:
-            raise _classification_failure("operation_conflict")
-        # Durable fingerprint matches: this is a reconciliation, not a new
-        # grounding-authorized creation.  Call the existing sink again to
-        # obtain the normal canonical duplicate receipt.
-        receipt = await _submit(runtime, candidate_envelope, workspace_root)
-        return _finalize_receipt(receipt)
+        return _finalize_receipt(
+            await _submit(runtime, candidate_envelope, workspace_root)
+        )
 
     # 6. only when no canonical event exists, observe current trusted grounding.
     trusted = await _observe_trusted_grounding(grounding_provider)
@@ -442,8 +580,32 @@ async def _handle_submit(
     # 8. derive/revalidate the canonical envelope from TRUSTED grounding (never
     #    silently reuse the caller's claimed envelope for the actual submit).
     trusted_envelope = _build_envelope(
-        normalized, intent_id=intent_id, workspace_root=workspace_root, grounding=trusted
+        normalized,
+        intent_id=intent_id,
+        workspace_root=workspace_root,
+        grounding=trusted,
+        strict_v2=strict_v2,
     )
+
+    execution_binding: Mapping[str, Any] | None = None
+    admitted_source: ExecutiveDialogueSource | None = None
+    if strict_v2:
+        if not callable(execution_binding_provider):
+            raise _dependency_failure("backend_unavailable")
+        try:
+            execution_binding = dict(
+                await asyncio.to_thread(execution_binding_provider)
+            )
+        except Exception as exc:
+            raise _dependency_failure("backend_unavailable") from exc
+        work_ref = normalized.get("workstream")
+        if not isinstance(work_ref, str) or not callable(dialogue_source_provider):
+            raise _dependency_failure("backend_unavailable")
+        admitted_source = await _observe_dialogue_source(
+            dialogue_source_provider,
+            intent_id=intent_id,
+            work_ref=work_ref,
+        )
 
     # 9. call the SAME provider again immediately before the first canonical
     #    submit; identity movement -> grounding_changed, zero Job.
@@ -451,8 +613,25 @@ async def _handle_submit(
     if reobserved != trusted:
         raise _classification_failure("grounding_changed")
 
+    if admitted_source is not None:
+        assert callable(dialogue_source_provider)
+        reobserved_source = await _observe_dialogue_source(
+            dialogue_source_provider,
+            intent_id=intent_id,
+            work_ref=admitted_source.work_ref,
+        )
+        if reobserved_source != admitted_source:
+            raise _classification_failure("operation_conflict")
+
     # 11. call the existing v1 mutation sink.
-    receipt = await _submit(runtime, trusted_envelope, workspace_root)
+    receipt = await _submit(
+        runtime,
+        trusted_envelope,
+        workspace_root,
+        execution_binding=execution_binding,
+        dialogue_source=admitted_source,
+        require_dialogue_source=strict_v2,
+    )
     return _finalize_receipt(receipt)
 
 
@@ -461,7 +640,11 @@ async def _handle_submit(
 # ---------------------------------------------------------------------------
 
 
-async def _handle_status(parsed: Mapping[str, Any], *, runtime: Any) -> dict[str, Any]:
+async def _handle_status(
+    parsed: Mapping[str, Any],
+    *,
+    runtime: Any,
+) -> dict[str, Any]:
     """§11.1 exact status lookup — this order is load-bearing."""
 
     intent_id = parsed["intent_id"]
@@ -469,6 +652,31 @@ async def _handle_status(parsed: Mapping[str, Any], *, runtime: Any) -> dict[str
         raise CeoIngressError(
             "invalid_intent_id", f"intent_id must match {STATUS_ID_RE.pattern!r}"
         )
+    return await _resolve_status_intent(runtime, intent_id)
+
+
+async def _handle_status_v2(
+    parsed: Mapping[str, Any],
+    *,
+    runtime: Any,
+) -> dict[str, Any]:
+    """Resolve status from trusted request identity, never a caller intent id."""
+
+    try:
+        intent_id = ceo_request.automated_intent_id(parsed["request_ref"])
+    except ceo_request.CeoRequestInvalid as exc:
+        raise CeoIngressError("invalid_input", exc.message) from exc
+    except ceo_request.CeoRequestInternalError as exc:
+        raise _dependency_failure("internal_error") from exc
+    return await _resolve_status_intent(runtime, intent_id)
+
+
+async def _resolve_status_intent(
+    runtime: Any,
+    intent_id: str,
+) -> dict[str, Any]:
+    """Shared exact command-id lookup and canonical durable resolution."""
+
     # 1-2. derive command_id; use existing RuntimeStore API for that one id.
     command_id = ceo_intent.command_id_for(intent_id)
     event = await _backend_call(runtime.store.find_event_by_command_id, command_id)
@@ -497,6 +705,22 @@ def _exact_top_keys(value: Any, name: str, expected: frozenset[str]) -> Mapping[
     return value
 
 
+def _require_v2_admission(*, service_state: Any, ceo_ingress_armed: bool) -> None:
+    """Reassert the existing host-owned gate for additive v2 schemas.
+
+    The composition service's historical schema discriminator is byte-frozen
+    outside AD-ID1's authorized files, so v2 fails closed here using the same
+    host-supplied arming/state values.  Invocation already occurs only after
+    the service startup-ready latch has opened.
+    """
+
+    if not ceo_ingress_armed or service_state not in {"READY", "AWAITING_CANARY"}:
+        raise CeoIngressError(
+            "ingress_unavailable",
+            "Executive CEO ingress is not currently admitting requests",
+        )
+
+
 async def handle_frame(
     parsed: Any,
     *,
@@ -505,13 +729,19 @@ async def handle_frame(
     workspace_root: "Path | str",
     service_state: Any = None,
     ceo_ingress_armed: bool = False,
+    strict_v2_admission: bool = False,
+    execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    dialogue_source_provider: (
+        Callable[[str, str], Mapping[str, Any] | None] | None
+    ) = None,
 ) -> dict[str, Any]:
     """Validate and dispatch one already-parsed JSON frame (§7).
 
-    There is no generic dispatcher: exactly three closed ``schema`` values are
-    legal.  The caller applies PR-A's full admission predicate to submit/status
-    before invoking this function; the R0 state branch is read-only and uses
-    only current in-process values supplied by that same service instance.
+    There is no generic dispatcher: exactly five closed ``schema`` values are
+    legal.  The caller applies PR-A's full admission predicate to v1 submit/
+    status before invoking this function; AD-ID1 reasserts that same predicate
+    for v2 inside this authorized module, while the R0 state branch is read-only
+    and uses only current in-process values supplied by the same service.
     Everything else — including a recognized schema whose object shape is
     wrong — refuses via :class:`CeoIngressError` with a code from
     :data:`ERROR_CODES`.  The caller (``executive_service``'s dedicated ingress
@@ -534,6 +764,26 @@ async def handle_frame(
     if schema == STATUS_SCHEMA:
         _exact_top_keys(parsed, "status frame", _STATUS_TOP_KEYS)
         return await _handle_status(parsed, runtime=runtime)
+    if schema == SUBMIT_SCHEMA_V2:
+        _require_v2_admission(
+            service_state=service_state, ceo_ingress_armed=ceo_ingress_armed
+        )
+        _exact_top_keys(parsed, "submit v2 frame", _SUBMIT_V2_TOP_KEYS)
+        return await _handle_submit_v2(
+            parsed,
+            runtime=runtime,
+            grounding_provider=grounding_provider,
+            workspace_root=workspace_root,
+            strict_v2_admission=strict_v2_admission,
+            execution_binding_provider=execution_binding_provider,
+            dialogue_source_provider=dialogue_source_provider,
+        )
+    if schema == STATUS_SCHEMA_V2:
+        _require_v2_admission(
+            service_state=service_state, ceo_ingress_armed=ceo_ingress_armed
+        )
+        _exact_top_keys(parsed, "status v2 frame", _STATUS_V2_TOP_KEYS)
+        return await _handle_status_v2(parsed, runtime=runtime)
     if schema == STATE_SCHEMA:
         _exact_top_keys(parsed, "state frame", _STATE_TOP_KEYS)
         try:
@@ -549,5 +799,6 @@ async def handle_frame(
             ) from exc
     raise CeoIngressError(
         "unsupported_ingress_schema",
-        f"schema must be one of {sorted([STATE_SCHEMA, STATUS_SCHEMA, SUBMIT_SCHEMA])}",
+        "schema must be one of "
+        f"{sorted([STATE_SCHEMA, STATUS_SCHEMA, STATUS_SCHEMA_V2, SUBMIT_SCHEMA, SUBMIT_SCHEMA_V2])}",
     )

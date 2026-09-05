@@ -39,6 +39,7 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "app/static/chairman_control/control_room.js",
     "app/static/chairman_control/remote.html",
     "common/__init__.py",
+    "common/commission_ref.py",
     "common/redaction.py",
     "config/strategic_state.yml",
     "control_plane/__init__.py",
@@ -54,6 +55,7 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "control_plane/executive_inbox.py",
     "control_plane/executive_orchestration_principal.py",
     "control_plane/executive_orchestration_result.py",
+    "control_plane/executive_retry_safety.py",
     "control_plane/executive_runtime.py",
     "control_plane/executive_supervisor.py",
     "control_plane/executive_worker_broker.py",
@@ -61,9 +63,11 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "control_plane/flags.py",
     "control_plane/operator_harness_contract.py",
     "control_plane/operator_harness_wire.py",
+    "control_plane/operator_materialization_receipt.py",
     "control_plane/strategic_state.py",
     "control_plane/surface_bindings.py",
     "control_plane/worker_adapter.py",
+    "control_plane/worker_browser_b1.py",
     "ops/control_room_remote/mastermind-control-room-remote.service",
     "scripts/__init__.py",
     "scripts/chairman_control_room_remote.py",
@@ -538,6 +542,21 @@ def _reject_sensitive_values(value: Any) -> None:
         raise RemoteProjectionError("sensitive_value")
 
 
+def _project_agent_os_freeform(value: Any) -> str | None:
+    """Redact private prose while preserving the closed projection shape."""
+
+    accepted = _optional_string(value)
+    if accepted is None:
+        return None
+    try:
+        _reject_sensitive_values(accepted)
+    except RemoteProjectionError as exc:
+        if exc.code != "sensitive_value":
+            raise
+        return "agent_os_detail_redacted"
+    return accepted
+
+
 def _project_pr(value: Any) -> dict[str, Any]:
     row = _require_exact_keys(value, _PR_KEYS)
     url = _string(row["url"])
@@ -592,13 +611,13 @@ def _project_agent_os(value: Any) -> dict[str, Any] | None:
     row = _require_exact_keys(value, _AGENT_OS_KEYS)
     return {
         "workstream": _string(row["workstream"]),
-        "title": _optional_string(row["title"]),
+        "title": _project_agent_os_freeform(row["title"]),
         "status": _optional_string(row["status"]),
-        "program": _optional_string(row["program"]),
-        "next_action": _optional_string(row["next_action"]),
+        "program": _project_agent_os_freeform(row["program"]),
+        "next_action": _project_agent_os_freeform(row["next_action"]),
         "state": _optional_string(row["state"]),
         "reason_code": _optional_string(row["reason_code"]),
-        "reason": _optional_string(row["reason"]),
+        "reason": _project_agent_os_freeform(row["reason"]),
         "depends_on": _string_list(row["depends_on"]),
         "unmet_dependencies": _string_list(row["unmet_dependencies"]),
     }

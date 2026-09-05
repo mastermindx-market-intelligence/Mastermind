@@ -24,6 +24,7 @@ RELEASE_TRACKED_PATHS=(
   app/static/chairman_control/control_room.js
   app/static/chairman_control/remote.html
   common/__init__.py
+  common/commission_ref.py
   common/redaction.py
   config/strategic_state.yml
   control_plane/__init__.py
@@ -39,6 +40,7 @@ RELEASE_TRACKED_PATHS=(
   control_plane/executive_inbox.py
   control_plane/executive_orchestration_principal.py
   control_plane/executive_orchestration_result.py
+  control_plane/executive_retry_safety.py
   control_plane/executive_runtime.py
   control_plane/executive_supervisor.py
   control_plane/executive_worker_broker.py
@@ -46,9 +48,11 @@ RELEASE_TRACKED_PATHS=(
   control_plane/flags.py
   control_plane/operator_harness_contract.py
   control_plane/operator_harness_wire.py
+  control_plane/operator_materialization_receipt.py
   control_plane/strategic_state.py
   control_plane/surface_bindings.py
   control_plane/worker_adapter.py
+  control_plane/worker_browser_b1.py
   ops/control_room_remote/mastermind-control-room-remote.service
   scripts/__init__.py
   scripts/chairman_control_room_remote.py

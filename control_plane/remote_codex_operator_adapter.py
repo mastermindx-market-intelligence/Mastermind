@@ -22,6 +22,7 @@ from control_plane.executive_worker_broker import (
 )
 from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION,
+    AttentionTurnObservation,
     CandidateResult,
     EventCursor,
     HarnessAdapterCapabilities,
@@ -42,6 +43,7 @@ from control_plane.operator_harness_contract import (
 )
 from control_plane.operator_harness_wire import (
     OperatorHarnessWireError,
+    attention_turn_observation,
     candidate_result,
     event_cursor,
     normalized_event,
@@ -54,6 +56,18 @@ from control_plane.operator_harness_wire import (
     session_start_observation,
     to_wire,
     turn_start_observation,
+)
+from control_plane.operator_materialization_receipt import (
+    OperatorMaterializationReceiptError,
+    OperatorMaterializationStatusObservation,
+    operator_materialization_status,
+    requested_profile_digest,
+    validate_materialization_request,
+)
+from control_plane.worker_browser_b1 import (
+    BrowserReviewError,
+    BrowserReviewReceipt,
+    browser_review_receipt,
 )
 
 
@@ -75,6 +89,7 @@ class RemoteCodexOperatorAdapter:
         self.turn_input_loader = turn_input_loader
         self._start_receipts: dict[str, dict[str, Any]] = {}
         self._turn_results: dict[str, dict[str, Any]] = {}
+        self._artifact_receipts: dict[str, BrowserReviewReceipt | None] = {}
 
     @staticmethod
     def _mapping(value: Any, *, name: str) -> dict[str, Any]:
@@ -193,6 +208,90 @@ class RemoteCodexOperatorAdapter:
             provider_session=provider_session,
         )
 
+    def materialization_status(
+        self,
+        *,
+        operation_id: OperationId,
+        requested: RequestedExecutionProfile,
+        epoch: SessionEpochRef,
+        generation: ProcessGenerationRef,
+        provider_session: ProviderSessionHandoff | None = None,
+    ) -> OperatorMaterializationStatusObservation:
+        """Read one exact receipt status without invoking or mutating a provider."""
+
+        operation_kind = (
+            "resume_session" if provider_session is not None else "start_session"
+        )
+        expected_provider_session_id = (
+            provider_session.provider_session_id
+            if provider_session is not None
+            else None
+        )
+        if (
+            requested.worker_id != epoch.worker_id
+            or generation.worker_id != epoch.worker_id
+            or generation.session_epoch_id != epoch.session_epoch_id
+            or (
+                provider_session is not None
+                and provider_session.worker_id != epoch.worker_id
+            )
+        ):
+            raise BrokerProtocolError(
+                "remote OHF materialization request identity is inconsistent"
+            )
+        try:
+            validate_materialization_request(
+                operation_command_id=operation_id.command_id,
+                operation_kind=operation_kind,
+                attempt_id=epoch.attempt_id,
+                worker_id=epoch.worker_id,
+                session_epoch_id=epoch.session_epoch_id,
+                process_generation_id=generation.process_generation_id,
+                generation_number=generation.generation_number,
+                expected_provider_session_id=expected_provider_session_id,
+            )
+        except OperatorMaterializationReceiptError as exc:
+            raise BrokerProtocolError(
+                "remote OHF materialization request identity is invalid"
+            ) from exc
+        payload = {
+            "operation_id": to_wire(operation_id),
+            "requested": to_wire(requested),
+            "epoch": to_wire(epoch),
+            "generation": to_wire(generation),
+        }
+        if provider_session is not None:
+            payload["provider_session"] = to_wire(provider_session)
+        result = self.client.request_sync(
+            "ohf-materialization-status", payload, timeout_seconds=30
+        )
+        try:
+            status = operator_materialization_status(result)
+        except OperatorMaterializationReceiptError as exc:
+            raise BrokerProtocolError(
+                "remote OHF materialization status is invalid"
+            ) from exc
+        receipt = status.receipt
+        if receipt is not None and not (
+            receipt.operation_command_id == operation_id.command_id
+            and receipt.operation_kind == operation_kind
+            and receipt.attempt_id == epoch.attempt_id
+            and receipt.worker_id == epoch.worker_id
+            and receipt.session_epoch_id == epoch.session_epoch_id
+            and receipt.process_generation_id == generation.process_generation_id
+            and receipt.generation_number == generation.generation_number
+            and receipt.requested_profile_digest
+            == requested_profile_digest(to_wire(requested))
+            and (
+                expected_provider_session_id is None
+                or receipt.provider_session_id == expected_provider_session_id
+            )
+        ):
+            raise BrokerProtocolError(
+                "remote OHF materialization receipt identity is invalid"
+            )
+        return status
+
     def _receipt(self, generation: ProcessGenerationRef) -> dict[str, Any]:
         try:
             return self._start_receipts[generation.process_generation_id]
@@ -238,6 +337,41 @@ class RemoteCodexOperatorAdapter:
             return turn_start_observation(result.get("observation"))
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError("remote OHF turn-start receipt is invalid") from exc
+
+    def deliver_attention(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        attempt_id: str,
+        binding_id: str,
+        binding_generation: int,
+        provider_session_id: str,
+        nudge_id: str,
+        opaque_ids: tuple[str, ...],
+        instruction: str,
+        completion_timeout_seconds: float,
+    ) -> AttentionTurnObservation:
+        result = self.client.request_sync(
+            "ohf-deliver-attention",
+            {
+                "generation": to_wire(generation),
+                "attempt_id": attempt_id,
+                "binding_id": binding_id,
+                "binding_generation": binding_generation,
+                "provider_session_id": provider_session_id,
+                "nudge_id": nudge_id,
+                "opaque_ids": list(opaque_ids),
+                "instruction": instruction,
+                "completion_timeout_seconds": float(completion_timeout_seconds),
+            },
+            timeout_seconds=float(completion_timeout_seconds) + 30.0,
+        )
+        try:
+            return attention_turn_observation(result.get("observation"))
+        except OperatorHarnessWireError as exc:
+            raise BrokerProtocolError(
+                "remote OHF attention receipt is invalid"
+            ) from exc
 
     def read_events(
         self, cursor: EventCursor, *, timeout_seconds: float = 30.0
@@ -311,9 +445,26 @@ class RemoteCodexOperatorAdapter:
             timeout_seconds=90,
         )
         try:
-            return reconcile_observation(result.get("observation"))
-        except OperatorHarnessWireError as exc:
+            observation = reconcile_observation(result.get("observation"))
+            raw_receipt = result.get("artifact_receipt")
+            receipt = (
+                None
+                if raw_receipt is None
+                else browser_review_receipt(raw_receipt)
+            )
+        except (OperatorHarnessWireError, BrowserReviewError) as exc:
             raise BrokerProtocolError("remote OHF stop receipt is invalid") from exc
+        self._artifact_receipts[generation.process_generation_id] = receipt
+        return observation
+
+    def terminal_artifact_receipt(
+        self, generation: ProcessGenerationRef
+    ) -> BrowserReviewReceipt | None:
+        if generation.process_generation_id not in self._artifact_receipts:
+            raise BrokerProtocolError(
+                "remote OHF terminal artifact receipt was not observed in protocol order"
+            )
+        return self._artifact_receipts[generation.process_generation_id]
 
     def cancel(
         self,
@@ -343,11 +494,19 @@ class RemoteCodexOperatorAdapter:
             timeout_seconds=30,
         )
         try:
-            return reconcile_observation(result.get("observation"))
-        except OperatorHarnessWireError as exc:
+            observation = reconcile_observation(result.get("observation"))
+            if result.get("terminal") is True:
+                raw_receipt = result.get("artifact_receipt")
+                self._artifact_receipts[generation.process_generation_id] = (
+                    None
+                    if raw_receipt is None
+                    else browser_review_receipt(raw_receipt)
+                )
+        except (OperatorHarnessWireError, BrowserReviewError) as exc:
             raise BrokerProtocolError(
                 "remote OHF reconciliation receipt is invalid"
             ) from exc
+        return observation
 
     def reconcile_absence(
         self,
@@ -370,11 +529,18 @@ class RemoteCodexOperatorAdapter:
             timeout_seconds=90,
         )
         try:
-            return reconcile_observation(result.get("observation"))
-        except OperatorHarnessWireError as exc:
+            observation = reconcile_observation(result.get("observation"))
+            raw_receipt = result.get("artifact_receipt")
+            self._artifact_receipts[generation.process_generation_id] = (
+                None
+                if raw_receipt is None
+                else browser_review_receipt(raw_receipt)
+            )
+        except (OperatorHarnessWireError, BrowserReviewError) as exc:
             raise BrokerProtocolError(
                 "remote OHF absence receipt is invalid"
             ) from exc
+        return observation
 
 
 __all__ = ["RemoteCodexOperatorAdapter"]

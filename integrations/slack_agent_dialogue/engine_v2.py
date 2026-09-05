@@ -10,6 +10,7 @@ import asyncio
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 from integrations.slack_agent_dialogue.contract import (
@@ -22,10 +23,12 @@ from integrations.slack_agent_dialogue.contract import (
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_DISCRIMINATOR_V2,
     PARENT_DISCRIMINATOR_V2,
+    _MESSAGE_KEY_RE as MESSAGE_KEY_RE_V2,
     build_parent_v2,
     parse_message_frame_v2,
     parse_parent_frame_v2,
     render_message_v2,
+    render_parent_v2,
     validate_actor_ref,
     validate_applies_to_v2,
     validate_message_v2,
@@ -36,11 +39,17 @@ from integrations.slack_agent_dialogue.engine import (
     DialoguePolicy,
     HistoryPage,
     MessageReceipt,
+    ParentEnsureReceipt,
     ReadMessage,
     SlackDialogueClient,
     SlackEffectUnknown,
     SlackMessage,
+    SlackTransportUnavailable,
     ThreadRead,
+)
+from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+    ActiveWaiterKey,
+    ActiveWaiterRegistry,
 )
 
 _CONTEXT_PROBE_SOL = "U00000000"
@@ -98,6 +107,43 @@ class DialogueContextV2:
         }
 
 
+@dataclass
+class _EnsureFlight:
+    """One transient coalesced parent-creation attempt for an exact identity."""
+
+    task: asyncio.Task[ParentEnsureReceipt]
+    waiters: int = 0
+
+
+@dataclass(frozen=True)
+class PreparedMessageSend:
+    """One connection-local send frozen after deterministic reconciliation."""
+
+    thread_ts: str
+    context: DialogueContextV2
+    message: Mapping[str, Any]
+    text: str
+    message_key: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class DiscoveredDialogueParent:
+    """One immutable, authority-filtered V2 parent found in bounded history."""
+
+    thread_ts: str
+    parent: Mapping[str, Any]
+
+
+@dataclass
+class _SendFlight:
+    """One transient coalesced commit for an exact logical message."""
+
+    fingerprint: str
+    task: asyncio.Task[MessageReceipt]
+    waiters: int = 0
+
+
 def _parent_identity(parent: Mapping[str, Any]) -> tuple[Any, ...]:
     return (
         parent.get("work_ref"),
@@ -122,6 +168,86 @@ def _one_field_different(left: tuple[Any, ...], right: tuple[Any, ...]) -> bool:
     return sum(a != b for a, b in zip(left, right, strict=True)) == 1
 
 
+def _deep_freeze(value: Any) -> Any:
+    """Turn validated JSON-shaped outbound state into an immutable snapshot."""
+
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _deep_freeze(item) for key, item in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_deep_freeze(item) for item in value)
+    return value
+
+
+def _scan_parent_history(
+    page: HistoryPage,
+    *,
+    normalized_context: Mapping[str, Any],
+    policy: DialoguePolicy,
+) -> tuple[SlackMessage, Mapping[str, Any]] | None:
+    """Purely reconcile one bounded history against the full parent identity."""
+
+    if not isinstance(page, HistoryPage) or not page.complete:
+        raise DialogueEngineError("THREAD_HISTORY_INCOMPLETE")
+    if not page.mutation_evidence_complete:
+        raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
+
+    eligible_authors = frozenset(
+        (*policy.allowed_parent_user_ids, policy.relay_bot_user_id)
+    )
+    matches: list[tuple[SlackMessage, Mapping[str, Any]]] = []
+    near_match = False
+    wanted = _context_parent_identity(normalized_context)
+
+    for transport in page.messages:
+        if transport.thread_ts not in {None, transport.ts}:
+            continue
+        author_is_eligible = transport.author_user_id in eligible_authors
+
+        created_text = transport.created_text
+        current_is_parent = transport.text.startswith(PARENT_DISCRIMINATOR_V2)
+        created_is_parent = (
+            created_text is not None
+            and created_text.startswith(PARENT_DISCRIMINATOR_V2)
+        )
+        if transport.deleted or transport.edited:
+            if author_is_eligible and (
+                created_text is None or current_is_parent or created_is_parent
+            ):
+                raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
+            if not author_is_eligible and (current_is_parent or created_is_parent):
+                raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+            continue
+        if not current_is_parent:
+            continue
+
+        try:
+            parent = parse_parent_frame_v2(transport.text)
+        except DialogueContractError:
+            if author_is_eligible:
+                raise DialogueEngineError("PARENT_MESSAGE_INVALID") from None
+            continue
+
+        observed = _parent_identity(parent)
+        if not author_is_eligible:
+            if observed == wanted or _one_field_different(observed, wanted):
+                raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+            continue
+        if observed == wanted:
+            if tuple(parent["allowed_sol_user_ids"]) != policy.allowed_sol_user_ids:
+                raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+            matches.append((transport, parent))
+        elif _one_field_different(observed, wanted):
+            near_match = True
+
+    if len(matches) > 1:
+        raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
+    if near_match:
+        raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
 def _ts_order(value: str) -> Decimal:
     try:
         return Decimal(value)
@@ -129,21 +255,56 @@ def _ts_order(value: str) -> Decimal:
         raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
 
 
-def _message_context_matches(
+def _same_applicability_carrier(
+    trusted: Mapping[str, Any], observed: Mapping[str, Any]
+) -> bool:
+    """Allow continuity movement only inside one accepted applicability carrier."""
+
+    if trusted.get("kind") != observed.get("kind"):
+        return False
+    if trusted.get("kind") == "repository":
+        return all(
+            trusted.get(field) == observed.get(field)
+            for field in ("repository", "pr")
+        )
+    if trusted.get("kind") == "executive_attempt":
+        return trusted.get("job_id") == observed.get("job_id")
+    return False
+
+
+def _message_matches_history_parent(
     message: Mapping[str, Any], context: Mapping[str, Any]
 ) -> bool:
     return (
         message.get("work_ref") == context["work_ref"]
         and message.get("commission_ref") == context["commission_ref"]
         and message.get("session_ref") == context["session_ref"]
+        and _same_applicability_carrier(
+            context["applies_to"], message.get("applies_to", {})
+        )
+    )
+
+
+def _message_matches_current_context(
+    message: Mapping[str, Any], context: Mapping[str, Any]
+) -> bool:
+    return (
+        _message_matches_history_parent(message, context)
         and message.get("applies_to") == context["applies_to"]
     )
 
 
-def _messages_share_context(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
-    return all(
-        left.get(key) == right.get(key)
-        for key in ("work_ref", "commission_ref", "session_ref", "applies_to")
+def _messages_share_reply_lineage(
+    left: Mapping[str, Any], right: Mapping[str, Any]
+) -> bool:
+    return (
+        all(
+            left.get(key) == right.get(key)
+            for key in ("work_ref", "commission_ref", "session_ref")
+        )
+        and _same_applicability_carrier(
+            left.get("applies_to", {}), right.get("applies_to", {})
+        )
     )
 
 
@@ -170,6 +331,21 @@ def _reply_direction_is_valid(
     return False
 
 
+def _waiter_target_seat(actor_ref: Mapping[str, Any]) -> str:
+    """Derive the post-reply Wake recipient from one validated request actor."""
+
+    if actor_ref["kind"] == "worker_attempt":
+        return "coo"
+    if actor_ref["kind"] == "executive_surface":
+        if actor_ref["seat"] == "coo":
+            return "coo"
+        if actor_ref["seat"] == "ceo":
+            # A CEO request has only the accepted CEO -> Chairman reply
+            # direction, so the corresponding blocked requester is the CEO.
+            return "ceo"
+    raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+
+
 def _adjudicate_ruling_v2(
     request: Mapping[str, Any],
     reply: Mapping[str, Any],
@@ -188,7 +364,7 @@ def _adjudicate_ruling_v2(
         request_message["message_type"] != "DECISION_REQUEST"
         or reply_message["message_type"] != "RULING"
         or reply_message["reply_to_message_key"] != request_message["message_key"]
-        or not _messages_share_context(request_message, reply_message)
+        or not _messages_share_reply_lineage(request_message, reply_message)
     ):
         raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
 
@@ -265,7 +441,7 @@ def _adjudicate_reply_v2(
 
     if (
         reply_message["reply_to_message_key"] != request_message["message_key"]
-        or not _messages_share_context(request_message, reply_message)
+        or not _messages_share_reply_lineage(request_message, reply_message)
         or not _reply_direction_is_valid(request_message, reply_message)
     ):
         raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
@@ -278,7 +454,12 @@ def _adjudicate_reply_v2(
             authority_policy=authority_policy,
         )
     if message_type == "CONTINUE":
-        if request_message["message_type"] not in {"ACK", "PROGRESS", "BLOCKED"}:
+        if request_message["message_type"] not in {
+            "ACK",
+            "PROGRESS",
+            "BLOCKED",
+            "RESULT",
+        }:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
         if (
             request_message["message_type"] == "BLOCKED"
@@ -327,16 +508,33 @@ class DialogueEngineV2:
         *,
         authority_policy: TrustedAuthorityPolicy,
         sleep: Any = asyncio.sleep,
+        active_waiter_registry: ActiveWaiterRegistry | None = None,
     ) -> None:
+        if active_waiter_registry is not None and not isinstance(
+            active_waiter_registry, ActiveWaiterRegistry
+        ):
+            raise TypeError("active_waiter_registry must be ActiveWaiterRegistry")
         self.policy = policy
         self.client = client
         self.authority_policy = authority_policy
         self._sleep = sleep
+        self._active_waiter_registry = active_waiter_registry
+        self._ensure_registry_lock = asyncio.Lock()
+        self._ensure_write_lock = asyncio.Lock()
+        self._ensure_barrier_generation = 0
+        self._ensure_inflight: dict[tuple[str | None, ...], _EnsureFlight] = {}
+        self._send_registry_lock = asyncio.Lock()
+        self._send_inflight: dict[tuple[str, str], _SendFlight] = {}
 
-    async def bind_or_verify_thread(self, context: DialogueContextV2) -> BoundThread:
-        normalized = context.normalized()
+    @property
+    def active_waiter_registry(self) -> ActiveWaiterRegistry | None:
+        """Return the injected process-local owner without creating a fallback."""
+
+        return self._active_waiter_registry
+
+    async def _parent_history(self) -> HistoryPage:
         try:
-            page = await asyncio.wait_for(
+            return await asyncio.wait_for(
                 self.client.fetch_channel_history(
                     channel_id=self.policy.channel_id,
                     limit=self.policy.max_channel_history,
@@ -346,54 +544,313 @@ class DialogueEngineV2:
         except Exception:
             raise DialogueEngineError("TRANSPORT_UNAVAILABLE") from None
 
+    async def discover_validated_parents(
+        self, *, maximum: int
+    ) -> tuple[DiscoveredDialogueParent, ...]:
+        """Discover bounded V2 parents through the Relay's existing Slack client.
+
+        This is a read-only composition seam, not another Slack discovery API.  It
+        deliberately applies author, mutation, schema, and cardinality gates here
+        before any parent is eligible for an Executive observation query.
+        """
+
+        if not isinstance(maximum, int) or isinstance(maximum, bool) or not 1 <= maximum:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+
+        page = await self._parent_history()
         if not isinstance(page, HistoryPage) or not page.complete:
             raise DialogueEngineError("THREAD_HISTORY_INCOMPLETE")
         if not page.mutation_evidence_complete:
             raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
 
-        matches: list[tuple[SlackMessage, Mapping[str, Any]]] = []
-        near_matches: list[Mapping[str, Any]] = []
-        wanted = _context_parent_identity(normalized)
-
+        eligible_authors = frozenset(
+            (*self.policy.allowed_parent_user_ids, self.policy.relay_bot_user_id)
+        )
+        discovered: list[DiscoveredDialogueParent] = []
+        fingerprints: set[str] = set()
         for transport in page.messages:
             if transport.thread_ts not in {None, transport.ts}:
                 continue
-            if transport.author_user_id not in self.policy.allowed_parent_user_ids:
+            if transport.author_user_id not in eligible_authors:
                 continue
 
-            raw_text = transport.text
-            if transport.deleted or transport.edited:
-                if transport.created_text is None:
+            current_is_parent = transport.text.startswith(PARENT_DISCRIMINATOR_V2)
+            created_is_parent = (
+                transport.created_text is not None
+                and transport.created_text.startswith(PARENT_DISCRIMINATOR_V2)
+            )
+            if transport.edited or transport.deleted:
+                if transport.created_text is None or current_is_parent or created_is_parent:
                     raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
-                raw_text = transport.created_text
-            if not raw_text.startswith(PARENT_DISCRIMINATOR_V2):
+                continue
+            if not current_is_parent:
                 continue
 
             try:
-                parent = parse_parent_frame_v2(raw_text)
+                parent = parse_parent_frame_v2(transport.text)
             except DialogueContractError:
                 raise DialogueEngineError("PARENT_MESSAGE_INVALID") from None
-
-            observed = _parent_identity(parent)
-            if observed == wanted:
-                if tuple(parent["allowed_sol_user_ids"]) != self.policy.allowed_sol_user_ids:
-                    raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
-                matches.append((transport, parent))
-            elif _one_field_different(observed, wanted):
-                near_matches.append(parent)
-
-        if len(matches) == 1:
-            transport, parent = matches[0]
-            return BoundThread(
-                thread_ts=transport.ts,
-                parent_author_user_id=transport.author_user_id,
-                parent_fingerprint=parent["fingerprint"],
+            if tuple(parent["allowed_sol_user_ids"]) != self.policy.allowed_sol_user_ids:
+                raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+            fingerprint = parent["fingerprint"]
+            if fingerprint in fingerprints:
+                raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
+            fingerprints.add(fingerprint)
+            discovered.append(
+                DiscoveredDialogueParent(
+                    thread_ts=transport.ts,
+                    # Preserve the canonical JSON list shape required by the
+                    # strict observation wire validator.  The parser already
+                    # returned a detached value, and no cache retains it.
+                    parent=parent,
+                )
             )
-        if len(matches) > 1:
+            if len(discovered) > maximum:
+                raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
+        return tuple(discovered)
+
+    @staticmethod
+    def _bound_parent(
+        match: tuple[SlackMessage, Mapping[str, Any]],
+    ) -> BoundThread:
+        transport, parent = match
+        return BoundThread(
+            thread_ts=transport.ts,
+            parent_author_user_id=transport.author_user_id,
+            parent_fingerprint=parent["fingerprint"],
+        )
+
+    @staticmethod
+    def _ensure_receipt(
+        match: tuple[SlackMessage, Mapping[str, Any]], *, action: str
+    ) -> ParentEnsureReceipt:
+        transport, parent = match
+        return ParentEnsureReceipt(
+            thread_ts=transport.ts,
+            parent_author_user_id=transport.author_user_id,
+            parent_fingerprint=parent["fingerprint"],
+            action=action,
+        )
+
+    def _scan_parent(
+        self,
+        page: HistoryPage,
+        *,
+        normalized_context: Mapping[str, Any],
+    ) -> tuple[SlackMessage, Mapping[str, Any]] | None:
+        return _scan_parent_history(
+            page,
+            normalized_context=normalized_context,
+            policy=self.policy,
+        )
+
+    async def bind_or_verify_thread(self, context: DialogueContextV2) -> BoundThread:
+        normalized = context.normalized()
+        match = self._scan_parent(
+            await self._parent_history(),
+            normalized_context=normalized,
+        )
+        if match is None:
             raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
-        if near_matches:
+        return self._bound_parent(match)
+
+    async def bind_or_verify_relay_parent_thread(
+        self, context: DialogueContextV2
+    ) -> BoundThread:
+        """Return a binding only when this Relay policy owns the parent author."""
+
+        bound = await self.bind_or_verify_thread(context)
+        if bound.parent_author_user_id != self.policy.relay_bot_user_id:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
-        raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
+        return bound
+
+    @staticmethod
+    def _ensure_flight_key(
+        normalized: Mapping[str, Any],
+    ) -> tuple[str | None, ...]:
+        commission = normalized["commission_ref"]
+        return (
+            normalized["work_ref"],
+            commission["repository"],
+            commission["commit"],
+            commission["path"],
+            commission["content_sha256"],
+            normalized["session_ref"],
+            normalized["operation_key"],
+            normalized["watch_mode"],
+        )
+
+    async def _retire_ensure_flight(
+        self,
+        key: tuple[str | None, ...],
+        flight: _EnsureFlight,
+    ) -> None:
+        async with self._ensure_registry_lock:
+            if (
+                flight.waiters == 0
+                and flight.task.done()
+                and self._ensure_inflight.get(key) is flight
+            ):
+                del self._ensure_inflight[key]
+
+    def _ensure_flight_done(
+        self,
+        key: tuple[str | None, ...],
+        flight: _EnsureFlight,
+    ) -> None:
+        try:
+            flight.task.exception()
+        except asyncio.CancelledError:
+            pass
+        asyncio.create_task(self._retire_ensure_flight(key, flight))
+
+    async def _ensure_thread_once(
+        self,
+        *,
+        normalized: Mapping[str, Any],
+        text: str,
+        barrier_generation: int,
+    ) -> ParentEnsureReceipt:
+        async with self._ensure_write_lock:
+            if barrier_generation != self._ensure_barrier_generation:
+                raise DialogueEngineError("PARENT_SEND_EFFECT_UNKNOWN")
+            return await self._ensure_thread_once_serialized(
+                normalized=normalized,
+                text=text,
+            )
+
+    def _hold_queued_parent_ensures(self) -> None:
+        """Fence writers already queued behind an unresolved parent effect."""
+
+        self._ensure_barrier_generation += 1
+
+    async def _ensure_thread_once_serialized(
+        self,
+        *,
+        normalized: Mapping[str, Any],
+        text: str,
+    ) -> ParentEnsureReceipt:
+        existing = self._scan_parent(
+            await self._parent_history(),
+            normalized_context=normalized,
+        )
+        if existing is not None:
+            return self._ensure_receipt(existing, action="REUSED")
+
+        posted: SlackMessage | None = None
+        try:
+            result = await asyncio.wait_for(
+                self.client.post_parent(
+                    channel_id=self.policy.channel_id,
+                    text=text,
+                ),
+                timeout=self.policy.method_timeout_seconds,
+            )
+        except SlackTransportUnavailable:
+            raise DialogueEngineError("TRANSPORT_UNAVAILABLE") from None
+        except (SlackEffectUnknown, asyncio.TimeoutError):
+            pass
+        except Exception:
+            pass
+        else:
+            if (
+                isinstance(result, SlackMessage)
+                and result.author_user_id == self.policy.relay_bot_user_id
+                and result.thread_ts is None
+                and result.text == text
+                and not result.edited
+                and not result.deleted
+                and result.created_text in {None, text}
+            ):
+                posted = result
+
+        try:
+            reconciled = self._scan_parent(
+                await self._parent_history(),
+                normalized_context=normalized,
+            )
+        except DialogueEngineError as exc:
+            self._hold_queued_parent_ensures()
+            if exc.code in {
+                "THREAD_HISTORY_INCOMPLETE",
+                "THREAD_RECONCILIATION_INCOMPLETE",
+                "TRANSPORT_UNAVAILABLE",
+            }:
+                raise DialogueEngineError("PARENT_SEND_EFFECT_UNKNOWN") from None
+            raise
+        if reconciled is None:
+            self._hold_queued_parent_ensures()
+            raise DialogueEngineError("PARENT_SEND_EFFECT_UNKNOWN")
+        reconciled_transport = reconciled[0]
+        if posted is not None and (
+            posted.ts != reconciled_transport.ts
+            or posted.author_user_id != reconciled_transport.author_user_id
+            or posted.thread_ts != reconciled_transport.thread_ts
+            or posted.text != reconciled_transport.text
+            or reconciled_transport.edited
+            or reconciled_transport.deleted
+        ):
+            self._hold_queued_parent_ensures()
+            raise DialogueEngineError("PARENT_SEND_EFFECT_UNKNOWN")
+        action = "POSTED" if posted is not None else "RECOVERED"
+        return self._ensure_receipt(reconciled, action=action)
+
+    async def ensure_thread(
+        self,
+        context: DialogueContextV2,
+        *,
+        created_at: str,
+    ) -> BoundThread:
+        normalized = context.normalized()
+        try:
+            prospective = build_parent_v2(
+                {
+                    "schema": "mastermind.agent_dialogue_parent.v2",
+                    "work_ref": normalized["work_ref"],
+                    "commission_ref": normalized["commission_ref"],
+                    "session_ref": normalized["session_ref"],
+                    "operation_key": normalized["operation_key"],
+                    "watch_mode": normalized["watch_mode"],
+                    "allowed_sol_user_ids": list(self.policy.allowed_sol_user_ids),
+                    "created_at": created_at,
+                }
+            )
+            text = render_parent_v2(prospective)
+        except DialogueContractError:
+            raise DialogueEngineError("PARENT_MESSAGE_INVALID") from None
+
+        key = self._ensure_flight_key(normalized)
+        async with self._ensure_registry_lock:
+            flight = self._ensure_inflight.get(key)
+            if flight is None:
+                barrier_generation = self._ensure_barrier_generation
+                flight = _EnsureFlight(
+                    task=asyncio.create_task(
+                        self._ensure_thread_once(
+                            normalized=normalized,
+                            text=text,
+                            barrier_generation=barrier_generation,
+                        )
+                    )
+                )
+                self._ensure_inflight[key] = flight
+                flight.task.add_done_callback(
+                    lambda _task: self._ensure_flight_done(key, flight)
+                )
+            flight.waiters += 1
+
+        try:
+            return await asyncio.shield(flight.task)
+        finally:
+            async with self._ensure_registry_lock:
+                flight.waiters -= 1
+                remove_now = (
+                    flight.waiters == 0
+                    and flight.task.done()
+                    and self._ensure_inflight.get(key) is flight
+                )
+                if remove_now:
+                    del self._ensure_inflight[key]
 
     def _sender_is_eligible(
         self, transport: SlackMessage, message: Mapping[str, Any]
@@ -471,7 +928,7 @@ class DialogueEngineV2:
             except DialogueContractError:
                 raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
 
-            if not _message_context_matches(message, normalized_context):
+            if not _message_matches_history_parent(message, normalized_context):
                 raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
             if not self._sender_is_eligible(transport, message):
                 ineligible_count += 1
@@ -535,7 +992,7 @@ class DialogueEngineV2:
             raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
         normalized = context.normalized()
         if (
-            not _message_context_matches(validated, normalized)
+            not _message_matches_current_context(validated, normalized)
             or validated["actor_ref"] != normalized["actor_ref"]
         ):
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
@@ -578,6 +1035,198 @@ class DialogueEngineV2:
         except DialogueEngineError:
             raise DialogueEngineError("SEND_EFFECT_UNKNOWN") from None
 
+    @staticmethod
+    def _duplicate_receipt(
+        existing: ReadMessage,
+        *,
+        message_key: str,
+        fingerprint: str,
+    ) -> MessageReceipt:
+        if existing.duplicate_timestamps:
+            raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
+        return MessageReceipt(
+            action="DUPLICATE",
+            message_key=message_key,
+            fingerprint=fingerprint,
+            message_ts=existing.primary_ts,
+            duplicate_timestamps=(),
+        )
+
+    async def prepare_send_message(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        message: Mapping[str, Any],
+    ) -> PreparedMessageSend | MessageReceipt:
+        """Freeze one exact send after every deterministic pre-dispatch check."""
+
+        normalized = context.normalized()
+        frozen_context = DialogueContextV2(
+            work_ref=normalized["work_ref"],
+            commission_ref=_deep_freeze(normalized["commission_ref"]),
+            session_ref=normalized["session_ref"],
+            operation_key=normalized["operation_key"],
+            watch_mode=normalized["watch_mode"],
+            actor_ref=_deep_freeze(normalized["actor_ref"]),
+            applies_to=_deep_freeze(normalized["applies_to"]),
+        )
+        validated = self._validate_outbound(message, context=context)
+        text = render_message_v2(validated)
+        existing = self._find_key(
+            await self._history(thread_ts=thread_ts, context=frozen_context),
+            message_key=validated["message_key"],
+            fingerprint=validated["fingerprint"],
+        )
+        if existing is not None:
+            return self._duplicate_receipt(
+                existing,
+                message_key=validated["message_key"],
+                fingerprint=validated["fingerprint"],
+            )
+        return PreparedMessageSend(
+            thread_ts=thread_ts,
+            context=frozen_context,
+            message=_deep_freeze(validated),
+            text=text,
+            message_key=validated["message_key"],
+            fingerprint=validated["fingerprint"],
+        )
+
+    async def _commit_send_once(
+        self,
+        prepared: PreparedMessageSend,
+    ) -> MessageReceipt:
+        existing = self._find_key(
+            await self._history(
+                thread_ts=prepared.thread_ts,
+                context=prepared.context,
+            ),
+            message_key=prepared.message_key,
+            fingerprint=prepared.fingerprint,
+        )
+        if existing is not None:
+            return self._duplicate_receipt(
+                existing,
+                message_key=prepared.message_key,
+                fingerprint=prepared.fingerprint,
+            )
+
+        transport: SlackMessage | None = None
+        try:
+            result = await asyncio.wait_for(
+                self.client.post_reply(
+                    channel_id=self.policy.channel_id,
+                    thread_ts=prepared.thread_ts,
+                    text=prepared.text,
+                ),
+                timeout=self.policy.method_timeout_seconds,
+            )
+        except SlackTransportUnavailable:
+            raise DialogueEngineError("TRANSPORT_UNAVAILABLE") from None
+        except (SlackEffectUnknown, asyncio.TimeoutError):
+            pass
+        except Exception:
+            # Only the transport's explicit typed exception proves that no
+            # write occurred.  An arbitrary provider/client exception after
+            # invocation has unknown effect and must reconcile exactly once.
+            pass
+        else:
+            try:
+                transport = self._validate_write_result(
+                    result,
+                    thread_ts=prepared.thread_ts,
+                    expected_text=prepared.text,
+                    expected_author_user_id=self.policy.relay_bot_user_id,
+                )
+            except DialogueEngineError:
+                pass
+
+        recovered = await self._reconcile_post_effect(
+            thread_ts=prepared.thread_ts,
+            context=prepared.context,
+            message_key=prepared.message_key,
+            fingerprint=prepared.fingerprint,
+        )
+        if recovered is None or recovered.duplicate_timestamps:
+            raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
+        action = (
+            "POSTED"
+            if transport is not None and transport.ts == recovered.primary_ts
+            else "RECOVERED"
+        )
+        return MessageReceipt(
+            action=action,
+            message_key=prepared.message_key,
+            fingerprint=prepared.fingerprint,
+            message_ts=recovered.primary_ts,
+            duplicate_timestamps=(),
+        )
+
+    async def _retire_send_flight(
+        self,
+        key: tuple[str, str],
+        flight: _SendFlight,
+    ) -> None:
+        async with self._send_registry_lock:
+            if (
+                flight.waiters == 0
+                and flight.task.done()
+                and self._send_inflight.get(key) is flight
+            ):
+                del self._send_inflight[key]
+
+    def _send_flight_done(
+        self,
+        key: tuple[str, str],
+        flight: _SendFlight,
+    ) -> None:
+        try:
+            flight.task.exception()
+        except asyncio.CancelledError:
+            pass
+        asyncio.create_task(self._retire_send_flight(key, flight))
+
+    async def commit_send_message(
+        self,
+        prepared: PreparedMessageSend | MessageReceipt,
+        *,
+        fingerprint: str,
+    ) -> MessageReceipt:
+        """Commit only the exact frozen fingerprint, coalescing concurrent peers."""
+
+        if not isinstance(prepared, PreparedMessageSend):
+            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+        if fingerprint != prepared.fingerprint:
+            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+        key = (prepared.thread_ts, prepared.message_key)
+        async with self._send_registry_lock:
+            flight = self._send_inflight.get(key)
+            if flight is None:
+                flight = _SendFlight(
+                    fingerprint=prepared.fingerprint,
+                    task=asyncio.create_task(self._commit_send_once(prepared))
+                )
+                self._send_inflight[key] = flight
+                flight.task.add_done_callback(
+                    lambda _task: self._send_flight_done(key, flight)
+                )
+            elif flight.fingerprint != prepared.fingerprint:
+                raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+            flight.waiters += 1
+
+        try:
+            return await asyncio.shield(flight.task)
+        finally:
+            async with self._send_registry_lock:
+                flight.waiters -= 1
+                if (
+                    flight.waiters == 0
+                    and flight.task.done()
+                    and self._send_inflight.get(key) is flight
+                ):
+                    del self._send_inflight[key]
+
     async def send_message(
         self,
         *,
@@ -585,76 +1234,19 @@ class DialogueEngineV2:
         context: DialogueContextV2,
         message: Mapping[str, Any],
     ) -> MessageReceipt:
-        validated = self._validate_outbound(message, context=context)
-        text = render_message_v2(validated)
-        existing = self._find_key(
-            await self._history(thread_ts=thread_ts, context=context),
-            message_key=validated["message_key"],
-            fingerprint=validated["fingerprint"],
+        """Preserve the legacy one-call API over the exact prepare/commit path."""
+
+        prepared = await self.prepare_send_message(
+            thread_ts=thread_ts,
+            context=context,
+            message=message,
         )
-        if existing is not None:
-            return MessageReceipt(
-                action="DUPLICATE",
-                message_key=validated["message_key"],
-                fingerprint=validated["fingerprint"],
-                message_ts=existing.primary_ts,
-                duplicate_timestamps=existing.duplicate_timestamps,
-            )
-
-        for attempt in range(2):
-            invalid_receipt = False
-            transport: SlackMessage | None = None
-            try:
-                result = await asyncio.wait_for(
-                    self.client.post_reply(
-                        channel_id=self.policy.channel_id,
-                        thread_ts=thread_ts,
-                        text=text,
-                    ),
-                    timeout=self.policy.method_timeout_seconds,
-                )
-            except (SlackEffectUnknown, asyncio.TimeoutError):
-                pass
-            except Exception:
-                raise DialogueEngineError("TRANSPORT_UNAVAILABLE") from None
-            else:
-                try:
-                    transport = self._validate_write_result(
-                        result,
-                        thread_ts=thread_ts,
-                        expected_text=text,
-                        expected_author_user_id=self.policy.relay_bot_user_id,
-                    )
-                except DialogueEngineError:
-                    invalid_receipt = True
-
-            recovered = await self._reconcile_post_effect(
-                thread_ts=thread_ts,
-                context=context,
-                message_key=validated["message_key"],
-                fingerprint=validated["fingerprint"],
-            )
-            if recovered is not None:
-                action = (
-                    "POSTED"
-                    if transport is not None
-                    and transport.ts
-                    in {recovered.primary_ts, *recovered.duplicate_timestamps}
-                    else "RECOVERED"
-                )
-                return MessageReceipt(
-                    action=action,
-                    message_key=validated["message_key"],
-                    fingerprint=validated["fingerprint"],
-                    message_ts=recovered.primary_ts,
-                    duplicate_timestamps=recovered.duplicate_timestamps,
-                )
-            if attempt == 0:
-                continue
-            if invalid_receipt:
-                raise DialogueEngineError("WRITE_RESULT_INVALID")
-            raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
-        raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
+        if isinstance(prepared, MessageReceipt):
+            return prepared
+        return await self.commit_send_message(
+            prepared,
+            fingerprint=prepared.fingerprint,
+        )
 
     async def wait_for_reply(
         self,
@@ -667,7 +1259,9 @@ class DialogueEngineV2:
     ) -> dict[str, Any]:
         expected = tuple(expected_types)
         if (
-            not expected
+            not isinstance(request_message_key, str)
+            or MESSAGE_KEY_RE_V2.fullmatch(request_message_key) is None
+            or not expected
             or len(expected) != len(set(expected))
             or any(message_type not in SOL_MESSAGE_TYPES for message_type in expected)
         ):
@@ -677,46 +1271,65 @@ class DialogueEngineV2:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
 
         normalized = context.normalized()
-        for index in range(attempts):
-            read = await self._history(thread_ts=thread_ts, context=context)
-            request_matches = [
-                item
-                for item in read.messages
-                if item.message["message_key"] == request_message_key
-                and item.message["message_type"] in FABLE_MESSAGE_TYPES
-                and item.message["actor_ref"] == normalized["actor_ref"]
-            ]
-            if len(request_matches) != 1:
-                raise DialogueEngineError("REPLY_NOT_FOUND")
-            request = request_matches[0].message
-            request_ts = _ts_order(request_matches[0].primary_ts)
-            replies = [
-                item
-                for item in read.messages
-                if item.message["reply_to_message_key"] == request_message_key
-                and item.message["message_type"] in expected
-                and _ts_order(item.primary_ts) > request_ts
-            ]
-            if len(replies) > 1:
-                raise DialogueEngineError("REPLY_AMBIGUOUS")
-            if len(replies) == 1:
-                reply = replies[0]
-                authority = _adjudicate_reply_v2(
-                    request,
-                    reply.message,
-                    authority_policy=self.authority_policy,
-                )
-                return {
-                    "reply": dict(reply.message),
-                    "transport": {
-                        "primary_ts": reply.primary_ts,
-                        "duplicate_timestamps": list(reply.duplicate_timestamps),
-                    },
-                    "authority": authority,
-                }
-            if index + 1 < attempts:
-                await self._sleep(self.policy.poll_interval_seconds)
-        raise DialogueEngineError("WAIT_TIMEOUT")
+
+        async def poll() -> dict[str, Any]:
+            for index in range(attempts):
+                read = await self._history(thread_ts=thread_ts, context=context)
+                request_matches = [
+                    item
+                    for item in read.messages
+                    if item.message["message_key"] == request_message_key
+                    and item.message["message_type"] in FABLE_MESSAGE_TYPES
+                    and item.message["actor_ref"] == normalized["actor_ref"]
+                ]
+                if len(request_matches) != 1:
+                    raise DialogueEngineError("REPLY_NOT_FOUND")
+                request = request_matches[0].message
+                request_ts = _ts_order(request_matches[0].primary_ts)
+                replies = [
+                    item
+                    for item in read.messages
+                    if item.message["reply_to_message_key"] == request_message_key
+                    and item.message["message_type"] in expected
+                    and _ts_order(item.primary_ts) > request_ts
+                ]
+                if len(replies) > 1:
+                    raise DialogueEngineError("REPLY_AMBIGUOUS")
+                if len(replies) == 1:
+                    reply = replies[0]
+                    authority = _adjudicate_reply_v2(
+                        request,
+                        reply.message,
+                        authority_policy=self.authority_policy,
+                    )
+                    return {
+                        "reply": dict(reply.message),
+                        "transport": {
+                            "primary_ts": reply.primary_ts,
+                            "duplicate_timestamps": list(reply.duplicate_timestamps),
+                        },
+                        "authority": authority,
+                    }
+                if index + 1 < attempts:
+                    await self._sleep(self.policy.poll_interval_seconds)
+            raise DialogueEngineError("WAIT_TIMEOUT")
+
+        registry = self._active_waiter_registry
+        if registry is None:
+            return await poll()
+
+        target_seat = _waiter_target_seat(normalized["actor_ref"])
+        bound = await self.bind_or_verify_thread(context)
+        if bound.thread_ts != thread_ts:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        key = ActiveWaiterKey(
+            parent_fingerprint=bound.parent_fingerprint,
+            operation_key=normalized["operation_key"],
+            session_ref_canonical=normalized["session_ref"],
+            target_seat=target_seat,
+        )
+        async with registry.hold(key):
+            return await poll()
 
     def status(self) -> dict[str, Any]:
         return {
@@ -733,4 +1346,9 @@ class DialogueEngineV2:
         }
 
 
-__all__ = ["DialogueContextV2", "DialogueEngineV2"]
+__all__ = [
+    "DialogueContextV2",
+    "DialogueEngineV2",
+    "DiscoveredDialogueParent",
+    "PreparedMessageSend",
+]
