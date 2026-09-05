@@ -1175,44 +1175,87 @@ def test_attention_read_state_preserves_nonempty_current_attention() -> None:
     assert _run_node(harness) == "current"
 
 
-def test_attention_empty_render_and_failed_refresh_withhold_clear_language() -> None:
-    """The actual empty renderers and API-failure path cannot leave a stale clear headline."""
+def test_state_refusal_or_network_failure_preserves_previous_attention_and_degraded_state() -> None:
+    """A parsed 503, malformed envelope, or rejected fetch cannot replace a real prior state."""
     source = JS.read_text(encoding="utf-8")
     load_state = source[source.index("  function loadState()") : source.index("\n  function readTheme()")]
     harness = """
-    var lists = { needs: [], sol: [], coo: [] };
-    lists.needs.appendChild = function(v) { lists.needs.push(v); };
-    lists.sol.appendChild = function(v) { lists.sol.push(v); };
-    lists.coo.appendChild = function(v) { lists.coo.push(v); };
-    function el(tag, opts) { return { tag:tag, text:(opts || {}).text || "", className:(opts || {}).className || "" }; }
-    function clear(list) { list.length = 0; }
-    var needs = { className:"", querySelector:function() { return lists.needs; } };
-    var sol = lists.sol;
-    var coo = lists.coo;
-    var tallies = {};
-    var nav = { textContent:"" };
-    var document = {
-      getElementById:function(id) { if (id === "needs-you") return needs; if (id === "nav-today-count") return nav; return { textContent:"" }; },
-      querySelector:function(id) { return id.indexOf("sol-attention") >= 0 ? sol : coo; },
-      querySelectorAll:function() { return []; }
-    };
-    function setTally(name, value) { tallies[name] = value; }
-    function renderDegraded() {}
-    var STATE = { doc:{attention:{chairman:[],ceo:[],coo:[]}} };
-    function getJSON() { return Promise.reject(new Error("offline")); }
+    var STATE;
+    var responses;
+    var calls;
+    var nav;
+    var document = { getElementById:function(id) { return id === "nav-today-count" ? nav : { textContent:"" }; } };
+    function getJSON() { return responses.shift(); }
+    function renderEverything(body) { calls.rendered.push(body); STATE.doc = body.control_room; }
+    function renderDegraded(items) { calls.degraded = items; }
+    function renderNeedsYou(items, state) { calls.chairman = [items, state]; }
+    function renderMiniAttention(id, items, state) { calls[id] = [items, state]; }
+    function setTally(name, value) { calls.tallies[name] = value; }
+    var healthy = {control_room:{
+      degraded:["executive_runtime: cache unavailable"],
+      attention:{chairman:[{attention_id:"chairman-existing"}], ceo:[{attention_id:"ceo-existing"}], coo:[{attention_id:"coo-existing"}]}
+    }};
+    function run(refusal) {
+      calls = {rendered:[], tallies:{}};
+      nav = {textContent:""};
+      STATE = {doc:{}};
+      responses = [Promise.resolve(healthy), refusal];
+      return loadState().then(function() {
+        return loadState();
+      }).then(function() { calls.nav = nav.textContent; return calls; });
+    }
     %s
-    %s
-    %s
-    %s
-    renderNeedsYou([], "current");
-    renderMiniAttention("sol-attention", [], "current");
-    loadState().then(function() { console.log(JSON.stringify({needs:lists.needs.map(function(v){return v.text;}), sol:lists.sol.map(function(v){return v.text;}), tallies:tallies, nav:nav.textContent})); });
-    """ % (_extract_fn("emptyAttentionText"), _extract_fn("appendAttentionFreshnessNote"), _extract_fn("renderNeedsYou"), _extract_fn("renderMiniAttention")) + load_state
+    var scenarios = [
+      function() { return Promise.resolve({ok:false, error:{code:"state_unavailable"}}); },
+      function() { return Promise.resolve({ok:true}); },
+      function() { return Promise.resolve({control_room:{}}); },
+      function() { return Promise.reject(new Error("offline")); }
+    ];
+    var results = [];
+    function next(index) {
+      if (index === scenarios.length) { console.log(JSON.stringify(results)); return; }
+      run(scenarios[index]()).then(function(result) { results.push(result); next(index + 1); });
+    }
+    next(0);
+    """ % _extract_fn("hasUsableStateEnvelope") + load_state
     out = _run_node(harness)
-    assert out["needs"] == ["Attention unavailable — refresh canonical sources."]
-    assert out["sol"] == ["Attention unavailable — refresh canonical sources."]
-    assert out["tallies"] == {"chairman": "—", "ceo": "—", "coo": "—"}
-    assert out["nav"] == "—"
+    for result in out:
+        assert result["rendered"] == [{
+            "control_room": {
+                "degraded": ["executive_runtime: cache unavailable"],
+                "attention": {
+                    "chairman": [{"attention_id": "chairman-existing"}],
+                    "ceo": [{"attention_id": "ceo-existing"}],
+                    "coo": [{"attention_id": "coo-existing"}],
+                },
+            },
+        }]
+        assert result["chairman"] == [[{"attention_id": "chairman-existing"}], "unavailable"]
+        assert result["sol-attention"] == [[{"attention_id": "ceo-existing"}], "unavailable"]
+        assert result["coo"] == [[{"attention_id": "coo-existing"}], "unavailable"]
+        assert result["degraded"] == [
+            "executive_runtime: cache unavailable",
+            "control_room_api: unavailable — current state could not be read",
+        ]
+        assert result["tallies"] == {"chairman": "—", "ceo": "—", "coo": "—"}
+        assert result["nav"] == "—"
+
+
+def test_state_envelope_accepts_local_and_remote_success_contracts_only_when_inbox_is_complete() -> None:
+    """Local success has no ok field; remote success does, and both require the actual Inbox shape."""
+    harness = """
+    %s
+    var document = {attention:{chairman:[], ceo:[], coo:[]}};
+    console.log(JSON.stringify({
+      local:hasUsableStateEnvelope({control_room:document, capabilities:{}}),
+      remote:hasUsableStateEnvelope({ok:true, control_room:document}),
+      missingInbox:hasUsableStateEnvelope({control_room:{attention:{chairman:[], ceo:[]}}}),
+      emptyDocument:hasUsableStateEnvelope({control_room:{}})
+    }));
+    """ % _extract_fn("hasUsableStateEnvelope")
+    assert _run_node(harness) == {
+        "local": True, "remote": True, "missingInbox": False, "emptyDocument": False,
+    }
 
 
 def test_addendum_behavioural_owed_binding_is_withheld_from_stale_cards() -> None:

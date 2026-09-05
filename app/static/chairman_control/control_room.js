@@ -2116,11 +2116,22 @@
 
   function loadState() {
     return getJSON("/api/state").then(function (body) {
+      // Local state envelopes intentionally have no `ok` member, while the
+      // remote read-only relay uses `{ok:true, control_room:…}`.  Both must
+      // contain the Control Room's essential Inbox arrays before replacing
+      // the last rendered state.  In particular, a remote 503 parses as JSON
+      // (`{ok:false,error:…}`), so transport success alone is not state
+      // success.
+      if (!hasUsableStateEnvelope(body)) {
+        return Promise.reject(new Error("control_room_state_unavailable"));
+      }
       renderEverything(body);
       return body;
     }).catch(function () {
-      renderDegraded(["control_room_api: unavailable — this page could not reach the state endpoint"]);
       var previous = STATE.doc && typeof STATE.doc === "object" ? STATE.doc : {};
+      var previousDegraded = Array.isArray(previous.degraded) ? previous.degraded.slice() : [];
+      previousDegraded.push("control_room_api: unavailable — current state could not be read");
+      renderDegraded(previousDegraded);
       var attention = previous.attention && typeof previous.attention === "object" ? previous.attention : {};
       renderNeedsYou(Array.isArray(attention.chairman) ? attention.chairman : [], "unavailable");
       renderMiniAttention("sol-attention", Array.isArray(attention.ceo) ? attention.ceo : [], "unavailable");
@@ -2131,6 +2142,13 @@
       document.getElementById("nav-today-count").textContent = "—";
       return null;
     });
+  }
+
+  function hasUsableStateEnvelope(body) {
+    var doc = body && body.control_room;
+    var attention = doc && typeof doc === "object" && !Array.isArray(doc) && doc.attention;
+    return !!(attention && typeof attention === "object" &&
+      Array.isArray(attention.chairman) && Array.isArray(attention.ceo) && Array.isArray(attention.coo));
   }
 
   // theme -----------------------------------------------------------------
