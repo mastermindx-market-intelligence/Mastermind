@@ -28,7 +28,10 @@ from integrations.business_mcp_auth.jwks import BoundedJwksCache
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 from integrations.mastermind_secretary_mcp.adapter import StewardGrounding
-from integrations.mastermind_steward_app.app import build_authenticated_app
+from integrations.mastermind_steward_app.app import (
+    _accepts_json,
+    build_authenticated_app,
+)
 from integrations.mastermind_steward_app.projection import (
     ControlRoomStewardReadPort,
     responsibility_ref_for,
@@ -59,6 +62,11 @@ MCP_BODY = {
         "clientInfo": {"name": "mastermind-test", "version": "1.0"},
     },
 }
+NON_FINITE_MCP_BODY_PREFIX = (
+    b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":'
+    b'{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":'
+    b'{"name":"mastermind-test","version":"1.0"}},"extra":'
+)
 TOOL_CALL_BODY = {
     "jsonrpc": "2.0",
     "id": 2,
@@ -559,7 +567,38 @@ def test_valid_token_without_steward_scope_gets_a1_insufficient_scope_challenge(
             b"{}",
             406,
         ),
+        (
+            "POST",
+            MCP_PATH,
+            {
+                "accept": "application/json;q=0",
+                "content-type": "application/json",
+            },
+            json.dumps(MCP_BODY).encode("utf-8"),
+            406,
+        ),
         ("POST", MCP_PATH, MCP_HEADERS, b"{", 400),
+        (
+            "POST",
+            MCP_PATH,
+            MCP_HEADERS,
+            NON_FINITE_MCP_BODY_PREFIX + b"NaN}",
+            400,
+        ),
+        (
+            "POST",
+            MCP_PATH,
+            MCP_HEADERS,
+            NON_FINITE_MCP_BODY_PREFIX + b"Infinity}",
+            400,
+        ),
+        (
+            "POST",
+            MCP_PATH,
+            MCP_HEADERS,
+            NON_FINITE_MCP_BODY_PREFIX + b"-Infinity}",
+            400,
+        ),
     ],
 )
 def test_transport_alias_method_and_content_type_refuse_before_authentication(
@@ -592,6 +631,10 @@ def test_transport_alias_method_and_content_type_refuse_before_authentication(
     assert verifier_calls == []
     assert port.calls == []
     assert "must-not-be-read" not in response.text
+
+
+def test_accept_quality_allows_rfc_maximum_with_empty_fraction():
+    assert _accepts_json(b"application/json;q=1.")
 
 
 @pytest.mark.parametrize(

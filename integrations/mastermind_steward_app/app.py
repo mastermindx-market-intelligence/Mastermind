@@ -83,10 +83,43 @@ def _accepts_json(value: bytes) -> bool:
         or any(ord(char) < 0x20 or ord(char) == 0x7F for char in token)
     ):
         return False
-    return any(
-        media_type.partition(";")[0].strip().lower() == "application/json"
-        for media_type in token.split(",")
-    )
+    for media_range in token.split(","):
+        parts = [part.strip() for part in media_range.split(";")]
+        if not parts or any(not part for part in parts):
+            continue
+        if parts[0].lower() != "application/json":
+            continue
+        quality: str | None = None
+        for parameter in parts[1:]:
+            name, separator, parameter_value = parameter.partition("=")
+            if (
+                separator != "="
+                or name.strip().lower() != "q"
+                or quality is not None
+            ):
+                quality = ""
+                break
+            quality = parameter_value.strip()
+        if quality is None or quality == "1":
+            return True
+        if quality.startswith("1."):
+            fraction = quality[2:]
+            if len(fraction) <= 3 and not set(fraction) - {"0"}:
+                return True
+            continue
+        if quality.startswith("0."):
+            fraction = quality[2:]
+            if (
+                1 <= len(fraction) <= 3
+                and fraction.isdigit()
+                and any(digit != "0" for digit in fraction)
+            ):
+                return True
+    return False
+
+
+def _reject_json_constant(_value: str) -> None:
+    raise ValueError("non-finite JSON number")
 
 
 def _canonical_raw_path(scope: Scope) -> bytes:
@@ -281,7 +314,7 @@ class _StewardTransportGuard:
             if not message.get("more_body", False):
                 break
         try:
-            json.loads(bytes(body))
+            json.loads(bytes(body), parse_constant=_reject_json_constant)
         except (RecursionError, UnicodeDecodeError, ValueError):
             await _reply(scope, receive, send, 400, "invalid_request")
             return
