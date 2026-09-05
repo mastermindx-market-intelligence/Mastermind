@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import dataclasses
 import errno
+import gc
 import hashlib
 import io
 import json
@@ -24,6 +25,7 @@ import shutil
 import stat
 import subprocess
 import tarfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -1059,9 +1061,11 @@ from scripts.ohf.cap_s1_mastermind_operator_canary import (
     CanaryEvidence,
     CanaryStop,
     CAP_S1_OBSERVER_MUTANT_TRANSFORMS,
+    CAP_S1_OBSERVER_TEST_MODULES,
     CAP_S1_GITLEAKS_ARCHIVE_BYTES,
     CAP_S1_GITLEAKS_ARCHIVE_MEMBERS,
     CAP_S1_GITLEAKS_ARCHIVE_SHA256,
+    CAP_S1_GITLEAKS_ARCHIVE_URL,
     CAP_S1_GITLEAKS_RULE_COUNT,
     CAP_S1_GITLEAKS_RULE_SHA256,
     CAP_S1_GITLEAKS_SOURCE_COMMIT,
@@ -1072,17 +1076,37 @@ from scripts.ohf.cap_s1_mastermind_operator_canary import (
     FAKE_HARNESS_VERSION,
     FROZEN_STOP_CODES,
     _SCHEMA_FIXTURE_BINARY_SOURCE,
+    _RESULT_ALL_CLEANUP_KINDS,
     _build_cap_s1_result_from_fixture,
     _assemble_cap_s1_secret_controls,
     _CapS1SecretSourceEntry,
+    _CapS1SourceCopyEntry,
+    _CapS1OwnedProcessCleanupObservation,
+    _CapS1OwnedRootIdentity,
+    _CapS1GitHubObservations,
     _canonical_digest,
+    _capture_cap_s1_interpreter_identity,
+    _consume_cap_s1_fake_canary_for_fixture,
     _extract_cap_s1_gitleaks_binary,
+    _finalize_cap_s1_observer_cleanup,
+    _download_cap_s1_pinned_bytes,
     _github_api_json as _real_github_api_json,
     _load_cap_s1_producer_evidence,
     _parse_cap_s1_gitleaks_coverage,
     _parse_cap_s1_gitleaks_report,
     _parse_cap_s1_junit,
+    _parse_cap_s1_mutation_junit,
+    _observe_cap_s1_codeql,
+    _observe_cap_s1_diff,
+    _observe_cap_s1_mutations,
+    _register_cap_s1_canary_evidence,
+    _revalidate_cap_s1_observer_source,
+    _register_cap_s1_owned_root,
+    _run_cap_s1_observer_bytes,
     _run_cap_s1_observer_process,
+    _run_cap_s1_python_observer_process,
+    _run_cap_s1_source_observer,
+    _revalidate_cap_s1_interpreter_identity,
     _strict_json_loads,
     _stage_cap_s1_secret_source,
     _verify_cap_s1_secret_manifest,
@@ -2168,7 +2192,9 @@ def test_run_canary_pathless_request_with_unrelated_skill_fragment_refuses_befor
                 _SCHEMA_WITHOUT_SKILL_PATH_PLUS_UNRELATED_FRAGMENT
             ),
         )
-    assert excinfo.value.code == "SKILL_PATH_ATTESTATION_UNAVAILABLE"
+    assert (
+        excinfo.value.code == "SKILL_PATH_ATTESTATION_UNAVAILABLE"
+    ), "CAP_A_UNRELATED_SKILL_ACCEPTED"
 
     assert len(_CREATED_CANARY_CLIENTS) == 1
     client = _CREATED_CANARY_CLIENTS[0]
@@ -2271,7 +2297,9 @@ def test_run_canary_empty_candidate_identity_refuses_before_provider_start(
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
     assert excinfo.value.code == "PROVIDER_REALM_UNAVAILABLE"
-    assert not (scratch / "cap-s1-attempt-root").exists()
+    assert not (
+        scratch / "cap-s1-attempt-root"
+    ).exists(), "CAP_C_FIRST_EFFECT_CLEANUP_BYPASSED"
     assert len(_CREATED_CANARY_CLIENTS) == 0
 
 
@@ -3215,6 +3243,17 @@ def _happy_cap_s1_result_kwargs() -> dict:
         "protected_join": protected_join,
         "provider_attempt_id": attempt_id,
     }
+    local_scopes = tuple(sorted(CAP_S1_OBSERVER_TEST_MODULES))
+    local_manifest = tuple(
+        (
+            scope,
+            1,
+            2 if index == len(local_scopes) - 1 else 0,
+            0,
+            0,
+        )
+        for index, scope in enumerate(local_scopes)
+    )
     raw = dict(
         operation="mastermind-cap-s1-complete-vertical-20260901-sol-001",
         receiver="fable-cap-s1",
@@ -3271,18 +3310,13 @@ def _happy_cap_s1_result_kwargs() -> dict:
         },
         local_proof={
             **bound,
-            "suite_count": 4,
-            "total": 359,
-            "passed": 357,
+            "suite_count": len(local_manifest),
+            "total": len(local_manifest) + 2,
+            "passed": len(local_manifest),
             "skipped": 2,
             "failed": 0,
             "cancelled": 0,
-            "suite_manifest": (
-                ("cap-s1-a", 100, 0, 0, 0),
-                ("cap-s1-b", 100, 0, 0, 0),
-                ("cap-s1-c", 100, 0, 0, 0),
-                ("cap-s1-closure", 57, 2, 0, 0),
-            ),
+            "suite_manifest": local_manifest,
             "evidence_digest": "6" * 64,
         },
         hosted_proof={
@@ -3335,29 +3369,13 @@ def _happy_cap_s1_result_kwargs() -> dict:
             **bound,
             "status": "CLEAN",
             "all_removed": True,
-            "resources_total": 7,
+            "resources_total": len(_RESULT_ALL_CLEANUP_KINDS),
             "failures": 0,
             "residue_count": 0,
-            "resource_kinds": (
-                "attempt",
-                "origin",
-                "process",
-                "projection",
-                "schema",
-                "thread",
-                "workspace",
-            ),
+            "resource_kinds": _RESULT_ALL_CLEANUP_KINDS,
             "resource_manifest": tuple(
                 (kind, _canonical_digest({"owned_resource": kind}), True, True)
-                for kind in (
-                    "attempt",
-                    "origin",
-                    "process",
-                    "projection",
-                    "schema",
-                    "thread",
-                    "workspace",
-                )
+                for kind in _RESULT_ALL_CLEANUP_KINDS
             ),
             "evidence_digest": "a" * 64,
         },
@@ -4003,6 +4021,57 @@ def test_cap_s1_result_refetches_review_and_requires_stable_non_author_ids() -> 
         build_cap_s1_result(**raw)
 
 
+def test_cap_s1_source_owned_validation_consumes_precleanup_github_observations(
+    monkeypatch,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    raw = _happy_cap_s1_result_kwargs()
+    result = build_cap_s1_result(**raw)
+    observations = _CapS1GitHubObservations(
+        hosted_run={
+            "id": int(result.hosted_proof.run_id),
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": result.exact_head,
+        },
+        hosted_rows=result.hosted_proof.job_manifest,
+        pull={
+            "user": {
+                "login": result.review_state.author,
+                "id": result.review_state.author_id,
+            },
+            "head": {"sha": result.exact_head},
+        },
+        review={
+            "id": int(result.review_state.review_id),
+            "state": result.review_state.state,
+            "commit_id": result.review_state.review_commit,
+            "user": {
+                "login": result.review_state.reviewer,
+                "id": result.review_state.reviewer_id,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_rederive_hosted_job_manifest",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("post-cleanup hosted read")),
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_rederive_github_review",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("post-cleanup review read")),
+    )
+    _validate_cap_s1_result_against_producer(
+        result,
+        producer_evidence=_load_cap_s1_producer_evidence(
+            raw["producer_evidence_path"]
+        ),
+        github_observations=observations,
+    )
+
+
 # ---------------------------------------------------------------------------
 # REQUEST_CHANGES 5112468319: producer-authentic evidence (RED first)
 # ---------------------------------------------------------------------------
@@ -4049,7 +4118,9 @@ def test_run_canary_fake_auth_setup_failure_cleans_first_owned_effect(
             client_factory=_canary_client_factory(),
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
-    assert not (scratch / "cap-s1-attempt-root").exists()
+    assert not (
+        scratch / "cap-s1-attempt-root"
+    ).exists(), "CAP_C_FIRST_EFFECT_CLEANUP_BYPASSED"
 
 
 @pytest.mark.parametrize(
@@ -4108,11 +4179,11 @@ def test_cap_s1_result_refuses_wholly_forged_producer_family() -> None:
     """CAP_B discriminator: matching forged families never become evidence."""
 
     forged = _happy_cap_s1_result_kwargs()
-    with pytest.raises(
-        CapS1ResultError,
-        match="caller_proof_authority_forbidden",
-    ):
+    with pytest.raises(CapS1ResultError) as excinfo:
         _public_build_cap_s1_result(**forged)
+    assert str(excinfo.value) == (
+        "cap_s1_result_caller_proof_authority_forbidden"
+    ), "CAP_B_FORGED_PRODUCER_ACCEPTED"
 
 
 def test_cap_s1_result_public_boundary_refuses_direct_proof_objects() -> None:
@@ -4155,19 +4226,546 @@ def test_cap_s1_result_caller_constructed_canary_object_is_not_producer_proof() 
         )
 
 
+def test_cap_s1_result_actual_fake_canary_refuses_before_source_observer(
+    tmp_path, monkeypatch
+) -> None:
+    """A real fake-realm return is fixture evidence, never provider proof."""
+
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    scratch = tmp_path / "fake-canary-source-boundary"
+    scratch.mkdir()
+    evidence = run_canary(
+        backend="fake",
+        binary_path=None,
+        codex_home=None,
+        repo_root=REPO_ROOT,
+        scratch_root=scratch,
+        operation_id="cap-s1-fake-not-provider-proof",
+        protected_join="c" * 40,
+        client_factory=_canary_client_factory(replies=list(_HAPPY_REPLIES)),
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+    )
+    observer_called = False
+
+    def _observer_must_not_run(**_kwargs):
+        nonlocal observer_called
+        observer_called = True
+        raise AssertionError("source observer reached for fake canary")
+
+    monkeypatch.setattr(canary_module, "_run_cap_s1_source_observer", _observer_must_not_run)
+    with pytest.raises(CapS1ResultError, match="canary_provenance_invalid"):
+        _public_build_cap_s1_result(
+            operation="cap-s1-abc-final-source-repair-20260904-sol-001",
+            receiver="codex-cap-s1",
+            carrier="C0BSBM78V1N/1788511189.200899",
+            canary_evidence=evidence,
+            hosted_run_id="1",
+            review_id="1",
+        )
+    assert not observer_called
+
+
+def test_cap_s1_canary_seal_requires_exact_object_and_is_at_most_once(
+    monkeypatch,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    monkeypatch.setattr(canary_module, "_CANARY_SOURCE_EVIDENCE_SEALS", {})
+    evidence = _completed_canary_evidence(
+        head="a" * 40,
+        tree="b" * 40,
+        attempt_id="fixture-seal-attempt",
+        protected_join="c" * 40,
+    )
+    replacement = dataclasses.replace(evidence)
+    _register_cap_s1_canary_evidence(
+        evidence,
+        backend="fake",
+        client_factory=object(),
+    )
+
+    with pytest.raises(CapS1ResultError, match="canary_evidence_source_invalid"):
+        _consume_cap_s1_fake_canary_for_fixture(replacement)
+    assert _consume_cap_s1_fake_canary_for_fixture(evidence) == (
+        "FIXTURE_ONLY/NOT_PROVIDER_PROOF"
+    )
+    with pytest.raises(CapS1ResultError, match="canary_evidence_source_invalid"):
+        _consume_cap_s1_fake_canary_for_fixture(evidence)
+
+
+def test_cap_s1_canary_seal_expires_weak_entries_and_bounds_live_entries(
+    monkeypatch,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    seals = {}
+    monkeypatch.setattr(canary_module, "_CANARY_SOURCE_EVIDENCE_SEALS", seals)
+    monkeypatch.setattr(canary_module, "_CANARY_SOURCE_EVIDENCE_SEAL_LIMIT", 1)
+    first = _completed_canary_evidence(
+        head="a" * 40,
+        tree="b" * 40,
+        attempt_id="fixture-seal-first",
+        protected_join="c" * 40,
+    )
+    _register_cap_s1_canary_evidence(first, backend="fake", client_factory=object())
+    assert len(seals) == 1
+    del first
+    gc.collect()
+    assert seals == {}
+
+    live = _completed_canary_evidence(
+        head="a" * 40,
+        tree="b" * 40,
+        attempt_id="fixture-seal-live",
+        protected_join="c" * 40,
+    )
+    other = dataclasses.replace(live, provider_attempt_id="fixture-seal-other")
+    _register_cap_s1_canary_evidence(live, backend="fake", client_factory=object())
+    with pytest.raises(CanaryStop, match="seal capacity unavailable"):
+        _register_cap_s1_canary_evidence(other, backend="fake", client_factory=object())
+
+
+def test_cap_s1_canary_seal_records_failed_observer_and_never_retries(
+    monkeypatch,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    monkeypatch.setattr(canary_module, "_CANARY_SOURCE_EVIDENCE_SEALS", {})
+    monkeypatch.setattr(
+        canary_module,
+        "_cap_s1_canary_provenance",
+        lambda **_kwargs: "LIVE_DEFAULT_APP_SERVER",
+    )
+    evidence = _completed_canary_evidence(
+        head="a" * 40,
+        tree="b" * 40,
+        attempt_id="fixture-seal-observer-failure",
+        protected_join="c" * 40,
+    )
+    replacement = dataclasses.replace(evidence)
+    _register_cap_s1_canary_evidence(
+        evidence,
+        backend="live",
+        client_factory=object(),
+    )
+    calls = 0
+    request = dict(
+        operation="cap-s1-abc-final-source-repair-20260904-sol-001",
+        receiver="codex-cap-s1",
+        carrier="C0BSBM78V1N/1788511189.200899",
+        canary_evidence=evidence,
+        hosted_run_id="1",
+        review_id="1",
+    )
+
+    def _failed_observer(**_kwargs):
+        nonlocal calls
+        calls += 1
+        with pytest.raises(CapS1ResultError, match="canary_evidence_in_progress"):
+            _public_build_cap_s1_result(**request)
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+
+    monkeypatch.setattr(canary_module, "_run_cap_s1_source_observer", _failed_observer)
+    with pytest.raises(CapS1ResultError, match="local_proof_invalid"):
+        _public_build_cap_s1_result(**request)
+    with pytest.raises(CapS1ResultError, match="local_proof_invalid"):
+        _public_build_cap_s1_result(**request)
+    with pytest.raises(CapS1ResultError, match="canary_evidence_source_invalid"):
+        _public_build_cap_s1_result(**{**request, "canary_evidence": replacement})
+    assert calls == 1
+
+
+def test_cap_s1_canary_seal_refuses_concurrent_second_claim(monkeypatch) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    monkeypatch.setattr(canary_module, "_CANARY_SOURCE_EVIDENCE_SEALS", {})
+    monkeypatch.setattr(
+        canary_module,
+        "_cap_s1_canary_provenance",
+        lambda **_kwargs: "LIVE_DEFAULT_APP_SERVER",
+    )
+    evidence = _completed_canary_evidence(
+        head="a" * 40,
+        tree="b" * 40,
+        attempt_id="fixture-seal-concurrent",
+        protected_join="c" * 40,
+    )
+    _register_cap_s1_canary_evidence(
+        evidence,
+        backend="live",
+        client_factory=object(),
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    first_errors = []
+    calls = 0
+    request = dict(
+        operation="cap-s1-abc-final-source-repair-20260904-sol-001",
+        receiver="codex-cap-s1",
+        carrier="C0BSBM78V1N/1788511189.200899",
+        canary_evidence=evidence,
+        hosted_run_id="1",
+        review_id="1",
+    )
+
+    def _blocking_observer(**_kwargs):
+        nonlocal calls
+        calls += 1
+        entered.set()
+        assert release.wait(timeout=5)
+        raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+
+    def _first_claim():
+        try:
+            _public_build_cap_s1_result(**request)
+        except CapS1ResultError as exc:
+            first_errors.append(str(exc))
+
+    monkeypatch.setattr(canary_module, "_run_cap_s1_source_observer", _blocking_observer)
+    worker = threading.Thread(target=_first_claim)
+    worker.start()
+    assert entered.wait(timeout=5)
+    with pytest.raises(CapS1ResultError, match="canary_evidence_in_progress"):
+        _public_build_cap_s1_result(**request)
+    release.set()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert first_errors == ["cap_s1_result_security_proof_invalid"]
+    assert calls == 1
+
+
+def test_cap_s1_diff_observer_executes_exact_registry_and_consumes_status(
+    monkeypatch,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    calls = []
+
+    def _completed(
+        argv, *, cwd, timeout, owned_state_path=None, cleanup_observations=None
+    ):
+        calls.append((tuple(argv), cwd, timeout, owned_state_path))
+        return _subprocess.CompletedProcess(
+            args=list(argv), returncode=len(calls) - 1, stdout="", stderr=""
+        )
+
+    monkeypatch.setattr(canary_module, "_run_cap_s1_observer_process", _completed)
+    passed = _observe_cap_s1_diff(exact_head="a" * 40, protected_join="b" * 40)
+    failed = _observe_cap_s1_diff(exact_head="a" * 40, protected_join="b" * 40)
+
+    expected_argv = tuple(cap_s1_observer_registry()["diff_argv"])
+    assert calls[0][0][:6] == expected_argv[:6]
+    assert calls[0][0][6] == f"{'b' * 40}...{'a' * 40}"
+    assert calls[0][0][7:] == expected_argv[7:]
+    assert passed[0:3] == ("diff-check", "PASSED", 0)
+    assert failed[0:3] == ("diff-check", "FAILED", 1)
+    assert passed[3] != failed[3]
+
+
+def test_cap_s1_supply_rejects_unapproved_redirect_even_when_bytes_match(
+    monkeypatch,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    payload = b"equal-hash-payload"
+
+    class _Response:
+        status = 302
+        headers = {"Content-Length": str(len(payload))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return "https://unapproved.example.invalid/asset"
+
+        def read(self, _size=-1):
+            value, self._payload = getattr(self, "_payload", payload), b""
+            return value
+
+    class _Opener:
+        def open(self, _request, timeout):
+            assert timeout == 60
+            return _Response()
+
+    monkeypatch.setattr(canary_module.urllib.request, "build_opener", lambda *_args: _Opener())
+    with pytest.raises(CapS1ResultError, match="secret_supply_unavailable"):
+        _download_cap_s1_pinned_bytes(
+            url=CAP_S1_GITLEAKS_ARCHIVE_URL,
+            expected_size=len(payload),
+            expected_sha256=hashlib.sha256(payload).hexdigest(),
+        )
+
+
+class _CapS1SupplyFixtureResponse:
+    def __init__(self, *, status, url, payload=b"", location=None):
+        self.status = status
+        self._url = url
+        self._payload = payload
+        self.closed = False
+        self.headers = {}
+        if status == 200:
+            self.headers["Content-Length"] = str(len(payload))
+        if location is not None:
+            self.headers["Location"] = location
+
+    def geturl(self):
+        return self._url
+
+    def read(self, size=-1):
+        if size < 0:
+            size = len(self._payload)
+        chunk, self._payload = self._payload[:size], self._payload[size:]
+        return chunk
+
+    def close(self):
+        self.closed = True
+
+
+def test_cap_s1_supply_accepts_direct_200_and_exact_single_hop(
+    monkeypatch,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    payload = b"finite-route-fixture"
+    digest = hashlib.sha256(payload).hexdigest()
+    direct = _CapS1SupplyFixtureResponse(
+        status=200,
+        url=canary_module.CAP_S1_GITLEAKS_RULE_URL,
+        payload=payload,
+    )
+    archive_initial, archive_base, _asset_id = (
+        canary_module.CAP_S1_GITLEAKS_RELEASE_ASSET_ROUTES[0]
+    )
+    opaque_destination = f"{archive_base}?opaque=fixture-value"
+    first = _CapS1SupplyFixtureResponse(
+        status=302,
+        url=archive_initial,
+        location=opaque_destination,
+    )
+    second = _CapS1SupplyFixtureResponse(
+        status=200,
+        url=opaque_destination,
+        payload=payload,
+    )
+    responses = [direct, first, second]
+    requests = []
+
+    class _Opener:
+        def open(self, request, timeout):
+            requests.append((request.full_url, dict(request.header_items()), timeout))
+            return responses.pop(0)
+
+    monkeypatch.setattr(
+        canary_module.urllib.request,
+        "build_opener",
+        lambda *handlers: _Opener(),
+    )
+    assert _download_cap_s1_pinned_bytes(
+        url=canary_module.CAP_S1_GITLEAKS_RULE_URL,
+        expected_size=len(payload),
+        expected_sha256=digest,
+    ) == payload
+    assert _download_cap_s1_pinned_bytes(
+        url=archive_initial,
+        expected_size=len(payload),
+        expected_sha256=digest,
+    ) == payload
+    assert [row[0] for row in requests] == [
+        canary_module.CAP_S1_GITLEAKS_RULE_URL,
+        archive_initial,
+        opaque_destination,
+    ]
+    assert all(row[1] == {"User-agent": "cap-s1-source-observer/1"} for row in requests)
+    assert all(row[2] == 60 for row in requests)
+    assert all(response.closed for response in (direct, first, second))
+
+
+@pytest.mark.parametrize(
+    "location",
+    (
+        "relative/path?opaque=x",
+        "http://release-assets.githubusercontent.com/wrong?opaque=x",
+        "https://user@release-assets.githubusercontent.com/wrong?opaque=x",
+        "https://release-assets.githubusercontent.com:443/wrong?opaque=x",
+        "https://RELEASE-ASSETS.GITHUBUSERCONTENT.COM/wrong?opaque=x",
+        "https://release-assets.githubusercontent.com/wrong%2Fpath?opaque=x",
+        "https://release-assets.githubusercontent.com/wrong?opaque=x#fragment",
+        "https://release-assets.githubusercontent.com/wrong\\path?opaque=x",
+        "https://release-assets.githubusercontent.com/wrong path?opaque=x",
+    ),
+)
+def test_cap_s1_supply_rejects_noncanonical_redirect_locations(
+    monkeypatch, location
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    initial, _base, _asset_id = canary_module.CAP_S1_GITLEAKS_RELEASE_ASSET_ROUTES[0]
+    response = _CapS1SupplyFixtureResponse(
+        status=302,
+        url=initial,
+        location=location,
+    )
+
+    class _Opener:
+        def open(self, _request, _timeout=None, **_kwargs):
+            return response
+
+    monkeypatch.setattr(
+        canary_module.urllib.request,
+        "build_opener",
+        lambda *_handlers: _Opener(),
+    )
+    with pytest.raises(CapS1ResultError, match="secret_supply_unavailable"):
+        _download_cap_s1_pinned_bytes(
+            url=initial,
+            expected_size=1,
+            expected_sha256=hashlib.sha256(b"x").hexdigest(),
+        )
+    assert response.closed
+
+
+def test_cap_s1_supply_refuses_redirect_chain_without_retry(
+    monkeypatch,
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    initial, base, _asset_id = canary_module.CAP_S1_GITLEAKS_RELEASE_ASSET_ROUTES[0]
+    destination = f"{base}?opaque=x"
+    responses = [
+        _CapS1SupplyFixtureResponse(status=302, url=initial, location=destination),
+        _CapS1SupplyFixtureResponse(status=302, url=destination, location=destination),
+    ]
+    calls = 0
+
+    class _Opener:
+        def open(self, _request, timeout):
+            nonlocal calls
+            calls += 1
+            assert timeout == 60
+            return responses.pop(0)
+
+    monkeypatch.setattr(
+        canary_module.urllib.request,
+        "build_opener",
+        lambda *_handlers: _Opener(),
+    )
+    with pytest.raises(CapS1ResultError, match="secret_supply_unavailable"):
+        _download_cap_s1_pinned_bytes(
+            url=initial,
+            expected_size=1,
+            expected_sha256=hashlib.sha256(b"x").hexdigest(),
+        )
+    assert calls == 2
+
+
+@pytest.mark.parametrize("location_kind", ("cross-asset", "oversized", "control"))
+def test_cap_s1_supply_refuses_cross_asset_and_unbounded_location(
+    monkeypatch, location_kind
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    initial, base, _asset_id = canary_module.CAP_S1_GITLEAKS_RELEASE_ASSET_ROUTES[0]
+    if location_kind == "cross-asset":
+        wrong_base = canary_module.CAP_S1_GITLEAKS_RELEASE_ASSET_ROUTES[1][1]
+        location = f"{wrong_base}?opaque=private-cross-asset"
+    elif location_kind == "oversized":
+        location = f"{base}?opaque={'x' * 8192}"
+    else:
+        location = f"{base}?opaque=private\ncontrol"
+    response = _CapS1SupplyFixtureResponse(
+        status=302,
+        url=initial,
+        location=location,
+    )
+
+    class _Opener:
+        def open(self, _request, timeout):
+            assert timeout == 60
+            return response
+
+    monkeypatch.setattr(
+        canary_module.urllib.request,
+        "build_opener",
+        lambda *_handlers: _Opener(),
+    )
+    with pytest.raises(CapS1ResultError) as excinfo:
+        _download_cap_s1_pinned_bytes(
+            url=initial,
+            expected_size=1,
+            expected_sha256=hashlib.sha256(b"x").hexdigest(),
+        )
+    assert str(excinfo.value) == "cap_s1_result_secret_supply_unavailable"
+    assert "private" not in str(excinfo.value)
+    assert response.closed
+
+
+@pytest.mark.parametrize("hostile", ("changed-final-url", "different-hash"))
+def test_cap_s1_supply_refuses_changed_final_identity_or_digest(
+    monkeypatch, hostile
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    payload = b"fixed-payload"
+    initial, base, _asset_id = canary_module.CAP_S1_GITLEAKS_RELEASE_ASSET_ROUTES[0]
+    destination = f"{base}?opaque=private-final-token"
+    first = _CapS1SupplyFixtureResponse(
+        status=302,
+        url=initial,
+        location=destination,
+    )
+    second = _CapS1SupplyFixtureResponse(
+        status=200,
+        url=destination + ("-changed" if hostile == "changed-final-url" else ""),
+        payload=payload,
+    )
+    responses = [first, second]
+
+    class _Opener:
+        def open(self, _request, timeout):
+            assert timeout == 60
+            return responses.pop(0)
+
+    monkeypatch.setattr(
+        canary_module.urllib.request,
+        "build_opener",
+        lambda *_handlers: _Opener(),
+    )
+    expected_digest = hashlib.sha256(
+        b"different" if hostile == "different-hash" else payload
+    ).hexdigest()
+    with pytest.raises(CapS1ResultError) as excinfo:
+        _download_cap_s1_pinned_bytes(
+            url=initial,
+            expected_size=len(payload),
+            expected_sha256=expected_digest,
+        )
+    assert str(excinfo.value) in {
+        "cap_s1_result_secret_supply_unavailable",
+        "cap_s1_result_secret_supply_invalid",
+    }
+    assert "private-final-token" not in str(excinfo.value)
+    assert first.closed and second.closed
+
+
 def test_cap_s1_source_observer_registry_is_exact_and_secret_scan_stays_held() -> None:
     registry = cap_s1_observer_registry()
     assert registry["schema_version"] == "mastermind.cap_s1_source_observer_registry/v1"
-    assert registry["python_argv"][:7] == (
-        "<trusted-current-python>",
+    assert registry["python_argv"][:8] == (
+        "<bound-lexical-python-entrypoint>",
         "-I",
+        "-B",
         "-m",
         "pytest",
         "-q",
         "--junitxml",
         "<owned-output>",
     )
-    assert len(registry["python_argv"][7:]) == 17
+    assert len(registry["python_argv"][8:]) == 17
     assert len(registry["diff_argv"][8:]) == 21
     assert tuple(mutation_id for mutation_id, _node in registry["mutants"]) == (
         "CAP_A_UNRELATED_SKILL_ACCEPTED",
@@ -4191,7 +4789,16 @@ def test_cap_s1_strict_json_parser_refuses_duplicate_keys_at_every_depth() -> No
 def test_cap_s1_github_json_boundary_refuses_duplicate_keys(monkeypatch) -> None:
     import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
 
-    def _duplicate_response(*_args, **_kwargs):
+    cleanup = []
+
+    def _duplicate_response(argv, **kwargs):
+        assert tuple(argv) == (
+            "gh",
+            "api",
+            "repos/mastermindx-market-intelligence/Mastermind/fixed",
+        )
+        assert kwargs["cleanup_observations"] is cleanup
+        assert kwargs["github_environment"] is True
         return _subprocess.CompletedProcess(
             args=["gh", "api", "fixed"],
             returncode=0,
@@ -4199,10 +4806,175 @@ def test_cap_s1_github_json_boundary_refuses_duplicate_keys(monkeypatch) -> None
             stderr="",
         )
 
-    monkeypatch.setattr(canary_module.subprocess, "run", _duplicate_response)
+    monkeypatch.setattr(
+        canary_module,
+        "_run_cap_s1_observer_process",
+        _duplicate_response,
+    )
     with pytest.raises(CapS1ResultError, match="github_evidence_unavailable") as excinfo:
-        _real_github_api_json("repos/mastermindx-market-intelligence/Mastermind/fixed")
+        _real_github_api_json(
+            "repos/mastermindx-market-intelligence/Mastermind/fixed",
+            cleanup_observations=cleanup,
+        )
     assert "head_sha" not in str(excinfo.value)
+
+
+def _install_cap_s1_codeql_fixture(monkeypatch, *, flaw=None):
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    exact_head = "a" * 40
+    categories = ("actions", "javascript-typescript", "python")
+    check_rows = []
+    details = {}
+    runs = {}
+    for index, category in enumerate(categories, start=1):
+        check_id = 1000 + index
+        run_id = str(9000 + index)
+        name = f"Analyze ({category})"
+        row = {
+            "id": check_id,
+            "name": name,
+            "head_sha": exact_head,
+            "app": {"id": 15368, "slug": "github-actions"},
+        }
+        check_rows.append(row)
+        details[check_id] = {
+            **row,
+            "status": "completed",
+            "conclusion": "success",
+            "details_url": (
+                "https://github.com/mastermindx-market-intelligence/Mastermind/"
+                f"actions/runs/{run_id}/job/{check_id}"
+            ),
+        }
+        runs[run_id] = {
+            "id": int(run_id),
+            "head_sha": exact_head,
+            "status": "completed",
+            "conclusion": "success",
+        }
+    analyses = [
+        {
+            "id": 2000 + index,
+            "commit_sha": exact_head,
+            "ref": "refs/pull/350/head",
+            "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+            "category": f"/language:{category}",
+            "tool": {"name": "CodeQL"},
+            "results_count": 0,
+            "rules_count": 10 + index,
+            "error": "",
+            "warning": "",
+        }
+        for index, category in enumerate(categories, start=1)
+    ]
+    if flaw == "same-sha-non-codeql":
+        analyses[0]["tool"] = {"name": "Other"}
+    elif flaw == "missing-category":
+        analyses.pop()
+    elif flaw == "missing-check":
+        check_rows.pop()
+    elif flaw == "nonzero-results":
+        analyses[0]["results_count"] = 1
+    elif flaw == "analysis-error":
+        analyses[0]["error"] = "analysis failed"
+    elif flaw == "analysis-warning":
+        analyses[0]["warning"] = "analysis incomplete"
+    elif flaw == "wrong-ref":
+        analyses[0]["ref"] = "refs/heads/fable/cap-s1-complete-vertical-20260901"
+    elif flaw == "duplicate-rerun":
+        analyses.append(dict(analyses[0], id=2999))
+
+    pull_reads = 0
+
+    def _json(endpoint):
+        nonlocal pull_reads
+        if endpoint.endswith("/pulls/350"):
+            pull_reads += 1
+            head = exact_head
+            if flaw == "moved-pr" and pull_reads == 2:
+                head = "b" * 40
+            return {
+                "number": 350,
+                "head": {
+                    "sha": head,
+                    "ref": "fable/cap-s1-complete-vertical-20260901",
+                },
+            }
+        if endpoint.endswith("/git/ref/pull/350/head"):
+            return {
+                "ref": "refs/pull/350/head",
+                "object": {"type": "commit", "sha": exact_head},
+            }
+        if "/commits/" in endpoint and "/check-runs?" in endpoint:
+            return {"total_count": len(check_rows), "check_runs": check_rows}
+        match = re.search(r"/check-runs/([0-9]+)$", endpoint)
+        if match:
+            return details[int(match.group(1))]
+        match = re.search(r"/actions/runs/([0-9]+)$", endpoint)
+        if match:
+            return runs[match.group(1)]
+        raise AssertionError(endpoint)
+
+    def _list(endpoint):
+        if "/code-scanning/analyses?" in endpoint:
+            assert "ref=refs%2Fpull%2F350%2Fhead" in endpoint
+            return analyses
+        if "/code-scanning/alerts?" in endpoint:
+            assert "?pr=350&state=open&" in endpoint
+            return []
+        raise AssertionError(endpoint)
+
+    monkeypatch.setattr(canary_module, "_github_api_json", _json)
+    monkeypatch.setattr(canary_module, "_github_api_list", _list)
+    return exact_head
+
+
+def test_cap_s1_codeql_binds_exact_pr_checks_analyses_and_alerts(monkeypatch) -> None:
+    exact_head = _install_cap_s1_codeql_fixture(monkeypatch)
+    rows = _observe_cap_s1_codeql(exact_head=exact_head)
+    assert tuple(row[:3] for row in rows) == (
+        ("codeql-checks", "PASSED", 0),
+        ("code-scanning-alerts", "PASSED", 0),
+    )
+
+
+@pytest.mark.parametrize(
+    "flaw",
+    (
+        "same-sha-non-codeql",
+        "missing-category",
+        "missing-check",
+        "nonzero-results",
+        "analysis-error",
+        "analysis-warning",
+        "moved-pr",
+        "wrong-ref",
+        "duplicate-rerun",
+    ),
+)
+def test_cap_s1_codeql_refuses_incomplete_or_moved_evidence(
+    monkeypatch, flaw
+) -> None:
+    exact_head = _install_cap_s1_codeql_fixture(monkeypatch, flaw=flaw)
+    with pytest.raises(CapS1ResultError, match="security_proof_(?:invalid|unavailable)"):
+        _observe_cap_s1_codeql(exact_head=exact_head)
+
+
+def test_cap_s1_codeql_refuses_full_page_pagination_exhaustion(monkeypatch) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    exact_head = _install_cap_s1_codeql_fixture(monkeypatch)
+    original_list = canary_module._github_api_list
+
+    def _full_analysis_pages(endpoint):
+        if "/code-scanning/analyses?" in endpoint:
+            return [{"page-not-terminal": True} for _index in range(100)]
+        return original_list(endpoint)
+
+    monkeypatch.setattr(canary_module, "_github_api_list", _full_analysis_pages)
+    with pytest.raises(CapS1ResultError, match="security_proof_unavailable"):
+        _observe_cap_s1_codeql(exact_head=exact_head)
 
 
 def test_cap_s1_mutant_transforms_are_unique_and_nodes_are_fixed() -> None:
@@ -4222,7 +4994,153 @@ def test_cap_s1_mutant_transforms_are_unique_and_nodes_are_fixed() -> None:
         assert f"def {test_name}" in test_source
 
 
+def _write_cap_s1_mutation_junit(
+    path: Path,
+    *,
+    name: str = "test_bound",
+    outcome: str = "PASSED",
+    detail: str = "",
+) -> None:
+    child = ""
+    if outcome == "FAILURE":
+        child = (
+            f'<failure type="AssertionError" message="{detail}">'
+            f"{detail}</failure>"
+        )
+    elif outcome == "ERROR":
+        child = f'<error type="RuntimeError" message="{detail}">{detail}</error>'
+    elif outcome == "SKIPPED":
+        child = '<skipped type="pytest.skip" message="fixture skip" />'
+    path.write_text(
+        '<testsuite tests="1" failures="0" errors="0" skipped="0">'
+        f'<testcase classname="test_cap_s1_mastermind_operator_canary" name="{name}">'
+        f"{child}</testcase></testsuite>",
+        encoding="utf-8",
+    )
+    path.chmod(0o444)
+
+
+def test_cap_s1_mutation_junit_distinguishes_error_skip_and_wrong_node(
+    tmp_path,
+) -> None:
+    node = "tests/test_cap_s1_mastermind_operator_canary.py::test_bound"
+    for outcome in ("ERROR", "SKIPPED", "FAILURE", "PASSED"):
+        junit = tmp_path / f"{outcome}.xml"
+        _write_cap_s1_mutation_junit(
+            junit,
+            outcome=outcome,
+            detail="AssertionError: FIXED_MUTANT" if outcome == "FAILURE" else "setup",
+        )
+        assert _parse_cap_s1_mutation_junit(
+            junit,
+            expected_node=node,
+        ).outcome == outcome
+    wrong = tmp_path / "wrong.xml"
+    _write_cap_s1_mutation_junit(wrong, name="test_unrelated")
+    with pytest.raises(CapS1ResultError, match="mutation_proof_invalid"):
+        _parse_cap_s1_mutation_junit(wrong, expected_node=node)
+
+
+@pytest.mark.parametrize("mutant_outcome", ("UNRELATED", "ERROR", "EXCEPTION"))
+def test_cap_s1_mutation_refuses_hostile_result_and_restores_source(
+    tmp_path, monkeypatch, mutant_outcome
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    source_root = tmp_path / "source"
+    target = source_root / "scripts/ohf/fixture.py"
+    target.parent.mkdir(parents=True)
+    original = b"return False\n"
+    target.write_bytes(original)
+    node = "tests/test_cap_s1_mastermind_operator_canary.py::test_bound"
+    monkeypatch.setattr(
+        canary_module,
+        "CAP_S1_OBSERVER_MUTANTS",
+        (("FIXED_MUTANT", node),),
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "CAP_S1_OBSERVER_MUTANT_ASSERTIONS",
+        (("FIXED_MUTANT", node, "FIXED_MUTANT"),),
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "CAP_S1_OBSERVER_MUTANT_TRANSFORMS",
+        (("FIXED_MUTANT", "scripts/ohf/fixture.py", "return False\n", "return True\n"),),
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_owned_cap_s1_source_copy",
+        lambda **_kwargs: (source_root, ()),
+    )
+    calls = 0
+
+    def _run(argv, **_kwargs):
+        nonlocal calls
+        calls += 1
+        junit = Path(argv[argv.index("--junitxml") + 1])
+        if calls == 2 and mutant_outcome == "EXCEPTION":
+            raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+        if calls == 2 and mutant_outcome == "ERROR":
+            _write_cap_s1_mutation_junit(junit, outcome="ERROR", detail="setup error")
+            return _subprocess.CompletedProcess(argv, 1, "", "")
+        if calls == 2:
+            _write_cap_s1_mutation_junit(
+                junit,
+                outcome="FAILURE",
+                detail="AssertionError: UNRELATED_ASSERTION",
+            )
+            return _subprocess.CompletedProcess(argv, 1, "", "")
+        _write_cap_s1_mutation_junit(junit)
+        return _subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(canary_module, "_run_cap_s1_observer_process", _run)
+    with pytest.raises(CapS1ResultError, match="mutation_proof_invalid"):
+        _observe_cap_s1_mutations(exact_head="a" * 40, scratch_root=tmp_path)
+    assert target.read_bytes() == original
+    assert calls == 3
+
+
+def test_cap_s1_mutation_refuses_skipped_control_before_mutation(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    source_root = tmp_path / "source"
+    target = source_root / "scripts/ohf/fixture.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("return False\n", encoding="utf-8")
+    node = "tests/test_cap_s1_mastermind_operator_canary.py::test_bound"
+    monkeypatch.setattr(canary_module, "CAP_S1_OBSERVER_MUTANTS", (("MUTANT", node),))
+    monkeypatch.setattr(
+        canary_module,
+        "CAP_S1_OBSERVER_MUTANT_ASSERTIONS",
+        (("MUTANT", node, "MUTANT"),),
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "CAP_S1_OBSERVER_MUTANT_TRANSFORMS",
+        (("MUTANT", "scripts/ohf/fixture.py", "return False\n", "return True\n"),),
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_owned_cap_s1_source_copy",
+        lambda **_kwargs: (source_root, ()),
+    )
+
+    def _skipped(argv, **_kwargs):
+        junit = Path(argv[argv.index("--junitxml") + 1])
+        _write_cap_s1_mutation_junit(junit, outcome="SKIPPED")
+        return _subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(canary_module, "_run_cap_s1_observer_process", _skipped)
+    with pytest.raises(CapS1ResultError, match="mutation_proof_invalid"):
+        _observe_cap_s1_mutations(exact_head="a" * 40, scratch_root=tmp_path)
+    assert target.read_text(encoding="utf-8") == "return False\n"
+
+
 def test_cap_s1_observer_process_and_junit_parser_short_fixture_seam(tmp_path) -> None:
+    cleanup = []
     completed = _run_cap_s1_observer_process(
         (
             _sys.executable,
@@ -4232,9 +5150,13 @@ def test_cap_s1_observer_process_and_junit_parser_short_fixture_seam(tmp_path) -
         ),
         cwd=tmp_path,
         timeout=30,
+        cleanup_observations=cleanup,
     )
     assert completed.returncode == 0
     assert completed.stdout.strip() == "fixture-ok"
+    assert len(cleanup) == 2
+    assert all(row.removed and row.verified_absent for row in cleanup)
+    assert len({row.identity_digest for row in cleanup}) == 2
 
     junit = tmp_path / "fixture.xml"
     junit.write_text(
@@ -4248,6 +5170,560 @@ def test_cap_s1_observer_process_and_junit_parser_short_fixture_seam(tmp_path) -
         junit,
         expected_scope=("tests/test_fixture_scope.py",),
     ) == (("tests/test_fixture_scope.py", 1, 0, 0, 0),)
+
+
+def test_cap_s1_actual_junit_parser_rows_are_accepted_by_result_consumer(
+    tmp_path,
+) -> None:
+    cases = []
+    sorted_scopes = tuple(sorted(CAP_S1_OBSERVER_TEST_MODULES))
+    for index, scope in enumerate(sorted_scopes):
+        module = Path(scope).stem
+        cases.append(
+            f'<testcase classname="{module}.Fixture" name="test_pass_{index}" />'
+        )
+        if index == len(sorted_scopes) - 1:
+            cases.extend(
+                f'<testcase classname="{module}.Fixture" name="test_skip_{offset}">'
+                '<skipped message="fixed skip" /></testcase>'
+                for offset in range(2)
+            )
+    junit = tmp_path / "actual-scopes.xml"
+    junit.write_text(
+        '<testsuite tests="19" failures="0" errors="0" skipped="2">'
+        + "".join(cases)
+        + "</testsuite>",
+        encoding="utf-8",
+    )
+    junit.chmod(0o444)
+    parsed = _parse_cap_s1_junit(
+        junit,
+        expected_scope=CAP_S1_OBSERVER_TEST_MODULES,
+    )
+    raw = _happy_cap_s1_result_kwargs()
+    assert parsed == raw["local_proof"]["suite_manifest"]
+    assert build_cap_s1_result(**raw).local_proof.suite_manifest == parsed
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    ("traversal", "absolute", "unknown", "duplicate", "missing", "extra"),
+)
+def test_cap_s1_result_refuses_nonexact_local_scope_inventory(hostile) -> None:
+    raw = _happy_cap_s1_result_kwargs()
+    rows = list(raw["local_proof"]["suite_manifest"])
+    if hostile == "traversal":
+        rows[0] = ("../tests/test_escape.py", *rows[0][1:])
+    elif hostile == "absolute":
+        rows[0] = ("/tests/test_escape.py", *rows[0][1:])
+    elif hostile == "unknown":
+        rows[0] = ("tests/test_unknown.py", *rows[0][1:])
+    elif hostile == "duplicate":
+        rows[0] = (rows[1][0], *rows[0][1:])
+    elif hostile == "missing":
+        rows.pop()
+    else:
+        rows.append(("tests/test_extra.py", 1, 0, 0, 0))
+    rows = sorted(rows)
+    raw["local_proof"].update(
+        suite_manifest=tuple(rows),
+        suite_count=len(rows),
+        passed=sum(row[1] for row in rows),
+        skipped=sum(row[2] for row in rows),
+        failed=sum(row[3] for row in rows),
+        cancelled=sum(row[4] for row in rows),
+        total=sum(sum(row[1:]) for row in rows),
+    )
+    _refresh_result_receipt_digest(raw, "local_proof", "CapS1LocalProofReceipt")
+    with pytest.raises(CapS1ResultError, match="local_proof_invalid"):
+        build_cap_s1_result(**raw)
+
+
+def test_cap_s1_observer_process_timeout_kills_owned_descendant(tmp_path) -> None:
+    marker = tmp_path / "descendant.pid"
+    child_script = "import time; time.sleep(30)"
+    parent_script = (
+        "import pathlib,subprocess,sys,time; "
+        f"p=subprocess.Popen([sys.executable,'-I','-c',{child_script!r}],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+        f"pathlib.Path({str(marker)!r}).write_text(str(p.pid),encoding='ascii'); "
+        "time.sleep(30)"
+    )
+    with pytest.raises(CapS1ResultError, match="source_observation_unavailable"):
+        _run_cap_s1_observer_process(
+            (_sys.executable, "-I", "-c", parent_script),
+            cwd=tmp_path,
+            timeout=0.5,
+        )
+    descendant_pid = int(marker.read_text(encoding="ascii"))
+    try:
+        os.kill(descendant_pid, 0)
+    except ProcessLookupError:
+        survived = False
+    else:
+        survived = True
+        os.kill(descendant_pid, 9)  # cleanup only our test-owned process on RED
+    assert not survived
+
+
+def test_cap_s1_observer_process_enforces_prebound_output_limit(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    monkeypatch.setattr(canary_module, "_CAP_S1_OBSERVER_MAX_OUTPUT_BYTES", 1024)
+    with pytest.raises(CapS1ResultError, match="source_observation_unavailable"):
+        _run_cap_s1_observer_process(
+            (_sys.executable, "-I", "-c", "import os; os.write(1,b'x'*4096)"),
+            cwd=tmp_path,
+            timeout=30,
+        )
+
+
+def test_cap_s1_observer_process_preserves_replaced_output_root(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    output_root = tmp_path / "observer-process-output"
+    original_root = tmp_path / "original-observer-process-output"
+    sentinel = output_root / "foreign-sentinel"
+
+    def _owned_process(_argv, *, stdout_path, **_kwargs):
+        stdout_path.parent.rename(original_root)
+        output_root.mkdir()
+        sentinel.write_text("preserve replacement\n", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(
+        canary_module.tempfile,
+        "mkdtemp",
+        lambda *_args, **_kwargs: str(output_root.mkdir() or output_root),
+    )
+    monkeypatch.setattr(canary_module, "_run_cap_s1_owned_process", _owned_process)
+    with pytest.raises(CapS1ResultError, match="source_observation_unavailable"):
+        _run_cap_s1_observer_process(("fixed",), cwd=tmp_path, timeout=30)
+    assert sentinel.read_text(encoding="utf-8") == "preserve replacement\n"
+
+
+def test_cap_s1_observer_bytes_preserves_replaced_output_root(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    output_root = tmp_path / "observer-bytes-output"
+    original_root = tmp_path / "original-observer-bytes-output"
+    sentinel = output_root / "foreign-sentinel"
+
+    def _owned_process(_argv, *, stdout_path, **_kwargs):
+        stdout_path.parent.rename(original_root)
+        output_root.mkdir()
+        sentinel.write_text("preserve byte replacement\n", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(
+        canary_module.tempfile,
+        "mkdtemp",
+        lambda *_args, **_kwargs: str(output_root.mkdir() or output_root),
+    )
+    monkeypatch.setattr(canary_module, "_run_cap_s1_owned_process", _owned_process)
+    with pytest.raises(CapS1ResultError, match="source_copy_invalid"):
+        _run_cap_s1_observer_bytes(
+            ("fixed",),
+            cwd=tmp_path,
+            timeout=30,
+            maximum_stream_bytes=1024,
+        )
+    assert sentinel.read_text(encoding="utf-8") == "preserve byte replacement\n"
+
+
+def test_cap_s1_python_observer_uses_lexical_entrypoint_isolation_and_no_pycache(
+    tmp_path,
+) -> None:
+    module = tmp_path / "cap_s1_import_probe.py"
+    module.write_text("VALUE = 'owned-source'\n", encoding="utf-8")
+    identity = _capture_cap_s1_interpreter_identity()
+    completed = _run_cap_s1_python_observer_process(
+        identity,
+        (
+            "-c",
+            "import json,os,pathlib,sys; "
+            "sys.path.insert(0, os.getcwd()); "
+            "import cap_s1_import_probe as probe; "
+            "print(json.dumps({'value':probe.VALUE,'isolated':sys.flags.isolated,"
+            "'dont_write_bytecode':sys.dont_write_bytecode,"
+            "'pythonhashseed':os.environ.get('PYTHONHASHSEED')}))",
+        ),
+        cwd=tmp_path,
+        timeout=30,
+    )
+    payload = json.loads(completed.stdout)
+    assert completed.args[:3] == [identity.entrypoint_path, "-I", "-B"]
+    assert payload == {
+        "value": "owned-source",
+        "isolated": 1,
+        "dont_write_bytecode": True,
+        "pythonhashseed": None,
+    }
+    assert not (tmp_path / "__pycache__").exists()
+
+
+def test_cap_s1_interpreter_identity_binds_entrypoint_target_and_venv_config(
+    tmp_path,
+) -> None:
+    venv = tmp_path / "venv"
+    entrypoint = venv / "bin/python"
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.symlink_to(Path(_sys.executable).resolve())
+    config = venv / "pyvenv.cfg"
+    config.write_text("home = /owned/base\n", encoding="utf-8")
+    identity = _capture_cap_s1_interpreter_identity(
+        entrypoint=str(entrypoint),
+        prefix=str(venv),
+        base_prefix="/owned/base",
+    )
+    assert identity.entrypoint_path == str(entrypoint.absolute())
+    assert identity.resolved_target_path == str(Path(_sys.executable).resolve())
+    assert identity.venv_config_path == str(config)
+    _revalidate_cap_s1_interpreter_identity(identity)
+
+    config.write_text("home = /replaced/base\n", encoding="utf-8")
+    with pytest.raises(CapS1ResultError, match="interpreter_identity_changed"):
+        _revalidate_cap_s1_interpreter_identity(identity)
+
+
+def _build_cap_s1_cleanup_fixture(
+    root: Path,
+) -> tuple[_CapS1OwnedRootIdentity, ...]:
+    owned_roots = [_register_cap_s1_owned_root(root, kind="observer-scratch")]
+    for relative, kind in (
+        ("mutant-0", "observer-mutants"),
+        ("mutant-1", "observer-mutants"),
+        ("mutant-2", "observer-mutants"),
+        ("output", "observer-output"),
+        ("source-copy", "observer-source"),
+        ("source-copy/verified-source", "observer-source"),
+        ("secret-scan", "observer-scratch"),
+        ("secret-scan/supply", "secret-supply"),
+        ("secret-scan/source", "secret-source"),
+        ("secret-scan/controls", "secret-controls"),
+        ("secret-scan/source-run", "secret-output"),
+    ):
+        directory = root / relative
+        directory.mkdir()
+        owned_roots.append(_register_cap_s1_owned_root(directory, kind=kind))
+        (directory / "owned.fixture").write_bytes(relative.encode("utf-8"))
+    return tuple(owned_roots)
+
+
+def test_cap_s1_observer_cleanup_returns_actual_fixed_resource_observations(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "observer-scratch"
+    scratch.mkdir()
+    owned_roots = _build_cap_s1_cleanup_fixture(scratch)
+    identity = scratch.stat()
+    process_cleanup = (
+        _CapS1OwnedProcessCleanupObservation(
+            identity_digest="a" * 64,
+            removed=True,
+            verified_absent=True,
+        ),
+    )
+    rows = _finalize_cap_s1_observer_cleanup(
+        scratch_path=scratch,
+        scratch_device=identity.st_dev,
+        scratch_inode=identity.st_ino,
+        process_cleanup=process_cleanup,
+        owned_roots=owned_roots,
+    )
+    assert tuple(row[0] for row in rows) == (
+        "observer-mutants",
+        "observer-output",
+        "observer-processes",
+        "observer-scratch",
+        "observer-source",
+        "secret-controls",
+        "secret-output",
+        "secret-source",
+        "secret-supply",
+    )
+    assert all(row[2:] == (True, True) for row in rows)
+    assert not scratch.exists()
+
+
+def test_cap_s1_observer_cleanup_failure_refuses_without_false_receipt(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    scratch = tmp_path / "observer-scratch"
+    scratch.mkdir()
+    owned_roots = _build_cap_s1_cleanup_fixture(scratch)
+    identity = scratch.stat()
+    monkeypatch.setattr(
+        canary_module,
+        "_cleanup_owned_dir_action",
+        lambda *_args, **_kwargs: (False, False),
+    )
+    with pytest.raises(CapS1ResultError, match="source_observer_cleanup_failed"):
+        _finalize_cap_s1_observer_cleanup(
+            scratch_path=scratch,
+            scratch_device=identity.st_dev,
+            scratch_inode=identity.st_ino,
+            owned_roots=owned_roots,
+            process_cleanup=(
+                _CapS1OwnedProcessCleanupObservation(
+                    identity_digest="a" * 64,
+                    removed=True,
+                    verified_absent=True,
+                ),
+            ),
+        )
+    assert scratch.exists()
+
+
+def test_cap_s1_observer_cleanup_refuses_untracked_owned_resource(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "observer-scratch"
+    scratch.mkdir()
+    owned_roots = _build_cap_s1_cleanup_fixture(scratch)
+    (scratch / "unexpected-resource").mkdir()
+    identity = scratch.stat()
+    with pytest.raises(CapS1ResultError, match="source_observer_cleanup_failed"):
+        _finalize_cap_s1_observer_cleanup(
+            scratch_path=scratch,
+            scratch_device=identity.st_dev,
+            scratch_inode=identity.st_ino,
+            owned_roots=owned_roots,
+            process_cleanup=(
+                _CapS1OwnedProcessCleanupObservation(
+                    identity_digest="a" * 64,
+                    removed=True,
+                    verified_absent=True,
+                ),
+            ),
+        )
+
+
+def test_cap_s1_observer_cleanup_preserves_replaced_supply_identity(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "observer-scratch"
+    scratch.mkdir()
+    owned_roots = _build_cap_s1_cleanup_fixture(scratch)
+    identity = scratch.stat()
+    supply = scratch / "secret-scan/supply"
+    owned_supply = tmp_path / "original-owned-supply"
+    supply.rename(owned_supply)
+    supply.mkdir()
+    sentinel = supply / "foreign-sentinel"
+    sentinel.write_text("preserve replacement\n", encoding="utf-8")
+    with pytest.raises(CapS1ResultError, match="source_observer_cleanup_failed"):
+        _finalize_cap_s1_observer_cleanup(
+            scratch_path=scratch,
+            scratch_device=identity.st_dev,
+            scratch_inode=identity.st_ino,
+            owned_roots=owned_roots,
+            process_cleanup=(
+                _CapS1OwnedProcessCleanupObservation(
+                    identity_digest="a" * 64,
+                    removed=True,
+                    verified_absent=True,
+                ),
+            ),
+        )
+    assert sentinel.read_text(encoding="utf-8") == "preserve replacement\n"
+    assert scratch.exists()
+
+
+def test_cap_s1_observer_early_failure_cleanup_preserves_replaced_identity(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "observer-scratch"
+    scratch.mkdir()
+    scratch_identity = scratch.stat()
+    owned_roots = [_register_cap_s1_owned_root(scratch, kind="observer-scratch")]
+    secret_root = scratch / "secret-scan"
+    secret_root.mkdir()
+    owned_roots.append(_register_cap_s1_owned_root(secret_root, kind="observer-scratch"))
+    supply = secret_root / "supply"
+    supply.mkdir()
+    owned_roots.append(_register_cap_s1_owned_root(supply, kind="secret-supply"))
+    supply.rename(tmp_path / "original-owned-supply")
+    supply.mkdir()
+    sentinel = supply / "foreign-sentinel"
+    sentinel.write_text("preserve after early failure\n", encoding="utf-8")
+    with pytest.raises(CapS1ResultError, match="source_observer_cleanup_failed"):
+        _finalize_cap_s1_observer_cleanup(
+            scratch_path=scratch,
+            scratch_device=scratch_identity.st_dev,
+            scratch_inode=scratch_identity.st_ino,
+            owned_roots=tuple(owned_roots),
+            process_cleanup=(),
+            require_complete=False,
+        )
+    assert sentinel.read_text(encoding="utf-8") == "preserve after early failure\n"
+
+
+def test_cap_s1_source_observer_early_failure_preserves_replaced_identity(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    scratch = tmp_path / "source-observer"
+    source_identity = ("a" * 40, "b" * 40, "c" * 40)
+    evidence = _completed_canary_evidence(
+        head=source_identity[0],
+        tree=source_identity[1],
+        attempt_id="source-observer-early-failure",
+        protected_join=source_identity[2],
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_capture_cap_s1_source_identity",
+        lambda **_kwargs: source_identity,
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_capture_cap_s1_interpreter_identity",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        canary_module.tempfile,
+        "mkdtemp",
+        lambda *_args, **_kwargs: str(scratch.mkdir() or scratch),
+    )
+
+    def _fail_after_replacement(*, scratch_root, owned_roots, **_kwargs):
+        secret_root = scratch_root / "secret-scan"
+        secret_root.mkdir()
+        owned_roots.append(
+            _register_cap_s1_owned_root(secret_root, kind="observer-scratch")
+        )
+        supply = secret_root / "supply"
+        supply.mkdir()
+        owned_roots.append(
+            _register_cap_s1_owned_root(supply, kind="secret-supply")
+        )
+        supply.rename(tmp_path / "original-source-observer-supply")
+        supply.mkdir()
+        (supply / "foreign-sentinel").write_text(
+            "preserve source observer replacement\n",
+            encoding="utf-8",
+        )
+        raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+
+    monkeypatch.setattr(
+        canary_module,
+        "_owned_cap_s1_source_copy",
+        _fail_after_replacement,
+    )
+    with pytest.raises(CapS1ResultError, match="source_observer_cleanup_failed"):
+        _run_cap_s1_source_observer(
+            canary=evidence,
+            canary_provenance="LIVE_DEFAULT_APP_SERVER",
+            hosted_run_id="1",
+            review_id="1",
+        )
+    assert (scratch / "secret-scan/supply/foreign-sentinel").read_text(
+        encoding="utf-8"
+    ) == "preserve source observer replacement\n"
+
+
+def _cap_s1_source_manifest_fixture(source_root: Path) -> tuple[_CapS1SourceCopyEntry, ...]:
+    payload = b"verified source bytes\n"
+    path = source_root / "package/module.py"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(payload)
+    git_blob = hashlib.sha1(
+        f"blob {len(payload)}\0".encode("ascii") + payload
+    ).hexdigest()
+    return (
+        _CapS1SourceCopyEntry(
+            path="package/module.py",
+            mode="100644",
+            blob=git_blob,
+            size=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+        ),
+    )
+
+
+def test_cap_s1_post_observation_revalidation_accepts_stable_exact_source(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    manifest = _cap_s1_source_manifest_fixture(source_root)
+    before = ("a" * 40, "b" * 40, "c" * 40)
+    monkeypatch.setattr(
+        canary_module,
+        "_capture_cap_s1_source_identity",
+        lambda **_kwargs: before,
+    )
+    _revalidate_cap_s1_observer_source(
+        before=before,
+        source_root=source_root,
+        source_manifest=manifest,
+    )
+
+
+@pytest.mark.parametrize("changed_index", (0, 1, 2))
+def test_cap_s1_post_observation_revalidation_refuses_identity_drift(
+    tmp_path, monkeypatch, changed_index
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    manifest = _cap_s1_source_manifest_fixture(source_root)
+    before = ("a" * 40, "b" * 40, "c" * 40)
+    changed = list(before)
+    changed[changed_index] = "d" * 40
+    monkeypatch.setattr(
+        canary_module,
+        "_capture_cap_s1_source_identity",
+        lambda **_kwargs: tuple(changed),
+    )
+    with pytest.raises(CapS1ResultError, match="source_identity_changed"):
+        _revalidate_cap_s1_observer_source(
+            before=before,
+            source_root=source_root,
+            source_manifest=manifest,
+        )
+
+
+@pytest.mark.parametrize("drift", ("bytes", "extra-file", "extra-directory"))
+def test_cap_s1_post_observation_revalidation_refuses_owned_source_drift(
+    tmp_path, monkeypatch, drift
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    manifest = _cap_s1_source_manifest_fixture(source_root)
+    before = ("a" * 40, "b" * 40, "c" * 40)
+    monkeypatch.setattr(
+        canary_module,
+        "_capture_cap_s1_source_identity",
+        lambda **_kwargs: before,
+    )
+    if drift == "bytes":
+        (source_root / "package/module.py").write_bytes(b"changed source bytes\n")
+    elif drift == "extra-file":
+        (source_root / "package/extra.py").write_text("extra\n", encoding="utf-8")
+    else:
+        (source_root / "package/extra").mkdir()
+    with pytest.raises(CapS1ResultError, match="source_copy_invalid"):
+        _revalidate_cap_s1_observer_source(
+            before=before,
+            source_root=source_root,
+            source_manifest=manifest,
+        )
 
 
 def test_cap_s1_secret_scan_policy_registry_is_exact_and_unobserved() -> None:

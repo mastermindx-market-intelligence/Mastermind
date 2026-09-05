@@ -38,8 +38,12 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import weakref
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -111,7 +115,9 @@ SYNTHETIC_DECISION_BRANCH = "branch-alpha"
 
 CANARY_CLEANUP_SCHEMA_VERSION = "mastermind.cap_s1_canary_cleanup/v1"
 CANARY_EVIDENCE_SCHEMA_VERSION = "mastermind.cap_s1_canary_evidence/v1"
-_CANARY_SOURCE_EVIDENCE_IDS: set[int] = set()
+_CANARY_SOURCE_EVIDENCE_SEALS: dict[int, "_CanarySourceSeal"] = {}
+_CANARY_SOURCE_EVIDENCE_SEAL_LIMIT = 64
+_CANARY_SOURCE_EVIDENCE_SEAL_LOCK = threading.RLock()
 
 # CAP-S1 Sol review item 1 (single-binary law): the fake realm's schema
 # fixture and its App Server used to be two DIFFERENT files -- a print/write
@@ -343,6 +349,22 @@ class CanaryEvidence:
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
+class _CanarySourceSeal:
+    """Process-local binding for one exact ``run_canary`` return object.
+
+    The weak reference prevents the registry from retaining unconsumed test
+    evidence forever, while the object ``is`` check prevents Python object-ID
+    reuse from authorizing a replacement object.
+    """
+
+    evidence_ref: "weakref.ReferenceType[CanaryEvidence]"
+    evidence_digest: str
+    provenance: str
+    state: str
+    failure_code: "str | None"
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class CapS1CanaryResultEvidence:
     """Secret-safe public projection of attempt-local canary evidence.
 
@@ -398,6 +420,154 @@ def _canonical_digest(value: object) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _cap_s1_canary_provenance(*, backend: str, client_factory: object) -> str:
+    """Classify the route actually selected by the canary owner.
+
+    The public result path accepts only the adapter's exact default live
+    factory.  A caller saying ``backend='live'`` is therefore insufficient,
+    and the opt-in live seam probe remains non-production evidence.
+    """
+
+    if backend == "fake":
+        return "FIXTURE_FAKE"
+    from control_plane.codex_operator_adapter import _default_client_factory
+
+    if client_factory is _default_client_factory:
+        return "LIVE_DEFAULT_APP_SERVER"
+    return "LIVE_NONPRODUCTION_OVERRIDE"
+
+
+def _register_cap_s1_canary_evidence(
+    evidence: CanaryEvidence,
+    *,
+    backend: str,
+    client_factory: object,
+) -> None:
+    """Seal one exact issued object without retaining it indefinitely."""
+
+    key = id(evidence)
+
+    def _expire(reference: "weakref.ReferenceType[CanaryEvidence]") -> None:
+        with _CANARY_SOURCE_EVIDENCE_SEAL_LOCK:
+            current = _CANARY_SOURCE_EVIDENCE_SEALS.get(key)
+            if current is not None and current.evidence_ref is reference:
+                _CANARY_SOURCE_EVIDENCE_SEALS.pop(key, None)
+
+    reference = weakref.ref(evidence, _expire)
+    with _CANARY_SOURCE_EVIDENCE_SEAL_LOCK:
+        stale = [
+            stale_key
+            for stale_key, seal in _CANARY_SOURCE_EVIDENCE_SEALS.items()
+            if seal.evidence_ref() is None
+        ]
+        for stale_key in stale:
+            _CANARY_SOURCE_EVIDENCE_SEALS.pop(stale_key, None)
+        if len(_CANARY_SOURCE_EVIDENCE_SEALS) >= _CANARY_SOURCE_EVIDENCE_SEAL_LIMIT:
+            raise CanaryStop(
+                "PROVIDER_REALM_UNAVAILABLE",
+                "canary evidence seal capacity unavailable",
+            )
+        existing = _CANARY_SOURCE_EVIDENCE_SEALS.get(key)
+        if existing is not None and existing.evidence_ref() is not evidence:
+            raise CanaryStop(
+                "PROVIDER_REALM_UNAVAILABLE",
+                "canary evidence identity collision",
+            )
+        _CANARY_SOURCE_EVIDENCE_SEALS[key] = _CanarySourceSeal(
+            evidence_ref=reference,
+            evidence_digest=_canonical_digest(dataclasses.asdict(evidence)),
+            provenance=_cap_s1_canary_provenance(
+                backend=backend,
+                client_factory=client_factory,
+            ),
+            state="AVAILABLE",
+            failure_code=None,
+        )
+
+
+def _find_cap_s1_canary_seal(evidence: CanaryEvidence) -> _CanarySourceSeal:
+    """Return only the exact unchanged object's current finite seal state."""
+
+    with _CANARY_SOURCE_EVIDENCE_SEAL_LOCK:
+        seal = _CANARY_SOURCE_EVIDENCE_SEALS.get(id(evidence))
+        if (
+            seal is None
+            or seal.evidence_ref() is not evidence
+            or seal.evidence_digest != _canonical_digest(dataclasses.asdict(evidence))
+        ):
+            raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
+        return seal
+
+
+def _consume_cap_s1_canary_seal(evidence: CanaryEvidence) -> _CanarySourceSeal:
+    """Fixture-only at-most-once consume of an AVAILABLE exact object."""
+
+    with _CANARY_SOURCE_EVIDENCE_SEAL_LOCK:
+        seal = _find_cap_s1_canary_seal(evidence)
+        if seal.state != "AVAILABLE" or seal.failure_code is not None:
+            raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
+        if _CANARY_SOURCE_EVIDENCE_SEALS.pop(id(evidence), None) is not seal:
+            raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
+        return seal
+
+
+def _claim_cap_s1_canary_seal(evidence: CanaryEvidence) -> _CanarySourceSeal:
+    """Atomically advance the existing seal to its non-retryable active state."""
+
+    with _CANARY_SOURCE_EVIDENCE_SEAL_LOCK:
+        seal = _find_cap_s1_canary_seal(evidence)
+        if seal.state == "FAILED" and seal.failure_code is not None:
+            raise CapS1ResultError(seal.failure_code)
+        if seal.state == "IN_PROGRESS":
+            raise CapS1ResultError("cap_s1_result_canary_evidence_in_progress")
+        if seal.state != "AVAILABLE" or seal.failure_code is not None:
+            raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
+        claimed = dataclasses.replace(seal, state="IN_PROGRESS")
+        if _CANARY_SOURCE_EVIDENCE_SEALS.get(id(evidence)) is not seal:
+            raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
+        _CANARY_SOURCE_EVIDENCE_SEALS[id(evidence)] = claimed
+        return claimed
+
+
+def _finish_cap_s1_canary_seal(
+    evidence: CanaryEvidence,
+    claimed: _CanarySourceSeal,
+    *,
+    failure: "CapS1ResultError | None",
+) -> None:
+    """Retire success or persist one typed failed disposition without retry."""
+
+    with _CANARY_SOURCE_EVIDENCE_SEAL_LOCK:
+        current = _CANARY_SOURCE_EVIDENCE_SEALS.get(id(evidence))
+        if (
+            current is not claimed
+            or current.evidence_ref() is not evidence
+            or current.state != "IN_PROGRESS"
+        ):
+            raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
+        if failure is None:
+            if _CANARY_SOURCE_EVIDENCE_SEALS.pop(id(evidence), None) is not claimed:
+                raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
+            return
+        failure_code = str(failure)
+        if re.fullmatch(r"cap_s1_result_[a-z0-9_]{1,160}", failure_code) is None:
+            failure_code = "cap_s1_result_source_observation_unavailable"
+        _CANARY_SOURCE_EVIDENCE_SEALS[id(evidence)] = dataclasses.replace(
+            claimed,
+            state="FAILED",
+            failure_code=failure_code,
+        )
+
+
+def _consume_cap_s1_fake_canary_for_fixture(evidence: CanaryEvidence) -> str:
+    """Fixture-only positive seam; never constructs or validates a result."""
+
+    seal = _consume_cap_s1_canary_seal(evidence)
+    if seal.provenance != "FIXTURE_FAKE":
+        raise CapS1ResultError("cap_s1_result_canary_fixture_provenance_invalid")
+    return "FIXTURE_ONLY/NOT_PROVIDER_PROOF"
 
 
 def _project_canary_result_evidence(
@@ -1670,10 +1840,14 @@ def run_canary(
         cleanup=cleanup_record,
         terminal_process_state=process_result.get("terminal_process_state", "UNKNOWN"),
     )
-    # Invocation-local authenticity: only the exact object returned by this
-    # ``run_canary`` call can be consumed by the immediate result constructor.
-    # The set is process-local, never serialized, and the id is consumed once.
-    _CANARY_SOURCE_EVIDENCE_IDS.add(id(evidence))
+    # Invocation-local authenticity: retain a weak reference to this exact
+    # object plus the route the owner actually selected.  A bare integer ID
+    # cannot distinguish fake/live provenance and can be reused after GC.
+    _register_cap_s1_canary_evidence(
+        evidence,
+        backend=backend,
+        client_factory=client_factory,
+    )
     return evidence
 
 
@@ -1743,12 +1917,14 @@ CAP_S1_OBSERVER_TEST_MODULES = (
     "tests/test_nonseat_canary.py",
 )
 CAP_S1_OBSERVER_GITHUB_ENDPOINT_FAMILIES = (
+    "repos/{repository}/pulls/{pr_number}",
+    "repos/{repository}/git/ref/pull/{pr_number}/head",
     "repos/{repository}/commits/{head}/check-runs",
     "repos/{repository}/check-runs/{check_run_id}",
     "repos/{repository}/actions/runs/{run_id}",
     "repos/{repository}/actions/runs/{run_id}/jobs?per_page=100&page={page}",
-    "repos/{repository}/code-scanning/analyses?ref={head_ref}&per_page=100&page={page}",
-    "repos/{repository}/code-scanning/alerts?ref={head_ref}&state=open&per_page=100&page={page}",
+    "repos/{repository}/code-scanning/analyses?ref={pr_head_ref}&per_page=100&page={page}",
+    "repos/{repository}/code-scanning/alerts?pr={pr_number}&state=open&per_page=100&page={page}",
 )
 CAP_S1_OBSERVER_MUTANTS = (
     (
@@ -1766,6 +1942,10 @@ CAP_S1_OBSERVER_MUTANTS = (
         "tests/test_cap_s1_mastermind_operator_canary.py::"
         "test_run_canary_fake_auth_setup_failure_cleans_first_owned_effect",
     ),
+)
+CAP_S1_OBSERVER_MUTANT_ASSERTIONS = tuple(
+    (mutation_id, node, mutation_id)
+    for mutation_id, node in CAP_S1_OBSERVER_MUTANTS
 )
 CAP_S1_OBSERVER_MUTANT_TRANSFORMS = (
     (
@@ -1801,9 +1981,7 @@ CAP_S1_OBSERVER_ENVIRONMENT_KEYS = (
     "LC_ALL",
     "OHF_FAKE_STATE",
     "PATH",
-    "PYTHONDONTWRITEBYTECODE",
-    "PYTHONHASHSEED",
-    "PYTHONNOUSERSITE",
+    "PYTEST_ADDOPTS",
     "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
 )
 CAP_S1_GITLEAKS_VERSION = "8.30.1"
@@ -1824,6 +2002,20 @@ CAP_S1_GITLEAKS_CHECKSUM_URL = (
 CAP_S1_GITLEAKS_CHECKSUM_BYTES = 999
 CAP_S1_GITLEAKS_CHECKSUM_SHA256 = (
     "061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae"
+)
+CAP_S1_GITLEAKS_RELEASE_ASSET_ROUTES = (
+    (
+        CAP_S1_GITLEAKS_ARCHIVE_URL,
+        "https://release-assets.githubusercontent.com"
+        "/github-production-release-asset/119190187/8000249c-b97a-4d5e-9f00-3901dd94c7cc",
+        378332059,
+    ),
+    (
+        CAP_S1_GITLEAKS_CHECKSUM_URL,
+        "https://release-assets.githubusercontent.com"
+        "/github-production-release-asset/119190187/b99b0689-ddf4-4162-9ddb-184c0ef8282e",
+        378333193,
+    ),
 )
 CAP_S1_GITLEAKS_RULE_URL = (
     "https://raw.githubusercontent.com/gitleaks/gitleaks/"
@@ -1875,6 +2067,8 @@ CAP_S1_SECRET_SCAN_TEST_NODES = (
 )
 _CAP_S1_OBSERVER_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 _CAP_S1_OBSERVER_MAX_JUNIT_BYTES = 16 * 1024 * 1024
+_CAP_S1_OBSERVER_MAX_TREE_BYTES = 16 * 1024 * 1024
+_CAP_S1_OBSERVER_MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 _CAP_S1_SECRET_MAX_STREAM_BYTES = 16 * 1024 * 1024
 _CAP_S1_SECRET_MAX_FILE_BYTES = 2 * 1024 * 1024
 _CAP_S1_SECRET_MAX_CLOSURE_BYTES = 10 * 1024 * 1024
@@ -2311,12 +2505,35 @@ _RESULT_CLEANUP_KINDS = (
     "thread",
     "workspace",
 )
+_RESULT_OBSERVER_CLEANUP_KINDS = (
+    "observer-mutants",
+    "observer-output",
+    "observer-processes",
+    "observer-scratch",
+    "observer-source",
+    "secret-controls",
+    "secret-output",
+    "secret-source",
+    "secret-supply",
+)
+_RESULT_ALL_CLEANUP_KINDS = tuple(
+    sorted((*_RESULT_CLEANUP_KINDS, *_RESULT_OBSERVER_CLEANUP_KINDS))
+)
 _RESULT_MAX_LOCAL_TESTS = 100_000
 _RESULT_MAX_HOSTED_JOBS = 256
 _RESULT_MAX_SECURITY_TOOLS = 64
 _RESULT_MAX_MUTATIONS = 100_000
 _RESULT_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
 _RESULT_PR_NUMBER = 350
+_CAP_S1_PR_BRANCH = "fable/cap-s1-complete-vertical-20260901"
+_CAP_S1_PR_HEAD_REF = f"refs/pull/{_RESULT_PR_NUMBER}/head"
+_CAP_S1_CODEQL_APP = (15368, "github-actions")
+_CAP_S1_CODEQL_CHECKS = (
+    ("actions", "Analyze (actions)"),
+    ("javascript-typescript", "Analyze (javascript-typescript)"),
+    ("python", "Analyze (python)"),
+)
+_CAP_S1_CODEQL_ANALYSIS_KEY = "dynamic/github-code-scanning/codeql:analyze"
 
 
 def _result_safe_identifier(value: object) -> bool:
@@ -2325,6 +2542,12 @@ def _result_safe_identifier(value: object) -> bool:
         and _RESULT_SAFE_ID_RE.fullmatch(value) is not None
         and not any(marker in value.lower() for marker in _RESULT_SENSITIVE_MARKERS)
     )
+
+
+def _result_valid_local_scope(value: object) -> bool:
+    """Accept only one exact source-owned pytest module path."""
+
+    return type(value) is str and value in CAP_S1_OBSERVER_TEST_MODULES
 
 
 def _result_safe_operation(value: object) -> bool:
@@ -2367,7 +2590,11 @@ def _result_positive_int(value: object, *, maximum: int = 2**63 - 1) -> bool:
     return type(value) is int and 0 < value <= maximum
 
 
-def _github_api_json(endpoint: str) -> Any:
+def _github_api_json(
+    endpoint: str,
+    *,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> Any:
     """Fresh, bounded GitHub read used to authenticate hosted/review proof.
 
     The endpoint is constructed only from closed contract constants and
@@ -2377,13 +2604,15 @@ def _github_api_json(endpoint: str) -> Any:
     """
 
     try:
-        completed = subprocess.run(
-            ["gh", "api", endpoint],
-            check=True,
-            capture_output=True,
-            text=True,
+        completed = _run_cap_s1_observer_process(
+            ("gh", "api", endpoint),
+            cwd=REPO_ROOT,
             timeout=30,
+            cleanup_observations=cleanup_observations,
+            github_environment=True,
         )
+        if completed.returncode != 0 or completed.stderr:
+            raise CapS1ResultError("cap_s1_result_github_evidence_unavailable")
         payload = _strict_json_loads(
             completed.stdout,
             error="cap_s1_result_github_evidence_unavailable",
@@ -2396,18 +2625,24 @@ def _github_api_json(endpoint: str) -> Any:
 
 
 def _rederive_hosted_job_manifest(
-    *, run_id: str, exact_head: str
+    *,
+    run_id: str,
+    exact_head: str,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
 ) -> tuple[dict[str, Any], tuple[tuple[str, str, str, str], ...]]:
-    run = _github_api_json(
-        f"repos/{_RESULT_REPOSITORY}/actions/runs/{run_id}"
-    )
+    def _get(endpoint: str) -> Any:
+        if process_cleanup is None:
+            return _github_api_json(endpoint)
+        return _github_api_json(endpoint, cleanup_observations=process_cleanup)
+
+    run = _get(f"repos/{_RESULT_REPOSITORY}/actions/runs/{run_id}")
     if str(run.get("id")) != run_id or run.get("head_sha") != exact_head:
         raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
 
     rows: list[tuple[str, str, str, str]] = []
     expected_total: "int | None" = None
     for page in range(1, 5):
-        payload = _github_api_json(
+        payload = _get(
             f"repos/{_RESULT_REPOSITORY}/actions/runs/{run_id}/jobs?per_page=100&page={page}"
         )
         total = payload.get("total_count")
@@ -2448,12 +2683,18 @@ def _rederive_hosted_job_manifest(
 
 
 def _rederive_github_review(
-    *, review_id: str, exact_head: str
+    *,
+    review_id: str,
+    exact_head: str,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    pull = _github_api_json(
-        f"repos/{_RESULT_REPOSITORY}/pulls/{_RESULT_PR_NUMBER}"
-    )
-    review = _github_api_json(
+    def _get(endpoint: str) -> Any:
+        if process_cleanup is None:
+            return _github_api_json(endpoint)
+        return _github_api_json(endpoint, cleanup_observations=process_cleanup)
+
+    pull = _get(f"repos/{_RESULT_REPOSITORY}/pulls/{_RESULT_PR_NUMBER}")
+    review = _get(
         f"repos/{_RESULT_REPOSITORY}/pulls/{_RESULT_PR_NUMBER}/reviews/{review_id}"
     )
     head = pull.get("head")
@@ -2725,6 +2966,7 @@ def _validate_cap_s1_result_against_producer(
     result: CapS1Result,
     *,
     producer_evidence: CapS1ProducerEvidence,
+    github_observations: "_CapS1GitHubObservations | None" = None,
 ) -> None:
     """Refuse anything not conforming to the closed
     ``mastermind.cap_s1_result/v1`` contract. Every refusal is a fixed,
@@ -2873,14 +3115,13 @@ def _validate_cap_s1_result_against_producer(
     local_rows = local_proof.suite_manifest
     if (
         type(local_rows) is not tuple
-        or not local_rows
-        or len(local_rows) > 64
+        or len(local_rows) != len(CAP_S1_OBSERVER_TEST_MODULES)
     ):
         raise CapS1ResultError("cap_s1_result_local_proof_invalid")
     if not all(
             type(row) is tuple
             and len(row) == 5
-            and _result_safe_identifier(row[0])
+            and _result_valid_local_scope(row[0])
             and all(_result_nonnegative_int(count) for count in row[1:])
             and sum(row[1:]) <= _RESULT_MAX_LOCAL_TESTS
             for row in local_rows
@@ -2889,6 +3130,8 @@ def _validate_cap_s1_result_against_producer(
     if (
         tuple(sorted(local_rows)) != local_rows
         or len({row[0] for row in local_rows}) != len(local_rows)
+        or tuple(row[0] for row in local_rows)
+        != tuple(sorted(CAP_S1_OBSERVER_TEST_MODULES))
     ):
         raise CapS1ResultError("cap_s1_result_local_proof_invalid")
     local_passed = sum(row[1] for row in local_rows)
@@ -2918,9 +3161,16 @@ def _validate_cap_s1_result_against_producer(
         or hosted_proof.conclusion != "SUCCESS"
     ):
         raise CapS1ResultError("cap_s1_result_hosted_proof_invalid")
-    hosted_run, hosted_rows = _rederive_hosted_job_manifest(
-        run_id=hosted_proof.run_id, exact_head=result.exact_head
-    )
+    if github_observations is None:
+        hosted_run, hosted_rows = _rederive_hosted_job_manifest(
+            run_id=hosted_proof.run_id,
+            exact_head=result.exact_head,
+        )
+    elif type(github_observations) is _CapS1GitHubObservations:
+        hosted_run = github_observations.hosted_run
+        hosted_rows = github_observations.hosted_rows
+    else:
+        raise CapS1ResultError("cap_s1_result_github_evidence_unavailable")
     hosted_passed = sum(
         status == "COMPLETED" and conclusion == "SUCCESS"
         for _job_id, _name, status, conclusion in hosted_rows
@@ -2931,7 +3181,9 @@ def _validate_cap_s1_result_against_producer(
     )
     hosted_failed = len(hosted_rows) - hosted_passed - hosted_cancelled
     if (
-        str(hosted_run.get("status", "")).upper() != hosted_proof.status
+        str(hosted_run.get("id", "")) != hosted_proof.run_id
+        or hosted_run.get("head_sha") != result.exact_head
+        or str(hosted_run.get("status", "")).upper() != hosted_proof.status
         or str(hosted_run.get("conclusion", "")).upper() != hosted_proof.conclusion
         or hosted_proof.job_manifest != hosted_rows
         or hosted_proof.jobs_total != len(hosted_rows)
@@ -3028,13 +3280,13 @@ def _validate_cap_s1_result_against_producer(
     cleanup_rows = cleanup_proof.resource_manifest
     if (
         type(cleanup_rows) is not tuple
-        or len(cleanup_rows) != len(_RESULT_CLEANUP_KINDS)
+        or len(cleanup_rows) != len(_RESULT_ALL_CLEANUP_KINDS)
     ):
         raise CapS1ResultError("cap_s1_result_cleanup_proof_invalid")
     if not all(
             type(row) is tuple
             and len(row) == 4
-            and row[0] in _RESULT_CLEANUP_KINDS
+            and row[0] in _RESULT_ALL_CLEANUP_KINDS
             and _result_is_hex64(row[1])
             and type(row[2]) is bool
             and type(row[3]) is bool
@@ -3043,7 +3295,7 @@ def _validate_cap_s1_result_against_producer(
         raise CapS1ResultError("cap_s1_result_cleanup_proof_invalid")
     if (
         tuple(sorted(cleanup_rows)) != cleanup_rows
-        or tuple(row[0] for row in cleanup_rows) != _RESULT_CLEANUP_KINDS
+        or tuple(row[0] for row in cleanup_rows) != _RESULT_ALL_CLEANUP_KINDS
     ):
         raise CapS1ResultError("cap_s1_result_cleanup_proof_invalid")
     cleanup_failures = sum(not row[2] for row in cleanup_rows)
@@ -3074,14 +3326,23 @@ def _validate_cap_s1_result_against_producer(
         or review.review_commit != result.exact_head
     ):
         raise CapS1ResultError("cap_s1_result_review_state_invalid")
-    pull, github_review = _rederive_github_review(
-        review_id=review.review_id, exact_head=result.exact_head
-    )
+    if github_observations is None:
+        pull, github_review = _rederive_github_review(
+            review_id=review.review_id,
+            exact_head=result.exact_head,
+        )
+    else:
+        pull = github_observations.pull
+        github_review = github_observations.review
     pull_author = pull.get("user")
+    pull_head = pull.get("head")
     github_reviewer = github_review.get("user")
     if (
         type(pull_author) is not dict
+        or type(pull_head) is not dict
         or type(github_reviewer) is not dict
+        or pull_head.get("sha") != result.exact_head
+        or str(github_review.get("id", "")) != review.review_id
         or pull_author.get("login") != review.author
         or pull_author.get("id") != review.author_id
         or github_reviewer.get("login") != review.reviewer
@@ -3138,6 +3399,7 @@ def _assemble_cap_s1_result_from_observations(
     raw_kwargs: Mapping[str, Any],
     *,
     producer_evidence: CapS1ProducerEvidence,
+    github_observations: "_CapS1GitHubObservations | None" = None,
 ) -> CapS1Result:
     """Immediate constructor used only with source-owned observations."""
 
@@ -3267,6 +3529,7 @@ def _assemble_cap_s1_result_from_observations(
     _validate_cap_s1_result_against_producer(
         result,
         producer_evidence=producer_evidence,
+        github_observations=github_observations,
     )
     return result
 
@@ -3282,8 +3545,9 @@ def cap_s1_observer_registry() -> dict[str, object]:
     return {
         "schema_version": "mastermind.cap_s1_source_observer_registry/v1",
         "python_argv": (
-            "<trusted-current-python>",
+            "<bound-lexical-python-entrypoint>",
             "-I",
+            "-B",
             "-m",
             "pytest",
             "-q",
@@ -3304,6 +3568,7 @@ def cap_s1_observer_registry() -> dict[str, object]:
         ),
         "github_get_endpoint_families": CAP_S1_OBSERVER_GITHUB_ENDPOINT_FAMILIES,
         "mutants": CAP_S1_OBSERVER_MUTANTS,
+        "mutant_assertions": CAP_S1_OBSERVER_MUTANT_ASSERTIONS,
         "mutant_transforms": tuple(
             (
                 mutation_id,
@@ -3315,6 +3580,14 @@ def cap_s1_observer_registry() -> dict[str, object]:
             in CAP_S1_OBSERVER_MUTANT_TRANSFORMS
         ),
         "environment_keys": CAP_S1_OBSERVER_ENVIRONMENT_KEYS,
+        "cleanup_kinds": _RESULT_ALL_CLEANUP_KINDS,
+        "observer_cleanup_policy": (
+            "EXACT_OWNED_ROOT_IDENTITY",
+            "BOUNDED_PREIMAGE_INODE_CENSUS",
+            "CHILD_PROCESS_GROUP_REAP_AND_ABSENCE",
+            "REMOVE_THEN_VERIFY_EVERY_FIXED_RESOURCE_ABSENT",
+            "FAILED_OR_UNKNOWN_CLEANUP_REFUSES_RESULT",
+        ),
         "secret_scan": CAP_S1_OBSERVER_SECRET_SCAN_STATE,
         "secret_supply": {
             "version": CAP_S1_GITLEAKS_VERSION,
@@ -3328,6 +3601,13 @@ def cap_s1_observer_registry() -> dict[str, object]:
                 CAP_S1_GITLEAKS_CHECKSUM_URL,
                 CAP_S1_GITLEAKS_CHECKSUM_BYTES,
                 CAP_S1_GITLEAKS_CHECKSUM_SHA256,
+            ),
+            "release_asset_routes": CAP_S1_GITLEAKS_RELEASE_ASSET_ROUTES,
+            "transport": (
+                "DIRECT_200_OR_EXACT_ONE_HOP_302",
+                "RAW_RULE_DIRECT_200_ONLY",
+                "NO_PROXY_AUTH_COOKIE_RETRY_OR_FALLBACK",
+                "OPAQUE_QUERY_PRIVATE_UNLOGGED",
             ),
             "rule": (
                 CAP_S1_GITLEAKS_RULE_URL,
@@ -3391,15 +3671,15 @@ def _cap_s1_observer_environment(
 ) -> dict[str, str]:
     """Build the fixed non-secret child environment from source constants."""
 
-    executable_dir = str(Path(sys.executable).resolve().parent)
-    system_path = os.defpath
+    executable_dir = str(Path(os.path.abspath(sys.executable)).parent)
+    system_path = os.pathsep.join(
+        ("/opt/homebrew/bin", "/usr/local/bin", os.defpath)
+    )
     environment = {
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "PATH": os.pathsep.join((executable_dir, system_path)),
-        "PYTHONDONTWRITEBYTECODE": "1",
-        "PYTHONHASHSEED": "0",
-        "PYTHONNOUSERSITE": "1",
+        "PYTEST_ADDOPTS": "-p no:cacheprovider",
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
     }
     if owned_state_path is not None:
@@ -3407,47 +3687,492 @@ def _cap_s1_observer_environment(
     return environment
 
 
+def _cap_s1_github_environment(*, owned_state_root: Path) -> dict[str, str]:
+    """Narrow inherited GitHub auth while keeping all CLI state attempt-local."""
+
+    try:
+        owned_state_root.mkdir(mode=0o700)
+    except OSError as exc:
+        raise CapS1ResultError("cap_s1_result_github_evidence_unavailable") from exc
+    environment = _cap_s1_observer_environment()
+    environment.update(
+        {
+            "HOME": str(Path.home()),
+            "XDG_STATE_HOME": str(owned_state_root),
+            "GH_PROMPT_DISABLED": "1",
+            "GH_NO_UPDATE_NOTIFIER": "1",
+        }
+    )
+    for key in ("GH_CONFIG_DIR", "GH_HOST", "GH_TOKEN", "GITHUB_TOKEN"):
+        value = os.environ.get(key)
+        if value:
+            environment[key] = value
+    return environment
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1InterpreterIdentity:
+    """Exact lexical Python entrypoint, resolved target, and venv binding."""
+
+    entrypoint_path: str
+    prefix: str
+    base_prefix: str
+    entrypoint_identity: tuple[int, int, int, int, int]
+    entrypoint_link_target: "str | None"
+    resolved_target_path: str
+    resolved_target_identity: tuple[int, int, int, int, int]
+    resolved_target_sha256: str
+    venv_config_path: "str | None"
+    venv_config_identity: "tuple[int, int, int, int, int] | None"
+    venv_config_sha256: "str | None"
+
+
+def _cap_s1_stable_file_identity(
+    path: Path,
+    *,
+    maximum_bytes: int,
+    executable: bool = False,
+) -> tuple[tuple[int, int, int, int, int], str]:
+    """Hash one exact regular file and refuse identity drift during the read."""
+
+    try:
+        before = path.lstat()
+        if (
+            stat.S_ISLNK(before.st_mode)
+            or not stat.S_ISREG(before.st_mode)
+            or not (0 < before.st_size <= maximum_bytes)
+            or (executable and not os.access(path, os.X_OK))
+        ):
+            raise ValueError("unsafe identity file")
+        digest = _sha256_file(path)
+        after = path.lstat()
+    except (OSError, ValueError) as exc:
+        raise CapS1ResultError("cap_s1_result_interpreter_identity_invalid") from exc
+    identity = (
+        before.st_dev,
+        before.st_ino,
+        stat.S_IMODE(before.st_mode),
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    if identity != (
+        after.st_dev,
+        after.st_ino,
+        stat.S_IMODE(after.st_mode),
+        after.st_size,
+        after.st_mtime_ns,
+    ):
+        raise CapS1ResultError("cap_s1_result_interpreter_identity_invalid")
+    return identity, digest
+
+
+def _capture_cap_s1_interpreter_identity(
+    *,
+    entrypoint: "str | None" = None,
+    prefix: "str | None" = None,
+    base_prefix: "str | None" = None,
+) -> _CapS1InterpreterIdentity:
+    """Bind the invoked entrypoint separately from its resolved binary target."""
+
+    lexical = Path(os.path.abspath(entrypoint if entrypoint is not None else sys.executable))
+    effective_prefix = os.path.abspath(prefix if prefix is not None else sys.prefix)
+    effective_base_prefix = os.path.abspath(
+        base_prefix if base_prefix is not None else sys.base_prefix
+    )
+    try:
+        entry_state = lexical.lstat()
+        if not (stat.S_ISLNK(entry_state.st_mode) or stat.S_ISREG(entry_state.st_mode)):
+            raise ValueError("entrypoint is not a file or link")
+        link_target = os.readlink(lexical) if stat.S_ISLNK(entry_state.st_mode) else None
+        if link_target is not None and (
+            not link_target
+            or len(link_target.encode("utf-8")) > 4096
+            or "\x00" in link_target
+        ):
+            raise ValueError("unsafe entrypoint link")
+        resolved = lexical.resolve(strict=True)
+    except (OSError, ValueError) as exc:
+        raise CapS1ResultError("cap_s1_result_interpreter_identity_invalid") from exc
+    entry_identity = (
+        entry_state.st_dev,
+        entry_state.st_ino,
+        stat.S_IMODE(entry_state.st_mode),
+        entry_state.st_size,
+        entry_state.st_mtime_ns,
+    )
+    target_identity, target_digest = _cap_s1_stable_file_identity(
+        resolved,
+        maximum_bytes=256 * 1024 * 1024,
+        executable=True,
+    )
+
+    config_path: "Path | None" = None
+    config_identity: "tuple[int, int, int, int, int] | None" = None
+    config_digest: "str | None" = None
+    if effective_prefix != effective_base_prefix:
+        config_path = Path(effective_prefix) / "pyvenv.cfg"
+        config_identity, config_digest = _cap_s1_stable_file_identity(
+            config_path,
+            maximum_bytes=64 * 1024,
+        )
+    return _CapS1InterpreterIdentity(
+        entrypoint_path=str(lexical),
+        prefix=effective_prefix,
+        base_prefix=effective_base_prefix,
+        entrypoint_identity=entry_identity,
+        entrypoint_link_target=link_target,
+        resolved_target_path=str(resolved),
+        resolved_target_identity=target_identity,
+        resolved_target_sha256=target_digest,
+        venv_config_path=str(config_path) if config_path is not None else None,
+        venv_config_identity=config_identity,
+        venv_config_sha256=config_digest,
+    )
+
+
+def _revalidate_cap_s1_interpreter_identity(
+    identity: _CapS1InterpreterIdentity,
+) -> None:
+    """Refuse entrypoint, target, or applicable virtual-environment drift."""
+
+    if type(identity) is not _CapS1InterpreterIdentity:
+        raise CapS1ResultError("cap_s1_result_interpreter_identity_changed")
+    try:
+        current = _capture_cap_s1_interpreter_identity(
+            entrypoint=identity.entrypoint_path,
+            prefix=identity.prefix,
+            base_prefix=identity.base_prefix,
+        )
+    except CapS1ResultError as exc:
+        raise CapS1ResultError("cap_s1_result_interpreter_identity_changed") from exc
+    if current != identity:
+        raise CapS1ResultError("cap_s1_result_interpreter_identity_changed")
+
+
+def _cap_s1_process_group_exists(process_group: int) -> bool:
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_cap_s1_process_group_absent(process_group: int) -> bool:
+    deadline = time.monotonic() + 1.0
+    while _cap_s1_process_group_exists(process_group) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return not _cap_s1_process_group_exists(process_group)
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1OwnedProcessCleanupObservation:
+    """Safe, invocation-local proof that one exact child tree was reaped."""
+
+    identity_digest: str
+    removed: bool
+    verified_absent: bool
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1OwnedRootIdentity:
+    """Creation-time identity for one finite observer-owned directory root."""
+
+    kind: str
+    path: Path
+    device: int
+    inode: int
+
+
+def _register_cap_s1_owned_root(path: Path, *, kind: str) -> _CapS1OwnedRootIdentity:
+    """Bind a directory at creation time; never infer ownership at teardown."""
+
+    try:
+        state = path.lstat()
+    except OSError as exc:
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed") from exc
+    if (
+        kind not in _RESULT_OBSERVER_CLEANUP_KINDS
+        or kind == "observer-processes"
+        or stat.S_ISLNK(state.st_mode)
+        or not stat.S_ISDIR(state.st_mode)
+    ):
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+    return _CapS1OwnedRootIdentity(
+        kind=kind,
+        path=path,
+        device=state.st_dev,
+        inode=state.st_ino,
+    )
+
+
+def _run_cap_s1_owned_process(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    environment: Mapping[str, str],
+    stdout_path: Path,
+    stderr_path: Path,
+    timeout: float,
+    maximum_stream_bytes: int,
+    error: str,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> int:
+    """Run one source-owned child with pre-bound streams and group cleanup."""
+
+    if (
+        not argv
+        or maximum_stream_bytes <= 0
+        or stdout_path == stderr_path
+        or stdout_path.parent != stderr_path.parent
+        or stdout_path.exists()
+        or stderr_path.exists()
+    ):
+        raise CapS1ResultError(error)
+
+    def _limit_output() -> None:
+        limit = maximum_stream_bytes + 1
+        resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+
+    process: "subprocess.Popen[bytes] | None" = None
+    process_group: "int | None" = None
+    stdout_identity: "tuple[int, int] | None" = None
+    stderr_identity: "tuple[int, int] | None" = None
+    return_code: "int | None" = None
+    timed_out = False
+    unexpected_descendant = False
+    survivor = False
+    try:
+        with stdout_path.open("xb") as stdout_file, stderr_path.open("xb") as stderr_file:
+            stdout_state = os.fstat(stdout_file.fileno())
+            stderr_state = os.fstat(stderr_file.fileno())
+            stdout_identity = (stdout_state.st_dev, stdout_state.st_ino)
+            stderr_identity = (stderr_state.st_dev, stderr_state.st_ino)
+            process = subprocess.Popen(
+                list(argv),
+                cwd=cwd,
+                env=dict(environment),
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                start_new_session=True,
+                preexec_fn=_limit_output,
+            )
+            process_group = process.pid
+            if os.getpgid(process.pid) != process.pid or os.getsid(process.pid) != process.pid:
+                process.kill()
+                process.wait(timeout=10)
+                raise CapS1ResultError(error)
+            try:
+                return_code = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                if (
+                    process.poll() is not None
+                    or os.getpgid(process.pid) != process_group
+                    or os.getsid(process.pid) != process_group
+                ):
+                    process.kill()
+                    process.wait(timeout=10)
+                    raise CapS1ResultError(error)
+                os.killpg(process_group, signal.SIGKILL)
+                process.wait(timeout=10)
+        if process_group is not None and _cap_s1_process_group_exists(process_group):
+            # A descendant survived the direct child.  This exact process group
+            # was created above and never exposed, so clean it before refusing.
+            unexpected_descendant = True
+            os.killpg(process_group, signal.SIGKILL)
+            survivor = not _wait_cap_s1_process_group_absent(process_group)
+        elif process_group is not None:
+            survivor = False
+    except CapS1ResultError:
+        raise
+    except (OSError, subprocess.SubprocessError):
+        if process is not None and process.poll() is None:
+            try:
+                if process_group is not None and os.getpgid(process.pid) == process_group:
+                    os.killpg(process_group, signal.SIGKILL)
+                else:
+                    process.kill()
+            finally:
+                process.wait(timeout=10)
+        raise CapS1ResultError(error) from None
+
+    try:
+        stdout_state = stdout_path.lstat()
+        stderr_state = stderr_path.lstat()
+        if (
+            stdout_identity != (stdout_state.st_dev, stdout_state.st_ino)
+            or stderr_identity != (stderr_state.st_dev, stderr_state.st_ino)
+            or not stat.S_ISREG(stdout_state.st_mode)
+            or not stat.S_ISREG(stderr_state.st_mode)
+            or stdout_state.st_size > maximum_stream_bytes
+            or stderr_state.st_size > maximum_stream_bytes
+        ):
+            raise CapS1ResultError(error)
+    except OSError:
+        raise CapS1ResultError(error) from None
+    if timed_out or unexpected_descendant or survivor or return_code is None:
+        raise CapS1ResultError(error)
+    if cleanup_observations is not None:
+        if process_group is None or _cap_s1_process_group_exists(process_group):
+            raise CapS1ResultError(error)
+        cleanup_observations.append(
+            _CapS1OwnedProcessCleanupObservation(
+                identity_digest=_canonical_digest(
+                    {
+                        "argv_digest": _canonical_digest(tuple(argv)),
+                        "process_group": process_group,
+                        "session": process_group,
+                        "return_code": return_code,
+                        "stdout_identity": stdout_identity,
+                        "stderr_identity": stderr_identity,
+                        "stdout_size": stdout_state.st_size,
+                        "stderr_size": stderr_state.st_size,
+                    }
+                ),
+                removed=True,
+                verified_absent=True,
+            )
+        )
+    return return_code
+
+
 def _run_cap_s1_observer_process(
     argv: Sequence[str],
     *,
     cwd: Path,
-    timeout: int,
+    timeout: float,
     owned_state_path: "Path | None" = None,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+    github_environment: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Single bounded process seam used by the source-owned observer.
+    """Run one fixed observer child without unbounded pipe capture."""
 
-    Production callers never receive this seam and cannot inject ``argv``;
-    only the fixed local-suite, diff and three mutation call sites below use
-    it.  Unit tests exercise this small seam without entering the full
-    production observer.
-    """
-
+    if github_environment and owned_state_path is not None:
+        raise CapS1ResultError("cap_s1_result_github_evidence_unavailable")
+    output_root: "Path | None" = None
+    root_state: "os.stat_result | None" = None
+    return_code: "int | None" = None
+    stdout: "str | None" = None
+    stderr: "str | None" = None
+    run_error: "BaseException | None" = None
     try:
-        completed = subprocess.run(
-            list(argv),
-            cwd=cwd,
-            env=_cap_s1_observer_environment(owned_state_path=owned_state_path),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
+        output_root = Path(tempfile.mkdtemp(prefix="cap-s1-observer-process-"))
+        root_state = output_root.lstat()
+        stdout_path = output_root / "stdout"
+        stderr_path = output_root / "stderr"
+        environment = (
+            _cap_s1_github_environment(
+                owned_state_root=output_root / "github-state"
+            )
+            if github_environment
+            else _cap_s1_observer_environment(owned_state_path=owned_state_path)
         )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise CapS1ResultError("cap_s1_result_source_observation_unavailable") from exc
-    output_size = len(completed.stdout.encode("utf-8")) + len(
-        completed.stderr.encode("utf-8")
-    )
-    if output_size > _CAP_S1_OBSERVER_MAX_OUTPUT_BYTES:
+        return_code = _run_cap_s1_owned_process(
+            argv,
+            cwd=cwd,
+            environment=environment,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            timeout=timeout,
+            maximum_stream_bytes=_CAP_S1_OBSERVER_MAX_OUTPUT_BYTES,
+            error="cap_s1_result_source_observation_unavailable",
+            cleanup_observations=cleanup_observations,
+        )
+        current = output_root.lstat()
+        if (
+            stat.S_ISLNK(current.st_mode)
+            or not stat.S_ISDIR(current.st_mode)
+            or (current.st_dev, current.st_ino)
+            != (root_state.st_dev, root_state.st_ino)
+        ):
+            raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+        stdout = stdout_path.read_bytes().decode("utf-8")
+        stderr = stderr_path.read_bytes().decode("utf-8")
+    except CapS1ResultError as exc:
+        run_error = exc
+    except (OSError, UnicodeError) as exc:
+        run_error = CapS1ResultError("cap_s1_result_source_observation_unavailable")
+        run_error.__cause__ = exc
+    if output_root is not None and root_state is not None:
+        removed, absent = _cleanup_owned_dir_action(
+            output_root,
+            expected_device=root_state.st_dev,
+            expected_inode=root_state.st_ino,
+        )
+        if not removed or not absent:
+            raise CapS1ResultError(
+                "cap_s1_result_source_observation_unavailable"
+            ) from run_error
+        if cleanup_observations is not None:
+            cleanup_observations.append(
+                _CapS1OwnedProcessCleanupObservation(
+                    identity_digest=_canonical_digest(
+                        {
+                            "kind": "observer-process-output-root",
+                            "device": root_state.st_dev,
+                            "inode": root_state.st_ino,
+                            "ctime_ns": root_state.st_ctime_ns,
+                        }
+                    ),
+                    removed=removed,
+                    verified_absent=absent,
+                )
+            )
+    if run_error is not None:
+        raise run_error
+    if return_code is None or stdout is None or stderr is None:
         raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+    return subprocess.CompletedProcess(
+        args=list(argv),
+        returncode=return_code,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
+def _run_cap_s1_python_observer_process(
+    interpreter: _CapS1InterpreterIdentity,
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    timeout: float,
+    owned_state_path: "Path | None" = None,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run the bound lexical interpreter with fixed isolated/no-bytecode flags."""
+
+    if not argv or argv[0] in {"-I", "-B"}:
+        raise CapS1ResultError("cap_s1_result_interpreter_identity_invalid")
+    _revalidate_cap_s1_interpreter_identity(interpreter)
+    completed = _run_cap_s1_observer_process(
+        (interpreter.entrypoint_path, "-I", "-B", *argv),
+        cwd=cwd,
+        timeout=timeout,
+        owned_state_path=owned_state_path,
+        cleanup_observations=cleanup_observations,
+    )
+    _revalidate_cap_s1_interpreter_identity(interpreter)
     return completed
 
 
-def _parse_cap_s1_junit(
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1JunitCaseObservation:
+    scope: str
+    classname: str
+    name: str
+    outcome: str
+    detail: str
+
+
+def _parse_cap_s1_junit_cases(
     junit_path: Path,
     *,
     expected_scope: Sequence[str],
-) -> tuple[tuple[str, int, int, int, int], ...]:
-    """Derive complete per-module counts from one bounded JUnit artifact."""
+) -> tuple[_CapS1JunitCaseObservation, ...]:
+    """Preserve assertion failures, setup errors and skips distinctly."""
 
     try:
         before = junit_path.lstat()
@@ -3469,8 +4194,11 @@ def _parse_cap_s1_junit(
     except (OSError, ValueError, ET.ParseError) as exc:
         raise CapS1ResultError("cap_s1_result_local_proof_invalid") from exc
 
-    counts = {scope: [0, 0, 0, 0] for scope in expected_scope}
+    expected = set(expected_scope)
+    if len(expected) != len(tuple(expected_scope)):
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid")
     seen: set[str] = set()
+    observations: list[_CapS1JunitCaseObservation] = []
     testcases = list(root.iter("testcase"))
     if not testcases:
         raise CapS1ResultError("cap_s1_result_local_proof_invalid")
@@ -3484,20 +4212,68 @@ def _parse_cap_s1_junit(
         module_parts = [part for part in classname.split(".") if part.startswith("test_")]
         if len(module_parts) != 1:
             raise CapS1ResultError("cap_s1_result_local_proof_invalid")
-        module = module_parts[0]
-        scope = f"tests/{module}.py"
-        if scope not in counts:
+        scope = f"tests/{module_parts[0]}.py"
+        if scope not in expected:
             raise CapS1ResultError("cap_s1_result_local_proof_invalid")
-        failures = len(case.findall("failure")) + len(case.findall("error"))
-        skipped = len(case.findall("skipped"))
-        if failures and skipped:
+        failures = case.findall("failure")
+        errors = case.findall("error")
+        skipped = case.findall("skipped")
+        if len(failures) + len(errors) + len(skipped) > 1:
             raise CapS1ResultError("cap_s1_result_local_proof_invalid")
         if failures:
-            counts[scope][2] += 1
+            outcome = "FAILURE"
+            element = failures[0]
+        elif errors:
+            outcome = "ERROR"
+            element = errors[0]
         elif skipped:
-            counts[scope][1] += 1
+            outcome = "SKIPPED"
+            element = skipped[0]
         else:
-            counts[scope][0] += 1
+            outcome = "PASSED"
+            element = None
+        detail = ""
+        if element is not None:
+            detail = "\n".join(
+                part
+                for part in (
+                    element.get("type", ""),
+                    element.get("message", ""),
+                    element.text or "",
+                )
+                if part
+            )
+            if len(detail.encode("utf-8")) > 64 * 1024:
+                raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+        observations.append(
+            _CapS1JunitCaseObservation(
+                scope=scope,
+                classname=classname,
+                name=name,
+                outcome=outcome,
+                detail=detail,
+            )
+        )
+    return tuple(observations)
+
+
+def _parse_cap_s1_junit(
+    junit_path: Path,
+    *,
+    expected_scope: Sequence[str],
+) -> tuple[tuple[str, int, int, int, int], ...]:
+    """Derive complete per-module counts from one bounded JUnit artifact."""
+
+    counts = {scope: [0, 0, 0, 0] for scope in expected_scope}
+    for case in _parse_cap_s1_junit_cases(junit_path, expected_scope=expected_scope):
+        if case.outcome == "PASSED":
+            counts[case.scope][0] += 1
+        elif case.outcome == "SKIPPED":
+            counts[case.scope][1] += 1
+        else:
+            # Local-suite ERROR and FAILURE both block the suite, while the
+            # mutation path below retains their distinct source meanings.
+            counts[case.scope][2] += 1
     if any(sum(values) == 0 for values in counts.values()):
         raise CapS1ResultError("cap_s1_result_local_proof_invalid")
     return tuple(
@@ -3506,11 +4282,123 @@ def _parse_cap_s1_junit(
     )
 
 
-def _extract_cap_s1_source_archive(archive: bytes, destination: Path) -> None:
+def _parse_cap_s1_mutation_junit(
+    junit_path: Path,
+    *,
+    expected_node: str,
+) -> _CapS1JunitCaseObservation:
+    module, separator, test_name = expected_node.partition("::")
+    if not separator or "::" in test_name or not test_name.startswith("test_"):
+        raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+    try:
+        cases = _parse_cap_s1_junit_cases(junit_path, expected_scope=(module,))
+    except CapS1ResultError:
+        raise CapS1ResultError("cap_s1_result_mutation_proof_invalid") from None
+    if len(cases) != 1 or cases[0].scope != module or cases[0].name != test_name:
+        raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+    return cases[0]
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1SourceCopyEntry:
+    path: str
+    mode: str
+    blob: str
+    size: int
+    sha256: str
+
+
+def _run_cap_s1_observer_bytes(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    timeout: float,
+    maximum_stream_bytes: int,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Binary-output counterpart for bounded fixed Git observations."""
+
+    output_root: "Path | None" = None
+    root_state: "os.stat_result | None" = None
+    return_code: "int | None" = None
+    stdout: "bytes | None" = None
+    stderr: "bytes | None" = None
+    run_error: "BaseException | None" = None
+    try:
+        output_root = Path(tempfile.mkdtemp(prefix="cap-s1-observer-bytes-"))
+        root_state = output_root.lstat()
+        stdout_path = output_root / "stdout"
+        stderr_path = output_root / "stderr"
+        return_code = _run_cap_s1_owned_process(
+            argv,
+            cwd=cwd,
+            environment=_cap_s1_observer_environment(),
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            timeout=timeout,
+            maximum_stream_bytes=maximum_stream_bytes,
+            error="cap_s1_result_source_copy_invalid",
+            cleanup_observations=cleanup_observations,
+        )
+        current = output_root.lstat()
+        if (
+            stat.S_ISLNK(current.st_mode)
+            or not stat.S_ISDIR(current.st_mode)
+            or (current.st_dev, current.st_ino)
+            != (root_state.st_dev, root_state.st_ino)
+        ):
+            raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+        stdout = stdout_path.read_bytes()
+        stderr = stderr_path.read_bytes()
+    except CapS1ResultError as exc:
+        run_error = exc
+    except OSError as exc:
+        run_error = CapS1ResultError("cap_s1_result_source_copy_invalid")
+        run_error.__cause__ = exc
+    if output_root is not None and root_state is not None:
+        removed, absent = _cleanup_owned_dir_action(
+            output_root,
+            expected_device=root_state.st_dev,
+            expected_inode=root_state.st_ino,
+        )
+        if not removed or not absent:
+            raise CapS1ResultError("cap_s1_result_source_copy_invalid") from run_error
+        if cleanup_observations is not None:
+            cleanup_observations.append(
+                _CapS1OwnedProcessCleanupObservation(
+                    identity_digest=_canonical_digest(
+                        {
+                            "kind": "observer-bytes-output-root",
+                            "device": root_state.st_dev,
+                            "inode": root_state.st_ino,
+                            "ctime_ns": root_state.st_ctime_ns,
+                        }
+                    ),
+                    removed=removed,
+                    verified_absent=absent,
+                )
+            )
+    if run_error is not None:
+        raise run_error
+    if return_code is None or stdout is None or stderr is None:
+        raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+    return subprocess.CompletedProcess(
+        args=list(argv), returncode=return_code, stdout=stdout, stderr=stderr
+    )
+
+
+def _extract_cap_s1_source_archive(archive_path: Path, destination: Path) -> None:
     """Extract an owner-created Git archive without links/path traversal."""
 
     try:
-        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as bundle:
+        archive_state = archive_path.lstat()
+        if (
+            not stat.S_ISREG(archive_state.st_mode)
+            or archive_state.st_size <= 0
+            or archive_state.st_size > _CAP_S1_OBSERVER_MAX_ARCHIVE_BYTES
+        ):
+            raise ValueError("unsafe archive")
+        with tarfile.open(archive_path, mode="r:") as bundle:
             members = bundle.getmembers()
             if not members:
                 raise ValueError("empty archive")
@@ -3529,17 +4417,102 @@ def _extract_cap_s1_source_archive(archive: bytes, destination: Path) -> None:
         raise CapS1ResultError("cap_s1_result_source_copy_invalid") from exc
 
 
-def _verify_cap_s1_source_copy(*, source_root: Path, exact_head: str) -> None:
-    """Byte-verify every regular tracked blob in the owned source copy."""
+def _hash_cap_s1_source_file(path: Path, *, expected_size: int) -> tuple[str, str]:
+    try:
+        before = path.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_ISLNK(before.st_mode)
+            or before.st_size != expected_size
+            or before.st_size > _CAP_S1_OBSERVER_MAX_ARCHIVE_BYTES
+        ):
+            raise ValueError("unsafe source file")
+        git_hash = hashlib.sha1()
+        git_hash.update(f"blob {expected_size}\0".encode("ascii"))
+        content_hash = hashlib.sha256()
+        observed_size = 0
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                observed_size += len(chunk)
+                if observed_size > expected_size:
+                    raise ValueError("source file grew")
+                git_hash.update(chunk)
+                content_hash.update(chunk)
+        after = path.lstat()
+        if (
+            observed_size != expected_size
+            or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        ):
+            raise ValueError("unstable source file")
+    except (OSError, ValueError) as exc:
+        raise CapS1ResultError("cap_s1_result_source_copy_invalid") from exc
+    return git_hash.hexdigest(), content_hash.hexdigest()
 
-    listing = subprocess.run(
-        ["git", "ls-tree", "-rz", exact_head],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        check=False,
-    )
-    if listing.returncode != 0:
+
+def _verify_cap_s1_owned_source_manifest(
+    *,
+    source_root: Path,
+    manifest: Sequence[_CapS1SourceCopyEntry],
+) -> None:
+    expected_files = {entry.path for entry in manifest}
+    expected_directories: set[str] = set()
+    for path in expected_files:
+        parent = Path(path).parent
+        while parent != Path("."):
+            expected_directories.add(parent.as_posix())
+            parent = parent.parent
+    actual_files: set[str] = set()
+    actual_directories: set[str] = set()
+    try:
+        for path in source_root.rglob("*"):
+            relative = path.relative_to(source_root).as_posix()
+            state = path.lstat()
+            if stat.S_ISLNK(state.st_mode):
+                raise ValueError("source symlink")
+            if stat.S_ISREG(state.st_mode):
+                actual_files.add(relative)
+            elif stat.S_ISDIR(state.st_mode):
+                actual_directories.add(relative)
+            else:
+                raise ValueError("source special file")
+    except (OSError, ValueError) as exc:
+        raise CapS1ResultError("cap_s1_result_source_copy_invalid") from exc
+    if actual_files != expected_files or actual_directories != expected_directories:
         raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+    for entry in manifest:
+        candidate = source_root / entry.path
+        git_oid, sha256 = _hash_cap_s1_source_file(candidate, expected_size=entry.size)
+        executable = bool(candidate.lstat().st_mode & 0o111)
+        if (
+            git_oid != entry.blob
+            or sha256 != entry.sha256
+            or executable != (entry.mode == "100755")
+        ):
+            raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+
+
+def _verify_cap_s1_source_copy(
+    *,
+    source_root: Path,
+    exact_head: str,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> tuple[_CapS1SourceCopyEntry, ...]:
+    """Byte-verify every regular tracked blob and reject extra source nodes."""
+
+    listing = _run_cap_s1_observer_bytes(
+        ("git", "ls-tree", "-rz", exact_head),
+        cwd=REPO_ROOT,
+        timeout=120,
+        maximum_stream_bytes=_CAP_S1_OBSERVER_MAX_TREE_BYTES,
+        cleanup_observations=process_cleanup,
+    )
+    if listing.returncode != 0 or listing.stderr:
+        raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+    manifest: list[_CapS1SourceCopyEntry] = []
     for raw_entry in listing.stdout.split(b"\0"):
         if not raw_entry:
             continue
@@ -3557,41 +4530,133 @@ def _verify_cap_s1_source_copy(*, source_root: Path, exact_head: str) -> None:
         candidate = source_root / relative
         if not candidate.is_file() or candidate.is_symlink():
             raise CapS1ResultError("cap_s1_result_source_copy_invalid")
-        actual = subprocess.run(
-            ["git", "hash-object", "--", str(candidate)],
-            cwd=source_root,
-            capture_output=True,
-            text=True,
-            check=False,
+        size = candidate.lstat().st_size
+        git_oid, sha256 = _hash_cap_s1_source_file(
+            candidate,
+            expected_size=size,
         )
-        if actual.returncode != 0 or actual.stdout.strip().encode("ascii") != expected_oid:
+        if git_oid.encode("ascii") != expected_oid:
             raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+        manifest.append(
+            _CapS1SourceCopyEntry(
+                path=relative,
+                mode=mode.decode("ascii"),
+                blob=git_oid,
+                size=size,
+                sha256=sha256,
+            )
+        )
+    result = tuple(sorted(manifest, key=lambda entry: entry.path))
+    _verify_cap_s1_owned_source_manifest(source_root=source_root, manifest=result)
+    return result
 
 
-def _owned_cap_s1_source_copy(*, exact_head: str, scratch_root: Path) -> Path:
+def _owned_cap_s1_source_copy(
+    *,
+    exact_head: str,
+    scratch_root: Path,
+    owned_roots: "list[_CapS1OwnedRootIdentity] | None" = None,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> tuple[Path, tuple[_CapS1SourceCopyEntry, ...]]:
     status = _run_cap_s1_observer_process(
         ("git", "status", "--porcelain=v1", "--untracked-files=all"),
         cwd=REPO_ROOT,
         timeout=30,
+        cleanup_observations=process_cleanup,
     )
     if status.returncode != 0 or status.stdout:
         raise CapS1ResultError("cap_s1_result_source_checkout_not_clean")
-    archived = subprocess.run(
-        ["git", "archive", "--format=tar", exact_head],
+    copy_root = scratch_root / "source-copy"
+    copy_root.mkdir(mode=0o700)
+    if owned_roots is not None:
+        owned_roots.append(_register_cap_s1_owned_root(copy_root, kind="observer-source"))
+    archive_path = copy_root / "verified-source.tar"
+    archive_stderr = copy_root / "verified-source.stderr"
+    archived_code = _run_cap_s1_owned_process(
+        ("git", "archive", "--format=tar", exact_head),
         cwd=REPO_ROOT,
-        capture_output=True,
-        check=False,
+        environment=_cap_s1_observer_environment(),
+        stdout_path=archive_path,
+        stderr_path=archive_stderr,
+        timeout=300,
+        maximum_stream_bytes=_CAP_S1_OBSERVER_MAX_ARCHIVE_BYTES,
+        error="cap_s1_result_source_copy_invalid",
+        cleanup_observations=process_cleanup,
     )
-    if archived.returncode != 0 or not archived.stdout:
+    if archived_code != 0 or archive_stderr.read_bytes():
         raise CapS1ResultError("cap_s1_result_source_copy_invalid")
-    source_root = scratch_root / "verified-source"
+    source_root = copy_root / "verified-source"
     source_root.mkdir(mode=0o700)
-    _extract_cap_s1_source_archive(archived.stdout, source_root)
-    _verify_cap_s1_source_copy(source_root=source_root, exact_head=exact_head)
-    return source_root
+    if owned_roots is not None:
+        owned_roots.append(_register_cap_s1_owned_root(source_root, kind="observer-source"))
+    _extract_cap_s1_source_archive(archive_path, source_root)
+    manifest = _verify_cap_s1_source_copy(
+        source_root=source_root,
+        exact_head=exact_head,
+        process_cleanup=process_cleanup,
+    )
+    archive_path.unlink()
+    archive_stderr.unlink()
+    if archive_path.exists() or archive_stderr.exists():
+        raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+    return source_root, manifest
 
 
-def _observe_cap_s1_import_origins(*, source_root: Path) -> str:
+def _capture_cap_s1_source_identity(
+    *,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> tuple[str, str, str]:
+    """Capture clean HEAD/tree/protected identities through bounded children."""
+
+    identity = _run_cap_s1_observer_process(
+        ("git", "rev-parse", "HEAD", "HEAD^{tree}", "origin/master"),
+        cwd=REPO_ROOT,
+        timeout=30,
+        cleanup_observations=process_cleanup,
+    )
+    status = _run_cap_s1_observer_process(
+        ("git", "status", "--porcelain=v1", "--untracked-files=all"),
+        cwd=REPO_ROOT,
+        timeout=30,
+        cleanup_observations=process_cleanup,
+    )
+    rows = identity.stdout.splitlines()
+    if (
+        identity.returncode != 0
+        or identity.stderr
+        or len(rows) != 3
+        or not all(_result_is_hex40(value) for value in rows)
+        or status.returncode != 0
+        or status.stdout
+        or status.stderr
+    ):
+        raise CapS1ResultError("cap_s1_result_source_identity_unavailable")
+    return rows[0], rows[1], rows[2]
+
+
+def _revalidate_cap_s1_observer_source(
+    *,
+    before: tuple[str, str, str],
+    source_root: Path,
+    source_manifest: Sequence[_CapS1SourceCopyEntry],
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> None:
+    """Refuse repository or owned-source drift before receipt construction."""
+
+    if _capture_cap_s1_source_identity(process_cleanup=process_cleanup) != before:
+        raise CapS1ResultError("cap_s1_result_source_identity_changed")
+    _verify_cap_s1_owned_source_manifest(
+        source_root=source_root,
+        manifest=source_manifest,
+    )
+
+
+def _observe_cap_s1_import_origins(
+    *,
+    source_root: Path,
+    interpreter: "_CapS1InterpreterIdentity | None" = None,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> str:
     """Verify fixed source/dependency imports and return only a safe digest."""
 
     source_modules = (
@@ -3611,10 +4676,13 @@ def _observe_cap_s1_import_origins(*, source_root: Path) -> str:
         "for n in names]; "
         "print(json.dumps(rows, separators=(',', ':')))"
     )
-    completed = _run_cap_s1_observer_process(
-        (str(Path(sys.executable).resolve()), "-I", "-c", probe),
+    bound_interpreter = interpreter or _capture_cap_s1_interpreter_identity()
+    completed = _run_cap_s1_python_observer_process(
+        bound_interpreter,
+        ("-c", probe),
         cwd=source_root,
         timeout=120,
+        cleanup_observations=process_cleanup,
     )
     if completed.returncode != 0 or completed.stderr:
         raise CapS1ResultError("cap_s1_result_import_origin_invalid")
@@ -3648,12 +4716,14 @@ def _observe_cap_s1_import_origins(*, source_root: Path) -> str:
 
 
 def _observe_cap_s1_local_suite(
-    *, source_root: Path, output_root: Path
+    *,
+    source_root: Path,
+    output_root: Path,
+    interpreter: "_CapS1InterpreterIdentity | None" = None,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
 ) -> tuple[tuple[str, int, int, int, int], ...]:
     junit_path = output_root / "local-suite.xml"
     argv = (
-        str(Path(sys.executable).resolve()),
-        "-I",
         "-m",
         "pytest",
         "-q",
@@ -3662,11 +4732,13 @@ def _observe_cap_s1_local_suite(
         *CAP_S1_OBSERVER_TEST_MODULES,
     )
     fake_state = output_root / "fake-app-state.json"
-    completed = _run_cap_s1_observer_process(
+    completed = _run_cap_s1_python_observer_process(
+        interpreter or _capture_cap_s1_interpreter_identity(),
         argv,
         cwd=source_root,
         timeout=3600,
         owned_state_path=fake_state,
+        cleanup_observations=process_cleanup,
     )
     try:
         junit_path.chmod(0o444)
@@ -3685,7 +4757,12 @@ def _observe_cap_s1_local_suite(
     return rows
 
 
-def _observe_cap_s1_diff(*, exact_head: str, protected_join: str) -> tuple[str, str, int, str]:
+def _observe_cap_s1_diff(
+    *,
+    exact_head: str,
+    protected_join: str,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> tuple[str, str, int, str]:
     argv = (
         "git",
         "--no-pager",
@@ -3696,6 +4773,26 @@ def _observe_cap_s1_diff(*, exact_head: str, protected_join: str) -> tuple[str, 
         f"{protected_join}...{exact_head}",
         "--",
         *RESULT_CHANGED_PATHS,
+    )
+    completed = _run_cap_s1_observer_process(
+        argv,
+        cwd=REPO_ROOT,
+        timeout=120,
+        cleanup_observations=process_cleanup,
+    )
+    evidence = {
+        "command_registry": "CAP_S1_FIXED_21_DIFF_CHECK",
+        "returncode": completed.returncode,
+        "stdout_bytes": len(completed.stdout.encode("utf-8")),
+        "stderr_bytes": len(completed.stderr.encode("utf-8")),
+        "head": exact_head,
+        "protected": protected_join,
+    }
+    return (
+        "diff-check",
+        "PASSED" if completed.returncode == 0 else "FAILED",
+        0 if completed.returncode == 0 else 1,
+        _canonical_digest(evidence),
     )
 
 
@@ -3731,36 +4828,39 @@ def _write_cap_s1_owned_bytes(
     if reread != payload:
         raise CapS1ResultError("cap_s1_result_mutation_write_invalid")
     return hashlib.sha256(reread).hexdigest()
-    completed = _run_cap_s1_observer_process(argv, cwd=REPO_ROOT, timeout=120)
-    evidence = {
-        "command_registry": "CAP_S1_FIXED_21_DIFF_CHECK",
-        "returncode": completed.returncode,
-        "stdout_bytes": len(completed.stdout.encode("utf-8")),
-        "stderr_bytes": len(completed.stderr.encode("utf-8")),
-        "head": exact_head,
-        "protected": protected_join,
-    }
-    return (
-        "diff-check",
-        "PASSED" if completed.returncode == 0 else "FAILED",
-        0 if completed.returncode == 0 else 1,
-        _canonical_digest(evidence),
-    )
 
 
 def _observe_cap_s1_mutations(
-    *, exact_head: str, scratch_root: Path
+    *,
+    exact_head: str,
+    scratch_root: Path,
+    owned_roots: "list[_CapS1OwnedRootIdentity] | None" = None,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+    interpreter: "_CapS1InterpreterIdentity | None" = None,
 ) -> tuple[tuple[str, str, str], ...]:
     node_by_id = dict(CAP_S1_OBSERVER_MUTANTS)
+    assertion_by_id = {
+        mutation_id: assertion
+        for mutation_id, _node, assertion in CAP_S1_OBSERVER_MUTANT_ASSERTIONS
+    }
+    if set(node_by_id) != set(assertion_by_id):
+        raise CapS1ResultError("cap_s1_result_mutation_registry_invalid")
+    bound_interpreter = interpreter or _capture_cap_s1_interpreter_identity()
     rows: list[tuple[str, str, str]] = []
     for index, (mutation_id, relative_path, preimage, postimage) in enumerate(
         CAP_S1_OBSERVER_MUTANT_TRANSFORMS
     ):
         mutant_root = scratch_root / f"mutant-{index}"
         mutant_root.mkdir(mode=0o700)
-        source_root = _owned_cap_s1_source_copy(
+        if owned_roots is not None:
+            owned_roots.append(
+                _register_cap_s1_owned_root(mutant_root, kind="observer-mutants")
+            )
+        source_root, _source_manifest = _owned_cap_s1_source_copy(
             exact_head=exact_head,
             scratch_root=mutant_root,
+            owned_roots=owned_roots,
+            process_cleanup=process_cleanup,
         )
         target = source_root / relative_path
         original = target.read_bytes()
@@ -3770,12 +4870,13 @@ def _observe_cap_s1_mutations(
             raise CapS1ResultError("cap_s1_result_mutation_preimage_invalid")
         node = node_by_id[mutation_id]
 
-        def _run(label: str) -> tuple[subprocess.CompletedProcess[str], tuple[tuple[str, int, int, int, int], ...]]:
+        def _run(
+            label: str,
+        ) -> tuple[subprocess.CompletedProcess[str], _CapS1JunitCaseObservation]:
             junit = mutant_root / f"{label}.xml"
-            completed = _run_cap_s1_observer_process(
+            completed = _run_cap_s1_python_observer_process(
+                bound_interpreter,
                 (
-                    str(Path(sys.executable).resolve()),
-                    "-I",
                     "-m",
                     "pytest",
                     "-q",
@@ -3786,37 +4887,67 @@ def _observe_cap_s1_mutations(
                 cwd=source_root,
                 timeout=600,
                 owned_state_path=mutant_root / f"{label}-fake-app-state.json",
+                cleanup_observations=process_cleanup,
             )
             junit.chmod(0o444)
-            return completed, _parse_cap_s1_junit(
+            return completed, _parse_cap_s1_mutation_junit(
                 junit,
-                expected_scope=("tests/test_cap_s1_mastermind_operator_canary.py",),
+                expected_node=node,
             )
 
-        control, control_rows = _run("control")
-        mutant_payload = decoded.replace(preimage, postimage).encode("utf-8")
-        mutant_digest = _write_cap_s1_owned_bytes(
-            target,
-            mutant_payload,
-            create=False,
-        )
-        mutant, mutant_rows = _run("mutant")
-        restored_digest = _write_cap_s1_owned_bytes(target, original, create=False)
-        if restored_digest != original_digest:
+        control, control_case = _run("control")
+        if control.returncode != 0 or control_case.outcome != "PASSED":
+            raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+
+        mutant: "subprocess.CompletedProcess[str] | None" = None
+        mutant_case: "_CapS1JunitCaseObservation | None" = None
+        mutant_digest: "str | None" = None
+        mutant_error: "BaseException | None" = None
+        restored: "subprocess.CompletedProcess[str] | None" = None
+        restored_case: "_CapS1JunitCaseObservation | None" = None
+        restore_error: "BaseException | None" = None
+        try:
+            mutant_payload = decoded.replace(preimage, postimage).encode("utf-8")
+            mutant_digest = _write_cap_s1_owned_bytes(
+                target,
+                mutant_payload,
+                create=False,
+            )
+            mutant, mutant_case = _run("mutant")
+        except BaseException as exc:  # restore even across an exceptional child path
+            mutant_error = exc
+        finally:
+            try:
+                restored_digest = _write_cap_s1_owned_bytes(
+                    target,
+                    original,
+                    create=False,
+                )
+                if restored_digest != original_digest or target.read_bytes() != original:
+                    raise CapS1ResultError("cap_s1_result_mutation_restore_invalid")
+                restored, restored_case = _run("restored")
+            except BaseException as exc:
+                restore_error = exc
+        if restore_error is not None:
+            raise CapS1ResultError("cap_s1_result_mutation_restore_invalid") from None
+        if (
+            restored is None
+            or restored_case is None
+            or restored.returncode != 0
+            or restored_case.outcome != "PASSED"
+        ):
             raise CapS1ResultError("cap_s1_result_mutation_restore_invalid")
-        restored, restored_rows = _run("restored")
-        control_failed = sum(row[3] for row in control_rows)
-        mutant_failed = sum(row[3] for row in mutant_rows)
-        restored_failed = sum(row[3] for row in restored_rows)
+        if mutant_error is not None:
+            raise CapS1ResultError("cap_s1_result_mutation_proof_invalid") from None
+        assertion_signature = assertion_by_id[mutation_id]
         killed = (
-            control.returncode == 0
-            and control_failed == 0
+            mutant is not None
+            and mutant_case is not None
             and mutant.returncode == 1
-            and mutant_failed == 1
-            and restored.returncode == 0
-            and restored_failed == 0
+            and mutant_case.outcome == "FAILURE"
+            and f"AssertionError: {assertion_signature}" in mutant_case.detail
         )
-        if not killed:
+        if not killed or mutant_digest is None:
             raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
         rows.append(
             (
@@ -3830,6 +4961,19 @@ def _observe_cap_s1_mutations(
                         "postimage": hashlib.sha256(postimage.encode()).hexdigest(),
                         "source_preimage": original_digest,
                         "source_postimage": mutant_digest,
+                        "assertion_signature": assertion_signature,
+                        "control": {
+                            "returncode": control.returncode,
+                            "case": _canonical_digest(dataclasses.asdict(control_case)),
+                        },
+                        "mutant": {
+                            "returncode": mutant.returncode,
+                            "case": _canonical_digest(dataclasses.asdict(mutant_case)),
+                        },
+                        "restored_control": {
+                            "returncode": restored.returncode,
+                            "case": _canonical_digest(dataclasses.asdict(restored_case)),
+                        },
                         "restored": True,
                     }
                 ),
@@ -3859,32 +5003,164 @@ class _CapS1SecretScanObservation:
     binary_version: str
     rule_sha256: str
     evidence_digest: str
+    process_cleanup: tuple[_CapS1OwnedProcessCleanupObservation, ...]
 
 
-def _download_cap_s1_pinned_bytes(*, url: str, expected_size: int, expected_sha256: str) -> bytes:
-    """Bounded fixed-URL supply seam; called only from the closed supplier."""
+class _CapS1NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Make every redirect observable to the closed route validator."""
 
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    request = urllib.request.Request(url, headers={"User-Agent": "cap-s1-source-observer/1"})
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
+
+
+def _cap_s1_response_status(response: object) -> int:
+    status = getattr(response, "status", None)
+    if status is None:
+        status = response.getcode()  # type: ignore[attr-defined]
+    if type(status) is not int:
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable")
+    return status
+
+
+def _open_cap_s1_no_redirect(opener: object, request: urllib.request.Request):
     try:
-        with opener.open(request, timeout=60) as response:
-            declared = response.headers.get("Content-Length")
-            if declared is not None and int(declared) != expected_size:
-                raise ValueError("download length")
-            chunks: list[bytes] = []
-            remaining = expected_size + 1
-            while remaining > 0:
-                chunk = response.read(min(64 * 1024, remaining))
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                remaining -= len(chunk)
-    except (OSError, ValueError, urllib.error.URLError) as exc:
-        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable") from exc
+        return opener.open(request, timeout=60)  # type: ignore[attr-defined]
+    except urllib.error.HTTPError as exc:
+        # A no-redirect opener represents the permitted initial 302 as an
+        # HTTPError response.  Never propagate its URL-bearing exception text.
+        if exc.code == 302:
+            return exc
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable") from None
+    except (OSError, ValueError, urllib.error.URLError):
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable") from None
+
+
+def _close_cap_s1_response(response: object) -> None:
+    close = getattr(response, "close", None)
+    if callable(close):
+        close()
+
+
+def _validate_cap_s1_release_redirect(*, initial_url: str, location: object) -> str:
+    routes = {initial: destination for initial, destination, _asset_id in CAP_S1_GITLEAKS_RELEASE_ASSET_ROUTES}
+    expected_destination = routes.get(initial_url)
+    if expected_destination is None or not isinstance(location, str):
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable")
+    try:
+        encoded = location.encode("ascii")
+    except UnicodeError:
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable") from None
+    if (
+        not encoded
+        or len(encoded) > 8192
+        or "\\" in location
+        or any(character <= 0x20 or character == 0x7F for character in encoded)
+    ):
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable")
+    parts = urllib.parse.urlsplit(location)
+    if (
+        parts.scheme != "https"
+        or parts.netloc != "release-assets.githubusercontent.com"
+        or parts.username is not None
+        or parts.password is not None
+        or parts.fragment
+        or not parts.query
+        or "%" in parts.path
+        or f"{parts.scheme}://{parts.netloc}{parts.path}" != expected_destination
+    ):
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable")
+    try:
+        if parts.port is not None:
+            raise CapS1ResultError("cap_s1_result_secret_supply_unavailable")
+    except ValueError:
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable") from None
+    return location
+
+
+def _read_cap_s1_pinned_response(
+    response: object,
+    *,
+    expected_url: str,
+    expected_size: int,
+    expected_sha256: str,
+) -> bytes:
+    try:
+        if _cap_s1_response_status(response) != 200 or response.geturl() != expected_url:  # type: ignore[attr-defined]
+            raise CapS1ResultError("cap_s1_result_secret_supply_unavailable")
+        declared = response.headers.get("Content-Length")  # type: ignore[attr-defined]
+        if declared is not None and int(declared) != expected_size:
+            raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
+        chunks: list[bytes] = []
+        remaining = expected_size + 1
+        while remaining > 0:
+            chunk = response.read(min(64 * 1024, remaining))  # type: ignore[attr-defined]
+            if not chunk:
+                break
+            if not isinstance(chunk, bytes):
+                raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    except CapS1ResultError:
+        raise
+    except (OSError, TypeError, ValueError, urllib.error.URLError):
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable") from None
     payload = b"".join(chunks)
     if len(payload) != expected_size or hashlib.sha256(payload).hexdigest() != expected_sha256:
         raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
     return payload
+
+
+def _download_cap_s1_pinned_bytes(*, url: str, expected_size: int, expected_sha256: str) -> bytes:
+    """Fetch one source-owned URL through its finite, no-retry route."""
+
+    allowed_urls = {
+        CAP_S1_GITLEAKS_ARCHIVE_URL,
+        CAP_S1_GITLEAKS_CHECKSUM_URL,
+        CAP_S1_GITLEAKS_RULE_URL,
+    }
+    if url not in allowed_urls or urllib.parse.urlsplit(url).query:
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable")
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _CapS1NoRedirectHandler(),
+    )
+    initial_request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "cap-s1-source-observer/1"},
+    )
+    first = _open_cap_s1_no_redirect(opener, initial_request)
+    try:
+        first_status = _cap_s1_response_status(first)
+        if first_status == 200:
+            return _read_cap_s1_pinned_response(
+                first,
+                expected_url=url,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            )
+        if first_status != 302 or url == CAP_S1_GITLEAKS_RULE_URL:
+            raise CapS1ResultError("cap_s1_result_secret_supply_unavailable")
+        location = _validate_cap_s1_release_redirect(
+            initial_url=url,
+            location=first.headers.get("Location"),  # type: ignore[attr-defined]
+        )
+    finally:
+        _close_cap_s1_response(first)
+
+    redirected_request = urllib.request.Request(
+        location,
+        headers={"User-Agent": "cap-s1-source-observer/1"},
+    )
+    second = _open_cap_s1_no_redirect(opener, redirected_request)
+    try:
+        return _read_cap_s1_pinned_response(
+            second,
+            expected_url=location,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
+    finally:
+        _close_cap_s1_response(second)
 
 
 def _extract_cap_s1_gitleaks_binary(archive: bytes, *, destination: Path) -> str:
@@ -3927,6 +5203,7 @@ def _extract_cap_s1_gitleaks_binary(archive: bytes, *, destination: Path) -> str
 
 
 def _cap_s1_secret_child_environment(*, owned_root: Path) -> dict[str, str]:
+    owned_root.mkdir(mode=0o700)
     home = owned_root / "home"
     temporary = owned_root / "tmp"
     home.mkdir(mode=0o700)
@@ -3948,50 +5225,33 @@ def _run_cap_s1_secret_process(
     stdout_path: Path,
     stderr_path: Path,
     timeout: int,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
 ) -> int:
     """Run the fixed scanner/version process with private bounded streams."""
 
-    def _limit_output() -> None:
-        resource.setrlimit(
-            resource.RLIMIT_FSIZE,
-            (_CAP_S1_SECRET_MAX_STREAM_BYTES, _CAP_S1_SECRET_MAX_STREAM_BYTES),
-        )
-
-    try:
-        with stdout_path.open("xb") as stdout_file, stderr_path.open("xb") as stderr_file:
-            process = subprocess.Popen(
-                list(argv),
-                cwd=cwd,
-                env=_cap_s1_secret_child_environment(owned_root=environment_root),
-                stdin=subprocess.DEVNULL,
-                stdout=stdout_file,
-                stderr=stderr_file,
-                start_new_session=True,
-                preexec_fn=_limit_output,
-            )
-            try:
-                return_code = process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired as exc:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                finally:
-                    process.wait(timeout=10)
-                raise CapS1ResultError("cap_s1_result_secret_scan_incomplete") from exc
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise CapS1ResultError("cap_s1_result_secret_scan_incomplete") from exc
-    for stream in (stdout_path, stderr_path):
-        try:
-            size = stream.stat().st_size
-        except OSError as exc:
-            raise CapS1ResultError("cap_s1_result_secret_scan_incomplete") from exc
-        if size > _CAP_S1_SECRET_MAX_STREAM_BYTES:
-            raise CapS1ResultError("cap_s1_result_secret_scan_incomplete")
-    return return_code
+    return _run_cap_s1_owned_process(
+        argv,
+        cwd=cwd,
+        environment=_cap_s1_secret_child_environment(owned_root=environment_root),
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        timeout=timeout,
+        maximum_stream_bytes=_CAP_S1_SECRET_MAX_STREAM_BYTES,
+        error="cap_s1_result_secret_scan_incomplete",
+        cleanup_observations=cleanup_observations,
+    )
 
 
-def _supply_cap_s1_gitleaks(*, owned_root: Path) -> tuple[Path, str, Path]:
+def _supply_cap_s1_gitleaks(
+    *,
+    owned_root: Path,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+    owned_roots: "list[_CapS1OwnedRootIdentity] | None" = None,
+) -> tuple[Path, str, Path]:
     supply_root = owned_root / "supply"
     supply_root.mkdir(mode=0o700)
+    if owned_roots is not None:
+        owned_roots.append(_register_cap_s1_owned_root(supply_root, kind="secret-supply"))
     archive = _download_cap_s1_pinned_bytes(
         url=CAP_S1_GITLEAKS_ARCHIVE_URL,
         expected_size=CAP_S1_GITLEAKS_ARCHIVE_BYTES,
@@ -4039,6 +5299,7 @@ def _supply_cap_s1_gitleaks(*, owned_root: Path) -> tuple[Path, str, Path]:
         stdout_path=version_stdout,
         stderr_path=version_stderr,
         timeout=30,
+        cleanup_observations=cleanup_observations,
     )
     try:
         version = version_stdout.read_text(encoding="utf-8").strip()
@@ -4053,46 +5314,56 @@ def _supply_cap_s1_gitleaks(*, owned_root: Path) -> tuple[Path, str, Path]:
 
 
 def _stage_cap_s1_secret_source(
-    *, exact_head: str, protected_join: str, owned_root: Path
+    *,
+    exact_head: str,
+    protected_join: str,
+    owned_root: Path,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+    owned_roots: "list[_CapS1OwnedRootIdentity] | None" = None,
 ) -> tuple[Path, tuple[_CapS1SecretSourceEntry, ...], int]:
     """Materialize all 21 immutable final blobs with a closed byte census."""
 
-    try:
-        merge_base = subprocess.run(
-            ["git", "merge-base", protected_join, exact_head],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        ).stdout.strip()
-        changed = subprocess.run(
-            ["git", "diff", "--name-only", f"{merge_base}...{exact_head}"],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        ).stdout.splitlines()
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise CapS1ResultError("cap_s1_result_secret_source_unavailable") from exc
+    merge_base_run = _run_cap_s1_observer_process(
+        ("git", "merge-base", protected_join, exact_head),
+        cwd=REPO_ROOT,
+        timeout=30,
+        cleanup_observations=cleanup_observations,
+    )
+    merge_base = merge_base_run.stdout.strip()
+    changed_run = _run_cap_s1_observer_process(
+        ("git", "diff", "--name-only", f"{merge_base}...{exact_head}"),
+        cwd=REPO_ROOT,
+        timeout=30,
+        cleanup_observations=cleanup_observations,
+    )
+    if (
+        merge_base_run.returncode != 0
+        or merge_base_run.stderr
+        or changed_run.returncode != 0
+        or changed_run.stderr
+    ):
+        raise CapS1ResultError("cap_s1_result_secret_source_unavailable")
+    changed = changed_run.stdout.splitlines()
     if not _result_is_hex40(merge_base) or not set(changed).issubset(RESULT_CHANGED_PATHS):
         raise CapS1ResultError("cap_s1_result_secret_source_path_boundary")
 
     source_root = owned_root / "source"
     source_root.mkdir(mode=0o700)
+    if owned_roots is not None:
+        owned_roots.append(_register_cap_s1_owned_root(source_root, kind="secret-source"))
     entries: list[_CapS1SecretSourceEntry] = []
     total_bytes = 0
     for index, relative in enumerate(RESULT_CHANGED_PATHS, start=1):
         try:
-            metadata = subprocess.run(
-                ["git", "ls-tree", "-l", exact_head, "--", relative],
+            metadata_run = _run_cap_s1_observer_process(
+                ("git", "ls-tree", "-l", exact_head, "--", relative),
                 cwd=REPO_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
                 timeout=30,
-            ).stdout.rstrip("\n")
+                cleanup_observations=cleanup_observations,
+            )
+            if metadata_run.returncode != 0 or metadata_run.stderr:
+                raise ValueError("tree read")
+            metadata = metadata_run.stdout.rstrip("\n")
             prefix, separator, observed_path = metadata.partition("\t")
             fields = prefix.split()
             if not separator or observed_path != relative or len(fields) != 4:
@@ -4107,13 +5378,16 @@ def _stage_cap_s1_secret_source(
                 or size > _CAP_S1_SECRET_MAX_FILE_BYTES
             ):
                 raise ValueError("tree identity")
-            payload = subprocess.run(
-                ["git", "cat-file", "blob", blob],
+            payload_run = _run_cap_s1_observer_bytes(
+                ("git", "cat-file", "blob", blob),
                 cwd=REPO_ROOT,
-                check=True,
-                capture_output=True,
                 timeout=30,
-            ).stdout
+                maximum_stream_bytes=_CAP_S1_SECRET_MAX_FILE_BYTES,
+                cleanup_observations=cleanup_observations,
+            )
+            if payload_run.returncode != 0 or payload_run.stderr:
+                raise ValueError("blob read")
+            payload = payload_run.stdout
             if len(payload) != size:
                 raise ValueError("blob size")
             payload.decode("utf-8")
@@ -4145,9 +5419,15 @@ def _stage_cap_s1_secret_source(
     return source_root, tuple(entries), total_bytes
 
 
-def _assemble_cap_s1_secret_controls(*, owned_root: Path) -> tuple[tuple[str, Path, int, str], ...]:
+def _assemble_cap_s1_secret_controls(
+    *,
+    owned_root: Path,
+    owned_roots: "list[_CapS1OwnedRootIdentity] | None" = None,
+) -> tuple[tuple[str, Path, int, str], ...]:
     control_root = owned_root / "positive-controls"
     control_root.mkdir(mode=0o700)
+    if owned_roots is not None:
+        owned_roots.append(_register_cap_s1_owned_root(control_root, kind="secret-controls"))
     rows: list[tuple[str, Path, int, str]] = []
     for rule_id, recipe, expected_count, expected_digest in CAP_S1_SECRET_CONTROL_RECIPES:
         payload = b"".join(segment * repeats for segment, repeats in recipe)
@@ -4285,8 +5565,15 @@ def _run_cap_s1_gitleaks_dir(
     rule_path: Path,
     target_root: Path,
     invocation_root: Path,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+    owned_roots: "list[_CapS1OwnedRootIdentity] | None" = None,
+    cleanup_kind: str = "secret-controls",
 ) -> tuple[int, bytes, bytes]:
     invocation_root.mkdir(mode=0o700)
+    if owned_roots is not None:
+        owned_roots.append(
+            _register_cap_s1_owned_root(invocation_root, kind=cleanup_kind)
+        )
     ignore_path = invocation_root / "empty-ignore"
     _write_cap_s1_owned_bytes(ignore_path, b"")
     ignore_path.chmod(0o400)
@@ -4328,6 +5615,7 @@ def _run_cap_s1_gitleaks_dir(
         stdout_path=stdout_path,
         stderr_path=stderr_path,
         timeout=150,
+        cleanup_observations=cleanup_observations,
     )
     try:
         report_state = report_path.lstat()
@@ -4364,19 +5652,37 @@ def _control_manifest(
 
 
 def _observe_cap_s1_secret_scan(
-    *, exact_head: str, protected_join: str, owned_root: Path
+    *,
+    exact_head: str,
+    protected_join: str,
+    owned_root: Path,
+    owned_roots: "list[_CapS1OwnedRootIdentity] | None" = None,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
 ) -> _CapS1SecretScanObservation:
-    binary_path, binary_digest, rule_path = _supply_cap_s1_gitleaks(owned_root=owned_root)
+    local_process_cleanup: list[_CapS1OwnedProcessCleanupObservation] = []
+    process_sink = process_cleanup if process_cleanup is not None else local_process_cleanup
+    binary_path, binary_digest, rule_path = _supply_cap_s1_gitleaks(
+        owned_root=owned_root,
+        cleanup_observations=process_sink,
+        owned_roots=owned_roots,
+    )
     source_root, source_manifest, source_bytes = _stage_cap_s1_secret_source(
         exact_head=exact_head,
         protected_join=protected_join,
         owned_root=owned_root,
+        cleanup_observations=process_sink,
+        owned_roots=owned_roots,
     )
     _verify_cap_s1_secret_manifest(source_root=source_root, manifest=source_manifest)
 
     control_owner = owned_root / "controls"
     control_owner.mkdir(mode=0o700)
-    controls = _assemble_cap_s1_secret_controls(owned_root=control_owner)
+    if owned_roots is not None:
+        owned_roots.append(_register_cap_s1_owned_root(control_owner, kind="secret-controls"))
+    controls = _assemble_cap_s1_secret_controls(
+        owned_root=control_owner,
+        owned_roots=owned_roots,
+    )
     control_root = control_owner / "positive-controls"
     control_manifest = _control_manifest(controls)
     control_bytes = sum(entry.size for entry in control_manifest)
@@ -4385,6 +5691,8 @@ def _observe_cap_s1_secret_scan(
         rule_path=rule_path,
         target_root=control_root,
         invocation_root=control_owner / "positive-run",
+        cleanup_observations=process_sink,
+        owned_roots=owned_roots,
     )
     control_counts = _parse_cap_s1_gitleaks_report(
         control_report,
@@ -4404,6 +5712,8 @@ def _observe_cap_s1_secret_scan(
 
     ignored_root = control_owner / "ignored-looking-control"
     ignored_root.mkdir(mode=0o700)
+    if owned_roots is not None:
+        owned_roots.append(_register_cap_s1_owned_root(ignored_root, kind="secret-controls"))
     stripe_recipe = next(
         recipe
         for rule_id, recipe, _expected, _digest in CAP_S1_SECRET_CONTROL_RECIPES
@@ -4430,6 +5740,8 @@ def _observe_cap_s1_secret_scan(
         rule_path=rule_path,
         target_root=ignored_root,
         invocation_root=control_owner / "ignored-looking-run",
+        cleanup_observations=process_sink,
+        owned_roots=owned_roots,
     )
     ignored_counts = _parse_cap_s1_gitleaks_report(
         ignored_report,
@@ -4446,6 +5758,8 @@ def _observe_cap_s1_secret_scan(
 
     negative_root = control_owner / "negative-control"
     negative_root.mkdir(mode=0o700)
+    if owned_roots is not None:
+        owned_roots.append(_register_cap_s1_owned_root(negative_root, kind="secret-controls"))
     negative_path = negative_root / "negative.txt"
     negative_payload = b"CAP-S1 deterministic negative control: no credential material.\n"
     negative_digest = _write_cap_s1_owned_bytes(negative_path, negative_payload)
@@ -4465,6 +5779,8 @@ def _observe_cap_s1_secret_scan(
         rule_path=rule_path,
         target_root=negative_root,
         invocation_root=control_owner / "negative-run",
+        cleanup_observations=process_sink,
+        owned_roots=owned_roots,
     )
     if negative_code != 0 or _parse_cap_s1_gitleaks_report(negative_report):
         raise CapS1ResultError("cap_s1_result_secret_control_invalid")
@@ -4480,6 +5796,9 @@ def _observe_cap_s1_secret_scan(
         rule_path=rule_path,
         target_root=source_root,
         invocation_root=owned_root / "source-run",
+        cleanup_observations=process_sink,
+        owned_roots=owned_roots,
+        cleanup_kind="secret-output",
     )
     actual_counts = _parse_cap_s1_gitleaks_report(actual_report)
     coverage_digest = _parse_cap_s1_gitleaks_coverage(
@@ -4515,6 +5834,7 @@ def _observe_cap_s1_secret_scan(
         "binary_sha256": binary_digest,
         "binary_version": CAP_S1_GITLEAKS_VERSION,
         "rule_sha256": CAP_S1_GITLEAKS_RULE_SHA256,
+        "process_cleanup": tuple(dataclasses.astuple(row) for row in process_sink),
     }
     result = _CapS1SecretScanObservation(
         status=status,
@@ -4526,23 +5846,30 @@ def _observe_cap_s1_secret_scan(
         binary_version=CAP_S1_GITLEAKS_VERSION,
         rule_sha256=CAP_S1_GITLEAKS_RULE_SHA256,
         evidence_digest=_canonical_digest(observation),
+        process_cleanup=tuple(process_sink),
     )
     if status != "COMPLETE_CLEAN":
         raise CapS1ResultError("cap_s1_result_secret_scan_findings")
     return result
 
 
-def _github_api_list(endpoint: str) -> list[Any]:
+def _github_api_list(
+    endpoint: str,
+    *,
+    cleanup_observations: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> list[Any]:
     """Fresh bounded GitHub list read with the same strict JSON boundary."""
 
     try:
-        completed = subprocess.run(
-            ["gh", "api", endpoint],
-            check=True,
-            capture_output=True,
-            text=True,
+        completed = _run_cap_s1_observer_process(
+            ("gh", "api", endpoint),
+            cwd=REPO_ROOT,
             timeout=30,
+            cleanup_observations=cleanup_observations,
+            github_environment=True,
         )
+        if completed.returncode != 0 or completed.stderr:
+            raise CapS1ResultError("cap_s1_result_github_evidence_unavailable")
         payload = _strict_json_loads(
             completed.stdout,
             error="cap_s1_result_github_evidence_unavailable",
@@ -4554,13 +5881,60 @@ def _github_api_list(endpoint: str) -> list[Any]:
     return payload
 
 
-def _observe_cap_s1_codeql(*, exact_head: str) -> tuple[tuple[str, str, int, str], ...]:
+def _observe_cap_s1_codeql(
+    *,
+    exact_head: str,
+    process_cleanup: "list[_CapS1OwnedProcessCleanupObservation] | None" = None,
+) -> tuple[tuple[str, str, int, str], ...]:
     """Authenticate fixed exact-head CodeQL/check and code-scanning reads."""
+
+    def _get(endpoint: str) -> Any:
+        if process_cleanup is None:
+            return _github_api_json(endpoint)
+        return _github_api_json(endpoint, cleanup_observations=process_cleanup)
+
+    def _get_list(endpoint: str) -> list[Any]:
+        if process_cleanup is None:
+            return _github_api_list(endpoint)
+        return _github_api_list(endpoint, cleanup_observations=process_cleanup)
+
+    def _pr_binding() -> tuple[str, str, str, str, str]:
+        pull = _get(
+            f"repos/{_RESULT_REPOSITORY}/pulls/{_RESULT_PR_NUMBER}"
+        )
+        git_ref = _get(
+            f"repos/{_RESULT_REPOSITORY}/git/ref/pull/{_RESULT_PR_NUMBER}/head"
+        )
+        head = pull.get("head")
+        ref_object = git_ref.get("object")
+        binding = (
+            str(pull.get("number", "")),
+            head.get("sha") if type(head) is dict else "",
+            head.get("ref") if type(head) is dict else "",
+            git_ref.get("ref", ""),
+            ref_object.get("sha") if type(ref_object) is dict else "",
+        )
+        if (
+            binding
+            != (
+                str(_RESULT_PR_NUMBER),
+                exact_head,
+                _CAP_S1_PR_BRANCH,
+                _CAP_S1_PR_HEAD_REF,
+                exact_head,
+            )
+            or type(ref_object) is not dict
+            or ref_object.get("type") != "commit"
+        ):
+            raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+        return binding
+
+    before_binding = _pr_binding()
 
     check_rows: list[dict[str, Any]] = []
     expected_total: "int | None" = None
     for page in range(1, 5):
-        payload = _github_api_json(
+        payload = _get(
             f"repos/{_RESULT_REPOSITORY}/commits/{exact_head}/check-runs"
             f"?per_page=100&page={page}"
         )
@@ -4585,68 +5959,146 @@ def _observe_cap_s1_codeql(*, exact_head: str) -> tuple[tuple[str, str, int, str
     if expected_total is None or len(check_rows) != expected_total:
         raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
 
-    codeql_rows = []
+    expected_checks = dict(_CAP_S1_CODEQL_CHECKS)
+    category_by_name = {name: category for category, name in _CAP_S1_CODEQL_CHECKS}
+    codeql_rows: list[dict[str, Any]] = []
+    seen_categories: set[str] = set()
     for row in check_rows:
         app = row.get("app")
-        name = str(row.get("name", ""))
-        slug = app.get("slug") if type(app) is dict else None
-        if "codeql" not in name.casefold() and slug != "github-advanced-security":
+        name = row.get("name")
+        if name not in category_by_name:
             continue
+        category = category_by_name[name]
         check_id = row.get("id")
-        if not _result_positive_int(check_id):
-            raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
-        detail = _github_api_json(
+        if (
+            category in seen_categories
+            or not _result_positive_int(check_id)
+            or row.get("head_sha") != exact_head
+            or type(app) is not dict
+            or (app.get("id"), app.get("slug")) != _CAP_S1_CODEQL_APP
+        ):
+            raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+        detail = _get(
             f"repos/{_RESULT_REPOSITORY}/check-runs/{check_id}"
         )
         detail_app = detail.get("app")
+        details_url = detail.get("details_url")
+        details_match = (
+            re.fullmatch(
+                rf"https://github\.com/{re.escape(_RESULT_REPOSITORY)}"
+                rf"/actions/runs/([1-9][0-9]*)/job/{check_id}",
+                details_url,
+            )
+            if isinstance(details_url, str)
+            else None
+        )
         if (
             detail.get("id") != check_id
+            or detail.get("name") != name
             or detail.get("head_sha") != exact_head
             or type(detail_app) is not dict
-            or detail_app.get("id") != app.get("id")
+            or (detail_app.get("id"), detail_app.get("slug")) != _CAP_S1_CODEQL_APP
             or str(detail.get("status", "")).upper() != "COMPLETED"
             or str(detail.get("conclusion", "")).upper() != "SUCCESS"
+            or details_match is None
         ):
             raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+        run_id = details_match.group(1)
+        run = _get(
+            f"repos/{_RESULT_REPOSITORY}/actions/runs/{run_id}"
+        )
+        if (
+            str(run.get("id", "")) != run_id
+            or run.get("head_sha") != exact_head
+            or str(run.get("status", "")).upper() != "COMPLETED"
+            or str(run.get("conclusion", "")).upper() != "SUCCESS"
+        ):
+            raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+        seen_categories.add(category)
         codeql_rows.append(
             {
+                "category": category,
                 "id": check_id,
                 "name": name,
-                "app_id": detail_app.get("id"),
-                "app_slug": detail_app.get("slug"),
+                "app_id": _CAP_S1_CODEQL_APP[0],
+                "app_slug": _CAP_S1_CODEQL_APP[1],
                 "status": "COMPLETED",
                 "conclusion": "SUCCESS",
                 "head": exact_head,
+                "run_id": run_id,
             }
         )
-    if not codeql_rows:
+    if seen_categories != set(expected_checks):
         raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
 
-    ref = "refs/heads/fable/cap-s1-complete-vertical-20260901"
+    encoded_ref = urllib.parse.quote(_CAP_S1_PR_HEAD_REF, safe="")
     analyses: list[dict[str, Any]] = []
-    alerts: list[dict[str, Any]] = []
     for page in range(1, 5):
-        analysis_page = _github_api_list(
+        analysis_page = _get_list(
             f"repos/{_RESULT_REPOSITORY}/code-scanning/analyses"
-            f"?ref={ref}&per_page=100&page={page}"
-        )
-        alert_page = _github_api_list(
-            f"repos/{_RESULT_REPOSITORY}/code-scanning/alerts"
-            f"?ref={ref}&state=open&per_page=100&page={page}"
+            f"?ref={encoded_ref}&per_page=100&page={page}"
         )
         analyses.extend(analysis_page)
-        alerts.extend(alert_page)
-        if len(analysis_page) < 100 and len(alert_page) < 100:
+        if len(analysis_page) < 100:
             break
-    if len(analyses) > 400 or len(alerts) > 400:
+    else:
         raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
-    bound_analyses = [
-        row
-        for row in analyses
-        if type(row) is dict and row.get("commit_sha") == exact_head
-    ]
-    if not bound_analyses or any(type(row) is not dict for row in alerts):
+
+    alerts: list[dict[str, Any]] = []
+    for page in range(1, 5):
+        alert_page = _get_list(
+            f"repos/{_RESULT_REPOSITORY}/code-scanning/alerts"
+            f"?pr={_RESULT_PR_NUMBER}&state=open&per_page=100&page={page}"
+        )
+        if any(type(row) is not dict for row in alert_page):
+            raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+        alerts.extend(alert_page)
+        if len(alert_page) < 100:
+            break
+    else:
         raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+
+    analysis_rows: list[dict[str, Any]] = []
+    seen_analysis_categories: set[str] = set()
+    expected_categories = set(expected_checks)
+    for row in analyses:
+        tool = row.get("tool") if type(row) is dict else None
+        category = row.get("category") if type(row) is dict else None
+        if (
+            type(row) is not dict
+            or not _result_positive_int(row.get("id"))
+            or row.get("commit_sha") != exact_head
+            or row.get("ref") != _CAP_S1_PR_HEAD_REF
+            or row.get("analysis_key") != _CAP_S1_CODEQL_ANALYSIS_KEY
+            or category not in {f"/language:{item}" for item in expected_categories}
+            or type(tool) is not dict
+            or tool.get("name") != "CodeQL"
+            or row.get("results_count") != 0
+            or not _result_positive_int(row.get("rules_count"))
+            or row.get("error") != ""
+            or row.get("warning") != ""
+        ):
+            raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+        normalized_category = str(category).removeprefix("/language:")
+        if normalized_category in seen_analysis_categories:
+            raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+        seen_analysis_categories.add(normalized_category)
+        analysis_rows.append(
+            {
+                "id": row["id"],
+                "category": normalized_category,
+                "ref": row["ref"],
+                "tool": tool["name"],
+                "results_count": row["results_count"],
+                "rules_count": row["rules_count"],
+            }
+        )
+    if seen_analysis_categories != expected_categories:
+        raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+
+    after_binding = _pr_binding()
+    if after_binding != before_binding:
+        raise CapS1ResultError("cap_s1_result_security_proof_invalid")
     findings = len(alerts)
     return (
         (
@@ -4662,8 +6114,12 @@ def _observe_cap_s1_codeql(*, exact_head: str) -> tuple[tuple[str, str, int, str
             _canonical_digest(
                 {
                     "exact_head": exact_head,
+                    "pr_binding": before_binding,
                     "analysis_ids": tuple(
-                        sorted(str(row.get("id", "")) for row in bound_analyses)
+                        sorted(str(row["id"]) for row in analysis_rows)
+                    ),
+                    "analysis_categories": tuple(
+                        sorted(str(row["category"]) for row in analysis_rows)
                     ),
                     "open_alert_numbers": tuple(
                         sorted(str(row.get("number", "")) for row in alerts)
@@ -4672,6 +6128,208 @@ def _observe_cap_s1_codeql(*, exact_head: str) -> tuple[tuple[str, str, int, str
             ),
         ),
     )
+
+
+def _capture_cap_s1_cleanup_tree(root: Path) -> tuple[tuple[object, ...], ...]:
+    """Capture bounded inode identities without reading possibly sensitive bytes."""
+
+    try:
+        root_state = root.lstat()
+    except OSError as exc:
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed") from exc
+    if stat.S_ISLNK(root_state.st_mode) or not stat.S_ISDIR(root_state.st_mode):
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+    rows: list[tuple[object, ...]] = [
+        (".", "directory", root_state.st_dev, root_state.st_ino, stat.S_IMODE(root_state.st_mode), 0)
+    ]
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        try:
+            entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
+        except OSError as exc:
+            raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed") from exc
+        for entry in entries:
+            try:
+                state = entry.stat(follow_symlinks=False)
+                relative = Path(entry.path).relative_to(root).as_posix()
+            except (OSError, ValueError) as exc:
+                raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed") from exc
+            if (
+                not relative
+                or len(relative.encode("utf-8")) > 4096
+                or stat.S_ISLNK(state.st_mode)
+            ):
+                raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+            if stat.S_ISDIR(state.st_mode):
+                kind = "directory"
+                size = 0
+                pending.append(Path(entry.path))
+            elif stat.S_ISREG(state.st_mode):
+                kind = "file"
+                size = state.st_size
+            else:
+                raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+            rows.append(
+                (
+                    relative,
+                    kind,
+                    state.st_dev,
+                    state.st_ino,
+                    stat.S_IMODE(state.st_mode),
+                    size,
+                )
+            )
+            if len(rows) > 100_000:
+                raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+    return tuple(sorted(rows))
+
+
+def _cap_s1_path_absent(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _finalize_cap_s1_observer_cleanup(
+    *,
+    scratch_path: Path,
+    scratch_device: int,
+    scratch_inode: int,
+    owned_roots: Sequence[_CapS1OwnedRootIdentity],
+    process_cleanup: Sequence[_CapS1OwnedProcessCleanupObservation],
+    require_complete: bool = True,
+) -> tuple[tuple[str, str, bool, bool], ...]:
+    """Return cleanup rows only after creation-time ownership revalidation."""
+
+    complete_top_level = {
+        "mutant-0",
+        "mutant-1",
+        "mutant-2",
+        "output",
+        "secret-scan",
+        "source-copy",
+    }
+    try:
+        scratch_state = scratch_path.lstat()
+        actual_top_level = {entry.name for entry in os.scandir(scratch_path)}
+    except OSError as exc:
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed") from exc
+    if (
+        stat.S_ISLNK(scratch_state.st_mode)
+        or not stat.S_ISDIR(scratch_state.st_mode)
+        or (scratch_state.st_dev, scratch_state.st_ino) != (scratch_device, scratch_inode)
+    ):
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+    if not owned_roots or any(type(row) is not _CapS1OwnedRootIdentity for row in owned_roots):
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+    category_paths: dict[str, list[Path]] = {}
+    seen_paths: set[Path] = set()
+    direct_owned_names: set[str] = set()
+    for row in owned_roots:
+        try:
+            current = row.path.lstat()
+            relative = row.path.relative_to(scratch_path)
+        except (OSError, ValueError) as exc:
+            raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed") from exc
+        if (
+            row.kind not in _RESULT_OBSERVER_CLEANUP_KINDS
+            or row.kind == "observer-processes"
+            or row.path in seen_paths
+            or stat.S_ISLNK(current.st_mode)
+            or not stat.S_ISDIR(current.st_mode)
+            or (current.st_dev, current.st_ino) != (row.device, row.inode)
+        ):
+            raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+        seen_paths.add(row.path)
+        category_paths.setdefault(row.kind, []).append(row.path)
+        if len(relative.parts) == 1:
+            direct_owned_names.add(relative.parts[0])
+    if actual_top_level != direct_owned_names:
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+    expected_root_kinds = set(_RESULT_OBSERVER_CLEANUP_KINDS) - {"observer-processes"}
+    if require_complete and (
+        actual_top_level != complete_top_level
+        or set(category_paths) != expected_root_kinds
+    ):
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+
+    category_digests: dict[str, str] = {}
+    for kind, paths in category_paths.items():
+        category_digests[kind] = _canonical_digest(
+            {
+                "kind": kind,
+                "owned_trees": tuple(
+                    _canonical_digest(_capture_cap_s1_cleanup_tree(path))
+                    for path in sorted(paths)
+                ),
+            }
+        )
+    if require_complete and (
+        not process_cleanup
+        or not all(
+            type(row) is _CapS1OwnedProcessCleanupObservation
+            and _result_is_hex64(row.identity_digest)
+            and row.removed is True
+            and row.verified_absent is True
+            for row in process_cleanup
+        )
+        or len({row.identity_digest for row in process_cleanup})
+        != len(process_cleanup)
+    ):
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+    if process_cleanup:
+        category_digests["observer-processes"] = _canonical_digest(
+            tuple(dataclasses.astuple(row) for row in process_cleanup)
+        )
+
+    removed, root_absent = _cleanup_owned_dir_action(
+        scratch_path,
+        expected_device=scratch_device,
+        expected_inode=scratch_inode,
+    )
+    row_kinds = (
+        _RESULT_OBSERVER_CLEANUP_KINDS
+        if require_complete
+        else tuple(sorted(category_digests))
+    )
+    rows = tuple(
+        sorted(
+            (
+                kind,
+                category_digests[kind],
+                removed,
+                root_absent
+                and all(
+                    _cap_s1_path_absent(path)
+                    for path in category_paths.get(kind, (scratch_path,))
+                ),
+            )
+            for kind in row_kinds
+        )
+    )
+    if (
+        not removed
+        or not root_absent
+        or (require_complete and tuple(row[0] for row in rows) != _RESULT_OBSERVER_CLEANUP_KINDS)
+        or not all(row[2] and row[3] for row in rows)
+    ):
+        raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+    return rows
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1GitHubObservations:
+    """Already-authenticated GitHub rows captured before cleanup receipts."""
+
+    hosted_run: dict[str, Any]
+    hosted_rows: tuple[tuple[str, str, str, str], ...]
+    pull: dict[str, Any]
+    review: dict[str, Any]
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -4686,6 +6344,7 @@ class _CapS1ObservedFamilies:
     mutation_proof: CapS1MutationProofReceipt
     cleanup_proof: CapS1CleanupProofReceipt
     review_state: CapS1ReviewReceipt
+    github_observations: _CapS1GitHubObservations
 
 
 def _receipt_with_digest(receipt: Any) -> Any:
@@ -4698,6 +6357,7 @@ def _receipt_with_digest(receipt: Any) -> Any:
 def _run_cap_s1_source_observer(
     *,
     canary: CanaryEvidence,
+    canary_provenance: str,
     hosted_run_id: str,
     review_id: str,
 ) -> _CapS1ObservedFamilies:
@@ -4709,20 +6369,15 @@ def _run_cap_s1_source_observer(
     may execute exactly this no-argument-policy boundary.
     """
 
-    try:
-        identity = subprocess.run(
-            ["git", "rev-parse", "HEAD", "HEAD^{tree}", "origin/master"],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        ).stdout.splitlines()
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise CapS1ResultError("cap_s1_result_source_identity_unavailable") from exc
-    if len(identity) != 3 or not all(_result_is_hex40(value) for value in identity):
-        raise CapS1ResultError("cap_s1_result_source_identity_unavailable")
-    exact_head, exact_tree, protected_join = identity
+    if canary_provenance != "LIVE_DEFAULT_APP_SERVER":
+        raise CapS1ResultError("cap_s1_result_canary_provenance_invalid")
+
+    process_cleanup: list[_CapS1OwnedProcessCleanupObservation] = []
+    source_identity = _capture_cap_s1_source_identity(
+        process_cleanup=process_cleanup,
+    )
+    interpreter = _capture_cap_s1_interpreter_identity()
+    exact_head, exact_tree, protected_join = source_identity
     if (
         canary.candidate_commit != exact_head
         or canary.candidate_tree != exact_tree
@@ -4731,244 +6386,327 @@ def _run_cap_s1_source_observer(
         raise CapS1ResultError("cap_s1_result_canary_evidence_binding_mismatch")
 
     scratch_path: "Path | None" = None
+    scratch_identity: "os.stat_result | None" = None
+    owned_roots: list[_CapS1OwnedRootIdentity] = []
+    cleanup_finished = False
     try:
-        with tempfile.TemporaryDirectory(prefix="cap-s1-source-observer-") as raw_scratch:
-            scratch_path = Path(raw_scratch)
-            scratch_identity = scratch_path.stat()
-            source_root = _owned_cap_s1_source_copy(
-                exact_head=exact_head,
-                scratch_root=scratch_path,
-            )
-            output_root = scratch_path / "output"
-            output_root.mkdir(mode=0o700)
-            import_origin_digest = _observe_cap_s1_import_origins(
-                source_root=source_root,
-            )
-            local_rows = _observe_cap_s1_local_suite(
-                source_root=source_root,
-                output_root=output_root,
-            )
-            diff_row = _observe_cap_s1_diff(
-                exact_head=exact_head,
-                protected_join=protected_join,
-            )
-            mutation_rows = _observe_cap_s1_mutations(
-                exact_head=exact_head,
-                scratch_root=scratch_path,
-            )
-            hosted_run, hosted_rows = _rederive_hosted_job_manifest(
-                run_id=hosted_run_id,
-                exact_head=exact_head,
-            )
-            pull, review = _rederive_github_review(
-                review_id=review_id,
-                exact_head=exact_head,
-            )
-            secret_scan = _observe_cap_s1_secret_scan(
-                exact_head=exact_head,
-                protected_join=protected_join,
-                owned_root=scratch_path / "secret-scan",
-            )
-            security_rows = tuple(
-                sorted(
-                    (
-                        *_observe_cap_s1_codeql(exact_head=exact_head),
-                        diff_row,
-                        (
-                            "gitleaks-8.30.1-final-21",
-                            "PASSED",
-                            secret_scan.findings,
-                            secret_scan.evidence_digest,
-                        ),
-                    )
-                )
-            )
-            cleanup_rows = tuple(
-                sorted(
-                    (
-                        kind,
-                        _canonical_digest(
-                            {
-                                "canary_operation_id": canary.canary_operation_id,
-                                "provider_attempt_id": canary.provider_attempt_id,
-                                "kind": kind,
-                            }
-                        ),
-                        removed,
-                        absent,
-                    )
-                    for kind, removed, absent in canary.cleanup.artifacts
-                )
-            )
-            if not all(
+        scratch_path = Path(tempfile.mkdtemp(prefix="cap-s1-source-observer-"))
+        scratch_identity = scratch_path.lstat()
+        owned_roots.append(
+            _register_cap_s1_owned_root(scratch_path, kind="observer-scratch")
+        )
+        source_root, source_manifest = _owned_cap_s1_source_copy(
+            exact_head=exact_head,
+            scratch_root=scratch_path,
+            owned_roots=owned_roots,
+            process_cleanup=process_cleanup,
+        )
+        output_root = scratch_path / "output"
+        output_root.mkdir(mode=0o700)
+        owned_roots.append(
+            _register_cap_s1_owned_root(output_root, kind="observer-output")
+        )
+        import_origin_digest = _observe_cap_s1_import_origins(
+            source_root=source_root,
+            interpreter=interpreter,
+            process_cleanup=process_cleanup,
+        )
+        local_rows = _observe_cap_s1_local_suite(
+            source_root=source_root,
+            output_root=output_root,
+            interpreter=interpreter,
+            process_cleanup=process_cleanup,
+        )
+        diff_row = _observe_cap_s1_diff(
+            exact_head=exact_head,
+            protected_join=protected_join,
+            process_cleanup=process_cleanup,
+        )
+        mutation_rows = _observe_cap_s1_mutations(
+            exact_head=exact_head,
+            scratch_root=scratch_path,
+            owned_roots=owned_roots,
+            process_cleanup=process_cleanup,
+            interpreter=interpreter,
+        )
+        hosted_run, hosted_rows = _rederive_hosted_job_manifest(
+            run_id=hosted_run_id,
+            exact_head=exact_head,
+            process_cleanup=process_cleanup,
+        )
+        pull, review = _rederive_github_review(
+            review_id=review_id,
+            exact_head=exact_head,
+            process_cleanup=process_cleanup,
+        )
+        secret_root = scratch_path / "secret-scan"
+        secret_root.mkdir(mode=0o700)
+        owned_roots.append(
+            _register_cap_s1_owned_root(secret_root, kind="observer-scratch")
+        )
+        secret_scan = _observe_cap_s1_secret_scan(
+            exact_head=exact_head,
+            protected_join=protected_join,
+            owned_root=secret_root,
+            owned_roots=owned_roots,
+            process_cleanup=process_cleanup,
+        )
+        security_rows = tuple(
+            sorted(
                 (
-                    local_rows,
-                    hosted_run,
-                    hosted_rows,
-                    security_rows,
-                    mutation_rows,
-                    cleanup_rows,
-                    pull,
-                    review,
-                    str(Path(sys.executable).resolve()),
-                    import_origin_digest,
-                )
-            ):
-                raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
-            if (
-                scratch_path.stat().st_dev != scratch_identity.st_dev
-                or scratch_path.stat().st_ino != scratch_identity.st_ino
-            ):
-                raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
-            bound = {
-                "exact_head": exact_head,
-                "exact_tree": exact_tree,
-                "protected_join": protected_join,
-                "provider_attempt_id": canary.provider_attempt_id,
-            }
-            local_proof = _receipt_with_digest(
-                CapS1LocalProofReceipt(
-                    **bound,
-                    suite_count=len(local_rows),
-                    total=sum(sum(row[1:]) for row in local_rows),
-                    passed=sum(row[1] for row in local_rows),
-                    skipped=sum(row[2] for row in local_rows),
-                    failed=sum(row[3] for row in local_rows),
-                    cancelled=sum(row[4] for row in local_rows),
-                    suite_manifest=tuple(sorted(local_rows)),
-                    evidence_digest="",
+                    *_observe_cap_s1_codeql(
+                        exact_head=exact_head,
+                        process_cleanup=process_cleanup,
+                    ),
+                    diff_row,
+                    (
+                        "gitleaks-8.30.1-final-21",
+                        "PASSED",
+                        secret_scan.findings,
+                        secret_scan.evidence_digest,
+                    ),
                 )
             )
-            hosted_status = str(hosted_run.get("status", "")).upper()
-            hosted_conclusion = str(hosted_run.get("conclusion", "")).upper()
-            hosted_passed = sum(
-                status == "COMPLETED" and conclusion == "SUCCESS"
-                for _job_id, _name, status, conclusion in hosted_rows
+        )
+        if not all(
+            (
+                local_rows,
+                hosted_run,
+                hosted_rows,
+                security_rows,
+                mutation_rows,
+                pull,
+                review,
+                interpreter,
+                import_origin_digest,
             )
-            hosted_cancelled = sum(
-                conclusion == "CANCELLED"
-                for _job_id, _name, _status, conclusion in hosted_rows
-            )
-            hosted_proof = _receipt_with_digest(
-                CapS1HostedProofReceipt(
-                    **bound,
-                    run_id=hosted_run_id,
-                    status=hosted_status,
-                    conclusion=hosted_conclusion,
-                    jobs_total=len(hosted_rows),
-                    jobs_passed=hosted_passed,
-                    jobs_failed=len(hosted_rows) - hosted_passed - hosted_cancelled,
-                    jobs_cancelled=hosted_cancelled,
-                    job_manifest=hosted_rows,
-                    evidence_digest="",
+        ):
+            raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+        current_scratch = scratch_path.lstat()
+        if (
+            stat.S_ISLNK(current_scratch.st_mode)
+            or not stat.S_ISDIR(current_scratch.st_mode)
+            or (current_scratch.st_dev, current_scratch.st_ino)
+            != (scratch_identity.st_dev, scratch_identity.st_ino)
+        ):
+            raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+        _revalidate_cap_s1_observer_source(
+            before=source_identity,
+            source_root=source_root,
+            source_manifest=source_manifest,
+            process_cleanup=process_cleanup,
+        )
+        _revalidate_cap_s1_interpreter_identity(interpreter)
+        observer_cleanup_rows = _finalize_cap_s1_observer_cleanup(
+            scratch_path=scratch_path,
+            scratch_device=scratch_identity.st_dev,
+            scratch_inode=scratch_identity.st_ino,
+            owned_roots=owned_roots,
+            process_cleanup=process_cleanup,
+        )
+        cleanup_finished = True
+        cleanup_rows = tuple(
+            sorted(
+                (
+                    *(
+                        (
+                            kind,
+                            _canonical_digest(
+                                {
+                                    "canary_operation_id": canary.canary_operation_id,
+                                    "provider_attempt_id": canary.provider_attempt_id,
+                                    "kind": kind,
+                                }
+                            ),
+                            removed,
+                            absent,
+                        )
+                        for kind, removed, absent in canary.cleanup.artifacts
+                    ),
+                    *observer_cleanup_rows,
                 )
             )
-            security_findings = sum(row[2] for row in security_rows)
-            security_failures = sum(row[1] == "FAILED" for row in security_rows)
-            security_cancelled = sum(row[1] == "CANCELLED" for row in security_rows)
-            security_proof = _receipt_with_digest(
-                CapS1SecurityProofReceipt(
-                    **bound,
-                    status="CLEAN" if not (security_findings or security_failures or security_cancelled) else "FAILED",
-                    tool_count=len(security_rows),
-                    findings=security_findings,
-                    failures=security_failures,
-                    cancelled=security_cancelled,
-                    tool_manifest=security_rows,
-                    evidence_digest="",
-                )
-            )
-            mutation_proof = _receipt_with_digest(
-                CapS1MutationProofReceipt(
-                    **bound,
-                    status="PASSED",
-                    total=len(mutation_rows),
-                    killed=sum(row[1] == "KILLED" for row in mutation_rows),
-                    survived=sum(row[1] == "SURVIVED" for row in mutation_rows),
-                    skipped=sum(row[1] == "SKIPPED" for row in mutation_rows),
-                    errors=sum(row[1] == "ERROR" for row in mutation_rows),
-                    cancelled=sum(row[1] == "CANCELLED" for row in mutation_rows),
-                    mutation_manifest=mutation_rows,
-                    evidence_digest="",
-                )
-            )
-            cleanup_failures = sum(not row[2] for row in cleanup_rows)
-            cleanup_residue = sum(not row[3] for row in cleanup_rows)
-            cleanup_proof = _receipt_with_digest(
-                CapS1CleanupProofReceipt(
-                    **bound,
-                    status="CLEAN" if not (cleanup_failures or cleanup_residue) else "FAILED",
-                    all_removed=not (cleanup_failures or cleanup_residue),
-                    resources_total=len(cleanup_rows),
-                    failures=cleanup_failures,
-                    residue_count=cleanup_residue,
-                    resource_kinds=tuple(row[0] for row in cleanup_rows),
-                    resource_manifest=cleanup_rows,
-                    evidence_digest="",
-                )
-            )
-            pull_author = pull.get("user")
-            reviewer = review.get("user")
-            if type(pull_author) is not dict or type(reviewer) is not dict:
-                raise CapS1ResultError("cap_s1_result_review_state_invalid")
-            review_state = _receipt_with_digest(
-                CapS1ReviewReceipt(
-                    **bound,
-                    author=pull_author.get("login"),
-                    author_id=pull_author.get("id"),
-                    reviewer=reviewer.get("login"),
-                    reviewer_id=reviewer.get("id"),
-                    review_id=review_id,
-                    state=str(review.get("state", "")).upper(),
-                    review_commit=review.get("commit_id"),
-                    evidence_digest="",
-                )
-            )
-            producer_payload = {
-                "schema_version": "mastermind.cap_s1_source_observations/v1",
-                "exact_head": exact_head,
-                "exact_tree": exact_tree,
-                "protected_join": protected_join,
-                "provider_attempt_id": canary.provider_attempt_id,
-                "local_suites": local_rows,
-                "security_tools": security_rows,
-                "mutations": mutation_rows,
-                "cleanup_resources": cleanup_rows,
-                "hosted_jobs": hosted_rows,
-                "review_id": review_id,
-                "interpreter_identity": _canonical_digest(
-                    {
-                        "executable": str(Path(sys.executable).resolve()),
-                        "import_origins": import_origin_digest,
-                    }
-                ),
-            }
-            producer_evidence = CapS1ProducerEvidence(
-                artifact_digest=_canonical_digest(producer_payload),
-                exact_head=exact_head,
-                exact_tree=exact_tree,
-                protected_join=protected_join,
-                provider_attempt_id=canary.provider_attempt_id,
-                local_suites=tuple(sorted(local_rows)),
-                security_tools=security_rows,
-                mutations=mutation_rows,
-                cleanup_resources=cleanup_rows,
-            )
-            return _CapS1ObservedFamilies(
-                exact_head=exact_head,
-                exact_tree=exact_tree,
-                protected_join=protected_join,
-                producer_evidence=producer_evidence,
-                local_proof=local_proof,
-                hosted_proof=hosted_proof,
-                security_proof=security_proof,
-                mutation_proof=mutation_proof,
-                cleanup_proof=cleanup_proof,
-                review_state=review_state,
-            )
-    finally:
-        if scratch_path is not None and scratch_path.exists():
+        )
+        if tuple(row[0] for row in cleanup_rows) != _RESULT_ALL_CLEANUP_KINDS:
             raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+        bound = {
+            "exact_head": exact_head,
+            "exact_tree": exact_tree,
+            "protected_join": protected_join,
+            "provider_attempt_id": canary.provider_attempt_id,
+        }
+        local_proof = _receipt_with_digest(
+            CapS1LocalProofReceipt(
+                **bound,
+                suite_count=len(local_rows),
+                total=sum(sum(row[1:]) for row in local_rows),
+                passed=sum(row[1] for row in local_rows),
+                skipped=sum(row[2] for row in local_rows),
+                failed=sum(row[3] for row in local_rows),
+                cancelled=sum(row[4] for row in local_rows),
+                suite_manifest=tuple(sorted(local_rows)),
+                evidence_digest="",
+            )
+        )
+        hosted_status = str(hosted_run.get("status", "")).upper()
+        hosted_conclusion = str(hosted_run.get("conclusion", "")).upper()
+        hosted_passed = sum(
+            status == "COMPLETED" and conclusion == "SUCCESS"
+            for _job_id, _name, status, conclusion in hosted_rows
+        )
+        hosted_cancelled = sum(
+            conclusion == "CANCELLED"
+            for _job_id, _name, _status, conclusion in hosted_rows
+        )
+        hosted_proof = _receipt_with_digest(
+            CapS1HostedProofReceipt(
+                **bound,
+                run_id=hosted_run_id,
+                status=hosted_status,
+                conclusion=hosted_conclusion,
+                jobs_total=len(hosted_rows),
+                jobs_passed=hosted_passed,
+                jobs_failed=len(hosted_rows) - hosted_passed - hosted_cancelled,
+                jobs_cancelled=hosted_cancelled,
+                job_manifest=hosted_rows,
+                evidence_digest="",
+            )
+        )
+        security_findings = sum(row[2] for row in security_rows)
+        security_failures = sum(row[1] == "FAILED" for row in security_rows)
+        security_cancelled = sum(row[1] == "CANCELLED" for row in security_rows)
+        security_proof = _receipt_with_digest(
+            CapS1SecurityProofReceipt(
+                **bound,
+                status="CLEAN" if not (security_findings or security_failures or security_cancelled) else "FAILED",
+                tool_count=len(security_rows),
+                findings=security_findings,
+                failures=security_failures,
+                cancelled=security_cancelled,
+                tool_manifest=security_rows,
+                evidence_digest="",
+            )
+        )
+        mutation_proof = _receipt_with_digest(
+            CapS1MutationProofReceipt(
+                **bound,
+                status="PASSED",
+                total=len(mutation_rows),
+                killed=sum(row[1] == "KILLED" for row in mutation_rows),
+                survived=sum(row[1] == "SURVIVED" for row in mutation_rows),
+                skipped=sum(row[1] == "SKIPPED" for row in mutation_rows),
+                errors=sum(row[1] == "ERROR" for row in mutation_rows),
+                cancelled=sum(row[1] == "CANCELLED" for row in mutation_rows),
+                mutation_manifest=mutation_rows,
+                evidence_digest="",
+            )
+        )
+        cleanup_failures = sum(not row[2] for row in cleanup_rows)
+        cleanup_residue = sum(not row[3] for row in cleanup_rows)
+        cleanup_proof = _receipt_with_digest(
+            CapS1CleanupProofReceipt(
+                **bound,
+                status="CLEAN" if not (cleanup_failures or cleanup_residue) else "FAILED",
+                all_removed=not (cleanup_failures or cleanup_residue),
+                resources_total=len(cleanup_rows),
+                failures=cleanup_failures,
+                residue_count=cleanup_residue,
+                resource_kinds=tuple(row[0] for row in cleanup_rows),
+                resource_manifest=cleanup_rows,
+                evidence_digest="",
+            )
+        )
+        pull_author = pull.get("user")
+        reviewer = review.get("user")
+        if type(pull_author) is not dict or type(reviewer) is not dict:
+            raise CapS1ResultError("cap_s1_result_review_state_invalid")
+        review_state = _receipt_with_digest(
+            CapS1ReviewReceipt(
+                **bound,
+                author=pull_author.get("login"),
+                author_id=pull_author.get("id"),
+                reviewer=reviewer.get("login"),
+                reviewer_id=reviewer.get("id"),
+                review_id=review_id,
+                state=str(review.get("state", "")).upper(),
+                review_commit=review.get("commit_id"),
+                evidence_digest="",
+            )
+        )
+        producer_payload = {
+            "schema_version": "mastermind.cap_s1_source_observations/v1",
+            "exact_head": exact_head,
+            "exact_tree": exact_tree,
+            "protected_join": protected_join,
+            "provider_attempt_id": canary.provider_attempt_id,
+            "local_suites": local_rows,
+            "security_tools": security_rows,
+            "mutations": mutation_rows,
+            "cleanup_resources": cleanup_rows,
+            "hosted_jobs": hosted_rows,
+            "review_id": review_id,
+            "interpreter_identity": _canonical_digest(
+                {
+                    "entrypoint_identity": interpreter.entrypoint_identity,
+                    "entrypoint_link_target_digest": _canonical_digest(
+                        interpreter.entrypoint_link_target
+                    ),
+                    "resolved_target_identity": interpreter.resolved_target_identity,
+                    "resolved_target_sha256": interpreter.resolved_target_sha256,
+                    "venv_config_identity": interpreter.venv_config_identity,
+                    "venv_config_sha256": interpreter.venv_config_sha256,
+                    "import_origins": import_origin_digest,
+                }
+            ),
+        }
+        producer_evidence = CapS1ProducerEvidence(
+            artifact_digest=_canonical_digest(producer_payload),
+            exact_head=exact_head,
+            exact_tree=exact_tree,
+            protected_join=protected_join,
+            provider_attempt_id=canary.provider_attempt_id,
+            local_suites=tuple(sorted(local_rows)),
+            security_tools=security_rows,
+            mutations=mutation_rows,
+            cleanup_resources=cleanup_rows,
+        )
+        return _CapS1ObservedFamilies(
+            exact_head=exact_head,
+            exact_tree=exact_tree,
+            protected_join=protected_join,
+            producer_evidence=producer_evidence,
+            local_proof=local_proof,
+            hosted_proof=hosted_proof,
+            security_proof=security_proof,
+            mutation_proof=mutation_proof,
+            cleanup_proof=cleanup_proof,
+            review_state=review_state,
+            github_observations=_CapS1GitHubObservations(
+                hosted_run=hosted_run,
+                hosted_rows=hosted_rows,
+                pull=pull,
+                review=review,
+            ),
+        )
+    except Exception as original_error:
+        if (
+            scratch_path is not None
+            and scratch_identity is not None
+            and not cleanup_finished
+            and not _cap_s1_path_absent(scratch_path)
+        ):
+            try:
+                _finalize_cap_s1_observer_cleanup(
+                    scratch_path=scratch_path,
+                    scratch_device=scratch_identity.st_dev,
+                    scratch_inode=scratch_identity.st_ino,
+                    owned_roots=owned_roots,
+                    process_cleanup=process_cleanup,
+                    require_complete=False,
+                )
+            except CapS1ResultError as cleanup_error:
+                raise cleanup_error from original_error
+        raise
 
 
 def validate_cap_s1_result(result: CapS1Result) -> None:
@@ -5033,20 +6771,29 @@ def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
             raise CapS1ResultError("cap_s1_result_source_observer_request_invalid")
     if type(kwargs.get("canary_evidence")) is CanaryEvidence:
         canary = kwargs["canary_evidence"]
-        if id(canary) not in _CANARY_SOURCE_EVIDENCE_IDS:
-            raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
-        _CANARY_SOURCE_EVIDENCE_IDS.discard(id(canary))
-        if not canary.cleanup.all_removed:
-            raise CapS1ResultError("cap_s1_result_cleanup_evidence_unavailable")
+        seal = _claim_cap_s1_canary_seal(canary)
     elif kwargs.get("canary_evidence") is not None:
         raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
     else:
         raise CapS1ResultError("cap_s1_result_cleanup_evidence_unavailable")
-    observed = _run_cap_s1_source_observer(
-        canary=canary,
-        hosted_run_id=kwargs["hosted_run_id"],
-        review_id=kwargs["review_id"],
-    )
+    try:
+        if seal.provenance != "LIVE_DEFAULT_APP_SERVER":
+            raise CapS1ResultError("cap_s1_result_canary_provenance_invalid")
+        if not canary.cleanup.all_removed:
+            raise CapS1ResultError("cap_s1_result_cleanup_evidence_unavailable")
+        observed = _run_cap_s1_source_observer(
+            canary=canary,
+            canary_provenance=seal.provenance,
+            hosted_run_id=kwargs["hosted_run_id"],
+            review_id=kwargs["review_id"],
+        )
+    except CapS1ResultError as error:
+        _finish_cap_s1_canary_seal(canary, seal, failure=error)
+        raise
+    except Exception as unexpected:
+        error = CapS1ResultError("cap_s1_result_source_observation_unavailable")
+        _finish_cap_s1_canary_seal(canary, seal, failure=error)
+        raise error from unexpected
     closures = tuple(sorted(canary.skill_closure_digests))
     result_kwargs = {
         "operation": kwargs["operation"],
@@ -5084,10 +6831,21 @@ def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
         "review_state": observed.review_state,
         "held_non_goals": RESULT_HELD_NON_GOALS,
     }
-    return _assemble_cap_s1_result_from_observations(
-        result_kwargs,
-        producer_evidence=observed.producer_evidence,
-    )
+    try:
+        result = _assemble_cap_s1_result_from_observations(
+            result_kwargs,
+            producer_evidence=observed.producer_evidence,
+            github_observations=observed.github_observations,
+        )
+    except CapS1ResultError as error:
+        _finish_cap_s1_canary_seal(canary, seal, failure=error)
+        raise
+    except Exception as unexpected:
+        error = CapS1ResultError("cap_s1_result_source_observation_unavailable")
+        _finish_cap_s1_canary_seal(canary, seal, failure=error)
+        raise error from unexpected
+    _finish_cap_s1_canary_seal(canary, seal, failure=None)
+    return result
 
 
 # ---------------------------------------------------------------------------
