@@ -88,7 +88,7 @@ import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -102,6 +102,9 @@ from control_plane import chairman_control_room as ccr  # noqa: E402
 from control_plane import surface_bindings as sb  # noqa: E402
 from integrations.chairman_surfaces import capability, chatgpt, contract  # noqa: E402
 from integrations.chairman_surfaces import runner as surfaces_runner  # noqa: E402
+
+# Reuse the compositor's optional-owner fence, including absent Steward.
+autonomy_projection = ccr.autonomy_control_room_projection
 
 #: Default static asset directory (Wave C's private, non-public UI).
 DEFAULT_STATIC_DIR = _REPO_ROOT / "app" / "static" / "chairman_control"
@@ -136,7 +139,237 @@ _CSP = (
 # ---------------------------------------------------------------------------
 
 def _utc_now_z() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    # A rounded-down source reference can predate its elapsed anchor by
+    # almost a second. Preserve precision for the finite validity contract.
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+_VALIDITY_PROFILE = "b5.darwin-chrome-paired-v1"
+_VALIDITY_DISCREPANCY_MS = 8
+_VALIDITY_RESERVE_MS = 16
+_VALIDITY_BRACKET_MS = 1
+_VALIDITY_MAX_PROOFS = 8192
+_VALIDITY_COMPONENTS = ("card", "decision_current", "dispatch", "owed_open_age")
+
+
+def _source_clock_sample() -> tuple[int, int, int, int] | None:
+    """Darwin continuous raw clock only; ordinary monotonic is not a fallback.
+
+    Sampling order is Mlo/Wlo/Mhi/Whi with integer nanosecond conversion.
+    This capability cannot certify an arbitrary browser or the Q premise.
+    """
+    if sys.platform != "darwin" or not hasattr(time, "CLOCK_MONOTONIC_RAW"):
+        return None
+    try:
+        if not 0 < time.clock_getres(time.CLOCK_MONOTONIC_RAW) <= 0.001:
+            return None
+        return (time.clock_gettime_ns(time.CLOCK_MONOTONIC_RAW) // 1000000,
+                time.time_ns() // 1000000,
+                time.clock_gettime_ns(time.CLOCK_MONOTONIC_RAW) // 1000000,
+                time.time_ns() // 1000000)
+    except (OSError, ValueError, OverflowError):
+        return None
+
+
+def _valid_clock_sample(sample: Any) -> bool:
+    return (isinstance(sample, (tuple, list)) and len(sample) == 4
+            and all(type(v) is int and 0 <= v < 2**53 for v in sample)
+            and 0 <= sample[2] - sample[0] <= _VALIDITY_BRACKET_MS
+            and 0 <= sample[3] - sample[1] <= _VALIDITY_BRACKET_MS)
+
+
+def _source_elapsed(anchor: Any, current: Any, previous: Any = None) -> int | None:
+    if not _valid_clock_sample(anchor) or not _valid_clock_sample(current):
+        return None
+    if any(z < a for z, a in zip(current, anchor)):
+        return None
+    if previous is not None:
+        if not _valid_clock_sample(previous) or any(z < p for z, p in zip(current, previous)):
+            return None
+        if _source_elapsed(previous, current) is None:
+            return None
+    dm, dw = current[2] - anchor[0], current[3] - anchor[1]
+    if dm < 0 or dw < 0 or abs(dm - dw) > _VALIDITY_DISCREPANCY_MS:
+        return None
+    return dm
+
+
+def _sample_source_clock(config: ServerConfig) -> Any:
+    try:
+        sample = config.validity_sample_fn()
+    except Exception:  # a failed capability never aborts the read-only document
+        return None
+    return tuple(sample) if _valid_clock_sample(sample) else None
+
+
+def _browser_qualification_context() -> None:
+    """No installed launcher is qualified at this generic HTTP boundary.
+
+    Neither Darwin nor client metadata identifies a supported browser target.
+    A trusted hermetic test may replace this seam after inspecting its owned
+    launcher. No request/header/query/CLI boolean enables it in the product.
+    """
+    return None
+
+
+def _source_remaining(bound: dict[str, Any], sample: Any, config: ServerConfig) -> int | None:
+    if bound.get("invalid") or bound.get("clock_id") != id(config.validity_sample_fn):
+        bound["invalid"] = True
+        return None
+    budget = bound.get("budget")
+    elapsed = _source_elapsed(bound.get("anchor"), sample, bound.get("previous"))
+    if type(budget) is not int or not 0 <= budget <= 176400000 or elapsed is None:
+        bound["invalid"] = True
+        return None
+    bound["previous"] = sample
+    # This is one reserve for the original anchored stage, not one debit per
+    # render/GET. A valid exhausted budget stays zero, never a new STALE fact.
+    return max(0, budget - elapsed - _VALIDITY_RESERVE_MS)
+
+
+def _publish_source_validity(config: ServerConfig, doc: dict[str, Any], anchor: Any, sample: Any) -> None:
+    """Publish beside the existing cache under its existing generation lock."""
+    if autonomy_projection is None:
+        return
+    # Retain anchored proof bounds in the existing cache for its lifetime.
+    # Omission or an intervening different proof cannot forget expiry/poison.
+    # Only the current document selects which bounds are exposed or usable.
+    bounds = config.state_cache.setdefault("source_validity_bounds", {})
+    if config.state_cache.get("source_validity_exhausted"):
+        return
+    autonomy = doc.get("autonomy") or {}
+    reference = autonomy_projection._parse_iso8601(doc.get("generated_at"))
+    reference_ms = ((reference - datetime(1970, 1, 1, tzinfo=timezone.utc)) // timedelta(milliseconds=1)
+                    if reference is not None else None)
+    reference_matches = (_valid_clock_sample(anchor) and _valid_clock_sample(sample)
+                         and reference_ms is not None and anchor[1] - 1 <= reference_ms <= sample[3])
+    for card in autonomy.get("responsibilities", ()):
+        key = (card.get("responsibility_ref"), card.get("root_job_id"))
+        for name in _VALIDITY_COMPONENTS:
+            meta = (card.get("validity") or {}).get(name, {})
+            matching = (reference_matches and meta.get("schema") == autonomy_projection.VALIDITY_SCHEMA
+                        and meta.get("policy") == autonomy_projection.VALIDITY_POLICY
+                        and meta.get("qualified_at") == autonomy.get("generated_at")
+                        and meta.get("qualified_at") == doc.get("generated_at")
+                        and isinstance(meta.get("proof_ref"), str) and len(meta["proof_ref"]) == 64)
+            bound = {"meta": meta, "budget": meta.get("valid_for_ms"), "anchor": anchor,
+                     "previous": anchor, "clock_id": id(config.validity_sample_fn), "invalid": not matching}
+            current_remaining = _source_remaining(bound, sample, config)
+            proof_key = (*key, name, meta.get("proof_ref"))
+            prior = bounds.get(proof_key)
+            if prior is None and len(bounds) >= _VALIDITY_MAX_PROOFS:
+                # Bounded memory without evicting evidence and accidentally
+                # granting the same proof a new deadline. Facts still serve.
+                config.state_cache["source_validity_exhausted"] = True
+                for retained in bounds.values():
+                    retained["invalid"] = True
+                return
+            if prior:
+                prior_remaining = _source_remaining(prior, sample, config)
+                # Same proof keeps its old anchor/expired/refused state. New
+                # publication time and reference rollback cannot renew it.
+                if prior_remaining is None or (current_remaining is not None and prior_remaining <= current_remaining):
+                    bound = dict(prior, meta=meta)
+            bounds[proof_key] = bound
+
+
+def _source_validity_snapshot(config: ServerConfig, sample: Any) -> dict[str, Any]:
+    """Caller holds state_lock; returned data never aliases cached source facts."""
+    cards = []
+    bounds = config.state_cache.get("source_validity_bounds", {})
+    autonomy = (config.state_cache.get("doc") or {}).get("autonomy") or {}
+    for card in autonomy.get("responsibilities", ()):
+        ref, root = card.get("responsibility_ref"), card.get("root_job_id")
+        components = {}
+        for name in _VALIDITY_COMPONENTS:
+            proof = ((card.get("validity") or {}).get(name) or {}).get("proof_ref")
+            bound = bounds.get((ref, root, name, proof))
+            if bound is None:
+                continue
+            remaining = _source_remaining(bound, sample, config)
+            meta = bound["meta"]
+            components[name] = {"proof_ref": meta.get("proof_ref"),
+                                "qualified_at": meta.get("qualified_at"),
+                                "remaining_ms": remaining,
+                                "state": "unqualified" if remaining is None else "current" if remaining > 0 else "expired"}
+        if components:
+            cards.append({"responsibility_ref": ref, "root_job_id": root, "components": components})
+    return {"schema": "mastermind.control_room_source_validity.v1", "profile": _VALIDITY_PROFILE,
+            "browser_qualification": _browser_qualification_context(),
+            "publication_seq": config.state_published_seq, "cards": cards}
+
+
+class _FrozenTarget(dict):
+    """Private immutable dict-compatible value for the existing provider API."""
+
+    def _refuse(self, *args, **kwargs):
+        raise TypeError("the checked navigation target is immutable")
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = __ior__ = _refuse
+
+
+def _freeze_target(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _FrozenTarget({key: _freeze_target(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_target(item) for item in value)
+    return value
+
+
+_OWED_CONTEXT_KEYS = frozenset({"schema", "publication_seq", "responsibility_ref", "root_job_id",
+                                "proof_ref", "binding_fingerprint", "owed_seat"})
+
+
+def _owed_context_shape(context: Any) -> bool:
+    return (isinstance(context, dict) and set(context) == _OWED_CONTEXT_KEYS
+            and context.get("schema") == "mastermind.owed_navigation.v1"
+            and type(context.get("publication_seq")) is int and context["publication_seq"] > 0
+            and all(isinstance(context.get(key), str) and 0 < len(context[key]) <= 512
+                    for key in _OWED_CONTEXT_KEYS - {"publication_seq"}))
+
+
+def _owed_handoff_current(config: ServerConfig, context: dict[str, Any], binding: dict[str, Any],
+                          current_bindings: list[dict[str, Any]]) -> bool:
+    """Compare at handoff, after the binding read, with no await or queue.
+
+    The file owner has no conditional-write primitive. This guards the exact
+    loaded immutable target and current publication; it is not an atomic
+    lease over future filesystem/provider changes. The provider still owns
+    its validation and effect. No composition lock spans that provider call.
+    """
+    if autonomy_projection is None or not _owed_context_shape(context):
+        return False
+    candidates = [row for row in current_bindings
+                  if row.get("work_ref") == context["responsibility_ref"]
+                  and row.get("role") == context["owed_seat"]]
+    if len(candidates) != 1 or candidates[0] != binding:
+        return False
+    fingerprint = autonomy_projection.binding_fingerprint(binding)
+    with config.state_lock:
+        if context["publication_seq"] != config.state_published_seq:
+            return False
+        key = (context["responsibility_ref"], context["root_job_id"])
+        bound = config.state_cache.get("source_validity_bounds", {}).get((*key, "owed_open_age", context["proof_ref"]))
+        if bound is None:
+            return False
+        meta = bound["meta"]
+        cards = ((config.state_cache.get("doc") or {}).get("autonomy") or {}).get("responsibilities", ())
+        card = next((c for c in cards if (c.get("responsibility_ref"), c.get("root_job_id")) == key), None)
+        if (card is None or ((card.get("validity") or {}).get("owed_open_age") or {}) != meta
+                or card.get("is_actionable") is not True
+                or card.get("runtime_root_state") != "RESOLVED"
+                or meta.get("proof_ref") != context["proof_ref"]
+                or meta.get("binding_id") != binding.get("binding_id")
+                or meta.get("binding_fingerprint") != context["binding_fingerprint"]
+                or fingerprint != context["binding_fingerprint"]
+                or binding.get("work_ref") != key[0] or binding.get("role") != context["owed_seat"]
+                or meta.get("owed_seat") != context["owed_seat"]
+                or (card.get("owed_turn") or {}).get("seat") != context["owed_seat"]):
+            return False
+        # Sample last, after all mutable reads and comparison work. A delayed
+        # request cannot use the budget that existed when its button rendered.
+        remaining = _source_remaining(bound, _sample_source_clock(config), config)
+        return remaining is not None and remaining > 0
 
 
 #: Default output cap for the cwd-supporting branch of :func:`default_runner`
@@ -278,6 +511,8 @@ class ServerConfig:
     runner: Callable[..., dict] = default_runner
     now_fn: Callable[[], str] = _utc_now_z
     open_binding_fn: Callable[..., dict] = contract.open_binding
+    #: Server-only elapsed source validity; no fallback and no browser authority.
+    validity_sample_fn: Callable[[], Any] = _source_clock_sample
     #: Overrides for the ``claude_code``/``codex`` native-existence-gate
     #: session-store roots (Sol review 5000169412 blocker 2) — ``None`` (the
     #: production default) means each adapter uses its own real default
@@ -468,6 +703,8 @@ def _refresh_state_cache(
     recomposes doc + census together, "alongside" each other in the same
     cache entry, per the frozen spec.
     """
+    # Anchor before _compose_state_doc captures its source reference or gathers.
+    qualification_anchor = _sample_source_clock(config)
     try:
         doc = _compose_state_doc(config, timeout=timeout)
         capabilities = capability.census(runner=config.runner) if include_capabilities else None
@@ -499,6 +736,7 @@ def _refresh_state_cache(
         published = config.state_published_seq
         floor = config.state_explicit_floor
         if not superseded:
+            _publish_source_validity(config, doc, qualification_anchor, _sample_source_clock(config))
             config.state_cache["doc"] = doc
             if include_capabilities:
                 config.state_cache["capabilities"] = capabilities
@@ -614,6 +852,7 @@ def _cached_state_snapshot(config: ServerConfig) -> dict[str, Any]:
             "composed_at": config.state_cache.get("composed_at"),
             "refresh_in_flight": config.state_refreshes_in_flight > 0,
             "state_refresh_error": config.state_refresh_error,
+            "source_validity": _source_validity_snapshot(config, _sample_source_clock(config)),
         }
 
 
@@ -926,6 +1165,7 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             "composed_at": snapshot["composed_at"],
             "refresh_in_flight": snapshot["refresh_in_flight"],
             "state_refresh_error": snapshot["state_refresh_error"],
+            "source_validity": snapshot["source_validity"],
         }
         self._send_json(200, body, no_store=True)
 
@@ -955,16 +1195,27 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         data, err = self._read_json_body()
         if err:
             return self._bad_request(err)
-        unknown = _unknown_key(data, {"binding_id"})
+        unknown = _unknown_key(data, {"binding_id", "owed_context"})
         if unknown is not None:
             return self._bad_request(f"unknown key: {unknown!r}")
         binding_id = data.get("binding_id")
         if not isinstance(binding_id, str) or not binding_id:
             return self._bad_request("binding_id: required (non-empty string)")
+        owed_route = "owed_context" in data
+        if owed_route and not _owed_context_shape(data["owed_context"]):
+            return self._owed_open_refused()
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
+        open_fn = config.open_binding_fn
+        provider_runner = config.runner
+        provider_options = dict(claude_projects_dir=config.claude_projects_dir,
+                                codex_sessions_dir=config.codex_sessions_dir,
+                                mlx_profiles_root=config.mlx_profiles_root,
+                                gologin_profiles_root=config.gologin_profiles_root)
         doc, problems = sb.load_bindings(config.bindings_path)
         if doc is None:
+            if owed_route:
+                return self._owed_open_refused()
             if problems:
                 outcome = contract.refused(
                     "unknown", binding_id, "invalid_binding", "the bindings file failed validation"
@@ -980,16 +1231,16 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             None,
         )
         if binding is None:
+            if owed_route:
+                return self._owed_open_refused()
             outcome = contract.refused("unknown", binding_id, "not_found", "no binding with this id exists")
             return self._send_json(200, outcome, no_store=True)
 
-        outcome = config.open_binding_fn(
-            binding, config.runner,
-            claude_projects_dir=config.claude_projects_dir,
-            codex_sessions_dir=config.codex_sessions_dir,
-            mlx_profiles_root=config.mlx_profiles_root,
-            gologin_profiles_root=config.gologin_profiles_root,
-        )
+        if owed_route:
+            binding = _freeze_target(binding)
+            if not _owed_handoff_current(config, data["owed_context"], binding, doc["bindings"]):
+                return self._owed_open_refused()
+        outcome = open_fn(binding, provider_runner, **provider_options)
         # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
         # blocker 2): a mere Terminal-launch ACK must never advance this —
         # only an outcome that PROVED the provider-native session/tab exists
@@ -997,13 +1248,19 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         # (chatgpt / claude_desktop / cursor_agent — no proven local read
         # surface) stays BOUND_UNVERIFIED and leaves the bindings file
         # byte-unchanged.
-        if outcome.get("ok") and outcome.get("verified"):
+        if not owed_route and outcome.get("ok") and outcome.get("verified"):
             now = config.now_fn()
             for row in doc["bindings"]:
                 if isinstance(row, dict) and row.get("binding_id") == binding_id:
                     row["last_verified_at"] = now
             sb.save_bindings(doc, config.bindings_path)
         self._send_json(200, outcome, no_store=True)
+
+    def _owed_open_refused(self) -> None:
+        self._send_json(409, {"ok": False, "verified": False,
+                             "failure_kind": "source_precondition_failed",
+                             "detail": "The owed action needs a current read; its source or exact target changed.",
+                             "next_action": "read_current_state"}, no_store=True)
 
     _BIND_ALLOWED_KEYS = frozenset({"work_ref", "role", "provider", "seat_ref", "locator"})
 

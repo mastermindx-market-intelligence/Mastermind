@@ -125,6 +125,93 @@ def _card(doc: dict, work_ref: str) -> dict:
     return matches[0]
 
 
+def _b5_compose(*, observed_at="2026-09-03T00:00:01Z", generated_at="2026-09-05T00:00:00Z",
+                inbox=None, bindings=None, dispatch_evidence=None):
+    """Real mapper/compositor, supplied owner inputs only; no Runtime I/O."""
+    return ccr.compose_control_room(
+        inbox=inbox, boot_packet=None, active_builds=None,
+        agent_os_state={"schema": "agent_os_state.v1", "generated_at": observed_at,
+                        "workstreams": [{"key": "B5", "title": "Bounded evidence",
+                                         "owner": "ceo-sol", "status": "active"}]},
+        runtime_jobs=[{"job_id": "ROOT-B5", "workstream_id": "B5", "parent_job_id": None}],
+        bindings=bindings, binding_problems=(), generated_at=generated_at,
+        dispatch_evidence=dispatch_evidence,
+    )
+
+
+@pytest.mark.parametrize("observed_at, expected_freshness, remaining", [
+    ("2026-09-03T00:00:01Z", "current", 1000),
+    ("2026-09-03T00:00:00Z", "current", 0),
+    ("2026-09-02T23:59:59.999999Z", "stale", None),
+    ("2026-09-05T01:00:00Z", "current", 176400000),
+    ("2026-09-05T01:00:00.000001Z", "unknown", None),
+    ("2026-09-03T01:00:01+01:00", "current", 1000),
+    ("2026-09-03T00:00:01", "current", 1000),
+    ("unreadable", "unknown", None),
+])
+def test_b5_mapper_validity_preserves_source_policy_boundary(observed_at, expected_freshness, remaining):
+    card = _b5_compose(observed_at=observed_at)["autonomy"]["responsibilities"][0]
+    assert card["freshness"] == expected_freshness
+    component = card.get("validity", {}).get("card", {})
+    assert component.get("schema") == "mastermind.autonomy_validity.v1"
+    assert component.get("valid_for_ms") == remaining
+    assert component["qualified_at"] == "2026-09-05T00:00:00Z"
+    assert component["sources"] == card["source_receipts"]
+
+
+def test_b5_source_proof_does_not_renew_on_composition_timestamp():
+    first = _b5_compose()["autonomy"]["responsibilities"][0]
+    later = _b5_compose(generated_at="2026-09-05T00:00:00.500Z")["autonomy"]["responsibilities"][0]
+    a = first.get("validity", {}).get("card", {})
+    b = later.get("validity", {}).get("card", {})
+    assert a.get("valid_for_ms") == 1000
+    assert b.get("valid_for_ms") == 500
+    assert a["proof_ref"] == b["proof_ref"]
+
+
+def test_b5_same_source_keeps_proof_across_expiry_and_reference_rollback():
+    cards = [_b5_compose(generated_at=stamp)["autonomy"]["responsibilities"][0]
+             for stamp in ("2026-09-05T00:00:00Z", "2026-09-05T00:00:02Z",
+                           "2026-09-04T23:59:59Z")]
+    assert [c["freshness"] for c in cards] == ["current", "stale", "current"]
+    assert len({c["validity"]["card"]["proof_ref"] for c in cards}) == 1
+
+
+def test_b5_independent_attention_dependency_withdraws_only_its_card():
+    from control_plane import autonomy_control_room_projection as projection
+    inputs = dict(inbox={"generated_at": "2026-09-03T00:00:01Z", "attention": [{
+        "attention_id": "ATTENTION-B5", "target": "chairman", "kind": "decision",
+        "reason": "Choose the bounded option", "workstream": "WS:B5"}]},
+        boot_packet=None, active_builds=None, runtime_jobs=None, bindings=None,
+        generated_at="2026-09-05T00:00:00Z", agent_os_state={
+            "schema": "agent_os_state.v1", "generated_at": "2026-09-05T00:00:00Z",
+            "workstreams": [{"key": key, "title": key, "owner": "ceo-sol", "status": "active"}
+                            for key in ("B5", "STABLE")]})
+    snapshot = projection.build_autonomy_snapshot(**inputs)
+    context = projection.build_autonomy_validity_context(**inputs)
+    doc = projection.project_autonomy(snapshot, generated_at=inputs["generated_at"], validity_context=context)
+    cards = {c["responsibility_ref"]: c for c in doc["responsibilities"]}
+    assert cards["WS:B5"]["validity"]["card"]["valid_for_ms"] == 1000
+    assert cards["WS:B5"]["validity"]["decision_current"]["valid_for_ms"] == 1000
+    assert cards["WS:STABLE"]["validity"]["card"]["valid_for_ms"] == 172800000
+    assert cards["WS:B5"]["chairman_decision_required"] is True
+
+
+def test_b5_raw_current_or_mismatched_context_cannot_enroll_presentation():
+    from control_plane import autonomy_control_room_projection as projection
+    inputs = dict(inbox=None, boot_packet=None, active_builds=None, runtime_jobs=None,
+                  bindings=None, generated_at="2026-09-05T00:00:00Z", agent_os_state={
+                      "schema": "agent_os_state.v1", "generated_at": "2026-09-05T00:00:00Z",
+                      "workstreams": [{"key": "B5", "title": "B5", "owner": "ceo-sol", "status": "active"}]})
+    snapshot = projection.build_autonomy_snapshot(**inputs)
+    context = projection.build_autonomy_validity_context(**inputs)
+    for supplied, stamp in ((None, inputs["generated_at"]), (context, "2026-09-05T00:00:00.001Z")):
+        card = projection.project_autonomy(snapshot, generated_at=stamp,
+                                           validity_context=supplied)["responsibilities"][0]
+        assert card["freshness"] == "current"
+        assert card["validity"]["card"]["valid_for_ms"] is None
+
+
 # ---------------------------------------------------------------------------
 # schema pins + closed output contract
 # ---------------------------------------------------------------------------
@@ -2196,6 +2283,10 @@ def test_actual_server_cold_and_warm_paths_preserve_canonical_dispatch_cases(
     cold_dispatch = _dispatch_for(cold, "WS:WARM-CACHE-DISPATCH")
     warm_dispatch = _dispatch_for(warm, "WS:WARM-CACHE-DISPATCH")
     assert cold_dispatch == warm_dispatch
+    cold_card = next(c for c in cold["autonomy"]["responsibilities"] if c["responsibility_ref"] == "WS:WARM-CACHE-DISPATCH")
+    warm_card = next(c for c in warm["autonomy"]["responsibilities"] if c["responsibility_ref"] == "WS:WARM-CACHE-DISPATCH")
+    assert cold_card["validity"] == warm_card["validity"]
+    assert set(cold_card["validity"]) == {"card", "decision_current", "dispatch", "owed_open_age"}
     assert warm_dispatch["dispatch_state"] == expected_state
     assert warm_dispatch["historical"] is expected_historical
     assert supplied_snapshot == supplied_before
