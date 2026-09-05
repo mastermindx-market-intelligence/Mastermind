@@ -26,13 +26,21 @@ import argparse
 import dataclasses
 import hashlib
 import importlib
+import io
 import json
 import os
 import re
+import resource
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import tarfile
+import tempfile
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -103,6 +111,7 @@ SYNTHETIC_DECISION_BRANCH = "branch-alpha"
 
 CANARY_CLEANUP_SCHEMA_VERSION = "mastermind.cap_s1_canary_cleanup/v1"
 CANARY_EVIDENCE_SCHEMA_VERSION = "mastermind.cap_s1_canary_evidence/v1"
+_CANARY_SOURCE_EVIDENCE_IDS: set[int] = set()
 
 # CAP-S1 Sol review item 1 (single-binary law): the fake realm's schema
 # fixture and its App Server used to be two DIFFERENT files -- a print/write
@@ -1656,11 +1665,16 @@ def run_canary(
             artifacts.append((kind, removed, verified_absent))
         cleanup_record = CanaryCleanupRecord(artifacts=tuple(artifacts))
 
-    return dataclasses.replace(
+    evidence = dataclasses.replace(
         evidence_local,
         cleanup=cleanup_record,
         terminal_process_state=process_result.get("terminal_process_state", "UNKNOWN"),
     )
+    # Invocation-local authenticity: only the exact object returned by this
+    # ``run_canary`` call can be consumed by the immediate result constructor.
+    # The set is process-local, never serialized, and the id is consumed once.
+    _CANARY_SOURCE_EVIDENCE_IDS.add(id(evidence))
+    return evidence
 
 
 # ---------------------------------------------------------------------------
@@ -1670,10 +1684,10 @@ def run_canary(
 # Before this commission no closed result validator existed at all, and
 # ``CanaryEvidence`` alone accepted an empty candidate identity anywhere it
 # was hand-assembled outside ``run_canary``. This section delivers the
-# closed validator + constructor only -- the principal assembles the real
-# packet (from a completed ``run_canary`` call, hosted CI evidence, review
-# state, etc.) later; this module never itself calls
-# ``build_cap_s1_result``.
+# closed validator, source-owned observer and immediate constructor.  The
+# serialized packet is a report rather than an authority input; production
+# proof is derived inside the same invocation from ``run_canary`` cleanup,
+# fixed local/mutation/security commands and authenticated GitHub reads.
 
 RESULT_CONTRACT_MARKER = "cap-s1-result-contract-v1"
 RESULT_CONTRACT_SCHEMA = "mastermind.cap_s1_result/v1"
@@ -1704,6 +1718,166 @@ RESULT_CHANGED_PATHS = (
     "tests/test_ohf_p1a_operator_harness_contract.py",
     "tests/test_ohf_protocol_fidelity.py",
 )
+
+# Source-owned CAP-S1 proof registry.  These values are deliberately data, not
+# arguments: callers may identify a run/review, but may not choose the command,
+# source paths, endpoints, parsers, environment, scanners or mutant policy that
+# decide whether the result is evidence-backed.
+CAP_S1_OBSERVER_TEST_MODULES = (
+    "tests/test_cap_s1_mastermind_operator_canary.py",
+    "tests/test_codex_operator_adapter.py",
+    "tests/test_control_room_remote_install.py",
+    "tests/test_executive_agent_capabilities.py",
+    "tests/test_executive_agent_capabilities_v4.py",
+    "tests/test_executive_capability_packages.py",
+    "tests/test_ohf_p1a_operator_harness_contract.py",
+    "tests/test_ohf_protocol_fidelity.py",
+    "tests/test_a2_agent_relay_host_prepare.py",
+    "tests/test_autonomy_control_room_projection.py",
+    "tests/test_chairman_cognition_agentos_warning_currentness.py",
+    "tests/test_chairman_cognition_sources.py",
+    "tests/test_chairman_control_room.py",
+    "tests/test_chairman_control_room_remote.py",
+    "tests/test_chairman_control_room_ui_x1.py",
+    "tests/test_mas115_setup.py",
+    "tests/test_nonseat_canary.py",
+)
+CAP_S1_OBSERVER_GITHUB_ENDPOINT_FAMILIES = (
+    "repos/{repository}/commits/{head}/check-runs",
+    "repos/{repository}/check-runs/{check_run_id}",
+    "repos/{repository}/actions/runs/{run_id}",
+    "repos/{repository}/actions/runs/{run_id}/jobs?per_page=100&page={page}",
+    "repos/{repository}/code-scanning/analyses?ref={head_ref}&per_page=100&page={page}",
+    "repos/{repository}/code-scanning/alerts?ref={head_ref}&state=open&per_page=100&page={page}",
+)
+CAP_S1_OBSERVER_MUTANTS = (
+    (
+        "CAP_A_UNRELATED_SKILL_ACCEPTED",
+        "tests/test_cap_s1_mastermind_operator_canary.py::"
+        "test_run_canary_pathless_request_with_unrelated_skill_fragment_refuses_before_thread_start",
+    ),
+    (
+        "CAP_B_FORGED_PRODUCER_ACCEPTED",
+        "tests/test_cap_s1_mastermind_operator_canary.py::"
+        "test_cap_s1_result_refuses_wholly_forged_producer_family",
+    ),
+    (
+        "CAP_C_FIRST_EFFECT_CLEANUP_BYPASSED",
+        "tests/test_cap_s1_mastermind_operator_canary.py::"
+        "test_run_canary_fake_auth_setup_failure_cleans_first_owned_effect",
+    ),
+)
+CAP_S1_OBSERVER_MUTANT_TRANSFORMS = (
+    (
+        "CAP_A_UNRELATED_SKILL_ACCEPTED",
+        "scripts/ohf/cap_s1_mastermind_operator_canary.py",
+        "    return _turn_start_document_supports_skill_input_path(document)\n",
+        "    return _turn_start_document_supports_skill_input_path(document) or "
+        "'\"path\"' in json.dumps(document, sort_keys=True)\n",
+    ),
+    (
+        "CAP_B_FORGED_PRODUCER_ACCEPTED",
+        "scripts/ohf/cap_s1_mastermind_operator_canary.py",
+        "    if forbidden_proof_inputs:\n        raise CapS1ResultError(\n"
+        "            \"cap_s1_result_caller_proof_authority_forbidden\"\n        )\n",
+        "    if False and forbidden_proof_inputs:\n        raise CapS1ResultError(\n"
+        "            \"cap_s1_result_caller_proof_authority_forbidden\"\n        )\n",
+    ),
+    (
+        "CAP_C_FIRST_EFFECT_CLEANUP_BYPASSED",
+        "scripts/ohf/cap_s1_mastermind_operator_canary.py",
+        "            for _kind, cleanup_action in reversed(cleanup_actions):\n"
+        "                try:\n                    cleanup_action()\n"
+        "                except Exception:  # noqa: BLE001 -- preserve the setup failure\n"
+        "                    pass\n",
+        "            for _kind, cleanup_action in reversed(cleanup_actions):\n"
+        "                try:\n                    continue\n"
+        "                except Exception:  # noqa: BLE001 -- preserve the setup failure\n"
+        "                    pass\n",
+    ),
+)
+CAP_S1_OBSERVER_ENVIRONMENT_KEYS = (
+    "LANG",
+    "LC_ALL",
+    "OHF_FAKE_STATE",
+    "PATH",
+    "PYTHONDONTWRITEBYTECODE",
+    "PYTHONHASHSEED",
+    "PYTHONNOUSERSITE",
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+)
+CAP_S1_GITLEAKS_VERSION = "8.30.1"
+CAP_S1_GITLEAKS_SOURCE_COMMIT = "83d9cd684c87d95d656c1458ef04895a7f1cbd8e"
+CAP_S1_GITLEAKS_ARCHIVE_NAME = "gitleaks_8.30.1_darwin_arm64.tar.gz"
+CAP_S1_GITLEAKS_ARCHIVE_URL = (
+    "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/"
+    "gitleaks_8.30.1_darwin_arm64.tar.gz"
+)
+CAP_S1_GITLEAKS_ARCHIVE_BYTES = 7_897_593
+CAP_S1_GITLEAKS_ARCHIVE_SHA256 = (
+    "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5"
+)
+CAP_S1_GITLEAKS_CHECKSUM_URL = (
+    "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/"
+    "gitleaks_8.30.1_checksums.txt"
+)
+CAP_S1_GITLEAKS_CHECKSUM_BYTES = 999
+CAP_S1_GITLEAKS_CHECKSUM_SHA256 = (
+    "061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae"
+)
+CAP_S1_GITLEAKS_RULE_URL = (
+    "https://raw.githubusercontent.com/gitleaks/gitleaks/"
+    f"{CAP_S1_GITLEAKS_SOURCE_COMMIT}/config/gitleaks.toml"
+)
+CAP_S1_GITLEAKS_RULE_BYTES = 97_731
+CAP_S1_GITLEAKS_RULE_SHA256 = (
+    "e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf"
+)
+CAP_S1_GITLEAKS_RULE_COUNT = 222
+CAP_S1_GITLEAKS_ARCHIVE_MEMBERS = ("LICENSE", "README.md", "gitleaks")
+CAP_S1_GITLEAKS_BINARY_MEMBER = "gitleaks"
+CAP_S1_OBSERVER_SECRET_SCAN_STATE = (
+    "POLICY_ACCEPTED/BINARY_HASH_UNOBSERVED/VERSION_UNOBSERVED/SCAN_UNRUN/"
+    "EVIDENCE_UNAVAILABLE_HOLD"
+)
+CAP_S1_SECRET_CONTROL_RECIPES = (
+    (
+        "private-key",
+        ((b"control = \"private-key\"\n", 1), (b"-----BE", 1),
+         (b"GIN PRIVATE KEY-----\n", 1),
+         (b"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n", 1),
+         (b"-----EN", 1), (b"D PRIVATE KEY-----\n", 1)),
+        1,
+        "5a0f3778f8ac6fd93ef9dc6d454a45197c195fa9a1084a4ccd88d87d5a420bee",
+    ),
+    (
+        "slack-bot-token",
+        ((b"control = \"slack-bot-token\"\nslack_bot = \"", 1),
+         (b"xoxb-", 1), (b"123456789012-", 2), (b"A", 24), (b"\"\n", 1)),
+        1,
+        "d017fd4bc360266440d4ca1b59c5adbaa40e50196e26e74b3467c3b5ce9f1044",
+    ),
+    (
+        "stripe-access-token",
+        ((b"control = \"stripe-access-token\"\nstripe_key = \"", 1),
+         (b"sk_", 1), (b"test_", 1), (b"A", 24), (b"\"\n", 1)),
+        1,
+        "cf57b04b5dd70da2928e7d72684e0ba2054cf1f0e02ccdd866d6e45be31b84f0",
+    ),
+)
+CAP_S1_SECRET_SCAN_TEST_NODES = (
+    "test_cap_s1_secret_scan_policy_registry_is_exact_and_unobserved",
+    "test_cap_s1_secret_control_recipes_assemble_only_in_owned_scratch",
+    "test_cap_s1_secret_archive_member_policy_rejects_hostile_members",
+    "test_cap_s1_secret_report_parser_requires_complete_clean_evidence",
+    "test_cap_s1_secret_report_parser_preserves_findings_and_rejects_forgery",
+    "test_cap_s1_secret_source_stage_is_immutable_complete_and_bounded",
+)
+_CAP_S1_OBSERVER_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+_CAP_S1_OBSERVER_MAX_JUNIT_BYTES = 16 * 1024 * 1024
+_CAP_S1_SECRET_MAX_STREAM_BYTES = 16 * 1024 * 1024
+_CAP_S1_SECRET_MAX_FILE_BYTES = 2 * 1024 * 1024
+_CAP_S1_SECRET_MAX_CLOSURE_BYTES = 10 * 1024 * 1024
 RESULT_HELD_NON_GOALS = (
     "NO_CAP_PROMOTE1",
     "NO_DEFAULT_V4_PROMOTION",
@@ -1848,14 +2022,46 @@ CAP_S1_PRODUCER_EVIDENCE_SCHEMA = "mastermind.cap_s1_producer_evidence/v1"
 _RESULT_MAX_PRODUCER_EVIDENCE_BYTES = 1024 * 1024
 
 
+def _strict_json_loads(payload: "str | bytes", *, error: str) -> Any:
+    """Parse JSON while refusing duplicate keys and non-JSON constants.
+
+    ``json.loads`` otherwise keeps the last duplicate member.  At an evidence
+    boundary that would let a displayed preimage and the value actually used by
+    validation disagree.  The public error is intentionally fixed/non-echoing.
+    """
+
+    def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate json member")
+            result[key] = value
+        return result
+
+    def _constant(_value: str) -> None:
+        raise ValueError("non-json numeric constant")
+
+    try:
+        if isinstance(payload, bytes):
+            payload = payload.decode("utf-8")
+        return json.loads(
+            payload,
+            object_pairs_hook=_pairs,
+            parse_constant=_constant,
+        )
+    except (UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise CapS1ResultError(error) from exc
+
+
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class CapS1ProducerEvidence:
-    """Immutable producer artifact reopened by result validation.
+    """Immutable same-invocation observation summary.
 
-    This object is never accepted from a result caller.  It is constructed
-    only by :func:`_load_cap_s1_producer_evidence` from one read-only,
-    no-follow regular file whose identity is stable across the bounded read.
-    The public result carries only ``artifact_digest``.
+    Production constructs this only from the source-owned observer.  The
+    read-only file loader below is retained solely for structural fixture
+    tests and is unreachable from :func:`build_cap_s1_result`.  The public
+    result carries only ``artifact_digest``; no caller-supplied instance is
+    accepted as proof.
     """
 
     artifact_digest: str
@@ -1872,14 +2078,11 @@ class CapS1ProducerEvidence:
 def _load_cap_s1_producer_evidence(
     path: "str | os.PathLike[str] | None",
 ) -> CapS1ProducerEvidence:
-    """Reopen and derive the four non-GitHub proof manifests.
+    """Fixture-only loader for structural hostile-result tests.
 
-    The artifact is a content-addressed producer boundary, not another
-    caller-authored result receipt.  It must be a stable, read-only regular
-    file; symlinks and files that change across the bounded read are refused.
-    Security, mutation, and cleanup row digests are derived from concrete JSON
-    preimages retained in the artifact instead of accepting opaque 64-hex
-    labels from the result caller.
+    Production never calls this loader.  Fixtures still require a stable,
+    read-only regular file so the legacy contract tests cannot pass through a
+    symlink, mutable file or duplicate-key JSON document.
     """
 
     error = "cap_s1_result_producer_evidence_invalid"
@@ -1927,11 +2130,9 @@ def _load_cap_s1_producer_evidence(
         ):
             raise ValueError("producer evidence changed")
 
-        def _reject_non_json_constant(_value: str) -> None:
-            raise ValueError("non-json numeric constant")
-
-        raw = json.loads(
-            payload_bytes.decode("utf-8"), parse_constant=_reject_non_json_constant
+        raw = _strict_json_loads(
+            payload_bytes,
+            error="cap_s1_result_producer_evidence_invalid",
         )
         keys = {
             "schema_version",
@@ -2183,8 +2384,11 @@ def _github_api_json(endpoint: str) -> Any:
             text=True,
             timeout=30,
         )
-        payload = json.loads(completed.stdout)
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        payload = _strict_json_loads(
+            completed.stdout,
+            error="cap_s1_result_github_evidence_unavailable",
+        )
+    except (OSError, subprocess.SubprocessError, CapS1ResultError) as exc:
         raise CapS1ResultError("cap_s1_result_github_evidence_unavailable") from exc
     if type(payload) is not dict:
         raise CapS1ResultError("cap_s1_result_github_evidence_unavailable")
@@ -2517,10 +2721,10 @@ def _validate_canary_evidence(
         raise CapS1ResultError("cap_s1_result_canary_evidence_cleanup_invalid")
 
 
-def validate_cap_s1_result(
+def _validate_cap_s1_result_against_producer(
     result: CapS1Result,
     *,
-    producer_evidence_path: "str | os.PathLike[str] | None",
+    producer_evidence: CapS1ProducerEvidence,
 ) -> None:
     """Refuse anything not conforming to the closed
     ``mastermind.cap_s1_result/v1`` contract. Every refusal is a fixed,
@@ -2657,7 +2861,6 @@ def validate_cap_s1_result(
         for receipt in bound_receipts
     ):
         raise CapS1ResultError("cap_s1_result_cross_binding_mismatch")
-    producer_evidence = _load_cap_s1_producer_evidence(producer_evidence_path)
     if (
         producer_evidence.artifact_digest != result.producer_evidence_digest
         or producer_evidence.exact_head != result.exact_head
@@ -2913,12 +3116,32 @@ def validate_cap_s1_result(
         raise CapS1ResultError("cap_s1_result_held_non_goals_invalid")
 
 
-def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
-    """Construct, then validate, a :class:`CapS1Result` -- the one lawful
-    way to obtain an instance believed to satisfy the closed contract."""
+def _build_cap_s1_result_from_fixture(**kwargs: Any) -> CapS1Result:
+    """Fixture-only assembler for structural contract tests.
+
+    Production callers must use :func:`build_cap_s1_result`; this helper is
+    intentionally private and still cross-checks every submitted family
+    against the bounded fixture artifact.  It exists so unit tests can cover
+    the closed result schema without invoking the production 17-module or
+    mutation observer recursively.
+    """
 
     producer_evidence_path = kwargs.pop("producer_evidence_path", None)
     producer_evidence = _load_cap_s1_producer_evidence(producer_evidence_path)
+    return _assemble_cap_s1_result_from_observations(
+        kwargs,
+        producer_evidence=producer_evidence,
+    )
+
+
+def _assemble_cap_s1_result_from_observations(
+    raw_kwargs: Mapping[str, Any],
+    *,
+    producer_evidence: CapS1ProducerEvidence,
+) -> CapS1Result:
+    """Immediate constructor used only with source-owned observations."""
+
+    kwargs = dict(raw_kwargs)
     if "producer_evidence_digest" in kwargs:
         raise CapS1ResultError("cap_s1_result_producer_evidence_invalid")
     kwargs["producer_evidence_digest"] = producer_evidence.artifact_digest
@@ -3041,8 +3264,1830 @@ def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
             kwargs["canary_evidence"]
         )
     result = CapS1Result(**kwargs)
-    validate_cap_s1_result(result, producer_evidence_path=producer_evidence_path)
+    _validate_cap_s1_result_against_producer(
+        result,
+        producer_evidence=producer_evidence,
+    )
     return result
+
+
+def cap_s1_observer_registry() -> dict[str, object]:
+    """Return the closed, public-safe production observer registry.
+
+    This is descriptive evidence for review, not an execution API.  It
+    intentionally contains templates and repository-relative identities only;
+    no host path, environment value, credential or callback is projected.
+    """
+
+    return {
+        "schema_version": "mastermind.cap_s1_source_observer_registry/v1",
+        "python_argv": (
+            "<trusted-current-python>",
+            "-I",
+            "-m",
+            "pytest",
+            "-q",
+            "--junitxml",
+            "<owned-output>",
+            *CAP_S1_OBSERVER_TEST_MODULES,
+        ),
+        "diff_argv": (
+            "git",
+            "--no-pager",
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--check",
+            "<verified-protected>...<verified-head>",
+            "--",
+            *RESULT_CHANGED_PATHS,
+        ),
+        "github_get_endpoint_families": CAP_S1_OBSERVER_GITHUB_ENDPOINT_FAMILIES,
+        "mutants": CAP_S1_OBSERVER_MUTANTS,
+        "mutant_transforms": tuple(
+            (
+                mutation_id,
+                relative_path,
+                hashlib.sha256(preimage.encode("utf-8")).hexdigest(),
+                hashlib.sha256(postimage.encode("utf-8")).hexdigest(),
+            )
+            for mutation_id, relative_path, preimage, postimage
+            in CAP_S1_OBSERVER_MUTANT_TRANSFORMS
+        ),
+        "environment_keys": CAP_S1_OBSERVER_ENVIRONMENT_KEYS,
+        "secret_scan": CAP_S1_OBSERVER_SECRET_SCAN_STATE,
+        "secret_supply": {
+            "version": CAP_S1_GITLEAKS_VERSION,
+            "source_commit": CAP_S1_GITLEAKS_SOURCE_COMMIT,
+            "archive": (
+                CAP_S1_GITLEAKS_ARCHIVE_URL,
+                CAP_S1_GITLEAKS_ARCHIVE_BYTES,
+                CAP_S1_GITLEAKS_ARCHIVE_SHA256,
+            ),
+            "checksum": (
+                CAP_S1_GITLEAKS_CHECKSUM_URL,
+                CAP_S1_GITLEAKS_CHECKSUM_BYTES,
+                CAP_S1_GITLEAKS_CHECKSUM_SHA256,
+            ),
+            "rule": (
+                CAP_S1_GITLEAKS_RULE_URL,
+                CAP_S1_GITLEAKS_RULE_BYTES,
+                CAP_S1_GITLEAKS_RULE_SHA256,
+                CAP_S1_GITLEAKS_RULE_COUNT,
+            ),
+            "archive_members": CAP_S1_GITLEAKS_ARCHIVE_MEMBERS,
+            "binary_member": CAP_S1_GITLEAKS_BINARY_MEMBER,
+            "binary_sha256": "UNOBSERVED",
+            "binary_version": "UNOBSERVED",
+        },
+        "secret_argv": (
+            "<verified-owned-gitleaks>",
+            "dir",
+            "<verified-owned-21-path-tree>",
+            "--config",
+            "<verified-pinned-rule-file>",
+            "--redact=100",
+            "--no-banner",
+            "--log-level",
+            "trace",
+            "--report-format",
+            "json",
+            "--report-path",
+            "<owned-private-report>",
+            "--exit-code",
+            "10",
+            "--ignore-gitleaks-allow",
+            "--gitleaks-ignore-path",
+            "<owned-empty-ignore-file>",
+            "--max-target-megabytes",
+            "0",
+            "--max-archive-depth",
+            "0",
+            "--max-decode-depth",
+            "5",
+            "--timeout",
+            "120",
+        ),
+        "secret_environment_keys": ("HOME", "LANG", "LC_ALL", "PATH", "TMPDIR"),
+        "secret_controls": tuple(
+            (
+                rule_id,
+                tuple(
+                    (hashlib.sha256(segment).hexdigest(), len(segment), repeats)
+                    for segment, repeats in recipe
+                ),
+                expected_count,
+                assembled_sha256,
+            )
+            for rule_id, recipe, expected_count, assembled_sha256
+            in CAP_S1_SECRET_CONTROL_RECIPES
+        ),
+        "secret_test_nodes": CAP_S1_SECRET_SCAN_TEST_NODES,
+    }
+
+
+def _cap_s1_observer_environment(
+    *, owned_state_path: "Path | None" = None
+) -> dict[str, str]:
+    """Build the fixed non-secret child environment from source constants."""
+
+    executable_dir = str(Path(sys.executable).resolve().parent)
+    system_path = os.defpath
+    environment = {
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PATH": os.pathsep.join((executable_dir, system_path)),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    }
+    if owned_state_path is not None:
+        environment["OHF_FAKE_STATE"] = str(owned_state_path)
+    return environment
+
+
+def _run_cap_s1_observer_process(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    timeout: int,
+    owned_state_path: "Path | None" = None,
+) -> subprocess.CompletedProcess[str]:
+    """Single bounded process seam used by the source-owned observer.
+
+    Production callers never receive this seam and cannot inject ``argv``;
+    only the fixed local-suite, diff and three mutation call sites below use
+    it.  Unit tests exercise this small seam without entering the full
+    production observer.
+    """
+
+    try:
+        completed = subprocess.run(
+            list(argv),
+            cwd=cwd,
+            env=_cap_s1_observer_environment(owned_state_path=owned_state_path),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CapS1ResultError("cap_s1_result_source_observation_unavailable") from exc
+    output_size = len(completed.stdout.encode("utf-8")) + len(
+        completed.stderr.encode("utf-8")
+    )
+    if output_size > _CAP_S1_OBSERVER_MAX_OUTPUT_BYTES:
+        raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+    return completed
+
+
+def _parse_cap_s1_junit(
+    junit_path: Path,
+    *,
+    expected_scope: Sequence[str],
+) -> tuple[tuple[str, int, int, int, int], ...]:
+    """Derive complete per-module counts from one bounded JUnit artifact."""
+
+    try:
+        before = junit_path.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_mode & 0o222
+            or not (0 < before.st_size <= _CAP_S1_OBSERVER_MAX_JUNIT_BYTES)
+        ):
+            raise ValueError("unsafe junit")
+        payload = junit_path.read_bytes()
+        after = junit_path.lstat()
+        if (
+            len(payload) != before.st_size
+            or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        ):
+            raise ValueError("unstable junit")
+        root = ET.fromstring(payload)
+    except (OSError, ValueError, ET.ParseError) as exc:
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid") from exc
+
+    counts = {scope: [0, 0, 0, 0] for scope in expected_scope}
+    seen: set[str] = set()
+    testcases = list(root.iter("testcase"))
+    if not testcases:
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+    for case in testcases:
+        classname = case.get("classname", "")
+        name = case.get("name", "")
+        identity = f"{classname}::{name}"
+        if not classname or not name or identity in seen:
+            raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+        seen.add(identity)
+        module_parts = [part for part in classname.split(".") if part.startswith("test_")]
+        if len(module_parts) != 1:
+            raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+        module = module_parts[0]
+        scope = f"tests/{module}.py"
+        if scope not in counts:
+            raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+        failures = len(case.findall("failure")) + len(case.findall("error"))
+        skipped = len(case.findall("skipped"))
+        if failures and skipped:
+            raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+        if failures:
+            counts[scope][2] += 1
+        elif skipped:
+            counts[scope][1] += 1
+        else:
+            counts[scope][0] += 1
+    if any(sum(values) == 0 for values in counts.values()):
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+    return tuple(
+        (scope, values[0], values[1], values[2], values[3])
+        for scope, values in sorted(counts.items())
+    )
+
+
+def _extract_cap_s1_source_archive(archive: bytes, destination: Path) -> None:
+    """Extract an owner-created Git archive without links/path traversal."""
+
+    try:
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as bundle:
+            members = bundle.getmembers()
+            if not members:
+                raise ValueError("empty archive")
+            for member in members:
+                path = Path(member.name)
+                if (
+                    path.is_absolute()
+                    or ".." in path.parts
+                    or member.issym()
+                    or member.islnk()
+                    or not (member.isfile() or member.isdir())
+                ):
+                    raise ValueError("unsafe archive member")
+            bundle.extractall(destination, members=members, filter="data")
+    except (OSError, tarfile.TarError, ValueError) as exc:
+        raise CapS1ResultError("cap_s1_result_source_copy_invalid") from exc
+
+
+def _verify_cap_s1_source_copy(*, source_root: Path, exact_head: str) -> None:
+    """Byte-verify every regular tracked blob in the owned source copy."""
+
+    listing = subprocess.run(
+        ["git", "ls-tree", "-rz", exact_head],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+    for raw_entry in listing.stdout.split(b"\0"):
+        if not raw_entry:
+            continue
+        metadata, separator, raw_path = raw_entry.partition(b"\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 3:
+            raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+        mode, kind, expected_oid = fields
+        if kind != b"blob" or mode not in {b"100644", b"100755"}:
+            continue
+        try:
+            relative = raw_path.decode("utf-8")
+        except UnicodeError as exc:
+            raise CapS1ResultError("cap_s1_result_source_copy_invalid") from exc
+        candidate = source_root / relative
+        if not candidate.is_file() or candidate.is_symlink():
+            raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+        actual = subprocess.run(
+            ["git", "hash-object", "--", str(candidate)],
+            cwd=source_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if actual.returncode != 0 or actual.stdout.strip().encode("ascii") != expected_oid:
+            raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+
+
+def _owned_cap_s1_source_copy(*, exact_head: str, scratch_root: Path) -> Path:
+    status = _run_cap_s1_observer_process(
+        ("git", "status", "--porcelain=v1", "--untracked-files=all"),
+        cwd=REPO_ROOT,
+        timeout=30,
+    )
+    if status.returncode != 0 or status.stdout:
+        raise CapS1ResultError("cap_s1_result_source_checkout_not_clean")
+    archived = subprocess.run(
+        ["git", "archive", "--format=tar", exact_head],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if archived.returncode != 0 or not archived.stdout:
+        raise CapS1ResultError("cap_s1_result_source_copy_invalid")
+    source_root = scratch_root / "verified-source"
+    source_root.mkdir(mode=0o700)
+    _extract_cap_s1_source_archive(archived.stdout, source_root)
+    _verify_cap_s1_source_copy(source_root=source_root, exact_head=exact_head)
+    return source_root
+
+
+def _observe_cap_s1_import_origins(*, source_root: Path) -> str:
+    """Verify fixed source/dependency imports and return only a safe digest."""
+
+    source_modules = (
+        "scripts.ohf.cap_s1_mastermind_operator_canary",
+        "scripts.ohf.capability_skill_projection",
+        "scripts.ohf.protocol",
+        "control_plane.codex_operator_adapter",
+        "control_plane.executive_capability_packages",
+    )
+    probe = (
+        "import importlib, json, os, sys; "
+        "sys.path.insert(0, os.getcwd()); "
+        f"names={source_modules!r} + ('pytest',); "
+        "rows=[]; "
+        "[(lambda m: rows.append((n, str(m.__file__), "
+        "str(getattr(m, '__version__', '')))))(importlib.import_module(n)) "
+        "for n in names]; "
+        "print(json.dumps(rows, separators=(',', ':')))"
+    )
+    completed = _run_cap_s1_observer_process(
+        (str(Path(sys.executable).resolve()), "-I", "-c", probe),
+        cwd=source_root,
+        timeout=120,
+    )
+    if completed.returncode != 0 or completed.stderr:
+        raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+    rows = _strict_json_loads(
+        completed.stdout,
+        error="cap_s1_result_import_origin_invalid",
+    )
+    if type(rows) is not list or len(rows) != len(source_modules) + 1:
+        raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+    safe_rows: list[tuple[str, str, str]] = []
+    source_root_resolved = source_root.resolve()
+    for index, row in enumerate(rows):
+        if type(row) is not list or len(row) != 3:
+            raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+        name, raw_origin, version = row
+        if name != (*source_modules, "pytest")[index] or not isinstance(version, str):
+            raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+        origin = Path(raw_origin).resolve()
+        if index < len(source_modules):
+            try:
+                relative = origin.relative_to(source_root_resolved).as_posix()
+            except ValueError as exc:
+                raise CapS1ResultError("cap_s1_result_import_origin_invalid") from exc
+            safe_origin = relative
+        else:
+            if origin == source_root_resolved or source_root_resolved in origin.parents:
+                raise CapS1ResultError("cap_s1_result_import_origin_invalid")
+            safe_origin = "trusted-interpreter-dependency:pytest"
+        safe_rows.append((name, safe_origin, version))
+    return _canonical_digest(tuple(safe_rows))
+
+
+def _observe_cap_s1_local_suite(
+    *, source_root: Path, output_root: Path
+) -> tuple[tuple[str, int, int, int, int], ...]:
+    junit_path = output_root / "local-suite.xml"
+    argv = (
+        str(Path(sys.executable).resolve()),
+        "-I",
+        "-m",
+        "pytest",
+        "-q",
+        "--junitxml",
+        str(junit_path),
+        *CAP_S1_OBSERVER_TEST_MODULES,
+    )
+    fake_state = output_root / "fake-app-state.json"
+    completed = _run_cap_s1_observer_process(
+        argv,
+        cwd=source_root,
+        timeout=3600,
+        owned_state_path=fake_state,
+    )
+    try:
+        junit_path.chmod(0o444)
+    except OSError as exc:
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid") from exc
+    rows = _parse_cap_s1_junit(junit_path, expected_scope=CAP_S1_OBSERVER_TEST_MODULES)
+    if fake_state.exists():
+        state = fake_state.lstat()
+        if not stat.S_ISREG(state.st_mode) or stat.S_ISLNK(state.st_mode):
+            raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+        fake_state.unlink()
+        if fake_state.exists():
+            raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+    if completed.returncode != 0 or any(row[3] or row[4] for row in rows):
+        raise CapS1ResultError("cap_s1_result_local_proof_invalid")
+    return rows
+
+
+def _observe_cap_s1_diff(*, exact_head: str, protected_join: str) -> tuple[str, str, int, str]:
+    argv = (
+        "git",
+        "--no-pager",
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--check",
+        f"{protected_join}...{exact_head}",
+        "--",
+        *RESULT_CHANGED_PATHS,
+    )
+
+
+def _write_cap_s1_owned_bytes(
+    path: Path,
+    payload: bytes,
+    *,
+    maximum: int = _CAP_S1_OBSERVER_MAX_OUTPUT_BYTES,
+    create: bool = True,
+) -> str:
+    """Complete one bounded owned-file write, then reread/hash its postimage."""
+
+    if len(payload) > maximum:
+        raise CapS1ResultError("cap_s1_result_mutation_write_invalid")
+    descriptor = -1
+    try:
+        flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0)
+        flags |= (os.O_CREAT | os.O_EXCL) if create else os.O_TRUNC
+        descriptor = os.open(path, flags, 0o600)
+        offset = 0
+        while offset < len(payload):
+            written = os.write(descriptor, payload[offset:])
+            if written <= 0:
+                raise OSError("short write")
+            offset += written
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise CapS1ResultError("cap_s1_result_mutation_write_invalid") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    reread = path.read_bytes()
+    if reread != payload:
+        raise CapS1ResultError("cap_s1_result_mutation_write_invalid")
+    return hashlib.sha256(reread).hexdigest()
+    completed = _run_cap_s1_observer_process(argv, cwd=REPO_ROOT, timeout=120)
+    evidence = {
+        "command_registry": "CAP_S1_FIXED_21_DIFF_CHECK",
+        "returncode": completed.returncode,
+        "stdout_bytes": len(completed.stdout.encode("utf-8")),
+        "stderr_bytes": len(completed.stderr.encode("utf-8")),
+        "head": exact_head,
+        "protected": protected_join,
+    }
+    return (
+        "diff-check",
+        "PASSED" if completed.returncode == 0 else "FAILED",
+        0 if completed.returncode == 0 else 1,
+        _canonical_digest(evidence),
+    )
+
+
+def _observe_cap_s1_mutations(
+    *, exact_head: str, scratch_root: Path
+) -> tuple[tuple[str, str, str], ...]:
+    node_by_id = dict(CAP_S1_OBSERVER_MUTANTS)
+    rows: list[tuple[str, str, str]] = []
+    for index, (mutation_id, relative_path, preimage, postimage) in enumerate(
+        CAP_S1_OBSERVER_MUTANT_TRANSFORMS
+    ):
+        mutant_root = scratch_root / f"mutant-{index}"
+        mutant_root.mkdir(mode=0o700)
+        source_root = _owned_cap_s1_source_copy(
+            exact_head=exact_head,
+            scratch_root=mutant_root,
+        )
+        target = source_root / relative_path
+        original = target.read_bytes()
+        original_digest = hashlib.sha256(original).hexdigest()
+        decoded = original.decode("utf-8")
+        if decoded.count(preimage) != 1 or postimage in decoded:
+            raise CapS1ResultError("cap_s1_result_mutation_preimage_invalid")
+        node = node_by_id[mutation_id]
+
+        def _run(label: str) -> tuple[subprocess.CompletedProcess[str], tuple[tuple[str, int, int, int, int], ...]]:
+            junit = mutant_root / f"{label}.xml"
+            completed = _run_cap_s1_observer_process(
+                (
+                    str(Path(sys.executable).resolve()),
+                    "-I",
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--junitxml",
+                    str(junit),
+                    node,
+                ),
+                cwd=source_root,
+                timeout=600,
+                owned_state_path=mutant_root / f"{label}-fake-app-state.json",
+            )
+            junit.chmod(0o444)
+            return completed, _parse_cap_s1_junit(
+                junit,
+                expected_scope=("tests/test_cap_s1_mastermind_operator_canary.py",),
+            )
+
+        control, control_rows = _run("control")
+        mutant_payload = decoded.replace(preimage, postimage).encode("utf-8")
+        mutant_digest = _write_cap_s1_owned_bytes(
+            target,
+            mutant_payload,
+            create=False,
+        )
+        mutant, mutant_rows = _run("mutant")
+        restored_digest = _write_cap_s1_owned_bytes(target, original, create=False)
+        if restored_digest != original_digest:
+            raise CapS1ResultError("cap_s1_result_mutation_restore_invalid")
+        restored, restored_rows = _run("restored")
+        control_failed = sum(row[3] for row in control_rows)
+        mutant_failed = sum(row[3] for row in mutant_rows)
+        restored_failed = sum(row[3] for row in restored_rows)
+        killed = (
+            control.returncode == 0
+            and control_failed == 0
+            and mutant.returncode == 1
+            and mutant_failed == 1
+            and restored.returncode == 0
+            and restored_failed == 0
+        )
+        if not killed:
+            raise CapS1ResultError("cap_s1_result_mutation_proof_invalid")
+        rows.append(
+            (
+                mutation_id,
+                "KILLED",
+                _canonical_digest(
+                    {
+                        "mutation_id": mutation_id,
+                        "node": node,
+                        "preimage": hashlib.sha256(preimage.encode()).hexdigest(),
+                        "postimage": hashlib.sha256(postimage.encode()).hexdigest(),
+                        "source_preimage": original_digest,
+                        "source_postimage": mutant_digest,
+                        "restored": True,
+                    }
+                ),
+            )
+        )
+    return tuple(sorted(rows))
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1SecretSourceEntry:
+    index: int
+    path: str
+    mode: str
+    blob: str
+    size: int
+    sha256: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1SecretScanObservation:
+    status: str
+    findings: int
+    rule_counts: tuple[tuple[str, int], ...]
+    source_file_count: int
+    source_bytes: int
+    binary_sha256: str
+    binary_version: str
+    rule_sha256: str
+    evidence_digest: str
+
+
+def _download_cap_s1_pinned_bytes(*, url: str, expected_size: int, expected_sha256: str) -> bytes:
+    """Bounded fixed-URL supply seam; called only from the closed supplier."""
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(url, headers={"User-Agent": "cap-s1-source-observer/1"})
+    try:
+        with opener.open(request, timeout=60) as response:
+            declared = response.headers.get("Content-Length")
+            if declared is not None and int(declared) != expected_size:
+                raise ValueError("download length")
+            chunks: list[bytes] = []
+            remaining = expected_size + 1
+            while remaining > 0:
+                chunk = response.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        raise CapS1ResultError("cap_s1_result_secret_supply_unavailable") from exc
+    payload = b"".join(chunks)
+    if len(payload) != expected_size or hashlib.sha256(payload).hexdigest() != expected_sha256:
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
+    return payload
+
+
+def _extract_cap_s1_gitleaks_binary(archive: bytes, *, destination: Path) -> str:
+    """Validate canonical members and extract only the pinned executable."""
+
+    try:
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as bundle:
+            members = bundle.getmembers()
+            names = tuple(sorted(member.name for member in members))
+            if names != tuple(sorted(CAP_S1_GITLEAKS_ARCHIVE_MEMBERS)):
+                raise ValueError("archive member census")
+            if len(set(names)) != len(names):
+                raise ValueError("archive duplicate")
+            for member in members:
+                path = Path(member.name)
+                if (
+                    path.is_absolute()
+                    or len(path.parts) != 1
+                    or ".." in path.parts
+                    or member.issym()
+                    or member.islnk()
+                    or not member.isfile()
+                ):
+                    raise ValueError("archive member type")
+            executable = bundle.getmember(CAP_S1_GITLEAKS_BINARY_MEMBER)
+            reader = bundle.extractfile(executable)
+            if reader is None:
+                raise ValueError("archive executable")
+            binary = reader.read(64 * 1024 * 1024 + 1)
+    except (OSError, KeyError, tarfile.TarError, ValueError) as exc:
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid") from exc
+    if not binary or len(binary) > 64 * 1024 * 1024:
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
+    digest = _write_cap_s1_owned_bytes(destination, binary, maximum=64 * 1024 * 1024)
+    destination.chmod(0o700)
+    reread = destination.read_bytes()
+    if hashlib.sha256(reread).hexdigest() != digest or not os.access(destination, os.X_OK):
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
+    return digest
+
+
+def _cap_s1_secret_child_environment(*, owned_root: Path) -> dict[str, str]:
+    home = owned_root / "home"
+    temporary = owned_root / "tmp"
+    home.mkdir(mode=0o700)
+    temporary.mkdir(mode=0o700)
+    return {
+        "HOME": str(home),
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PATH": "/usr/bin:/bin",
+        "TMPDIR": str(temporary),
+    }
+
+
+def _run_cap_s1_secret_process(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    environment_root: Path,
+    stdout_path: Path,
+    stderr_path: Path,
+    timeout: int,
+) -> int:
+    """Run the fixed scanner/version process with private bounded streams."""
+
+    def _limit_output() -> None:
+        resource.setrlimit(
+            resource.RLIMIT_FSIZE,
+            (_CAP_S1_SECRET_MAX_STREAM_BYTES, _CAP_S1_SECRET_MAX_STREAM_BYTES),
+        )
+
+    try:
+        with stdout_path.open("xb") as stdout_file, stderr_path.open("xb") as stderr_file:
+            process = subprocess.Popen(
+                list(argv),
+                cwd=cwd,
+                env=_cap_s1_secret_child_environment(owned_root=environment_root),
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                start_new_session=True,
+                preexec_fn=_limit_output,
+            )
+            try:
+                return_code = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                finally:
+                    process.wait(timeout=10)
+                raise CapS1ResultError("cap_s1_result_secret_scan_incomplete") from exc
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CapS1ResultError("cap_s1_result_secret_scan_incomplete") from exc
+    for stream in (stdout_path, stderr_path):
+        try:
+            size = stream.stat().st_size
+        except OSError as exc:
+            raise CapS1ResultError("cap_s1_result_secret_scan_incomplete") from exc
+        if size > _CAP_S1_SECRET_MAX_STREAM_BYTES:
+            raise CapS1ResultError("cap_s1_result_secret_scan_incomplete")
+    return return_code
+
+
+def _supply_cap_s1_gitleaks(*, owned_root: Path) -> tuple[Path, str, Path]:
+    supply_root = owned_root / "supply"
+    supply_root.mkdir(mode=0o700)
+    archive = _download_cap_s1_pinned_bytes(
+        url=CAP_S1_GITLEAKS_ARCHIVE_URL,
+        expected_size=CAP_S1_GITLEAKS_ARCHIVE_BYTES,
+        expected_sha256=CAP_S1_GITLEAKS_ARCHIVE_SHA256,
+    )
+    checksums = _download_cap_s1_pinned_bytes(
+        url=CAP_S1_GITLEAKS_CHECKSUM_URL,
+        expected_size=CAP_S1_GITLEAKS_CHECKSUM_BYTES,
+        expected_sha256=CAP_S1_GITLEAKS_CHECKSUM_SHA256,
+    )
+    checksum_lines = checksums.decode("utf-8").splitlines()
+    expected_checksum_line = (
+        f"{CAP_S1_GITLEAKS_ARCHIVE_SHA256}  {CAP_S1_GITLEAKS_ARCHIVE_NAME}"
+    )
+    if checksum_lines.count(expected_checksum_line) != 1:
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
+    rule_bytes = _download_cap_s1_pinned_bytes(
+        url=CAP_S1_GITLEAKS_RULE_URL,
+        expected_size=CAP_S1_GITLEAKS_RULE_BYTES,
+        expected_sha256=CAP_S1_GITLEAKS_RULE_SHA256,
+    )
+    try:
+        rule_text = rule_bytes.decode("utf-8")
+    except UnicodeError as exc:
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid") from exc
+    if rule_text.count("[[rules]]") != CAP_S1_GITLEAKS_RULE_COUNT:
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
+    rule_path = supply_root / "gitleaks.toml"
+    rule_digest = _write_cap_s1_owned_bytes(
+        rule_path,
+        rule_bytes,
+        maximum=CAP_S1_GITLEAKS_RULE_BYTES,
+    )
+    rule_path.chmod(0o400)
+    if rule_digest != CAP_S1_GITLEAKS_RULE_SHA256:
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
+    binary_path = supply_root / "gitleaks"
+    binary_digest = _extract_cap_s1_gitleaks_binary(archive, destination=binary_path)
+    version_stdout = supply_root / "version.stdout"
+    version_stderr = supply_root / "version.stderr"
+    version_code = _run_cap_s1_secret_process(
+        (str(binary_path), "version"),
+        cwd=supply_root,
+        environment_root=supply_root / "version-environment",
+        stdout_path=version_stdout,
+        stderr_path=version_stderr,
+        timeout=30,
+    )
+    try:
+        version = version_stdout.read_text(encoding="utf-8").strip()
+        version_error = version_stderr.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid") from exc
+    if version_code != 0 or version != CAP_S1_GITLEAKS_VERSION or version_error:
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
+    if hashlib.sha256(binary_path.read_bytes()).hexdigest() != binary_digest:
+        raise CapS1ResultError("cap_s1_result_secret_supply_invalid")
+    return binary_path, binary_digest, rule_path
+
+
+def _stage_cap_s1_secret_source(
+    *, exact_head: str, protected_join: str, owned_root: Path
+) -> tuple[Path, tuple[_CapS1SecretSourceEntry, ...], int]:
+    """Materialize all 21 immutable final blobs with a closed byte census."""
+
+    try:
+        merge_base = subprocess.run(
+            ["git", "merge-base", protected_join, exact_head],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+        changed = subprocess.run(
+            ["git", "diff", "--name-only", f"{merge_base}...{exact_head}"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CapS1ResultError("cap_s1_result_secret_source_unavailable") from exc
+    if not _result_is_hex40(merge_base) or not set(changed).issubset(RESULT_CHANGED_PATHS):
+        raise CapS1ResultError("cap_s1_result_secret_source_path_boundary")
+
+    source_root = owned_root / "source"
+    source_root.mkdir(mode=0o700)
+    entries: list[_CapS1SecretSourceEntry] = []
+    total_bytes = 0
+    for index, relative in enumerate(RESULT_CHANGED_PATHS, start=1):
+        try:
+            metadata = subprocess.run(
+                ["git", "ls-tree", "-l", exact_head, "--", relative],
+                cwd=REPO_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout.rstrip("\n")
+            prefix, separator, observed_path = metadata.partition("\t")
+            fields = prefix.split()
+            if not separator or observed_path != relative or len(fields) != 4:
+                raise ValueError("tree row")
+            mode, kind, blob, raw_size = fields
+            size = int(raw_size)
+            if (
+                mode not in {"100644", "100755"}
+                or kind != "blob"
+                or not _result_is_hex40(blob)
+                or size < 0
+                or size > _CAP_S1_SECRET_MAX_FILE_BYTES
+            ):
+                raise ValueError("tree identity")
+            payload = subprocess.run(
+                ["git", "cat-file", "blob", blob],
+                cwd=REPO_ROOT,
+                check=True,
+                capture_output=True,
+                timeout=30,
+            ).stdout
+            if len(payload) != size:
+                raise ValueError("blob size")
+            payload.decode("utf-8")
+        except (OSError, UnicodeError, ValueError, subprocess.SubprocessError) as exc:
+            raise CapS1ResultError("cap_s1_result_secret_source_unsupported") from exc
+        total_bytes += size
+        if total_bytes > _CAP_S1_SECRET_MAX_CLOSURE_BYTES:
+            raise CapS1ResultError("cap_s1_result_secret_source_scope_exceeded")
+        destination = source_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        digest = _write_cap_s1_owned_bytes(
+            destination,
+            payload,
+            maximum=_CAP_S1_SECRET_MAX_FILE_BYTES,
+        )
+        destination.chmod(0o500 if mode == "100755" else 0o400)
+        entries.append(
+            _CapS1SecretSourceEntry(
+                index=index,
+                path=relative,
+                mode=mode,
+                blob=blob,
+                size=size,
+                sha256=digest,
+            )
+        )
+    if len(entries) != len(RESULT_CHANGED_PATHS):
+        raise CapS1ResultError("cap_s1_result_secret_source_incomplete")
+    return source_root, tuple(entries), total_bytes
+
+
+def _assemble_cap_s1_secret_controls(*, owned_root: Path) -> tuple[tuple[str, Path, int, str], ...]:
+    control_root = owned_root / "positive-controls"
+    control_root.mkdir(mode=0o700)
+    rows: list[tuple[str, Path, int, str]] = []
+    for rule_id, recipe, expected_count, expected_digest in CAP_S1_SECRET_CONTROL_RECIPES:
+        payload = b"".join(segment * repeats for segment, repeats in recipe)
+        if hashlib.sha256(payload).hexdigest() != expected_digest:
+            raise CapS1ResultError("cap_s1_result_secret_control_invalid")
+        path = control_root / f"{rule_id}.txt"
+        digest = _write_cap_s1_owned_bytes(path, payload)
+        path.chmod(0o400)
+        rows.append((rule_id, path, expected_count, digest))
+    return tuple(rows)
+
+
+_CAP_S1_GITLEAKS_FINDING_KEYS = {
+    "RuleID", "Description", "StartLine", "EndLine", "StartColumn", "EndColumn",
+    "Match", "Secret", "File", "SymlinkFile", "Commit", "Entropy", "Author",
+    "Email", "Date", "Message", "Tags", "Fingerprint",
+}
+
+
+def _parse_cap_s1_gitleaks_report(
+    report_bytes: bytes,
+    *,
+    allowed_rule_ids: "set[str] | None" = None,
+) -> tuple[tuple[str, int], ...]:
+    raw = _strict_json_loads(
+        report_bytes,
+        error="cap_s1_result_secret_report_invalid",
+    )
+    if type(raw) is not list or len(raw) > 10_000:
+        raise CapS1ResultError("cap_s1_result_secret_report_invalid")
+    counts: dict[str, int] = {}
+    for finding in raw:
+        if type(finding) is not dict:
+            raise CapS1ResultError("cap_s1_result_secret_report_invalid")
+        keys = set(finding)
+        if not _CAP_S1_GITLEAKS_FINDING_KEYS.issubset(keys) or not keys.issubset(
+            _CAP_S1_GITLEAKS_FINDING_KEYS | {"Link", "Fragment"}
+        ):
+            raise CapS1ResultError("cap_s1_result_secret_report_invalid")
+        rule_id = finding.get("RuleID")
+        if not _result_safe_manifest_label(rule_id):
+            raise CapS1ResultError("cap_s1_result_secret_report_invalid")
+        if allowed_rule_ids is not None and rule_id not in allowed_rule_ids:
+            raise CapS1ResultError("cap_s1_result_secret_report_invalid")
+        if finding.get("Secret") != "REDACTED":
+            raise CapS1ResultError("cap_s1_result_secret_report_unredacted")
+        if not _result_positive_int(finding.get("StartLine"), maximum=10_000_000):
+            raise CapS1ResultError("cap_s1_result_secret_report_invalid")
+        counts[rule_id] = counts.get(rule_id, 0) + 1
+    return tuple(sorted(counts.items()))
+
+
+_CAP_S1_GITLEAKS_INCOMPLETE_MARKERS = (
+    "partial scan",
+    "skipping directory",
+    "skipping file: could not get info",
+    "skipping file: too large",
+    "skipping file: permission denied",
+    "skipping file: global allowlist",
+    "skipping symlink",
+    "skipping unknown archive type",
+    "skipping archive:",
+    "skipping binary file",
+    "skipping fragment: size",
+    "could not read file",
+    "issue reading file",
+    "failed scan directory",
+)
+
+
+def _parse_cap_s1_gitleaks_coverage(
+    log_bytes: bytes,
+    *,
+    source_root: Path,
+    manifest: Sequence[_CapS1SecretSourceEntry],
+    expected_bytes: int,
+) -> str:
+    try:
+        text = log_bytes.decode("utf-8")
+    except UnicodeError as exc:
+        raise CapS1ResultError("cap_s1_result_secret_scan_incomplete") from exc
+    lowered = text.casefold()
+    if any(marker in lowered for marker in _CAP_S1_GITLEAKS_INCOMPLETE_MARKERS):
+        raise CapS1ResultError("cap_s1_result_secret_scan_incomplete")
+    totals = re.findall(r"scanned ~([0-9]+) bytes", text)
+    if totals != [str(expected_bytes)]:
+        raise CapS1ResultError("cap_s1_result_secret_scan_incomplete")
+    observed: set[str] = set()
+    for line in text.splitlines():
+        if "scanning path" not in line:
+            continue
+        match = re.search(r'path=(?:"([^"]+)"|(\S+))', line)
+        if match is None:
+            raise CapS1ResultError("cap_s1_result_secret_scan_incomplete")
+        raw_path = match.group(1) or match.group(2)
+        try:
+            relative = Path(raw_path).resolve().relative_to(source_root.resolve()).as_posix()
+        except ValueError as exc:
+            raise CapS1ResultError("cap_s1_result_secret_scan_incomplete") from exc
+        observed.add(relative)
+    expected_nonempty = {entry.path for entry in manifest if entry.size > 0}
+    if observed != expected_nonempty:
+        raise CapS1ResultError("cap_s1_result_secret_scan_incomplete")
+    return _canonical_digest(
+        {
+            "paths": tuple(sorted(observed)),
+            "bytes": expected_bytes,
+            "incomplete_markers": False,
+        }
+    )
+
+
+def _verify_cap_s1_secret_manifest(
+    *, source_root: Path, manifest: Sequence[_CapS1SecretSourceEntry]
+) -> None:
+    for entry in manifest:
+        path = source_root / entry.path
+        try:
+            state = path.lstat()
+            payload = path.read_bytes()
+        except OSError as exc:
+            raise CapS1ResultError("cap_s1_result_secret_source_changed") from exc
+        if (
+            not stat.S_ISREG(state.st_mode)
+            or stat.S_ISLNK(state.st_mode)
+            or len(payload) != entry.size
+            or hashlib.sha256(payload).hexdigest() != entry.sha256
+        ):
+            raise CapS1ResultError("cap_s1_result_secret_source_changed")
+
+
+def _run_cap_s1_gitleaks_dir(
+    *,
+    binary_path: Path,
+    rule_path: Path,
+    target_root: Path,
+    invocation_root: Path,
+) -> tuple[int, bytes, bytes]:
+    invocation_root.mkdir(mode=0o700)
+    ignore_path = invocation_root / "empty-ignore"
+    _write_cap_s1_owned_bytes(ignore_path, b"")
+    ignore_path.chmod(0o400)
+    report_path = invocation_root / "report.json"
+    stdout_path = invocation_root / "stdout.private"
+    stderr_path = invocation_root / "stderr.private"
+    argv = (
+        str(binary_path),
+        "dir",
+        str(target_root),
+        "--config",
+        str(rule_path),
+        "--redact=100",
+        "--no-banner",
+        "--log-level",
+        "trace",
+        "--report-format",
+        "json",
+        "--report-path",
+        str(report_path),
+        "--exit-code",
+        "10",
+        "--ignore-gitleaks-allow",
+        "--gitleaks-ignore-path",
+        str(ignore_path),
+        "--max-target-megabytes",
+        "0",
+        "--max-archive-depth",
+        "0",
+        "--max-decode-depth",
+        "5",
+        "--timeout",
+        "120",
+    )
+    return_code = _run_cap_s1_secret_process(
+        argv,
+        cwd=invocation_root,
+        environment_root=invocation_root / "environment",
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        timeout=150,
+    )
+    try:
+        report_state = report_path.lstat()
+        report = report_path.read_bytes()
+        stdout = stdout_path.read_bytes()
+        stderr = stderr_path.read_bytes()
+    except OSError as exc:
+        raise CapS1ResultError("cap_s1_result_secret_scan_incomplete") from exc
+    if (
+        not stat.S_ISREG(report_state.st_mode)
+        or report_state.st_size != len(report)
+        or len(report) > _CAP_S1_SECRET_MAX_STREAM_BYTES
+        or len(stdout) > _CAP_S1_SECRET_MAX_STREAM_BYTES
+        or len(stderr) > _CAP_S1_SECRET_MAX_STREAM_BYTES
+    ):
+        raise CapS1ResultError("cap_s1_result_secret_scan_incomplete")
+    return return_code, report, stdout + b"\n" + stderr
+
+
+def _control_manifest(
+    controls: Sequence[tuple[str, Path, int, str]],
+) -> tuple[_CapS1SecretSourceEntry, ...]:
+    return tuple(
+        _CapS1SecretSourceEntry(
+            index=index,
+            path=path.name,
+            mode="100644",
+            blob="0" * 40,
+            size=path.stat().st_size,
+            sha256=digest,
+        )
+        for index, (_rule_id, path, _expected, digest) in enumerate(controls, start=1)
+    )
+
+
+def _observe_cap_s1_secret_scan(
+    *, exact_head: str, protected_join: str, owned_root: Path
+) -> _CapS1SecretScanObservation:
+    binary_path, binary_digest, rule_path = _supply_cap_s1_gitleaks(owned_root=owned_root)
+    source_root, source_manifest, source_bytes = _stage_cap_s1_secret_source(
+        exact_head=exact_head,
+        protected_join=protected_join,
+        owned_root=owned_root,
+    )
+    _verify_cap_s1_secret_manifest(source_root=source_root, manifest=source_manifest)
+
+    control_owner = owned_root / "controls"
+    control_owner.mkdir(mode=0o700)
+    controls = _assemble_cap_s1_secret_controls(owned_root=control_owner)
+    control_root = control_owner / "positive-controls"
+    control_manifest = _control_manifest(controls)
+    control_bytes = sum(entry.size for entry in control_manifest)
+    control_code, control_report, control_log = _run_cap_s1_gitleaks_dir(
+        binary_path=binary_path,
+        rule_path=rule_path,
+        target_root=control_root,
+        invocation_root=control_owner / "positive-run",
+    )
+    control_counts = _parse_cap_s1_gitleaks_report(
+        control_report,
+        allowed_rule_ids={rule_id for rule_id, _path, _count, _digest in controls},
+    )
+    expected_control_counts = tuple(
+        sorted((rule_id, expected_count) for rule_id, _path, expected_count, _digest in controls)
+    )
+    _parse_cap_s1_gitleaks_coverage(
+        control_log,
+        source_root=control_root,
+        manifest=control_manifest,
+        expected_bytes=control_bytes,
+    )
+    if control_code != 10 or control_counts != expected_control_counts:
+        raise CapS1ResultError("cap_s1_result_secret_control_invalid")
+
+    ignored_root = control_owner / "ignored-looking-control"
+    ignored_root.mkdir(mode=0o700)
+    stripe_recipe = next(
+        recipe
+        for rule_id, recipe, _expected, _digest in CAP_S1_SECRET_CONTROL_RECIPES
+        if rule_id == "stripe-access-token"
+    )
+    ignored_payload = b"# gitleaks:allow\n" + b"".join(
+        segment * repeats for segment, repeats in stripe_recipe
+    )
+    ignored_path = ignored_root / "ignored-looking.txt"
+    ignored_digest = _write_cap_s1_owned_bytes(ignored_path, ignored_payload)
+    ignored_path.chmod(0o400)
+    ignored_manifest = (
+        _CapS1SecretSourceEntry(
+            index=1,
+            path=ignored_path.name,
+            mode="100644",
+            blob="0" * 40,
+            size=len(ignored_payload),
+            sha256=ignored_digest,
+        ),
+    )
+    ignored_code, ignored_report, ignored_log = _run_cap_s1_gitleaks_dir(
+        binary_path=binary_path,
+        rule_path=rule_path,
+        target_root=ignored_root,
+        invocation_root=control_owner / "ignored-looking-run",
+    )
+    ignored_counts = _parse_cap_s1_gitleaks_report(
+        ignored_report,
+        allowed_rule_ids={"stripe-access-token"},
+    )
+    _parse_cap_s1_gitleaks_coverage(
+        ignored_log,
+        source_root=ignored_root,
+        manifest=ignored_manifest,
+        expected_bytes=len(ignored_payload),
+    )
+    if ignored_code != 10 or ignored_counts != (("stripe-access-token", 1),):
+        raise CapS1ResultError("cap_s1_result_secret_control_invalid")
+
+    negative_root = control_owner / "negative-control"
+    negative_root.mkdir(mode=0o700)
+    negative_path = negative_root / "negative.txt"
+    negative_payload = b"CAP-S1 deterministic negative control: no credential material.\n"
+    negative_digest = _write_cap_s1_owned_bytes(negative_path, negative_payload)
+    negative_path.chmod(0o400)
+    negative_manifest = (
+        _CapS1SecretSourceEntry(
+            index=1,
+            path=negative_path.name,
+            mode="100644",
+            blob="0" * 40,
+            size=len(negative_payload),
+            sha256=negative_digest,
+        ),
+    )
+    negative_code, negative_report, negative_log = _run_cap_s1_gitleaks_dir(
+        binary_path=binary_path,
+        rule_path=rule_path,
+        target_root=negative_root,
+        invocation_root=control_owner / "negative-run",
+    )
+    if negative_code != 0 or _parse_cap_s1_gitleaks_report(negative_report):
+        raise CapS1ResultError("cap_s1_result_secret_control_invalid")
+    _parse_cap_s1_gitleaks_coverage(
+        negative_log,
+        source_root=negative_root,
+        manifest=negative_manifest,
+        expected_bytes=len(negative_payload),
+    )
+
+    actual_code, actual_report, actual_log = _run_cap_s1_gitleaks_dir(
+        binary_path=binary_path,
+        rule_path=rule_path,
+        target_root=source_root,
+        invocation_root=owned_root / "source-run",
+    )
+    actual_counts = _parse_cap_s1_gitleaks_report(actual_report)
+    coverage_digest = _parse_cap_s1_gitleaks_coverage(
+        actual_log,
+        source_root=source_root,
+        manifest=source_manifest,
+        expected_bytes=source_bytes,
+    )
+    _verify_cap_s1_secret_manifest(source_root=source_root, manifest=source_manifest)
+    if (
+        hashlib.sha256(binary_path.read_bytes()).hexdigest() != binary_digest
+        or hashlib.sha256(rule_path.read_bytes()).hexdigest() != CAP_S1_GITLEAKS_RULE_SHA256
+    ):
+        raise CapS1ResultError("cap_s1_result_secret_supply_changed")
+    findings = sum(count for _rule_id, count in actual_counts)
+    if actual_code == 10 and findings > 0:
+        status = "FINDINGS"
+    elif actual_code == 0 and findings == 0:
+        status = "COMPLETE_CLEAN"
+    else:
+        raise CapS1ResultError("cap_s1_result_secret_scan_incomplete")
+    observation = {
+        "policy": "CAP_S1_GITLEAKS_8_30_1_FINAL_21_V1",
+        "exact_head": exact_head,
+        "protected_join": protected_join,
+        "source_manifest": tuple(dataclasses.astuple(entry) for entry in source_manifest),
+        "source_bytes": source_bytes,
+        "control_counts": control_counts,
+        "negative_clean": True,
+        "coverage_digest": coverage_digest,
+        "status": status,
+        "rule_counts": actual_counts,
+        "binary_sha256": binary_digest,
+        "binary_version": CAP_S1_GITLEAKS_VERSION,
+        "rule_sha256": CAP_S1_GITLEAKS_RULE_SHA256,
+    }
+    result = _CapS1SecretScanObservation(
+        status=status,
+        findings=findings,
+        rule_counts=actual_counts,
+        source_file_count=len(source_manifest),
+        source_bytes=source_bytes,
+        binary_sha256=binary_digest,
+        binary_version=CAP_S1_GITLEAKS_VERSION,
+        rule_sha256=CAP_S1_GITLEAKS_RULE_SHA256,
+        evidence_digest=_canonical_digest(observation),
+    )
+    if status != "COMPLETE_CLEAN":
+        raise CapS1ResultError("cap_s1_result_secret_scan_findings")
+    return result
+
+
+def _github_api_list(endpoint: str) -> list[Any]:
+    """Fresh bounded GitHub list read with the same strict JSON boundary."""
+
+    try:
+        completed = subprocess.run(
+            ["gh", "api", endpoint],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        payload = _strict_json_loads(
+            completed.stdout,
+            error="cap_s1_result_github_evidence_unavailable",
+        )
+    except (OSError, subprocess.SubprocessError, CapS1ResultError) as exc:
+        raise CapS1ResultError("cap_s1_result_github_evidence_unavailable") from exc
+    if type(payload) is not list or len(payload) > 100:
+        raise CapS1ResultError("cap_s1_result_github_evidence_unavailable")
+    return payload
+
+
+def _observe_cap_s1_codeql(*, exact_head: str) -> tuple[tuple[str, str, int, str], ...]:
+    """Authenticate fixed exact-head CodeQL/check and code-scanning reads."""
+
+    check_rows: list[dict[str, Any]] = []
+    expected_total: "int | None" = None
+    for page in range(1, 5):
+        payload = _github_api_json(
+            f"repos/{_RESULT_REPOSITORY}/commits/{exact_head}/check-runs"
+            f"?per_page=100&page={page}"
+        )
+        total = payload.get("total_count")
+        rows = payload.get("check_runs")
+        if (
+            not _result_nonnegative_int(total)
+            or total > _RESULT_MAX_HOSTED_JOBS
+            or type(rows) is not list
+        ):
+            raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+        if expected_total is None:
+            expected_total = total
+        elif expected_total != total:
+            raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+        for row in rows:
+            if type(row) is not dict:
+                raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+            check_rows.append(row)
+        if len(check_rows) >= total:
+            break
+    if expected_total is None or len(check_rows) != expected_total:
+        raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+
+    codeql_rows = []
+    for row in check_rows:
+        app = row.get("app")
+        name = str(row.get("name", ""))
+        slug = app.get("slug") if type(app) is dict else None
+        if "codeql" not in name.casefold() and slug != "github-advanced-security":
+            continue
+        check_id = row.get("id")
+        if not _result_positive_int(check_id):
+            raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+        detail = _github_api_json(
+            f"repos/{_RESULT_REPOSITORY}/check-runs/{check_id}"
+        )
+        detail_app = detail.get("app")
+        if (
+            detail.get("id") != check_id
+            or detail.get("head_sha") != exact_head
+            or type(detail_app) is not dict
+            or detail_app.get("id") != app.get("id")
+            or str(detail.get("status", "")).upper() != "COMPLETED"
+            or str(detail.get("conclusion", "")).upper() != "SUCCESS"
+        ):
+            raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+        codeql_rows.append(
+            {
+                "id": check_id,
+                "name": name,
+                "app_id": detail_app.get("id"),
+                "app_slug": detail_app.get("slug"),
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "head": exact_head,
+            }
+        )
+    if not codeql_rows:
+        raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+
+    ref = "refs/heads/fable/cap-s1-complete-vertical-20260901"
+    analyses: list[dict[str, Any]] = []
+    alerts: list[dict[str, Any]] = []
+    for page in range(1, 5):
+        analysis_page = _github_api_list(
+            f"repos/{_RESULT_REPOSITORY}/code-scanning/analyses"
+            f"?ref={ref}&per_page=100&page={page}"
+        )
+        alert_page = _github_api_list(
+            f"repos/{_RESULT_REPOSITORY}/code-scanning/alerts"
+            f"?ref={ref}&state=open&per_page=100&page={page}"
+        )
+        analyses.extend(analysis_page)
+        alerts.extend(alert_page)
+        if len(analysis_page) < 100 and len(alert_page) < 100:
+            break
+    if len(analyses) > 400 or len(alerts) > 400:
+        raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+    bound_analyses = [
+        row
+        for row in analyses
+        if type(row) is dict and row.get("commit_sha") == exact_head
+    ]
+    if not bound_analyses or any(type(row) is not dict for row in alerts):
+        raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+    findings = len(alerts)
+    return (
+        (
+            "codeql-checks",
+            "PASSED",
+            0,
+            _canonical_digest(tuple(sorted(_canonical_digest(row) for row in codeql_rows))),
+        ),
+        (
+            "code-scanning-alerts",
+            "PASSED" if findings == 0 else "FAILED",
+            findings,
+            _canonical_digest(
+                {
+                    "exact_head": exact_head,
+                    "analysis_ids": tuple(
+                        sorted(str(row.get("id", "")) for row in bound_analyses)
+                    ),
+                    "open_alert_numbers": tuple(
+                        sorted(str(row.get("number", "")) for row in alerts)
+                    ),
+                }
+            ),
+        ),
+    )
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _CapS1ObservedFamilies:
+    exact_head: str
+    exact_tree: str
+    protected_join: str
+    producer_evidence: CapS1ProducerEvidence
+    local_proof: CapS1LocalProofReceipt
+    hosted_proof: CapS1HostedProofReceipt
+    security_proof: CapS1SecurityProofReceipt
+    mutation_proof: CapS1MutationProofReceipt
+    cleanup_proof: CapS1CleanupProofReceipt
+    review_state: CapS1ReviewReceipt
+
+
+def _receipt_with_digest(receipt: Any) -> Any:
+    return dataclasses.replace(
+        receipt,
+        evidence_digest=_result_receipt_evidence_digest(receipt),
+    )
+
+
+def _run_cap_s1_source_observer(
+    *,
+    canary: CanaryEvidence,
+    hosted_run_id: str,
+    review_id: str,
+) -> _CapS1ObservedFamilies:
+    """Run the fixed observation set and construct its proof families.
+
+    This is intentionally connected to the production builder yet is not
+    invoked by structural tests.  The current commission forbids running the
+    aggregate observer before review of this registry.  A later explicit edge
+    may execute exactly this no-argument-policy boundary.
+    """
+
+    try:
+        identity = subprocess.run(
+            ["git", "rev-parse", "HEAD", "HEAD^{tree}", "origin/master"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CapS1ResultError("cap_s1_result_source_identity_unavailable") from exc
+    if len(identity) != 3 or not all(_result_is_hex40(value) for value in identity):
+        raise CapS1ResultError("cap_s1_result_source_identity_unavailable")
+    exact_head, exact_tree, protected_join = identity
+    if (
+        canary.candidate_commit != exact_head
+        or canary.candidate_tree != exact_tree
+        or canary.protected_join != protected_join
+    ):
+        raise CapS1ResultError("cap_s1_result_canary_evidence_binding_mismatch")
+
+    scratch_path: "Path | None" = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="cap-s1-source-observer-") as raw_scratch:
+            scratch_path = Path(raw_scratch)
+            scratch_identity = scratch_path.stat()
+            source_root = _owned_cap_s1_source_copy(
+                exact_head=exact_head,
+                scratch_root=scratch_path,
+            )
+            output_root = scratch_path / "output"
+            output_root.mkdir(mode=0o700)
+            import_origin_digest = _observe_cap_s1_import_origins(
+                source_root=source_root,
+            )
+            local_rows = _observe_cap_s1_local_suite(
+                source_root=source_root,
+                output_root=output_root,
+            )
+            diff_row = _observe_cap_s1_diff(
+                exact_head=exact_head,
+                protected_join=protected_join,
+            )
+            mutation_rows = _observe_cap_s1_mutations(
+                exact_head=exact_head,
+                scratch_root=scratch_path,
+            )
+            hosted_run, hosted_rows = _rederive_hosted_job_manifest(
+                run_id=hosted_run_id,
+                exact_head=exact_head,
+            )
+            pull, review = _rederive_github_review(
+                review_id=review_id,
+                exact_head=exact_head,
+            )
+            secret_scan = _observe_cap_s1_secret_scan(
+                exact_head=exact_head,
+                protected_join=protected_join,
+                owned_root=scratch_path / "secret-scan",
+            )
+            security_rows = tuple(
+                sorted(
+                    (
+                        *_observe_cap_s1_codeql(exact_head=exact_head),
+                        diff_row,
+                        (
+                            "gitleaks-8.30.1-final-21",
+                            "PASSED",
+                            secret_scan.findings,
+                            secret_scan.evidence_digest,
+                        ),
+                    )
+                )
+            )
+            cleanup_rows = tuple(
+                sorted(
+                    (
+                        kind,
+                        _canonical_digest(
+                            {
+                                "canary_operation_id": canary.canary_operation_id,
+                                "provider_attempt_id": canary.provider_attempt_id,
+                                "kind": kind,
+                            }
+                        ),
+                        removed,
+                        absent,
+                    )
+                    for kind, removed, absent in canary.cleanup.artifacts
+                )
+            )
+            if not all(
+                (
+                    local_rows,
+                    hosted_run,
+                    hosted_rows,
+                    security_rows,
+                    mutation_rows,
+                    cleanup_rows,
+                    pull,
+                    review,
+                    str(Path(sys.executable).resolve()),
+                    import_origin_digest,
+                )
+            ):
+                raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+            if (
+                scratch_path.stat().st_dev != scratch_identity.st_dev
+                or scratch_path.stat().st_ino != scratch_identity.st_ino
+            ):
+                raise CapS1ResultError("cap_s1_result_source_observation_unavailable")
+            bound = {
+                "exact_head": exact_head,
+                "exact_tree": exact_tree,
+                "protected_join": protected_join,
+                "provider_attempt_id": canary.provider_attempt_id,
+            }
+            local_proof = _receipt_with_digest(
+                CapS1LocalProofReceipt(
+                    **bound,
+                    suite_count=len(local_rows),
+                    total=sum(sum(row[1:]) for row in local_rows),
+                    passed=sum(row[1] for row in local_rows),
+                    skipped=sum(row[2] for row in local_rows),
+                    failed=sum(row[3] for row in local_rows),
+                    cancelled=sum(row[4] for row in local_rows),
+                    suite_manifest=tuple(sorted(local_rows)),
+                    evidence_digest="",
+                )
+            )
+            hosted_status = str(hosted_run.get("status", "")).upper()
+            hosted_conclusion = str(hosted_run.get("conclusion", "")).upper()
+            hosted_passed = sum(
+                status == "COMPLETED" and conclusion == "SUCCESS"
+                for _job_id, _name, status, conclusion in hosted_rows
+            )
+            hosted_cancelled = sum(
+                conclusion == "CANCELLED"
+                for _job_id, _name, _status, conclusion in hosted_rows
+            )
+            hosted_proof = _receipt_with_digest(
+                CapS1HostedProofReceipt(
+                    **bound,
+                    run_id=hosted_run_id,
+                    status=hosted_status,
+                    conclusion=hosted_conclusion,
+                    jobs_total=len(hosted_rows),
+                    jobs_passed=hosted_passed,
+                    jobs_failed=len(hosted_rows) - hosted_passed - hosted_cancelled,
+                    jobs_cancelled=hosted_cancelled,
+                    job_manifest=hosted_rows,
+                    evidence_digest="",
+                )
+            )
+            security_findings = sum(row[2] for row in security_rows)
+            security_failures = sum(row[1] == "FAILED" for row in security_rows)
+            security_cancelled = sum(row[1] == "CANCELLED" for row in security_rows)
+            security_proof = _receipt_with_digest(
+                CapS1SecurityProofReceipt(
+                    **bound,
+                    status="CLEAN" if not (security_findings or security_failures or security_cancelled) else "FAILED",
+                    tool_count=len(security_rows),
+                    findings=security_findings,
+                    failures=security_failures,
+                    cancelled=security_cancelled,
+                    tool_manifest=security_rows,
+                    evidence_digest="",
+                )
+            )
+            mutation_proof = _receipt_with_digest(
+                CapS1MutationProofReceipt(
+                    **bound,
+                    status="PASSED",
+                    total=len(mutation_rows),
+                    killed=sum(row[1] == "KILLED" for row in mutation_rows),
+                    survived=sum(row[1] == "SURVIVED" for row in mutation_rows),
+                    skipped=sum(row[1] == "SKIPPED" for row in mutation_rows),
+                    errors=sum(row[1] == "ERROR" for row in mutation_rows),
+                    cancelled=sum(row[1] == "CANCELLED" for row in mutation_rows),
+                    mutation_manifest=mutation_rows,
+                    evidence_digest="",
+                )
+            )
+            cleanup_failures = sum(not row[2] for row in cleanup_rows)
+            cleanup_residue = sum(not row[3] for row in cleanup_rows)
+            cleanup_proof = _receipt_with_digest(
+                CapS1CleanupProofReceipt(
+                    **bound,
+                    status="CLEAN" if not (cleanup_failures or cleanup_residue) else "FAILED",
+                    all_removed=not (cleanup_failures or cleanup_residue),
+                    resources_total=len(cleanup_rows),
+                    failures=cleanup_failures,
+                    residue_count=cleanup_residue,
+                    resource_kinds=tuple(row[0] for row in cleanup_rows),
+                    resource_manifest=cleanup_rows,
+                    evidence_digest="",
+                )
+            )
+            pull_author = pull.get("user")
+            reviewer = review.get("user")
+            if type(pull_author) is not dict or type(reviewer) is not dict:
+                raise CapS1ResultError("cap_s1_result_review_state_invalid")
+            review_state = _receipt_with_digest(
+                CapS1ReviewReceipt(
+                    **bound,
+                    author=pull_author.get("login"),
+                    author_id=pull_author.get("id"),
+                    reviewer=reviewer.get("login"),
+                    reviewer_id=reviewer.get("id"),
+                    review_id=review_id,
+                    state=str(review.get("state", "")).upper(),
+                    review_commit=review.get("commit_id"),
+                    evidence_digest="",
+                )
+            )
+            producer_payload = {
+                "schema_version": "mastermind.cap_s1_source_observations/v1",
+                "exact_head": exact_head,
+                "exact_tree": exact_tree,
+                "protected_join": protected_join,
+                "provider_attempt_id": canary.provider_attempt_id,
+                "local_suites": local_rows,
+                "security_tools": security_rows,
+                "mutations": mutation_rows,
+                "cleanup_resources": cleanup_rows,
+                "hosted_jobs": hosted_rows,
+                "review_id": review_id,
+                "interpreter_identity": _canonical_digest(
+                    {
+                        "executable": str(Path(sys.executable).resolve()),
+                        "import_origins": import_origin_digest,
+                    }
+                ),
+            }
+            producer_evidence = CapS1ProducerEvidence(
+                artifact_digest=_canonical_digest(producer_payload),
+                exact_head=exact_head,
+                exact_tree=exact_tree,
+                protected_join=protected_join,
+                provider_attempt_id=canary.provider_attempt_id,
+                local_suites=tuple(sorted(local_rows)),
+                security_tools=security_rows,
+                mutations=mutation_rows,
+                cleanup_resources=cleanup_rows,
+            )
+            return _CapS1ObservedFamilies(
+                exact_head=exact_head,
+                exact_tree=exact_tree,
+                protected_join=protected_join,
+                producer_evidence=producer_evidence,
+                local_proof=local_proof,
+                hosted_proof=hosted_proof,
+                security_proof=security_proof,
+                mutation_proof=mutation_proof,
+                cleanup_proof=cleanup_proof,
+                review_state=review_state,
+            )
+    finally:
+        if scratch_path is not None and scratch_path.exists():
+            raise CapS1ResultError("cap_s1_result_source_observer_cleanup_failed")
+
+
+def validate_cap_s1_result(result: CapS1Result) -> None:
+    """Refuse detached/direct result objects at the public trust boundary.
+
+    A serialized result is a report, never self-authenticating proof.  The
+    only production validator is invoked inside the same source-owned observer
+    invocation that constructs the result; callers cannot replay validation
+    with a path, manifest or producer object.
+    """
+
+    raise CapS1ResultError("cap_s1_result_source_observer_required")
+
+
+def build_cap_s1_result(**kwargs: Any) -> CapS1Result:
+    """Production result boundary owned by the CAP-S1 observer.
+
+    Caller-authored proof families are rejected before any process, GitHub or
+    provider effect.  A result is assembled only from the fixed source-owned
+    observer in this same invocation.  The consumed historical attempt cannot
+    enter this path because it has no exact object returned by ``run_canary``
+    and therefore remains ``UNAVAILABLE/HOLD`` with no replay or backfill.
+    """
+
+    forbidden_proof_inputs = set(kwargs) & {
+        "producer_evidence_path",
+        "producer_evidence_digest",
+        "package_identities",
+        "provider_attempt",
+        "changed_path_census",
+        "held_non_goals",
+        "release_state",
+        "local_proof",
+        "hosted_proof",
+        "security_proof",
+        "mutation_proof",
+        "cleanup_proof",
+        "review_state",
+    }
+    if forbidden_proof_inputs:
+        raise CapS1ResultError(
+            "cap_s1_result_caller_proof_authority_forbidden"
+        )
+    if set(kwargs) != {
+        "operation",
+        "receiver",
+        "carrier",
+        "canary_evidence",
+        "hosted_run_id",
+        "review_id",
+    }:
+        raise CapS1ResultError("cap_s1_result_source_observer_request_invalid")
+    if not _result_safe_operation(kwargs["operation"]):
+        raise CapS1ResultError("cap_s1_result_operation_invalid")
+    if not _result_safe_receiver(kwargs["receiver"]):
+        raise CapS1ResultError("cap_s1_result_receiver_invalid")
+    if not _result_safe_slack_carrier(kwargs["carrier"]):
+        raise CapS1ResultError("cap_s1_result_carrier_invalid")
+    for locator in ("hosted_run_id", "review_id"):
+        value = kwargs[locator]
+        if not isinstance(value, str) or not value.isascii() or not value.isdigit() or len(value) > 20:
+            raise CapS1ResultError("cap_s1_result_source_observer_request_invalid")
+    if type(kwargs.get("canary_evidence")) is CanaryEvidence:
+        canary = kwargs["canary_evidence"]
+        if id(canary) not in _CANARY_SOURCE_EVIDENCE_IDS:
+            raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
+        _CANARY_SOURCE_EVIDENCE_IDS.discard(id(canary))
+        if not canary.cleanup.all_removed:
+            raise CapS1ResultError("cap_s1_result_cleanup_evidence_unavailable")
+    elif kwargs.get("canary_evidence") is not None:
+        raise CapS1ResultError("cap_s1_result_canary_evidence_source_invalid")
+    else:
+        raise CapS1ResultError("cap_s1_result_cleanup_evidence_unavailable")
+    observed = _run_cap_s1_source_observer(
+        canary=canary,
+        hosted_run_id=kwargs["hosted_run_id"],
+        review_id=kwargs["review_id"],
+    )
+    closures = tuple(sorted(canary.skill_closure_digests))
+    result_kwargs = {
+        "operation": kwargs["operation"],
+        "receiver": kwargs["receiver"],
+        "carrier": kwargs["carrier"],
+        "exact_head": observed.exact_head,
+        "exact_tree": observed.exact_tree,
+        "current_protected_join": observed.protected_join,
+        "changed_path_census": RESULT_CHANGED_PATHS,
+        "package_identities": CapS1PackageIdentitiesReceipt(
+            exact_head=observed.exact_head,
+            exact_tree=observed.exact_tree,
+            package_content_digest=_canonical_digest(
+                {"skill_closures": closures}
+            ),
+            package_source_digest=canary.package_source_digest,
+            package_generation_digest=canary.package_generation_digest,
+            closures=closures,
+        ),
+        "canary_evidence": canary,
+        "provider_attempt": CapS1ProviderAttemptReceipt(
+            state="COMPLETED",
+            attempt_id=canary.provider_attempt_id,
+            attempt_operation=canary.canary_operation_id,
+            candidate_head=observed.exact_head,
+            candidate_tree=observed.exact_tree,
+            disposition="ACCEPTED",
+            hold_code=None,
+        ),
+        "local_proof": observed.local_proof,
+        "hosted_proof": observed.hosted_proof,
+        "security_proof": observed.security_proof,
+        "mutation_proof": observed.mutation_proof,
+        "cleanup_proof": observed.cleanup_proof,
+        "review_state": observed.review_state,
+        "held_non_goals": RESULT_HELD_NON_GOALS,
+    }
+    return _assemble_cap_s1_result_from_observations(
+        result_kwargs,
+        producer_evidence=observed.producer_evidence,
+    )
 
 
 # ---------------------------------------------------------------------------

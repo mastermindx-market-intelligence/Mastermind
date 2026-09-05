@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import dataclasses
 import errno
+import hashlib
 import io
 import json
 import os
@@ -1057,20 +1058,58 @@ from scripts.ohf.cap_s1_mastermind_operator_canary import (
     CanaryCleanupRecord,
     CanaryEvidence,
     CanaryStop,
+    CAP_S1_OBSERVER_MUTANT_TRANSFORMS,
+    CAP_S1_GITLEAKS_ARCHIVE_BYTES,
+    CAP_S1_GITLEAKS_ARCHIVE_MEMBERS,
+    CAP_S1_GITLEAKS_ARCHIVE_SHA256,
+    CAP_S1_GITLEAKS_RULE_COUNT,
+    CAP_S1_GITLEAKS_RULE_SHA256,
+    CAP_S1_GITLEAKS_SOURCE_COMMIT,
+    CAP_S1_GITLEAKS_VERSION,
+    CAP_S1_SECRET_CONTROL_RECIPES,
     CapS1Result,
     CapS1ResultError,
     FAKE_HARNESS_VERSION,
     FROZEN_STOP_CODES,
     _SCHEMA_FIXTURE_BINARY_SOURCE,
+    _build_cap_s1_result_from_fixture,
+    _assemble_cap_s1_secret_controls,
+    _CapS1SecretSourceEntry,
     _canonical_digest,
+    _extract_cap_s1_gitleaks_binary,
+    _github_api_json as _real_github_api_json,
+    _load_cap_s1_producer_evidence,
+    _parse_cap_s1_gitleaks_coverage,
+    _parse_cap_s1_gitleaks_report,
+    _parse_cap_s1_junit,
+    _run_cap_s1_observer_process,
+    _strict_json_loads,
+    _stage_cap_s1_secret_source,
+    _verify_cap_s1_secret_manifest,
+    _validate_cap_s1_result_against_producer,
     attest_protocol_schema,
-    build_cap_s1_result,
+    build_cap_s1_result as _public_build_cap_s1_result,
     build_synthetic_workspace,
+    cap_s1_observer_registry,
     main as canary_main,
     run_canary,
-    validate_cap_s1_result,
 )
 from scripts.ohf.laboratory import AppServerClient, default_user_codex_home
+
+
+def build_cap_s1_result(**kwargs):
+    """Fixture-only compatibility wrapper for the structural contract tests."""
+
+    return _build_cap_s1_result_from_fixture(**kwargs)
+
+
+def validate_cap_s1_result(result, *, producer_evidence_path):
+    """Validate against a fixture artifact without entering the full observer."""
+
+    return _validate_cap_s1_result_against_producer(
+        result,
+        producer_evidence=_load_cap_s1_producer_evidence(producer_evidence_path),
+    )
 
 
 def _load_canary_profile():
@@ -4063,6 +4102,384 @@ def test_cap_s1_result_refuses_invented_self_consistent_proof_family(
     _refresh_result_receipt_digest(raw, receipt_name, receipt_type)
     with pytest.raises(CapS1ResultError, match=f"{receipt_name}_invalid"):
         build_cap_s1_result(**raw)
+
+
+def test_cap_s1_result_refuses_wholly_forged_producer_family() -> None:
+    """CAP_B discriminator: matching forged families never become evidence."""
+
+    forged = _happy_cap_s1_result_kwargs()
+    with pytest.raises(
+        CapS1ResultError,
+        match="caller_proof_authority_forbidden",
+    ):
+        _public_build_cap_s1_result(**forged)
+
+
+def test_cap_s1_result_public_boundary_refuses_direct_proof_objects() -> None:
+    forged = _happy_cap_s1_result_kwargs()
+    typed = build_cap_s1_result(**forged)
+    with pytest.raises(
+        CapS1ResultError,
+        match="caller_proof_authority_forbidden",
+    ):
+        _public_build_cap_s1_result(local_proof=typed.local_proof)
+
+
+def test_cap_s1_result_historical_attempt_without_cleanup_stays_unavailable() -> None:
+    with pytest.raises(CapS1ResultError, match="cleanup_evidence_unavailable"):
+        _public_build_cap_s1_result(
+            operation="cap-s1-abc-final-source-repair-20260904-sol-001",
+            receiver="codex-cap-s1",
+            carrier="C0BSBM78V1N/1788511189.200899",
+            canary_evidence=None,
+            hosted_run_id="1",
+            review_id="1",
+        )
+
+
+def test_cap_s1_result_caller_constructed_canary_object_is_not_producer_proof() -> None:
+    forged = _completed_canary_evidence(
+        head="a" * 40,
+        tree="b" * 40,
+        attempt_id="forged-attempt",
+        protected_join="c" * 40,
+    )
+    with pytest.raises(CapS1ResultError, match="canary_evidence_source_invalid"):
+        _public_build_cap_s1_result(
+            operation="cap-s1-abc-final-source-repair-20260904-sol-001",
+            receiver="codex-cap-s1",
+            carrier="C0BSBM78V1N/1788511189.200899",
+            canary_evidence=forged,
+            hosted_run_id="1",
+            review_id="1",
+        )
+
+
+def test_cap_s1_source_observer_registry_is_exact_and_secret_scan_stays_held() -> None:
+    registry = cap_s1_observer_registry()
+    assert registry["schema_version"] == "mastermind.cap_s1_source_observer_registry/v1"
+    assert registry["python_argv"][:7] == (
+        "<trusted-current-python>",
+        "-I",
+        "-m",
+        "pytest",
+        "-q",
+        "--junitxml",
+        "<owned-output>",
+    )
+    assert len(registry["python_argv"][7:]) == 17
+    assert len(registry["diff_argv"][8:]) == 21
+    assert tuple(mutation_id for mutation_id, _node in registry["mutants"]) == (
+        "CAP_A_UNRELATED_SKILL_ACCEPTED",
+        "CAP_B_FORGED_PRODUCER_ACCEPTED",
+        "CAP_C_FIRST_EFFECT_CLEANUP_BYPASSED",
+    )
+    assert registry["secret_scan"].endswith("EVIDENCE_UNAVAILABLE_HOLD")
+
+
+def test_cap_s1_strict_json_parser_refuses_duplicate_keys_at_every_depth() -> None:
+    for payload in (
+        '{"exact_head":"a","exact_head":"b"}',
+        '{"outer":{"state":"clean","state":"forged"}}',
+        '{"rows":[{"id":1,"id":2}]}',
+    ):
+        with pytest.raises(CapS1ResultError, match="duplicate_boundary") as excinfo:
+            _strict_json_loads(payload, error="cap_s1_result_duplicate_boundary")
+        assert "forged" not in str(excinfo.value)
+
+
+def test_cap_s1_github_json_boundary_refuses_duplicate_keys(monkeypatch) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    def _duplicate_response(*_args, **_kwargs):
+        return _subprocess.CompletedProcess(
+            args=["gh", "api", "fixed"],
+            returncode=0,
+            stdout='{"head_sha":"a","head_sha":"b"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(canary_module.subprocess, "run", _duplicate_response)
+    with pytest.raises(CapS1ResultError, match="github_evidence_unavailable") as excinfo:
+        _real_github_api_json("repos/mastermindx-market-intelligence/Mastermind/fixed")
+    assert "head_sha" not in str(excinfo.value)
+
+
+def test_cap_s1_mutant_transforms_are_unique_and_nodes_are_fixed() -> None:
+    source = (REPO_ROOT / "scripts/ohf/cap_s1_mastermind_operator_canary.py").read_text(
+        encoding="utf-8"
+    )
+    test_source = Path(__file__).read_text(encoding="utf-8")
+    assert len(CAP_S1_OBSERVER_MUTANT_TRANSFORMS) == 3
+    for mutation_id, relative_path, preimage, postimage in CAP_S1_OBSERVER_MUTANT_TRANSFORMS:
+        assert relative_path == "scripts/ohf/cap_s1_mastermind_operator_canary.py"
+        assert source.count(preimage) == 1, mutation_id
+        assert postimage not in source, mutation_id
+    for _mutation_id, node in cap_s1_observer_registry()["mutants"]:
+        module, separator, test_name = node.partition("::")
+        assert separator == "::"
+        assert module == "tests/test_cap_s1_mastermind_operator_canary.py"
+        assert f"def {test_name}" in test_source
+
+
+def test_cap_s1_observer_process_and_junit_parser_short_fixture_seam(tmp_path) -> None:
+    completed = _run_cap_s1_observer_process(
+        (
+            _sys.executable,
+            "-I",
+            "-c",
+            "import os; assert 'PYTHONPATH' not in os.environ; print('fixture-ok')",
+        ),
+        cwd=tmp_path,
+        timeout=30,
+    )
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == "fixture-ok"
+
+    junit = tmp_path / "fixture.xml"
+    junit.write_text(
+        '<testsuite tests="1" failures="0" errors="0" skipped="0">'
+        '<testcase classname="test_fixture_scope.Example" name="test_ok" />'
+        "</testsuite>",
+        encoding="utf-8",
+    )
+    junit.chmod(0o444)
+    assert _parse_cap_s1_junit(
+        junit,
+        expected_scope=("tests/test_fixture_scope.py",),
+    ) == (("tests/test_fixture_scope.py", 1, 0, 0, 0),)
+
+
+def test_cap_s1_secret_scan_policy_registry_is_exact_and_unobserved() -> None:
+    registry = cap_s1_observer_registry()
+    supply = registry["secret_supply"]
+    assert supply["version"] == CAP_S1_GITLEAKS_VERSION == "8.30.1"
+    assert supply["source_commit"] == CAP_S1_GITLEAKS_SOURCE_COMMIT
+    assert supply["archive"][1:] == (
+        CAP_S1_GITLEAKS_ARCHIVE_BYTES,
+        CAP_S1_GITLEAKS_ARCHIVE_SHA256,
+    )
+    assert supply["rule"][2:] == (
+        CAP_S1_GITLEAKS_RULE_SHA256,
+        CAP_S1_GITLEAKS_RULE_COUNT,
+    )
+    assert supply["archive_members"] == CAP_S1_GITLEAKS_ARCHIVE_MEMBERS
+    assert supply["binary_sha256"] == "UNOBSERVED"
+    assert supply["binary_version"] == "UNOBSERVED"
+    assert registry["secret_argv"][0] == "<verified-owned-gitleaks>"
+    assert "--ignore-gitleaks-allow" in registry["secret_argv"]
+    assert "--exit-code" in registry["secret_argv"]
+    assert registry["secret_environment_keys"] == (
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "TMPDIR",
+    )
+
+
+def test_cap_s1_secret_control_recipes_assemble_only_in_owned_scratch(tmp_path) -> None:
+    owner = tmp_path / "control-owner"
+    owner.mkdir()
+    rows = _assemble_cap_s1_secret_controls(owned_root=owner)
+    assert tuple(rule_id for rule_id, _path, _count, _digest in rows) == (
+        "private-key",
+        "slack-bot-token",
+        "stripe-access-token",
+    )
+    committed = (
+        (REPO_ROOT / "scripts/ohf/cap_s1_mastermind_operator_canary.py").read_bytes()
+        + Path(__file__).read_bytes()
+    )
+    for (rule_id, recipe, expected_count, expected_digest), row in zip(
+        CAP_S1_SECRET_CONTROL_RECIPES,
+        rows,
+    ):
+        observed_rule, path, observed_count, observed_digest = row
+        payload = b"".join(segment * repeats for segment, repeats in recipe)
+        assert observed_rule == rule_id
+        assert observed_count == expected_count == 1
+        assert observed_digest == expected_digest
+        assert path.read_bytes() == payload
+        assert payload not in committed
+        assert path.is_relative_to(owner)
+
+
+def _secret_test_archive(members) -> bytes:
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w:gz") as bundle:
+        for name, kind, payload in members:
+            member = tarfile.TarInfo(name)
+            member.mode = 0o755 if name == "gitleaks" else 0o644
+            if kind == "file":
+                member.size = len(payload)
+                bundle.addfile(member, io.BytesIO(payload))
+            elif kind == "symlink":
+                member.type = tarfile.SYMTYPE
+                member.linkname = "gitleaks"
+                bundle.addfile(member)
+            elif kind == "hardlink":
+                member.type = tarfile.LNKTYPE
+                member.linkname = "gitleaks"
+                bundle.addfile(member)
+            else:
+                raise AssertionError(kind)
+    return output.getvalue()
+
+
+def test_cap_s1_secret_archive_member_policy_rejects_hostile_members(tmp_path) -> None:
+    canonical = _secret_test_archive(
+        (
+            ("LICENSE", "file", b"fixture-license"),
+            ("README.md", "file", b"fixture-readme"),
+            ("gitleaks", "file", b"fixture-binary"),
+        )
+    )
+    destination = tmp_path / "gitleaks"
+    digest = _extract_cap_s1_gitleaks_binary(canonical, destination=destination)
+    assert digest == hashlib.sha256(b"fixture-binary").hexdigest()
+    assert destination.read_bytes() == b"fixture-binary"
+
+    hostile_member_sets = (
+        (
+            ("LICENSE", "file", b"x"),
+            ("README.md", "file", b"x"),
+            ("gitleaks", "file", b"x"),
+            ("gitleaks", "file", b"replacement"),
+        ),
+        (("LICENSE", "file", b"x"), ("README.md", "file", b"x"), ("../gitleaks", "file", b"x")),
+        (("LICENSE", "file", b"x"), ("README.md", "file", b"x"), ("gitleaks", "symlink", b"")),
+        (("LICENSE", "file", b"x"), ("README.md", "file", b"x"), ("gitleaks", "hardlink", b"")),
+        (("LICENSE", "file", b"x"), ("README.md", "file", b"x"), ("gitleaks", "file", b"x"), ("extra", "file", b"x")),
+    )
+    for index, members in enumerate(hostile_member_sets):
+        with pytest.raises(CapS1ResultError, match="secret_supply_invalid"):
+            _extract_cap_s1_gitleaks_binary(
+                _secret_test_archive(members),
+                destination=tmp_path / f"hostile-{index}",
+            )
+
+
+def _redacted_secret_finding(rule_id: str, *, line: int = 1) -> dict:
+    return {
+        "RuleID": rule_id,
+        "Description": "synthetic detector control",
+        "StartLine": line,
+        "EndLine": line,
+        "StartColumn": 1,
+        "EndColumn": 8,
+        "Match": "REDACTED",
+        "Secret": "REDACTED",
+        "File": f"{rule_id}.txt",
+        "SymlinkFile": "",
+        "Commit": "",
+        "Entropy": 0.0,
+        "Author": "",
+        "Email": "",
+        "Date": "",
+        "Message": "",
+        "Tags": [],
+        "Fingerprint": "",
+    }
+
+
+def test_cap_s1_secret_report_parser_requires_complete_clean_evidence(tmp_path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    first = source / "a.py"
+    second = source / "b.py"
+    first.write_text("alpha\n", encoding="utf-8")
+    second.write_text("beta\n", encoding="utf-8")
+    manifest = (
+        _CapS1SecretSourceEntry(
+            index=1, path="a.py", mode="100644", blob="0" * 40,
+            size=first.stat().st_size, sha256=hashlib.sha256(first.read_bytes()).hexdigest(),
+        ),
+        _CapS1SecretSourceEntry(
+            index=2, path="b.py", mode="100644", blob="0" * 40,
+            size=second.stat().st_size, sha256=hashlib.sha256(second.read_bytes()).hexdigest(),
+        ),
+    )
+    total = sum(entry.size for entry in manifest)
+    log = (
+        f'TRC scanning path path="{first}"\n'
+        f'TRC scanning path path="{second}"\n'
+        f'INF scanned ~{total} bytes ({total} bytes) in 1ms\n'
+        "INF no leaks found\n"
+    ).encode()
+    assert _parse_cap_s1_gitleaks_report(b"[]") == ()
+    assert _parse_cap_s1_gitleaks_coverage(
+        log,
+        source_root=source,
+        manifest=manifest,
+        expected_bytes=total,
+    )
+    with pytest.raises(CapS1ResultError, match="secret_scan_incomplete"):
+        _parse_cap_s1_gitleaks_coverage(
+            log.replace(b"no leaks found", b"partial scan completed"),
+            source_root=source,
+            manifest=manifest,
+            expected_bytes=total,
+        )
+    with pytest.raises(CapS1ResultError, match="secret_scan_incomplete"):
+        _parse_cap_s1_gitleaks_coverage(
+            log.replace(str(second).encode(), str(first).encode()),
+            source_root=source,
+            manifest=manifest,
+            expected_bytes=total,
+        )
+
+
+def test_cap_s1_secret_report_parser_preserves_findings_and_rejects_forgery() -> None:
+    findings = [
+        _redacted_secret_finding("private-key"),
+        _redacted_secret_finding("slack-bot-token"),
+        _redacted_secret_finding("stripe-access-token"),
+    ]
+    assert _parse_cap_s1_gitleaks_report(
+        json.dumps(findings, separators=(",", ":")).encode(),
+        allowed_rule_ids={"private-key", "slack-bot-token", "stripe-access-token"},
+    ) == (
+        ("private-key", 1),
+        ("slack-bot-token", 1),
+        ("stripe-access-token", 1),
+    )
+    unredacted = dict(findings[0])
+    unredacted["Secret"] = "not-redacted"
+    with pytest.raises(CapS1ResultError, match="secret_report_unredacted"):
+        _parse_cap_s1_gitleaks_report(json.dumps([unredacted]).encode())
+    with pytest.raises(CapS1ResultError, match="secret_report_invalid"):
+        _parse_cap_s1_gitleaks_report(
+            b'[{"RuleID":"private-key","RuleID":"stripe-access-token"}]'
+        )
+    forged = _redacted_secret_finding("private-key")
+    forged["caller_clean"] = True
+    with pytest.raises(CapS1ResultError, match="secret_report_invalid"):
+        _parse_cap_s1_gitleaks_report(json.dumps([forged]).encode())
+
+
+def test_cap_s1_secret_source_stage_is_immutable_complete_and_bounded(tmp_path) -> None:
+    head = _subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()
+    protected = _subprocess.check_output(
+        ["git", "rev-parse", "origin/master"], cwd=REPO_ROOT, text=True
+    ).strip()
+    owner = tmp_path / "source-owner"
+    owner.mkdir()
+    source, manifest, total = _stage_cap_s1_secret_source(
+        exact_head=head,
+        protected_join=protected,
+        owned_root=owner,
+    )
+    assert len(manifest) == 21
+    assert tuple(entry.path for entry in manifest) == tuple(sorted(entry.path for entry in manifest))
+    assert total == sum(entry.size for entry in manifest)
+    assert 0 < total <= 10 * 1024 * 1024
+    _verify_cap_s1_secret_manifest(source_root=source, manifest=manifest)
+    first = source / manifest[0].path
+    first.chmod(0o600)
+    first.write_bytes(first.read_bytes() + b"changed")
+    with pytest.raises(CapS1ResultError, match="secret_source_changed"):
+        _verify_cap_s1_secret_manifest(source_root=source, manifest=manifest)
 
 
 def test_cap_s1_result_reopens_only_read_only_regular_producer_evidence() -> None:
