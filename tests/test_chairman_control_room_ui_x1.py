@@ -6,6 +6,7 @@ They do not grant the UI lifecycle, attention, identity, or completion authority
 from __future__ import annotations
 
 from html.parser import HTMLParser
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -1178,7 +1179,8 @@ def test_attention_read_state_preserves_nonempty_current_attention() -> None:
 def test_state_refusal_or_network_failure_preserves_previous_attention_and_degraded_state() -> None:
     """A parsed 503, malformed envelope, or rejected fetch cannot replace a real prior state."""
     source = JS.read_text(encoding="utf-8")
-    load_state = source[source.index("  function loadState()") : source.index("\n  function readTheme()")]
+    state_helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
+    load_state = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
     harness = """
     var STATE;
     var responses;
@@ -1217,7 +1219,7 @@ def test_state_refusal_or_network_failure_preserves_previous_attention_and_degra
       run(scenarios[index]()).then(function(result) { results.push(result); next(index + 1); });
     }
     next(0);
-    """ % _extract_fn("hasUsableStateEnvelope") + load_state
+    """ % (_extract_fn("hasUsableStateEnvelope") + state_helpers + load_state)
     out = _run_node(harness)
     for result in out:
         assert result["rendered"] == [{
@@ -1239,6 +1241,340 @@ def test_state_refusal_or_network_failure_preserves_previous_attention_and_degra
         ]
         assert result["tallies"] == {"chairman": "—", "ceo": "—", "coo": "—"}
         assert result["nav"] == "—"
+
+
+def test_refresh_follow_up_reloads_once_then_cancels_or_fails_closed() -> None:
+    """A stale cache gets one bounded retry chain; superseded or hung reads cannot render late."""
+    source = JS.read_text(encoding="utf-8")
+    helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    harness = """
+    var STATE;
+    var responses;
+    var calls;
+    var timers = [];
+    var nextTimer = 1;
+    function setTimeout(fn, delay) { var item = {id:nextTimer++, fn:fn, delay:delay, cancelled:false}; timers.push(item); return item.id; }
+    function clearTimeout(id) { timers.forEach(function(item) { if (item.id === id) item.cancelled = true; }); }
+    function runNextTimer() {
+      var pending = timers.filter(function(item) { return !item.cancelled; }).sort(function(a, b) { return a.delay - b.delay; });
+      if (!pending.length) throw new Error("no timer");
+      pending[0].cancelled = true;
+      pending[0].fn();
+      return pending[0].delay;
+    }
+    var nav;
+    var document = {getElementById:function(id) { return id === "nav-today-count" ? nav : {textContent:""}; }};
+    function getJSON() { calls.gets += 1; return responses.shift(); }
+    function renderEverything(body) { calls.rendered.push(body.tag); STATE.doc = body.control_room; }
+    function renderDegraded(items) { calls.degraded.push(items[items.length - 1]); }
+    function renderNeedsYou() {}
+    function renderMiniAttention() {}
+    function setTally() {}
+    var refreshing = {tag:"refreshing", refresh_in_flight:true, control_room:{attention:{chairman:[],ceo:[],coo:[]}, degraded:[]}};
+    var fresh = {tag:"fresh", refresh_in_flight:false, control_room:{attention:{chairman:[],ceo:[],coo:[]}, degraded:[]}};
+    function reset(queue) {
+      STATE = {doc:{attention:{chairman:[{attention_id:"retained"}],ceo:[],coo:[]}, degraded:[]}};
+      responses = queue.slice(); calls = {gets:0, rendered:[], degraded:[]}; nav = {textContent:""}; timers = []; nextTimer = 1;
+    }
+    %s
+    %s
+    %s
+    %s
+    reset([Promise.resolve(refreshing), Promise.resolve(fresh)]);
+    loadState().then(function() {
+      var retryDelay = runNextTimer();
+      return Promise.resolve().then(function() { return {complete:{gets:calls.gets, rendered:calls.rendered, retryDelay:retryDelay, pending:timers.filter(function(item){return !item.cancelled;}).length}}; });
+    }).then(function(complete) {
+      reset([Promise.resolve(refreshing), Promise.resolve(fresh)]);
+      return loadState().then(function() {
+        return loadState();
+      }).then(function() { return {complete:complete.complete, superseded:{gets:calls.gets, rendered:calls.rendered, pending:timers.filter(function(item){return !item.cancelled;}).length}}; });
+    }).then(function(first) {
+      reset([Promise.resolve(refreshing), new Promise(function() {})]);
+      return loadState().then(function() {
+        runNextTimer();
+        runNextTimer();
+        return Promise.resolve().then(function() { return {timedOut:{gets:calls.gets, rendered:calls.rendered, degraded:calls.degraded, pending:timers.filter(function(item){return !item.cancelled;}).length}}; });
+      }).then(function(second) { console.log(JSON.stringify({complete:first.complete, superseded:first.superseded, timedOut:second.timedOut})); });
+    });
+    """ % (helpers, reader, _extract_fn("hasUsableStateEnvelope"), "")
+    out = _run_node(harness)
+    assert out["complete"] == {"gets": 2, "rendered": ["refreshing", "fresh"], "retryDelay": 1000, "pending": 0}
+    assert out["superseded"] == {"gets": 2, "rendered": ["refreshing", "fresh"], "pending": 0}
+    assert out["timedOut"] == {
+        "gets": 2, "rendered": ["refreshing"],
+        "degraded": ["control_room_api: state read timed out — current state could not be read"], "pending": 0,
+    }
+
+
+def _deadline_clock_probe(mode: str, *, wall_offset: int = 0, consumed_at: int = 0,
+                          clock: str = "valid") -> dict:
+    """Run the real reader with independently controlled clocks and deferred timer delivery."""
+    source = JS.read_text(encoding="utf-8")
+    helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    options = json.dumps({"mode": mode, "wall_offset": wall_offset,
+                          "consumed_at": consumed_at, "clock": clock})
+    harness = r"""
+    var options = %s;
+    var elapsed = 0, wallOffset = 0, nextTimer = 1, timers = [], resolveResponse;
+    var calls = {gets:0, rendered:[], degraded:[], attention:[]};
+    var STATE = {doc:{attention:{chairman:[{attention_id:"retained"}],ceo:[],coo:[]}, degraded:[]}};
+    var performance = {now:function() { return elapsed; }};
+    if (options.clock === "missing") performance = undefined;
+    if (options.clock === "invalid") performance.now = function() { return NaN; };
+    if (options.clock === "throws") performance.now = function() { throw new Error("clock unavailable"); };
+    Date.now = function() { return 1700000000000 + elapsed + wallOffset; };
+    function setTimeout(fn, delay) {
+      if (!Number.isFinite(delay) || delay < 0) throw new Error("invalid timer delay");
+      var timer = {id:nextTimer++, fn:fn, due:elapsed + delay, cancelled:false};
+      timers.push(timer); return timer.id;
+    }
+    function clearTimeout(id) { timers.forEach(function(t) { if (t.id === id) t.cancelled = true; }); }
+    var document = {getElementById:function() { return {textContent:"",hidden:true}; }};
+    function body(refreshing) {
+      return {tag:refreshing ? "refreshing":"fresh", refresh_in_flight:refreshing,
+        control_room:{attention:{chairman:[],ceo:[],coo:[]},degraded:[]}};
+    }
+    function getJSON() {
+      calls.gets++;
+      if (options.mode === "refreshing") return Promise.resolve(body(true));
+      return new Promise(function(resolve) { resolveResponse = resolve; });
+    }
+    function renderEverything(value) { calls.rendered.push({tag:value.tag,at:elapsed}); STATE.doc = value.control_room; }
+    function renderDegraded(items) { calls.degraded.push({reason:items[items.length - 1],at:elapsed}); }
+    function renderNeedsYou(items, state) { calls.attention.push({ids:items.map(function(x){return x.attention_id;}),state:state}); }
+    function renderMiniAttention() {} function setTally() {}
+    %s
+    %s
+    %s
+    async function drain() { for (var i = 0; i < 8; i++) await Promise.resolve(); }
+    async function advanceTo(cutoff) {
+      for (var steps = 0; steps < 1000; steps++) {
+        var timer = timers.filter(function(t) { return !t.cancelled && t.due <= cutoff; })
+          .sort(function(a,b) { return a.due - b.due || a.id - b.id; })[0];
+        if (!timer) { elapsed = cutoff; await drain(); return; }
+        elapsed = timer.due; timer.cancelled = true; timer.fn(); await drain();
+      }
+      throw new Error("unbounded timer chain");
+    }
+    (async function() {
+      var completion = loadState();
+      if (options.mode === "refreshing") {
+        await completion;
+        wallOffset = options.wall_offset;
+        await advanceTo(250000);
+      } else if (resolveResponse) {
+        // Deliver the response microtask before running any overdue timer task.
+        elapsed = options.consumed_at;
+        if (options.clock === "lost") performance = undefined;
+        resolveResponse(body(false)); await completion; await drain();
+      } else {
+        await completion; await drain();
+      }
+      console.log(JSON.stringify({calls:calls,
+        pending:timers.filter(function(t){return !t.cancelled;}).length,
+        active:ACTIVE_STATE_READ !== null,
+        retained:STATE.doc.attention.chairman.map(function(x){return x.attention_id;})}));
+    })();
+    """ % (options, helpers, reader, _extract_fn("hasUsableStateEnvelope"))
+    return _run_node(harness)
+
+
+@pytest.mark.parametrize("wall_offset", [-600000, 600000])
+def test_refresh_deadline_ignores_wall_clock_changes(wall_offset: int) -> None:
+    """Mutable calendar time cannot extend or prematurely expire the elapsed read budget."""
+    out = _deadline_clock_probe("refreshing", wall_offset=wall_offset)
+    assert out["calls"]["gets"] == 13
+    assert len(out["calls"]["degraded"]) == 1
+    assert out["calls"]["degraded"][0]["at"] == 250000
+    assert "timed out" in out["calls"]["degraded"][0]["reason"]
+    assert out["pending"] == 0
+    assert out["active"] is False
+
+
+@pytest.mark.parametrize("consumed_at", [249000, 250000, 251000])
+def test_state_response_must_meet_deadline_before_timer_callback(consumed_at: int) -> None:
+    """A due but unprocessed timer cannot be cancelled by a late successful response."""
+    out = _deadline_clock_probe("response", consumed_at=consumed_at)
+    assert out["calls"]["gets"] == 1
+    assert out["pending"] == 0
+    assert out["active"] is False
+    if consumed_at == 249000:
+        assert out["calls"]["rendered"] == [{"tag": "fresh", "at": 249000}]
+        assert out["calls"]["degraded"] == []
+    else:
+        assert out["calls"]["rendered"] == []
+        assert len(out["calls"]["degraded"]) == 1
+        assert "timed out" in out["calls"]["degraded"][0]["reason"]
+        assert out["retained"] == ["retained"]
+        assert out["calls"]["attention"] == [{"ids": ["retained"], "state": "unavailable"}]
+
+
+@pytest.mark.parametrize("clock", ["missing", "invalid", "throws", "lost"])
+def test_state_read_fails_closed_without_reliable_elapsed_clock(clock: str) -> None:
+    """An unavailable elapsed clock cannot silently restore a wall-clock deadline."""
+    out = _deadline_clock_probe("response", clock=clock, consumed_at=1000)
+    assert out["calls"]["gets"] == (1 if clock == "lost" else 0)
+    assert out["calls"]["rendered"] == []
+    assert len(out["calls"]["degraded"]) == 1
+    assert out["calls"]["attention"] == [{"ids": ["retained"], "state": "unavailable"}]
+    assert out["retained"] == ["retained"]
+    assert out["pending"] == 0
+    assert out["active"] is False
+
+
+def test_refresh_follow_up_uses_the_explicit_load_deadline_not_a_second_window() -> None:
+    """An in-flight body received at 249 seconds cannot start a new 250-second follow-up budget."""
+    source = JS.read_text(encoding="utf-8")
+    helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    harness = """
+    var STATE; var calls = {gets:0, rendered:[], degraded:[]}; var resolveInitial; var nav = {textContent:""};
+    var now = 0; var timers = []; var timerId = 1;
+    Date.now = function() { return now; };
+    var performance = {now:function() { return now; }};
+    function setTimeout(fn, delay) { var timer = {id:timerId++, fn:fn, due:now + delay, cancelled:false}; timers.push(timer); return timer.id; }
+    function clearTimeout(id) { timers.forEach(function(timer) { if (timer.id === id) timer.cancelled = true; }); }
+    function runNextTimer() { var timer = timers.filter(function(item){return !item.cancelled;}).sort(function(a,b){return a.due-b.due;})[0]; now = timer.due; timer.cancelled = true; timer.fn(); }
+    var document = {getElementById:function(id) { return id === "nav-today-count" ? nav : {textContent:""}; }};
+    function getJSON() { calls.gets += 1; return new Promise(function(resolve) { resolveInitial = resolve; }); }
+    function renderEverything(body) { calls.rendered.push(body.tag); STATE.doc = body.control_room; }
+    function renderDegraded(items) { calls.degraded.push(items[items.length - 1]); }
+    function renderNeedsYou() {} function renderMiniAttention() {} function setTally() {}
+    var refreshing = {tag:"refreshing", refresh_in_flight:true, control_room:{attention:{chairman:[],ceo:[],coo:[]}, degraded:[]}};
+    %s
+    %s
+    %s
+    STATE = {doc:{}};
+    loadState();
+    now = 249000;
+    resolveInitial(refreshing);
+    Promise.resolve().then(function() {
+      runNextTimer();
+      return Promise.resolve().then(function() { console.log(JSON.stringify({now:now, gets:calls.gets, rendered:calls.rendered, degraded:calls.degraded, pending:timers.filter(function(timer){return !timer.cancelled;}).length})); });
+    });
+    """ % (helpers, reader, _extract_fn("hasUsableStateEnvelope"))
+    assert _run_node(harness) == {
+        "now": 250000, "gets": 1, "rendered": ["refreshing"],
+        "degraded": ["control_room_api: state read timed out — current state could not be read"], "pending": 0,
+    }
+
+
+def test_refresh_follow_up_refused_or_malformed_response_preserves_known_rows() -> None:
+    """A terminal follow-up refusal cannot replace the prior stale composition with a false clear."""
+    source = JS.read_text(encoding="utf-8")
+    helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    harness = """
+    var STATE; var responses; var calls; var timer; var nav;
+    function setTimeout(fn, delay) { timer = {fn:fn, delay:delay, cancelled:false}; return 1; }
+    function clearTimeout() { if (timer) timer.cancelled = true; }
+    var document = {getElementById:function(id) { return id === "nav-today-count" ? nav : {textContent:""}; }};
+    function getJSON() { return responses.shift(); }
+    function renderEverything(body) { calls.rendered.push(body.tag); STATE.doc = body.control_room; }
+    function renderDegraded(items) { calls.degraded = items; }
+    function renderNeedsYou(items, state) { calls.chairman = [items, state]; }
+    function renderMiniAttention() {}
+    function setTally() {}
+    var refreshing = {tag:"refreshing", refresh_in_flight:true, control_room:{attention:{chairman:[{attention_id:"retained"}],ceo:[],coo:[]}, degraded:["executive_runtime: unavailable"]}};
+    function run(refusal) {
+      STATE = {doc:{}}; nav = {textContent:""}; calls = {rendered:[]}; timer = null;
+      responses = [Promise.resolve(refreshing), Promise.resolve(refusal)];
+      return loadState().then(function() { timer.fn(); return Promise.resolve(); }).then(function() { return calls; });
+    }
+    %s
+    %s
+    %s
+    run({ok:false, error:{code:"state_unavailable"}}).then(function(refused) {
+      return run({control_room:{}}).then(function(malformed) { console.log(JSON.stringify({refused:refused, malformed:malformed})); });
+    });
+    """ % (helpers, reader, _extract_fn("hasUsableStateEnvelope"))
+    out = _run_node(harness)
+    for result in out.values():
+        assert result["rendered"] == ["refreshing"]
+        assert result["chairman"] == [[{"attention_id": "retained"}], "unavailable"]
+        assert result["degraded"] == [
+            "executive_runtime: unavailable",
+            "control_room_api: unavailable — current state could not be read",
+        ]
+
+
+def test_refresh_follow_up_invalidates_late_reads_and_pagehide_uses_that_same_fence() -> None:
+    """A cancelled request's late success or failure cannot overwrite the newer explicit read."""
+    source = JS.read_text(encoding="utf-8")
+    helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    wiring = source[source.index('document.addEventListener("DOMContentLoaded"') :]
+    assert 'window.addEventListener("pagehide"' in wiring
+    assert "invalidateStateReads();" in wiring
+    harness = """
+    var STATE; var calls; var queue; var firstResolve; var firstReject; var nav;
+    var timers = []; var timerId = 1;
+    function setTimeout(fn, delay) { var timer = {id:timerId++, fn:fn, delay:delay, cancelled:false}; timers.push(timer); return timer.id; }
+    function clearTimeout(id) { timers.forEach(function(timer) { if (timer.id === id) timer.cancelled = true; }); }
+    function AbortController() { this.signal = {}; this.abort = function() { calls.aborts += 1; }; }
+    var document = {getElementById:function(id) { return id === "nav-today-count" ? nav : {textContent:""}; }};
+    function getJSON() { calls.gets += 1; return queue.shift(); }
+    function renderEverything(body) { calls.rendered.push(body.tag); STATE.doc = body.control_room; }
+    function renderDegraded() { calls.degraded += 1; }
+    function renderNeedsYou() {} function renderMiniAttention() {} function setTally() {}
+    var fresh = {tag:"fresh", refresh_in_flight:false, control_room:{attention:{chairman:[],ceo:[],coo:[]}, degraded:[]}};
+    function run(lateFailure) {
+      STATE = {doc:{}}; nav = {textContent:""}; calls = {gets:0, aborts:0, rendered:[], degraded:0}; timers = []; timerId = 1;
+      var pending = new Promise(function(resolve, reject) { firstResolve = resolve; firstReject = reject; });
+      queue = [pending, Promise.resolve(fresh)];
+      loadState();
+      return loadState().then(function() {
+        if (lateFailure) firstReject(new Error("late failure")); else firstResolve({tag:"late", refresh_in_flight:true, control_room:fresh.control_room});
+        return Promise.resolve().then(function() { return {gets:calls.gets, aborts:calls.aborts, rendered:calls.rendered, degraded:calls.degraded, pending:timers.filter(function(timer){return !timer.cancelled;}).length}; });
+      });
+    }
+    %s
+    %s
+    %s
+    run(false).then(function(success) { return run(true).then(function(failure) { console.log(JSON.stringify({success:success, failure:failure})); }); });
+    """ % (helpers, reader, _extract_fn("hasUsableStateEnvelope"))
+    out = _run_node(harness)
+    assert out["success"] == {"gets": 2, "aborts": 1, "rendered": ["fresh"], "degraded": 0, "pending": 0}
+    assert out["failure"] == {"gets": 2, "aborts": 1, "rendered": ["fresh"], "degraded": 0, "pending": 0}
+
+
+def test_refresh_follow_up_never_polls_a_current_state_or_a_fired_cancelled_callback() -> None:
+    """A normal response is one read, and a timer that fires after teardown cannot begin another."""
+    source = JS.read_text(encoding="utf-8")
+    helpers = source[source.index("  var STATE_LOAD_GENERATION") : source.index("\n  function indexState")]
+    reader = source[source.index("  function readState(") : source.index("\n  function hasUsableStateEnvelope")]
+    harness = """
+    var STATE; var calls; var responses; var nav; var timers = []; var timerId = 1;
+    function setTimeout(fn, delay) { var timer = {id:timerId++, fn:fn, delay:delay, cancelled:false}; timers.push(timer); return timer.id; }
+    function clearTimeout(id) { timers.forEach(function(timer) { if (timer.id === id) timer.cancelled = true; }); }
+    var document = {getElementById:function(id) { return id === "nav-today-count" ? nav : {textContent:""}; }};
+    function getJSON() { calls.gets += 1; return responses.shift(); }
+    function renderEverything(body) { calls.rendered.push(body.tag); STATE.doc = body.control_room; }
+    function renderDegraded() {} function renderNeedsYou() {} function renderMiniAttention() {} function setTally() {}
+    var fresh = {tag:"fresh", refresh_in_flight:false, control_room:{attention:{chairman:[],ceo:[],coo:[]}, degraded:[]}};
+    var refreshing = {tag:"refreshing", refresh_in_flight:true, control_room:fresh.control_room};
+    function reset(queue) { STATE = {doc:{}}; calls = {gets:0, rendered:[]}; responses = queue; nav = {textContent:""}; timers = []; timerId = 1; }
+    %s
+    %s
+    %s
+    reset([Promise.resolve(fresh)]);
+    loadState().then(function() {
+      var current = {gets:calls.gets, rendered:calls.rendered, timers:timers.filter(function(timer){return !timer.cancelled;}).length};
+      reset([Promise.resolve(refreshing), Promise.resolve(fresh)]);
+      return loadState().then(function() {
+        var retry = timers.filter(function(timer){return !timer.cancelled && timer.delay === 1000;})[0];
+        invalidateStateReads();
+        retry.fn();
+        return Promise.resolve().then(function() { console.log(JSON.stringify({current:current, cancelled:{gets:calls.gets, rendered:calls.rendered, timers:timers.filter(function(timer){return !timer.cancelled;}).length}})); });
+      });
+    });
+    """ % (helpers, reader, _extract_fn("hasUsableStateEnvelope"))
+    out = _run_node(harness)
+    assert out["current"] == {"gets": 1, "rendered": ["fresh"], "timers": 0}
+    assert out["cancelled"] == {"gets": 1, "rendered": ["refreshing"], "timers": 0}
 
 
 def test_state_envelope_accepts_local_and_remote_success_contracts_only_when_inbox_is_complete() -> None:
