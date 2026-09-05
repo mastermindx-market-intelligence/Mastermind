@@ -34,6 +34,7 @@ from control_plane.wake_dispatcher import (
     WakeEffectUnknownError,
     WakePreSubmitError,
     dispatch_persisted_nudge,
+    mint_nudge_id,
     reconcile_persisted_delivered_ack,
 )
 from control_plane.wake_events import WakeObligation, canonical_json_bytes
@@ -477,6 +478,11 @@ def _validated_delayed_ack_attempt(
         binding_generation=grant.binding_generation,
     )
     if attempt.destination_digest != expected_destination:
+        return None
+    if attempt.nudge_id != mint_nudge_id(
+        expected_destination,
+        (attempt.attempt_command_id,),
+    ):
         return None
     effective_policy = hashlib.sha256(
         canonical_json_bytes({

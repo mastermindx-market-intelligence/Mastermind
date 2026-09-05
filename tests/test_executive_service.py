@@ -3333,6 +3333,69 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
                 ),
                 grant2,
             ) is None
+
+            # A syntactically valid alternate nudge identity on both durable
+            # attempt phases remains causal, but must not receive terminal
+            # replay credit because it was not minted from the destination
+            # and singleton command group.
+            alternate_nudge_id = "NUDGE-" + "f" * 32
+            forged_nudge_history = tuple(
+                dataclasses.replace(
+                    item,
+                    record=dataclasses.replace(
+                        item.record,
+                        nudge_id=alternate_nudge_id,
+                    ),
+                )
+                if item.record.phase in {
+                    LedgerPhase.DELIVERY_ATTEMPT,
+                    LedgerPhase.DELIVERED,
+                }
+                else item
+                for item in persisted_ack2
+            )
+            from control_plane.wake_ledger import assert_causal
+
+            assert_causal(tuple(item.record for item in forged_nudge_history))
+            original_list_records = WakeLedgerRepository.list_records
+
+            def forged_terminal_history(repository_self, obligation_id):
+                if obligation_id == obligation2.obligation_id:
+                    return forged_nudge_history
+                return original_list_records(repository_self, obligation_id)
+
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_records",
+                forged_terminal_history,
+            )
+            calls_before_forged_terminal = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count(
+                    "historical-enter"
+                ),
+            )
+            assert await exchange(observation_path, ack2) == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "HOLD",
+                "reason": "ACK_HISTORY_REFUSED",
+            }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count(
+                    "historical-enter"
+                ),
+            ) == calls_before_forged_terminal
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_records",
+                original_list_records,
+            )
+            assert WakeLedgerRepository(runtime).list_records(
+                obligation2.obligation_id
+            ) == persisted_ack2
             second_connected_pass = await turn_runtime.reconcile_once()
             assert len(second_connected_pass) == 1
             assert second_connected_pass[0].outcome.value == "NO_ACTION"
