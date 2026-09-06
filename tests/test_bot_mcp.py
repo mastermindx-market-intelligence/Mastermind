@@ -208,14 +208,46 @@ def test_json_transport_returns_fixed_error_for_non_strict_or_unencodable_values
     assert _utf8_bytes(text) <= 8_000
 
 
-def test_json_transport_catches_base_exception_from_default_serialization():
+def test_json_transport_catches_ordinary_serialization_exceptions():
     class ExplosiveStringification:
         def __str__(self):
-            raise BaseException("do not leak this")
+            raise RuntimeError("do not leak this")
 
     result = bot_mcp._json({"value": ExplosiveStringification()})
 
     assert _strict_json(_text(result)) == {"error": "MCP_RESPONSE_NOT_JSON"}
+    assert result["is_error"] is True
+
+
+@pytest.mark.parametrize("signal", (KeyboardInterrupt, SystemExit, GeneratorExit, asyncio.CancelledError))
+def test_json_transport_propagates_base_exception_subclasses(signal):
+    class TerminatingStringification:
+        def __str__(self):
+            raise signal()
+
+    with pytest.raises(signal):
+        bot_mcp._json({"value": TerminatingStringification()})
+
+
+def test_json_transport_propagates_termination_from_compaction_path():
+    class ChangesDuringSerialization:
+        calls = 0
+
+        def __str__(self):
+            type(self).calls += 1
+            if type(self).calls == 1:
+                return "x" * 9_000
+            raise KeyboardInterrupt()
+
+    with pytest.raises(KeyboardInterrupt):
+        bot_mcp._json({"value": ChangesDuringSerialization()})
+
+
+@pytest.mark.parametrize("root", (["x" * 1_000] * 50, tuple(["x" * 1_000] * 50), "x" * 9_000))
+def test_json_transport_refuses_oversized_non_object_roots(root):
+    result = bot_mcp._json(root)
+
+    assert _strict_json(_text(result)) == {"error": "MCP_RESPONSE_TOO_LARGE"}
     assert result["is_error"] is True
 
 
@@ -243,6 +275,34 @@ def test_real_decorated_handler_sets_sdk_wire_error_once(monkeypatch):
     assert producer_calls == 1
     assert wire["isError"] is True
     assert _strict_json(wire["content"][0]["text"]) == {"error": "MCP_RESPONSE_NOT_JSON"}
+
+
+def test_real_decorated_handler_preserves_multilingual_success_through_sdk(monkeypatch):
+    producer_calls = 0
+    handler_calls = 0
+    original_handler = bot_mcp.get_regime.handler
+
+    def regime_fixture(_path):
+        nonlocal producer_calls
+        producer_calls += 1
+        return {"quad": "Q1", "cycle_tag": "電力", "growth_score": 0, "liquidity_overlay": False,
+                "sector_rs": ["🚀"], "data_quality": None}
+
+    async def counted_handler(args):
+        nonlocal handler_calls
+        handler_calls += 1
+        return await original_handler(args)
+
+    monkeypatch.setattr(bot_mcp, "_read_json", regime_fixture)
+    monkeypatch.setattr(bot_mcp.get_regime, "handler", counted_handler)
+    wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_regime", {}))
+    parsed = _strict_json(wire["content"][0]["text"])
+
+    assert handler_calls == producer_calls == 1
+    assert wire.get("isError", False) is False
+    assert _utf8_bytes(wire["content"][0]["text"]) <= 8_000
+    assert parsed["cycle_tag"] == "電力" and parsed["growth_score"] == 0
+    assert parsed["liquidity_overlay"] is False
 
 
 @pytest.mark.parametrize("invalid", (float("nan"), "\ud800"))

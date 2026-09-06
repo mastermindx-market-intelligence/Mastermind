@@ -57,7 +57,7 @@ def _serialize_json_transport(value):
     try:
         payload = json.dumps(value, default=str, ensure_ascii=False, allow_nan=False)
         return payload, "ok" if len(payload.encode("utf-8")) <= _JSON_TRANSPORT_LIMIT_BYTES else "too_large"
-    except BaseException:
+    except Exception:
         return None, "not_json"
 
 
@@ -112,6 +112,8 @@ def _json(obj) -> dict:
             return _ok(payload)
         if status == "not_json":
             return _json_transport_error("not_json")
+        if not isinstance(obj, dict):
+            return _json_transport_error("too_large")
         for list_limit, str_limit in ((20, 400), (10, 240), (5, 160), (3, 100), (1, 72)):
             compact = _compact_json_value(
                 obj,
@@ -126,7 +128,7 @@ def _json(obj) -> dict:
             if status == "not_json":
                 return _json_transport_error("not_json")
         return _json_transport_error("too_large")
-    except BaseException:
+    except Exception:
         return _json_transport_error("not_json")
 
 
