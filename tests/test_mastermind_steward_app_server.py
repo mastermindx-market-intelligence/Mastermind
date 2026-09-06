@@ -650,7 +650,11 @@ process.stdout.write(JSON.stringify({ ok: true, scenarios: 24 }));
 
 
 def test_ui_ingress_distinguishes_absent_cleared_and_malformed_results():
-    scripts = re.findall(r"<script>\s*(.*?)\s*</script>", CONTROL_ROOM_HTML, re.DOTALL)
+    scripts = re.findall(
+        r"<script>\s*(.*?)\s*</script>",
+        CONTROL_ROOM_HTML,
+        re.DOTALL | re.IGNORECASE,
+    )
     assert len(scripts) == 1
     node_program = _NODE_UI_BEHAVIOR_HARNESS.replace(
         "__CONTROL_ROOM_SCRIPT__",
