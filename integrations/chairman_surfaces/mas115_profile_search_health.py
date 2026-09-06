@@ -35,7 +35,6 @@ _RECEIPT_KEYS = frozenset({
     "initial_peer_census_decode_context",
 })
 _DISCARD_PROFILE_NAME = object()
-_HTTP_CLOSED_ATTR = "_mas115_profile_search_health_closed"
 
 
 def _receipt(
@@ -95,6 +94,15 @@ def _emit(stdout, receipt: dict) -> int:
     return 0 if receipt.get("verdict") == "PASS" else 2
 
 
+def run_coordinator_profile_search_health_refusal(*, stdout=None) -> int:
+    """Emit the one fixed pre-trusted refusal without touching live dependencies."""
+
+    return _emit(
+        stdout if stdout is not None else sys.stdout,
+        _receipt("UNSUPPORTED_SURFACE"),
+    )
+
+
 def _load_live_preflight():
     """Repeat the complete fixed anchor/binding/census gate before Keychain."""
 
@@ -143,23 +151,26 @@ def _checked_close_keychain_pipe(pipe) -> bool:
     pipe._fd = -1  # noqa: SLF001 - make this owner one-shot before waiting
 
     timeout = _vendors._KEYCHAIN_WAIT_TIMEOUT_SECONDS  # noqa: SLF001
-    try:
-        if pipe._wait_until(time.monotonic() + timeout):  # noqa: SLF001
-            return closed is True
-    except Exception:  # noqa: BLE001
-        return False
-
     cleanup_error = False
+    try:
+        reaped = pipe._wait_until(time.monotonic() + timeout)  # noqa: SLF001
+    except Exception:  # noqa: BLE001
+        cleanup_error = True
+        reaped = False
+    if reaped is True:
+        return closed is True and cleanup_error is False
+
     try:
         pipe._kill(pipe._pid, signal.SIGTERM)  # noqa: SLF001
     except Exception:  # noqa: BLE001
         cleanup_error = True
-    else:
-        try:
-            if pipe._wait_until(time.monotonic() + timeout):  # noqa: SLF001
-                return closed is True and cleanup_error is False
-        except Exception:  # noqa: BLE001
-            cleanup_error = True
+    try:
+        reaped = pipe._wait_until(time.monotonic() + timeout)  # noqa: SLF001
+    except Exception:  # noqa: BLE001
+        cleanup_error = True
+        reaped = False
+    if reaped is True:
+        return closed is True and cleanup_error is False
 
     try:
         pipe._kill(pipe._pid, signal.SIGKILL)  # noqa: SLF001
@@ -175,30 +186,83 @@ def _checked_close_keychain_pipe(pipe) -> bool:
     return closed is True and reaped is True and cleanup_error is False
 
 
-def _checked_close_http_client(client) -> bool:
-    """Close the exact bounded HTTP owner once, without changing legacy close."""
-
-    if type(client) is not _vendors.BoundedHttpClient:
-        return False
-    if getattr(client, _HTTP_CLOSED_ATTR, False) is not False:
-        return False
-    setattr(client, _HTTP_CLOSED_ATTR, True)
-    try:
-        client._client.close()  # noqa: SLF001 - checked owner beneath legacy close
-    except Exception:  # noqa: BLE001
-        return False
-    return True
-
-
 class _ProfileSearchOnlyClient:
-    """Sealed capability exposing only diagnostic Profile Search."""
+    """Sealed transport that can issue only the canonical diagnostic search."""
 
-    __slots__ = ("_delegate",)
+    __slots__ = ("_client", "_closed")
 
-    def __init__(self, delegate):
-        if type(delegate) is not _vendors.BoundedHttpClient:
-            raise TypeError("bounded Profile Search client required")
-        self._delegate = delegate
+    def __init__(self, *, client=None):
+        if isinstance(client, _vendors.BoundedHttpClient):
+            raise TypeError("full bounded client authority is forbidden")
+        _vendors.BoundedHttpClient.__init__(self, client=client)
+        self._closed = False
+
+    @staticmethod
+    def _bearer(credential):
+        return _vendors.BoundedHttpClient._bearer(credential)
+
+    def _request(
+        self,
+        method: str,
+        origin: str,
+        path: str,
+        *,
+        headers=None,
+        params=None,
+        json_body=None,
+        diagnostic_sink=None,
+    ):
+        """Fail closed unless the request is exactly one Profile Search page."""
+
+        body = json_body
+        authorization = headers.get("Authorization") if isinstance(headers, dict) else None
+        fixed_body_keys = {
+            "is_removed",
+            "limit",
+            "offset",
+            "search_text",
+            "storage_type",
+            "order_by",
+            "sort",
+            "folder_id",
+        }
+        if (
+            method != "POST"
+            or origin != _vendors._MLX_CLOUD_ORIGIN  # noqa: SLF001
+            or path != "/profile/search"
+            or params is not None
+            or not isinstance(headers, dict)
+            or set(headers) != {"Authorization"}
+            or not isinstance(authorization, str)
+            or not authorization.startswith("Bearer ")
+            or len(authorization) <= len("Bearer ")
+            or not isinstance(body, dict)
+            or set(body) != fixed_body_keys
+            or body.get("is_removed") is not False
+            or body.get("limit") != _vendors._PROFILE_PAGE_SIZE  # noqa: SLF001
+            or type(body.get("offset")) is not int
+            or body["offset"] < 0
+            or body["offset"] >= _vendors._MAX_PROFILE_CENSUS  # noqa: SLF001
+            or body.get("search_text") != ""
+            or body.get("storage_type") != "all"
+            or body.get("order_by") != "created_at"
+            or body.get("sort") != "asc"
+            or not isinstance(body.get("folder_id"), str)
+            or not body["folder_id"]
+        ):
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        if type(diagnostic_sink) is not _vendors._InitialPeerCensusDiagnosticSink:  # noqa: SLF001
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        return _vendors.BoundedHttpClient._request(
+            self,
+            method,
+            origin,
+            path,
+            headers=headers,
+            params=params,
+            json_body=body,
+            diagnostic_sink=diagnostic_sink,
+        )
 
     def _mlx_profile_search_with_diagnostic(
         self,
@@ -208,12 +272,30 @@ class _ProfileSearchOnlyClient:
         offset: int,
         diagnostic_sink,
     ):
-        return self._delegate._mlx_profile_search_with_diagnostic(  # noqa: SLF001
+        if type(diagnostic_sink) is not _vendors._InitialPeerCensusDiagnosticSink:  # noqa: SLF001
+            raise TypeError("initial peer census diagnostic sink required")
+        return _vendors.BoundedHttpClient._mlx_profile_search_request(  # noqa: SLF001
+            self,
             credential,
             folder_id,
             offset=offset,
             diagnostic_sink=diagnostic_sink,
         )
+
+
+def _checked_close_http_client(client) -> bool:
+    """Close the exact sealed HTTP owner once without exposing legacy close."""
+
+    if type(client) is not _ProfileSearchOnlyClient:
+        return False
+    if client._closed is not False:  # noqa: SLF001
+        return False
+    client._closed = True  # noqa: SLF001
+    try:
+        client._client.close()  # noqa: SLF001 - checked raw owner under sealed guard
+    except Exception:  # noqa: BLE001
+        return False
+    return True
 
 
 class _ProfileSearchProxy:
@@ -304,7 +386,7 @@ def _run_profile_search_health(
         client = client_factory()
     except Exception:  # noqa: BLE001
         client = None
-    if type(client) is not _vendors.BoundedHttpClient:
+    if type(client) is not _ProfileSearchOnlyClient:
         return _emit(stdout, _receipt("VENDOR_ERROR"))
 
     sink = None
@@ -313,10 +395,7 @@ def _run_profile_search_health(
         sink = _vendors._InitialPeerCensusDiagnosticSink(  # noqa: SLF001
             _vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,  # noqa: SLF001
         )
-        proxy = _ProfileSearchProxy(
-            credential,
-            _ProfileSearchOnlyClient(client),
-        )
+        proxy = _ProfileSearchProxy(credential, client)
         matches = _vendors.MultiloginClient._peer_candidates(  # noqa: SLF001
             proxy,
             folder_id=provision["folder_id"],
@@ -355,6 +434,6 @@ def run_coordinator_profile_search_health(*, stdout=None) -> int:
         pipe_factory=_vendors._open_keychain_credential_pipe,  # noqa: SLF001
         credential_reader=_vendors._read_direct_pipe_credential,  # noqa: SLF001
         pipe_closer=_checked_close_keychain_pipe,
-        client_factory=_vendors.BoundedHttpClient,
+        client_factory=_ProfileSearchOnlyClient,
         client_closer=_checked_close_http_client,
     )
