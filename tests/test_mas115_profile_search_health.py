@@ -161,7 +161,7 @@ def test_receipt_schema_is_exact_and_success_is_narrow():
     assert set(receipt) == _KEYS
     assert receipt == {
         "schema": "mastermind.mas115_profile_search_health.v1",
-        "operation": "web-sol-realm1-profile-search-read-health-source-20260905-sol-001",
+        "operation": "web-sol-realm1-profile-search-read-health-20260905-sol-001",
         "verdict": "PASS",
         "effect": "NONE",
         "code": "OK",
@@ -340,7 +340,7 @@ def test_profile_only_client_exposes_no_mutator_or_fallback_surface():
 def test_profile_only_client_rejects_full_bounded_constructor_input():
     bounded = vendors.BoundedHttpClient(client=_FakeHttp([]))
     with pytest.raises(TypeError):
-        health._ProfileSearchOnlyClient(bounded)
+        health._ProfileSearchOnlyClient(client=bounded)
 
 
 def test_proxy_exposes_only_parser_requirements_not_full_multilogin_client():
