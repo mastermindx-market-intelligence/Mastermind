@@ -23,6 +23,7 @@ import pytest
 
 from common.redaction import TRUNCATION_MARKER
 from control_plane import ceo_intent as ceo_intent_mod
+from control_plane import executive_dialogue_observation as observation_mod
 from control_plane import executive_ceo_ingress as ceo_ingress_mod
 from control_plane.executive_runtime import (
     AttemptLease,
@@ -1311,15 +1312,46 @@ def test_public_terminal_wake_read_reuses_real_service_projection_and_wake_owner
         attempt_id=terminal.attempt_id,
         worker_id=terminal.worker_id,
     )
+    direct_reader = getattr(
+        observation_mod,
+        "read_runtime_canonical_terminal_wake",
+        None,
+    )
+    facts_owner = getattr(
+        observation_mod,
+        "runtime_canonical_terminal_facts",
+        None,
+    )
+    assert callable(direct_reader), "standalone Runtime reader is not exposed"
+    assert callable(facts_owner), "canonical Runtime facts owner is not exposed"
+    owner_connections: list[sqlite3.Connection] = []
+
+    def observed_owner(runtime_arg, candidate_arg, connection_arg):
+        owner_connections.append(connection_arg)
+        return facts_owner(runtime_arg, candidate_arg, connection_arg)
+
+    monkeypatch.setattr(
+        observation_mod,
+        "runtime_canonical_terminal_facts",
+        observed_owner,
+    )
+
     result = service.read_canonical_dialogue_terminal_wake(
         source_root_job_id=terminal.root_job_id,
         candidate=exact_candidate,
     )
     with runtime.store.read() as connection:
+        caller_connection = connection
         event_count_before = int(
             connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         )
         same_snapshot = service.read_canonical_dialogue_terminal_wake(
+            source_root_job_id=terminal.root_job_id,
+            candidate=exact_candidate,
+            connection=connection,
+        )
+        direct_snapshot = direct_reader(
+            runtime=runtime,
             source_root_job_id=terminal.root_job_id,
             candidate=exact_candidate,
             connection=connection,
@@ -1339,8 +1371,183 @@ def test_public_terminal_wake_read_reuses_real_service_projection_and_wake_owner
     assert result.wake.obligation_id == obligation.obligation_id
     assert result.wake.status == "PENDING_RETRYABLE"
     assert same_snapshot.to_dict() == result.to_dict()
+    assert direct_snapshot.to_dict() == result.to_dict()
     assert replay.to_dict() == result.to_dict()
+    assert caller_connection in owner_connections
     assert event_count_after == event_count_before
+
+    for field, value in (
+        ("root_job_id", "JOB-WRONG-ROOT"),
+        ("job_id", "JOB-WRONG"),
+        ("attempt_id", "ATT-WRONG"),
+        ("worker_id", "worker-wrong"),
+    ):
+        wrong_candidate = dataclasses.replace(exact_candidate, **{field: value})
+        wrong = direct_reader(
+            runtime=runtime,
+            source_root_job_id=wrong_candidate.root_job_id,
+            candidate=wrong_candidate,
+        )
+        assert wrong.state == "ABSENT"
+        assert wrong.reason == "CANONICAL_TERMINAL_ABSENT"
+        assert wrong.terminal_applied is False
+
+    wrong_source_root = direct_reader(
+        runtime=runtime,
+        source_root_job_id="JOB-WRONG-ROOT",
+        candidate=exact_candidate,
+    )
+    assert wrong_source_root.state == "UNAVAILABLE"
+    assert wrong_source_root.reason == "READ_REQUEST_INVALID"
+
+    command_base, _material = observation_mod.terminal_return_event_material(
+        terminal
+    )
+    applied_command = observation_mod.terminal_return_phase_spec(command_base)[-1][2]
+    # Simulate out-of-band disk corruption by bypassing the immutable Event
+    # API. Production writers cannot perform this update.
+    connection = sqlite3.connect(runtime.store.path)
+    try:
+        row = connection.execute(
+            "SELECT payload_json FROM events WHERE command_id=?",
+            (applied_command,),
+        ).fetchone()
+        assert row is not None
+        malformed_payload = json.loads(str(row[0]))
+        malformed_payload["projection_receipt"]["fingerprint"] = "malformed"
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE command_id=?",
+            (
+                json.dumps(
+                    malformed_payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                applied_command,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    malformed = direct_reader(
+        runtime=runtime,
+        source_root_job_id=exact_candidate.root_job_id,
+        candidate=exact_candidate,
+    )
+    assert malformed.state == "CONFLICT"
+    assert malformed.reason == "CANONICAL_TERMINAL_CONFLICT"
+    assert malformed.terminal_state == "CONFLICT"
+    assert malformed.terminal_applied is False
+    assert "malformed" not in json.dumps(malformed.to_dict(), sort_keys=True)
+
+
+def test_terminal_wake_runtime_owner_is_single_and_service_wrappers_are_thin() -> None:
+    root = Path(__file__).resolve().parents[1]
+    service_path = root / "control_plane" / "executive_service.py"
+    observation_path = root / "control_plane" / "executive_dialogue_observation.py"
+    service_source = service_path.read_text(encoding="utf-8")
+    observation_source = observation_path.read_text(encoding="utf-8")
+    service_tree = ast.parse(service_source, filename=str(service_path))
+    observation_tree = ast.parse(observation_source, filename=str(observation_path))
+
+    service_class = next(
+        node
+        for node in service_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "ExecutiveControlService"
+    )
+    service_methods = {
+        node.name: node
+        for node in service_class.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    delegates = {
+        "_runtime_canonical_terminal_facts": "runtime_canonical_terminal_facts",
+        "read_canonical_dialogue_terminal_wake": "read_runtime_canonical_terminal_wake",
+        "_terminal_return_event_material": "terminal_return_event_material",
+        "_validate_terminal_return_event": "validate_terminal_return_event",
+        "_normalize_terminal_return_projection_receipt": (
+            "normalize_terminal_return_projection_receipt"
+        ),
+        "_terminal_return_phase_spec": "terminal_return_phase_spec",
+        "_inspect_terminal_return_history": "inspect_terminal_return_history",
+    }
+    for method_name, owner_name in delegates.items():
+        method = service_methods[method_name]
+        body = list(method.body)
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            body = body[1:]
+        assert len(body) == 1, method_name
+        owner_calls = [
+            node
+            for node in ast.walk(method)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "dialogue_observation"
+            and node.func.attr == owner_name
+        ]
+        assert len(owner_calls) == 1, (method_name, owner_name)
+        assert not any(
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and any(
+                token in node.value.upper()
+                for token in ("SELECT ", "INSERT ", "UPDATE ", "DELETE ")
+            )
+            for node in ast.walk(method)
+        ), method_name
+
+    extracted_constants = {
+        "_TERMINAL_RETURN_PROJECTION_SCHEMA",
+        "_TERMINAL_RETURN_PREPARED_EVENT",
+        "_TERMINAL_RETURN_ATTEMPTED_EVENT",
+        "_TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT",
+        "_TERMINAL_RETURN_EFFECT_UNKNOWN_EVENT",
+        "_TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT",
+        "_TERMINAL_RETURN_APPLIED_EVENT",
+        "_TERMINAL_RETURN_RECEIPT_ACTIONS",
+    }
+    assigned_names: set[str] = set()
+    for node in service_tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            assigned_names.update(
+                target.id for target in targets if isinstance(target, ast.Name)
+            )
+    assert assigned_names.isdisjoint(extracted_constants)
+
+    owner_names = set(delegates.values())
+    observation_functions = [
+        node.name
+        for node in observation_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in owner_names
+    ]
+    assert sorted(observation_functions) == sorted(owner_names)
+    imported_modules = {
+        node.module
+        for node in ast.walk(observation_tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    assert "control_plane.executive_service" not in imported_modules
+    assert "ExecutiveControlService" not in {
+        node.id for node in ast.walk(observation_tree) if isinstance(node, ast.Name)
+    }
+    assert "/var/run/mastermind-agent-relay" not in observation_source
+    assert "/var/run/mastermind-dialogue-observation" not in observation_source
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "Runtime"
+        and node.func.attr == "at"
+        for node in ast.walk(observation_tree)
+    )
 
 
 @pytest.mark.parametrize("node_kind", ["socket", "symlink"])

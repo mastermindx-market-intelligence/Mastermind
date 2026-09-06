@@ -11,14 +11,33 @@ import dataclasses
 import hashlib
 import json
 import re
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Mapping
 
 from common.commission_ref import CommissionRefError, normalize_commission_ref
-from control_plane.executive_runtime import ExecutiveDialogueSource
+from control_plane.executive_runtime import (
+    ExecutiveDialogueSource,
+    JobStatus,
+    PersistenceError,
+    Runtime,
+    RuntimeProofError,
+    StateConflict,
+    ValidatedRoleCompletion,
+    _attempt_from_row,
+    _dialogue_source_from_root_creation,
+    _job_from_row,
+    _strict_canonical_json_loads,
+    _validated_role_completion_material,
+)
 from control_plane.session_targets import BINDING_ID_RE, WakeRoute
-from control_plane.executive_terminal_return import TerminalReturnCandidate
+from control_plane.executive_terminal_return import (
+    TerminalReturnCandidate,
+    TerminalReturnError,
+    reduce_terminal_return,
+)
+from control_plane.operator_harness_contract import AttemptExecutionMode
 from control_plane.wake_events import (
     SourceKind,
     WakeKind,
@@ -42,6 +61,18 @@ MAX_RESPONSE_BYTES = 64 * 1024
 CANONICAL_WAKE_EVENT_BUDGET = 64
 TERMINAL_SOURCE_OWNER = "executive_terminal_return"
 WAKE_SOURCE_OWNER = "wake_ledger"
+TERMINAL_RETURN_PROJECTION_SCHEMA = "mastermind.executive_terminal_return_projection/v1"
+TERMINAL_RETURN_PREPARED_EVENT = "EXECUTIVE_TERMINAL_RETURN_PREPARED"
+TERMINAL_RETURN_ATTEMPTED_EVENT = "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED"
+TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT = (
+    "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED"
+)
+TERMINAL_RETURN_EFFECT_UNKNOWN_EVENT = "EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN"
+TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT = (
+    "EXECUTIVE_TERMINAL_RETURN_PROVEN_NO_EFFECT"
+)
+TERMINAL_RETURN_APPLIED_EVENT = "EXECUTIVE_TERMINAL_RETURN_APPLIED"
+TERMINAL_RETURN_RECEIPT_ACTIONS = frozenset({"POSTED", "RECOVERED", "DUPLICATE"})
 
 _REQUEST_KEYS = frozenset({"schema", "request_id", "parent"})
 _WAKE_REQUEST_KEYS = frozenset(
@@ -107,6 +138,7 @@ _WORK_REF_RE = re.compile(r"\AWS:[A-Z0-9][A-Z0-9-]{1,63}\Z")
 _SESSION_REF_RE = re.compile(r"\Aasd-session-[a-z0-9][a-z0-9-]{7,63}\Z")
 _OPERATION_KEY_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{7,127}\Z")
 _SLACK_USER_ID_RE = re.compile(r"\A[UW][A-Z0-9]{8,31}\Z")
+_TERMINAL_RETURN_SLACK_TS_RE = re.compile(r"\A[0-9]{10,16}\.[0-9]{6}\Z")
 _UTC_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
 _SECRET_SHAPED_RE = re.compile(
     r"(?i)(?:xox[a-z]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|"
@@ -961,6 +993,466 @@ def reduce_dialogue_observation(
     return _closed("UNAVAILABLE", "PARENT_NOT_EXECUTIVE_BOUND")
 
 
+def terminal_return_event_material(
+    candidate: TerminalReturnCandidate,
+) -> tuple[str, dict[str, Any]]:
+    """Derive the immutable projection command family and Event material."""
+
+    terminal_digest = str(candidate.terminal_digest or "")
+    if re.fullmatch(r"[0-9a-f]{64}", terminal_digest) is None:
+        raise StateConflict("terminal-return candidate lacks a canonical terminal digest")
+    candidate_bytes = (
+        json.dumps(
+            dataclasses.asdict(candidate),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    candidate_digest = hashlib.sha256(candidate_bytes).hexdigest()
+    command_base = f"terminal-return:{candidate.attempt_id}:{terminal_digest}"
+    return command_base, {
+        "schema_version": TERMINAL_RETURN_PROJECTION_SCHEMA,
+        "job_id": candidate.job_id,
+        "attempt_id": candidate.attempt_id,
+        "worker_id": candidate.worker_id,
+        "root_job_id": candidate.root_job_id,
+        "message_key": candidate.message_key,
+        "terminal_digest": terminal_digest,
+        "candidate_digest": candidate_digest,
+    }
+
+
+def normalize_terminal_return_projection_receipt(
+    receipt: Any,
+    *,
+    message_key: str,
+) -> dict[str, Any]:
+    """Freeze only one exact physical Relay RESULT as durable APPLIED proof."""
+
+    if dataclasses.is_dataclass(receipt) and not isinstance(receipt, type):
+        value = dataclasses.asdict(receipt)
+    elif isinstance(receipt, Mapping):
+        value = dict(receipt)
+    else:
+        raise StateConflict("terminal-return projection receipt is invalid")
+    expected = {
+        "action",
+        "message_key",
+        "fingerprint",
+        "message_ts",
+        "duplicate_timestamps",
+        "thread_ts",
+        "parent_author_user_id",
+        "parent_fingerprint",
+    }
+    duplicates = value.get("duplicate_timestamps")
+    if (
+        set(value) != expected
+        or value.get("action") not in TERMINAL_RETURN_RECEIPT_ACTIONS
+        or value.get("message_key") != message_key
+        or not isinstance(value.get("fingerprint"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", value["fingerprint"]) is None
+        or not isinstance(value.get("message_ts"), str)
+        or _TERMINAL_RETURN_SLACK_TS_RE.fullmatch(value["message_ts"]) is None
+        or not isinstance(value.get("thread_ts"), str)
+        or _TERMINAL_RETURN_SLACK_TS_RE.fullmatch(value["thread_ts"]) is None
+        or not isinstance(value.get("parent_author_user_id"), str)
+        or re.fullmatch(r"[UW][A-Z0-9]{8,31}", value["parent_author_user_id"])
+        is None
+        or not isinstance(value.get("parent_fingerprint"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", value["parent_fingerprint"])
+        is None
+        or not isinstance(duplicates, (list, tuple))
+        or len(duplicates) != 0
+    ):
+        raise StateConflict("terminal-return projection receipt is invalid")
+    return {
+        "action": value["action"],
+        "message_key": value["message_key"],
+        "fingerprint": value["fingerprint"],
+        "message_ts": value["message_ts"],
+        "duplicate_timestamps": [],
+        "thread_ts": value["thread_ts"],
+        "parent_author_user_id": value["parent_author_user_id"],
+        "parent_fingerprint": value["parent_fingerprint"],
+    }
+
+
+def validate_terminal_return_event(
+    event: Any,
+    *,
+    event_type: str,
+    command_id: str,
+    material: Mapping[str, Any],
+    applied: bool,
+) -> None:
+    """Validate one immutable member of the terminal projection Event family."""
+
+    expected_keys = set(material) | ({"projection_receipt"} if applied else set())
+    payload = getattr(event, "payload", None)
+    if (
+        event is None
+        or event.event_type != event_type
+        or event.command_id != command_id
+        or event.aggregate_type != "terminal_return_projection"
+        or event.aggregate_id != material["attempt_id"]
+        or event.job_id != material["job_id"]
+        or event.attempt_id != material["attempt_id"]
+        or event.worker_id != material["worker_id"]
+        or not isinstance(payload, dict)
+        or set(payload) != expected_keys
+        or any(payload.get(key) != value for key, value in material.items())
+    ):
+        raise StateConflict("terminal-return projection event drifted")
+    if applied:
+        normalized_receipt = normalize_terminal_return_projection_receipt(
+            payload.get("projection_receipt"),
+            message_key=str(material["message_key"]),
+        )
+        if payload.get("projection_receipt") != normalized_receipt:
+            raise StateConflict("terminal-return projection receipt drifted")
+
+
+def terminal_return_phase_spec(
+    command_base: str,
+) -> tuple[tuple[str, str, str], ...]:
+    """Return the sole ordered phase, Event, and stable-command vocabulary."""
+
+    return (
+        (
+            "PREPARED",
+            TERMINAL_RETURN_PREPARED_EVENT,
+            f"{command_base}:prepared",
+        ),
+        (
+            "PRE_SUBMIT_REFUSED",
+            TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT,
+            f"{command_base}:pre-submit-refused",
+        ),
+        (
+            "ATTEMPTED",
+            TERMINAL_RETURN_ATTEMPTED_EVENT,
+            f"{command_base}:attempted",
+        ),
+        (
+            "PROVEN_NO_EFFECT",
+            TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT,
+            f"{command_base}:proven-no-effect",
+        ),
+        (
+            "EFFECT_UNKNOWN",
+            TERMINAL_RETURN_EFFECT_UNKNOWN_EVENT,
+            f"{command_base}:effect-unknown",
+        ),
+        (
+            "APPLIED",
+            TERMINAL_RETURN_APPLIED_EVENT,
+            f"{command_base}:applied",
+        ),
+    )
+
+
+def inspect_terminal_return_history(
+    runtime: Runtime,
+    connection: sqlite3.Connection,
+    *,
+    candidate: TerminalReturnCandidate,
+    material: Mapping[str, Any],
+) -> str | None:
+    """Validate one exact immutable projection family without mutating it."""
+
+    command_base, expected_material = terminal_return_event_material(candidate)
+    if dict(material) != expected_material:
+        raise StateConflict("terminal-return projection material drifted")
+    phase_spec = terminal_return_phase_spec(command_base)
+    expected_by_command = {
+        command_id: (phase_name, event_type)
+        for phase_name, event_type, command_id in phase_spec
+    }
+    rows = connection.execute(
+        """
+        SELECT command_id,event_type,event_id
+        FROM events
+        WHERE aggregate_type='terminal_return_projection'
+          AND aggregate_id=?
+        ORDER BY event_id
+        LIMIT ?
+        """,
+        (candidate.attempt_id, len(phase_spec) + 1),
+    ).fetchall()
+    if not rows:
+        return None
+    if len(rows) > len(phase_spec):
+        raise StateConflict("terminal-return projection event drifted")
+
+    phases: list[str] = []
+    applied_receipt: dict[str, Any] | None = None
+    seen: set[str] = set()
+    for row in rows:
+        command_id = str(row["command_id"] or "")
+        expected = expected_by_command.get(command_id)
+        if (
+            expected is None
+            or row["event_type"] != expected[1]
+            or expected[0] in seen
+        ):
+            raise StateConflict("terminal-return projection event drifted")
+        phase_name, event_type = expected
+        event = runtime.store.get_event_by_command_id(
+            command_id,
+            connection=connection,
+        )
+        validate_terminal_return_event(
+            event,
+            event_type=event_type,
+            command_id=command_id,
+            material=material,
+            applied=phase_name == "APPLIED",
+        )
+        if phase_name == "APPLIED":
+            applied_receipt = normalize_terminal_return_projection_receipt(
+                event.payload.get("projection_receipt"),
+                message_key=candidate.message_key,
+            )
+        phases.append(phase_name)
+        seen.add(phase_name)
+
+    if phases[0] != "PREPARED":
+        raise StateConflict("terminal-return projection event drifted")
+    phase_rank = {
+        phase_name: index
+        for index, (phase_name, _event_type, _command_id) in enumerate(phase_spec)
+    }
+    if any(
+        phase_rank[current] >= phase_rank[following]
+        for current, following in zip(phases, phases[1:])
+    ):
+        raise StateConflict("terminal-return projection phase order drifted")
+    if "APPLIED" in seen and phases[-1] != "APPLIED":
+        raise StateConflict("terminal-return projection phase order drifted")
+    if "EFFECT_UNKNOWN" in seen and "ATTEMPTED" not in seen:
+        raise StateConflict("terminal-return projection phase order drifted")
+    if "PROVEN_NO_EFFECT" in seen and "ATTEMPTED" not in seen:
+        raise StateConflict("terminal-return projection phase order drifted")
+    if "APPLIED" in seen:
+        assert applied_receipt is not None
+        action = applied_receipt["action"]
+        prior_phase = phases[-2] if len(phases) >= 2 else None
+        if action == "POSTED" and (
+            "ATTEMPTED" not in seen
+            or prior_phase not in {"ATTEMPTED", "PROVEN_NO_EFFECT"}
+        ):
+            raise StateConflict("terminal-return projection phase order drifted")
+        if action == "RECOVERED" and (
+            "ATTEMPTED" not in seen
+            or prior_phase
+            not in {"ATTEMPTED", "PROVEN_NO_EFFECT", "EFFECT_UNKNOWN"}
+        ):
+            raise StateConflict("terminal-return projection phase order drifted")
+        if action == "DUPLICATE" and prior_phase not in {
+            "PREPARED",
+            "PRE_SUBMIT_REFUSED",
+            "ATTEMPTED",
+            "PROVEN_NO_EFFECT",
+        }:
+            raise StateConflict("terminal-return projection phase order drifted")
+    return phases[-1]
+
+
+def runtime_canonical_terminal_facts(
+    runtime: Runtime,
+    candidate: CanonicalTerminalWakeCandidate,
+    connection: sqlite3.Connection,
+) -> DialogueObservationFacts:
+    """Reconstruct one exact terminal projection inside the caller's snapshot."""
+
+    from control_plane.executive_delegation_identity import (
+        derive_delegation_identity,
+    )
+
+    rows = connection.execute(
+        """
+        SELECT * FROM jobs
+        WHERE root_job_id=?
+          AND job_id=?
+          AND current_attempt_id=?
+          AND status=?
+          AND orchestration_role IN ('plan','work','review','repair')
+        ORDER BY job_id
+        LIMIT 2
+        """,
+        (
+            candidate.root_job_id,
+            candidate.job_id,
+            candidate.attempt_id,
+            JobStatus.COMPLETED.value,
+        ),
+    ).fetchall()
+    if len(rows) > 1:
+        return DialogueObservationFacts(complete=False)
+    if not rows:
+        return DialogueObservationFacts()
+
+    job_row = rows[0]
+    root_job_id = str(job_row["root_job_id"] or "")
+    role = str(job_row["orchestration_role"] or "")
+    try:
+        source = _dialogue_source_from_root_creation(
+            connection,
+            root_job_id=root_job_id,
+        )
+        job = _job_from_row(job_row)
+        identity = derive_delegation_identity(job)
+        attempt_row, seal, terminal_receipt, role_result_digest = (
+            _validated_role_completion_material(
+                connection,
+                job_row=job_row,
+                expected_role=role,
+                root_job_id=root_job_id,
+            )
+        )
+        if (
+            str(attempt_row["attempt_id"] or "") != candidate.attempt_id
+            or str(attempt_row["worker_id"] or "") != candidate.worker_id
+        ):
+            return DialogueObservationFacts()
+        job_result = _strict_canonical_json_loads(
+            str(job_row["result_json"]),
+            name="canonical terminal Job result",
+        )
+        attempt_result = _strict_canonical_json_loads(
+            str(attempt_row["result_json"]),
+            name="canonical terminal Attempt result",
+        )
+        if job_result != terminal_receipt or attempt_result != terminal_receipt:
+            raise StateConflict("terminal result receipt drifted")
+        envelope = seal.get("result_envelope")
+        envelope_digest = seal.get("result_envelope_digest")
+        if (
+            not isinstance(envelope, dict)
+            or not isinstance(envelope_digest, str)
+            or not isinstance(role_result_digest, str)
+        ):
+            raise StateConflict("terminal result material is incomplete")
+        completion = ValidatedRoleCompletion(
+            job=job,
+            attempt=_attempt_from_row(attempt_row),
+            result_envelope=dict(envelope),
+            terminal_receipt=dict(terminal_receipt),
+            result_digest=envelope_digest,
+            role_result_digest=role_result_digest,
+            execution_mode=str(
+                attempt_row["execution_mode"]
+                or AttemptExecutionMode.SEALED_WORKER.value
+            ),
+            dialogue_source=source,
+        )
+        terminal_candidate = reduce_terminal_return(material=completion)
+        if (
+            terminal_candidate.root_job_id != candidate.root_job_id
+            or terminal_candidate.job_id != candidate.job_id
+            or terminal_candidate.attempt_id != candidate.attempt_id
+            or terminal_candidate.worker_id != candidate.worker_id
+            or terminal_candidate.dialogue_source != source
+            or identity.root_job_id != terminal_candidate.root_job_id
+            or identity.operation_key != terminal_candidate.operation_key
+            or identity.session_ref != terminal_candidate.session_ref
+        ):
+            return DialogueObservationFacts()
+        command_base, event_material = terminal_return_event_material(
+            terminal_candidate
+        )
+    except (
+        RuntimeProofError,
+        PersistenceError,
+        TerminalReturnError,
+        TypeError,
+        ValueError,
+    ):
+        return DialogueObservationFacts(complete=False)
+
+    try:
+        phase = inspect_terminal_return_history(
+            runtime,
+            connection,
+            candidate=terminal_candidate,
+            material=event_material,
+        )
+    except (RuntimeProofError, PersistenceError, TypeError, ValueError):
+        return DialogueObservationFacts(
+            terminal=(
+                TerminalObservationFacts(
+                    candidate=terminal_candidate,
+                    projection_receipt=None,
+                    projection_effect="CONFLICT",
+                    binding_revalidated=False,
+                ),
+            )
+        )
+
+    receipt: TerminalProjectionReceiptFacts | None = None
+    if phase == "APPLIED":
+        try:
+            applied_command = terminal_return_phase_spec(command_base)[-1][2]
+            applied_event = runtime.store.get_event_by_command_id(
+                applied_command,
+                connection=connection,
+            )
+            if applied_event is None:
+                raise StateConflict("terminal APPLIED receipt disappeared")
+            normalized = normalize_terminal_return_projection_receipt(
+                applied_event.payload.get("projection_receipt"),
+                message_key=terminal_candidate.message_key,
+            )
+            normalized["duplicate_timestamps"] = tuple(
+                normalized["duplicate_timestamps"]
+            )
+            receipt = TerminalProjectionReceiptFacts(**normalized)
+        except (RuntimeProofError, PersistenceError, TypeError, ValueError):
+            return DialogueObservationFacts(
+                terminal=(
+                    TerminalObservationFacts(
+                        candidate=terminal_candidate,
+                        projection_receipt=None,
+                        projection_effect="CONFLICT",
+                        binding_revalidated=False,
+                    ),
+                )
+            )
+
+    return DialogueObservationFacts(
+        terminal=(
+            TerminalObservationFacts(
+                candidate=terminal_candidate,
+                projection_receipt=receipt,
+                projection_effect=phase or "MISSING",
+                binding_revalidated=True,
+            ),
+        )
+    )
+
+
+def read_runtime_canonical_terminal_wake(
+    *,
+    runtime: Runtime,
+    source_root_job_id: str,
+    candidate: CanonicalTerminalWakeCandidate,
+    connection: sqlite3.Connection | None = None,
+) -> CanonicalTerminalWakeRead:
+    """Read canonical terminal/Wake truth without constructing a service."""
+
+    return read_canonical_terminal_wake(
+        runtime=runtime,
+        source_root_job_id=source_root_job_id,
+        candidate=candidate,
+        facts_provider=runtime_canonical_terminal_facts,
+        connection=connection,
+    )
+
+
 def _canonical_read_result(
     state: str,
     reason: str,
@@ -1345,6 +1837,14 @@ __all__ = [
     "WAKE_REQUEST_SCHEMA",
     "WAKE_RESPONSE_SCHEMA",
     "TERMINAL_RESULT",
+    "TERMINAL_RETURN_APPLIED_EVENT",
+    "TERMINAL_RETURN_ATTEMPTED_EVENT",
+    "TERMINAL_RETURN_EFFECT_UNKNOWN_EVENT",
+    "TERMINAL_RETURN_PREPARED_EVENT",
+    "TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT",
+    "TERMINAL_RETURN_PROJECTION_SCHEMA",
+    "TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT",
+    "TERMINAL_RETURN_RECEIPT_ACTIONS",
     "ActiveObservationFacts",
     "CanonicalTerminalWakeCandidate",
     "CanonicalTerminalProjection",
@@ -1362,9 +1862,16 @@ __all__ = [
     "TerminalProjectionReceiptReference",
     "parse_observation_request",
     "parse_wake_request",
+    "inspect_terminal_return_history",
+    "normalize_terminal_return_projection_receipt",
     "reduce_dialogue_observation",
     "read_canonical_terminal_wake",
+    "read_runtime_canonical_terminal_wake",
     "response_bytes",
+    "runtime_canonical_terminal_facts",
+    "terminal_return_event_material",
+    "terminal_return_phase_spec",
     "terminal_projection_receipt_reference",
+    "validate_terminal_return_event",
     "wake_response_bytes",
 ]

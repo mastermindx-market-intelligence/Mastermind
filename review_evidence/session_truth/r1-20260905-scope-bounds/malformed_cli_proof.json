@@ -1,0 +1,57 @@
+{
+  "source_head": "839162b7bbe97ddc65cb4cd4878383e8c94c0fa5",
+  "scope": "real CLI with explicit absent Macro read root; malformed external snapshot rejection, not current-estate AgentOS proof",
+  "common_argv": [
+    "python3",
+    "scripts/session_truth_receipt.py",
+    "--workstream",
+    "WS:CHAIRMAN-CONTROL-ROOM",
+    "--repository",
+    "mastermindx-market-intelligence/Mastermind",
+    "--macro-root",
+    "/Users/chriswong/Documents/Cluade/exec-prestage-receipts/runtime-continuity-r1-release-20260905/task7-scope-bounds-inputs/absent-macro-root",
+    "--protected-skillpack-sha",
+    "0d9cf2f58f9a6a1fe895d5d199abc18735201e24",
+    "--json",
+    "--now",
+    "2026-09-05T05:35:09Z",
+    "--linear-snapshot",
+    "/Users/chriswong/Documents/Cluade/exec-prestage-receipts/runtime-continuity-r1-release-20260905/task7-scope-bounds-inputs/linear_observation.v1.json",
+    "--slack-snapshot",
+    "/Users/chriswong/Documents/Cluade/exec-prestage-receipts/runtime-continuity-r1-release-20260905/task7-scope-bounds-inputs/slack_observation.v1.json",
+    "--executive-snapshot",
+    "/Users/chriswong/Documents/Cluade/exec-prestage-receipts/runtime-continuity-r1-release-20260905/task7-scope-bounds-inputs/executive_observation.v1.json",
+    "--identity-snapshot",
+    "/Users/chriswong/Documents/Cluade/exec-prestage-receipts/runtime-continuity-r1-release-20260905/task7-scope-bounds-inputs/identity_observation.v1.json"
+  ],
+  "cases": [
+    {
+      "case": "invalid_utf8",
+      "exit": 2,
+      "stdout_bytes": 0,
+      "stderr": "session-truth error: invalid session truth input",
+      "input_sha256": "a8100ae6aa1940d0b663bb31cd466142ebbdbd5187131b92d93818987832eb89"
+    },
+    {
+      "case": "depth10000",
+      "exit": 2,
+      "stdout_bytes": 0,
+      "stderr": "session-truth error: invalid session truth input",
+      "input_sha256": "98fba39ff9b67e1919161643d6ae2cceba423d9c878ce268edb344a0176907b0"
+    },
+    {
+      "case": "lone_surrogate",
+      "exit": 2,
+      "stdout_bytes": 0,
+      "stderr": "session-truth error: invalid session truth input",
+      "input_sha256": "8df98d973b575504a597ff05b6d97b4f1dd42127add443e6c37847744c21dcd5"
+    },
+    {
+      "case": "integer5000",
+      "exit": 2,
+      "stdout_bytes": 0,
+      "stderr": "session-truth error: invalid session truth input",
+      "input_sha256": "a0f7251240fdc547a6f25aaa47a9353dd359eda8a07045defcb3dcba7dad231e"
+    }
+  ]
+}

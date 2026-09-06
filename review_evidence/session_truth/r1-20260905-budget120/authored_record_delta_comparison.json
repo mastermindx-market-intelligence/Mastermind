@@ -1,0 +1,23 @@
+{
+  "status": "AUTHORED_RECORD_DELTA_PASS",
+  "current_source_sha": "63fee292a9938664899284796e58926f13b8ed9e",
+  "historical_source_sha": "bd862eedb854474b80b82303b1788d0c6fea0fbc",
+  "current_state_digest": "sha256:b0fbe9930ac9d4d992264bfb86bf373b0ceca0b8ed4eaf6e731cb0968c630b25",
+  "historical_state_digest": "sha256:ab8bbea151415668a737c088c6debcfea3497eee9c530a8e3c07f97ea2a482b0",
+  "scoped_context_digest_unchanged": true,
+  "current_semantic_hash": "sha256:f172b639c650a682915e55dd0bf318506127f3a9ddd422e7a5a1b269410a3f9b",
+  "historical_semantic_hash": "sha256:c5ffa5338025e709b22804736e01e94072481e66fc40933d5292a94772a88da9",
+  "derived_historical_with_current_source_sha_hash": "sha256:4be1878f8805d72b7fdf400748ab8fc457a842e82c69fa6846a093fcd3b253da",
+  "derived_control_is_not_another_real_acquisition": true,
+  "real_delta": "Three authored Market Ontology decision/handoff records changed; scripts/agentos.py unchanged. Macro HEAD also differs, so derived source-SHA control demonstrates record digest sensitivity independently of HEAD alone.",
+  "authored_record_commit": "fe75dfe2cc834beb86ae5af0ee5811971a27f7aa",
+  "authored_record_commit_parent": "bd862eedb854474b80b82303b1788d0c6fea0fbc",
+  "changed_record_paths": [
+    "agentos/decisions/DEC-MARKET-ONTOLOGY-F04-EXPLORER-LIVE-TRACE-SCENARIO-BOUNDARY.md",
+    "agentos/handoffs/MARKET-ONTOLOGY-F04-EXPLORER-F00-RETURN-RECONCILIATION-2026-09-04.md",
+    "agentos/handoffs/MARKET-ONTOLOGY-F04-EXPLORER-FABLE-COO-2026-09-04.md"
+  ],
+  "derived_control_changed_semantic_leaves": [
+    "/observations/agentos/state/source_records_digest"
+  ]
+}

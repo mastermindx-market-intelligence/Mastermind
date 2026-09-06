@@ -48,6 +48,7 @@ RELEASE_TRACKED_PATHS=(
   control_plane/flags.py
   control_plane/operator_harness_contract.py
   control_plane/operator_harness_wire.py
+  control_plane/operator_materialization_receipt.py
   control_plane/strategic_state.py
   control_plane/surface_bindings.py
   control_plane/worker_adapter.py
