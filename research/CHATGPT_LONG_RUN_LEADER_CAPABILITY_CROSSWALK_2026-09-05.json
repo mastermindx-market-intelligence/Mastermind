@@ -6,7 +6,7 @@
   "publication_carrier": "Mastermind PR #490",
   "authority": "ADVISORY_CURRENT_STATE_SNAPSHOT_NOT_CANONICAL_STATE_ASSIGNMENT_OR_RELEASE",
   "protected_source_basis": "467a81e84b08a7f1c3cdb9a410b2f7857816675d",
-  "supersedes_blob": "8c5cd6e9ea29f26b2b7144f3e6022958fd3e65ae",
+  "supersedes_blob": "a1ca3c40e6f1bc749976676edd96ba3ea299e161",
   "current_state_register": "research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md",
   "refresh_law": "Every carrier, entitlement, source, host, permission, action, effect and proof fact must be refreshed from its canonical owner immediately before action. This crosswalk never authorizes a Job, worker, source writer, app installation, permission change, provider turn, review, release or production effect.",
   "state_vocabulary": [
@@ -26,7 +26,7 @@
         "LRL-C08",
         "LRL-C09"
       ],
-      "state": "PARTIAL_PLAN_READY_HELPER_PROVEN_LOCALLY_REAL_MAC_NOT_RUN_PRESTART",
+      "state": "PARTIAL_ATTENDED_VENDOR_FILE_WRITE_SHELL_PROVEN_COMPLETE_FS0_NOT_PROVEN_CHILD_PRESTART",
       "existing_owner_operation": "personal-mcp-cockpit-integration-20260906-sol-001",
       "existing_owner_carrier": "D0BTAKPHX8S/1788689346.571769",
       "cockpit_task": "01a06f73-d4cf-7933-8268-d3c9644bc63d",
@@ -34,7 +34,9 @@
       "proposed_child": "web-ceo-workbench-fs0-20260906-sol-001",
       "child_state_at_last_verified_evidence": "NOT_SUBMITTED",
       "mission": "One authorized Web CEO lists and reads a real Mac Studio scratch file, creates and edits one disposable file with readback, runs one real exit-0 command and one intentional exit-7 command, refuses an out-of-scope file, disconnects the pilot and proves the existing Executive connection unchanged.",
-      "next_owner_edge": "Existing Cockpit/Integration reconciles equivalent child/effect state; only a positive no-existing-effect result permits one executor binding and one lawful child carrier."
+      "next_owner_edge": "Existing Cockpit/Integration consumes immutable receipt 5559023488, treats baseline attended Mac file/write/shell availability as proven for this seat, reconciles child/effect state, and commissions only remaining gap proof without duplicating the functioning backend, tunnel or owner plane.",
+      "attended_baseline_receipt": "Mastermind PR #490 comment 5559023488",
+      "attended_baseline_state": "PROVEN_LIVE_ONE_ATTENDED_VENDOR_CONNECTION_BOUNDED_SMOKE_ONLY"
     },
     {
       "id": "BUSINESS_STEWARD_ONE_COCKPIT",
@@ -191,9 +193,9 @@
         "supported private MCP tunnel",
         "host security"
       ],
-      "research_state": "PARTIAL_PLAN_READY_HELPER_PROVEN_LOCALLY_REAL_MAC_NOT_RUN_PRESTART",
-      "current_evidence": "PR #490 comment 5558890710 records a 216-line FS0 plan and an observed 22-test red run followed by 22 passing disposable helper tests. No real Mac, tunnel, app, permission, source branch, implementation PR, receiver ACK or START is proven.",
-      "next_useful_proof": "After existing-owner deduplication and effect reconciliation, one bound executor proves real Mac scratch list/read plus traversal, symlink and out-of-scope denial, then disconnects the pilot without changing Executive.",
+      "research_state": "PARTIAL_ATTENDED_VENDOR_READ_WRITE_PROVEN_COMPLETE_FS0_NOT_PROVEN",
+      "current_evidence": "PR #490 comment 5559023488 proves explicit-device Web-to-Mac execution through one attended Remote Desktop Commander connection: bounded system/scratch reads plus disposable create/update/readback and exact-byte verification. It does not prove out-of-scope/traversal/symlink denial, revoke/reconnect, first-party Workbench/Executive integration, an FS0 source child, desktop/Chrome or unattended access.",
+      "next_useful_proof": "Consume the existing receipt rather than repeat baseline reads; prove traversal, symlink and out-of-scope denial, disconnect/revoke/reconnect and unchanged Executive connectivity through the existing owner, then originate only the remaining gap implementation if evidence requires it.",
       "must_not_build": [
         "CEO home-directory access",
         "recording as Agent OS",
@@ -214,9 +216,9 @@
         "Source Continuity",
         "GitHub"
       ],
-      "research_state": "PARTIAL_PLAN_READY_HELPER_PROVEN_LOCALLY_REAL_MAC_NOT_RUN_PRESTART",
-      "current_evidence": "The FS0 design has fail-closed helper evidence only. It has no real file mutation, shell process, tunnel, rollback or production consumer proof.",
-      "next_useful_proof": "One owner-bound attended pilot creates, edits and reads back a disposable Mac file; runs one exact exit-0 and one intentional exit-7 command; preserves bounded output and timeout/completion distinctions; reconciles lost responses through pre-effect action identities; and proves rollback with Executive unchanged.",
+      "research_state": "PARTIAL_ATTENDED_VENDOR_WRITE_SHELL_PROVEN_COMPLETE_FS0_NOT_PROVEN",
+      "current_evidence": "PR #490 comment 5559023488 proves one disposable file create/update/readback, exact-byte comparison, one exit-0 shell process and one intentional exit-7 process on the explicit Mac device. The connector merged stdout/stderr and exposed malformed edit_block discovery; pre-effect/lost-response reconciliation, bounded timeout/cancel, rollback/revoke, independent observation and first-party integration remain unproven.",
+      "next_useful_proof": "Use the functioning attended connection to close only remaining gaps: denied-path and stale-preimage cases, typed bounded output policy, timeout/cancel, loss-safe effect reconciliation, rollback/revoke and unchanged Executive readback. Do not add a second backend or rerun the already-proven exit-0/exit-7 baseline as a substitute.",
       "must_not_build": [
         "plugin process database",
         "arbitrary shell in Steward or Executive",
