@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -53,7 +54,9 @@ class _FakeHeaders:
         self.content_type = content_type
 
     def get_list(self, key):
-        return [self.content_type] if key.lower() == "content-type" else []
+        if key.lower() != "content-type" or self.content_type is None:
+            return []
+        return [self.content_type]
 
 
 class _FakeWireResponse:
@@ -70,6 +73,22 @@ class _FakeWireResponse:
 
     def iter_bytes(self):
         yield json.dumps(self._payload).encode("utf-8")
+
+
+class _RawWireResponse:
+    def __init__(self, status_code, body: bytes, content_type):
+        self.status_code = status_code
+        self.headers = _FakeHeaders(content_type)
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def iter_bytes(self):
+        yield self._body
 
 
 class _FakeHttp:
@@ -93,6 +112,8 @@ class _FakeHttp:
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
             raise response
+        if isinstance(response, _RawWireResponse):
+            return response
         return _FakeWireResponse(response)
 
     def close(self):
@@ -115,14 +136,13 @@ def _run(
     pipe = SimpleNamespace()
     credential = core.Credential(_SECRET if credential_present else None, "stdin" if credential_present else "absent")
     fake_http = _FakeHttp(responses, events, close_error=client_close_error)
-    bounded = vendors.BoundedHttpClient(client=fake_http)
     code = health._run_profile_search_health(
         stdout=out,
         preflight_loader=lambda: preflight,
         pipe_factory=lambda: events.append("pipe_open") or pipe,
         credential_reader=lambda actual: events.append("credential_read") or credential,
         pipe_closer=lambda actual: events.append("pipe_close") or pipe_close,
-        client_factory=lambda: events.append("client_open") or bounded,
+        client_factory=lambda: events.append("client_open") or health._ProfileSearchOnlyClient(client=fake_http),
         client_closer=lambda actual: health._checked_close_http_client(actual),
     )
     return code, json.loads(out.getvalue()), events, fake_http
@@ -289,21 +309,32 @@ def test_auth_rejection_is_not_recovery_or_refresh(status):
 
 
 def test_profile_only_client_exposes_no_mutator_or_fallback_surface():
-    bounded = vendors.BoundedHttpClient(client=_FakeHttp([]))
-    narrowed = health._ProfileSearchOnlyClient(bounded)
+    narrowed = health._ProfileSearchOnlyClient(client=_FakeHttp([]))
+    assert type(narrowed) is not vendors.BoundedHttpClient
     assert callable(narrowed._mlx_profile_search_with_diagnostic)
+    assert not hasattr(narrowed, "_delegate")
     for forbidden in (
         "_mlx_profile_search", "_mlx_profile_create", "_mlx_profile_remove",
         "_mlx_profile_start", "_mlx_profile_stop", "_mlx_configure_canary_port",
     ):
         assert not hasattr(narrowed, forbidden)
     assert not hasattr(narrowed, "__dict__")
+    for name in dir(narrowed):
+        value = getattr(narrowed, name, None)
+        owner = getattr(value, "__self__", None)
+        assert type(owner) is not vendors.BoundedHttpClient
+
+
+def test_profile_only_client_rejects_full_bounded_constructor_input():
+    bounded = vendors.BoundedHttpClient(client=_FakeHttp([]))
+    with pytest.raises(TypeError):
+        health._ProfileSearchOnlyClient(bounded)
 
 
 def test_proxy_exposes_only_parser_requirements_not_full_multilogin_client():
     credential = core.Credential(_SECRET, "stdin")
-    bounded = vendors.BoundedHttpClient(client=_FakeHttp([]))
-    proxy = health._ProfileSearchProxy(credential, health._ProfileSearchOnlyClient(bounded))
+    narrowed = health._ProfileSearchOnlyClient(client=_FakeHttp([]))
+    proxy = health._ProfileSearchProxy(credential, narrowed)
     assert type(proxy) is not vendors.MultiloginClient
     assert not hasattr(proxy, "create_peer_profile")
     assert not hasattr(proxy, "remove_peer_profile")
@@ -354,9 +385,42 @@ def test_success_path_never_calls_other_bounded_http_endpoints(monkeypatch):
     assert http.search_calls == 1
 
 
+def test_profile_only_request_guard_refuses_non_search_shapes_before_http():
+    fake = _FakeHttp([])
+    narrowed = health._ProfileSearchOnlyClient(client=fake)
+    canonical_body = {
+        "is_removed": False,
+        "limit": vendors._PROFILE_PAGE_SIZE,
+        "offset": 0,
+        "search_text": "",
+        "storage_type": "all",
+        "order_by": "created_at",
+        "sort": "asc",
+        "folder_id": _FOLDER,
+    }
+    attempts = (
+        ("GET", vendors._MLX_CLOUD_ORIGIN, "/profile/search", canonical_body),
+        ("POST", "https://example.invalid", "/profile/search", canonical_body),
+        ("POST", vendors._MLX_CLOUD_ORIGIN, "/profile/create", canonical_body),
+        ("POST", vendors._MLX_CLOUD_ORIGIN, "/profile/search", {**canonical_body, "search_text": "x"}),
+    )
+    for method, origin, path, body in attempts:
+        with pytest.raises(core.CanaryRefusal):
+            narrowed._request(
+                method,
+                origin,
+                path,
+                headers={"Authorization": f"Bearer {_SECRET}"},
+                params=None,
+                json_body=body,
+                diagnostic_sink=None,
+            )
+    assert fake.search_calls == 0
+
+
 def test_checked_http_close_is_one_shot_and_exact_boolean():
     fake = _FakeHttp([])
-    client = vendors.BoundedHttpClient(client=fake)
+    client = health._ProfileSearchOnlyClient(client=fake)
     assert health._checked_close_http_client(client) is True
     assert health._checked_close_http_client(client) is False
     assert fake.closed == 1
@@ -369,14 +433,13 @@ def test_truthy_non_boolean_client_cleanup_cannot_produce_pass():
     fake_http = _FakeHttp(
         [vendors._BoundedResponse(200, _payload([], 0))], events,
     )
-    bounded = vendors.BoundedHttpClient(client=fake_http)
     code = health._run_profile_search_health(
         stdout=out,
         preflight_loader=lambda: (_provision(), None),
         pipe_factory=lambda: events.append("pipe_open") or pipe,
         credential_reader=lambda actual: events.append("credential_read") or core.Credential(_SECRET, "stdin"),
         pipe_closer=lambda actual: events.append("pipe_close") or True,
-        client_factory=lambda: events.append("client_open") or bounded,
+        client_factory=lambda: events.append("client_open") or health._ProfileSearchOnlyClient(client=fake_http),
         client_closer=lambda actual: actual._client.close() or 1,
     )
     receipt = json.loads(out.getvalue())
@@ -433,6 +496,54 @@ def test_checked_pipe_term_error_still_attempts_kill_and_refuses():
     assert signals == [signal.SIGTERM, signal.SIGKILL]
 
 
+def test_checked_pipe_initial_wait_error_still_attempts_term_and_kill_and_refuses(monkeypatch):
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    signals = []
+    waits = iter((RuntimeError("initial wait failed"), False, True))
+
+    def _wait_until(_self, _deadline):
+        outcome = next(waits)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(vendors._KeychainCredentialPipe, "_wait_until", _wait_until)
+    pipe = vendors._KeychainCredentialPipe(
+        read_fd, 4242,
+        waitpid=lambda _pid, _flags: (0, 0),
+        kill=lambda _pid, sig: signals.append(sig),
+    )
+    assert health._checked_close_keychain_pipe(pipe) is False
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+
+
+@pytest.mark.parametrize(
+    ("wire", "status_class", "media_class", "decoder_class"),
+    (
+        (_RawWireResponse(503, b"<html>private</html>", "text/html"), "HTTP_5XX", "HTML", "JSON_VALUE_REJECTED"),
+        (_RawWireResponse(302, b"not-json", None), "HTTP_3XX", "MISSING", "JSON_VALUE_REJECTED"),
+        (_RawWireResponse(429, b"\xff", "text/plain"), "HTTP_RATE_LIMITED", "TEXT", "UNICODE_REJECTED"),
+    ),
+)
+def test_decode_failure_context_projects_closed_wire_classes_without_raw_leak(
+    wire, status_class, media_class, decoder_class,
+):
+    code, receipt, _events, http = _run([wire])
+    assert code == 2
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["initial_peer_census_diagnostic"] == "RESPONSE_DECODE_FAILURE"
+    assert receipt["initial_peer_census_decode_context"] == {
+        "status_class": status_class,
+        "declared_media_type_class": media_class,
+        "decoder_class": decoder_class,
+    }
+    rendered = json.dumps(receipt, sort_keys=True)
+    assert "private" not in rendered
+    assert "not-json" not in rendered
+    assert http.search_calls == 1
+
+
 def test_live_wrapper_fixes_all_dependency_owners(monkeypatch):
     observed = {}
     monkeypatch.setattr(health, "_run_profile_search_health", lambda **kwargs: observed.update(kwargs) or 2)
@@ -442,7 +553,7 @@ def test_live_wrapper_fixes_all_dependency_owners(monkeypatch):
     assert observed["preflight_loader"] is health._load_live_preflight
     assert observed["pipe_factory"] is vendors._open_keychain_credential_pipe
     assert observed["credential_reader"] is vendors._read_direct_pipe_credential
-    assert observed["client_factory"] is vendors.BoundedHttpClient
+    assert observed["client_factory"] is health._ProfileSearchOnlyClient
     assert observed["pipe_closer"] is health._checked_close_keychain_pipe
     assert observed["client_closer"] is health._checked_close_http_client
 
@@ -471,6 +582,53 @@ def test_setup_wrong_confirmation_refuses_before_health(monkeypatch):
     )
     assert setup.main(["profile-search-health", "--vendor", "multilogin"]) == 2
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "confirmation",
+    (
+        " OBSERVE MULTILOGIN PROFILE SEARCH HEALTH ONCE",
+        "OBSERVE MULTILOGIN PROFILE SEARCH HEALTH ONCE ",
+        "OBSERVE MULTILOGIN PROFILE SEARCH HEALTH ONCE\t",
+        "observe multilogin profile search health once",
+        "",
+    ),
+)
+def test_setup_confirmation_is_byte_exact_without_whitespace_normalization(monkeypatch, confirmation):
+    from scripts import mas115_setup as setup
+    calls = []
+    monkeypatch.setattr("builtins.input", lambda _prompt: confirmation)
+    monkeypatch.setattr(
+        setup.profile_search_health,
+        "run_coordinator_profile_search_health",
+        lambda: calls.append("health") or 0,
+    )
+    assert setup.main(["profile-search-health", "--vendor", "multilogin"]) == 2
+    assert calls == []
+
+
+def test_setup_valid_health_invocation_keeps_prompt_off_stdout(monkeypatch, capsys):
+    from scripts import mas115_setup as setup
+    expected_receipt = health._receipt("BINDINGS_UNAVAILABLE")
+    rendered = json.dumps(expected_receipt, separators=(",", ":"), sort_keys=True) + "\n"
+    monkeypatch.setattr(sys, "stdin", io.StringIO(setup._CONFIRM_PROFILE_SEARCH_HEALTH + "\n"))
+
+    def _fake_health():
+        sys.stdout.write(rendered)
+        return 2
+
+    monkeypatch.setattr(
+        setup.profile_search_health,
+        "run_coordinator_profile_search_health",
+        _fake_health,
+    )
+    assert setup.main(["profile-search-health", "--vendor", "multilogin"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == rendered
+    assert captured.err == (
+        f"Type {setup._CONFIRM_PROFILE_SEARCH_HEALTH!r} to perform one read-only "
+        "Profile Search health observation: "
+    )
 
 
 def test_setup_exact_confirmation_dispatches_only_fixed_health_entry(monkeypatch):
