@@ -149,25 +149,30 @@ def _checked_close_keychain_pipe(pipe) -> bool:
     except Exception:  # noqa: BLE001
         return False
 
+    cleanup_error = False
     try:
         pipe._kill(pipe._pid, signal.SIGTERM)  # noqa: SLF001
     except Exception:  # noqa: BLE001
-        return False
-    try:
-        if pipe._wait_until(time.monotonic() + timeout):  # noqa: SLF001
-            return closed is True
-    except Exception:  # noqa: BLE001
-        return False
+        cleanup_error = True
+    else:
+        try:
+            if pipe._wait_until(time.monotonic() + timeout):  # noqa: SLF001
+                return closed is True and cleanup_error is False
+        except Exception:  # noqa: BLE001
+            cleanup_error = True
 
     try:
         pipe._kill(pipe._pid, signal.SIGKILL)  # noqa: SLF001
     except Exception:  # noqa: BLE001
-        return False
-    try:
-        reaped = pipe._wait_until(time.monotonic() + timeout)  # noqa: SLF001
-    except Exception:  # noqa: BLE001
-        return False
-    return closed is True and reaped is True
+        cleanup_error = True
+        reaped = False
+    else:
+        try:
+            reaped = pipe._wait_until(time.monotonic() + timeout)  # noqa: SLF001
+        except Exception:  # noqa: BLE001
+            cleanup_error = True
+            reaped = False
+    return closed is True and reaped is True and cleanup_error is False
 
 
 def _checked_close_http_client(client) -> bool:
@@ -283,7 +288,7 @@ def _run_profile_search_health(
     try:
         pipe = pipe_factory()
         credential = credential_reader(pipe)
-    except Exception:  # noqa: BLE001
+    except (Exception, KeyboardInterrupt):  # noqa: BLE001
         credential = None
     try:
         pipe_closed = pipe_closer(pipe) if pipe is not None else False
@@ -302,11 +307,12 @@ def _run_profile_search_health(
     if type(client) is not _vendors.BoundedHttpClient:
         return _emit(stdout, _receipt("VENDOR_ERROR"))
 
-    sink = _vendors._InitialPeerCensusDiagnosticSink(  # noqa: SLF001
-        _vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,  # noqa: SLF001
-    )
-    code = "OK"
+    sink = None
+    code = "VENDOR_ERROR"
     try:
+        sink = _vendors._InitialPeerCensusDiagnosticSink(  # noqa: SLF001
+            _vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,  # noqa: SLF001
+        )
         proxy = _ProfileSearchProxy(
             credential,
             _ProfileSearchOnlyClient(client),
@@ -317,17 +323,16 @@ def _run_profile_search_health(
             peer_name=_DISCARD_PROFILE_NAME,
             diagnostic_sink=sink,
         )
-        if type(matches) is not list or matches:
-            code = "VENDOR_ERROR"
+        code = "OK" if type(matches) is list and not matches else "VENDOR_ERROR"
     except _core.CanaryRefusal as refusal:
         code = refusal.code if refusal.code in _core.RESULT_CODES else "VENDOR_ERROR"
     except Exception:  # noqa: BLE001
         code = "VENDOR_ERROR"
-
-    try:
-        client_closed = client_closer(client)
-    except Exception:  # noqa: BLE001
-        client_closed = False
+    finally:
+        try:
+            client_closed = client_closer(client)
+        except Exception:  # noqa: BLE001
+            client_closed = False
     if client_closed is not True:
         code = "VENDOR_ERROR"
 
@@ -335,8 +340,8 @@ def _run_profile_search_health(
         stdout,
         _receipt(
             code,
-            diagnostic=sink.value,
-            decode_context=sink.decode_context,
+            diagnostic=sink.value if sink is not None else "NONE",
+            decode_context=sink.decode_context if sink is not None else None,
         ),
     )
 
