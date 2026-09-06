@@ -556,6 +556,41 @@ def test_create_app_refuses_valid_a1_metadata_paths_the_raw_route_fence_cannot_s
         create_app(settings)
 
 
+@pytest.mark.parametrize(
+    "metadata_path",
+    [
+        "/v1/tools",
+        "/v1/tools/executive_state",
+        "/v1/tools/submit_ceo_intent/reconcile",
+    ],
+)
+def test_create_app_refuses_metadata_paths_that_shadow_the_tool_namespace(
+    rsa_key, tmp_path, metadata_path
+):
+    """The public metadata fence runs before Starlette routing. A metadata
+    path inside the tool namespace would otherwise turn a legitimate tool
+    POST into a fixed 404 before authentication or admission can run.
+    """
+
+    metadata_url = "https://executive-app.mastermind.example.test" + metadata_path
+    policies = AppPolicies(
+        read=_read_policy(resource_metadata_url=metadata_url),
+        submit=_submit_policy(resource_metadata_url=metadata_url),
+    )
+    settings = AppSettings(
+        policies=policies,
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ValueError, match="reserved tool namespace"):
+        create_app(settings)
+
+
 def test_metadata_url_without_a_path_serves_the_http_root_exactly(rsa_key, tmp_path):
     """An authority-only HTTPS URL has the HTTP request path `/`; rejecting
     it would make one otherwise safe, validated URL form unservable.
