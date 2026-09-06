@@ -93,6 +93,8 @@ def _metadata_policy_and_path(policies: AppPolicies) -> tuple[ResourcePolicy, st
     path = urlsplit(read_policy.resource_metadata_url).path or "/"
     if "%" in path or "//" in path:
         raise ValueError("metadata policy route is not safely serveable")
+    if path == "/v1/tools" or path.startswith("/v1/tools/"):
+        raise ValueError("metadata policy route collides with reserved tool namespace")
     return read_policy, path
 
 
