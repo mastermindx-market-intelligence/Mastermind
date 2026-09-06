@@ -5959,12 +5959,14 @@ def _run_cap_s1_real_nested_file_limit_case(
     inherited_limits: "tuple[int, int] | None",
     maximum_stream_bytes: int,
     expected_limits: tuple[int, int],
+    expect_refusal: bool = False,
 ) -> None:
     """Exercise the real observer -> secret -> child process boundary."""
 
     python = Path(_sys.prefix) / "bin/python"
     assert python.is_file()
     nested_root = tmp_path / "nested-secret-process"
+    child_marker = nested_root / "child-limit-verified"
     expected_keys = ("HOME", "LANG", "LC_ALL", "NO_COLOR", "PATH", "TMPDIR")
     inner = (
         "import os,resource,sys; "
@@ -5975,29 +5977,40 @@ def _run_cap_s1_real_nested_file_limit_case(
         "24 if not all(key in os.environ for key in expected_keys) else "
         "25 if os.environ['NO_COLOR']!='1' else "
         "26 if 'CAP_S1_AMBIENT_SENTINEL' in os.environ else 0); "
+        f"(os.mkdir({str(child_marker)!r}) if status==0 else None); "
         "raise SystemExit(status)"
     )
     outer = (
-        "import resource,sys; "
-        "from pathlib import Path; "
-        f"sys.path.insert(0,{str(REPO_ROOT)!r}); "
-        "import scripts.ohf.cap_s1_mastermind_operator_canary as cap; "
-        f"inherited={inherited_limits!r}; "
+        "import resource,sys\n"
+        "from pathlib import Path\n"
+        f"sys.path.insert(0,{str(REPO_ROOT)!r})\n"
+        "import scripts.ohf.cap_s1_mastermind_operator_canary as cap\n"
+        f"inherited={inherited_limits!r}\n"
         "(resource.setrlimit(resource.RLIMIT_FSIZE,inherited) "
-        "if inherited is not None else None); "
-        f"cap._CAP_S1_SECRET_MAX_STREAM_BYTES={maximum_stream_bytes!r}; "
-        f"root=Path({str(nested_root)!r}); "
-        "root.mkdir(); "
-        "cleanup=[]; "
-        "return_code=cap._run_cap_s1_secret_process("
-        f"({str(python)!r},'-I','-B','-c',{inner!r}),"
-        f"cwd=Path({str(tmp_path)!r}),"
-        "environment_root=root/'environment',"
-        "stdout_path=root/'stdout',stderr_path=root/'stderr',"
-        "timeout=30,cleanup_observations=cleanup); "
-        "assert return_code==0,('inner-return',return_code); "
-        "assert len(cleanup)==1,('cleanup-count',len(cleanup)); "
-        "assert cleanup[0].removed and cleanup[0].verified_absent,'cleanup-state'"
+        "if inherited is not None else None)\n"
+        f"cap._CAP_S1_SECRET_MAX_STREAM_BYTES={maximum_stream_bytes!r}\n"
+        f"root=Path({str(nested_root)!r})\n"
+        "root.mkdir()\n"
+        "cleanup=[]\n"
+        "refused=False\n"
+        "try:\n"
+        "    return_code=cap._run_cap_s1_secret_process(\n"
+        f"        ({str(python)!r},'-I','-B','-c',{inner!r}),\n"
+        f"        cwd=Path({str(tmp_path)!r}),\n"
+        "        environment_root=root/'environment',\n"
+        "        stdout_path=root/'stdout',stderr_path=root/'stderr',\n"
+        "        timeout=30,cleanup_observations=cleanup)\n"
+        "except cap.CapS1ResultError as exc:\n"
+        "    assert str(exc)=='cap_s1_result_secret_scan_incomplete'\n"
+        "    refused=True\n"
+        f"assert refused is {expect_refusal!r},('refusal',refused)\n"
+        f"assert Path({str(child_marker)!r}).is_dir()\n"
+        f"if not {expect_refusal!r}:\n"
+        "    assert return_code==0,('inner-return',return_code)\n"
+        "    assert len(cleanup)==1,('cleanup-count',len(cleanup))\n"
+        "    assert cleanup[0].removed and cleanup[0].verified_absent\n"
+        "else:\n"
+        "    assert cleanup==[],('unexpected-cleanup-receipt',len(cleanup))\n"
     )
 
     parent_limits = resource.getrlimit(resource.RLIMIT_FSIZE)
@@ -6017,29 +6030,143 @@ def _run_cap_s1_real_nested_file_limit_case(
 
 
 @pytest.mark.parametrize(
-    ("inherited_limits", "maximum_stream_bytes", "expected_limits"),
+    (
+        "inherited_limits",
+        "maximum_stream_bytes",
+        "expected_limits",
+        "expect_refusal",
+    ),
     (
         pytest.param(
             None,
             16 * 1024 * 1024,
             (4 * 1024 * 1024 + 1, 4 * 1024 * 1024 + 1),
+            False,
             id="observer-to-secret",
         ),
-        pytest.param((2048, 4096), 16 * 1024 * 1024, (2048, 4096), id="soft"),
-        pytest.param((4096, 8192), 1024, (1025, 1025), id="requested"),
-        pytest.param((1025, 1025), 1024, (1025, 1025), id="equal"),
-        pytest.param((0, 0), 16 * 1024 * 1024, (0, 0), id="zero"),
+        pytest.param(
+            (2048, 4096), 16 * 1024 * 1024, (2048, 4096), False, id="soft"
+        ),
+        pytest.param(
+            (4096, 8192), 1024, (1025, 1025), False, id="requested"
+        ),
+        pytest.param((1025, 1025), 1024, (1025, 1025), False, id="equal"),
+        pytest.param((0, 0), 16 * 1024 * 1024, (0, 0), True, id="zero"),
     ),
 )
 def test_cap_s1_nested_child_never_raises_inherited_file_size_limits(
-    tmp_path, inherited_limits, maximum_stream_bytes, expected_limits
+    tmp_path,
+    inherited_limits,
+    maximum_stream_bytes,
+    expected_limits,
+    expect_refusal,
 ) -> None:
     _run_cap_s1_real_nested_file_limit_case(
         tmp_path,
         inherited_limits=inherited_limits,
         maximum_stream_bytes=maximum_stream_bytes,
         expected_limits=expected_limits,
+        expect_refusal=expect_refusal,
     )
+
+
+@pytest.mark.parametrize(
+    ("case", "inherited_limits", "child", "expected_size", "expect_refusal"),
+    (
+        pytest.param(
+            "below-bound",
+            (2048, 4096),
+            "import os\nos.write(1, b'x' * 2047)\n",
+            2047,
+            False,
+            id="below-bound",
+        ),
+        pytest.param(
+            "swallowed-boundary",
+            (2048, 4096),
+            (
+                "import os, signal\n"
+                "signal.signal(signal.SIGXFSZ, signal.SIG_IGN)\n"
+                "assert os.write(1, b'x' * 2048) == 2048\n"
+                "try:\n"
+                "    os.write(1, b'y')\n"
+                "except OSError:\n"
+                "    pass\n"
+                "else:\n"
+                "    raise SystemExit(91)\n"
+            ),
+            2048,
+            True,
+            id="swallowed-boundary",
+        ),
+        pytest.param(
+            "zero-no-witness",
+            (0, 0),
+            "raise SystemExit(0)\n",
+            0,
+            True,
+            id="zero-no-witness",
+        ),
+    ),
+)
+def test_cap_s1_nested_child_output_boundary_refuses_swallowed_truncation(
+    tmp_path,
+    case,
+    inherited_limits,
+    child,
+    expected_size,
+    expect_refusal,
+) -> None:
+    """Bind acceptance to the installed child limit, not the requested limit."""
+
+    python = Path(_sys.prefix) / "bin/python"
+    assert python.is_file()
+    nested_root = tmp_path / f"nested-output-{case}"
+    outer = (
+        "import resource,sys\n"
+        "from pathlib import Path\n"
+        f"sys.path.insert(0,{str(REPO_ROOT)!r})\n"
+        "import scripts.ohf.cap_s1_mastermind_operator_canary as cap\n"
+        f"resource.setrlimit(resource.RLIMIT_FSIZE,{inherited_limits!r})\n"
+        f"root=Path({str(nested_root)!r})\n"
+        "root.mkdir()\n"
+        "cleanup=[]\n"
+        "refused=False\n"
+        "try:\n"
+        "    return_code=cap._run_cap_s1_secret_process(\n"
+        f"        ({str(python)!r},'-I','-B','-c',{child!r}),\n"
+        f"        cwd=Path({str(tmp_path)!r}),\n"
+        "        environment_root=root/'environment',\n"
+        "        stdout_path=root/'stdout',stderr_path=root/'stderr',\n"
+        "        timeout=30,cleanup_observations=cleanup)\n"
+        "except cap.CapS1ResultError as exc:\n"
+        "    assert str(exc)=='cap_s1_result_secret_scan_incomplete'\n"
+        "    refused=True\n"
+        f"assert refused is {expect_refusal!r},('refusal',refused)\n"
+        f"assert (root/'stdout').stat().st_size=={expected_size!r}\n"
+        "assert (root/'stderr').stat().st_size==0\n"
+        f"if not {expect_refusal!r}:\n"
+        "    assert return_code==0,('inner-return',return_code)\n"
+        "    assert len(cleanup)==1,('cleanup-count',len(cleanup))\n"
+        "    assert cleanup[0].removed and cleanup[0].verified_absent\n"
+        "else:\n"
+        "    assert cleanup==[],('unexpected-cleanup-receipt',len(cleanup))\n"
+    )
+
+    parent_limits = resource.getrlimit(resource.RLIMIT_FSIZE)
+    cleanup = []
+    completed = _run_cap_s1_observer_process(
+        (str(python), "-I", "-B", "-c", outer),
+        cwd=tmp_path,
+        timeout=30,
+        cleanup_observations=cleanup,
+    )
+
+    assert resource.getrlimit(resource.RLIMIT_FSIZE) == parent_limits
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == ""
+    assert len(cleanup) == 2
+    assert all(row.removed and row.verified_absent for row in cleanup)
 
 
 @pytest.mark.parametrize(

@@ -4374,12 +4374,18 @@ def _run_cap_s1_owned_process(
     ):
         raise CapS1ResultError(error)
 
+    inherited_file_size_limits = resource.getrlimit(resource.RLIMIT_FSIZE)
+    child_file_size_limits = _cap_s1_effective_file_size_limits(
+        maximum_stream_bytes,
+        inherited_file_size_limits,
+    )
+
     def _limit_output() -> None:
-        limits = _cap_s1_effective_file_size_limits(
-            maximum_stream_bytes,
-            resource.getrlimit(resource.RLIMIT_FSIZE),
-        )
-        resource.setrlimit(resource.RLIMIT_FSIZE, limits)
+        if resource.getrlimit(resource.RLIMIT_FSIZE) != inherited_file_size_limits:
+            raise OSError("inherited file-size limits changed before child setup")
+        resource.setrlimit(resource.RLIMIT_FSIZE, child_file_size_limits)
+        if resource.getrlimit(resource.RLIMIT_FSIZE) != child_file_size_limits:
+            raise OSError("child file-size limits were not installed exactly")
 
     process: "subprocess.Popen[bytes] | None" = None
     process_group: "int | None" = None
@@ -4485,6 +4491,9 @@ def _run_cap_s1_owned_process(
             or stderr_identity != (stderr_state.st_dev, stderr_state.st_ino)
             or not stat.S_ISREG(stdout_state.st_mode)
             or not stat.S_ISREG(stderr_state.st_mode)
+            or child_file_size_limits[0] == 0
+            or stdout_state.st_size >= child_file_size_limits[0]
+            or stderr_state.st_size >= child_file_size_limits[0]
             or stdout_state.st_size > maximum_stream_bytes
             or stderr_state.st_size > maximum_stream_bytes
         ):
