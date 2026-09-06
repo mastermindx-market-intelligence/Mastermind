@@ -91,7 +91,11 @@ def _metadata_policy_and_path(policies: AppPolicies) -> tuple[ResourcePolicy, st
     if any(getattr(read_policy, name) != getattr(submit_policy, name) for name in identity):
         raise ValueError("read and submit policies must name the same resource identity")
     path = urlsplit(read_policy.resource_metadata_url).path or "/"
-    if "%" in path or "//" in path:
+    if (
+        "%" in path
+        or "//" in path
+        or any(segment in {".", ".."} for segment in path.split("/"))
+    ):
         raise ValueError("metadata policy route is not safely serveable")
     if path == "/v1/tools" or path.startswith("/v1/tools/"):
         raise ValueError("metadata policy route collides with reserved tool namespace")
