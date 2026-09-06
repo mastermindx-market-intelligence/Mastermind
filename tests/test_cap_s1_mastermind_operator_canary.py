@@ -24,6 +24,7 @@ import os
 import re
 import resource
 import shutil
+import signal
 import stat
 import subprocess
 import tarfile
@@ -1104,6 +1105,7 @@ from scripts.ohf.cap_s1_mastermind_operator_canary import (
     _register_cap_s1_canary_evidence,
     _revalidate_cap_s1_observer_source,
     _register_cap_s1_owned_root,
+    _run_cap_s1_owned_process,
     _run_cap_s1_observer_bytes,
     _run_cap_s1_observer_process,
     _run_cap_s1_python_observer_process,
@@ -1113,6 +1115,7 @@ from scripts.ohf.cap_s1_mastermind_operator_canary import (
     _stage_cap_s1_secret_source,
     _verify_cap_s1_secret_manifest,
     _validate_cap_s1_result_against_producer,
+    _turn_start_document_supports_skill_input_path,
     attest_protocol_schema,
     build_cap_s1_result as _public_build_cap_s1_result,
     build_synthetic_workspace,
@@ -1120,7 +1123,7 @@ from scripts.ohf.cap_s1_mastermind_operator_canary import (
     main as canary_main,
     run_canary,
 )
-from scripts.ohf.laboratory import AppServerClient, default_user_codex_home
+from scripts.ohf.laboratory import AppServerClient, AppServerStopProof, default_user_codex_home
 
 
 def build_cap_s1_result(**kwargs):
@@ -1548,6 +1551,272 @@ def _probe_env(probe_root: Path) -> dict:
         "OHF_FAKE_MCP_GONE": "1",
         "LC_ALL": "C",
     }
+
+
+def _skill_variant(document: dict) -> dict:
+    return document["definitions"]["UserInput"]["oneOf"][1]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "contradictory-const",
+        "contradictory-enum",
+        "wrong-discriminator-type",
+        "wrong-skill-object-type",
+        "missing-skill-object-type",
+        "deprecated-skill-object",
+        "nonboolean-deprecated",
+        "unknown-discriminator-validator",
+        "unknown-skill-validator",
+        "unknown-name-validator",
+        "unknown-path-validator",
+    ),
+)
+def test_turn_start_skill_path_schema_refuses_ambiguous_or_unfrozen_shapes(
+    mutation,
+) -> None:
+    document = json.loads(json.dumps(_SCHEMA_WITH_SKILL_PATH))
+    skill_variant = _skill_variant(document)
+    discriminator = skill_variant["properties"]["type"]
+
+    if mutation == "contradictory-const":
+        discriminator["const"] = "skill"
+        discriminator["enum"] = ["text"]
+    elif mutation == "contradictory-enum":
+        discriminator["const"] = "text"
+    elif mutation == "wrong-discriminator-type":
+        discriminator["type"] = "object"
+    elif mutation == "wrong-skill-object-type":
+        skill_variant["type"] = ["object", "null"]
+    elif mutation == "missing-skill-object-type":
+        skill_variant.pop("type")
+    elif mutation == "deprecated-skill-object":
+        skill_variant["deprecated"] = True
+    elif mutation == "nonboolean-deprecated":
+        skill_variant["deprecated"] = "false"
+    elif mutation == "unknown-discriminator-validator":
+        discriminator["pattern"] = "^skill$"
+    elif mutation == "unknown-skill-validator":
+        skill_variant["allOf"] = []
+    elif mutation == "unknown-name-validator":
+        skill_variant["properties"]["name"]["maxLength"] = 64
+    elif mutation == "unknown-path-validator":
+        skill_variant["properties"]["path"]["pattern"] = "^/"
+    else:  # pragma: no cover - the parameter list is the closed fixture inventory
+        raise AssertionError(mutation)
+
+    assert _turn_start_document_supports_skill_input_path(document) is False
+
+
+@pytest.mark.parametrize("discriminator_form", ("enum", "const"))
+def test_turn_start_skill_path_schema_accepts_each_exact_frozen_discriminator_form(
+    discriminator_form,
+) -> None:
+    document = json.loads(json.dumps(_SCHEMA_WITH_SKILL_PATH))
+    skill_variant = _skill_variant(document)
+    discriminator = skill_variant["properties"]["type"]
+    if discriminator_form == "const":
+        discriminator.pop("enum")
+        discriminator["const"] = "skill"
+    skill_variant["deprecated"] = False
+
+    assert _turn_start_document_supports_skill_input_path(document) is True
+
+
+class _ProtocolProbeFixture:
+    def __init__(self, proof_or_error) -> None:
+        self.proof_or_error = proof_or_error
+        self.pid = 71311
+        self.proc = None
+        self.graceful_close_calls = 0
+        self.close_calls = 0
+
+    def start(self) -> None:
+        self.proc = object()
+
+    def request(self, method, params, *, timeout: float = 15.0):
+        assert method == "initialize"
+        assert params["capabilities"] == {"experimentalApi": True}
+        return {"userAgent": FAKE_HARNESS_VERSION}
+
+    def graceful_close(self, *, wait: float = 5.0) -> AppServerStopProof:
+        self.graceful_close_calls += 1
+        if isinstance(self.proof_or_error, BaseException):
+            raise self.proof_or_error
+        return self.proof_or_error
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+def _attest_with_protocol_probe(
+    tmp_path, monkeypatch, proof_or_error, *, probe_sink=None
+):
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    probes = []
+
+    def _factory(*_args, **_kwargs):
+        probe = _ProtocolProbeFixture(proof_or_error)
+        probes.append(probe)
+        if probe_sink is not None:
+            probe_sink.append(probe)
+        return probe
+
+    monkeypatch.setattr(canary_module, "AppServerClient", _factory)
+    scratch = tmp_path / "scratch-probe-proof"
+    scratch.mkdir()
+    binary = tmp_path / "fixture-binary-probe-proof"
+    binary.write_bytes(b"probe-proof-fixture")
+    result = attest_protocol_schema(
+        binary_path=binary,
+        scratch_root=scratch,
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        probe_env=_probe_env(tmp_path / "probe-proof-env"),
+        probe_cwd=tmp_path,
+    )
+    return result, probes
+
+
+def test_attest_protocol_schema_accepts_only_one_exact_graceful_close_proof(
+    tmp_path, monkeypatch
+) -> None:
+    proof = AppServerStopProof(
+        controller_returncode=0,
+        private_group_id=71311,
+        private_group_empty=True,
+        leader_exit_confirmed_graceful=True,
+        survivors_detected_after_controller_exit=False,
+        termination_outcome="stdin-close",
+    )
+
+    receipt, probes = _attest_with_protocol_probe(tmp_path, monkeypatch, proof)
+
+    assert receipt.probe_user_agent == FAKE_HARNESS_VERSION
+    assert len(probes) == 1
+    assert probes[0].graceful_close_calls == 1
+    assert probes[0].close_calls == 0
+
+
+@pytest.mark.parametrize(
+    "proof",
+    (
+        AppServerStopProof(
+            controller_returncode=0,
+            private_group_id=71311,
+            private_group_empty=False,
+            leader_exit_confirmed_graceful=True,
+            survivors_detected_after_controller_exit=False,
+            termination_outcome="stdin-close",
+        ),
+        AppServerStopProof(
+            controller_returncode=True,
+            private_group_id=71311,
+            private_group_empty=True,
+            leader_exit_confirmed_graceful=True,
+            survivors_detected_after_controller_exit=False,
+            termination_outcome="stdin-close",
+        ),
+        AppServerStopProof(
+            controller_returncode=0,
+            private_group_id=71311,
+            private_group_empty=True,
+            leader_exit_confirmed_graceful=True,
+            survivors_detected_after_controller_exit=True,
+            termination_outcome="kill",
+        ),
+        AppServerStopProof(
+            controller_returncode=0,
+            private_group_id=71312,
+            private_group_empty=True,
+            leader_exit_confirmed_graceful=True,
+            survivors_detected_after_controller_exit=False,
+            termination_outcome="stdin-close",
+        ),
+        object(),
+    ),
+)
+def test_attest_protocol_schema_refuses_nonexact_process_settlement_proof(
+    tmp_path, monkeypatch, proof
+) -> None:
+    probes = []
+    with pytest.raises(CanaryStop) as excinfo:
+        _attest_with_protocol_probe(
+            tmp_path, monkeypatch, proof, probe_sink=probes
+        )
+    assert excinfo.value.code == "SKILL_PROTOCOL_SCHEMA_UNATTESTED"
+    assert len(probes) == 1
+    assert probes[0].graceful_close_calls == 1
+    assert probes[0].close_calls == 0
+    assert not (tmp_path / "scratch-probe-proof" / "schema-attestation").exists()
+
+
+def test_attest_protocol_schema_refuses_graceful_close_error(
+    tmp_path, monkeypatch
+) -> None:
+    probes = []
+    with pytest.raises(CanaryStop) as excinfo:
+        _attest_with_protocol_probe(
+            tmp_path,
+            monkeypatch,
+            RuntimeError("synthetic settlement failure"),
+            probe_sink=probes,
+        )
+    assert excinfo.value.code == "SKILL_PROTOCOL_SCHEMA_UNATTESTED"
+    assert len(probes) == 1
+    assert probes[0].graceful_close_calls == 1
+    assert probes[0].close_calls == 0
+    assert not (tmp_path / "scratch-probe-proof" / "schema-attestation").exists()
+
+
+def test_run_canary_unsettled_schema_probe_stops_before_adapter_or_thread_creation(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    proof = AppServerStopProof(
+        controller_returncode=0,
+        private_group_id=71311,
+        private_group_empty=True,
+        leader_exit_confirmed_graceful=True,
+        survivors_detected_after_controller_exit=True,
+        termination_outcome="kill",
+    )
+    probes = []
+
+    def _probe_factory(*_args, **_kwargs):
+        probe = _ProtocolProbeFixture(proof)
+        probes.append(probe)
+        return probe
+
+    main_client_creations = []
+    monkeypatch.setattr(canary_module, "AppServerClient", _probe_factory)
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=tmp_path / "full-run-unsettled-probe",
+            operation_id="cap-s1-unsettled-probe",
+            protected_join="c" * 40,
+            client_factory=_canary_client_factory(
+                on_create=lambda: main_client_creations.append("created")
+            ),
+            run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        )
+
+    assert excinfo.value.code == "SKILL_PROTOCOL_SCHEMA_UNATTESTED"
+    assert len(probes) == 1
+    assert probes[0].graceful_close_calls == 1
+    assert probes[0].close_calls == 0
+    assert main_client_creations == []
+    assert _CREATED_CANARY_CLIENTS == []
+    assert not (
+        tmp_path / "full-run-unsettled-probe" / "schema-attestation"
+    ).exists()
 
 
 def test_attest_protocol_schema_with_skill_path_supports_true_and_is_deterministic(
@@ -2208,6 +2477,45 @@ def test_run_canary_pathless_request_with_unrelated_skill_fragment_refuses_befor
     assert len(thread_start_calls) == 0
 
 
+def test_run_canary_pathless_invalid_skill_schema_refuses_before_thread_start(
+    tmp_path,
+) -> None:
+    scratch = tmp_path / "scratch-invalid-skill-schema"
+    scratch.mkdir()
+    workspace_cwd = str((scratch / "synthetic-workspace").resolve())
+    required_names = _required_runtime_names()
+    schema = json.loads(json.dumps(_SCHEMA_WITH_SKILL_PATH))
+    _skill_variant(schema)["properties"]["type"]["const"] = "text"
+    script = [
+        _strict_skills_list_result(workspace_cwd, []),
+        _strict_skills_list_result(workspace_cwd, []),
+        _strict_skills_list_result(
+            workspace_cwd,
+            [_skill_row(name) for name in required_names],
+        ),
+    ]
+    factory = _canary_client_factory(skills_list_script=script)
+
+    with pytest.raises(CanaryStop) as excinfo:
+        run_canary(
+            backend="fake",
+            binary_path=None,
+            codex_home=None,
+            repo_root=REPO_ROOT,
+            scratch_root=scratch,
+            operation_id="cap-s1-invalid-skill-schema",
+            protected_join="c" * 40,
+            client_factory=factory,
+            run_command=_fake_schema_run_command(schema),
+        )
+
+    assert excinfo.value.code == "SKILL_PATH_ATTESTATION_UNAVAILABLE"
+    assert len(_CREATED_CANARY_CLIENTS) == 1
+    client = _CREATED_CANARY_CLIENTS[0]
+    assert [call for call in client.calls if call[0] == "thread/start"] == []
+    assert [call for call in client.calls if call[0] == "turn/start"] == []
+
+
 def test_run_canary_skills_changed_notification_stops_before_the_next_turn(tmp_path) -> None:
     """A ``skills/changed`` notification during turn 1 stops turn 2.
 
@@ -2594,11 +2902,11 @@ def test_run_canary_mid_turn_effect_unknown_tears_down_process_exactly_once_and_
 ) -> None:
     scratch = tmp_path / "scratch-cleanup-boundary-effect-unknown"
     scratch.mkdir()
-    call_count = {"n": 0}
+    graceful_close_cwds = []
     real_graceful_close = AppServerClient.graceful_close
 
     def _counting_graceful_close(self, *, wait: float = 5.0):
-        call_count["n"] += 1
+        graceful_close_cwds.append(Path(self.cwd))
         return real_graceful_close(self, wait=wait)
 
     monkeypatch.setattr(AppServerClient, "graceful_close", _counting_graceful_close)
@@ -2618,10 +2926,10 @@ def test_run_canary_mid_turn_effect_unknown_tears_down_process_exactly_once_and_
             run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
         )
     assert excinfo.value.code == "EFFECT_UNKNOWN"
-    # Attempted exactly once, never retried -- the process stop surface is
-    # invoked by the finally-block cleanup ledger regardless of the
-    # mid-turn transport failure's own uncertainty.
-    assert call_count["n"] == 1
+    # The schema probe and later adapter each own one distinct process and
+    # each settle exactly once.  The adapter process is never retried after
+    # the mid-turn transport failure.
+    assert graceful_close_cwds == [scratch, scratch / "synthetic-workspace"]
     assert _CREATED_CANARY_CLIENTS[0].alive() is False
     _assert_scratch_has_no_leaked_resources(scratch)
 
@@ -4899,6 +5207,22 @@ def _install_cap_s1_codeql_fixture(monkeypatch, *, flaw=None):
         }
         for index, category in enumerate(categories, start=1)
     ]
+    historical_analyses = [
+        {
+            "id": 3000 + index,
+            "commit_sha": f"{index + 1:040x}",
+            "ref": "refs/pull/350/head",
+            "analysis_key": "historical-analysis-key",
+            "category": "/language:historical",
+            "tool": {"name": "HistoricalTool"},
+            "results_count": 99,
+            "rules_count": 1,
+            "error": "historic result must not bind the current head",
+            "warning": "historic result must not bind the current head",
+        }
+        for index in range(100)
+    ]
+    paged_analyses = None
     if flaw == "same-sha-non-codeql":
         analyses[0]["tool"] = {"name": "Other"}
     elif flaw == "missing-category":
@@ -4913,8 +5237,22 @@ def _install_cap_s1_codeql_fixture(monkeypatch, *, flaw=None):
         analyses[0]["warning"] = "analysis incomplete"
     elif flaw == "wrong-ref":
         analyses[0]["ref"] = "refs/heads/fable/cap-s1-complete-vertical-20260901"
+    elif flaw == "wrong-analysis-key":
+        analyses[0]["analysis_key"] = "unexpected-analysis-key"
     elif flaw == "duplicate-rerun":
         analyses.append(dict(analyses[0], id=2999))
+    elif flaw == "historical-pr-ref":
+        analyses = historical_analyses[:3] + analyses
+    elif flaw == "historical-full-page":
+        paged_analyses = (historical_analyses, analyses)
+    elif flaw == "malformed-historical-ref":
+        malformed = dict(historical_analyses[0])
+        malformed["ref"] = "refs/heads/fable/cap-s1-complete-vertical-20260901"
+        analyses = [malformed, *analyses]
+    elif flaw == "malformed-historical-shape":
+        malformed = dict(historical_analyses[0])
+        malformed["tool"] = "not-an-object"
+        analyses = [malformed, *analyses]
 
     pull_reads = 0
 
@@ -4950,6 +5288,11 @@ def _install_cap_s1_codeql_fixture(monkeypatch, *, flaw=None):
     def _list(endpoint):
         if "/code-scanning/analyses?" in endpoint:
             assert "ref=refs%2Fpull%2F350%2Fhead" in endpoint
+            if paged_analyses is not None:
+                match = re.search(r"[?&]page=([0-9]+)", endpoint)
+                assert match is not None
+                page = int(match.group(1))
+                return list(paged_analyses[page - 1]) if page <= len(paged_analyses) else []
             return analyses
         if "/code-scanning/alerts?" in endpoint:
             assert "?pr=350&state=open&" in endpoint
@@ -4970,6 +5313,20 @@ def test_cap_s1_codeql_binds_exact_pr_checks_analyses_and_alerts(monkeypatch) ->
     )
 
 
+@pytest.mark.parametrize("history_fixture", ("historical-pr-ref", "historical-full-page"))
+def test_cap_s1_codeql_selects_current_head_from_bounded_pr_ref_history(
+    monkeypatch, history_fixture
+) -> None:
+    exact_head = _install_cap_s1_codeql_fixture(monkeypatch, flaw=history_fixture)
+
+    rows = _observe_cap_s1_codeql(exact_head=exact_head)
+
+    assert tuple(row[:3] for row in rows) == (
+        ("codeql-checks", "PASSED", 0),
+        ("code-scanning-alerts", "PASSED", 0),
+    )
+
+
 @pytest.mark.parametrize(
     "flaw",
     (
@@ -4981,7 +5338,10 @@ def test_cap_s1_codeql_binds_exact_pr_checks_analyses_and_alerts(monkeypatch) ->
         "analysis-warning",
         "moved-pr",
         "wrong-ref",
+        "wrong-analysis-key",
         "duplicate-rerun",
+        "malformed-historical-ref",
+        "malformed-historical-shape",
     ),
 )
 def test_cap_s1_codeql_refuses_incomplete_or_moved_evidence(
@@ -5912,6 +6272,236 @@ def test_cap_s1_result_refuses_nonexact_local_scope_inventory(hostile) -> None:
         build_cap_s1_result(**raw)
 
 
+class _OwnedProcessFixture:
+    def __init__(self, *, mode: str, stdin_path: "Path | None" = None) -> None:
+        self.mode = mode
+        self.stdin_path = stdin_path
+        self.pid = 42424
+        self.returncode = None
+        self.wait_calls = 0
+        self.kill_calls = 0
+        self.poll_calls = 0
+
+    def wait(self, *, timeout: float):
+        self.wait_calls += 1
+        if self.mode == "success" and self.wait_calls == 1:
+            self.returncode = 0
+            return 0
+        if self.mode == "poll-error" and self.wait_calls == 1:
+            raise _subprocess.TimeoutExpired(["fixture-owned-process"], timeout)
+        if self.mode in {"timeout-dead-leader", "timeout-live-leader"} and self.wait_calls == 1:
+            if self.mode == "timeout-dead-leader":
+                self.returncode = 7
+            raise _subprocess.TimeoutExpired(["fixture-owned-process"], timeout)
+        if self.mode == "stdin-drift" and self.wait_calls == 1:
+            assert self.stdin_path is not None
+            self.stdin_path.unlink()
+            self.stdin_path.write_bytes(b"replacement")
+            self.returncode = 0
+            return 0
+        if self.returncode is None:
+            self.returncode = -9
+        return self.returncode
+
+    def poll(self):
+        self.poll_calls += 1
+        if self.mode == "poll-error" and self.poll_calls == 1:
+            raise OSError("synthetic poll failure")
+        return self.returncode
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        self.returncode = -9
+
+
+def _run_owned_process_fixture(
+    tmp_path,
+    monkeypatch,
+    *,
+    mode: str,
+    group_exists_after_leader: bool,
+    startup_identity_matches: bool = True,
+):
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    stdin_path = None
+    if mode == "stdin-drift":
+        stdin_path = tmp_path / "stdin.json"
+        stdin_path.write_bytes(b"original")
+    process = _OwnedProcessFixture(mode=mode, stdin_path=stdin_path)
+    group_signals = []
+    cleanup = []
+
+    monkeypatch.setattr(canary_module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(
+        canary_module.os,
+        "getpgid",
+        lambda pid: pid if startup_identity_matches else pid + 1,
+    )
+    monkeypatch.setattr(
+        canary_module.os,
+        "getsid",
+        lambda pid: pid if startup_identity_matches else pid + 1,
+    )
+
+    def _killpg(process_group, signal_number):
+        group_signals.append((process_group, signal_number))
+        process.returncode = -9
+
+    monkeypatch.setattr(canary_module.os, "killpg", _killpg)
+    monkeypatch.setattr(
+        canary_module,
+        "_cap_s1_process_group_exists",
+        lambda _process_group: group_exists_after_leader,
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_wait_cap_s1_process_group_absent",
+        lambda _process_group: True,
+    )
+
+    with pytest.raises(CapS1ResultError, match="source_observation_unavailable"):
+        _run_cap_s1_owned_process(
+            ("fixture-owned-process",),
+            cwd=tmp_path,
+            environment={},
+            stdout_path=tmp_path / "stdout.bin",
+            stderr_path=tmp_path / "stderr.bin",
+            timeout=0.01,
+            maximum_stream_bytes=1024,
+            error="cap_s1_result_source_observation_unavailable",
+            cleanup_observations=cleanup,
+            stdin_path=stdin_path,
+        )
+    return process, group_signals, cleanup
+
+
+def test_cap_s1_owned_process_dead_leader_with_live_numeric_group_is_unknown_not_signaled(
+    tmp_path, monkeypatch
+) -> None:
+    process, group_signals, cleanup = _run_owned_process_fixture(
+        tmp_path,
+        monkeypatch,
+        mode="timeout-dead-leader",
+        group_exists_after_leader=True,
+    )
+
+    assert process.kill_calls == 0
+    assert group_signals == []
+    assert len(cleanup) == 1
+    assert cleanup[0].verified_absent is False
+
+
+def test_cap_s1_owned_process_signals_only_a_freshly_verified_live_leader_group(
+    tmp_path, monkeypatch
+) -> None:
+    process, group_signals, cleanup = _run_owned_process_fixture(
+        tmp_path,
+        monkeypatch,
+        mode="timeout-live-leader",
+        group_exists_after_leader=False,
+    )
+
+    assert process.kill_calls == 0
+    assert group_signals == [(process.pid, signal.SIGKILL)]
+    assert len(cleanup) == 1
+    assert cleanup[0].removed is True
+    assert cleanup[0].verified_absent is True
+
+
+def test_cap_s1_owned_process_stdin_drift_after_leader_exit_cannot_signal_numeric_group(
+    tmp_path, monkeypatch
+) -> None:
+    process, group_signals, cleanup = _run_owned_process_fixture(
+        tmp_path,
+        monkeypatch,
+        mode="stdin-drift",
+        group_exists_after_leader=True,
+    )
+
+    assert process.kill_calls == 0
+    assert group_signals == []
+    assert len(cleanup) == 1
+    assert cleanup[0].verified_absent is False
+
+
+def test_cap_s1_owned_process_startup_identity_failure_is_accounted_without_group_signal(
+    tmp_path, monkeypatch
+) -> None:
+    process, group_signals, cleanup = _run_owned_process_fixture(
+        tmp_path,
+        monkeypatch,
+        mode="startup-identity-failure",
+        group_exists_after_leader=True,
+        startup_identity_matches=False,
+    )
+
+    assert process.kill_calls == 1
+    assert group_signals == []
+    assert len(cleanup) == 1
+    assert cleanup[0].verified_absent is False
+
+
+def test_cap_s1_owned_process_poll_failure_reaps_direct_owner_without_group_signal(
+    tmp_path, monkeypatch
+) -> None:
+    process, group_signals, cleanup = _run_owned_process_fixture(
+        tmp_path,
+        monkeypatch,
+        mode="poll-error",
+        group_exists_after_leader=True,
+    )
+
+    assert process.kill_calls == 1
+    assert group_signals == []
+    assert len(cleanup) == 1
+    assert cleanup[0].verified_absent is False
+
+
+def test_cap_s1_owned_process_settled_success_records_absence(
+    tmp_path, monkeypatch
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    process = _OwnedProcessFixture(mode="success")
+    group_signals = []
+    cleanup = []
+    monkeypatch.setattr(canary_module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(canary_module.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(canary_module.os, "getsid", lambda pid: pid)
+    monkeypatch.setattr(
+        canary_module.os,
+        "killpg",
+        lambda process_group, signal_number: group_signals.append(
+            (process_group, signal_number)
+        ),
+    )
+    monkeypatch.setattr(
+        canary_module,
+        "_cap_s1_process_group_exists",
+        lambda _process_group: False,
+    )
+
+    return_code = _run_cap_s1_owned_process(
+        ("fixture-owned-process",),
+        cwd=tmp_path,
+        environment={},
+        stdout_path=tmp_path / "stdout.bin",
+        stderr_path=tmp_path / "stderr.bin",
+        timeout=0.01,
+        maximum_stream_bytes=1024,
+        error="cap_s1_result_source_observation_unavailable",
+        cleanup_observations=cleanup,
+    )
+
+    assert return_code == 0
+    assert process.kill_calls == 0
+    assert group_signals == []
+    assert len(cleanup) == 1
+    assert cleanup[0].removed is True
+    assert cleanup[0].verified_absent is True
+
+
 def test_cap_s1_observer_process_timeout_kills_owned_descendant(tmp_path) -> None:
     marker = tmp_path / "descendant.pid"
     child_script = "import time; time.sleep(30)"
@@ -6010,7 +6600,8 @@ def _run_cap_s1_real_nested_file_limit_case(
         "    assert len(cleanup)==1,('cleanup-count',len(cleanup))\n"
         "    assert cleanup[0].removed and cleanup[0].verified_absent\n"
         "else:\n"
-        "    assert cleanup==[],('unexpected-cleanup-receipt',len(cleanup))\n"
+        "    assert len(cleanup)==1,('cleanup-count',len(cleanup))\n"
+        "    assert cleanup[0].removed and cleanup[0].verified_absent\n"
     )
 
     parent_limits = resource.getrlimit(resource.RLIMIT_FSIZE)
@@ -6150,7 +6741,8 @@ def test_cap_s1_nested_child_output_boundary_refuses_swallowed_truncation(
         "    assert len(cleanup)==1,('cleanup-count',len(cleanup))\n"
         "    assert cleanup[0].removed and cleanup[0].verified_absent\n"
         "else:\n"
-        "    assert cleanup==[],('unexpected-cleanup-receipt',len(cleanup))\n"
+        "    assert len(cleanup)==1,('cleanup-count',len(cleanup))\n"
+        "    assert cleanup[0].removed and cleanup[0].verified_absent\n"
     )
 
     parent_limits = resource.getrlimit(resource.RLIMIT_FSIZE)

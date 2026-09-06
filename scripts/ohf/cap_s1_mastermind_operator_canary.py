@@ -89,7 +89,12 @@ from scripts.ohf.capability_skill_projection import (
     create_ephemeral_archive_origin,
     stage_skill_projection,
 )
-from scripts.ohf.laboratory import AppServerClient, default_user_codex_home, validate_live_codex_home
+from scripts.ohf.laboratory import (
+    AppServerClient,
+    AppServerStopProof,
+    default_user_codex_home,
+    validate_live_codex_home,
+)
 from scripts.ohf.protocol import (
     SkillProtocolShapeError,
     enabled_skill_names,
@@ -655,12 +660,50 @@ def _resolve_local_schema_ref(document: dict[str, Any], ref: Any) -> Any | None:
     return current
 
 
+_SCHEMA_ANNOTATION_KEYS = frozenset(
+    {"$comment", "default", "description", "examples", "title"}
+)
+
+
+def _schema_uses_only_supported_keys(
+    schema: dict[str, Any], assertions: frozenset[str]
+) -> bool:
+    return set(schema).issubset(assertions | _SCHEMA_ANNOTATION_KEYS)
+
+
+def _skill_discriminator_mentions_skill(schema: Any) -> bool:
+    if not isinstance(schema, dict):
+        return False
+    enum = schema.get("enum")
+    return schema.get("const") == "skill" or enum == "skill" or (
+        isinstance(enum, list) and "skill" in enum
+    )
+
+
 def _is_exact_skill_discriminator(schema: Any) -> bool:
     if not isinstance(schema, dict):
         return False
-    const = schema.get("const")
-    enum = schema.get("enum")
-    return const == "skill" or enum == ["skill"]
+    if not _schema_uses_only_supported_keys(
+        schema, frozenset({"const", "enum", "type"})
+    ):
+        return False
+    if "const" not in schema and "enum" not in schema:
+        return False
+    if "type" in schema and schema["type"] != "string":
+        return False
+    if "const" in schema and schema["const"] != "skill":
+        return False
+    if "enum" in schema and schema["enum"] != ["skill"]:
+        return False
+    return True
+
+
+def _is_exact_generated_string_schema(schema: Any) -> bool:
+    return (
+        isinstance(schema, dict)
+        and _schema_uses_only_supported_keys(schema, frozenset({"type"}))
+        and schema.get("type") == "string"
+    )
 
 
 def _turn_start_document_supports_skill_input_path(document: Any) -> bool:
@@ -703,20 +746,40 @@ def _turn_start_document_supports_skill_input_path(document: Any) -> bool:
         variant_properties = variant.get("properties")
         if not isinstance(variant_properties, dict):
             return False
-        if _is_exact_skill_discriminator(variant_properties.get("type")):
+        discriminator = variant_properties.get("type")
+        skill_shaped = _skill_discriminator_mentions_skill(discriminator) or (
+            variant.get("title") == "SkillUserInput"
+        )
+        if skill_shaped and not _is_exact_skill_discriminator(discriminator):
+            return False
+        if skill_shaped:
             skill_variants.append(variant)
     if len(skill_variants) != 1:
         return False
     skill_variant = skill_variants[0]
     skill_properties = skill_variant.get("properties")
     skill_required = skill_variant.get("required")
-    if not isinstance(skill_properties, dict) or not isinstance(skill_required, list):
+    if (
+        not _schema_uses_only_supported_keys(
+            skill_variant,
+            frozenset({"deprecated", "properties", "required", "type"}),
+        )
+        or skill_variant.get("type") != "object"
+        or (
+            "deprecated" in skill_variant
+            and skill_variant["deprecated"] is not False
+        )
+        or not isinstance(skill_properties, dict)
+        or set(skill_properties) != {"type", "name", "path"}
+        or not isinstance(skill_required, list)
+        or len(skill_required) != 3
+        or set(skill_required) != {"type", "name", "path"}
+    ):
         return False
-    if not {"type", "name", "path"}.issubset(skill_required):
-        return False
-    return all(
-        isinstance(skill_properties.get(field), dict)
-        and skill_properties[field].get("type") == "string"
+    return _is_exact_skill_discriminator(
+        skill_properties["type"]
+    ) and all(
+        _is_exact_generated_string_schema(skill_properties[field])
         for field in ("name", "path")
     )
 
@@ -843,6 +906,8 @@ def attest_protocol_schema(
             cwd=resolved_probe_cwd,
             start_new_session=True,
         )
+        initialized: Any = None
+        probe_failure: "Exception | None" = None
         try:
             probe_client.start()
             initialized = probe_client.request(
@@ -850,14 +915,56 @@ def attest_protocol_schema(
                 {"clientInfo": _PROBE_CLIENT_INFO, "capabilities": {"experimentalApi": True}},
             )
         except Exception as exc:  # noqa: BLE001 -- any probe failure is unattested
+            probe_failure = exc
+        process_created = probe_client.proc is not None
+        started_private_group = (
+            probe_client.pid if type(probe_client.pid) is int and probe_client.pid > 0 else None
+        )
+        try:
+            stop_proof = probe_client.graceful_close(wait=5.0)
+        except Exception as settlement_exc:  # noqa: BLE001 -- settlement must be proved
+            if probe_failure is not None:
+                raise CanaryStop(
+                    "SKILL_PROTOCOL_SCHEMA_UNATTESTED",
+                    "protocol initialize probe failed and process settlement is unproved",
+                ) from probe_failure
+            raise CanaryStop(
+                "SKILL_PROTOCOL_SCHEMA_UNATTESTED",
+                "protocol initialize probe settlement failed",
+            ) from settlement_exc
+
+        settled_created_process = (
+            type(stop_proof) is AppServerStopProof
+            and type(stop_proof.controller_returncode) is int
+            and type(stop_proof.private_group_id) is int
+            and stop_proof.private_group_id == started_private_group
+            and stop_proof.private_group_empty is True
+            and type(stop_proof.leader_exit_confirmed_graceful) is bool
+            and type(stop_proof.survivors_detected_after_controller_exit) is bool
+            and type(stop_proof.termination_outcome) is str
+            and bool(stop_proof.termination_outcome)
+        )
+        if probe_failure is not None:
+            if process_created and not settled_created_process:
+                raise CanaryStop(
+                    "SKILL_PROTOCOL_SCHEMA_UNATTESTED",
+                    "protocol initialize probe failed and process settlement is unproved",
+                ) from probe_failure
             raise CanaryStop(
                 "SKILL_PROTOCOL_SCHEMA_UNATTESTED", "protocol initialize probe failed"
-            ) from exc
-        finally:
-            try:
-                probe_client.close()
-            except Exception:  # noqa: BLE001 -- best-effort probe teardown
-                pass
+            ) from probe_failure
+        if not (
+            process_created
+            and settled_created_process
+            and stop_proof.controller_returncode == 0
+            and stop_proof.leader_exit_confirmed_graceful is True
+            and stop_proof.survivors_detected_after_controller_exit is False
+            and stop_proof.termination_outcome == "stdin-close"
+        ):
+            raise CanaryStop(
+                "SKILL_PROTOCOL_SCHEMA_UNATTESTED",
+                "protocol initialize probe settlement is not exact",
+            )
         probe_user_agent = str(initialized.get("userAgent") or "").strip()
         if not probe_user_agent:
             raise CanaryStop(
@@ -4389,20 +4496,25 @@ def _run_cap_s1_owned_process(
 
     process: "subprocess.Popen[bytes] | None" = None
     process_group: "int | None" = None
+    private_group_verified = False
     stdout_identity: "tuple[int, int] | None" = None
     stderr_identity: "tuple[int, int] | None" = None
     return_code: "int | None" = None
-    timed_out = False
-    unexpected_descendant = False
-    survivor = False
     stdin_file: "Any | None" = None
     stdin_identity: "tuple[int, int, int, int] | None" = None
+    primary_error: "CapS1ResultError | None" = None
+    settlement_error: "BaseException | None" = None
+    group_signal_performed = False
+    direct_child_reaped = False
+    group_verified_absent = False
+    stdout_state: "os.stat_result | None" = None
+    stderr_state: "os.stat_result | None" = None
     try:
         with stdout_path.open("xb") as stdout_file, stderr_path.open("xb") as stderr_file:
-            stdout_state = os.fstat(stdout_file.fileno())
-            stderr_state = os.fstat(stderr_file.fileno())
-            stdout_identity = (stdout_state.st_dev, stdout_state.st_ino)
-            stderr_identity = (stderr_state.st_dev, stderr_state.st_ino)
+            created_stdout_state = os.fstat(stdout_file.fileno())
+            created_stderr_state = os.fstat(stderr_file.fileno())
+            stdout_identity = (created_stdout_state.st_dev, created_stdout_state.st_ino)
+            stderr_identity = (created_stderr_state.st_dev, created_stderr_state.st_ino)
             if stdin_path is not None:
                 stdin_file = stdin_path.open("rb")
                 stdin_state = os.fstat(stdin_file.fileno())
@@ -4429,25 +4541,24 @@ def _run_cap_s1_owned_process(
                 preexec_fn=_limit_output,
             )
             process_group = process.pid
-            if os.getpgid(process.pid) != process.pid or os.getsid(process.pid) != process.pid:
-                process.kill()
-                process.wait(timeout=10)
-                raise CapS1ResultError(error)
             try:
-                return_code = process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                if (
-                    process.poll() is not None
-                    or os.getpgid(process.pid) != process_group
-                    or os.getsid(process.pid) != process_group
-                ):
-                    process.kill()
-                    process.wait(timeout=10)
-                    raise CapS1ResultError(error)
-                os.killpg(process_group, signal.SIGKILL)
-                process.wait(timeout=10)
-        if stdin_file is not None:
+                private_group_verified = (
+                    os.getpgid(process.pid) == process_group
+                    and os.getsid(process.pid) == process_group
+                )
+            except OSError:
+                private_group_verified = False
+            if not private_group_verified:
+                primary_error = CapS1ResultError(error)
+            else:
+                try:
+                    return_code = process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    primary_error = CapS1ResultError(error)
+                except (OSError, subprocess.SubprocessError):
+                    primary_error = CapS1ResultError(error)
+
+        if stdin_file is not None and primary_error is None:
             current_input = stdin_path.lstat() if stdin_path is not None else None
             if current_input is None or stdin_identity != (
                 current_input.st_dev,
@@ -4455,33 +4566,69 @@ def _run_cap_s1_owned_process(
                 current_input.st_size,
                 current_input.st_mtime_ns,
             ):
-                raise CapS1ResultError(error)
-        if process_group is not None and _cap_s1_process_group_exists(process_group):
-            # A descendant survived the direct child.  This exact process group
-            # was created above and never exposed, so clean it before refusing.
-            unexpected_descendant = True
-            os.killpg(process_group, signal.SIGKILL)
-            survivor = not _wait_cap_s1_process_group_absent(process_group)
-        elif process_group is not None:
-            survivor = False
-    except CapS1ResultError:
-        raise
+                primary_error = CapS1ResultError(error)
+    except CapS1ResultError as exc:
+        primary_error = primary_error or exc
     except (OSError, subprocess.SubprocessError):
-        if process is not None and process.poll() is None:
-            try:
-                if process_group is not None and os.getpgid(process.pid) == process_group:
-                    os.killpg(process_group, signal.SIGKILL)
-                else:
-                    process.kill()
-            finally:
-                process.wait(timeout=10)
-        raise CapS1ResultError(error) from None
+        primary_error = primary_error or CapS1ResultError(error)
     finally:
         if stdin_file is not None:
             try:
                 stdin_file.close()
             except OSError:
                 pass
+
+    # Every successful spawn enters this single settlement path before any
+    # operation error can escape.  A group signal is allowed only while the
+    # exact Popen-owned leader is still live and a fresh PID/PGID/SID read
+    # continues to prove the initially captured private-session identity.
+    # Once the leader is reaped, a merely-live numeric PGID is ambiguous: do
+    # not signal it, and never turn that UNKNOWN state into a clean receipt.
+    if process is not None and process_group is not None:
+        try:
+            direct_child_reaped = process.poll() is not None
+        except (OSError, subprocess.SubprocessError) as exc:
+            settlement_error = exc
+        if not direct_child_reaped:
+            live_group_verified = False
+            if private_group_verified and settlement_error is None:
+                try:
+                    live_group_verified = (
+                        process.poll() is None
+                        and os.getpgid(process.pid) == process_group
+                        and os.getsid(process.pid) == process_group
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    live_group_verified = False
+            try:
+                if live_group_verified:
+                    os.killpg(process_group, signal.SIGKILL)
+                    group_signal_performed = True
+                else:
+                    process.kill()
+                return_code = process.wait(timeout=10)
+                direct_child_reaped = process.poll() is not None
+            except (OSError, subprocess.SubprocessError) as exc:
+                settlement_error = settlement_error or exc
+
+        if private_group_verified and direct_child_reaped and settlement_error is None:
+            try:
+                if group_signal_performed:
+                    group_verified_absent = _wait_cap_s1_process_group_absent(
+                        process_group
+                    )
+                else:
+                    group_verified_absent = not _cap_s1_process_group_exists(
+                        process_group
+                    )
+            except (OSError, ValueError) as exc:
+                settlement_error = exc
+                group_verified_absent = False
+
+        if return_code is None and direct_child_reaped:
+            return_code = process.returncode
+        if not (direct_child_reaped and group_verified_absent):
+            settlement_error = settlement_error or CapS1ResultError(error)
 
     try:
         stdout_state = stdout_path.lstat()
@@ -4497,14 +4644,12 @@ def _run_cap_s1_owned_process(
             or stdout_state.st_size > maximum_stream_bytes
             or stderr_state.st_size > maximum_stream_bytes
         ):
-            raise CapS1ResultError(error)
+            primary_error = primary_error or CapS1ResultError(error)
     except OSError:
-        raise CapS1ResultError(error) from None
-    if timed_out or unexpected_descendant or survivor or return_code is None:
-        raise CapS1ResultError(error)
-    if cleanup_observations is not None:
-        if process_group is None or _cap_s1_process_group_exists(process_group):
-            raise CapS1ResultError(error)
+        primary_error = primary_error or CapS1ResultError(error)
+
+    if process is not None and process_group is not None and cleanup_observations is not None:
+        clean_settlement = direct_child_reaped and group_verified_absent
         cleanup_observations.append(
             _CapS1OwnedProcessCleanupObservation(
                 identity_digest=_canonical_digest(
@@ -4515,15 +4660,23 @@ def _run_cap_s1_owned_process(
                         "return_code": return_code,
                         "stdout_identity": stdout_identity,
                         "stderr_identity": stderr_identity,
-                        "stdout_size": stdout_state.st_size,
-                        "stderr_size": stderr_state.st_size,
+                        "stdout_size": stdout_state.st_size if stdout_state is not None else None,
+                        "stderr_size": stderr_state.st_size if stderr_state is not None else None,
                         "stdin_identity": stdin_identity,
                     }
                 ),
-                removed=True,
-                verified_absent=True,
+                removed=clean_settlement,
+                verified_absent=clean_settlement,
             )
         )
+    if return_code is None:
+        primary_error = primary_error or CapS1ResultError(error)
+    if primary_error is not None:
+        if settlement_error is not None:
+            raise primary_error from settlement_error
+        raise primary_error
+    if settlement_error is not None:
+        raise CapS1ResultError(error) from settlement_error
     return return_code
 
 
@@ -7729,17 +7882,44 @@ def _observe_cap_s1_codeql(
         raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
 
     analysis_rows: list[dict[str, Any]] = []
+    seen_analysis_ids: set[int] = set()
     seen_analysis_categories: set[str] = set()
     expected_categories = set(expected_checks)
+    authenticated_run_by_category = {
+        str(row["category"]): str(row["run_id"]) for row in codeql_rows
+    }
     for row in analyses:
-        tool = row.get("tool") if type(row) is dict else None
-        category = row.get("category") if type(row) is dict else None
+        if type(row) is not dict:
+            raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+        analysis_id = row.get("id")
+        commit_sha = row.get("commit_sha")
+        analysis_key = row.get("analysis_key")
+        category = row.get("category")
+        tool = row.get("tool")
         if (
-            type(row) is not dict
-            or not _result_positive_int(row.get("id"))
-            or row.get("commit_sha") != exact_head
+            not _result_positive_int(analysis_id)
+            or analysis_id in seen_analysis_ids
+            or not _result_is_hex40(commit_sha)
             or row.get("ref") != _CAP_S1_PR_HEAD_REF
-            or row.get("analysis_key") != _CAP_S1_CODEQL_ANALYSIS_KEY
+            or not isinstance(analysis_key, str)
+            or not analysis_key
+            or not isinstance(category, str)
+            or not category
+            or type(tool) is not dict
+            or not isinstance(tool.get("name"), str)
+            or not tool["name"]
+            or not _result_nonnegative_int(row.get("results_count"))
+            or not _result_positive_int(row.get("rules_count"))
+            or not isinstance(row.get("error"), str)
+            or not isinstance(row.get("warning"), str)
+        ):
+            raise CapS1ResultError("cap_s1_result_security_proof_invalid")
+        seen_analysis_ids.add(analysis_id)
+        if commit_sha != exact_head:
+            continue
+
+        if (
+            analysis_key != _CAP_S1_CODEQL_ANALYSIS_KEY
             or category not in {f"/language:{item}" for item in expected_categories}
             or type(tool) is not dict
             or tool.get("name") != "CodeQL"
@@ -7755,16 +7935,22 @@ def _observe_cap_s1_codeql(
         seen_analysis_categories.add(normalized_category)
         analysis_rows.append(
             {
-                "id": row["id"],
+                "id": analysis_id,
+                "exact_head": exact_head,
+                "analysis_key": _CAP_S1_CODEQL_ANALYSIS_KEY,
                 "category": normalized_category,
                 "ref": row["ref"],
                 "tool": tool["name"],
                 "results_count": row["results_count"],
                 "rules_count": row["rules_count"],
+                "authenticated_check_run_correlation": authenticated_run_by_category[
+                    normalized_category
+                ],
             }
         )
     if seen_analysis_categories != expected_categories:
         raise CapS1ResultError("cap_s1_result_security_proof_unavailable")
+    analysis_rows.sort(key=lambda row: (str(row["category"]), int(row["id"])))
 
     after_binding = _pr_binding()
     if after_binding != before_binding:
@@ -7791,6 +7977,7 @@ def _observe_cap_s1_codeql(
                     "analysis_categories": tuple(
                         sorted(str(row["category"]) for row in analysis_rows)
                     ),
+                    "current_analysis_evidence": tuple(analysis_rows),
                     "open_alert_numbers": tuple(
                         sorted(str(row.get("number", "")) for row in alerts)
                     ),
