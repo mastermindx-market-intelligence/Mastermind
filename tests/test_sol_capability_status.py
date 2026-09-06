@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 
@@ -793,3 +793,115 @@ def test_semantically_invalid_timestamp_has_no_hidden_exception_context() -> Non
     assert raised.value.__cause__ is None
     assert raised.value.__context__ is None
     assert invalid not in str(raised.value)
+
+
+# Both public timestamp fields share the same strict instant boundary.
+_TIMESTAMP_FIELDS = ('observed_at', 'last_proven_at')
+_TIMESTAMP_PRIVILEGES = (capability_status_module.PrivilegeClass.W2_CONSEQUENTIAL, capability_status_module.PrivilegeClass.A3_ADMIN)
+_TIMESTAMP_INVALID_OFFSETS = ('+00:60', '-00:60', '+00:99', '-00:99', '+24:00', '-24:00', '+99:00', '-99:00')
+_TIMESTAMP_OVERFLOWS = ('0001-01-01T00:00:00+00:01', '9999-12-31T23:59:59-00:01')
+_TIMESTAMP_ZERO_SPELLINGS = ('Z', '+00:00', '-00:00')
+
+
+def _timestamp_fact(privilege):
+    return capability_status_module.CapabilityFact(
+        name='probe', app_id='probe-app', app_generation='g1',
+        privilege_class=privilege, production_armed=True,
+        required_scopes=('read', 'write'), required_write_scopes=('write',),
+        current_scopes=('read', 'write'), confirmation_required=True,
+        prepared_action_required=True, canonical_owner='probe-owner', dependencies=(),
+        schema_digest='a' * 64, source_state=capability_status_module.CapabilityState.BUILT_NOT_PROVEN,
+        observed_available=True, live_proof_current=True, write_capable=True,
+        last_proven_at='2026-08-30T18:00:00Z', source_refs=('github:Mastermind:290',),
+    )
+
+
+def _timestamp_project(privilege, *, observed_at='2026-08-30T20:00:00Z', last_proven_at='2026-08-30T18:00:00Z'):
+    subject = replace(_timestamp_fact(privilege), last_proven_at=last_proven_at)
+    before = asdict(subject)
+    result = capability_status_module.project_sol_capability_status(
+        (subject,), observed_at=observed_at, capability_generation='g1',
+    )
+    assert asdict(subject) == before, 'input mutated'
+    return result
+
+
+def _require_timestamp_refusal(privilege, field, value):
+    field_name = 'observed_at' if field == 'observed_at' else 'probe.last_proven_at'
+    try:
+        result = _timestamp_project(privilege, **{field: value})
+    except capability_status_module.CapabilityProjectionError as exc:
+        assert type(exc) is capability_status_module.CapabilityProjectionError
+        assert str(exc) == f'{field_name} must be an RFC3339 timestamp'
+        assert value not in str(exc)
+        assert exc.__cause__ is None
+        assert exc.__context__ is None
+    else:
+        item = result.capabilities[0]
+        pytest.fail(f'invalid timestamp accepted: {field}={value}; normalized={getattr(result, field, None) or item.last_proven_at}; write_serviceable={item.write_serviceable}; proof={item.proof_state.value}')
+
+
+@pytest.mark.parametrize('privilege', _TIMESTAMP_PRIVILEGES)
+@pytest.mark.parametrize('field', _TIMESTAMP_FIELDS)
+@pytest.mark.parametrize('offset', _TIMESTAMP_INVALID_OFFSETS)
+def test_timestamp_boundary_invalid_offset_components_refused(privilege, field, offset):
+    clock = '20:00:00' if field == 'observed_at' else '18:00:00'
+    _require_timestamp_refusal(privilege, field, f'2026-08-30T{clock}{offset}')
+
+
+@pytest.mark.parametrize('privilege', _TIMESTAMP_PRIVILEGES)
+@pytest.mark.parametrize('field', _TIMESTAMP_FIELDS)
+@pytest.mark.parametrize('value', _TIMESTAMP_OVERFLOWS)
+def test_timestamp_boundary_utc_conversion_overflow_is_typed(privilege, field, value):
+    _require_timestamp_refusal(privilege, field, value)
+
+
+@pytest.mark.parametrize('privilege', _TIMESTAMP_PRIVILEGES)
+@pytest.mark.parametrize('observed_suffix', _TIMESTAMP_ZERO_SPELLINGS)
+@pytest.mark.parametrize('proof_suffix', _TIMESTAMP_ZERO_SPELLINGS)
+@pytest.mark.parametrize('clock, future', [('19:59:59', False), ('20:00:00', False), ('20:00:01', True)])
+def test_timestamp_boundary_zero_offset_spelling_preserves_instant_and_future_guard(privilege, observed_suffix, proof_suffix, clock, future):
+    result = _timestamp_project(privilege, observed_at='2026-08-30T20:00:00' + observed_suffix,
+                     last_proven_at='2026-08-30T' + clock + proof_suffix)
+    reference = _timestamp_project(privilege, last_proven_at='2026-08-30T' + clock + 'Z')
+    assert result.to_dict() == reference.to_dict()
+    item = result.capabilities[0]
+    assert item.write_serviceable is (not future)
+    assert ('LIVE_PROOF_FUTURE' in item.issues) is future
+    assert item.proof_state is (capability_status_module.CapabilityState.BUILT_NOT_PROVEN if future else capability_status_module.CapabilityState.PROVEN_LIVE)
+
+
+@pytest.mark.parametrize('privilege', _TIMESTAMP_PRIVILEGES)
+@pytest.mark.parametrize('field', _TIMESTAMP_FIELDS)
+@pytest.mark.parametrize('offset, expected', [
+    ('+00:59', '2026-08-30T19:01:00Z'), ('-00:59', '2026-08-30T20:59:00Z'),
+    ('+23:59', '2026-08-29T20:01:00Z'), ('-23:59', '2026-08-31T19:59:00Z'),
+])
+def test_timestamp_boundary_valid_offset_component_edges(privilege, field, offset, expected):
+    result = _timestamp_project(privilege, **{field: '2026-08-30T20:00:00' + offset})
+    reference = _timestamp_project(privilege, **{field: expected})
+    assert result.to_dict() == reference.to_dict()
+
+
+@pytest.mark.parametrize('privilege', _TIMESTAMP_PRIVILEGES)
+@pytest.mark.parametrize('field', _TIMESTAMP_FIELDS)
+@pytest.mark.parametrize('value, expected', [
+    ('0001-01-01T00:01:00+00:01', '0001-01-01T00:00:00Z'),
+    ('9999-12-31T23:58:59-00:01', '9999-12-31T23:59:59Z'),
+])
+def test_timestamp_boundary_representable_utc_extrema(privilege, field, value, expected):
+    assert _timestamp_project(privilege, **{field: value}).to_dict() == _timestamp_project(privilege, **{field: expected}).to_dict()
+
+
+@pytest.mark.parametrize('privilege', _TIMESTAMP_PRIVILEGES)
+def test_timestamp_boundary_optional_missing_proof_cannot_enable_write(privilege):
+    item = _timestamp_project(privilege, last_proven_at=None).capabilities[0]
+    assert not item.write_serviceable
+    assert item.proof_state is capability_status_module.CapabilityState.BUILT_NOT_PROVEN
+    assert 'LIVE_PROOF_MISSING' in item.issues
+
+
+@pytest.mark.parametrize('privilege', _TIMESTAMP_PRIVILEGES)
+@pytest.mark.parametrize('field', _TIMESTAMP_FIELDS)
+def test_timestamp_boundary_invalid_calendar_remains_payload_free(privilege, field):
+    _require_timestamp_refusal(privilege, field, '2026-02-30T12:00:00Z')
