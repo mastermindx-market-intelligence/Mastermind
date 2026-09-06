@@ -4,8 +4,8 @@
 **Hardening children:** `mastermind-sol-capability-fabric-cap1-r1-20260830-sol-001`, `mastermind-sol-capability-fabric-cap1-r2-20260830-sol-001`  
 **Parent:** `mastermind-sol-capability-fabric-20260830-sol-001`  
 **Protected pickup:** `mastermindx-market-intelligence/Mastermind@98bc7a71dcd70947c7a18eb5af7493a2f62a2571`  
-**Historical R2 proof procedure (September 4):** `mastermindx-market-intelligence/Mastermind@3055b499b87db19730e9a724e34f07f0d0af8755`  
-**Timestamp completion procedure (September 6):** `mastermindx-market-intelligence/Mastermind@467a81e84b08a7f1c3cdb9a410b2f7857816675d`  
+**Historical R2 proof procedure (September 4):** `mastermindx-market-intelligence/Mastermind@3055b499b87db19730e9a724e34f07f0d0af8755`
+**Timestamp completion procedure (September 6):** `mastermindx-market-intelligence/Mastermind@467a81e84b08a7f1c3cdb9a410b2f7857816675d`
 **Cognition:** `COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT / CHAT_REASONING_MODE: NON_PRO_DEFAULT`  
 **State at candidate source:** `BUILT_NOT_PROVEN / PRODUCTION_INERT`
 
