@@ -106,3 +106,57 @@ def test_bra_records_reject_super_mcp_and_remote_desktop_rebuild():
     assert "central browser-session database" in design
     assert "super-MCP combining Executive, browser, filesystem and shell powers" in design
     assert "generic `execute_javascript`/raw-CDP model tools" in design
+
+
+def test_bra_modifying_effects_use_existing_durable_owner_and_command_lineage():
+    law = _text(LAW)
+    design = _text(DESIGN)
+    plan = _text(PLAN)
+    for phrase in (
+        "Attempt-local Operator Harness effect owner",
+        "`operation_command_id`",
+        "INTENT -> APPLIED_VERIFIED",
+        "INTENT -> EFFECT_UNKNOWN -> RECONCILED",
+        "rereads current authority, exact target, and prior effect",
+        "Matching replay is evidence-only",
+        "Changed replay is a conflict and refuses",
+        "gateway receipt is evidence only",
+    ):
+        assert phrase in law
+    assert "The gateway never mints or owns `operation_command_id`." in design
+    assert "owner-minted `operation_command_id`" in plan
+
+
+def test_bra_navigation_and_network_policy_is_closed_before_runtime_build():
+    law = _text(LAW)
+    design = _text(DESIGN)
+    plan = _text(PLAN)
+    for phrase in (
+        "exact disposable synthetic origin allowlist",
+        "redirect chain",
+        "subframes and subresources",
+        "DNS rebinding",
+        "private, loopback, or link-local",
+        "credential-bearing URLs",
+        "downloads and uploads",
+        "`file:` / `data:` / `chrome:`",
+        "`navigation_epoch`",
+    ):
+        assert phrase in law
+    assert "BRA-W1 receives no generic navigation or network-inspection authority" in law
+    assert "separately reviewed policy generation and real canary" in design
+    assert "BRA-O1 cannot navigate" in plan
+
+
+def test_bra_reuses_existing_operator_operation_event_plane():
+    law = _text(LAW)
+    design = _text(DESIGN)
+    for phrase in (
+        "`OPERATOR_OPERATION_INTENT`",
+        "`OPERATOR_OPERATION_APPLIED`",
+        "`OPERATOR_OPERATION_EFFECT_UNKNOWN`",
+        "`OPERATOR_OPERATION_RECONCILED`",
+        "`APPLIED_VERIFIED` is the browser outcome carried by existing `OPERATOR_OPERATION_APPLIED`",
+    ):
+        assert phrase in law
+    assert "No new Event type or effect store is introduced." in design

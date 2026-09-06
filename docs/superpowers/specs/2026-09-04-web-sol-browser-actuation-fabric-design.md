@@ -91,7 +91,7 @@ Candidate operations for `DISPOSABLE_AUTOMATION_BROWSER` and later other explici
 - `browser_resize`
 - `browser_focus_tab`
 
-Selectors should be structured/semantic and constrained by the underlying adapter. No generic script evaluator exists.
+Selectors should be structured/semantic and constrained by the underlying adapter. No generic script evaluator exists. `browser_navigate` is available only to a target class whose reviewed closed origin/network policy expressly grants it.
 
 For modifying operations the response contains an effect classification and postcondition evidence digest. A response that cannot establish the postcondition is not promoted to `APPLIED_VERIFIED` merely because the driver returned success.
 
@@ -143,20 +143,76 @@ ChatGPT app
 
 If more than one host appears eligible and there is no canonical exact target, the request refuses as ambiguous rather than choosing one.
 
+## Durable effect owner and command lineage
+
+The existing Attempt-local Operator Harness `operator_operation` Event plane,
+under Executive OS's current Attempt lease/fence, is the durable effect owner
+for modifying browser work. BRA extends that existing owner with a bounded
+browser operation kind; it does not add a gateway table, replay cache or browser
+ledger. No new Event type or effect store is introduced.
+
+Before dispatch, the owner mints one existing owner-native `OperationId` and
+projects it to the closed browser command as `operation_command_id`.
+The gateway never mints or owns `operation_command_id`. It may only verify that the opaque
+value and bound request facts match the owner-issued envelope.
+
+The owner commits `INTENT` before the adapter call and then rereads the current
+Attempt authority, exact target/generation/navigation epoch, policy generation,
+deadline, precondition digest and prior effect immediately before mutation.
+Only a clean current reread permits one dispatch. Browser, tunnel and gateway
+receipts return as evidence to the same owner.
+
+Normal terminal history is `INTENT -> APPLIED_VERIFIED`, `INTENT -> NO_EFFECT`
+or `INTENT -> REFUSED`. A post-dispatch ambiguity is
+`INTENT -> EFFECT_UNKNOWN -> RECONCILED(resolution=...)`; it never becomes a
+fresh APPLIED event after the unknown edge. Matching replay reads the existing
+history and produces zero second effect. Reuse of the command ID with any
+different normalized payload, target, generation or policy is a conflict and
+refuses.
+
 ## State machine for one modifying browser operation
 
 ```text
-REQUEST_VALIDATED
--> TARGET_RESOLVED
+OWNER_INTENT_COMMITTED(operation_command_id)
+-> ACTION_TIME_AUTHORITY_TARGET_PRIOR_EFFECT_REREAD
 -> PRECONDITION_VERIFIED
--> EFFECT_DISPATCHED
--> POSTCONDITION_VERIFIED => APPLIED_VERIFIED
+-> EFFECT_DISPATCHED_ONCE
+-> POSTCONDITION_VERIFIED
+-> APPLIED_VERIFIED
 
-before EFFECT_DISPATCHED failure => NO_EFFECT/REFUSED
-unknown after EFFECT_DISPATCHED => EFFECT_UNKNOWN
+before EFFECT_DISPATCHED_ONCE failure -> NO_EFFECT | REFUSED
+unknown after EFFECT_DISPATCHED_ONCE -> EFFECT_UNKNOWN
+EFFECT_UNKNOWN + same-command read proof -> RECONCILED(resolution=...)
 ```
 
-No generic retry state exists. Reconciliation is an explicit read-only operation against the same logical operation and exact target.
+There is no generic retry state. Unresolved `EFFECT_UNKNOWN` blocks another
+dispatch, another gateway/host and another target. Reconciliation is an explicit
+read-only operation against the same owner-minted command and exact target.
+Matching replay returns prior evidence only; changed replay conflicts.
+
+## Closed navigation and network policy
+
+Observation and actuation have separate policies. BRA-O1 cannot navigate.
+BRA-A1's first policy generation, `DISPOSABLE_SYNTHETIC_ORIGIN_V1`, contains one
+owner-attested exact synthetic origin/scheme/address/port allowlist and a policy
+digest. Calls cannot widen it.
+
+The policy verifies the full redirect chain, resolved address before every
+connection/redirect, same-origin subframes/subresources/fetch/workers/WebSockets,
+and current navigation epoch. It refuses cross-origin/scheme redirects, DNS
+rebinding, unapproved private/loopback/link-local reach, popups/new windows,
+downloads/uploads, credential-bearing URLs, local/browser-internal/opaque
+schemes, and network evidence outside the exact disposable target. An
+owner-attested literal loopback fixture is the only V1 private-address
+exception.
+
+A navigation invalidates prior observation before dispatch and advances
+`navigation_epoch` only after a verified same-policy postcondition. An ambiguous
+navigation leaves effect and epoch unresolved. BRA-W1 receives no generic
+navigation, console or network-inspection tools against ChatGPT.
+
+Any broader origin, scheme, subresource, redirect, private-network, popup,
+download/upload or evidence scope requires a separately reviewed policy generation and real canary. It cannot arrive as a child implementation default.
 
 ## Evidence model
 

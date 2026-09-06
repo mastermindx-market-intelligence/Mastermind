@@ -76,18 +76,40 @@ ChatGPT-specific modifying semantics remain separately versioned and separately 
 
 A generic browser primitive is never authority-equivalent to a semantic Web-Sol action.
 
-## 5. Effect law
+## 5. Effect law and durable owner-native command lineage
 
-Every modifying browser request binds at minimum:
+The existing **Attempt-local Operator Harness effect owner** on Executive OS's
+`operator_operation` Event plane owns durable effect truth for every modifying
+browser operation. Executive OS continues to own Attempt authority and lifecycle.
+The MCP edge, Secure MCP Tunnel, local gateway, target adapter and browser receipt
+remain evidence carriers only. BRA adds no gateway ledger, retry table or second
+effect owner.
 
-- stable logical operation identity;
-- exact target identity and target generation/fingerprint supplied by an existing owner;
-- capability/action schema generation;
+Before any modifying dispatch, that existing owner mints one owner-native
+`OperationId`. The model-facing command calls this opaque value
+`operation_command_id`; it is the required `action_ref`, not a tunnel/MCP/browser
+correlation ID. The owner binds it to all of:
+
+- current Attempt ID, lease/fence and authority generation;
+- stable logical operation fingerprint and normalized action-argument digest;
+- exact target class, opaque target identity, target generation and
+  `navigation_epoch`;
+- semantic action plus capability, schema, app and target-policy generations;
 - issue/expiry window or equivalent bounded deadline;
-- pre-effect observation sufficient to prove target identity;
-- target-class policy.
+- precondition/observation digest sufficient to prove target identity.
 
-Closed conceptual outcomes are:
+The required pre-dispatch order is closed:
+
+1. the existing effect owner commits `INTENT` before any adapter call;
+2. immediately before mutation, that owner rereads current authority, exact target, and prior effect for the same
+   `operation_command_id`;
+3. any lease/fence, authority, target, generation, policy, deadline,
+   precondition or prior-effect mismatch refuses before effect;
+4. only that owner may dispatch the bound action exactly once;
+5. postcondition evidence is returned to that owner for a terminal or
+   reconciled owner-local history.
+
+Closed conceptual outcomes remain:
 
 ```text
 NO_EFFECT
@@ -96,16 +118,42 @@ EFFECT_UNKNOWN
 REFUSED
 ```
 
-A timeout, disconnect, browser crash, tunnel loss or local gateway loss after an effect may have started is `EFFECT_UNKNOWN` unless post-effect evidence proves otherwise.
+Closed owner-local histories are:
+
+```text
+INTENT -> APPLIED_VERIFIED
+INTENT -> NO_EFFECT
+INTENT -> REFUSED
+INTENT -> EFFECT_UNKNOWN -> RECONCILED
+```
+
+The histories reuse the existing owner-native `OPERATOR_OPERATION_INTENT`,
+`OPERATOR_OPERATION_APPLIED`, `OPERATOR_OPERATION_EFFECT_UNKNOWN` and
+`OPERATOR_OPERATION_RECONCILED` Events. `APPLIED_VERIFIED` is the browser outcome carried by existing `OPERATOR_OPERATION_APPLIED`
+only after the bound postcondition is proven; normalized `NO_EFFECT` and
+`REFUSED` remain payload outcomes on that same Event plane. No browser Event
+store or parallel operation ledger is created.
+
+`RECONCILED` records a closed resolution such as `APPLIED_VERIFIED`,
+`NO_EFFECT` or `REFUSED`; it never appends a fresh `APPLIED_VERIFIED` after the
+unknown edge. A timeout, disconnect, browser crash, tunnel loss or local gateway
+loss after an effect may have started is `EFFECT_UNKNOWN` unless same-command
+read-only evidence closes that history.
 
 `EFFECT_UNKNOWN`:
 
-- keeps the same logical operation/carrier binding;
-- permits read-only reconciliation only;
+- keeps the same logical operation, `operation_command_id`, Attempt, exact target
+  and carrier binding;
+- permits read-only reconciliation only against that same command and target;
 - blocks blind retry;
 - blocks target/session/account failover;
-- blocks a second browser gateway from replaying the action;
+- blocks every resend and receiver/host/gateway change until reconciled;
 - does not imply Executive failure or completion.
+
+Matching replay is evidence-only: the owner returns the existing sanitized
+history/receipt and performs no second browser effect. Changed replay is a conflict and refuses before adapter I/O. A gateway receipt is evidence only; tunnel and browser receipts are likewise
+evidence only. None can grant retry, completion, RuntimeBinding, Executive
+authority or a new action target.
 
 ## 6. Exact-target law
 
@@ -120,6 +168,50 @@ When exactness is required, target selection may not use:
 - remembered prior-session UI state.
 
 A missing, stale, duplicate, conflicting or unresolvable exact target refuses before effect.
+
+## 6A. Closed navigation and network policy
+
+Observation and actuation use separate closed target-policy generations.
+`BRA-O1` cannot navigate, open a new browsing context, issue a generic network
+inspection call or cause a modifying page action. `BRA-A1` may navigate only
+under `DISPOSABLE_SYNTHETIC_ORIGIN_V1`, an owner-attested policy containing an
+exact disposable synthetic origin allowlist, allowed scheme, resolved
+host/address/port, action set and policy digest. The caller cannot supply or
+expand that policy.
+
+For `DISPOSABLE_SYNTHETIC_ORIGIN_V1`:
+
+- every requested URL and every URL in a redirect chain must stay on the exact
+  attested origin and scheme; cross-origin or scheme-changing redirects refuse;
+- main frames, subframes and subresources, fetch/XHR, workers and WebSockets are
+  confined to that exact origin; popups, new windows and external opener targets
+  refuse;
+- DNS rebinding is refused by checking the resolved address at admission and
+  again before each connect/redirect; a hostname may not resolve outside its
+  attested address set;
+- any other private, loopback, or link-local destination refuses. The sole
+  exception is an exact owner-attested loopback synthetic origin whose literal
+  address and ephemeral port are already in the policy;
+- credential-bearing URLs and userinfo refuse. Query/fragment values are allowed
+  only when the exact owner-minted URL set classifies them as non-secret;
+- downloads and uploads refuse, including file chooser, drag/drop and arbitrary
+  upload-path flows;
+- browser/local/opaque schemes are closed: `file:` / `data:` / `chrome:`,
+  `chrome-extension:`, `javascript:`, `blob:` and unreviewed `about:` targets
+  refuse;
+- console/network evidence remains bounded, sanitized and unavailable to
+  Chairman/ChatGPT target classes.
+
+A navigation invalidates the prior observation and target precondition before
+dispatch. Only a successful same-policy postcondition advances
+`navigation_epoch`; ambiguous navigation leaves the effect/epoch unresolved and
+requires same-command reconciliation. Every subsequent read or actuation
+requires fresh exact-target and postcondition evidence bound to the new epoch.
+
+BRA-W1 receives no generic navigation or network-inspection authority against
+ChatGPT. A broader origin, scheme, redirect, subresource, popup, download,
+upload, private-network or evidence policy requires a separately versioned
+source-law review and canary; implementation convenience cannot widen V1.
 
 ## 7. Local gateway boundary
 

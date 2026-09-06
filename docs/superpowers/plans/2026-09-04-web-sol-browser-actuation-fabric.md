@@ -70,7 +70,7 @@ BRA-T0 and BRA-O1 may start independently after F0 protection if their source pa
 
 **Non-goals:** zero extension/native-host/MCP runtime change; zero tunnel creation; zero browser/profile effect; zero Executive/RuntimeBinding/Agent OS mutation.
 
-**Acceptance:** exact four-path delta, hosted repository/security checks, independent source-law review, Draft/HOLD until Sol release adjudication.
+**Acceptance:** exact four-path delta; static regressions fail if the existing durable effect owner/owner-native command lineage or closed target-class navigation/network policy disappears; hosted repository/security checks; independent source-law review; Draft/HOLD until Sol release adjudication.
 
 ## BRA-T0 — Secure MCP Tunnel + local gateway transport falsifier
 
@@ -98,9 +98,9 @@ BRA-T0 and BRA-O1 may start independently after F0 protection if their source pa
 
 **Allowed:** status, bounded snapshot, optional screenshot on the synthetic test page.
 
-**Forbidden:** click/fill/navigation in O1; Chairman/ChatGPT seat targets; cookies/storage/network secrets; arbitrary HTML export.
+**Forbidden:** click/fill/navigation in O1; Chairman/ChatGPT seat targets; cookies/storage/network secrets; arbitrary HTML export. BRA-O1 cannot navigate, open a popup/new browsing context, invoke generic network inspection or trigger page modification.
 
-**Proof:** synthetic local page, exact target generation, restart/no-hidden-state tests, secret-shaped content suppression.
+**Proof:** synthetic local page, exact target generation, restart/no-hidden-state tests, secret-shaped content suppression, and zero navigation/network calls.
 
 ## BRA-A1 — one generic modifying actuation vertical
 
@@ -108,7 +108,11 @@ BRA-T0 and BRA-O1 may start independently after F0 protection if their source pa
 
 **First action set:** keep minimal; a combined structured operation may perform one exact fill+click synthetic interaction, or expose `browser_fill` and `browser_click` if the contract remains simpler and independently safe.
 
-**Effect semantics:** precondition verified -> one dispatch -> postcondition verify. Inject transport/browser failure after dispatch and prove `EFFECT_UNKNOWN` with zero second effect.
+**Durable command lineage:** the existing Attempt-local Operator Harness effect owner commits `INTENT` and supplies one owner-minted `operation_command_id` bound to current Attempt authority, exact target/generation/`navigation_epoch`, action digest, schema/app/policy generation, deadline and precondition digest. Immediately before mutation it rereads authority, target and prior effect. The gateway never owns this lineage.
+
+**Target/network policy:** `DISPOSABLE_SYNTHETIC_ORIGIN_V1` permits only the exact owner-attested synthetic origin/scheme/address/port. Refuse cross-origin or scheme-changing redirects, off-origin subframes/subresources/fetch/WebSockets, DNS rebinding, unapproved private/loopback/link-local reach, popups/new windows, downloads/uploads, credential-bearing URLs and local/browser-internal/opaque schemes. A successful navigation advances the epoch only after same-policy proof; ambiguity leaves it unresolved.
+
+**Effect semantics:** `INTENT -> APPLIED_VERIFIED | NO_EFFECT | REFUSED`, or `INTENT -> EFFECT_UNKNOWN -> RECONCILED(resolution=...)`. Inject transport/browser failure after dispatch and prove unresolved uncertainty blocks every resend/failover. Matching same-command replay is read-only evidence with zero second effect; changed replay refuses.
 
 **No Chairman seat. No ChatGPT prompt submission.**
 
