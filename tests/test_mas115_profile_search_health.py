@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+from pathlib import Path
 import signal
 from types import SimpleNamespace
 
@@ -11,11 +12,8 @@ import pytest
 
 from integrations.chairman_surfaces import nonseat_canary as core
 from integrations.chairman_surfaces import nonseat_canary_vendors as vendors
-
 health = None
-if importlib.util.find_spec(
-    "integrations.chairman_surfaces.mas115_profile_search_health"
-) is not None:
+if importlib.util.find_spec("integrations.chairman_surfaces.mas115_profile_search_health") is not None:
     from integrations.chairman_surfaces import mas115_profile_search_health as health
 
 _FOLDER = "00000000-0000-4000-8000-000000000002"
@@ -114,10 +112,7 @@ def _run(
     events = []
     out = io.StringIO()
     pipe = SimpleNamespace()
-    credential = core.Credential(
-        _SECRET if credential_present else None,
-        "stdin" if credential_present else "absent",
-    )
+    credential = core.Credential(_SECRET if credential_present else None, "stdin" if credential_present else "absent")
     fake_http = _FakeHttp(responses, events, close_error=client_close_error)
     bounded = vendors.BoundedHttpClient(client=fake_http)
     code = health._run_profile_search_health(
@@ -153,9 +148,7 @@ def test_receipt_schema_is_exact_and_success_is_narrow():
 
 
 def test_preflight_refusal_precedes_pipe_and_http():
-    code, receipt, events, http = _run(
-        [], preflight=(None, "BINDINGS_UNAVAILABLE")
-    )
+    code, receipt, events, http = _run([], preflight=(None, "BINDINGS_UNAVAILABLE"))
     assert code == 2
     assert receipt["code"] == "BINDINGS_UNAVAILABLE"
     assert events == []
@@ -170,6 +163,24 @@ def test_pipe_cleanup_must_be_exact_true_before_http_construction():
     assert http.search_calls == 0
 
 
+def test_truthy_non_boolean_pipe_cleanup_refuses_before_http_construction():
+    code, receipt, events, http = _run([], pipe_close=1)
+    assert code == 2
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert events == ["pipe_open", "credential_read", "pipe_close"]
+    assert http.search_calls == 0
+
+
+def test_malformed_preflight_without_anchor_identity_refuses_before_secret():
+    malformed = _provision()
+    malformed.pop("profile_id")
+    code, receipt, events, http = _run([], preflight=(malformed, None))
+    assert code == 2
+    assert receipt["code"] == "PROVISION_MISSING"
+    assert events == []
+    assert http.search_calls == 0
+
+
 def test_absent_credential_is_classified_only_after_pipe_cleanup():
     code, receipt, events, http = _run([], credential_present=False)
     assert code == 2
@@ -180,11 +191,7 @@ def test_absent_credential_is_classified_only_after_pipe_cleanup():
 
 def test_complete_two_page_census_discards_all_rows_and_passes_after_cleanup():
     rows = [
-        {
-            "id": f"00000000-0000-4000-8000-{i:012d}",
-            "folder_id": _FOLDER,
-            "name": f"profile-{i}",
-        }
+        {"id": f"00000000-0000-4000-8000-{i:012d}", "folder_id": _FOLDER, "name": f"profile-{i}"}
         for i in range(11)
     ]
     code, receipt, events, http = _run([
@@ -194,16 +201,11 @@ def test_complete_two_page_census_discards_all_rows_and_passes_after_cleanup():
     assert code == 0
     assert receipt["verdict"] == "PASS"
     assert receipt["read_surface_usable"] is True
-    assert events == [
-        "pipe_open", "credential_read", "pipe_close", "client_open",
-        "search:0", "search:10", "client_close",
-    ]
+    assert events == ["pipe_open", "credential_read", "pipe_close", "client_open", "search:0", "search:10", "client_close"]
     assert http.search_calls == 2
     assert http.closed == 1
     rendered = json.dumps(receipt, sort_keys=True)
-    for forbidden in (
-        "profile-0", _PROFILE, _FOLDER, "total_count", "page_count", "candidate",
-    ):
+    for forbidden in ("profile-0", _PROFILE, _FOLDER, "total_count", "page_count", "candidate"):
         assert forbidden not in rendered
 
 
@@ -220,9 +222,7 @@ def test_http_cleanup_failure_overrides_a_successful_census():
 
 
 def test_transport_failure_is_single_attempt_and_closed():
-    code, receipt, _events, http = _run([
-        RuntimeError("private transport detail")
-    ])
+    code, receipt, events, http = _run([RuntimeError("private transport detail")])
     assert code == 2
     assert receipt["code"] == "VENDOR_ERROR"
     assert receipt["initial_peer_census_diagnostic"] == "TRANSPORT_FAILURE"
@@ -232,17 +232,10 @@ def test_transport_failure_is_single_attempt_and_closed():
 
 @pytest.mark.parametrize(
     ("status", "diagnostic"),
-    [
-        (429, "HTTP_RATE_LIMITED"),
-        (422, "HTTP_REQUEST_REJECTED"),
-        (503, "HTTP_SERVICE_UNAVAILABLE"),
-        (299, "HTTP_UNEXPECTED"),
-    ],
+    [(429, "HTTP_RATE_LIMITED"), (422, "HTTP_REQUEST_REJECTED"), (503, "HTTP_SERVICE_UNAVAILABLE"), (299, "HTTP_UNEXPECTED")],
 )
 def test_non_success_statuses_remain_closed(status, diagnostic):
-    code, receipt, _events, http = _run([
-        vendors._BoundedResponse(status, {})
-    ])
+    code, receipt, _, http = _run([vendors._BoundedResponse(status, {})])
     assert code == 2
     assert receipt["code"] == "VENDOR_ERROR"
     assert receipt["initial_peer_census_diagnostic"] == diagnostic
@@ -251,9 +244,7 @@ def test_non_success_statuses_remain_closed(status, diagnostic):
 
 @pytest.mark.parametrize("status", [401, 403])
 def test_auth_rejection_is_not_recovery_or_refresh(status):
-    code, receipt, _events, http = _run([
-        vendors._BoundedResponse(status, {})
-    ])
+    code, receipt, _, http = _run([vendors._BoundedResponse(status, {})])
     assert code == 2
     assert receipt["code"] == "AUTH_EXPIRED"
     assert receipt["effect"] == "NONE"
@@ -275,9 +266,7 @@ def test_profile_only_client_exposes_no_mutator_or_fallback_surface():
 def test_proxy_exposes_only_parser_requirements_not_full_multilogin_client():
     credential = core.Credential(_SECRET, "stdin")
     bounded = vendors.BoundedHttpClient(client=_FakeHttp([]))
-    proxy = health._ProfileSearchProxy(
-        credential, health._ProfileSearchOnlyClient(bounded)
-    )
+    proxy = health._ProfileSearchProxy(credential, health._ProfileSearchOnlyClient(bounded))
     assert type(proxy) is not vendors.MultiloginClient
     assert not hasattr(proxy, "create_peer_profile")
     assert not hasattr(proxy, "remove_peer_profile")
@@ -295,13 +284,36 @@ def test_checked_http_close_is_one_shot_and_exact_boolean():
     assert fake.closed == 1
 
 
+def test_truthy_non_boolean_client_cleanup_cannot_produce_pass():
+    events = []
+    out = io.StringIO()
+    pipe = SimpleNamespace()
+    fake_http = _FakeHttp(
+        [vendors._BoundedResponse(200, _payload([], 0))], events,
+    )
+    bounded = vendors.BoundedHttpClient(client=fake_http)
+    code = health._run_profile_search_health(
+        stdout=out,
+        preflight_loader=lambda: (_provision(), None),
+        pipe_factory=lambda: events.append("pipe_open") or pipe,
+        credential_reader=lambda actual: events.append("credential_read") or core.Credential(_SECRET, "stdin"),
+        pipe_closer=lambda actual: events.append("pipe_close") or True,
+        client_factory=lambda: events.append("client_open") or bounded,
+        client_closer=lambda actual: actual._client.close() or 1,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 2
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["read_surface_usable"] is False
+    assert events[-1] == "client_close"
+
+
 def test_checked_pipe_close_reaps_without_signal_and_is_one_shot():
     read_fd, write_fd = os.pipe()
     os.close(write_fd)
     waits = iter([(4242, 0)])
     pipe = vendors._KeychainCredentialPipe(
-        read_fd,
-        4242,
+        read_fd, 4242,
         waitpid=lambda pid, flags: next(waits),
         kill=lambda *_: pytest.fail("no signal should be sent"),
     )
@@ -313,13 +325,10 @@ def test_checked_pipe_close_term_then_reap_is_bounded():
     read_fd, write_fd = os.pipe()
     os.close(write_fd)
     signals = []
-
     def _waitpid(pid, flags):
         return (pid, 0) if signals else (0, 0)
-
     pipe = vendors._KeychainCredentialPipe(
-        read_fd,
-        4242,
+        read_fd, 4242,
         waitpid=_waitpid,
         kill=lambda pid, sig: signals.append(sig),
     )
@@ -329,11 +338,7 @@ def test_checked_pipe_close_term_then_reap_is_bounded():
 
 def test_live_wrapper_fixes_all_dependency_owners(monkeypatch):
     observed = {}
-    monkeypatch.setattr(
-        health,
-        "_run_profile_search_health",
-        lambda **kwargs: observed.update(kwargs) or 2,
-    )
+    monkeypatch.setattr(health, "_run_profile_search_health", lambda **kwargs: observed.update(kwargs) or 2)
     out = io.StringIO()
     assert health.run_coordinator_profile_search_health(stdout=out) == 2
     assert observed["stdout"] is out
@@ -347,11 +352,8 @@ def test_live_wrapper_fixes_all_dependency_owners(monkeypatch):
 
 def test_setup_gologin_refuses_before_prompt_or_health(monkeypatch):
     from scripts import mas115_setup as setup
-
     calls = []
-    monkeypatch.setattr(
-        "builtins.input", lambda _prompt: pytest.fail("must not prompt")
-    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("must not prompt"))
     monkeypatch.setattr(
         setup.profile_search_health,
         "run_coordinator_profile_search_health",
@@ -363,7 +365,6 @@ def test_setup_gologin_refuses_before_prompt_or_health(monkeypatch):
 
 def test_setup_wrong_confirmation_refuses_before_health(monkeypatch):
     from scripts import mas115_setup as setup
-
     calls = []
     monkeypatch.setattr("builtins.input", lambda _prompt: "wrong")
     monkeypatch.setattr(
@@ -371,25 +372,18 @@ def test_setup_wrong_confirmation_refuses_before_health(monkeypatch):
         "run_coordinator_profile_search_health",
         lambda: calls.append("health") or 0,
     )
-    assert setup.main([
-        "profile-search-health", "--vendor", "multilogin"
-    ]) == 2
+    assert setup.main(["profile-search-health", "--vendor", "multilogin"]) == 2
     assert calls == []
 
 
 def test_setup_exact_confirmation_dispatches_only_fixed_health_entry(monkeypatch):
     from scripts import mas115_setup as setup
-
     calls = []
-    monkeypatch.setattr(
-        "builtins.input", lambda _prompt: setup._CONFIRM_PROFILE_SEARCH_HEALTH
-    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: setup._CONFIRM_PROFILE_SEARCH_HEALTH)
     monkeypatch.setattr(
         setup.profile_search_health,
         "run_coordinator_profile_search_health",
         lambda: calls.append("health") or 0,
     )
-    assert setup.main([
-        "profile-search-health", "--vendor", "multilogin"
-    ]) == 0
+    assert setup.main(["profile-search-health", "--vendor", "multilogin"]) == 0
     assert calls == ["health"]
