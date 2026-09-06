@@ -349,9 +349,7 @@ def test_missing_macro_root_degrades_and_still_exits_zero(tmp_path, monkeypatch,
     assert packet["macro"]["root"] is None
     assert packet["macro"]["sha"] is None
     assert packet["macro"]["resolved_via"] is None
-    assert [c["via"] for c in packet["macro"]["candidates_tried"]] == [
-        "flag", "sibling", "vendor",
-    ]
+    assert [c["via"] for c in packet["macro"]["candidates_tried"]] == ["flag"]
     assert all(c["usable"] is False for c in packet["macro"]["candidates_tried"])
     assert packet["handoffs"] == []
     assert packet["degraded"]
@@ -615,8 +613,6 @@ def test_env_is_used_when_no_flag_is_given(tmp_path):
 
 
 def test_unusable_candidates_are_recorded_with_reasons(tmp_path):
-    absent = tmp_path / "absent"
-
     no_script = tmp_path / "no_script"
     (no_script / "agentos").mkdir(parents=True)
 
@@ -626,19 +622,18 @@ def test_unusable_candidates_are_recorded_with_reasons(tmp_path):
 
     good = make_macro_root(tmp_path, name="good")
 
-    # Stage them through the ladder: flag -> env -> sibling.  The sibling slot is
+    # Stage them through the discovery ladder: env -> sibling.  The sibling slot is
     # `<repo_root>/../Macro Dashboard`, so build a repo_root whose parent holds one.
     home = tmp_path / "home"
     (home / "sub").mkdir(parents=True)
     (home / "Macro Dashboard").symlink_to(good, target_is_directory=True)
 
     resolved, via, candidates = resolve_macro_root(
-        os.fspath(absent), {ENV_MACRO_ROOT: os.fspath(no_script)}, home / "sub"
+        None, {ENV_MACRO_ROOT: os.fspath(no_script)}, home / "sub"
     )
     assert via == "sibling"
     assert resolved == home / "Macro Dashboard"
     assert [(c["via"], c["usable"], c["reason"]) for c in candidates] == [
-        ("flag", False, "missing"),
         ("env", False, "no scripts/agentos.py"),
         ("sibling", True, None),
     ]
@@ -650,6 +645,34 @@ def test_unusable_candidates_are_recorded_with_reasons(tmp_path):
         "via": "flag", "path": os.fspath(no_store), "usable": False,
         "reason": "no agentos/ store",
     }
+
+
+def test_unusable_explicit_root_never_falls_through_to_valid_discovery_candidates(
+    tmp_path,
+):
+    missing = tmp_path / "missing-explicit"
+    env_root = make_macro_root(tmp_path, name="from_env")
+    home = tmp_path / "home"
+    repo = home / "Mastermind"
+    repo.mkdir(parents=True)
+    make_macro_root(home, name="Macro Dashboard")
+
+    resolved, via, candidates = resolve_macro_root(
+        os.fspath(missing),
+        {ENV_MACRO_ROOT: os.fspath(env_root)},
+        repo,
+    )
+
+    assert resolved is None
+    assert via is None
+    assert candidates == [
+        {
+            "via": "flag",
+            "path": os.fspath(missing),
+            "usable": False,
+            "reason": "missing",
+        }
+    ]
 
 
 def test_vendor_is_last_because_the_pin_is_stale_by_design(tmp_path):
