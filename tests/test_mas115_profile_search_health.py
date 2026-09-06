@@ -49,6 +49,10 @@ def _payload(profiles, total):
     }
 
 
+def _rendered(receipt):
+    return json.dumps(receipt, separators=(",", ":"), sort_keys=True) + "\n"
+
+
 class _FakeHeaders:
     def __init__(self, content_type="application/json"):
         self.content_type = content_type
@@ -157,7 +161,7 @@ def test_receipt_schema_is_exact_and_success_is_narrow():
     assert set(receipt) == _KEYS
     assert receipt == {
         "schema": "mastermind.mas115_profile_search_health.v1",
-        "operation": "web-sol-realm1-profile-search-read-health-20260905-sol-001",
+        "operation": "web-sol-realm1-profile-search-read-health-source-20260905-sol-001",
         "verdict": "PASS",
         "effect": "NONE",
         "code": "OK",
@@ -166,6 +170,14 @@ def test_receipt_schema_is_exact_and_success_is_narrow():
         "initial_peer_census_diagnostic": "NONE",
         "initial_peer_census_decode_context": _NONE_CONTEXT,
     }
+
+
+def test_pretrusted_cli_refusal_is_fixed_closed_receipt_only():
+    out = io.StringIO()
+    assert health.run_coordinator_profile_search_health_refusal(stdout=out) == 2
+    receipt = json.loads(out.getvalue())
+    assert set(receipt) == _KEYS
+    assert receipt == health._receipt("UNSUPPORTED_SURFACE")
 
 
 def test_preflight_refusal_precedes_pipe_and_http():
@@ -558,7 +570,7 @@ def test_live_wrapper_fixes_all_dependency_owners(monkeypatch):
     assert observed["client_closer"] is health._checked_close_http_client
 
 
-def test_setup_gologin_refuses_before_prompt_or_health(monkeypatch):
+def test_setup_gologin_refuses_before_prompt_or_health(monkeypatch, capsys):
     from scripts import mas115_setup as setup
     calls = []
     monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("must not prompt"))
@@ -568,10 +580,13 @@ def test_setup_gologin_refuses_before_prompt_or_health(monkeypatch):
         lambda: calls.append("health") or 0,
     )
     assert setup.main(["profile-search-health", "--vendor", "gologin"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == _rendered(health._receipt("UNSUPPORTED_SURFACE"))
+    assert captured.err == ""
     assert calls == []
 
 
-def test_setup_wrong_confirmation_refuses_before_health(monkeypatch):
+def test_setup_wrong_confirmation_refuses_before_health(monkeypatch, capsys):
     from scripts import mas115_setup as setup
     calls = []
     monkeypatch.setattr("builtins.input", lambda _prompt: "wrong")
@@ -581,6 +596,35 @@ def test_setup_wrong_confirmation_refuses_before_health(monkeypatch):
         lambda: calls.append("health") or 0,
     )
     assert setup.main(["profile-search-health", "--vendor", "multilogin"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == _rendered(health._receipt("UNSUPPORTED_SURFACE"))
+    assert captured.err == (
+        f"Type {setup._CONFIRM_PROFILE_SEARCH_HEALTH!r} to perform one read-only "
+        "Profile Search health observation: "
+    )
+    assert calls == []
+
+
+def test_setup_eof_confirmation_refuses_with_closed_receipt(monkeypatch, capsys):
+    from scripts import mas115_setup as setup
+    calls = []
+
+    def _eof(_prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _eof)
+    monkeypatch.setattr(
+        setup.profile_search_health,
+        "run_coordinator_profile_search_health",
+        lambda: calls.append("health") or 0,
+    )
+    assert setup.main(["profile-search-health", "--vendor", "multilogin"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == _rendered(health._receipt("UNSUPPORTED_SURFACE"))
+    assert captured.err == (
+        f"Type {setup._CONFIRM_PROFILE_SEARCH_HEALTH!r} to perform one read-only "
+        "Profile Search health observation: "
+    )
     assert calls == []
 
 
@@ -610,7 +654,7 @@ def test_setup_confirmation_is_byte_exact_without_whitespace_normalization(monke
 def test_setup_valid_health_invocation_keeps_prompt_off_stdout(monkeypatch, capsys):
     from scripts import mas115_setup as setup
     expected_receipt = health._receipt("BINDINGS_UNAVAILABLE")
-    rendered = json.dumps(expected_receipt, separators=(",", ":"), sort_keys=True) + "\n"
+    rendered = _rendered(expected_receipt)
     monkeypatch.setattr(sys, "stdin", io.StringIO(setup._CONFIRM_PROFILE_SEARCH_HEALTH + "\n"))
 
     def _fake_health():
