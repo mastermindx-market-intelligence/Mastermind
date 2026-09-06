@@ -22,6 +22,7 @@ import json
 import math
 import os
 import re
+import resource
 import shutil
 import stat
 import subprocess
@@ -5950,6 +5951,116 @@ def test_cap_s1_observer_process_enforces_prebound_output_limit(
             cwd=tmp_path,
             timeout=30,
         )
+
+
+def _run_cap_s1_real_nested_file_limit_case(
+    tmp_path: Path,
+    *,
+    inherited_limits: "tuple[int, int] | None",
+    maximum_stream_bytes: int,
+    expected_limits: tuple[int, int],
+) -> None:
+    """Exercise the real observer -> secret -> child process boundary."""
+
+    python = Path(_sys.prefix) / "bin/python"
+    assert python.is_file()
+    nested_root = tmp_path / "nested-secret-process"
+    expected_keys = ("HOME", "LANG", "LC_ALL", "NO_COLOR", "PATH", "TMPDIR")
+    inner = (
+        "import os,resource,sys; "
+        f"expected={expected_limits!r}; "
+        f"expected_keys={expected_keys!r}; "
+        "actual=resource.getrlimit(resource.RLIMIT_FSIZE); "
+        "status=(23 if actual!=expected else "
+        "24 if not all(key in os.environ for key in expected_keys) else "
+        "25 if os.environ['NO_COLOR']!='1' else "
+        "26 if 'CAP_S1_AMBIENT_SENTINEL' in os.environ else 0); "
+        "raise SystemExit(status)"
+    )
+    outer = (
+        "import resource,sys; "
+        "from pathlib import Path; "
+        f"sys.path.insert(0,{str(REPO_ROOT)!r}); "
+        "import scripts.ohf.cap_s1_mastermind_operator_canary as cap; "
+        f"inherited={inherited_limits!r}; "
+        "(resource.setrlimit(resource.RLIMIT_FSIZE,inherited) "
+        "if inherited is not None else None); "
+        f"cap._CAP_S1_SECRET_MAX_STREAM_BYTES={maximum_stream_bytes!r}; "
+        f"root=Path({str(nested_root)!r}); "
+        "root.mkdir(); "
+        "cleanup=[]; "
+        "return_code=cap._run_cap_s1_secret_process("
+        f"({str(python)!r},'-I','-B','-c',{inner!r}),"
+        f"cwd=Path({str(tmp_path)!r}),"
+        "environment_root=root/'environment',"
+        "stdout_path=root/'stdout',stderr_path=root/'stderr',"
+        "timeout=30,cleanup_observations=cleanup); "
+        "assert return_code==0,('inner-return',return_code); "
+        "assert len(cleanup)==1,('cleanup-count',len(cleanup)); "
+        "assert cleanup[0].removed and cleanup[0].verified_absent,'cleanup-state'"
+    )
+
+    parent_limits = resource.getrlimit(resource.RLIMIT_FSIZE)
+    cleanup = []
+    completed = _run_cap_s1_observer_process(
+        (str(python), "-I", "-B", "-c", outer),
+        cwd=tmp_path,
+        timeout=30,
+        cleanup_observations=cleanup,
+    )
+
+    assert resource.getrlimit(resource.RLIMIT_FSIZE) == parent_limits
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == ""
+    assert len(cleanup) == 2
+    assert all(row.removed and row.verified_absent for row in cleanup)
+
+
+@pytest.mark.parametrize(
+    ("inherited_limits", "maximum_stream_bytes", "expected_limits"),
+    (
+        pytest.param(
+            None,
+            16 * 1024 * 1024,
+            (4 * 1024 * 1024 + 1, 4 * 1024 * 1024 + 1),
+            id="observer-to-secret",
+        ),
+        pytest.param((2048, 4096), 16 * 1024 * 1024, (2048, 4096), id="soft"),
+        pytest.param((4096, 8192), 1024, (1025, 1025), id="requested"),
+        pytest.param((1025, 1025), 1024, (1025, 1025), id="equal"),
+        pytest.param((0, 0), 16 * 1024 * 1024, (0, 0), id="zero"),
+    ),
+)
+def test_cap_s1_nested_child_never_raises_inherited_file_size_limits(
+    tmp_path, inherited_limits, maximum_stream_bytes, expected_limits
+) -> None:
+    _run_cap_s1_real_nested_file_limit_case(
+        tmp_path,
+        inherited_limits=inherited_limits,
+        maximum_stream_bytes=maximum_stream_bytes,
+        expected_limits=expected_limits,
+    )
+
+
+@pytest.mark.parametrize(
+    ("maximum_stream_bytes", "inherited_limits", "expected_limits"),
+    (
+        (16 * 1024 * 1024, (4 * 1024 * 1024 + 1,) * 2, (4 * 1024 * 1024 + 1,) * 2),
+        (16 * 1024 * 1024, (2048, 4096), (2048, 4096)),
+        (1024, (4096, 8192), (1025, 1025)),
+        (16 * 1024 * 1024, (0, 0), (0, 0)),
+        (1024, (resource.RLIM_INFINITY,) * 2, (1025, 1025)),
+        (1024, (resource.RLIM_INFINITY, 8192), (1025, 1025)),
+    ),
+)
+def test_cap_s1_effective_file_size_limits_clamp_finite_and_infinite_bounds(
+    maximum_stream_bytes, inherited_limits, expected_limits
+) -> None:
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    assert canary_module._cap_s1_effective_file_size_limits(
+        maximum_stream_bytes, inherited_limits
+    ) == expected_limits
 
 
 def test_cap_s1_observer_process_preserves_replaced_output_root(

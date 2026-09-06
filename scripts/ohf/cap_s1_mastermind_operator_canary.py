@@ -4327,6 +4327,27 @@ def _register_cap_s1_owned_root(path: Path, *, kind: str) -> _CapS1OwnedRootIden
     )
 
 
+def _cap_s1_effective_file_size_limits(
+    maximum_stream_bytes: int,
+    inherited_limits: tuple[int, int],
+) -> tuple[int, int]:
+    """Clamp the requested stream ceiling without raising inherited limits."""
+
+    requested = maximum_stream_bytes + 1
+    inherited_soft, inherited_hard = inherited_limits
+    effective_hard = (
+        requested
+        if inherited_hard == resource.RLIM_INFINITY
+        else min(requested, inherited_hard)
+    )
+    effective_soft = (
+        requested
+        if inherited_soft == resource.RLIM_INFINITY
+        else min(requested, inherited_soft)
+    )
+    return min(effective_soft, effective_hard), effective_hard
+
+
 def _run_cap_s1_owned_process(
     argv: Sequence[str],
     *,
@@ -4354,8 +4375,11 @@ def _run_cap_s1_owned_process(
         raise CapS1ResultError(error)
 
     def _limit_output() -> None:
-        limit = maximum_stream_bytes + 1
-        resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+        limits = _cap_s1_effective_file_size_limits(
+            maximum_stream_bytes,
+            resource.getrlimit(resource.RLIMIT_FSIZE),
+        )
+        resource.setrlimit(resource.RLIMIT_FSIZE, limits)
 
     process: "subprocess.Popen[bytes] | None" = None
     process_group: "int | None" = None
