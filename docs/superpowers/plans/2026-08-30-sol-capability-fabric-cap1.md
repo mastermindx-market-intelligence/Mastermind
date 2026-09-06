@@ -4,7 +4,8 @@
 **Hardening children:** `mastermind-sol-capability-fabric-cap1-r1-20260830-sol-001`, `mastermind-sol-capability-fabric-cap1-r2-20260830-sol-001`  
 **Parent:** `mastermind-sol-capability-fabric-20260830-sol-001`  
 **Protected pickup:** `mastermindx-market-intelligence/Mastermind@98bc7a71dcd70947c7a18eb5af7493a2f62a2571`  
-**Action-time compatible procedure for R2 repair:** `mastermindx-market-intelligence/Mastermind@3055b499b87db19730e9a724e34f07f0d0af8755`  
+**Historical R2 proof procedure (September 4):** `mastermindx-market-intelligence/Mastermind@3055b499b87db19730e9a724e34f07f0d0af8755`  
+**Timestamp completion procedure (September 6):** `mastermindx-market-intelligence/Mastermind@467a81e84b08a7f1c3cdb9a410b2f7857816675d`  
 **Cognition:** `COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT / CHAT_REASONING_MODE: NON_PRO_DEFAULT`  
 **State at candidate source:** `BUILT_NOT_PROVEN / PRODUCTION_INERT`
 
@@ -200,6 +201,16 @@ The caller supplies `observed_at`; the projector never calls the clock. Both `ob
 YYYY-MM-DDTHH:MM:SS[.1-6 ASCII fractional digits](Z|+HH:MM|-HH:MM)
 ```
 
+Numeric offset hours are restricted to `00..23` and minutes to `00..59` before parsing.
+UTC conversion must remain within the supported Python datetime range, years `0001..9999`;
+an otherwise parseable timestamp whose offset would overflow that range is refused, never clipped.
+Both parsing and UTC conversion share the same fixed-error boundary.
+
+`Z`, `+00:00`, and `-00:00` identify the same UTC instant for this projector. The last spelling
+expresses an unknown sender-local offset, not an unknown UTC instant. CAP1 intentionally hashes
+instants rather than sender-local offset metadata. Preserve equal-instant and future-proof controls.
+This is the standards correction recorded in PR290 comment5551058078, not a new proof source.
+
 The exact input must be nonempty, contain no leading/trailing whitespace, use uppercase `T`/`Z`, and
 fit the 32-character ceiling. The ceiling is evaluated before the timestamp grammar. Basic
 dates/times, ISO week dates, space/lowercase separators, comma fractions, colonless or
@@ -306,6 +317,37 @@ UTC canonicalization disabled                     6 failed / 40 passed
 PARTIAL proof erased under nullable availability  2 failed / 44 passed
 own DARK source masked by unknown                 1 failed / 45 passed
 ```
+
+### September 6 timestamp-boundary integration
+
+The original timestamp parser admitted offset minutes `60`/`99`, and UTC conversion outside
+its exception guard could expose a raw overflow at the minimum/maximum datetime years.
+The minimal correction changes only the offset grammar and `_timestamp` conversion boundary.
+The resulting module is blob `87cd6ce8d28c7fb2a188adcbf87101d3ffc2a932`.
+
+The previously accepted 124-case diagnostic is now integrated into the existing CAP1 test file
+using its real normal module import, rather than an external alias loader. All pre-existing test
+functions and real registry/Harness dependencies remain unchanged. Seven parameterized test
+families cover both public timestamp fields and W2/A3, malformed component ranges, typed overflow,
+zero-offset equivalence and future-proof guards, valid extreme offsets, representable UTC extrema,
+missing proof, calendar refusal, input immutability and payload-free exception chains.
+
+Executed against a complete disposable source snapshot under the unchanged locked CPython3.12.13
+profile: old module plus integrated tests **182 passed / 24 failed**; minimal repair plus the
+same tests **206 passed**, no skips or collection errors. The 24 intended failures comprise
+16 malformed-minute cases and 8 uncontained UTC-overflow cases. An earlier launch used the wrong
+working directory and produced 19 unrelated relative-fixture failures; that output is retained,
+and only the working directory was corrected before the qualified RED, without test/code edits.
+
+This is new committed-test integration proof, not a rerun of the previously accepted disposable
+82-case plus external-diagnostic batch. Hosted exact-head/current-base checks, independent repaired-head
+review and publication settlement remain separate; this plan does not claim source release or a
+live capability-status tool. Preserve all earlier evidence at its original historical scope.
+
+The same integrated 206-case suite also discriminates the bounded repair: removing only the
+offset-minute guard causes 16 failures; restoring uncontained UTC conversion causes 8; and
+incorrectly rejecting `-00:00` causes 30. All mutation runs have zero collection errors or skips.
+The corrected source was restored byte-identically after these private negative controls.
 
 ## 10. Proof and promotion
 

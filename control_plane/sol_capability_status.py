@@ -28,7 +28,7 @@ _ISSUE = re.compile(r"^[A-Z0-9][A-Z0-9_.:-]{0,127}$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _RFC3339 = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
-    r"(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+    r"(?:\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
 )
 _SECRET = tuple(
     re.compile(pattern, re.I)
@@ -134,11 +134,11 @@ def _timestamp(value: object, field: str, *, optional: bool = False) -> str | No
         raise error
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        canonical = parsed.astimezone(timezone.utc) if parsed.tzinfo is not None else None
     except (ValueError, OverflowError):
-        parsed = None
-    if parsed is None or parsed.tzinfo is None:
+        canonical = None
+    if canonical is None:
         raise error
-    canonical = parsed.astimezone(timezone.utc)
     timespec = "microseconds" if canonical.microsecond else "seconds"
     return canonical.isoformat(timespec=timespec).replace("+00:00", "Z")
 
