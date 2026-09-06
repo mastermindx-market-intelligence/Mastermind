@@ -184,3 +184,28 @@ def test_renderer_does_not_read_source_paths(assets, monkeypatch):
         guard.setattr(Path, "read_bytes", forbidden)
         guard.setattr(Path, "read_text", forbidden)
         assert len(render(assets).artifacts) == 10
+
+
+def test_duplicate_otherwise_valid_manifest_field_is_refused(assets):
+    original = assets["manifest.json"]
+    assets["manifest.json"] = original[:-1] + b',"version":"0.1.0"}'
+    with pytest.raises(deployment.WebSolDeploymentError, match="extension_manifest_invalid"):
+        render(assets)
+
+
+def test_wrong_identity_is_refused_even_with_valid_base64(assets):
+    import base64
+    manifest = json.loads(assets["manifest.json"])
+    manifest["key"] = base64.b64encode(b"another extension public key").decode("ascii")
+    assets["manifest.json"] = json.dumps(manifest).encode()
+    with pytest.raises(deployment.WebSolDeploymentError, match="extension_manifest_invalid"):
+        render(assets)
+
+
+@pytest.mark.parametrize("bad", [None, [], "private-marker"])
+def test_non_mapping_source_is_refused_without_payload(assets, bad):
+    method = getattr(deployment, "render_census_extension_bundle", None)
+    assert callable(method)
+    with pytest.raises(deployment.WebSolDeploymentError, match="extension_sources_invalid") as caught:
+        method(binding(), release(), source_files=bad, expected_source_digests=digest_map(assets))
+    assert "private-marker" not in str(caught.value)
