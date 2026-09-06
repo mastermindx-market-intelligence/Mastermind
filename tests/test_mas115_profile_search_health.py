@@ -189,6 +189,25 @@ def test_absent_credential_is_classified_only_after_pipe_cleanup():
     assert http.search_calls == 0
 
 
+def test_credential_reader_cancellation_still_closes_pipe_before_refusal():
+    events = []
+    out = io.StringIO()
+    pipe = SimpleNamespace()
+    code = health._run_profile_search_health(
+        stdout=out,
+        preflight_loader=lambda: (_provision(), None),
+        pipe_factory=lambda: events.append("pipe_open") or pipe,
+        credential_reader=lambda actual: (_ for _ in ()).throw(KeyboardInterrupt()),
+        pipe_closer=lambda actual: events.append("pipe_close") or True,
+        client_factory=lambda: pytest.fail("HTTP must not be constructed"),
+        client_closer=lambda actual: pytest.fail("HTTP close is not applicable"),
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 2
+    assert receipt["code"] == "AUTH_MISSING"
+    assert events == ["pipe_open", "pipe_close"]
+
+
 def test_complete_two_page_census_discards_all_rows_and_passes_after_cleanup():
     rows = [
         {"id": f"00000000-0000-4000-8000-{i:012d}", "folder_id": _FOLDER, "name": f"profile-{i}"}
@@ -219,6 +238,23 @@ def test_http_cleanup_failure_overrides_a_successful_census():
     assert receipt["read_surface_usable"] is False
     assert events[-1] == "client_close"
     assert http.closed == 1
+
+
+def test_diagnostic_sink_construction_failure_still_closes_http_and_refuses(monkeypatch):
+    monkeypatch.setattr(
+        vendors,
+        "_InitialPeerCensusDiagnosticSink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("private sink error")),
+    )
+    code, receipt, events, http = _run([
+        vendors._BoundedResponse(200, _payload([], 0)),
+    ])
+    assert code == 2
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["read_surface_usable"] is False
+    assert events[-1] == "client_close"
+    assert http.closed == 1
+    assert "private sink error" not in json.dumps(receipt)
 
 
 def test_transport_failure_is_single_attempt_and_closed():
@@ -334,6 +370,25 @@ def test_checked_pipe_close_term_then_reap_is_bounded():
     )
     assert health._checked_close_keychain_pipe(pipe) is True
     assert signals == [signal.SIGTERM]
+
+
+def test_checked_pipe_term_error_still_attempts_kill_and_refuses():
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    signals = []
+
+    def _kill(pid, sig):
+        signals.append(sig)
+        if sig == signal.SIGTERM:
+            raise OSError("synthetic TERM failure")
+
+    pipe = vendors._KeychainCredentialPipe(
+        read_fd, 4242,
+        waitpid=lambda pid, flags: (0, 0),
+        kill=_kill,
+    )
+    assert health._checked_close_keychain_pipe(pipe) is False
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
 
 
 def test_live_wrapper_fixes_all_dependency_owners(monkeypatch):
