@@ -169,6 +169,21 @@ def test_json_transport_measures_final_unicode_payload_after_metadata():
     assert _strict_json(text)["_transport_truncated"] is True
 
 
+def test_json_transport_rechecks_final_metadata_at_the_utf8_boundary():
+    payload = {"k" * 6_792: "電" * 2_700}
+    first_compact = bot_mcp._compact_json_value(payload, list_limit=20, str_limit=400)
+    first_text = json.dumps(first_compact, ensure_ascii=False, allow_nan=False)
+    first_compact["_transport_truncated"] = True
+    marked_text = json.dumps(first_compact, ensure_ascii=False, allow_nan=False)
+    result = bot_mcp._json(payload)
+    text = _text(result)
+
+    assert _utf8_bytes(first_text) == 8_000
+    assert _utf8_bytes(marked_text) == 8_030
+    assert _utf8_bytes(text) == 7_550
+    assert _strict_json(text)["_transport_truncated"] is True
+
+
 @pytest.mark.parametrize(
     "payload",
     (
@@ -303,6 +318,59 @@ def test_real_decorated_handler_preserves_multilingual_success_through_sdk(monke
     assert _utf8_bytes(wire["content"][0]["text"]) <= 8_000
     assert parsed["cycle_tag"] == "電力" and parsed["growth_score"] == 0
     assert parsed["liquidity_overlay"] is False
+
+
+def test_real_intel_hub_handler_compacts_multilingual_fixture_through_sdk(tmp_path, monkeypatch):
+    producer_calls = 0
+    handler_calls = 0
+    original_read_json = bot_mcp._read_json
+    original_handler = bot_mcp.get_intel_hub.handler
+    hub_path = tmp_path / "site" / "intel_hub" / "hub.json"
+    hub_path.parent.mkdir(parents=True)
+    hub_path.write_text(json.dumps({
+        "as_of": "2026-09-06",
+        "macro_context": {"label": "電力", "confidence": 0, "risk_off": False, "note": None},
+        "desks": {"research": {"active": True}},
+        "counts": {"actionable": 0, "complete": False, "pending": None},
+        "n_actionable": 0,
+        "command": [
+            {
+                "ticker": f"T{index:02d}", "name": "電" * 160,
+                "composite_conviction": 0, "lean": False, "n_confirm": 0,
+                "flags": ["電力", "🚀"], "read": "多語研究",
+                "peers": ["PWR"], "sectors": ["utilities"], "falsifier": None,
+            }
+            for index in range(24)
+        ],
+        "divergence_alerts": {"early_edge": []}, "sector_heat": [], "how_to_use": "研究用",
+    }, ensure_ascii=False))
+
+    def counted_read_json(path):
+        nonlocal producer_calls
+        producer_calls += 1
+        return original_read_json(path)
+
+    async def counted_handler(args):
+        nonlocal handler_calls
+        handler_calls += 1
+        return await original_handler(args)
+
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    monkeypatch.setattr(bot_mcp, "_read_json", counted_read_json)
+    monkeypatch.setattr(bot_mcp.get_intel_hub, "handler", counted_handler)
+    wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_intel_hub", {"top": 24}))
+    text = wire["content"][0]["text"]
+    parsed = _strict_json(text)
+
+    assert handler_calls == producer_calls == 1
+    assert wire.get("isError", False) is False
+    assert _utf8_bytes(text) <= 8_000
+    assert parsed["_transport_truncated"] is True
+    assert parsed["command"] and parsed["command"][0]["ticker"] == "T00"
+    assert parsed["command"][0]["composite_conviction"] == 0
+    assert parsed["command"][0]["lean"] is False
+    assert parsed["command"][0]["falsifier"] is None
+    assert "電" in parsed["command"][0]["name"] and "🚀" in parsed["command"][0]["flags"]
 
 
 @pytest.mark.parametrize("invalid", (float("nan"), "\ud800"))
