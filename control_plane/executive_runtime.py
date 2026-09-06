@@ -2103,6 +2103,197 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
 )
 
 
+# Inactive candidate only: deliberately NOT a member of _MIGRATIONS. A separately
+# reviewed offline successor is required before any production installation.
+_PHYSICAL_RESOURCE_SCHEMA_CANDIDATE: tuple[str, ...] = (
+    """
+    CREATE TABLE physical_resource_commitments (
+      commitment_id TEXT PRIMARY KEY CHECK(length(trim(commitment_id)) > 0),
+      host_id TEXT NOT NULL CHECK(length(trim(host_id)) > 0),
+      operation_key TEXT NOT NULL CHECK(length(trim(operation_key)) > 0),
+      phase_key TEXT NOT NULL CHECK(length(trim(phase_key)) > 0),
+      owner_id TEXT NOT NULL CHECK(length(trim(owner_id)) > 0),
+      carrier_id TEXT NOT NULL CHECK(length(trim(carrier_id)) > 0),
+      allocation_generation INTEGER NOT NULL CHECK(typeof(allocation_generation)='integer' AND allocation_generation > 0),
+      revision INTEGER NOT NULL CHECK(typeof(revision)='integer' AND revision > 0),
+      state TEXT NOT NULL CHECK(state IN ('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED','SETTLED','ABANDONED_NO_EFFECT')),
+      request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+      bundle_fingerprint TEXT NOT NULL CHECK(length(bundle_fingerprint)=64 AND bundle_fingerprint NOT GLOB '*[^0-9a-f]*'),
+      bundle_manifest_json TEXT NOT NULL CHECK(json_valid(bundle_manifest_json) AND json_type(bundle_manifest_json)='array'),
+      caller_binding_json TEXT NOT NULL CHECK(json_valid(caller_binding_json) AND json_type(caller_binding_json)='object'),
+      source_binding_json TEXT NOT NULL CHECK(json_valid(source_binding_json) AND json_type(source_binding_json)='object'),
+      policy_binding_json TEXT NOT NULL CHECK(json_valid(policy_binding_json) AND json_type(policy_binding_json)='object'),
+      pool_binding_json TEXT NOT NULL CHECK(json_valid(pool_binding_json) AND json_type(pool_binding_json)='array'),
+      phase_scope_json TEXT NOT NULL CHECK(json_valid(phase_scope_json) AND json_type(phase_scope_json)='object'),
+      decision_event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE RESTRICT,
+      begin_event_id INTEGER REFERENCES events(event_id) ON DELETE RESTRICT,
+      last_observation_event_id INTEGER REFERENCES events(event_id) ON DELETE RESTRICT,
+      settlement_event_id INTEGER REFERENCES events(event_id) ON DELETE RESTRICT,
+      created_at_ms INTEGER NOT NULL CHECK(typeof(created_at_ms)='integer' AND created_at_ms >= 0),
+      updated_at_ms INTEGER NOT NULL CHECK(typeof(updated_at_ms)='integer' AND updated_at_ms >= created_at_ms),
+      UNIQUE(host_id,operation_key,phase_key),
+      UNIQUE(commitment_id,allocation_generation),
+      CHECK(state NOT IN ('RESERVED','ABANDONED_NO_EFFECT') OR begin_event_id IS NULL),
+      CHECK(state NOT IN ('EFFECT_MAY_HAVE_BEGUN','ACTIVE','SETTLED') OR begin_event_id IS NOT NULL),
+      CHECK((state IN ('SETTLED','ABANDONED_NO_EFFECT')) = (settlement_event_id IS NOT NULL))
+    )
+    """,
+    """
+    CREATE TABLE physical_resource_demands (
+      commitment_id TEXT NOT NULL,
+      allocation_generation INTEGER NOT NULL,
+      dimension TEXT NOT NULL CHECK(dimension IN ('memory_bytes','disk_bytes','cpu_us_per_window','io_bytes_per_window','heavy_phase_count')),
+      capacity_pool_id TEXT NOT NULL CHECK(length(trim(capacity_pool_id)) > 0),
+      window_binding_json TEXT NOT NULL CHECK(json_valid(window_binding_json) AND json_type(window_binding_json)='object'),
+      qualified_incremental_peak INTEGER NOT NULL CHECK(typeof(qualified_incremental_peak)='integer' AND qualified_incremental_peak >= 0),
+      remaining_charge INTEGER NOT NULL CHECK(typeof(remaining_charge)='integer' AND remaining_charge >= 0),
+      attributed_materialized_or_active INTEGER NOT NULL CHECK(typeof(attributed_materialized_or_active)='integer' AND attributed_materialized_or_active >= 0),
+      attribution_json TEXT NOT NULL CHECK(json_valid(attribution_json) AND json_type(attribution_json)='object'),
+      observed_revision INTEGER NOT NULL CHECK(typeof(observed_revision)='integer' AND observed_revision > 0),
+      PRIMARY KEY(commitment_id,allocation_generation,dimension,capacity_pool_id),
+      FOREIGN KEY(commitment_id,allocation_generation) REFERENCES physical_resource_commitments(commitment_id,allocation_generation) ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TRIGGER physical_resource_identity_immutable
+    BEFORE UPDATE ON physical_resource_commitments
+    WHEN OLD.commitment_id IS NOT NEW.commitment_id OR OLD.host_id IS NOT NEW.host_id
+      OR OLD.operation_key IS NOT NEW.operation_key OR OLD.phase_key IS NOT NEW.phase_key
+      OR OLD.owner_id IS NOT NEW.owner_id OR OLD.carrier_id IS NOT NEW.carrier_id
+      OR OLD.allocation_generation IS NOT NEW.allocation_generation
+      OR OLD.request_fingerprint IS NOT NEW.request_fingerprint
+      OR OLD.bundle_fingerprint IS NOT NEW.bundle_fingerprint
+      OR OLD.bundle_manifest_json IS NOT NEW.bundle_manifest_json
+      OR OLD.caller_binding_json IS NOT NEW.caller_binding_json
+      OR OLD.source_binding_json IS NOT NEW.source_binding_json
+      OR OLD.policy_binding_json IS NOT NEW.policy_binding_json
+      OR OLD.pool_binding_json IS NOT NEW.pool_binding_json
+      OR OLD.phase_scope_json IS NOT NEW.phase_scope_json
+      OR OLD.decision_event_id IS NOT NEW.decision_event_id
+      OR OLD.created_at_ms IS NOT NEW.created_at_ms
+      OR (OLD.begin_event_id IS NOT NULL AND OLD.begin_event_id IS NOT NEW.begin_event_id)
+    BEGIN SELECT RAISE(ABORT, 'physical resource identity is immutable'); END
+    """,
+    """
+    CREATE TRIGGER physical_resource_transition_guard
+    BEFORE UPDATE ON physical_resource_commitments
+    WHEN OLD.state IN ('SETTLED','ABANDONED_NO_EFFECT') OR NEW.revision != OLD.revision+1
+      OR NOT (
+        (OLD.state=NEW.state AND OLD.state IN ('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED'))
+        OR (OLD.state='RESERVED' AND NEW.state IN ('EFFECT_MAY_HAVE_BEGUN','RECONCILIATION_REQUIRED','ABANDONED_NO_EFFECT'))
+        OR (OLD.state='EFFECT_MAY_HAVE_BEGUN' AND NEW.state IN ('ACTIVE','RECONCILIATION_REQUIRED','SETTLED'))
+        OR (OLD.state='ACTIVE' AND NEW.state IN ('RECONCILIATION_REQUIRED','SETTLED'))
+        OR (OLD.state='RECONCILIATION_REQUIRED' AND NEW.state IN ('ACTIVE','SETTLED') AND OLD.begin_event_id IS NOT NULL)
+        OR (OLD.state='RECONCILIATION_REQUIRED' AND NEW.state='ABANDONED_NO_EFFECT' AND OLD.begin_event_id IS NULL)
+      )
+    BEGIN SELECT RAISE(ABORT, 'physical resource transition refused'); END
+    """,
+    """
+    CREATE TRIGGER physical_resource_tombstones_permanent
+    BEFORE DELETE ON physical_resource_commitments
+    BEGIN SELECT RAISE(ABORT, 'physical resource tombstones are permanent'); END
+    """,
+    """
+    CREATE TRIGGER physical_resource_demand_identity_immutable
+    BEFORE UPDATE ON physical_resource_demands
+    WHEN OLD.commitment_id IS NOT NEW.commitment_id OR OLD.allocation_generation IS NOT NEW.allocation_generation
+      OR OLD.dimension IS NOT NEW.dimension OR OLD.capacity_pool_id IS NOT NEW.capacity_pool_id
+      OR OLD.window_binding_json IS NOT NEW.window_binding_json
+      OR OLD.qualified_incremental_peak IS NOT NEW.qualified_incremental_peak
+      OR NEW.observed_revision != OLD.observed_revision+1
+      OR NEW.observed_revision != (SELECT revision FROM physical_resource_commitments WHERE commitment_id=OLD.commitment_id)
+    BEGIN SELECT RAISE(ABORT, 'physical resource demand identity is immutable'); END
+    """,
+    """
+    CREATE TRIGGER physical_resource_demands_permanent
+    BEFORE DELETE ON physical_resource_demands
+    BEGIN SELECT RAISE(ABORT, 'physical resource demands are permanent'); END
+    """,
+    """
+    CREATE TRIGGER physical_resource_decision_binding
+    BEFORE INSERT ON physical_resource_commitments
+    WHEN NEW.revision != 1 OR NEW.state != 'RESERVED' OR NOT EXISTS (
+      SELECT 1 FROM events e,json_each(e.payload_json,'$.receipt.commitments') j
+      WHERE e.event_id=NEW.decision_event_id AND e.aggregate_type='physical_resource_operation'
+        AND e.sequence=NEW.allocation_generation
+        AND json_extract(e.payload_json,'$.action')='reserve'
+        AND json_extract(e.payload_json,'$.receipt.request_fingerprint')=NEW.request_fingerprint
+        AND json_extract(j.value,'$.commitment_id')=NEW.commitment_id
+        AND json_extract(j.value,'$.allocation_generation')=NEW.allocation_generation
+        AND json_extract(j.value,'$.phase_key')=NEW.phase_key
+    )
+    BEGIN SELECT RAISE(ABORT, 'physical resource decision event mismatch'); END
+    """,
+    """
+    CREATE TRIGGER physical_resource_begin_binding
+    BEFORE UPDATE ON physical_resource_commitments
+    WHEN OLD.begin_event_id IS NULL AND NEW.begin_event_id IS NOT NULL AND (
+      OLD.state != 'RESERVED' OR NEW.state != 'EFFECT_MAY_HAVE_BEGUN' OR NOT EXISTS (
+        SELECT 1 FROM events e,json_each(e.payload_json,'$.receipt.commitments') j
+        WHERE e.event_id=NEW.begin_event_id AND e.aggregate_type='physical_resource_operation'
+          AND json_extract(e.payload_json,'$.action')='begin'
+          AND json_extract(e.payload_json,'$.receipt.request_fingerprint')=NEW.request_fingerprint
+          AND json_extract(j.value,'$.commitment_id')=NEW.commitment_id
+          AND json_extract(j.value,'$.allocation_generation')=NEW.allocation_generation
+          AND json_extract(j.value,'$.revision')=NEW.revision
+      )
+    )
+    BEGIN SELECT RAISE(ABORT, 'physical resource begin event mismatch'); END
+    """,
+    """
+    CREATE TRIGGER physical_resource_settlement_binding
+    BEFORE UPDATE ON physical_resource_commitments
+    WHEN NEW.settlement_event_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM events e,json_each(e.payload_json,'$.receipt.commitments') j
+      WHERE e.event_id=NEW.settlement_event_id AND e.aggregate_type='physical_resource_operation'
+        AND json_extract(e.payload_json,'$.action')='settle'
+        AND json_extract(e.payload_json,'$.receipt.request_fingerprint')=NEW.request_fingerprint
+        AND json_extract(j.value,'$.commitment_id')=NEW.commitment_id
+        AND json_extract(j.value,'$.allocation_generation')=NEW.allocation_generation
+        AND json_extract(j.value,'$.revision')=NEW.revision
+        AND json_extract(j.value,'$.state')=NEW.state
+    )
+    BEGIN SELECT RAISE(ABORT, 'physical resource settlement event mismatch'); END
+    """,
+    """
+    CREATE TRIGGER physical_resource_terminal_demand_guard
+    BEFORE UPDATE ON physical_resource_demands
+    WHEN EXISTS (SELECT 1 FROM physical_resource_commitments c
+      WHERE c.commitment_id=OLD.commitment_id AND c.state IN ('SETTLED','ABANDONED_NO_EFFECT')
+        AND (OLD.observed_revision >= c.revision OR NEW.remaining_charge != 0))
+    BEGIN SELECT RAISE(ABORT, 'terminal physical resource demand is immutable'); END
+    """,
+
+    """
+    CREATE TRIGGER physical_resource_observation_binding
+    BEFORE UPDATE ON physical_resource_commitments
+    WHEN (OLD.last_observation_event_id IS NOT NULL AND NEW.last_observation_event_id IS NULL)
+      OR (NEW.last_observation_event_id IS NOT OLD.last_observation_event_id AND NOT EXISTS (
+        SELECT 1 FROM events e,json_each(e.payload_json,'$.receipt.commitments') j
+        WHERE e.event_id=NEW.last_observation_event_id AND e.aggregate_type='physical_resource_operation'
+          AND json_extract(e.payload_json,'$.action') IN ('observe','settle')
+          AND json_extract(e.payload_json,'$.receipt.request_fingerprint')=NEW.request_fingerprint
+          AND json_extract(j.value,'$.commitment_id')=NEW.commitment_id
+          AND json_extract(j.value,'$.allocation_generation')=NEW.allocation_generation
+          AND json_extract(j.value,'$.revision')=NEW.revision
+          AND json_extract(j.value,'$.state')=NEW.state
+          AND (OLD.last_observation_event_id IS NULL OR e.sequence >
+               (SELECT sequence FROM events WHERE event_id=OLD.last_observation_event_id))
+      ))
+    BEGIN SELECT RAISE(ABORT, 'physical resource observation event mismatch'); END
+    """,
+    """
+    CREATE TRIGGER physical_resource_revision_event_required
+    BEFORE UPDATE ON physical_resource_commitments
+    WHEN NEW.begin_event_id IS OLD.begin_event_id
+      AND NEW.last_observation_event_id IS OLD.last_observation_event_id
+      AND NEW.settlement_event_id IS OLD.settlement_event_id
+    BEGIN SELECT RAISE(ABORT, 'physical resource revision requires a new bound Event'); END
+    """,
+
+)
+
+
 class RuntimeStore:
     """SQLite connection, migration, transaction, and event boundary."""
 
@@ -15526,6 +15717,342 @@ class EventRegistry:
 
 
 class ResourceBroker:
+    def _physical_admission(
+        self, request: Any, caller_context: Any, *, connection=None, stage="entry"
+    ) -> dict[str, Any]:
+        """Unresolved transport/caller/runtime/schema admission; no production bypass.
+
+        Pytest may replace this boundary with synthetic context. Normal Runtime
+        composition, constructor parameters, policy files and environment cannot.
+        This refuses before this resource path opens or queries a database.
+        """
+        from .executive_physical_resources import PhysicalResourceRefusal
+        raise PhysicalResourceRefusal("CALLER_BINDING_UNAVAILABLE", "physical resource caller admission is unavailable")
+
+    def reserve_physical(self, request, *, caller_context):
+        return self._physical_command("reserve", request, caller_context)
+
+    def begin_physical(self, request, *, caller_context):
+        return self._physical_command("begin", request, caller_context)
+
+    def observe_physical(self, request, *, caller_context):
+        return self._physical_command("observe", request, caller_context)
+
+    def settle_physical(self, request, *, caller_context):
+        return self._physical_command("settle", request, caller_context)
+
+    def physical_status(self, request, *, caller_context):
+        return self._physical_command("status", request, caller_context)
+
+    def _physical_guard(self, request, caller_context, connection, stage, epoch=None):
+        from .executive_physical_resources import PhysicalResourceRefusal
+        # Retain the existing canonical verifier. This is not an independent
+        # claim of platform-level identity for EACH installed SQLite handle.
+        self.store._assert_owned_snapshot_connection(connection)
+        self.store._verify_current_schema(connection)
+        context = self._physical_admission(request, caller_context, connection=connection, stage=stage)
+        # Admission may reconcile an identity epoch; verify the still-queried
+        # handle again before using its result or performing a semantic query.
+        self.store._assert_owned_snapshot_connection(connection)
+        self.store._verify_current_schema(connection)
+        current = _json_dumps({key: context[key] for key in ("policy", "binding")})
+        if epoch is not None and current != epoch:
+            raise PhysicalResourceRefusal("ADMISSION_MOVED", "admission changed during resource transaction")
+        return context, current
+
+    def _physical_headers(self, connection, reservation):
+        return [connection.execute(
+            "SELECT * FROM physical_resource_commitments WHERE host_id=? AND operation_key=? AND phase_key=?",
+            (reservation["host_id"], reservation["operation_key"], phase["phase_key"]),
+        ).fetchone() for phase in reservation["phases"]]
+
+    def _physical_demands(self, connection, header):
+        rows = connection.execute(
+            "SELECT * FROM physical_resource_demands WHERE commitment_id=? AND allocation_generation=? ORDER BY dimension,capacity_pool_id",
+            (header["commitment_id"], header["allocation_generation"]),
+        ).fetchall()
+        return [{"dimension": row["dimension"], "capacity_pool_id": row["capacity_pool_id"],
+                 "qualified_incremental_peak": row["qualified_incremental_peak"],
+                 "remaining_charge": row["remaining_charge"],
+                 "attributed_materialized_or_active": row["attributed_materialized_or_active"],
+                 "window_binding": json.loads(row["window_binding_json"]),
+                 "attribution": json.loads(row["attribution_json"])} for row in rows]
+
+    def _physical_receipt(self, connection, reservation, fingerprint, headers):
+        return {"operation_key": reservation["operation_key"], "request_fingerprint": fingerprint,
+                "commitments": [{"commitment_id": row["commitment_id"],
+                    "allocation_generation": row["allocation_generation"], "revision": row["revision"],
+                    "phase_key": row["phase_key"], "state": row["state"],
+                    "demands": self._physical_demands(connection, row)} for row in headers]}
+
+    def _physical_event(self, connection, reservation, aggregate_id, action, command_fingerprint,
+                        receipt, timestamp, *, original_event_id=None):
+        payload = {"action": action, "command_fingerprint": command_fingerprint, "receipt": receipt,
+                   "original_event_id": original_event_id}
+        self.store.append_event(connection, aggregate_type="physical_resource_operation", aggregate_id=aggregate_id,
+                                event_type="PHYSICAL_RESOURCE_" + action.upper(), actor=reservation["owner_id"],
+                                payload=payload, command_id=reservation["command_id"], timestamp_ms=timestamp)
+        return self.store.get_event_by_command_id(reservation["command_id"], connection=connection)
+
+    def _physical_command(self, action, request, caller_context):
+        import time
+        from . import executive_physical_resources as physical
+        try:
+            # Default production composition always exits here, before parsing,
+            # file lookup, DB open, status read or transaction acquisition.
+            pre = self._physical_admission(request, caller_context)
+            if action == "reserve":
+                reservation = physical.validate_physical_request(request)
+                envelope = {}
+            else:
+                required = {"reservation"} if action == "status" else {"reservation", "commitments"}
+                optional = {"evidence"} if action in {"observe", "settle"} else set()
+                if type(request) is not dict or not required <= set(request) or set(request) - required - optional:
+                    raise physical.PhysicalResourceRefusal("INVALID_REQUEST", "closed resource envelope required")
+                reservation = physical.validate_physical_request(request["reservation"])
+                envelope = request
+            fingerprint = physical.physical_request_fingerprint(reservation)
+            aggregate_id = hashlib.sha256(_json_dumps([reservation["host_id"], reservation["operation_key"]]).encode()).hexdigest()
+            command_fingerprint = hashlib.sha256(_json_dumps({"action": action, "request": fingerprint,
+                "commitments": envelope.get("commitments"), "evidence": envelope.get("evidence")}).encode()).hexdigest()
+            if action != "status":
+                wait_ms = physical.bounded_wait_ms(pre["policy"], remaining_start_ms=pre["policy"]["freshness"]["decision_to_effect_max_ms"])
+                if self.store.busy_timeout_ms > wait_ms:
+                    raise physical.PhysicalResourceRefusal("WAIT_BUDGET_EXCEEDED", "store lock wait exceeds qualified resource budget")
+            epoch = _json_dumps({key: pre[key] for key in ("policy", "binding")})
+            manager = self.store.read if action == "status" else self.store.transaction
+            started = time.monotonic()
+            fresh_begin = False
+            with manager() as connection:
+                context, epoch = self._physical_guard(request, caller_context, connection, "locked", epoch)
+                timestamp = self.store.now_ms() if action != "status" else None
+                if action != "status" and (time.monotonic() - started) * 1000 > wait_ms:
+                    raise physical.PhysicalResourceRefusal("WAIT_BUDGET_EXCEEDED", "resource lock wait exhausted the bounded decision")
+                replay = None if action == "status" else self.store.get_event_by_command_id(reservation["command_id"], connection=connection)
+                headers = self._physical_headers(connection, reservation)
+                present = [row for row in headers if row is not None]
+                if present and (len(present) != len(headers) or any(row["request_fingerprint"] != fingerprint for row in present)):
+                    raise physical.PhysicalResourceRefusal("PHASE_IDENTITY_CONFLICT", "operation phase already binds another immutable bundle")
+                if replay is not None:
+                    if replay.aggregate_type != "physical_resource_operation" or replay.aggregate_id != aggregate_id or replay.payload.get("command_fingerprint") != command_fingerprint:
+                        raise physical.PhysicalResourceRefusal("COMMAND_IDENTITY_CONFLICT", "command is owned by another semantic outcome")
+                    receipt = replay.payload["receipt"]
+                    code = receipt.get("refusal_code", "RECONCILED")
+                elif action == "status":
+                    if present:
+                        receipt = self._physical_receipt(connection, reservation, fingerprint, headers)
+                        code = "STATUS"
+                    else:
+                        original = connection.execute(
+                            "SELECT payload_json FROM events WHERE aggregate_type='physical_resource_operation' AND aggregate_id=? "
+                            "AND event_type='PHYSICAL_RESOURCE_RESERVE_REFUSED' "
+                            "AND json_extract(payload_json,'$.receipt.request_fingerprint')=? ORDER BY sequence LIMIT 1",
+                            (aggregate_id, fingerprint)).fetchone()
+                        if original is None:
+                            raise physical.PhysicalResourceRefusal("COMMITMENT_NOT_FOUND", "no original resource outcome exists")
+                        receipt = json.loads(original[0])["receipt"]
+                        code = receipt["refusal_code"]
+                elif action == "reserve" and present:
+                    original_id = headers[0]["decision_event_id"]
+                    original = connection.execute("SELECT payload_json FROM events WHERE event_id=?", (original_id,)).fetchone()
+                    receipt = json.loads(original[0])["receipt"]
+                    self._physical_event(connection, reservation, aggregate_id, action, command_fingerprint,
+                                         receipt, timestamp, original_event_id=original_id)
+                    self._physical_guard(request, caller_context, connection, "after_event", epoch)
+                    code = "RECONCILED"
+                elif action == "reserve":
+                    charges = [dict(row) for row in connection.execute(
+                        "SELECT d.* FROM physical_resource_demands d JOIN physical_resource_commitments c USING(commitment_id,allocation_generation) "
+                        "WHERE c.host_id=? AND c.state IN ('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED')", (reservation["host_id"],))]
+                    prior_refusal = connection.execute(
+                        "SELECT payload_json FROM events WHERE aggregate_type='physical_resource_operation' AND aggregate_id=? "
+                        "AND event_type='PHYSICAL_RESOURCE_RESERVE_REFUSED' "
+                        "AND json_extract(payload_json,'$.receipt.request_fingerprint')=? ORDER BY sequence LIMIT 1",
+                        (aggregate_id, fingerprint)).fetchone()
+                    try:
+                        if prior_refusal is not None:
+                            prior_code = json.loads(prior_refusal[0])["receipt"]["refusal_code"]
+                            raise physical.PhysicalResourceRefusal(prior_code, "original no-debit decision remains binding")
+                        physical.evaluate_reservation(reservation, policy=context["policy"], current_charges=charges,
+                                                      observations=context["observations"], decision_time_ms=timestamp)
+                    except physical.PhysicalResourceRefusal as refusal:
+                        # No headers or demands have been written. Preserve the
+                        # decision in existing Events; this command or another
+                        # ID cannot silently reevaluate the same semantic request.
+                        receipt = {"operation_key": reservation["operation_key"], "request_fingerprint": fingerprint,
+                                   "commitments": [], "refusal_code": refusal.code}
+                        self._physical_event(connection, reservation, aggregate_id, "reserve_refused", command_fingerprint, receipt, timestamp)
+                        self._physical_guard(request, caller_context, connection, "after_event", epoch)
+                        code = refusal.code
+                    else:
+                        generation = connection.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM events WHERE aggregate_type='physical_resource_operation' AND aggregate_id=?", (aggregate_id,)).fetchone()[0]
+                        planned = []
+                        for phase in reservation["phases"]:
+                            demands = [{**d, "remaining_charge": d["qualified_incremental_peak"],
+                                        "attributed_materialized_or_active": 0, "attribution": {}} for d in phase["demands"]]
+                            demands.sort(key=lambda d: (d["dimension"], d["capacity_pool_id"]))
+                            planned.append({"commitment_id": uuid4().hex, "allocation_generation": generation, "revision": 1,
+                                            "phase_key": phase["phase_key"], "state": "RESERVED", "demands": demands})
+                        receipt = {"operation_key": reservation["operation_key"], "request_fingerprint": fingerprint, "commitments": planned}
+                        event = self._physical_event(connection, reservation, aggregate_id, action, command_fingerprint, receipt, timestamp)
+                        if event.sequence != generation:
+                            raise physical.PhysicalResourceRefusal("GENERATION_CONFLICT", "existing Event sequence moved")
+                        self._physical_guard(request, caller_context, connection, "after_event", epoch)
+                        manifest = _json_dumps(reservation["phases"])
+                        bundle = hashlib.sha256(manifest.encode()).hexdigest()
+                        for phase, plan in zip(reservation["phases"], planned):
+                            connection.execute("""INSERT INTO physical_resource_commitments(
+                                commitment_id,host_id,operation_key,phase_key,owner_id,carrier_id,allocation_generation,revision,state,
+                                request_fingerprint,bundle_fingerprint,bundle_manifest_json,caller_binding_json,source_binding_json,
+                                policy_binding_json,pool_binding_json,phase_scope_json,decision_event_id,created_at_ms,updated_at_ms)
+                                VALUES(?,?,?,?,?,?,?,1,'RESERVED',?,?,?,?,?,?,?,?,?,?,?)""",
+                                (plan["commitment_id"], reservation["host_id"], reservation["operation_key"], phase["phase_key"],
+                                 reservation["owner_id"], reservation["carrier_id"], generation, fingerprint, bundle, manifest,
+                                 _json_dumps(reservation["caller_binding"]), _json_dumps(reservation["source_binding"]),
+                                 _json_dumps(reservation["policy_binding"]), _json_dumps(phase["demands"]),
+                                 _json_dumps({"profile": phase["profile"], "duration_ms": phase["duration_ms"], "effect_scope": phase["effect_scope"]}), event.event_id, timestamp, timestamp))
+                            self._physical_guard(request, caller_context, connection, "after_header:" + phase["phase_key"], epoch)
+                            for index, demand in enumerate(plan["demands"]):
+                                connection.execute("""INSERT INTO physical_resource_demands(
+                                  commitment_id,allocation_generation,dimension,capacity_pool_id,window_binding_json,
+                                  qualified_incremental_peak,remaining_charge,attributed_materialized_or_active,attribution_json,observed_revision)
+                                  VALUES(?,?,?,?,?,?,?,0,'{}',1)""", (plan["commitment_id"], generation, demand["dimension"],
+                                    demand["capacity_pool_id"], _json_dumps(demand["window_binding"]),
+                                    demand["qualified_incremental_peak"], demand["remaining_charge"]))
+                                self._physical_guard(request, caller_context, connection, f"after_demand:{phase['phase_key']}:{index}", epoch)
+                        code = "RESERVED"
+                else:
+                    if not present:
+                        raise physical.PhysicalResourceRefusal("COMMITMENT_NOT_FOUND", "no original reservation exists")
+                    references = envelope["commitments"]
+                    if type(references) is not list or len(references) != len(headers):
+                        raise physical.PhysicalResourceRefusal("STALE_COMMITMENT", "exact complete bundle references required")
+                    for row, reference in zip(headers, references):
+                        if (type(reference) is not dict or set(reference) != {"commitment_id", "allocation_generation", "expected_revision"}
+                            or type(reference["allocation_generation"]) is not int or reference["allocation_generation"] <= 0
+                            or type(reference["expected_revision"]) is not int or reference["expected_revision"] <= 0
+                            or row["commitment_id"] != reference["commitment_id"] or row["allocation_generation"] != reference["allocation_generation"]):
+                            raise physical.PhysicalResourceRefusal("STALE_COMMITMENT", "stale generation or commitment")
+                    # A second command reconciles the already-consumed BEGIN. It
+                    # never refreshes a grant, revision or decision deadline.
+                    if action == "begin" and all(row["begin_event_id"] is not None for row in headers):
+                        ids = {row["begin_event_id"] for row in headers}
+                        if len(ids) != 1:
+                            raise physical.PhysicalResourceRefusal("PHASE_IDENTITY_CONFLICT", "bundle has divergent BEGIN outcomes")
+                        original_id = ids.pop()
+                        original = connection.execute("SELECT payload_json FROM events WHERE event_id=?", (original_id,)).fetchone()
+                        receipt = json.loads(original[0])["receipt"]
+                        self._physical_event(connection, reservation, aggregate_id, action, command_fingerprint,
+                                             receipt, timestamp, original_event_id=original_id)
+                        self._physical_guard(request, caller_context, connection, "after_event", epoch)
+                        code = "RECONCILED"
+                    else:
+                        for row, reference in zip(headers, references):
+                            if row["state"] in {"SETTLED", "ABANDONED_NO_EFFECT"}:
+                                raise physical.PhysicalResourceRefusal("TERMINAL_COMMITMENT", "terminal tombstone cannot be reopened")
+                            if row["revision"] != reference["expected_revision"]:
+                                raise physical.PhysicalResourceRefusal("STALE_COMMITMENT", "stale expected revision")
+                        if action == "begin":
+                            if any(row["state"] != "RESERVED" for row in headers):
+                                raise physical.PhysicalResourceRefusal("STALE_COMMITMENT", "BEGIN requires the reserved bundle")
+                            charges = [dict(row) for row in connection.execute(
+                                "SELECT d.* FROM physical_resource_demands d JOIN physical_resource_commitments c USING(commitment_id,allocation_generation) "
+                                "WHERE c.host_id=? AND c.state IN ('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED')", (reservation["host_id"],))]
+                            for header, phase in zip(headers, reservation["phases"]):
+                                own = self._physical_demands(connection, header)
+                                expected = {(d["dimension"], d["capacity_pool_id"]): d for d in phase["demands"]}
+                                actual = {(d["dimension"], d["capacity_pool_id"]): d for d in own}
+                                if connection.execute(
+                                    "SELECT 1 FROM physical_resource_demands WHERE commitment_id=? AND observed_revision!=? LIMIT 1",
+                                    (header["commitment_id"], header["revision"])).fetchone() is not None:
+                                    raise physical.PhysicalResourceRefusal("OWN_DEMAND_MISMATCH", "own demand observation revision differs from header")
+                                if set(actual) != set(expected) or any(
+                                    actual[key]["qualified_incremental_peak"] != demand["qualified_incremental_peak"]
+                                    or actual[key]["window_binding"] != demand["window_binding"]
+                                    or actual[key]["remaining_charge"] != demand["qualified_incremental_peak"]
+                                    or actual[key]["attributed_materialized_or_active"] != 0
+                                    or actual[key]["attribution"] != {}
+                                    for key, demand in expected.items()
+                                ):
+                                    raise physical.PhysicalResourceRefusal("OWN_DEMAND_MISMATCH", "exact own reservation rows do not cover BEGIN")
+                            # Own-phase identity and pristine charge are proven
+                            # above; global pool rows only supply additive capacity.
+                            physical.evaluate_begin(reservation, policy=context["policy"], current_charges=charges,
+                                                    observations=context["observations"], decision_time_ms=timestamp)
+                        planned = []
+                        for row in headers:
+                            demands = self._physical_demands(connection, row)
+                            state = "EFFECT_MAY_HAVE_BEGUN"
+                            if action in {"observe", "settle"}:
+                                evidence = envelope.get("evidence")
+                                if type(evidence) is not dict:
+                                    raise physical.PhysicalResourceRefusal("INVALID_EVIDENCE", "bound accounting evidence is required")
+                                if action == "observe":
+                                    accounting = physical.apply_physical_observation(demands, evidence)
+                                    demands = accounting["charges"]
+                                    state = "RECONCILIATION_REQUIRED" if (accounting["overrun"] or row["begin_event_id"] is None
+                                        or row["state"] == "RECONCILIATION_REQUIRED"
+                                        or any(d["remaining_charge"] > d["qualified_incremental_peak"] for d in demands)) else "ACTIVE"
+                                else:
+                                    terminal = evidence.get("terminal_effect_state")
+                                    if terminal == "NO_EFFECT" and (row["begin_event_id"] is not None or evidence.get("positive_no_effect") is not True):
+                                        raise physical.PhysicalResourceRefusal("NO_EFFECT_UNPROVEN", "BEGIN or missing positive evidence forbids abandonment")
+                                    if terminal == "TERMINAL" and (row["begin_event_id"] is None or evidence.get("process_terminal") is not True or evidence.get("descendants_terminal") is not True):
+                                        raise physical.PhysicalResourceRefusal("TERMINAL_EFFECT_UNPROVEN", "bound process and descendant terminal evidence required")
+                                    accounting = physical.settle_physical_accounting(demands, evidence)
+                                    demands = accounting["charges"]
+                                    state = {"NO_EFFECT": "ABANDONED_NO_EFFECT", "TERMINAL": "SETTLED", "UNKNOWN": "RECONCILIATION_REQUIRED"}.get(terminal)
+                                    if state is None:
+                                        raise physical.PhysicalResourceRefusal("INVALID_EVIDENCE", "closed terminal evidence state required")
+                                    if state in {"SETTLED", "ABANDONED_NO_EFFECT"} and any(d["remaining_charge"] for d in demands):
+                                        state = "RECONCILIATION_REQUIRED"
+                            planned.append({"commitment_id": row["commitment_id"], "allocation_generation": row["allocation_generation"],
+                                            "revision": row["revision"] + 1, "phase_key": row["phase_key"], "state": state, "demands": demands})
+                        receipt = {"operation_key": reservation["operation_key"], "request_fingerprint": fingerprint, "commitments": planned}
+                        event = self._physical_event(connection, reservation, aggregate_id, action, command_fingerprint, receipt, timestamp)
+                        self._physical_guard(request, caller_context, connection, "after_event", epoch)
+                        for row, plan in zip(headers, planned):
+                            cursor = connection.execute("""UPDATE physical_resource_commitments SET state=?,revision=revision+1,updated_at_ms=?,
+                                begin_event_id=?,last_observation_event_id=?,settlement_event_id=?
+                                WHERE commitment_id=? AND allocation_generation=? AND revision=? AND state=?""",
+                                (plan["state"], timestamp, event.event_id if action == "begin" else row["begin_event_id"],
+                                 event.event_id if action in {"observe", "settle"} else row["last_observation_event_id"],
+                                 event.event_id if plan["state"] in {"SETTLED", "ABANDONED_NO_EFFECT"} else None,
+                                 row["commitment_id"], row["allocation_generation"], row["revision"], row["state"]))
+                            if cursor.rowcount != 1:
+                                raise physical.PhysicalResourceRefusal("STALE_COMMITMENT", "physical commitment CAS lost")
+                            self._physical_guard(request, caller_context, connection, "after_header:" + row["phase_key"], epoch)
+                            for index, demand in enumerate(plan["demands"]):
+                                cursor = connection.execute("""UPDATE physical_resource_demands SET remaining_charge=?,attributed_materialized_or_active=?,
+                                    attribution_json=?,observed_revision=? WHERE commitment_id=? AND allocation_generation=? AND dimension=? AND capacity_pool_id=? AND observed_revision=?""",
+                                    (demand["remaining_charge"], demand["attributed_materialized_or_active"], _json_dumps(demand.get("attribution", {})),
+                                     plan["revision"], row["commitment_id"], row["allocation_generation"], demand["dimension"], demand["capacity_pool_id"], row["revision"]))
+                                if cursor.rowcount != 1:
+                                    raise physical.PhysicalResourceRefusal("STALE_COMMITMENT", "physical demand CAS lost")
+                                self._physical_guard(request, caller_context, connection, f"after_demand:{row['phase_key']}:{index}", epoch)
+                        code = {"begin": "BEGUN", "observe": "OBSERVED", "settle": "SETTLEMENT_RECORDED"}[action]
+                        fresh_begin = action == "begin"
+                self._physical_guard(request, caller_context, connection, "before_commit", epoch)
+                if fresh_begin:
+                    deadline_ms = timestamp + context["policy"]["freshness"]["decision_to_effect_max_ms"]
+                    if (self.store.now_ms() > deadline_ms or
+                        (time.monotonic() - started) * 1000 > context["policy"]["freshness"]["decision_to_effect_max_ms"]):
+                        raise physical.PhysicalResourceRefusal("DECISION_DEADLINE_EXPIRED", "BEGIN deadline expired before commit")
+            # This ephemeral bit exists only after successful commit and is never
+            # stored in Events. Lost replies must reconcile with fresh_begin=False.
+            if fresh_begin and (self.store.now_ms() > deadline_ms or
+                                (time.monotonic() - started) * 1000 > context["policy"]["freshness"]["decision_to_effect_max_ms"]):
+                # Commit may itself exhaust the remaining window. The debit is
+                # durable, but this response cannot authorize a late launch.
+                fresh_begin = False
+                code = "BEGIN_COMMITTED_DEADLINE_EXPIRED"
+            result = {"admitted": "refusal_code" not in receipt, "code": code, "fresh_begin": fresh_begin, "receipt": receipt}
+            if fresh_begin:
+                result["start_deadline_ms"] = deadline_ms
+            return result
+        except physical.PhysicalResourceRefusal as exc:
+            return {"admitted": False, "code": exc.code, "fresh_begin": False}
+
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
 
