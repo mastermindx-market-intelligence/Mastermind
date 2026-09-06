@@ -566,21 +566,21 @@ def profile_search_health_interactive(vendor: str) -> int:
     """Run one confirmed, read-only Multilogin Profile Search observation."""
 
     if vendor != "multilogin":
-        raise SetupRefusal("Profile Search health is supported only for Multilogin")
+        return profile_search_health.run_coordinator_profile_search_health_refusal()
+
+    prompt = (
+        f"Type {_CONFIRM_PROFILE_SEARCH_HEALTH!r} to perform one read-only "
+        "Profile Search health observation: "
+    )
+    print(prompt, file=sys.stderr, end="", flush=True)
     try:
-        confirmation = input(
-            f"Type {_CONFIRM_PROFILE_SEARCH_HEALTH!r} to perform one read-only "
-            "Profile Search health observation: "
-        ).strip()
+        # ``input`` already removes the terminal newline.  An empty prompt keeps
+        # stdout machine-clean while preserving the exact operator ceremony.
+        confirmation = input("")
     except (EOFError, KeyboardInterrupt):
-        raise SetupRefusal(
-            "Profile Search health confirmation was not completed"
-        ) from None
+        return profile_search_health.run_coordinator_profile_search_health_refusal()
     if confirmation != _CONFIRM_PROFILE_SEARCH_HEALTH:
-        raise SetupRefusal(
-            "Profile Search health confirmation did not match; "
-            "no vendor request was sent"
-        )
+        return profile_search_health.run_coordinator_profile_search_health_refusal()
     return profile_search_health.run_coordinator_profile_search_health()
 
 
