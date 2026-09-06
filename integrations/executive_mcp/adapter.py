@@ -76,6 +76,19 @@ __all__ = [
 ]
 
 
+def _refuse_explicit_e1_path(value: Path | str, field: str) -> str:
+    """Reject lexical and symlink-resolved installed paths before E1 use."""
+
+    normalized = refuse_production_path(str(value), field)
+    try:
+        resolved = Path(normalized).resolve()
+    except OSError as exc:
+        raise GatewayError(
+            "invalid_input", "E1 configuration path cannot be resolved"
+        ) from exc
+    return refuse_production_path(str(resolved), field)
+
+
 # ---------------------------------------------------------------------------
 # configuration
 # ---------------------------------------------------------------------------
@@ -122,6 +135,10 @@ class GatewayConfig:
 
     mode: ServerMode
     repo_root: Path
+    #: Explicit temporary runtime for the E1 read profile.  It is host
+    #: configuration, never a model/tool argument, and defaults to legacy root
+    #: grounding when omitted.
+    read_runtime_root: Path | str | None = None
     fixture: FixtureBackend | None = None
     macro_root_flag: str | None = None
     bind_host: str = "127.0.0.1"
@@ -131,7 +148,29 @@ class GatewayConfig:
     now: str | None = None
 
     def __post_init__(self) -> None:
+        raw_repo_root = self.repo_root
+        raw_macro_root = self.macro_root_flag
+        raw_runtime_root = self.read_runtime_root
+        # E1 is the only readonly profile with an explicit temporary runtime.
+        # Fence all of its operator coordinates before accepting/resolving any
+        # one of them; legacy readonly's omitted runtime behavior stays intact.
+        if raw_runtime_root is not None:
+            _refuse_explicit_e1_path(raw_repo_root, "repo_root")
+            if raw_macro_root is not None:
+                _refuse_explicit_e1_path(raw_macro_root, "macro_root")
+            _refuse_explicit_e1_path(raw_runtime_root, "read_runtime_root")
         object.__setattr__(self, "repo_root", Path(self.repo_root).resolve())
+        if self.read_runtime_root is not None:
+            if self.mode is not ServerMode.READONLY or self.fixture is not None:
+                raise GatewayError(
+                    "invalid_input",
+                    "read_runtime_root is only valid for non-fixture readonly reads",
+                )
+            requested_root = Path(self.read_runtime_root)
+            resolved_root = Path(
+                _refuse_explicit_e1_path(requested_root, "read_runtime_root")
+            )
+            object.__setattr__(self, "read_runtime_root", resolved_root)
         # Validated even though HTTP transport is not wired in this wave, so a
         # later change that wires it cannot introduce a public bind by omission.
         object.__setattr__(self, "bind_host", loopback_bind_host(self.bind_host))
@@ -161,7 +200,28 @@ class GatewayConfig:
 
         if self.fixture is not None:
             return Path(self.fixture.runtime_root)
+        if self.read_runtime_root is not None:
+            return Path(self.read_runtime_root)
         return self.repo_root
+
+    def reverify_read_runtime_root(self) -> None:
+        """Refuse a moved explicit E1 runtime root before every read."""
+
+        if self.read_runtime_root is None:
+            return
+        root = Path(self.read_runtime_root)
+        try:
+            _refuse_explicit_e1_path(root, "read_runtime_root")
+            _refuse_explicit_e1_path(
+                root / executive_inbox.DB_RELATIVE_PATH, "read_runtime_db"
+            )
+        except GatewayError as exc:
+            # The E1 profile must not disclose a production coordinate when a
+            # previously accepted temporary tree is replaced with a symlink.
+            # Preserve the typed refusal while making its public text generic.
+            raise GatewayError(
+                exc.code, "temporary E1 runtime configuration is unavailable"
+            ) from exc
 
 
 def load_gateway_config(
@@ -574,16 +634,24 @@ class ExecutiveMcpGateway:
     def _collect(self) -> tuple[dict[str, Any], dict[str, Any]]:
         """The boot packet and the inbox built FROM it — never re-derived."""
 
+        self.config.reverify_read_runtime_root()
         packet = self._packet_builder(
             repo_root=self.config.repo_root,
             macro_root_flag=self.config.macro_root_flag,
             now=self.config.now,
             timeout=self.config.boot_packet_timeout,
         )
+        inbox_kwargs: dict[str, Any] = {
+            "repo_root": self.config.repo_root,
+            "boot_packet": packet,
+            "now": self.config.now,
+        }
+        # Fixture mode's historical inbox semantics remain repository-grounded;
+        # only the explicit E1 root changes all four read projections.
+        if self.config.read_runtime_root is not None:
+            inbox_kwargs["runtime_root"] = self.config.runtime_root
         inbox = self._inbox_builder(
-            repo_root=self.config.repo_root,
-            boot_packet=packet,
-            now=self.config.now,
+            **inbox_kwargs,
         )
         return packet, inbox
 
@@ -664,6 +732,7 @@ class ExecutiveMcpGateway:
 
     def _runtime(self) -> Runtime:
         try:
+            self.config.reverify_read_runtime_root()
             return self._runtime_factory(Path(self.config.runtime_root))
         except Exception as exc:  # noqa: BLE001 — named degradation, never empty success
             raise GatewayError(

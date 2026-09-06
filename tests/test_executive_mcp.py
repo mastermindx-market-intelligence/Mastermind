@@ -735,6 +735,68 @@ def test_19_02_executive_inbox_is_the_canonical_projection_verbatim(tmp_path: Pa
     ]
 
 
+def test_explicit_read_runtime_root_reaches_inbox_and_registry_reads(tmp_path: Path):
+    """The temporary E1 runtime is explicit and never replaces repo grounding."""
+
+    repo_root = tmp_path / "mastermind"
+    runtime_root = tmp_path / "temporary-runtime"
+    repo_root.mkdir()
+    job_id = _seed_runtime(runtime_root)
+    seen: dict[str, Path] = {}
+
+    def inbox_builder(**kwargs: Any) -> dict[str, Any]:
+        seen["inbox_repo"] = Path(kwargs["repo_root"])
+        seen["inbox_runtime"] = Path(kwargs["runtime_root"])
+        return executive_inbox.build_inbox(**kwargs)
+
+    def runtime_factory(root: Path) -> Runtime:
+        seen["registry_runtime"] = root
+        return Runtime.at(root, create=False)
+
+    gateway = ExecutiveMcpGateway(
+        GatewayConfig(
+            mode=ServerMode.READONLY,
+            repo_root=repo_root,
+            read_runtime_root=runtime_root,
+            now=_FROZEN_NOW,
+        ),
+        packet_builder=lambda **_kwargs: _packet(),
+        inbox_builder=inbox_builder,
+        runtime_factory=runtime_factory,
+        transport=_forbidden_transport,
+        clock=lambda: _FROZEN_NOW,
+    )
+
+    assert _call(gateway, "executive_state")["ok"] is True
+    job = _call(gateway, "executive_job", {"job_id": job_id})
+
+    assert job["ok"] is True
+    assert seen == {
+        "inbox_repo": repo_root.resolve(),
+        "inbox_runtime": runtime_root.resolve(),
+        "registry_runtime": runtime_root.resolve(),
+    }
+
+
+def test_explicit_runtime_root_is_reverified_before_state_projection(tmp_path: Path):
+    """A retargeted configured root must fail before the inbox projector reads."""
+
+    gateway = _gateway(tmp_path)
+    config = GatewayConfig(
+        mode=ServerMode.READONLY,
+        repo_root=tmp_path,
+        read_runtime_root=tmp_path / "temporary-runtime",
+        now=_FROZEN_NOW,
+    )
+    gateway.config = config
+    object.__setattr__(config, "read_runtime_root", Path("/var/db/mastermind-executive"))
+
+    state = _call(gateway, "executive_state")
+
+    assert state["ok"] is False
+    assert state["error"]["code"] == "invalid_input"
+
+
 def test_19_03_executive_job_uses_registry_apis_not_sql(tmp_path: Path):
     job_id = _seed_runtime(tmp_path)
     calls: list[str] = []
