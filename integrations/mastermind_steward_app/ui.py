@@ -282,9 +282,16 @@ h1{font-size:16px;line-height:1.25;margin:0}
   }
 
   function accept(value) {
-    if (value !== undefined && value !== null) {
-      latest = value;
-      render();
+    latest = value;
+    render();
+  }
+
+  function acceptGlobals(globals) {
+    if (!isRecord(globals)) return;
+    if (hasOwn(globals, "toolOutput")) {
+      accept(globals.toolOutput);
+    } else if (hasOwn(globals, "structuredContent")) {
+      accept(globals.structuredContent);
     }
   }
 
@@ -295,18 +302,23 @@ h1{font-size:16px;line-height:1.25;margin:0}
       const message = event && event.data;
       if (!message || message.jsonrpc !== "2.0") return;
       if (message.method !== "ui/notifications/tool-result") return;
-      accept(message.params && (message.params.structuredContent || message.params));
+      if (!hasOwn(message, "params")) return;
+      const params = message.params;
+      if (isRecord(params) && hasOwn(params, "structuredContent")) {
+        accept(params.structuredContent);
+      } else {
+        accept(params);
+      }
     },
     { passive: true }
   );
 
   window.addEventListener("openai:set_globals", (event) => {
     const globals = event.detail && event.detail.globals;
-    accept(globals && (globals.toolOutput || globals.structuredContent));
+    acceptGlobals(globals);
   });
 
-  const openai = window.openai || {};
-  accept(openai.toolOutput || openai.structuredContent);
+  acceptGlobals(window.openai);
   render();
 })();
 </script>

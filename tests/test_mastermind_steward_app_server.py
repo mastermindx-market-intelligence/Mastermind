@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import subprocess
 
 import mcp.types as mcp_types
 
@@ -242,3 +244,426 @@ def test_describe_and_ui_resource_are_v2_static_self_contained_and_inert():
         "setInterval(",
     ):
         assert forbidden not in CONTROL_ROOM_HTML
+
+
+_NODE_UI_BEHAVIOR_HARNESS = r"""
+const assert = require("node:assert/strict");
+const vm = require("node:vm");
+
+const CONTROL_ROOM_SCRIPT = __CONTROL_ROOM_SCRIPT__;
+const ABSENT = Symbol("absent");
+
+class Element {
+  constructor(tagName, id = "") {
+    this.tagName = tagName;
+    this.id = id;
+    this.className = "";
+    this.textContent = "";
+    this.hidden = false;
+    this.dataset = {};
+    this.children = [];
+  }
+
+  replaceChildren(...children) {
+    this.children = children;
+    this.textContent = "";
+  }
+
+  appendChild(child) {
+    this.children.push(child);
+    return child;
+  }
+}
+
+function boot(initialOpenAI = ABSENT) {
+  const elements = {
+    content: new Element("div", "content"),
+    notice: new Element("div", "notice"),
+    state: new Element("span", "state"),
+  };
+  elements.content.className = "empty";
+  elements.content.textContent = "No authoritative facts available.";
+  elements.notice.className = "notice";
+  elements.notice.hidden = true;
+  elements.state.className = "pill";
+  elements.state.textContent = "UNKNOWN";
+
+  const listeners = new Map();
+  const parent = {
+    postMessage() {
+      throw new Error("Control Room must remain outbound-inert");
+    },
+  };
+  const window = {
+    parent,
+    addEventListener(type, listener) {
+      const registered = listeners.get(type) || [];
+      registered.push(listener);
+      listeners.set(type, registered);
+    },
+  };
+  if (initialOpenAI !== ABSENT) window.openai = initialOpenAI;
+
+  const document = {
+    getElementById(id) {
+      return elements[id];
+    },
+    createElement(tagName) {
+      return new Element(tagName);
+    },
+  };
+  const forbiddenOutbound = () => {
+    throw new Error("Control Room must remain outbound-inert");
+  };
+  const context = vm.createContext({
+    document,
+    fetch: forbiddenOutbound,
+    setInterval: forbiddenOutbound,
+    setTimeout: forbiddenOutbound,
+    window,
+    XMLHttpRequest: forbiddenOutbound,
+  });
+  vm.runInContext(CONTROL_ROOM_SCRIPT, context, {
+    filename: "steward-control-room-inline.js",
+  });
+
+  const dispatch = (type, event) => {
+    for (const listener of listeners.get(type) || []) listener(event);
+  };
+  const textFor = (element) =>
+    [element.textContent, ...element.children.map(textFor)]
+      .filter((text) => text !== "")
+      .join(" ");
+  const snapshot = () => ({
+    cardCount: elements.content.children.filter(
+      (child) => child.className === "card"
+    ).length,
+    contentClass: elements.content.className,
+    contentText: textFor(elements.content),
+    noticeHidden: elements.notice.hidden,
+    noticeText: textFor(elements.notice),
+    state: elements.state.textContent,
+    stateAttribute: elements.state.dataset.state,
+  });
+  return {
+    globals(globals) {
+      dispatch("openai:set_globals", { detail: { globals } });
+    },
+    message(data, source = parent) {
+      dispatch("message", { data, source });
+    },
+    parent,
+    snapshot,
+  };
+}
+
+const source = (sourceRef) => ({
+  observed_at: "2026-09-06T00:00:00Z",
+  owner: "agent_os",
+  source_ref: sourceRef,
+});
+
+function result({
+  freshness = "FRESH",
+  reasonCodes = [],
+  sourceRef,
+  state = "FACTS",
+  subjectRef,
+  value,
+}) {
+  return {
+    data: {
+      reason_codes: reasonCodes,
+      state,
+      subjects: [
+        {
+          facts: [
+            {
+              freshness,
+              predicate: "responsibility.state",
+              sources: [source(sourceRef)],
+              value,
+            },
+          ],
+          subject_ref: subjectRef,
+        },
+      ],
+    },
+    ok: true,
+    schema: "mastermind.secretary_grounding_mcp_result.v2",
+    server_version: "2.0.0",
+    tool: "list_responsibilities",
+  };
+}
+
+const oldFacts = result({
+  sourceRef: "WS:OLD",
+  subjectRef: "responsibility:old",
+  value: "FACT-OLD",
+});
+const degradedFacts = result({
+  freshness: "STALE",
+  reasonCodes: ["STALE_SOURCE"],
+  sourceRef: "WS:DEGRADED",
+  state: "DEGRADED",
+  subjectRef: "responsibility:degraded",
+  value: "DEGRADED-OLD",
+});
+const newFacts = result({
+  sourceRef: "WS:NEW",
+  subjectRef: "responsibility:new",
+  value: "FACT-NEW",
+});
+const siblingFacts = result({
+  sourceRef: "WS:SIBLING",
+  subjectRef: "responsibility:sibling",
+  value: "FACT-SIBLING",
+});
+
+function assertFacts(view, marker, label) {
+  assert.equal(view.state, "FACTS", label);
+  assert.equal(view.stateAttribute, "FACTS", label);
+  assert.equal(view.cardCount, 1, label);
+  assert.match(view.contentText, new RegExp(marker), label);
+}
+
+function assertCleared(view, label) {
+  assert.equal(view.state, "UNKNOWN", label);
+  assert.equal(view.stateAttribute, "UNKNOWN", label);
+  assert.equal(view.cardCount, 0, label);
+  assert.equal(view.contentClass, "empty", label);
+  assert.equal(view.contentText, "No authoritative facts available.", label);
+  assert.equal(view.noticeHidden, true, label);
+  assert.equal(view.noticeText, "", label);
+  for (const staleText of [
+    "FACT-OLD",
+    "DEGRADED-OLD",
+    "WS:OLD",
+    "WS:DEGRADED",
+    "FRESH",
+    "STALE",
+    "STALE_SOURCE",
+  ]) {
+    assert.doesNotMatch(
+      view.contentText + " " + view.noticeText,
+      new RegExp(staleText),
+      label
+    );
+  }
+}
+
+function assertMalformed(view, label) {
+  assert.equal(view.state, "REFUSED", label);
+  assert.equal(view.stateAttribute, "REFUSED", label);
+  assert.equal(view.cardCount, 0, label);
+  assert.equal(view.contentClass, "empty", label);
+  assert.equal(view.contentText, "Malformed tool result refused.", label);
+  assert.equal(view.noticeHidden, true, label);
+  assert.equal(view.noticeText, "", label);
+  assert.doesNotMatch(view.contentText, /FACT-(OLD|SIBLING)/, label);
+}
+
+// Globals: absent fields retain the prior display; explicit clears replace it.
+const globalsView = boot();
+assertCleared(globalsView.snapshot(), "absent initial globals render UNKNOWN");
+globalsView.globals({ toolOutput: oldFacts });
+assertFacts(globalsView.snapshot(), "FACT-OLD", "valid toolOutput renders facts");
+const beforeAbsentGlobals = globalsView.snapshot();
+globalsView.globals({});
+assert.deepEqual(
+  globalsView.snapshot(),
+  beforeAbsentGlobals,
+  "absent globals result fields must preserve the prior display"
+);
+globalsView.globals({ toolOutput: degradedFacts });
+assert.equal(globalsView.snapshot().state, "DEGRADED");
+assert.match(globalsView.snapshot().contentText, /DEGRADED-OLD/);
+assert.match(globalsView.snapshot().contentText, /STALE/);
+assert.match(globalsView.snapshot().noticeText, /STALE_SOURCE/);
+globalsView.globals({ toolOutput: null });
+assertCleared(
+  globalsView.snapshot(),
+  "present toolOutput null must clear populated DEGRADED facts"
+);
+globalsView.globals({ toolOutput: newFacts });
+assertFacts(
+  globalsView.snapshot(),
+  "FACT-NEW",
+  "a valid result must recover after UNKNOWN"
+);
+globalsView.globals({ structuredContent: null });
+assertCleared(
+  globalsView.snapshot(),
+  "present structuredContent null must clear when toolOutput is absent"
+);
+globalsView.globals({ toolOutput: null, structuredContent: siblingFacts });
+assertCleared(
+  globalsView.snapshot(),
+  "present toolOutput null must win over a populated structuredContent sibling"
+);
+globalsView.globals({ toolOutput: oldFacts, structuredContent: siblingFacts });
+assertFacts(
+  globalsView.snapshot(),
+  "FACT-OLD",
+  "toolOutput must win when both globals result fields are populated"
+);
+assert.doesNotMatch(globalsView.snapshot().contentText, /FACT-SIBLING/);
+
+for (const [name, malformed] of [
+  ["false", false],
+  ["zero", 0],
+  ["empty string", ""],
+  ["undefined", undefined],
+]) {
+  globalsView.globals({ toolOutput: oldFacts });
+  globalsView.globals({ toolOutput: malformed, structuredContent: siblingFacts });
+  assertMalformed(
+    globalsView.snapshot(),
+    `present malformed ${name} must be REFUSED without sibling fallback`
+  );
+}
+globalsView.globals({ toolOutput: newFacts });
+assertFacts(
+  globalsView.snapshot(),
+  "FACT-NEW",
+  "a valid result must recover after malformed REFUSED"
+);
+
+// Notifications: all four guard edges are inert, while present params are accepted.
+const notificationView = boot({ toolOutput: oldFacts });
+const validNotification = {
+  jsonrpc: "2.0",
+  method: "ui/notifications/tool-result",
+  params: newFacts,
+};
+for (const [label, data, sourceValue] of [
+  ["wrong source", validNotification, {}],
+  ["wrong JSON-RPC version", { ...validNotification, jsonrpc: "1.0" }, notificationView.parent],
+  ["wrong method", { ...validNotification, method: "ui/notifications/other" }, notificationView.parent],
+  ["missing params", { jsonrpc: "2.0", method: "ui/notifications/tool-result" }, notificationView.parent],
+]) {
+  const before = notificationView.snapshot();
+  notificationView.message(data, sourceValue);
+  assert.deepEqual(notificationView.snapshot(), before, `${label} must be inert`);
+}
+notificationView.message(validNotification);
+assertFacts(
+  notificationView.snapshot(),
+  "FACT-NEW",
+  "a direct valid params envelope must replace the prior display"
+);
+notificationView.message({
+  jsonrpc: "2.0",
+  method: "ui/notifications/tool-result",
+  params: { structuredContent: null },
+});
+assertCleared(
+  notificationView.snapshot(),
+  "present params.structuredContent null must clear"
+);
+notificationView.message({
+  jsonrpc: "2.0",
+  method: "ui/notifications/tool-result",
+  params: newFacts,
+});
+notificationView.message({
+  jsonrpc: "2.0",
+  method: "ui/notifications/tool-result",
+  params: null,
+});
+assertCleared(notificationView.snapshot(), "present params null must clear");
+notificationView.message({
+  jsonrpc: "2.0",
+  method: "ui/notifications/tool-result",
+  params: false,
+});
+assertMalformed(
+  notificationView.snapshot(),
+  "present malformed direct params must be REFUSED"
+);
+notificationView.message({
+  jsonrpc: "2.0",
+  method: "ui/notifications/tool-result",
+  params: { toolOutput: siblingFacts },
+});
+assertMalformed(
+  notificationView.snapshot(),
+  "generic params.toolOutput must not become an ingress alias"
+);
+notificationView.message(validNotification);
+assertFacts(
+  notificationView.snapshot(),
+  "FACT-NEW",
+  "a notification must recover after UNKNOWN and REFUSED"
+);
+
+// Initial globals use the same presence and transport-precedence rules.
+assertCleared(
+  boot({ toolOutput: null, structuredContent: siblingFacts }).snapshot(),
+  "initial toolOutput null must win over a populated sibling"
+);
+assertCleared(
+  boot({ structuredContent: null }).snapshot(),
+  "initial structuredContent null must render UNKNOWN"
+);
+assertFacts(
+  boot({ structuredContent: newFacts }).snapshot(),
+  "FACT-NEW",
+  "initial structuredContent alone must render"
+);
+const initialBoth = boot({ toolOutput: oldFacts, structuredContent: siblingFacts });
+assertFacts(
+  initialBoth.snapshot(),
+  "FACT-OLD",
+  "initial toolOutput must win when both result fields are populated"
+);
+assert.doesNotMatch(initialBoth.snapshot().contentText, /FACT-SIBLING/);
+
+// The total display bound applies across all grouped subjects, not per subject.
+const manySubjects = Array.from({ length: 65 }, (_, index) => ({
+  facts: [
+    {
+      freshness: "FRESH",
+      predicate: "responsibility.state",
+      sources: [source(`WS:${index}`)],
+      value: `FACT-${index}`,
+    },
+  ],
+  subject_ref: `responsibility:${index}`,
+}));
+const bounded = boot({
+  structuredContent: {
+    data: { reason_codes: [], state: "FACTS", subjects: manySubjects },
+    ok: true,
+    schema: "mastermind.secretary_grounding_mcp_result.v2",
+    server_version: "2.0.0",
+    tool: "list_responsibilities",
+  },
+}).snapshot();
+assert.equal(bounded.state, "FACTS");
+assert.equal(bounded.cardCount, 64, "one global 64-fact bound must hold");
+assert.equal(bounded.noticeHidden, false);
+assert.match(bounded.noticeText, /Showing the first 64 facts\./);
+
+process.stdout.write(JSON.stringify({ ok: true, scenarios: 24 }));
+"""
+
+
+def test_ui_ingress_distinguishes_absent_cleared_and_malformed_results():
+    scripts = re.findall(r"<script>\s*(.*?)\s*</script>", CONTROL_ROOM_HTML, re.DOTALL)
+    assert len(scripts) == 1
+    node_program = _NODE_UI_BEHAVIOR_HARNESS.replace(
+        "__CONTROL_ROOM_SCRIPT__",
+        json.dumps(scripts[0]),
+    )
+
+    completed = subprocess.run(
+        ["node"],
+        input=node_program,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == {"ok": True, "scenarios": 24}
