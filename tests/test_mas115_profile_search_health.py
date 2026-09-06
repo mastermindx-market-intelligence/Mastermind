@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import io
 import json
@@ -310,6 +311,47 @@ def test_proxy_exposes_only_parser_requirements_not_full_multilogin_client():
     assert not hasattr(proxy, "start")
     assert not hasattr(proxy, "stop")
     assert not hasattr(proxy, "__dict__")
+
+
+def test_health_source_ast_has_no_mutation_peer_state_or_retry_calls():
+    tree = ast.parse(Path(health.__file__).read_text())
+    forbidden = {
+        "_mlx_profile_create", "_mlx_profile_remove", "_mlx_profile_start",
+        "_mlx_profile_stop", "_mlx_configure_canary_port", "create_peer_profile",
+        "remove_peer_profile", "_commit_peer_intent", "_transition_peer_intent",
+        "_write_peer_provision", "_exclusive_private_json", "atomic_private_json",
+        "run_coordinator_peer_create", "run_coordinator_peer_rollback",
+        "LoopbackBenignOrigin", "WebDriverNavigator", "PEER_INTENT_PATH",
+        "PEER_GENESIS_WITNESS_PATH", "PEER_BOOTSTRAP_FENCE_PATH",
+        "PEER_PROVISION_PATH", "PEER_OWNERSHIP_RECEIPT_PATH", "sleep",
+    }
+    hits = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in forbidden:
+            hits.append((node.id, node.lineno))
+        if isinstance(node, ast.Attribute) and node.attr in forbidden:
+            hits.append((node.attr, node.lineno))
+    assert hits == []
+
+
+def test_success_path_never_calls_other_bounded_http_endpoints(monkeypatch):
+    forbidden = (
+        "_mlx_profile_create", "_mlx_profile_remove", "_mlx_profile_start",
+        "_mlx_profile_stop", "_mlx_configure_canary_port", "_mlx_profile_status",
+        "_mlx_profile_metas", "_webdriver_create_session", "_webdriver_navigate",
+    )
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("forbidden endpoint reached")
+
+    for name in forbidden:
+        monkeypatch.setattr(vendors.BoundedHttpClient, name, _forbidden, raising=False)
+    code, receipt, _events, http = _run([
+        vendors._BoundedResponse(200, _payload([], 0)),
+    ])
+    assert code == 0
+    assert receipt["verdict"] == "PASS"
+    assert http.search_calls == 1
 
 
 def test_checked_http_close_is_one_shot_and_exact_boolean():
