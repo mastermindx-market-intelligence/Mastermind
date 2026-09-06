@@ -278,6 +278,7 @@ def test_browser_proof_is_csp_safe_sandboxed_and_process_isolates_discard():
     assert "wait_for_function(" not in parent + child + stable
     assert '"--no-sandbox"' not in parent + child + stable + launcher
     assert "chromium_sandbox=True" in launcher
+    assert 'ignore_default_args=["--disable-field-trial-config"]' in launcher
     assert "chrome.tabs.discard" not in parent
     assert "chrome.tabs.discard" in child
     assert "run_discard_probe_and_record" in parent
@@ -619,6 +620,7 @@ def _fulfill_browser_fixture(route):
 def _launch_fixture_context(playwright, executable, extension, profile, viewport):
     context = playwright.chromium.launch_persistent_context(
         str(profile), executable_path=executable, headless=True, chromium_sandbox=True,
+        ignore_default_args=["--disable-field-trial-config"],
         viewport=viewport,
         args=[
             f"--disable-extensions-except={extension}", f"--load-extension={extension}",
