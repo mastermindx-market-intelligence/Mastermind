@@ -1,18 +1,29 @@
 {
   "document_type": "mastermind.governed_workbench_contract_candidate",
-  "version": 1,
-  "date": "2026-09-05",
+  "version": 2,
+  "date": "2026-09-06",
   "publication_carrier": "Mastermind PR #490",
   "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
   "authority": "RESEARCH_ONLY_NOT_A_RUNTIME_SCHEMA_OR_IMPLEMENTATION_COMMISSION",
-  "protected_source_basis": "8f3370e349ab8f1a54acac4c63697740f32715b1",
+  "protected_source_basis": "467a81e84b08a7f1c3cdb9a410b2f7857816675d",
+  "supersedes_blob": "767204353203885a908fb31ae04728e4d42f5d44",
   "capability_state": "SPEC_ONLY",
+  "revision_reason": [
+    "Remove canonical operation identity from model-authored tool input.",
+    "Add owner-issued pre-effect references and loss-safe reconciliation for every proposed mutator.",
+    "Bind workspace reads to the host-selected source envelope.",
+    "Separate read status from modifying effect state.",
+    "Normalize native route coverage vocabulary to ATTENDED_ONLY."
+  ],
   "principles": [
-    "The workbench is a facade over an existing exact Attempt/provider execution context, not a lifecycle, session, memory, retry, queue, permission, workspace, or evidence owner.",
+    "The workbench is a facade over an existing exact Attempt/provider execution context, not a lifecycle, session, memory, retry, queue, permission, workspace, process, or evidence owner.",
     "Leader and operator capability profiles are separate.",
-    "The model never supplies host, principal, credential, account, profile, absolute root, worktree, branch, lease, fence, capability generation, or effect state.",
-    "Every modifying call revalidates current owner predicates at invocation time.",
-    "EFFECT_UNKNOWN blocks retry and provider/account/carrier failover.",
+    "The model never supplies or selects canonical operation, host, principal, credential, account, profile, absolute root, worktree, branch, source ref, lease, fence, capability generation, authority, or effect state.",
+    "Canonical operation identity is derived exclusively from the current authenticated host envelope; a caller-provided operation_key is refused and has zero effect.",
+    "Every modifying call consumes one owner-issued, Attempt-bound, pre-effect action reference at most once and revalidates current owner predicates at invocation time.",
+    "A lost modifying response is reconciled through that pre-effect action reference before any new action can be prepared.",
+    "EFFECT_UNKNOWN blocks retry and provider, account, receiver, backend, or carrier failover.",
+    "Read status and modifying effect state are separate closed vocabularies.",
     "A durable process or MCP task handle is not proof that an inactive ChatGPT reasoning session can be awakened.",
     "Existing frozen Mastermind tool contracts are not modified by this candidate.",
     "All named tools below are proposed semantics, not callable or approved schemas."
@@ -20,22 +31,39 @@
   "capability_profiles": [
     {
       "id": "LEADER_READ",
-      "purpose": "Task-relevant source/evidence reads for a Sol leader.",
-      "allowed_surfaces": ["workspace_read"],
-      "forbidden_surfaces": ["workspace_change", "process", "desktop"],
+      "purpose": "Task-relevant source and evidence reads for a Sol leader.",
+      "allowed_surfaces": [
+        "workspace_read"
+      ],
+      "forbidden_surfaces": [
+        "workspace_change",
+        "process",
+        "desktop"
+      ],
       "authority_note": "Use existing Steward, GitHub and CodeIntel owners where possible; no unrestricted local access."
     },
     {
       "id": "EXACT_OPERATOR",
       "purpose": "File and process capabilities for one host-injected Job/Attempt/worker/workspace binding.",
-      "allowed_surfaces": ["workspace_read", "workspace_change", "process"],
-      "forbidden_surfaces": ["desktop"],
+      "allowed_surfaces": [
+        "workspace_read",
+        "workspace_change",
+        "process"
+      ],
+      "forbidden_surfaces": [
+        "desktop"
+      ],
       "authority_note": "Requires exact Attempt binding, current source and an enforcing worker sandbox/provider owner."
     },
     {
       "id": "EXACT_OPERATOR_DESKTOP",
       "purpose": "Optional disposable worker-browser observation and bounded semantic actuation.",
-      "allowed_surfaces": ["workspace_read", "workspace_change", "process", "desktop"],
+      "allowed_surfaces": [
+        "workspace_read",
+        "workspace_change",
+        "process",
+        "desktop"
+      ],
       "forbidden_surfaces": [],
       "authority_note": "Requires a separately reviewed Desktop capability generation and exact approved profile/window."
     }
@@ -60,16 +88,30 @@
     "source_base",
     "allowed_read_paths",
     "allowed_write_paths",
+    "allowed_evidence_refs",
     "allowed_recipe_ids",
     "process_policy_ref",
     "network_policy_ref",
     "secret_policy_ref",
     "desktop_policy_ref_when_enabled",
+    "action_reference_issuer_ref",
     "observed_at",
     "expires_at",
     "reconciliation_owner_ref"
   ],
+  "trusted_derivation": {
+    "canonical_operation_identity": "Derived from the authenticated host envelope and never accepted from model input.",
+    "source_selection": "workspace_ref and source_head are host-bound. Optional historical evidence reads require an owner-supplied immutable reference already present in allowed_evidence_refs.",
+    "action_identity": "Each prepare operation returns one opaque owner-issued action reference bound to operation_key, attempt_ref, capability_generation, target, payload digest, preconditions and expiry.",
+    "caller_correlation": "A model may provide a non-authoritative client_call_ref for display correlation. It cannot select operation, authority, owner, target, idempotency scope or reconciliation scope.",
+    "untrusted_field_rule": "Supplying a forbidden authority field yields REFUSED with NOT_APPLIED and no downstream call."
+  },
   "model_forbidden_fields": [
+    "operation_key",
+    "responsibility_ref",
+    "job_ref",
+    "attempt_ref",
+    "worker_ref",
     "actor_privilege",
     "uid",
     "credential",
@@ -81,6 +123,9 @@
     "workspace_root",
     "worktree",
     "branch",
+    "requested_ref",
+    "source_head",
+    "source_base",
     "raw_git_ref_update",
     "lease",
     "fence",
@@ -91,7 +136,44 @@
     "arbitrary_url",
     "arbitrary_javascript"
   ],
-  "effect_states": ["NOT_APPLIED", "APPLIED", "PARTIAL", "EFFECT_UNKNOWN", "REFUSED"],
+  "read_statuses": [
+    "OK",
+    "DEGRADED",
+    "NOT_FOUND",
+    "REFUSED",
+    "ERROR"
+  ],
+  "effect_states": [
+    "NOT_APPLIED",
+    "APPLIED",
+    "PARTIAL",
+    "EFFECT_UNKNOWN",
+    "REFUSED"
+  ],
+  "effect_semantics": {
+    "scope": "effect_state appears only for a modifying action or its reconciliation.",
+    "read_rule": "A read-only response uses status and never implies a modifying effect.",
+    "unknown_rule": "EFFECT_UNKNOWN means the owning actuator cannot yet prove whether zero, one, or a partial effect occurred; no retry or failover is permitted.",
+    "process_specialization": "PROCESS_EFFECT_UNKNOWN is a closed error code whose effect_state is EFFECT_UNKNOWN and whose target family is process. It is not a second effect state."
+  },
+  "action_reference_contract": {
+    "issuer": "Existing owning actuator or its approved adapter; never the model and never a new generic retry database.",
+    "binding_fields": [
+      "operation_key",
+      "attempt_ref",
+      "capability_generation",
+      "action_family",
+      "target_owner",
+      "target_identity",
+      "payload_digest",
+      "precondition_digest",
+      "issued_at",
+      "expires_at"
+    ],
+    "consume_rule": "A modifying action reference is accepted at most once. Duplicate delivery returns the one canonical prior result or EFFECT_UNKNOWN; it never performs effect two.",
+    "reconcile_rule": "The corresponding read-only reconcile tool accepts the pre-effect reference and returns NOT_APPLIED, APPLIED, PARTIAL, EFFECT_UNKNOWN or REFUSED plus the canonical target identity when one exists.",
+    "retention_rule": "Reference and result retention remain with the existing actuator/evidence owner. This candidate creates no cross-system retry or effect store."
+  },
   "surfaces": [
     {
       "id": "workspace_read",
@@ -103,35 +185,103 @@
           "privilege": "R0_OBSERVE",
           "mutating": false,
           "model_input": [],
-          "minimum_output": ["workspace_ref", "source_head", "languages", "build_systems", "capabilities", "degraded", "source_refs", "observed_at"]
+          "minimum_output": [
+            "status",
+            "workspace_ref",
+            "source_head",
+            "languages",
+            "build_systems",
+            "capabilities",
+            "degraded",
+            "source_refs",
+            "observed_at"
+          ]
         },
         {
           "name": "read_workspace_files",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": ["relative_paths", "ranges", "continuation"],
-          "minimum_output": ["path", "blob_or_content_hash", "content_or_artifact_ref", "truncated", "continuation", "source_head"]
+          "model_input": [
+            "relative_paths",
+            "ranges",
+            "continuation",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "path",
+            "blob_or_content_hash",
+            "content_or_artifact_ref",
+            "truncated",
+            "continuation",
+            "source_head"
+          ],
+          "notes": "Paths are resolved only within the host-bound workspace and allowed_read_paths."
         },
         {
           "name": "search_workspace",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": ["query", "relative_path_filters", "language_filters", "requested_ref", "limit", "continuation"],
-          "minimum_output": ["matches", "requested_ref", "searched_ref", "coverage", "freshness", "truncated", "continuation", "source_refs"]
+          "model_input": [
+            "query",
+            "relative_path_filters",
+            "language_filters",
+            "limit",
+            "continuation",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "matches",
+            "searched_ref",
+            "coverage",
+            "freshness",
+            "truncated",
+            "continuation",
+            "source_refs"
+          ],
+          "notes": "Searches the host-bound source_head. A caller-selected requested_ref is forbidden. Immutable historical evidence is available only through an owner-supplied allowed_evidence_ref in the current host envelope."
         },
         {
           "name": "workspace_semantics",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": ["query_kind", "symbol_or_location", "language", "limit", "continuation"],
-          "minimum_output": ["results", "backend_generation", "workspace_ref", "source_head", "coverage", "issues", "continuation"]
+          "model_input": [
+            "query_kind",
+            "symbol_or_location",
+            "language",
+            "limit",
+            "continuation",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "results",
+            "backend_generation",
+            "workspace_ref",
+            "source_head",
+            "coverage",
+            "issues",
+            "continuation"
+          ]
         },
         {
           "name": "view_workspace_image",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": ["relative_path"],
-          "minimum_output": ["artifact_ref", "media_type", "width", "height", "content_hash", "source_head"]
+          "model_input": [
+            "relative_path",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "artifact_ref",
+            "media_type",
+            "width",
+            "height",
+            "content_hash",
+            "source_head"
+          ]
         }
       ]
     },
@@ -144,31 +294,98 @@
           "name": "prepare_workspace_patch",
           "privilege": "W1_ROUTINE",
           "mutating": false,
-          "model_input": ["operation_key", "patch", "expected_path_hashes"],
-          "minimum_output": ["preparation_ref", "expires_at", "candidate_paths", "candidate_diff_hash", "preconditions", "status", "issues"],
-          "notes": "Preparation performs no file write and creates no durable prepared-action database."
+          "model_input": [
+            "patch",
+            "expected_path_hashes",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "workspace_patch_ref",
+            "expires_at",
+            "candidate_paths",
+            "candidate_diff_hash",
+            "preconditions",
+            "issues"
+          ],
+          "notes": "Returns an owner-issued pre-effect reference bound to the host-derived operation and Attempt. Preparation performs no file write and creates no new generic prepared-action database."
         },
         {
           "name": "commit_workspace_patch",
           "privilege": "W1_ROUTINE",
           "mutating": true,
-          "model_input": ["preparation_ref"],
-          "minimum_output": ["effect_state", "changed_paths", "post_image_hashes", "workspace_diff_hash", "source_preconditions", "reconciliation_ref"],
-          "notes": "Revalidate current binding, permission and source; perform at most one patch effect."
+          "model_input": [
+            "workspace_patch_ref"
+          ],
+          "minimum_output": [
+            "effect_state",
+            "workspace_patch_ref",
+            "changed_paths",
+            "post_image_hashes",
+            "workspace_diff_hash",
+            "source_preconditions",
+            "reconciliation_ref"
+          ],
+          "notes": "Consumes workspace_patch_ref at most once after revalidating binding, permission and source."
+        },
+        {
+          "name": "reconcile_workspace_patch",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": [
+            "workspace_patch_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "effect_state",
+            "workspace_patch_ref",
+            "changed_paths",
+            "post_image_hashes",
+            "workspace_diff_hash",
+            "issues",
+            "observed_at"
+          ],
+          "notes": "A lost commit response is reconciled through the pre-effect reference before another patch can be prepared."
         },
         {
           "name": "workspace_diff",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": ["relative_path_filters", "limit", "continuation"],
-          "minimum_output": ["paths", "diff_or_artifact_ref", "diff_hash", "binary_paths", "truncated", "continuation", "workspace_ref"]
+          "model_input": [
+            "relative_path_filters",
+            "limit",
+            "continuation",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "paths",
+            "diff_or_artifact_ref",
+            "diff_hash",
+            "binary_paths",
+            "truncated",
+            "continuation",
+            "workspace_ref"
+          ]
         },
         {
           "name": "checkpoint_workspace",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": [],
-          "minimum_output": ["source_continuity_receipt", "workspace_ref", "local_head", "remote_head", "tree", "paths", "dirty_state", "issues"],
+          "model_input": [
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "source_continuity_receipt",
+            "workspace_ref",
+            "local_head",
+            "remote_head",
+            "tree",
+            "paths",
+            "dirty_state",
+            "issues"
+          ],
           "notes": "Projects the existing Source Continuity owner and grants no commit, push, receiver transfer, Ready, merge or release authority."
         }
       ]
@@ -182,46 +399,229 @@
           "name": "list_validation_recipes",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": [],
-          "minimum_output": ["recipes", "source_head", "process_policy_ref", "capability_generation"]
+          "model_input": [
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "recipes",
+            "source_head",
+            "process_policy_ref",
+            "capability_generation"
+          ]
+        },
+        {
+          "name": "prepare_validation_start",
+          "privilege": "W1_ROUTINE",
+          "mutating": false,
+          "model_input": [
+            "recipe_id",
+            "bounded_targets",
+            "expected_source_head",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "validation_start_ref",
+            "recipe_id",
+            "target_digest",
+            "preconditions",
+            "expires_at",
+            "issues"
+          ],
+          "notes": "Issues the immutable Attempt-bound reference before any process launch."
         },
         {
           "name": "start_validation",
           "privilege": "W1_ROUTINE",
           "mutating": true,
-          "model_input": ["operation_key", "recipe_id", "bounded_targets", "expected_source_head"],
-          "minimum_output": ["effect_state", "process_ref", "attempt_ref", "recipe_id", "started_at", "state", "reconciliation_ref"],
-          "notes": "Owner derives argv, cwd, environment, network and resource policy. No raw shell text."
+          "model_input": [
+            "validation_start_ref"
+          ],
+          "minimum_output": [
+            "effect_state",
+            "validation_start_ref",
+            "process_ref",
+            "attempt_ref",
+            "recipe_id",
+            "started_at",
+            "state",
+            "reconciliation_ref"
+          ],
+          "notes": "Consumes validation_start_ref at most once. Owner derives argv, cwd, environment, network and resource policy. No raw shell text."
+        },
+        {
+          "name": "reconcile_validation_start",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": [
+            "validation_start_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "effect_state",
+            "validation_start_ref",
+            "process_ref_when_applied",
+            "state",
+            "started_at",
+            "issues",
+            "observed_at"
+          ],
+          "notes": "Can prove NOT_APPLIED or return the one canonical process identity after a lost launch response. It never starts a process."
         },
         {
           "name": "read_process",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": ["process_ref", "output_cursor", "limit"],
-          "minimum_output": ["process_ref", "state", "output_delta", "next_output_cursor", "exit_code", "truncated", "observed_at"]
+          "model_input": [
+            "process_ref",
+            "output_cursor",
+            "limit",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "process_ref",
+            "state",
+            "output_delta",
+            "next_output_cursor",
+            "exit_code",
+            "truncated",
+            "observed_at"
+          ]
+        },
+        {
+          "name": "prepare_process_input",
+          "privilege": "W1_ROUTINE",
+          "mutating": false,
+          "model_input": [
+            "process_ref",
+            "input_kind",
+            "input",
+            "expected_process_state",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "process_input_ref",
+            "process_ref",
+            "input_kind",
+            "input_digest",
+            "sequence",
+            "expires_at",
+            "issues"
+          ],
+          "notes": "The owner seals the exact bytes and monotonic sequence in the pre-effect reference."
         },
         {
           "name": "send_process_input",
           "privilege": "W1_ROUTINE",
           "mutating": true,
-          "model_input": ["process_ref", "input_kind", "input"],
-          "minimum_output": ["effect_state", "accepted_bytes", "process_state", "reconciliation_ref"],
-          "notes": "Only for a process whose host policy declares the exact input kind."
+          "model_input": [
+            "process_input_ref"
+          ],
+          "minimum_output": [
+            "effect_state",
+            "process_input_ref",
+            "accepted_bytes",
+            "process_state",
+            "sequence",
+            "reconciliation_ref"
+          ],
+          "notes": "Consumes process_input_ref at most once and never accepts unbound raw bytes."
+        },
+        {
+          "name": "reconcile_process_input",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": [
+            "process_input_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "effect_state",
+            "process_input_ref",
+            "accepted_bytes",
+            "process_state",
+            "sequence",
+            "issues",
+            "observed_at"
+          ]
+        },
+        {
+          "name": "prepare_process_cancel",
+          "privilege": "W1_ROUTINE",
+          "mutating": false,
+          "model_input": [
+            "process_ref",
+            "reason_code",
+            "expected_process_state",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "process_cancel_ref",
+            "process_ref",
+            "reason_code",
+            "preconditions",
+            "expires_at",
+            "issues"
+          ]
         },
         {
           "name": "request_process_cancel",
           "privilege": "W1_ROUTINE",
           "mutating": true,
-          "model_input": ["operation_key", "process_ref", "reason_code"],
-          "minimum_output": ["effect_state", "cancel_requested", "process_state", "terminal_proven", "reconciliation_ref"],
+          "model_input": [
+            "process_cancel_ref"
+          ],
+          "minimum_output": [
+            "effect_state",
+            "process_cancel_ref",
+            "cancel_requested",
+            "process_state",
+            "terminal_proven",
+            "reconciliation_ref"
+          ],
           "notes": "A request receipt never proves terminal process state or reversal of completed effects."
+        },
+        {
+          "name": "reconcile_process_cancel",
+          "privilege": "R0_OBSERVE",
+          "mutating": false,
+          "model_input": [
+            "process_cancel_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "effect_state",
+            "process_cancel_ref",
+            "cancel_requested",
+            "process_state",
+            "terminal_proven",
+            "cleanup_state",
+            "issues",
+            "observed_at"
+          ]
         },
         {
           "name": "reconcile_process",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": ["operation_key", "process_ref"],
-          "minimum_output": ["process_ref", "state", "effect_state", "exit_code", "cleanup_state", "evidence_refs", "observed_at"]
+          "model_input": [
+            "process_ref",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "process_ref",
+            "state",
+            "exit_code",
+            "cleanup_state",
+            "evidence_refs",
+            "observed_at"
+          ],
+          "notes": "General process observation is not a substitute for reconciling a lost modifying action through its pre-effect reference."
         }
       ]
     },
@@ -234,50 +634,118 @@
           "name": "observe_worker_desktop",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": ["approved_view_kind"],
-          "minimum_output": ["observation_ref", "expires_at", "approved_profile_ref", "window_ref", "controls", "redacted_artifact_ref", "issues"]
+          "model_input": [
+            "approved_view_kind",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "observation_ref",
+            "expires_at",
+            "approved_profile_ref",
+            "window_ref",
+            "controls",
+            "redacted_artifact_ref",
+            "issues"
+          ]
+        },
+        {
+          "name": "prepare_desktop_action",
+          "privilege": "W1_ROUTINE_OR_W2_BY_ACTION",
+          "mutating": false,
+          "model_input": [
+            "observation_ref",
+            "control_ref",
+            "action_kind",
+            "bounded_value",
+            "client_call_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "desktop_action_ref",
+            "observation_ref",
+            "target_digest",
+            "action_kind",
+            "preconditions",
+            "expires_at",
+            "issues"
+          ],
+          "notes": "Binds one intended semantic action to one fresh observation before any desktop effect."
         },
         {
           "name": "act_on_worker_observation",
           "privilege": "W1_ROUTINE_OR_W2_BY_ACTION",
           "mutating": true,
-          "model_input": ["operation_key", "observation_ref", "control_ref", "action_kind", "bounded_value"],
-          "minimum_output": ["effect_state", "completed_steps", "postcondition", "new_observation_ref", "uncertain_boundary", "reconciliation_ref"],
-          "notes": "No arbitrary coordinates, JavaScript, account switching, clipboard, credential/settings surface, or caller-selected native application in V1."
+          "model_input": [
+            "desktop_action_ref"
+          ],
+          "minimum_output": [
+            "effect_state",
+            "desktop_action_ref",
+            "completed_steps",
+            "postcondition",
+            "new_observation_ref",
+            "uncertain_boundary",
+            "reconciliation_ref"
+          ],
+          "notes": "Consumes desktop_action_ref at most once. No arbitrary coordinates, JavaScript, account switching, clipboard, credential/settings surface, or caller-selected native application in V1."
         },
         {
           "name": "reconcile_desktop_action",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": ["operation_key", "observation_ref"],
-          "minimum_output": ["effect_state", "completed_steps", "current_window_ref", "postcondition", "issues", "observed_at"]
+          "model_input": [
+            "desktop_action_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "effect_state",
+            "desktop_action_ref",
+            "completed_steps",
+            "current_window_ref",
+            "postcondition",
+            "issues",
+            "observed_at"
+          ],
+          "notes": "A lost desktop response is reconciled by the pre-effect action reference, never by replaying the click or typing."
         }
       ]
     }
   ],
-  "required_response_fields": [
-    "operation_or_call_identity",
-    "status",
-    "effect_state",
-    "observed_at",
-    "source_or_capability_generation",
-    "target_owner",
-    "precondition_evidence",
-    "postcondition_evidence",
-    "completed_step_count_when_applicable",
-    "truncated",
-    "continuation_or_output_cursor",
-    "closed_error_code",
-    "reconciliation_ref"
-  ],
+  "response_contract": {
+    "all_responses": [
+      "call_ref",
+      "status",
+      "observed_at",
+      "source_or_capability_generation",
+      "target_owner",
+      "precondition_evidence",
+      "postcondition_evidence",
+      "truncated",
+      "continuation_or_output_cursor",
+      "closed_error_code"
+    ],
+    "modifying_or_reconciliation_only": [
+      "action_ref",
+      "effect_state",
+      "completed_step_count_when_applicable",
+      "reconciliation_ref"
+    ],
+    "rule": "Read-only responses do not populate effect_state. Reconciliation responses may report effect_state for the modifying action they observe."
+  },
   "error_codes": [
     "CAPABILITY_UNAVAILABLE",
     "CAPABILITY_GENERATION_MISMATCH",
     "PRINCIPAL_OR_SCOPE_REFUSED",
+    "FORBIDDEN_AUTHORITY_FIELD",
     "ATTEMPT_BINDING_MISSING",
     "ATTEMPT_BINDING_STALE",
+    "ACTION_REFERENCE_INVALID",
+    "ACTION_REFERENCE_EXPIRED",
+    "ACTION_REFERENCE_ALREADY_CONSUMED",
     "WORKSPACE_IDENTITY_MISMATCH",
     "SOURCE_PRECONDITION_FAILED",
+    "SOURCE_REF_NOT_ALLOWED",
     "PATH_OUT_OF_SCOPE",
     "CODEINTEL_COVERAGE_INCOMPLETE",
     "OUTPUT_BOUNDED",
@@ -299,6 +767,36 @@
     "NATIVE_MUTATOR_COVERAGE_INCOMPLETE",
     "EFFECT_UNKNOWN"
   ],
+  "mandatory_negative_cases": [
+    {
+      "id": "CALLER_SUPPLIES_FOREIGN_OPERATION_KEY",
+      "expected": "REFUSED / NOT_APPLIED / zero downstream effect; authenticated host operation remains authoritative."
+    },
+    {
+      "id": "CALLER_SELECTS_FOREIGN_OR_MOVABLE_SOURCE_REF",
+      "expected": "REFUSED read with SOURCE_REF_NOT_ALLOWED; host-bound source remains unchanged."
+    },
+    {
+      "id": "VALIDATION_LAUNCH_COMMITS_RESPONSE_LOST",
+      "expected": "reconcile_validation_start returns the one canonical process; duplicate start cannot create process two."
+    },
+    {
+      "id": "PATCH_COMMITS_RESPONSE_LOST",
+      "expected": "reconcile_workspace_patch returns the one canonical changed-path/post-image result; duplicate commit cannot apply patch two."
+    },
+    {
+      "id": "PROCESS_INPUT_ACCEPTED_RESPONSE_LOST",
+      "expected": "reconcile_process_input returns the sealed sequence and byte count; duplicate send cannot write input two."
+    },
+    {
+      "id": "CANCEL_REQUEST_ACCEPTED_RESPONSE_LOST",
+      "expected": "reconcile_process_cancel distinguishes request accepted, process still running, terminal process and cleanup state; no second cancellation is inferred necessary."
+    },
+    {
+      "id": "DESKTOP_ACTION_PARTIAL_RESPONSE_LOST",
+      "expected": "reconcile_desktop_action returns completed steps and uncertain boundary; action is not replayed."
+    }
+  ],
   "native_mutator_coverage": {
     "route_families": [
       "mastermind_executive",
@@ -313,8 +811,13 @@
       "administrator_or_installation",
       "other_connected_write_apps"
     ],
-    "classifications": ["ENFORCED", "DENIED", "ATTENDED", "UNKNOWN"],
-    "autonomous_claim_rule": "Only ENFORCED and DENIED routes may be included in the stale-session technical-fencing claim. ATTENDED remains a supported human-confirmed route. Any UNKNOWN route blocks the stronger claim.",
+    "classifications": [
+      "ENFORCED",
+      "DENIED",
+      "ATTENDED_ONLY",
+      "UNKNOWN"
+    ],
+    "autonomous_claim_rule": "Only ENFORCED and DENIED routes may be included in the stale-session technical-fencing claim. ATTENDED_ONLY is a supported human-confirmed path excluded from the autonomous fencing claim. Any UNKNOWN route blocks the stronger claim.",
     "persistence_rule": "This is an evidence artifact from existing owners, not a mutable permissions registry."
   },
   "candidate_proof_slices": [
@@ -325,6 +828,13 @@
       "state": "NOT_RUN_BY_THIS_RESEARCH"
     },
     {
+      "id": "WEB_CEO_FILE_SHELL_FS0",
+      "owner": "existing Personal MCP Cockpit/Integration and selected local-executor owners",
+      "outcome": "One authorized Web CEO lists and reads a real Mac scratch file, creates and edits one disposable file, verifies real exit 0 and intentional exit 7, refuses an out-of-scope file, and disconnects the pilot while Executive remains unchanged.",
+      "state": "PLAN_READY_HELPER_PROVEN_LOCALLY_REAL_MAC_NOT_RUN",
+      "evidence": "Mastermind PR #490 issue comment 5558890710"
+    },
+    {
       "id": "READ_SYNTHETIC_WORKSPACE",
       "owner": "existing CodeIntel/GitHub/worker-sandbox owners",
       "outcome": "One exact synthetic Attempt performs file/symbol/image reads and refuses forbidden paths and incomplete-coverage absence conclusions.",
@@ -333,12 +843,12 @@
     {
       "id": "PATCH_VALIDATE_SYNTHETIC",
       "owner": "existing worker/provider execution and Source Continuity owners",
-      "outcome": "One exact synthetic Attempt prepares/applies one small patch and runs one reviewed validation recipe with lost-response and stale-source discriminators.",
+      "outcome": "One exact synthetic Attempt prepares and applies one small patch and runs one reviewed validation recipe with lost-response and stale-source discriminators.",
       "state": "NOT_RUN_BY_THIS_RESEARCH"
     },
     {
       "id": "DURABLE_PROCESS_RETURN",
-      "owner": "existing Executive/provider/Dialog/Wake owners",
+      "owner": "existing Executive/provider/Dialogue/Wake owners",
       "outcome": "A process outlives the leader turn, remains one operation, and its result reaches the exact leader or truthfully reports wake unavailable.",
       "state": "NOT_RUN_BY_THIS_RESEARCH"
     },
