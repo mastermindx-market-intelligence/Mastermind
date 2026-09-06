@@ -240,6 +240,14 @@ def load_gateway_config(
 #: into an opaque ``internal_error``.  Everything else is opaque by default.
 _TRANSPORT_ERRORS = (ConnectionError, FileNotFoundError, OSError)
 
+#: ``aclose`` is truthful but bounded: no read thread is cancelled, and a later
+#: close may succeed after work that outlived this private shutdown budget ends.
+_CLOSE_TIMEOUT_SECONDS = 5.0
+
+
+class _ReadDeadlineExceeded(Exception):
+    """Private marker that distinguishes this adapter's deadline from I/O errors."""
+
 
 class ExecutiveMcpGateway:
     """Five tools over existing Executive OS primitives.  No new authority."""
@@ -262,15 +270,31 @@ class ExecutiveMcpGateway:
         self._clock = clock or _utc_now_z
         # Bounded reader concurrency; exactly one modifying call in flight (R12).
         self._read_semaphore = asyncio.Semaphore(MAX_CONCURRENT_READS)
+        # A permit transfers to this set only once synchronous work actually
+        # starts.  A caller may leave, but its physical read still owns the
+        # permit until this task's completion callback releases it.
+        self._physical_reads: set[asyncio.Task[Any]] = set()
         self._write_lock = asyncio.Lock()
         self._closed = False
 
     # -- lifecycle ---------------------------------------------------------
 
     async def aclose(self) -> None:
-        """Graceful shutdown.  The gateway holds no durable state to flush."""
+        """Close new admission and truthfully bound already-started reads."""
 
         self._closed = True
+        physical_reads = tuple(self._physical_reads)
+        if not physical_reads:
+            return
+        _done, pending = await asyncio.wait(
+            physical_reads, timeout=_CLOSE_TIMEOUT_SECONDS
+        )
+        if pending:
+            raise GatewayError(
+                "timeout",
+                "gateway close timed out waiting for "
+                f"{len(pending)} active physical read(s)",
+            )
 
     # -- public entry point ------------------------------------------------
 
@@ -292,6 +316,11 @@ class ExecutiveMcpGateway:
                 code=exc.code, message=exc.message,
             )
         try:
+            if self._closed:
+                raise GatewayError(
+                    "backend_unavailable",
+                    "gateway is closed and cannot admit new calls",
+                )
             validated = validate_tool_arguments(spec.name, arguments)
             if spec.name == MODIFYING_TOOL:
                 return await self._run_submit(validated, generated_at)
@@ -319,30 +348,89 @@ class ExecutiveMcpGateway:
     async def _run_read(
         self, name: str, arguments: Mapping[str, Any], generated_at: str
     ) -> dict[str, Any]:
-        async with self._read_semaphore:
-            attempts = MAX_READ_RETRIES + 1
-            last: BaseException | None = None
-            for _ in range(attempts):
-                try:
-                    return await asyncio.wait_for(
-                        asyncio.to_thread(self._read, name, arguments, generated_at),
-                        timeout=READ_TIMEOUT_SECONDS,
-                    )
-                except _TRANSPORT_ERRORS as exc:
-                    # A transient transport failure only.  A GatewayError is a
-                    # decision and is never retried.
-                    last = exc
-                    continue
-                except asyncio.TimeoutError as exc:
-                    raise GatewayError(
-                        "timeout",
-                        f"{name} exceeded the {READ_TIMEOUT_SECONDS:g}s read budget",
-                    ) from exc
-            raise GatewayError(
-                "backend_unavailable",
-                f"{name} could not read Executive OS state: "
-                f"{sanitize_external_text(last)}",
+        attempts = MAX_READ_RETRIES + 1
+        last: BaseException | None = None
+        for _ in range(attempts):
+            try:
+                return await self._run_read_attempt(name, arguments, generated_at)
+            except _ReadDeadlineExceeded as exc:
+                # This must precede the broad OSError transport family: asyncio
+                # TimeoutError aliases builtin TimeoutError, which is an OSError.
+                raise GatewayError(
+                    "timeout",
+                    f"{name} exceeded the {READ_TIMEOUT_SECONDS:g}s read budget",
+                ) from exc
+            except _TRANSPORT_ERRORS as exc:
+                # A completed, genuine transient transport failure is retried.
+                # GatewayError remains a decision and is never retried.
+                last = exc
+                continue
+        raise GatewayError(
+            "backend_unavailable",
+            f"{name} could not read Executive OS state: "
+            f"{sanitize_external_text(last)}",
+        )
+
+    async def _run_read_attempt(
+        self, name: str, arguments: Mapping[str, Any], generated_at: str
+    ) -> dict[str, Any]:
+        """Run one deadline-bounded read attempt without orphaning its permit."""
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + READ_TIMEOUT_SECONDS
+        acquired = False
+        try:
+            try:
+                async with asyncio.timeout_at(deadline):
+                    await self._read_semaphore.acquire()
+            except asyncio.TimeoutError as exc:
+                raise _ReadDeadlineExceeded from exc
+            acquired = True
+            # A waiter that acquired concurrently with close must refuse and
+            # release before it can start synchronous work.
+            if self._closed:
+                raise GatewayError(
+                    "backend_unavailable",
+                    "gateway is closed and cannot admit new calls",
+                )
+            if loop.time() >= deadline:
+                raise _ReadDeadlineExceeded
+
+            physical = asyncio.create_task(
+                asyncio.to_thread(self._read, name, arguments, generated_at)
             )
+            self._physical_reads.add(physical)
+            physical.add_done_callback(self._finish_physical_read)
+            acquired = False
+
+            physical_timeout = asyncio.timeout_at(deadline)
+            try:
+                async with physical_timeout:
+                    # Shield preserves the physical task after a caller timeout
+                    # or cancellation; its callback releases the real permit.
+                    return await asyncio.shield(physical)
+            except asyncio.TimeoutError as exc:
+                if physical_timeout.expired():
+                    raise _ReadDeadlineExceeded from exc
+                # A synchronous reader may itself raise TimeoutError as an
+                # allowed completed transport error; only our deadline is final.
+                raise
+        finally:
+            if acquired:
+                self._read_semaphore.release()
+
+    def _finish_physical_read(self, task: asyncio.Task[Any]) -> None:
+        """Release one physical permit and consume a detached task exception."""
+
+        try:
+            task.result()
+        except BaseException:
+            # The caller may already have left.  It cannot observe this task,
+            # but its completion is intentionally consumed rather than warned.
+            pass
+        finally:
+            self._physical_reads.discard(task)
+            self._read_semaphore.release()
 
     def _read(
         self, name: str, arguments: Mapping[str, Any], generated_at: str

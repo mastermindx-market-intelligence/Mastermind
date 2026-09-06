@@ -14,6 +14,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ import pytest
 
 from control_plane import ceo_boot_packet, executive_inbox
 from control_plane.executive_runtime import Runtime
-from integrations.executive_mcp import schemas
+from integrations.executive_mcp import adapter, schemas
 from integrations.executive_mcp.adapter import (
     ExecutiveMcpGateway,
     FixtureBackend,
@@ -1061,6 +1062,268 @@ def test_no_operator_home_path_in_read_grounding_or_mode_note(tmp_path: Path):
     # The label is still informative — mode + basename, never the host path.
     state = _call(gateway, "executive_state", {})
     assert state["grounding"]["runtime"] == "fixture:runtime"
+
+
+# ===========================================================================
+# Task 1 — deadline and physical-reader lifetime
+# ===========================================================================
+
+
+class _Task1BlockingReader:
+    """An in-memory physical reader whose completion is controlled by the test.
+
+    It deliberately does not touch a Runtime, database, socket, transport, or
+    subprocess.  The counters track physical synchronous work, not callers
+    waiting for the adapter semaphore.
+    """
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self._lock = threading.Lock()
+        self.active = 0
+        self.started = 0
+        self.finished = 0
+        self.peak = 0
+
+    def packet(self, **_kwargs: Any) -> dict[str, Any]:
+        with self._lock:
+            self.active += 1
+            self.started += 1
+            self.peak = max(self.peak, self.active)
+        try:
+            if not self.release.wait(5):  # pragma: no cover - cleanup guard
+                raise AssertionError("controlled reader was not released")
+            return _packet()
+        finally:
+            with self._lock:
+                self.active -= 1
+                self.finished += 1
+
+    def snapshot(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                "active": self.active,
+                "started": self.started,
+                "finished": self.finished,
+                "peak": self.peak,
+            }
+
+
+def _task_1_gateway(tmp_path: Path, reader: _Task1BlockingReader) -> ExecutiveMcpGateway:
+    return ExecutiveMcpGateway(
+        GatewayConfig(mode=ServerMode.READONLY, repo_root=tmp_path, now=_FROZEN_NOW),
+        packet_builder=reader.packet,
+        inbox_builder=lambda **_kwargs: {
+            "grounding": {},
+            "degraded": [],
+            "attention": [],
+        },
+        runtime_factory=lambda _root: (_ for _ in ()).throw(
+            AssertionError("Task 1 uses executive_state only")
+        ),
+        transport=_forbidden_transport,
+        clock=lambda: _FROZEN_NOW,
+    )
+
+
+async def _task_1_wait_for(
+    reader: _Task1BlockingReader,
+    predicate: Any,
+    *,
+    timeout: float = 1.0,
+) -> dict[str, int]:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        snapshot = reader.snapshot()
+        if predicate(snapshot):
+            return snapshot
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError(f"reader condition was not met: {snapshot}")
+        await asyncio.sleep(0.001)
+
+
+async def _task_1_release_and_drain(reader: _Task1BlockingReader) -> None:
+    reader.release.set()
+    await _task_1_wait_for(
+        reader,
+        lambda snapshot: snapshot["active"] == 0
+        and snapshot["finished"] == snapshot["started"],
+    )
+    # Let adapter-owned completion callbacks run before the next assertion or
+    # before the persistent loop is closed.
+    await asyncio.sleep(0)
+
+
+class TestTask1DeadlineAndPhysicalReaderLifetime:
+    """All concurrent cases share one persistent event loop.
+
+    Capturing loop exception contexts turns an unconsumed detached-task failure
+    into a deterministic test failure instead of a warning printed at teardown.
+    """
+
+    @classmethod
+    def setup_class(cls) -> None:
+        cls._loop = asyncio.new_event_loop()
+        cls._unhandled: list[dict[str, Any]] = []
+        cls._loop.set_exception_handler(
+            lambda _loop, context: cls._unhandled.append(dict(context))
+        )
+
+    @classmethod
+    def teardown_class(cls) -> None:
+        try:
+            assert not cls._unhandled, cls._unhandled
+        finally:
+            cls._loop.close()
+
+    def _run(self, coroutine: Any) -> Any:
+        return self._loop.run_until_complete(coroutine)
+
+    def test_task_1_timeout_is_not_retried_after_one_physical_attempt(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        reader = _Task1BlockingReader()
+        gateway = _task_1_gateway(tmp_path, reader)
+        monkeypatch.setattr(adapter, "READ_TIMEOUT_SECONDS", 0.03)
+
+        async def scenario() -> None:
+            try:
+                result = await gateway.call("executive_state", {})
+                assert result["error"]["code"] == "timeout"
+                assert reader.snapshot()["started"] == 1
+            finally:
+                await _task_1_release_and_drain(reader)
+                await gateway.aclose()
+
+        self._run(scenario())
+
+    def test_task_1_timeout_batches_hold_the_physical_limit_and_drop_waiters(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        reader = _Task1BlockingReader()
+        gateway = _task_1_gateway(tmp_path, reader)
+        monkeypatch.setattr(adapter, "READ_TIMEOUT_SECONDS", 0.03)
+
+        async def timeout_batch(count: int) -> list[dict[str, Any]]:
+            return await asyncio.gather(
+                *(gateway.call("executive_state", {}) for _ in range(count))
+            )
+
+        async def scenario() -> None:
+            try:
+                first = asyncio.create_task(timeout_batch(8))
+                await _task_1_wait_for(reader, lambda snapshot: snapshot["started"] == 4)
+                first_results = await first
+                assert [item["error"]["code"] for item in first_results] == ["timeout"] * 8
+                assert reader.snapshot()["peak"] <= 4
+                assert reader.snapshot()["started"] == 4
+
+                for _ in range(2):
+                    results = await timeout_batch(4)
+                    assert [item["error"]["code"] for item in results] == ["timeout"] * 4
+                    assert reader.snapshot()["peak"] <= 4
+                    assert reader.snapshot()["started"] == 4
+            finally:
+                await _task_1_release_and_drain(reader)
+                await asyncio.sleep(0.04)
+                assert reader.snapshot()["started"] == 4
+                await gateway.aclose()
+
+        self._run(scenario())
+
+    def test_task_1_cancellation_keeps_permits_until_threads_finish(
+        self, tmp_path: Path
+    ) -> None:
+        reader = _Task1BlockingReader()
+        gateway = _task_1_gateway(tmp_path, reader)
+
+        async def scenario() -> None:
+            first = [
+                asyncio.create_task(gateway.call("executive_state", {})) for _ in range(4)
+            ]
+            second: list[asyncio.Task[dict[str, Any]]] = []
+            try:
+                await _task_1_wait_for(reader, lambda snapshot: snapshot["started"] == 4)
+                for task in first:
+                    task.cancel()
+                first_results = await asyncio.gather(*first, return_exceptions=True)
+                assert all(isinstance(item, asyncio.CancelledError) for item in first_results)
+
+                second = [
+                    asyncio.create_task(gateway.call("executive_state", {})) for _ in range(4)
+                ]
+                await asyncio.sleep(0.04)
+                snapshot = reader.snapshot()
+                assert snapshot["started"] == 4
+                assert snapshot["peak"] <= 4
+            finally:
+                for task in second:
+                    task.cancel()
+                await asyncio.gather(*second, return_exceptions=True)
+                await _task_1_release_and_drain(reader)
+                await gateway.aclose()
+
+        self._run(scenario())
+
+    def test_task_1_transient_connection_errors_still_retry_three_times(
+        self, tmp_path: Path
+    ) -> None:
+        attempts = 0
+
+        def flaky_packet(**_kwargs: Any) -> dict[str, Any]:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise ConnectionError("synthetic transient failure")
+            return _packet()
+
+        gateway = ExecutiveMcpGateway(
+            GatewayConfig(mode=ServerMode.READONLY, repo_root=tmp_path, now=_FROZEN_NOW),
+            packet_builder=flaky_packet,
+            inbox_builder=lambda **_kwargs: {
+                "grounding": {},
+                "degraded": [],
+                "attention": [],
+            },
+            transport=_forbidden_transport,
+            clock=lambda: _FROZEN_NOW,
+        )
+
+        async def scenario() -> None:
+            try:
+                result = await gateway.call("executive_state", {})
+                assert result["ok"] is True
+                assert attempts == 3
+            finally:
+                await gateway.aclose()
+
+        self._run(scenario())
+
+    def test_task_1_close_reports_physical_work_and_refuses_new_admission(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        reader = _Task1BlockingReader()
+        gateway = _task_1_gateway(tmp_path, reader)
+        monkeypatch.setattr(adapter, "READ_TIMEOUT_SECONDS", 0.05)
+        monkeypatch.setattr(adapter, "_CLOSE_TIMEOUT_SECONDS", 0.02, raising=False)
+
+        async def scenario() -> None:
+            active = asyncio.create_task(gateway.call("executive_state", {}))
+            try:
+                await _task_1_wait_for(reader, lambda snapshot: snapshot["started"] == 1)
+                with pytest.raises(GatewayError) as excinfo:
+                    await gateway.aclose()
+                assert excinfo.value.code == "timeout"
+
+                refused = await gateway.call("executive_state", {})
+                assert refused["error"]["code"] == "backend_unavailable"
+                assert reader.snapshot()["started"] == 1
+            finally:
+                await _task_1_release_and_drain(reader)
+                await asyncio.gather(active, return_exceptions=True)
+                await gateway.aclose()
+
+        self._run(scenario())
 
 
 def test_docs_exist_and_record_the_future_gates():
