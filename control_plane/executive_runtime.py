@@ -15975,6 +15975,8 @@ class ResourceBroker:
                                     for key, demand in expected.items()
                                 ):
                                     raise physical.PhysicalResourceRefusal("OWN_DEMAND_MISMATCH", "exact own reservation rows do not cover BEGIN")
+                            # Own-phase identity and pristine charge are proven
+                            # above; global pool rows only supply additive capacity.
                             physical.evaluate_begin(reservation, policy=context["policy"], current_charges=charges,
                                                     observations=context["observations"], decision_time_ms=timestamp)
                         planned = []

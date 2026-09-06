@@ -419,11 +419,14 @@ def evaluate_reservation(request, *, policy, current_charges, observations, deci
 
 
 def evaluate_begin(request, *, policy, current_charges, observations, decision_time_ms):
+    """Evaluate additive capacity after the broker proves the owned reservation.
+
+    ``current_charges`` is the global accounting view, so it cannot prove which
+    rows belong to this request.  The ResourceBroker must first fence and verify
+    the request's exact commitment rows.  A successful result here is therefore
+    conditional accounting evidence, not an independently usable resource grant.
+    """
     normalized, policy = _admission_context(request, policy, observations, decision_time_ms)
-    reserved = {(charge.get("dimension"), charge.get("capacity_pool_id")): _uint(charge.get("remaining_charge"), "remaining_charge") for charge in current_charges}
-    for demand in _request_charges(normalized):
-        if reserved.get((demand["dimension"], demand["capacity_pool_id"]), -1) < demand["qualified_incremental_peak"]:
-            _refuse("MISSING_RESERVED_CHARGE", "BEGIN requires every requested demand to remain reserved")
     _check_capacity(policy, observations, current_charges)
     return {"admitted": True, "code": "FRESH_BEGIN", "request_fingerprint": physical_request_fingerprint(request), "fresh_begin": True, "charges": _request_charges(normalized)}
 

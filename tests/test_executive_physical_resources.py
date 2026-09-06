@@ -252,13 +252,52 @@ def test_internal_git_and_external_materialization_demands_are_both_required():
 
 
 def test_begin_counts_own_reserved_demand_exactly_once():
-    charges = _reserved_charges()
-    observations = _observations(); observations["pools"]["external"]["available"] = 90
-    result = evaluate_begin(_request(), policy=_policy(), current_charges=charges, observations=observations, decision_time_ms=100)
-    assert result["admitted"] is True and result["fresh_begin"] is True
+    own_charges = _reserved_charges()
+    linked_charge = copy.deepcopy(own_charges[0])
+    linked_charge["qualified_incremental_peak"] = 5
+    linked_charge["remaining_charge"] = 5
+    observations = _observations()
+    observations["pools"]["memory"]["available"] = 35
+    observations["pools"]["external"]["available"] = 90
+
+    # The broker has already proved the operation's own reservation rows.  The
+    # pure accounting layer must include every co-resident charge exactly once,
+    # independent of row order, rather than infer ownership from a global row.
+    for charges in ([linked_charge, *own_charges], [*own_charges, linked_charge]):
+        result = evaluate_begin(
+            _request(),
+            policy=_policy(),
+            current_charges=charges,
+            observations=observations,
+            decision_time_ms=100,
+        )
+        assert result["admitted"] is True and result["fresh_begin"] is True
+
+    insufficient = copy.deepcopy(observations)
+    insufficient["pools"]["memory"]["available"] = 34
     with pytest.raises(PhysicalResourceRefusal) as exc:
-        evaluate_begin(_request(), policy=_policy(), current_charges=charges[:-1], observations=observations, decision_time_ms=100)
-    assert exc.value.code == "MISSING_RESERVED_CHARGE"
+        evaluate_begin(
+            _request(),
+            policy=_policy(),
+            current_charges=[linked_charge, *own_charges],
+            observations=insufficient,
+            decision_time_ms=100,
+        )
+    assert exc.value.code == "INSUFFICIENT_CAPACITY"
+
+    overflow_charges = copy.deepcopy(own_charges)
+    overflow_charges[0]["remaining_charge"] = (1 << 63) - 1
+    overflow_linked = copy.deepcopy(linked_charge)
+    overflow_linked["remaining_charge"] = 1
+    with pytest.raises(PhysicalResourceRefusal) as exc:
+        evaluate_begin(
+            _request(),
+            policy=_policy(),
+            current_charges=[overflow_linked, *overflow_charges],
+            observations=observations,
+            decision_time_ms=100,
+        )
+    assert exc.value.code == "NUMERIC_OVERFLOW"
 
 
 def test_stale_boot_window_sequence_and_policy_movement_refuse():

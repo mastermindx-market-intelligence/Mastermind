@@ -2012,7 +2012,7 @@ def test_m2_stale_generation_revision_and_terminal_reopen_are_refused(m2_store):
     runtime, _, request, _ = m2_store(); reserved = _m2_reserve(runtime, request)
     # A valid-schema but incomplete own reservation cannot borrow a foreign
     # operation's matching pool rows to pass BEGIN completeness.
-    for corruption in ('missing', 'inflated', 'attributed', 'revision'):
+    for corruption in ('missing', 'inflated', 'attributed', 'revision', 'peak', 'window', 'attribution'):
         damaged, _, _, _ = m2_store('own-' + corruption)
         with runtime.store.read() as source, damaged.store.transaction() as target:
             for table in ('events', 'physical_resource_commitments', 'physical_resource_demands'):
@@ -2023,13 +2023,19 @@ def test_m2_stale_generation_revision_and_terminal_reopen_are_refused(m2_store):
                         if corruption == 'missing': continue
                         field, value = {'inflated': ('remaining_charge', 21),
                                         'attributed': ('attributed_materialized_or_active', 1),
-                                        'revision': ('observed_revision', 2)}[corruption]
+                                        'revision': ('observed_revision', 2),
+                                        'peak': ('qualified_incremental_peak', 21),
+                                        'window': ('window_binding_json', json.dumps({**json.loads(row['window_binding_json']), 'baseline_id': 'foreign-baseline'})),
+                                        'attribution': ('attribution_json', '{"attribution_id":"foreign"}')}[corruption]
                         values[columns.index(field)] = value
                     placeholders = ','.join('?' for _ in columns)
                     target.execute(f"INSERT INTO {table}({','.join(columns)}) VALUES({placeholders})", tuple(values))
         foreign = copy.deepcopy(request); foreign['operation_key'] = 'foreign'; foreign['command_id'] = 'physical:foreign'
         assert _m2_reserve(damaged, foreign)['admitted']
-        assert damaged.broker.begin_physical(_m2_envelope(request, reserved, 'bad-own'), caller_context=None)['code'] == 'OWN_DEMAND_MISMATCH'
+        before = _m2_rows(damaged)
+        refused = damaged.broker.begin_physical(_m2_envelope(request, reserved, 'bad-own'), caller_context=None)
+        assert refused['code'] == 'OWN_DEMAND_MISMATCH' and refused['fresh_begin'] is False
+        assert _m2_rows(damaged) == before
     for field in ('allocation_generation', 'expected_revision'):
         stale = _m2_envelope(request, reserved, 'stale-' + field); stale['commitments'][0][field] += 1
         assert runtime.broker.begin_physical(stale, caller_context=None)['code'] == 'STALE_COMMITMENT'
@@ -2091,20 +2097,68 @@ def test_m2_begin_rechecks_freshness_and_policy_after_write_lock(m2_store):
 
 
 def test_m2_begin_replay_and_new_command_never_return_fresh_grant(m2_store):
-    runtime, second, request, _ = m2_store(); reserved = _m2_reserve(runtime, request)
-    envelope = _m2_envelope(request, reserved, 'begin')
-    first = runtime.broker.begin_physical(envelope, caller_context=None)
-    assert first['fresh_begin'] is True
-    assert first['start_deadline_ms'] == 1100
-    with runtime.store.read() as connection:
-        for row in connection.execute('SELECT payload_json FROM events'):
-            payload = json.loads(row[0])
-            assert 'fresh_begin' not in payload and 'fresh_begin' not in payload['receipt']
-    replay = second.broker.begin_physical(envelope, caller_context=None)
-    assert replay['receipt'] == first['receipt'] and replay['fresh_begin'] is False
-    envelope['reservation']['command_id'] = 'physical:new-begin-command'
-    reconciled = second.broker.begin_physical(envelope, caller_context=None)
-    assert reconciled['receipt'] == first['receipt'] and reconciled['fresh_begin'] is False
+    import copy
+    # Exercise real SQLite query order independently of insertion/phase order.
+    # A20 + B10 uses exactly the available40 minus protected10 memory boundary.
+    for co_start in (False, True):
+        for reverse_insertion in (False, True):
+            for reverse_rows in (False, True):
+                name = f'{co_start}-{reverse_insertion}-{reverse_rows}'
+                runtime, second, request, context = m2_store(name)
+                small = copy.deepcopy(request)
+                small['operation_key'] = 'smaller'; small['command_id'] = 'physical:smaller'
+                small_phase = small['phases'][0]
+                small_phase['phase_key'] = 'smaller'
+                small_phase['profile'] = 'SYNTHETIC_SMALL_CREATE'
+                small_phase['demands'][0]['qualified_incremental_peak'] = 10
+                profile = copy.deepcopy(context['policy']['profiles'][0])
+                profile['profile'] = small_phase['profile']
+                profile['qualified_demands'] = copy.deepcopy(small_phase['demands'])
+                context['policy']['profiles'].append(profile)
+                context['observations']['pools']['memory']['available'] = 40
+                def row_order(_broker, connection, stage):
+                    if stage == 'locked':
+                        connection.execute(f'PRAGMA reverse_unordered_selects={int(reverse_rows)}')
+                context['at_stage'] = row_order
+                if co_start:
+                    request['phases'].append(small_phase)
+                    if reverse_insertion: request['phases'].reverse()
+                    reserved = _m2_reserve(runtime, request)
+                else:
+                    pairs = [(runtime, request), (second, small)]
+                    if reverse_insertion: pairs.reverse()
+                    results = {value['operation_key']: _m2_reserve(instance, value) for instance, value in pairs}
+                    assert all(result['admitted'] for result in results.values()), results
+                    reserved = results[request['operation_key']]
+                assert reserved['admitted'], reserved
+                envelope = _m2_envelope(request, reserved, 'begin')
+                first = runtime.broker.begin_physical(envelope, caller_context=None)
+                assert first['fresh_begin'] is True, (name, first)
+                assert first['start_deadline_ms'] == 1100
+                with runtime.store.read() as connection:
+                    for row in connection.execute('SELECT payload_json FROM events'):
+                        payload = json.loads(row[0])
+                        assert 'fresh_begin' not in payload and 'fresh_begin' not in payload['receipt']
+                replay = second.broker.begin_physical(envelope, caller_context=None)
+                assert replay['receipt'] == first['receipt'] and replay['fresh_begin'] is False
+                envelope['reservation']['command_id'] = 'physical:new-begin-command'
+                reconciled = second.broker.begin_physical(envelope, caller_context=None)
+                assert reconciled['receipt'] == first['receipt'] and reconciled['fresh_begin'] is False
+
+                # A different store starts with the same pristine reservations,
+                # then its current observation crosses the protected boundary.
+                limited, _, limited_request, limited_context = m2_store(name + '-limited')
+                limited_context['policy'] = copy.deepcopy(context['policy'])
+                limited_context['at_stage'] = row_order
+                limited_request = copy.deepcopy(request)
+                limit_reserved = _m2_reserve(limited, limited_request)
+                assert limit_reserved['admitted'], limit_reserved
+                if not co_start: assert _m2_reserve(limited, small)['admitted']
+                limited_context['observations']['pools']['memory']['available'] = 39
+                before = _m2_rows(limited)
+                refused = limited.broker.begin_physical(_m2_envelope(limited_request, limit_reserved, 'capacity'), caller_context=None)
+                assert refused['code'] == 'INSUFFICIENT_CAPACITY' and refused['fresh_begin'] is False, refused
+                assert _m2_rows(limited) == before
 
 
 def test_m2_lost_begin_reply_reconciles_with_zero_effect_stub_calls(m2_store):
