@@ -157,6 +157,9 @@ def observe_root_lanes(runtime: Runtime, root_job_id: str, *, max_rows: int = 64
 
             connection.set_progress_handler(budget, interval)
             try:
+                # Qualify this exact read snapshot, not just a cached readonly open.
+                # Runtime remains the sole migration/checksum/DDL policy owner.
+                runtime.store._verify_current_schema(connection)
                 root_row = connection.execute(
                     "SELECT " + _JOB_COLUMNS + " FROM jobs j WHERE j.job_id=?", (root,)
                 ).fetchone()

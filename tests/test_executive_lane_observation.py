@@ -105,7 +105,7 @@ def test_one_snapshot_does_not_mix_a_concurrent_child_commit(tmp_path, monkeypat
     writer, parent, *_ = seed(tmp_path)
     reader = Runtime.at(tmp_path, create=False)
     real_read = reader.store.read
-    statements, contexts = [], []
+    statements, contexts, projections = [], [], []
 
     @contextmanager
     def instrumented():
@@ -117,14 +117,16 @@ def test_one_snapshot_does_not_mix_a_concurrent_child_commit(tmp_path, monkeypat
 
                 def execute(self, sql, parameters=()):
                     statements.append(sql)
-                    if len(statements) == 2:
-                        writer.jobs.create_job("concurrent child", parent_job_id=parent.job_id)
+                    if "FROM jobs j" in sql:
+                        projections.append(sql)
+                        if len(projections) == 2:
+                            writer.jobs.create_job("concurrent child", parent_job_id=parent.job_id)
                     return connection.execute(sql, parameters)
             yield ReadConnection()
 
     monkeypatch.setattr(reader.store, "read", instrumented)
     first = observer().observe_root_lanes(reader, parent.job_id)
-    assert len(contexts) == 1 and len(statements) == 2
+    assert len(contexts) == 1 and len(projections) == 2
     assert len(first["lanes"]) == 3
     second = observer().observe_root_lanes(reader, parent.job_id)
     assert len(second["lanes"]) == 4
@@ -248,3 +250,115 @@ def test_demo_failure_is_nonzero_and_opaque(monkeypatch, capsys):
     monkeypatch.setattr(cli, "demonstration", fail)
     assert cli.main(["demo"]) == 1
     assert "PRIVATE_" not in capsys.readouterr().out
+
+
+def _persisted_file_state(path):
+    stat = path.stat()
+    # Runtime mode=ro may create SQLite WAL/SHM sidecars; assert main-file integrity.
+    return (path.read_bytes(), stat.st_mode, stat.st_mtime_ns)
+
+
+def test_foreign_lookalike_schema_is_not_executive_truth(tmp_path):
+    from control_plane.executive_runtime import _DB_RELATIVE_PATH
+    path = tmp_path / _DB_RELATIVE_PATH
+    path.parent.mkdir(parents=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript("""
+        CREATE TABLE schema_migrations(version INTEGER, name TEXT, checksum TEXT);
+        INSERT INTO schema_migrations VALUES(999,'foreign','not-reviewed');
+        CREATE TABLE jobs(job_id TEXT, parent_job_id TEXT, root_job_id TEXT,
+          depth INTEGER, owner_seat TEXT, status TEXT, updated_at_ms INTEGER,
+          current_attempt_id TEXT, assigned_worker_id TEXT, assigned_quota_class TEXT);
+        CREATE TABLE attempts(attempt_id TEXT, job_id TEXT, worker_id TEXT,
+          quota_class TEXT, status TEXT, fence_generation INTEGER,
+          heartbeat_at_ms INTEGER, lease_expires_at_ms INTEGER,
+          checkpoint_sequence INTEGER, started_at_ms INTEGER, finished_at_ms INTEGER);
+        CREATE TABLE workers(worker_id TEXT, last_seen_at_ms INTEGER);
+        INSERT INTO jobs VALUES('JOB-FAKE',NULL,'JOB-FAKE',0,'ceo','QUEUED',1,NULL,NULL,NULL);
+        """)
+    finally:
+        connection.close()
+    before = _persisted_file_state(path)
+    reader = Runtime.at(tmp_path, create=False)
+    result = observer().observe_root_lanes(reader, "JOB-FAKE")
+    assert _persisted_file_state(path) == before
+    assert result["status"] == "UNAVAILABLE"
+    assert result["issues"] == ["RUNTIME_UNAVAILABLE"]
+    assert result["lanes"] is None
+    assert result["coverage"]["completeness"] == "unknown"
+
+
+def _tamper_fixture_schema(path, mutation):
+    connection = sqlite3.connect(path)
+    try:
+        statements = {
+            "checksum": "UPDATE schema_migrations SET checksum='tampered' WHERE version=1",
+            "name": "UPDATE schema_migrations SET name='tampered' WHERE version=1",
+            "vector": "DELETE FROM schema_migrations WHERE version=1",
+            "ddl": "CREATE TABLE unexpected_schema_extension(value TEXT)",
+        }
+        connection.execute(statements[mutation])
+        connection.commit()
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("mutation", ["checksum", "name", "vector", "ddl"])
+def test_tampered_current_schema_refuses_without_mutation(tmp_path, mutation):
+    writer, parent, *_ = seed(tmp_path)
+    _tamper_fixture_schema(writer.store.path, mutation)
+    before = _persisted_file_state(writer.store.path)
+    result = observer().observe_root_lanes(Runtime.at(tmp_path, create=False), parent.job_id)
+    assert _persisted_file_state(writer.store.path) == before
+    assert result["status"] == "UNAVAILABLE"
+    assert result["issues"] == ["RUNTIME_UNAVAILABLE"]
+    assert result["lanes"] is None
+
+
+def test_exact_schema_is_requalified_after_previous_success(tmp_path):
+    writer, parent, *_ = seed(tmp_path)
+    reader = Runtime.at(tmp_path, create=False)
+    first = observer().observe_root_lanes(reader, parent.job_id)
+    assert first["status"] == "OBSERVED"
+    _tamper_fixture_schema(writer.store.path, "checksum")
+    before = _persisted_file_state(writer.store.path)
+    second = observer().observe_root_lanes(reader, parent.job_id)
+    assert _persisted_file_state(writer.store.path) == before
+    assert second["status"] == "UNAVAILABLE"
+    assert second["lanes"] is None
+
+
+def test_exact_schema_uses_the_same_read_transaction_before_rows(tmp_path, monkeypatch):
+    _, parent, *_ = seed(tmp_path)
+    reader = Runtime.at(tmp_path, create=False)
+    original_read = reader.store.read
+    original_verify = reader.store._verify_current_schema
+    events = []
+    connections = []
+
+    @contextmanager
+    def traced_read():
+        with original_read() as connection:
+            connections.append(connection)
+            def trace(statement):
+                if "FROM jobs j" in statement:
+                    events.append("projection")
+            connection.set_trace_callback(trace)
+            try:
+                yield connection
+            finally:
+                connection.set_trace_callback(None)
+
+    def verified(connection):
+        assert connection is connections[-1]
+        assert connection.in_transaction is True
+        events.append("qualification")
+        original_verify(connection)
+
+    monkeypatch.setattr(reader.store, "read", traced_read)
+    monkeypatch.setattr(reader.store, "_verify_current_schema", verified)
+    result = observer().observe_root_lanes(reader, parent.job_id)
+    assert result["status"] == "OBSERVED"
+    assert len(connections) == 1
+    assert events == ["qualification", "projection", "projection"]
