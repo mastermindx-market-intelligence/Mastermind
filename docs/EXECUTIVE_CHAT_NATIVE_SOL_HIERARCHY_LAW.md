@@ -67,7 +67,7 @@ CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
 WHY_PRO_MODE: <specific frontier-reasoning advantage required by this mission>
 WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
 PRO_MODE_TASK_CLASS: <one allowed class below>
-EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+EXPECTED_DURATION_MINUTES: <integer between 1 and 1440 minutes, inclusive>
 STOP_CONDITION: <observable completion or abort condition>
 ```
 
@@ -80,16 +80,23 @@ HARD_DEBUGGING
 ADVERSARIAL_JUDGMENT
 ```
 
-All fields are required. `EXPECTED_DURATION_MINUTES` must be an integer between 80 and 1440 minutes,
-inclusive, and therefore at least 80 minutes. The work must genuinely belong to the named class. A
-class label, importance, model prestige, or a desire for more effort is not sufficient.
+All fields are required. `EXPECTED_DURATION_MINUTES` must be an integer between 1 and 1440 minutes,
+inclusive. The work must genuinely belong to the named class. A class label, importance, model
+prestige, or a desire for more effort is not sufficient.
+
+Duration is a planning estimate, not a minimum run time. Short substantive work is eligible
+under the same task-class and justification gates. Do not inflate an estimate or keep a session
+generating to fill it. Complete the useful authorized work batch, then checkpoint or yield.
+Current model/account allowances and remaining capacity remain facts supplied by existing Capacity
+owners; this receipt neither reserves quota nor proves model availability. No quota constants,
+new capacity store, or provider entitlement are introduced here.
 
 Pro mode is categorically refused for handoffs; `ACK / PICKUP_ACK / START / CONTINUE / STOP`
 lifecycle or routing packets; status checks; monitoring / watchers / polling; message relay;
-routing / placement / foregrounding; mechanical edits or tests; simple reviews; and other short
-bounded work. Those turns remain `NON_PRO_DEFAULT` even when they support a larger program that may
-separately contain a qualifying Pro-mode reasoning turn. An absent, incomplete, under-duration,
-over-duration, ineligible, or stale receipt produces:
+routing / placement / foregrounding; mechanical edits or tests; simple reviews; and other routine
+administrative work. Those turns remain `NON_PRO_DEFAULT` even when they support a larger program that may
+separately contain a qualifying Pro-mode reasoning turn. An absent, incomplete, out-of-range,
+ineligible, or stale receipt produces:
 
 ```text
 PRO_MODE_REFUSED / USE_NON_PRO_MODE
