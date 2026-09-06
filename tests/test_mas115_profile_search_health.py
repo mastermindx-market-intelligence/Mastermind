@@ -398,8 +398,15 @@ def test_success_path_never_calls_other_bounded_http_endpoints(monkeypatch):
 
 
 def test_profile_only_request_guard_refuses_non_search_shapes_before_http():
-    fake = _FakeHttp([])
-    narrowed = health._ProfileSearchOnlyClient(client=fake)
+    # The fake records every shape; it must not enforce the guard under test.
+    class RecordingHttp:
+        def __init__(self):
+            self.calls = []
+
+        def stream(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            return _FakeWireResponse(vendors._BoundedResponse(200, _payload([], 0)))
+
     canonical_body = {
         "is_removed": False,
         "limit": vendors._PROFILE_PAGE_SIZE,
@@ -410,24 +417,51 @@ def test_profile_only_request_guard_refuses_non_search_shapes_before_http():
         "sort": "asc",
         "folder_id": _FOLDER,
     }
-    attempts = (
-        ("GET", vendors._MLX_CLOUD_ORIGIN, "/profile/search", canonical_body),
-        ("POST", "https://example.invalid", "/profile/search", canonical_body),
-        ("POST", vendors._MLX_CLOUD_ORIGIN, "/profile/create", canonical_body),
-        ("POST", vendors._MLX_CLOUD_ORIGIN, "/profile/search", {**canonical_body, "search_text": "x"}),
-    )
-    for method, origin, path, body in attempts:
+    canonical = {
+        "method": "POST",
+        "origin": vendors._MLX_CLOUD_ORIGIN,
+        "path": "/profile/search",
+        "headers": {"Authorization": f"Bearer {_SECRET}"},
+        "params": None,
+        "json_body": canonical_body,
+    }
+
+    def invoke(fake, request):
+        sink = vendors._InitialPeerCensusDiagnosticSink(
+            vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+        )
+        client = health._ProfileSearchOnlyClient(client=fake)
+        return client._request(**request, diagnostic_sink=sink)
+
+    positive = RecordingHttp()
+    assert invoke(positive, canonical).status_code == 200
+    assert len(positive.calls) == 1
+
+    attempts = [
+        {**canonical, "method": "GET"},
+        {**canonical, "origin": "https://example.invalid"},
+        {**canonical, "path": "/profile/create"},
+        {**canonical, "params": {}},
+        {**canonical, "headers": {}},
+        {**canonical, "headers": {**canonical["headers"], "X-Extra": "x"}},
+    ]
+    for key, value in (
+        ("is_removed", True), ("limit", 1), ("offset", -1),
+        ("offset", True), ("offset", vendors._MAX_PROFILE_CENSUS),
+        ("search_text", "x"), ("storage_type", "local"),
+        ("order_by", "name"), ("sort", "desc"), ("folder_id", ""),
+        ("extra", "x"),
+    ):
+        attempts.append({**canonical, "json_body": {**canonical_body, key: value}})
+    attempts.append({
+        **canonical,
+        "json_body": {key: value for key, value in canonical_body.items() if key != "folder_id"},
+    })
+    for request in attempts:
+        fake = RecordingHttp()
         with pytest.raises(core.CanaryRefusal):
-            narrowed._request(
-                method,
-                origin,
-                path,
-                headers={"Authorization": f"Bearer {_SECRET}"},
-                params=None,
-                json_body=body,
-                diagnostic_sink=None,
-            )
-    assert fake.search_calls == 0
+            invoke(fake, request)
+        assert fake.calls == []
 
 
 def test_checked_http_close_is_one_shot_and_exact_boolean():
@@ -686,3 +720,27 @@ def test_setup_exact_confirmation_dispatches_only_fixed_health_entry(monkeypatch
     )
     assert setup.main(["profile-search-health", "--vendor", "multilogin"]) == 0
     assert calls == ["health"]
+
+
+def test_request_cancellation_emits_one_closed_receipt_after_http_cleanup():
+    events = []
+    out = io.StringIO()
+    fake_http = _FakeHttp([KeyboardInterrupt("private cancellation detail")], events)
+    try:
+        code = health._run_profile_search_health(
+            stdout=out,
+            preflight_loader=lambda: (_provision(), None),
+            pipe_factory=lambda: events.append("pipe_open") or SimpleNamespace(),
+            credential_reader=lambda pipe: events.append("credential_read") or core.Credential(_SECRET, "stdin"),
+            pipe_closer=lambda pipe: events.append("pipe_close") or True,
+            client_factory=lambda: events.append("client_open") or health._ProfileSearchOnlyClient(client=fake_http),
+            client_closer=health._checked_close_http_client,
+        )
+    except KeyboardInterrupt:
+        pytest.fail("request cancellation escaped before the closed receipt")
+    assert code == 2
+    assert out.getvalue() == _rendered(health._receipt("VENDOR_ERROR"))
+    assert set(json.loads(out.getvalue())) == _KEYS
+    assert events == ["pipe_open", "credential_read", "pipe_close", "client_open", "search:0", "client_close"]
+    assert fake_http.search_calls == 1
+    assert fake_http.closed == 1

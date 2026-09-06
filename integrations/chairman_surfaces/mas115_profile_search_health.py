@@ -405,7 +405,7 @@ def _run_profile_search_health(
         code = "OK" if type(matches) is list and not matches else "VENDOR_ERROR"
     except _core.CanaryRefusal as refusal:
         code = refusal.code if refusal.code in _core.RESULT_CODES else "VENDOR_ERROR"
-    except Exception:  # noqa: BLE001
+    except (Exception, KeyboardInterrupt):  # noqa: BLE001
         code = "VENDOR_ERROR"
     finally:
         try:
