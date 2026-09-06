@@ -528,6 +528,8 @@ def test_create_app_refuses_read_submit_policy_identity_drift(rsa_key, tmp_path,
         RESOURCE + "/.well-known%5coauth-protected-resource",
         RESOURCE + "/.well-known/oauth-protected-%41resource",
         RESOURCE + "//.well-known/oauth-protected-resource",
+        RESOURCE + "/./.well-known/oauth-protected-resource",
+        RESOURCE + "/../v1/tools/executive_state",
     ],
 )
 def test_create_app_refuses_valid_a1_metadata_paths_the_raw_route_fence_cannot_serve(
