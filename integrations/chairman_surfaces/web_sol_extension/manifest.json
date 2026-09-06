@@ -25,5 +25,9 @@
       ],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "action": {
+    "default_title": "Web Sol profile snapshot",
+    "default_popup": "census.html"
+  }
 }
