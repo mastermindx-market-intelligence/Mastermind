@@ -49,6 +49,30 @@ def _payload(profiles, total):
     }
 
 
+class _FakeHeaders:
+    def __init__(self, content_type="application/json"):
+        self.content_type = content_type
+
+    def get_list(self, key):
+        return [self.content_type] if key.lower() == "content-type" else []
+
+
+class _FakeWireResponse:
+    def __init__(self, response):
+        self.status_code = response.status_code
+        self.headers = _FakeHeaders()
+        self._payload = response.payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def iter_bytes(self):
+        yield json.dumps(self._payload).encode("utf-8")
+
+
 class _FakeHttp:
     def __init__(self, responses, events=None, *, close_error=False):
         self.responses = list(responses)
@@ -57,15 +81,20 @@ class _FakeHttp:
         self.search_calls = 0
         self.closed = 0
 
-    def search(self, credential, folder_id, offset, diagnostic_sink):
-        assert credential.expose() == _SECRET
-        assert folder_id == _FOLDER
+    def stream(self, method, url, *, headers=None, params=None, json=None):
+        assert method == "POST"
+        assert url.endswith("/profile/search")
+        assert headers == {"Authorization": f"Bearer {_SECRET}"}
+        assert params is None
+        assert isinstance(json, dict)
+        assert json["folder_id"] == _FOLDER
+        offset = json["offset"]
         self.events.append(f"search:{offset}")
         self.search_calls += 1
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
             raise response
-        return response
+        return _FakeWireResponse(response)
 
     def close(self):
         self.events.append("client_close")
