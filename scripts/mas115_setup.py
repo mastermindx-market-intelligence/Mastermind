@@ -64,7 +64,7 @@ def _identity(row: dict) -> tuple[str, str | None, str]:
     manager = row.get("env_manager")
     profile_id = row.get("profile_id")
     folder_id = row.get("folder_id") if manager == "multilogin" else None
-    if manager not in sb.ENV_MANANAGERS if False else sb.ENV_MANAGERS or not isinstance(profile_id, str):
+    if manager not in sb.ENV_MANAGERS or not isinstance(profile_id, str):
         raise SetupRefusal("the selected managed-browser environment is malformed")
     return manager, folder_id, profile_id
 
