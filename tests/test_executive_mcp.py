@@ -15,6 +15,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -1109,6 +1110,25 @@ class _Task1BlockingReader:
             }
 
 
+class _Task1DefaultExecutorBlockers:
+    """Occupy the loop's existing default executor without replacing it."""
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self._lock = threading.Lock()
+        self.started = 0
+
+    def block(self) -> None:
+        with self._lock:
+            self.started += 1
+        if not self.release.wait(5):  # pragma: no cover - cleanup guard
+            raise AssertionError("default-executor blocker was not released")
+
+    def started_count(self) -> int:
+        with self._lock:
+            return self.started
+
+
 def _task_1_gateway(tmp_path: Path, reader: _Task1BlockingReader) -> ExecutiveMcpGateway:
     return ExecutiveMcpGateway(
         GatewayConfig(mode=ServerMode.READONLY, repo_root=tmp_path, now=_FROZEN_NOW),
@@ -1152,6 +1172,84 @@ async def _task_1_release_and_drain(reader: _Task1BlockingReader) -> None:
     # Let adapter-owned completion callbacks run before the next assertion or
     # before the persistent loop is closed.
     await asyncio.sleep(0)
+
+
+async def _task_1_saturate_default_executor() -> tuple[
+    _Task1DefaultExecutorBlockers, list[asyncio.Task[None]]
+]:
+    """Fill the already-selected event loop executor, never a test replacement."""
+
+    loop = asyncio.get_running_loop()
+    await asyncio.to_thread(lambda: None)
+    executor = loop._default_executor
+    assert executor is not None
+    workers = executor._max_workers
+    blockers = _Task1DefaultExecutorBlockers()
+    tasks = [
+        asyncio.create_task(asyncio.to_thread(blockers.block))
+        for _ in range(workers)
+    ]
+    try:
+        deadline = loop.time() + 2.0
+        while blockers.started_count() < workers:
+            if loop.time() >= deadline:
+                raise AssertionError(
+                    f"default executor did not saturate: {blockers.started_count()}/{workers}"
+                )
+            await asyncio.sleep(0.001)
+    except BaseException:
+        blockers.release.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+    return blockers, tasks
+
+
+async def _task_1_release_default_executor(
+    blockers: _Task1DefaultExecutorBlockers, tasks: list[asyncio.Task[None]]
+) -> None:
+    blockers.release.set()
+    await asyncio.gather(*tasks)
+
+
+async def _task_1_settle_default_executor() -> None:
+    """Require every existing default-executor worker to cross a held barrier."""
+
+    loop = asyncio.get_running_loop()
+    executor = loop._default_executor
+    assert executor is not None
+    workers = executor._max_workers
+    settlers = _Task1DefaultExecutorBlockers()
+    tasks = [
+        asyncio.create_task(asyncio.to_thread(settlers.block))
+        for _ in range(workers)
+    ]
+    try:
+        deadline = loop.time() + 2.0
+        while settlers.started_count() < workers:
+            if loop.time() >= deadline:
+                raise AssertionError(
+                    "default executor did not settle every worker before the assertion"
+                )
+            await asyncio.sleep(0.001)
+    finally:
+        settlers.release.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _task_1_wait_for_queued_executor_reader(reader: _Task1BlockingReader) -> None:
+    """Prove the adapter callable is queued before the synthetic reader enters."""
+
+    loop = asyncio.get_running_loop()
+    executor = loop._default_executor
+    assert executor is not None
+    deadline = loop.time() + 2.0
+    while True:
+        if executor._work_queue.qsize() > 0:
+            assert reader.snapshot()["started"] == 0
+            return
+        if loop.time() >= deadline:
+            raise AssertionError("adapter callable was not queued behind executor blockers")
+        await asyncio.sleep(0.001)
 
 
 class TestTask1DeadlineAndPhysicalReaderLifetime:
@@ -1321,6 +1419,219 @@ class TestTask1DeadlineAndPhysicalReaderLifetime:
             finally:
                 await _task_1_release_and_drain(reader)
                 await asyncio.gather(active, return_exceptions=True)
+                await gateway.aclose()
+
+        self._run(scenario())
+
+    def test_task_1_timed_out_executor_queue_never_enters_read_after_release(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pre-entry deadline abandons queued default-executor work."""
+
+        reader = _Task1BlockingReader()
+        gateway = _task_1_gateway(tmp_path, reader)
+        monkeypatch.setattr(adapter, "READ_TIMEOUT_SECONDS", 0.2)
+
+        async def scenario() -> None:
+            blockers, blocker_tasks = await _task_1_saturate_default_executor()
+            call_task: asyncio.Task[dict[str, Any]] | None = None
+            try:
+                call_task = asyncio.create_task(gateway.call("executive_state", {}))
+                await _task_1_wait_for_queued_executor_reader(reader)
+                result = await call_task
+                assert result["error"]["code"] == "timeout"
+                assert reader.snapshot()["started"] == 0
+
+                reader.release.set()
+                await _task_1_release_default_executor(blockers, blocker_tasks)
+                await _task_1_settle_default_executor()
+                assert reader.snapshot()["started"] == 0
+            finally:
+                reader.release.set()
+                await _task_1_release_default_executor(blockers, blocker_tasks)
+                if call_task is not None:
+                    await asyncio.gather(call_task, return_exceptions=True)
+                await gateway.aclose()
+
+        self._run(scenario())
+
+    def test_task_1_cancelled_executor_queue_never_enters_read_after_release(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Caller cancellation abandons queued default-executor work."""
+
+        reader = _Task1BlockingReader()
+        gateway = _task_1_gateway(tmp_path, reader)
+        monkeypatch.setattr(adapter, "READ_TIMEOUT_SECONDS", 1.0)
+
+        async def scenario() -> None:
+            blockers, blocker_tasks = await _task_1_saturate_default_executor()
+            call_task: asyncio.Task[dict[str, Any]] | None = None
+            try:
+                call_task = asyncio.create_task(gateway.call("executive_state", {}))
+                await _task_1_wait_for_queued_executor_reader(reader)
+                call_task.cancel()
+                result = await asyncio.gather(call_task, return_exceptions=True)
+                assert len(result) == 1 and isinstance(result[0], asyncio.CancelledError)
+                assert reader.snapshot()["started"] == 0
+
+                reader.release.set()
+                await _task_1_release_default_executor(blockers, blocker_tasks)
+                await _task_1_settle_default_executor()
+                assert reader.snapshot()["started"] == 0
+            finally:
+                reader.release.set()
+                await _task_1_release_default_executor(blockers, blocker_tasks)
+                if call_task is not None:
+                    await asyncio.gather(call_task, return_exceptions=True)
+                await gateway.aclose()
+
+        self._run(scenario())
+
+    def test_task_1_close_abandons_executor_queue_before_read_entry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Close counts only entered readers and prevents queued late entry."""
+
+        reader = _Task1BlockingReader()
+        gateway = _task_1_gateway(tmp_path, reader)
+        monkeypatch.setattr(adapter, "READ_TIMEOUT_SECONDS", 1.0)
+        monkeypatch.setattr(adapter, "_CLOSE_TIMEOUT_SECONDS", 0.02)
+
+        async def scenario() -> None:
+            blockers, blocker_tasks = await _task_1_saturate_default_executor()
+            call_task: asyncio.Task[dict[str, Any]] | None = None
+            try:
+                call_task = asyncio.create_task(gateway.call("executive_state", {}))
+                await _task_1_wait_for_queued_executor_reader(reader)
+                await gateway.aclose()
+                closed_result = await call_task
+                assert closed_result["error"]["code"] == "backend_unavailable"
+                assert reader.snapshot()["started"] == 0
+
+                refused = await gateway.call("executive_state", {})
+                assert refused["error"]["code"] == "backend_unavailable"
+                assert reader.snapshot()["started"] == 0
+
+                reader.release.set()
+                await _task_1_release_default_executor(blockers, blocker_tasks)
+                await _task_1_settle_default_executor()
+                assert reader.snapshot()["started"] == 0
+            finally:
+                reader.release.set()
+                await _task_1_release_default_executor(blockers, blocker_tasks)
+                if call_task is not None:
+                    await asyncio.gather(call_task, return_exceptions=True)
+                await gateway.aclose()
+
+        self._run(scenario())
+
+    def test_task_1_expired_deadline_at_worker_entry_never_starts_read(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Worker entry rechecks the absolute deadline after loop timers stall."""
+
+        reader = _Task1BlockingReader()
+        gateway = _task_1_gateway(tmp_path, reader)
+        monkeypatch.setattr(adapter, "READ_TIMEOUT_SECONDS", 0.05)
+
+        async def scenario() -> None:
+            blockers, blocker_tasks = await _task_1_saturate_default_executor()
+            call_task: asyncio.Task[dict[str, Any]] | None = None
+            release_timer: threading.Timer | None = None
+            try:
+                call_task = asyncio.create_task(gateway.call("executive_state", {}))
+                await _task_1_wait_for_queued_executor_reader(reader)
+                release_timer = threading.Timer(0.1, blockers.release.set)
+                release_timer.start()
+                # The timer releases executor workers only after the attempt
+                # deadline.  Blocking this loop defers its timeout callback,
+                # leaving worker entry as the sole correct deadline fence.
+                time.sleep(0.25)
+                assert reader.snapshot()["started"] == 0
+
+                reader.release.set()
+                await _task_1_release_default_executor(blockers, blocker_tasks)
+                await _task_1_settle_default_executor()
+                result = await call_task
+                assert result["error"]["code"] == "timeout"
+            finally:
+                if release_timer is not None:
+                    release_timer.cancel()
+                reader.release.set()
+                await _task_1_release_default_executor(blockers, blocker_tasks)
+                await _task_1_settle_default_executor()
+                if call_task is not None:
+                    await asyncio.gather(call_task, return_exceptions=True)
+                await gateway.aclose()
+
+        self._run(scenario())
+
+    def test_task_1_close_and_worker_entry_share_one_linearization_gate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Close wins a pending-entry race before its worker can call ``_read``."""
+
+        reader = _Task1BlockingReader()
+        gateway = _task_1_gateway(tmp_path, reader)
+        monkeypatch.setattr(adapter, "READ_TIMEOUT_SECONDS", 1.0)
+        monkeypatch.setattr(adapter, "_CLOSE_TIMEOUT_SECONDS", 0.02)
+
+        async def scenario() -> None:
+            blockers, blocker_tasks = await _task_1_saturate_default_executor()
+            call_task: asyncio.Task[dict[str, Any]] | None = None
+            race_thread: threading.Thread | None = None
+            allow_close_decision = threading.Event()
+            close_decision_reached = threading.Event()
+            try:
+                call_task = asyncio.create_task(gateway.call("executive_state", {}))
+                await _task_1_wait_for_queued_executor_reader(reader)
+                attempts = tuple(gateway._read_attempts)
+                assert len(attempts) == 1
+                attempt = attempts[0]
+                original_abandon = attempt.abandon
+
+                def delayed_abandon(reason: str) -> bool:
+                    if reason == "closed":
+                        close_decision_reached.set()
+                        if not allow_close_decision.wait(2):
+                            raise AssertionError("close decision was not released")
+                    return original_abandon(reason)
+
+                monkeypatch.setattr(attempt, "abandon", delayed_abandon)
+
+                def release_executor_during_close_decision() -> None:
+                    if not close_decision_reached.wait(2):
+                        return
+                    blockers.release.set()
+                    time.sleep(0.1)
+                    allow_close_decision.set()
+
+                race_thread = threading.Thread(
+                    target=release_executor_during_close_decision,
+                    daemon=True,
+                )
+                race_thread.start()
+                await gateway.aclose()
+                race_thread.join(1)
+                assert not race_thread.is_alive()
+                assert reader.snapshot()["started"] == 0
+
+                closed_result = await call_task
+                assert closed_result["error"]["code"] == "backend_unavailable"
+                reader.release.set()
+                await _task_1_release_default_executor(blockers, blocker_tasks)
+                await _task_1_settle_default_executor()
+                assert reader.snapshot()["started"] == 0
+            finally:
+                allow_close_decision.set()
+                if race_thread is not None:
+                    race_thread.join(1)
+                reader.release.set()
+                await _task_1_release_default_executor(blockers, blocker_tasks)
+                await _task_1_settle_default_executor()
+                if call_task is not None:
+                    await asyncio.gather(call_task, return_exceptions=True)
                 await gateway.aclose()
 
         self._run(scenario())

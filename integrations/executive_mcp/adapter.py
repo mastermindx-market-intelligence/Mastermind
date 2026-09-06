@@ -32,6 +32,7 @@ import asyncio
 import dataclasses
 import json
 import os
+import threading
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -249,6 +250,58 @@ class _ReadDeadlineExceeded(Exception):
     """Private marker that distinguishes this adapter's deadline from I/O errors."""
 
 
+_READ_NOT_STARTED = object()
+
+
+class _ReadAttempt:
+    """Private ownership for one scheduled default-executor read attempt.
+
+    Creating a ``to_thread`` task does not mean its callable has entered
+    ``_read``: the existing default executor may still hold it in its queue.
+    This short gate serializes that worker entry with timeout, cancellation, and
+    close abandonment.  It is never held while the synchronous read runs.
+    """
+
+    def __init__(self, *, deadline: float, clock: Callable[[], float]) -> None:
+        self._entry_gate = threading.Lock()
+        self._state = "pending"
+        self._abandonment: str | None = None
+        self._deadline = deadline
+        self._clock = clock
+        self.task: asyncio.Task[Any] | None = None
+
+    def enter(self) -> bool:
+        """Claim the one transition that permits synchronous ``_read`` entry."""
+
+        with self._entry_gate:
+            if self._state != "pending":
+                return False
+            if self._clock() >= self._deadline:
+                self._state = "abandoned"
+                self._abandonment = "timeout"
+                return False
+            self._state = "started"
+            return True
+
+    def abandon(self, reason: str) -> bool:
+        """Prevent a pending executor callable from entering ``_read`` later."""
+
+        with self._entry_gate:
+            if self._state != "pending":
+                return False
+            self._state = "abandoned"
+            self._abandonment = reason
+            return True
+
+    def started(self) -> bool:
+        with self._entry_gate:
+            return self._state == "started"
+
+    def abandonment(self) -> str | None:
+        with self._entry_gate:
+            return self._abandonment
+
+
 class ExecutiveMcpGateway:
     """Five tools over existing Executive OS primitives.  No new authority."""
 
@@ -270,10 +323,12 @@ class ExecutiveMcpGateway:
         self._clock = clock or _utc_now_z
         # Bounded reader concurrency; exactly one modifying call in flight (R12).
         self._read_semaphore = asyncio.Semaphore(MAX_CONCURRENT_READS)
-        # A permit transfers to this set only once synchronous work actually
-        # starts.  A caller may leave, but its physical read still owns the
-        # permit until this task's completion callback releases it.
-        self._physical_reads: set[asyncio.Task[Any]] = set()
+        # Close admission and worker entry share this short, process-local
+        # linearization point.  It is never held while a synchronous read runs.
+        self._read_entry_gate = threading.Lock()
+        # This is private, process-local ownership only.  A token starts as a
+        # pending executor callable; only its entry gate marks it physical.
+        self._read_attempts: set[_ReadAttempt] = set()
         self._write_lock = asyncio.Lock()
         self._closed = False
 
@@ -282,8 +337,19 @@ class ExecutiveMcpGateway:
     async def aclose(self) -> None:
         """Close new admission and truthfully bound already-started reads."""
 
-        self._closed = True
-        physical_reads = tuple(self._physical_reads)
+        physical_reads: list[asyncio.Task[Any]] = []
+        with self._read_entry_gate:
+            self._closed = True
+            for attempt in tuple(self._read_attempts):
+                if attempt.abandon("closed"):
+                    # No synchronous work entered.  Cancelling removes queued
+                    # executor work when possible; the entry gate refuses it if
+                    # it raced into a worker thread but has not entered ``_read``.
+                    if attempt.task is not None:
+                        attempt.task.cancel()
+                    continue
+                if attempt.started() and attempt.task is not None:
+                    physical_reads.append(attempt.task)
         if not physical_reads:
             return
         _done, pending = await asyncio.wait(
@@ -396,11 +462,21 @@ class ExecutiveMcpGateway:
             if loop.time() >= deadline:
                 raise _ReadDeadlineExceeded
 
+            attempt = _ReadAttempt(deadline=deadline, clock=loop.time)
             physical = asyncio.create_task(
-                asyncio.to_thread(self._read, name, arguments, generated_at)
+                asyncio.to_thread(
+                    self._read_after_entry_gate,
+                    attempt,
+                    name,
+                    arguments,
+                    generated_at,
+                )
             )
-            self._physical_reads.add(physical)
-            physical.add_done_callback(self._finish_physical_read)
+            attempt.task = physical
+            self._read_attempts.add(attempt)
+            physical.add_done_callback(
+                lambda task: self._finish_read_attempt(task, attempt)
+            )
             acquired = False
 
             physical_timeout = asyncio.timeout_at(deadline)
@@ -408,19 +484,63 @@ class ExecutiveMcpGateway:
                 async with physical_timeout:
                     # Shield preserves the physical task after a caller timeout
                     # or cancellation; its callback releases the real permit.
-                    return await asyncio.shield(physical)
+                    result = await asyncio.shield(physical)
             except asyncio.TimeoutError as exc:
                 if physical_timeout.expired():
+                    if attempt.abandon("timeout"):
+                        physical.cancel()
                     raise _ReadDeadlineExceeded from exc
                 # A synchronous reader may itself raise TimeoutError as an
                 # allowed completed transport error; only our deadline is final.
                 raise
+            except asyncio.CancelledError:
+                if attempt.abandonment() == "closed" and (
+                    asyncio.current_task() is None
+                    or asyncio.current_task().cancelling() == 0
+                ):
+                    raise GatewayError(
+                        "backend_unavailable",
+                        "gateway is closed and cannot admit new calls",
+                    )
+                if attempt.abandon("caller"):
+                    physical.cancel()
+                raise
+
+            if result is _READ_NOT_STARTED:
+                if attempt.abandonment() == "closed":
+                    raise GatewayError(
+                        "backend_unavailable",
+                        "gateway is closed and cannot admit new calls",
+                    )
+                if attempt.abandonment() == "timeout":
+                    raise _ReadDeadlineExceeded
+                raise GatewayError(
+                    "backend_unavailable",
+                    "read attempt was abandoned before synchronous entry",
+                )
+            return result
         finally:
             if acquired:
                 self._read_semaphore.release()
 
-    def _finish_physical_read(self, task: asyncio.Task[Any]) -> None:
-        """Release one physical permit and consume a detached task exception."""
+    def _read_after_entry_gate(
+        self,
+        attempt: _ReadAttempt,
+        name: str,
+        arguments: Mapping[str, Any],
+        generated_at: str,
+    ) -> dict[str, Any] | object:
+        """Enter ``_read`` only if timeout, cancellation, and close lost the gate."""
+
+        with self._read_entry_gate:
+            if self._closed or not attempt.enter():
+                if self._closed:
+                    attempt.abandon("closed")
+                return _READ_NOT_STARTED
+        return self._read(name, arguments, generated_at)
+
+    def _finish_read_attempt(self, task: asyncio.Task[Any], attempt: _ReadAttempt) -> None:
+        """Release one permit and consume the outcome of a scheduled attempt."""
 
         try:
             task.result()
@@ -429,7 +549,7 @@ class ExecutiveMcpGateway:
             # but its completion is intentionally consumed rather than warned.
             pass
         finally:
-            self._physical_reads.discard(task)
+            self._read_attempts.discard(attempt)
             self._read_semaphore.release()
 
     def _read(
