@@ -4,7 +4,8 @@ Operation: `web-sol-census-package-closure-20260906-sol-001`
 Carrier: Slack `C0BSBM78V1N/1788711726.330709`
 Parent: `WS:CHAIRMAN-CONTROL-ROOM`, MAS-198, Mastermind #501
 Installer owner: existing #340; model/effort owner: existing #480
-Protected procedure/source baseline: `cd297f1079bf5a44b520697a096096000f64efdd`
+Original source baseline: `cd297f1079bf5a44b520697a096096000f64efdd`
+Current protected procedure pin at repair: `4fe4d6bc93d9543f77320f68342a10c5af4d4f49`
 Skillpack: `mastermind.sol_skillpack.v1`, 1.0.1, bootstrap major 1
 State: `BUILT_NOT_PROVEN / SOURCE_ONLY / HOLD_FOR_REVIEW`
 
@@ -16,8 +17,9 @@ renderer correctly produces three configuration/launcher artifacts. It does not
 claim to package static extension source. This additive function makes that next
 step explicit without changing that contract or creating another installer.
 
-`render_census_extension_bundle` returns the existing `DeploymentBundle`, containing
-seven exact source files and three generated artifacts. Its existing `as_files`,
+`render_census_extension_bundle` returns a private `DeploymentBundle`-compatible
+complete-bundle subtype containing seven exact source files and three generated
+artifacts. Its existing `as_files`,
 `plan_deployment`, rollback manifest and `verify_deployment_readback` consumers cover
 all ten. Removing or modifying any member makes exact readback fail.
 
@@ -58,6 +60,26 @@ does not authenticate a Git commit, prove source protection, inspect JavaScript
 semantics, attest HTML dependencies, authorize installation, or prove live behavior.
 The caller must establish source provenance and independent source review before use.
 No native wire schema, capability digest, package-version fence or protocol changes.
+
+## Public receipt boundary
+
+The complete bundle preserves source commit, instance, native-host and profile-derived
+identity internally because exact binding, artifact destinations, bundle digest,
+deployment planning, readback and rollback depend on them. Its public projection is
+separately constrained to exactly six integrity fields:
+
+- `schema`
+- `package_version`
+- `protocol_major`
+- `capability_digest`
+- `bundle_digest`
+- `artifact_digests`
+
+The projection omits `source_commit`, `instance_id`, `native_host_name` and raw profile
+identity. All ten artifact digests remain present. The legacy generated-only
+`DeploymentBundle.public_receipt` retains its original identity-bearing byte/behavior
+contract; this repair does not silently change existing consumers or add a second
+receipt schema/store.
 
 ## Proof and release sequence
 
@@ -124,3 +146,32 @@ fetched before the successful test. The tested renderer and extension source pin
 are distinct and explicit. No native wrapper ran, no browser launched, and no real
 profile, account, installation or provider behavior was exercised by this child.
 Independent review, hosted CI, source release and #340 installation remain separate.
+
+## Independent-review repair evidence, 2026-09-06
+
+Independent exact-head review `5126187281` requested changes because the complete
+renderer returned `dataclasses.replace(generated, ...)` and therefore inherited the
+legacy public receipt, exposing `source_commit`, `instance_id` and
+`native_host_name`. The review explicitly required a complete-bundle-only payload-free
+projection while preserving the generated-only contract.
+
+TDD repair on the incumbent branch and carrier:
+
+- RED: `test_complete_bundle_public_receipt_exposes_integrity_not_source_or_profile_identity`
+  failed on the three extra identity keys. Log SHA-256:
+  `99cb9aa3894dd8b3d8c5af152f1afdb3e70420aff382207d7e95300fe6883ed3`.
+- GREEN control: the new complete-bundle projection test and unchanged legacy public
+  receipt test both passed. Log SHA-256:
+  `7d8791a9bb72e65283b3c0e607dd407e50bce3050f811bc7cf9b37f38c330fda`.
+- Focused deployment/complete-bundle suite: **84 passed**.
+- Full applicable Web-Sol Python family: **320 passed** with a short isolated
+  pytest base directory; compile and `git diff --check` passed.
+- The #502 Node census fixture is not present on this pre-#502 source branch, so a
+  direct Node invocation was inapplicable rather than a test failure. Current-base
+  integration after #502 protection must run that fixture separately.
+
+The production change is limited to a private complete-bundle subtype and construction
+of that subtype in `render_census_extension_bundle`. Bundle/source/profile identity
+still changes the internal `bundle_digest`; all ten artifact digests remain externally
+committed. No browser, profile, installer, native wrapper, provider or runtime effect
+occurred in this repair.

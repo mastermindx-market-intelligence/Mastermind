@@ -160,6 +160,24 @@ class DeploymentBundle:
 
 
 @dataclasses.dataclass(frozen=True)
+class _CensusExtensionDeploymentBundle(DeploymentBundle):
+    """Complete census bundle with a payload-free public projection."""
+
+    @property
+    def public_receipt(self) -> dict[str, object]:
+        return {
+            "schema": PUBLIC_RECEIPT_SCHEMA,
+            "package_version": wsp.WEB_SOL_PACKAGE_VERSION,
+            "protocol_major": wsp.TRANSPORT_PROTOCOL_MAJOR,
+            "capability_digest": wsp.transport_capability_digest(),
+            "bundle_digest": self.bundle_digest,
+            "artifact_digests": {
+                item.kind: item.sha256 for item in self.artifacts
+            },
+        }
+
+
+@dataclasses.dataclass(frozen=True)
 class DeploymentChange:
     path: Path
     action: str
@@ -553,11 +571,17 @@ def render_census_extension_bundle(
         (*generated.artifacts, *source_artifacts),
         key=lambda item: (str(item.destination), item.kind),
     ))
-    return dataclasses.replace(
-        generated,
+    return _CensusExtensionDeploymentBundle(
+        instance_id=generated.instance_id,
+        native_host_name=generated.native_host_name,
+        source_commit=generated.source_commit,
+        wrapper_argv=generated.wrapper_argv,
         artifacts=artifacts,
-        bundle_digest=_bundle_digest(release=release, instance_id=generated.instance_id,
-                                     artifacts=artifacts),
+        bundle_digest=_bundle_digest(
+            release=release,
+            instance_id=generated.instance_id,
+            artifacts=artifacts,
+        ),
     )
 
 

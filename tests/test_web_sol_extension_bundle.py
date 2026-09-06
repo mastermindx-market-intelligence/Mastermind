@@ -53,6 +53,40 @@ def test_complete_bundle_preserves_generated_contract_and_all_source_bytes(asset
     assert deployment.verify_deployment_readback(complete, complete.as_files())["ok"] is True
 
 
+def test_complete_bundle_public_receipt_exposes_integrity_not_source_or_profile_identity(assets):
+    raw_profile_id = "44444444-4444-4444-8444-444444444444"
+    exact_source_commit = "f" * 40
+    bundle = render(
+        assets,
+        row=binding(profile_id=raw_profile_id),
+        spec=release(source_commit=exact_source_commit),
+    )
+
+    receipt = bundle.public_receipt
+    assert set(receipt) == {
+        "schema",
+        "package_version",
+        "protocol_major",
+        "capability_digest",
+        "bundle_digest",
+        "artifact_digests",
+    }
+    assert receipt["schema"] == deployment.PUBLIC_RECEIPT_SCHEMA
+    assert receipt["bundle_digest"] == bundle.bundle_digest
+    assert receipt["artifact_digests"] == {
+        item.kind: item.sha256 for item in bundle.artifacts
+    }
+
+    serialized = json.dumps(receipt, sort_keys=True)
+    for forbidden in (
+        exact_source_commit,
+        raw_profile_id,
+        bundle.instance_id,
+        bundle.native_host_name,
+    ):
+        assert forbidden not in serialized
+
+
 def test_order_independence_immutability_and_profile_isolation(assets):
     before = copy.deepcopy(assets)
     first = render(assets)
