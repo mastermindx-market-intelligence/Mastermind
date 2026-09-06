@@ -271,6 +271,8 @@ def _run_profile_search_health(
         not isinstance(provision, dict)
         or provision.get("vendor") != "multilogin"
         or provision.get("browser_type") != "mimic"
+        or not isinstance(provision.get("profile_id"), str)
+        or not provision.get("profile_id")
         or not isinstance(provision.get("folder_id"), str)
         or not provision.get("folder_id")
     ):
