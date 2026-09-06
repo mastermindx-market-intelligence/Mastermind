@@ -65,21 +65,20 @@ No native wire schema, capability digest, package-version fence or protocol chan
 
 The complete bundle preserves source commit, instance, native-host and profile-derived
 identity internally because exact binding, artifact destinations, bundle digest,
-deployment planning, readback and rollback depend on them. Its public projection is
-separately constrained to exactly six integrity fields:
+deployment planning, readback and rollback depend on them. Both public serialization
+routes have complete-bundle-only projections:
 
-- `schema`
-- `package_version`
-- `protocol_major`
-- `capability_digest`
-- `bundle_digest`
-- `artifact_digests`
+- `bundle.public_receipt` contains exactly `schema`, `package_version`,
+  `protocol_major`, `capability_digest`, `bundle_digest`, and `artifact_digests`.
+- `verify_deployment_readback(bundle, current_files)` contains exactly `schema`,
+  `ok`, `bundle_digest`, and `artifact_digests` after exact byte verification.
 
-The projection omits `source_commit`, `instance_id`, `native_host_name` and raw profile
-identity. All ten artifact digests remain present. The legacy generated-only
-`DeploymentBundle.public_receipt` retains its original identity-bearing byte/behavior
-contract; this repair does not silently change existing consumers or add a second
-receipt schema/store.
+Both projections omit `source_commit`, `instance_id`, `native_host_name` and raw
+profile identity while retaining all ten artifact digests. The legacy generated-only
+`DeploymentBundle.public_receipt` and five-key readback receipt retain their original
+identity-bearing byte/order/behavior contracts. These repairs do not relabel the
+readback consumer, silently change legacy consumers, or add another receipt schema or
+store.
 
 ## Proof and release sequence
 
@@ -175,3 +174,42 @@ of that subtype in `render_census_extension_bundle`. Bundle/source/profile ident
 still changes the internal `bundle_digest`; all ten artifact digests remain externally
 committed. No browser, profile, installer, native wrapper, provider or runtime effect
 occurred in this repair.
+
+## Second independent-review repair evidence, 2026-09-06
+
+Independent exact-head review `5126402205` requested changes at
+`c2e9f8162f880468aa1b05148a0d22a0ba43f074`: the direct complete-bundle projection
+was identity-free, but the documented-public `verify_deployment_readback` consumer
+still emitted the derived `instance_id`. Root admitted one local-only correction on
+the original source carrier; remote push remained explicitly ungranted.
+
+TDD and local evidence for the second correction:
+
+- RED: `test_complete_bundle_readback_receipt_exposes_integrity_not_identity`
+  failed because the readback receipt contained `instance_id`; the exact legacy
+  generated-bundle readback control passed. RED log SHA-256:
+  `971e99520d3334cd879896bf6ab867963f30e1f718aeb91ee66858c814453919`.
+- GREEN: the same two discriminators passed after the minimum subtype-only projection
+  change. GREEN log SHA-256:
+  `99db33d5c94c6f7da021687c7391181685cc33299c5435b1c861e2db3be3ec87`.
+- Focused deployment/complete-bundle suite: **86 collected and passed**; log SHA-256
+  `b7dee23c5b0bdea31c1d8ae048f013874efa279f477dccaba3f25c872d457efb`.
+- Full applicable Web-Sol Python family: **322 collected and passed** using the fresh
+  short pytest base `/tmp/r5`; log SHA-256
+  `bfe89c27e132745f82f4f85848e64c38c3d77cebbbad4fa3c4b3e5b33a829428`.
+- The first full-family attempt used a longer owned temporary root and produced five
+  `socket_path_too_long` failures in unrelated AF_UNIX transport tests. Every failure
+  had that exact class; the result is preserved as an environmental qualification,
+  not counted as passing evidence. Log SHA-256:
+  `2893afb3c6bce211cfc44a214e7cfd7fe17836afe9c98d5210db0851ecea93f8`.
+- Python compilation and `git diff --check` passed. The empty diff-check log SHA-256 is
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+The implementation changes only the existing readback function's projection for the
+private complete-bundle subtype. Exact readback mismatch refusal executes before the
+projection; all ten artifact commitments and private identity-sensitive bundle,
+destination, plan and rollback behavior remain unchanged. The ordinary generated-only
+bundle still returns its original ordered five keys, including `instance_id`.
+No source push, PR metadata, hosted CI, review, browser, profile, native wrapper,
+provider, installation, RuntimeBinding or production effect is part of this local
+repair evidence.

@@ -440,15 +440,17 @@ def verify_deployment_readback(
     expected = bundle.as_files()
     if any(current.get(path) != payload for path, payload in expected.items()):
         raise WebSolDeploymentError("readback_mismatch")
-    return {
+    receipt: dict[str, object] = {
         "schema": READBACK_RECEIPT_SCHEMA,
         "ok": True,
-        "instance_id": bundle.instance_id,
-        "bundle_digest": bundle.bundle_digest,
-        "artifact_digests": {
-            item.kind: item.sha256 for item in bundle.artifacts
-        },
     }
+    if not isinstance(bundle, _CensusExtensionDeploymentBundle):
+        receipt["instance_id"] = bundle.instance_id
+    receipt["bundle_digest"] = bundle.bundle_digest
+    receipt["artifact_digests"] = {
+        item.kind: item.sha256 for item in bundle.artifacts
+    }
+    return receipt
 
 
 __all__ = [

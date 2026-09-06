@@ -87,6 +87,59 @@ def test_complete_bundle_public_receipt_exposes_integrity_not_source_or_profile_
         assert forbidden not in serialized
 
 
+def test_complete_bundle_readback_receipt_exposes_integrity_not_identity(assets):
+    raw_profile_id = "55555555-5555-4555-8555-555555555555"
+    exact_source_commit = "e" * 40
+    bundle = render(
+        assets,
+        row=binding(profile_id=raw_profile_id),
+        spec=release(source_commit=exact_source_commit),
+    )
+
+    receipt = deployment.verify_deployment_readback(bundle, bundle.as_files())
+    assert list(receipt) == [
+        "schema",
+        "ok",
+        "bundle_digest",
+        "artifact_digests",
+    ]
+    assert receipt["schema"] == deployment.READBACK_RECEIPT_SCHEMA
+    assert receipt["ok"] is True
+    assert receipt["bundle_digest"] == bundle.bundle_digest
+    assert receipt["artifact_digests"] == {
+        item.kind: item.sha256 for item in bundle.artifacts
+    }
+
+    serialized = json.dumps(receipt, sort_keys=True)
+    for forbidden in (
+        exact_source_commit,
+        raw_profile_id,
+        bundle.instance_id,
+        bundle.native_host_name,
+    ):
+        assert forbidden not in serialized
+
+
+def test_legacy_generated_bundle_readback_retains_identity_contract():
+    bundle = deployment.render_bundle(binding(), release())
+    receipt = deployment.verify_deployment_readback(bundle, bundle.as_files())
+
+    assert list(receipt) == [
+        "schema",
+        "ok",
+        "instance_id",
+        "bundle_digest",
+        "artifact_digests",
+    ]
+    assert receipt["schema"] == deployment.READBACK_RECEIPT_SCHEMA
+    assert receipt["ok"] is True
+    assert receipt["instance_id"] == bundle.instance_id
+    assert receipt["bundle_digest"] == bundle.bundle_digest
+    assert receipt["artifact_digests"] == {
+        item.kind: item.sha256 for item in bundle.artifacts
+    }
+
+
 def test_order_independence_immutability_and_profile_isolation(assets):
     before = copy.deepcopy(assets)
     first = render(assets)
