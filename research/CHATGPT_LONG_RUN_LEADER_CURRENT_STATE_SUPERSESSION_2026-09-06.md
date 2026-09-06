@@ -2,89 +2,119 @@
 
 **Date:** 2026-09-06  
 **Parent operation:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001`  
+**Evidence-refresh operation:** `chatgpt-pro-long-run-fs0-evidence-refresh-20260906-sol-002`  
 **Carrier:** Mastermind Draft PR #490  
 **Authority:** `RECORDS_ONLY / CURRENT_STATE_CORRECTION / NO_RUNTIME_INSTALL_DISPATCH_OR_RELEASE_AUTHORITY`  
-**Capability state:** `SPEC_ONLY / PARTIAL_EVIDENCE / ATTENDED_VENDOR_FILE_SHELL_PROVEN / COMPLETE_FS0_NOT_PROVEN`
+**Capability state:** `SPEC_ONLY / PARTIAL_EVIDENCE / ATTENDED_VENDOR_FILE_SHELL_INTERACTIVE_PROCESS_PASSIVE_VISUAL_PROVEN / GOVERNED_FS0_NOT_PROVEN`
 
 ## Purpose and precedence
 
-The original PR #490 research set was assembled across several protected-source and operating-state transitions. Its product thesis and architecture remain useful, but some sections labeled **current**, **next action**, **critical path**, **active owner**, or **release sequence** became stale after:
+The original PR #490 research set was assembled across several protected-source and operating-state transitions. Its product thesis and architecture remain useful, but sections labeled **current**, **next action**, **critical path**, **active owner**, or **release sequence** became stale after:
 
 - protected PR #500 landed U1 installation-binding/enrollment tooling;
 - the old records-recovery Slack child remained unconsumed and was terminally closed;
 - the Chairman selected direct Web-CEO access to one real Mac Studio file/shell slice as the quickest useful product vertical;
 - a concrete FS0 plan and disposable helper evidence were published;
 - author-side review identified and repaired contract, connector-evidence and evaluation-admission defects;
-- immutable PR #490 comment `5559023488` subsequently proved one attended Remote Desktop Commander Web-to-Mac file/write/shell smoke connection while leaving the complete FS0 and first-party integration gates open.
+- immutable PR #490 comment `5559023488` proved one attended Remote Desktop Commander file/write/shell smoke connection;
+- independent later receipt `5559187015` proved interactive process input, exact-owned-process cancellation, passive Mac observation and actual cropped-image delivery to a Web CEO;
+- later same-author receipt `5559231616` independently reproduced checked file/edit/shell proof and exposed the current connection's missing confinement, transient completed-process retention and broken exported `edit_block` schema.
 
-This register is the current records interpretation for PR #490. When a dated 2026-09-05 statement conflicts with this register or an in-place corrected artifact, use this order:
+This register is the current records interpretation for PR #490. When a dated statement conflicts with this register or an in-place corrected artifact, use this order:
 
 1. current protected Mastermind procedure and canonical owner readback at the action boundary;
-2. in-place corrected PR #490 artifacts at the current exact head;
-3. this supersession register;
+2. this current-state register at the latest PR #490 exact head;
+3. the machine-readable capability crosswalk at that same head;
 4. older PR #490 “current/next action” prose as historical evidence only.
 
 This document does not erase history, retroactively alter a prior observation or grant implementation authority.
 
-## Exact source snapshot used for this correction
+## Exact source and evidence snapshot
 
 - protected `master`: `467a81e84b08a7f1c3cdb9a410b2f7857816675d`
 - protected tree: `3b6c3a02440dd77055756d4a4ff4a5f7a91feeca`
 - protected procedure compatibility: Skillpack `1.0.1`, bootstrap major `1`
 - protected movement: PR #500, **Add Business Sol U1 installation binding compiler**
-- PR #490 branch before this register: `407aea15d69906fc22355a88d6463caeebcba776`
-- PR #490 branch before this evidence refresh: `cb183b45c9756c7eccaae0fb90318fc418a9538a`
-- immutable attended baseline receipt: PR #490 comment `5559023488`, created `2026-09-06T11:51:37Z`
-- branch/tree and checks must be refreshed after this commit and before review or release adjudication
+- PR #490 branch before this refresh: `19c9abb721a42de55488d00dff6f1b11869bffc8`
+- attended file/shell baseline: comment `5559023488`, created `2026-09-06T11:51:37Z`
+- attended process/passive-visual follow-through: comment `5559187015`, created `2026-09-06T12:23:22Z`
+- attended confinement/schema/retention observation: comment `5559231616`, created `2026-09-06T12:31:47Z`
+- Agent OS discovery candidate: Macro Draft/Hold PR #6944, observed head `de6fe26a484e249cc2d78febb1e5e830895cece2`
+- branch/tree and checks must be refreshed after this records commit and before review or release adjudication.
 
-## In-place corrected artifacts
+## Evidence epoch — what is actually proven
 
-| Artifact | Current correction |
-|---|---|
-| `CHATGPT_WEB_GOVERNED_WORKBENCH_CONTRACT_CANDIDATE_2026-09-05.json` | Revision 2. Canonical operation/source authority is host-derived; every mutator uses a pre-effect owner-issued action reference and dedicated loss-safe reconciliation; reads and modifying effects are distinct; source selection is host-bound; `ATTENDED_ONLY` is normalized. Still `SPEC_ONLY`. |
-| `CHATGPT_LONG_RUN_LEADER_CURRENT_CONNECTOR_AUTHORITY_OBSERVATION_2026-09-05.md` | One issue-comment write is proven. `performed_via_github_app.permissions` is app registration/configuration metadata, not proof of the complete effective installation/token grant, repository selection, per-chat product surface or stale-session reachability. |
-| `CHATGPT_LONG_RUN_LEADER_24_TASK_EVALUATION_PROTOCOL_2026-09-05.json` | Reclassified as `EVALUATION_TEMPLATE_NOT_PREREGISTERED_NOT_EXECUTABLE`. All 24 tasks remain, but fixtures, digests, answer keys, assignment, graders, denominators, exclusions, statistics, budget, provider authorization and owner acceptance are not frozen. |
-| `CHATGPT_LONG_RUN_LEADERS_CHAIRMAN_DECISION_MEMO_2026-09-05.md` | Chairman FS0 priority, parallel Steward lane, U1 protected/inert state, terminal recovery child, exact mutator identity law, current owner gates and the bounded attended receipt `5559023488` are now explicit. |
-| `CHATGPT_LONG_RUN_LEADER_CAPABILITY_CROSSWALK_2026-09-05.json` | C08/C09 and the parallel FS0 frontier now preserve the attended vendor-plugin baseline while keeping complete FS0, first-party integration and child execution unproven. |
+### File and shell baseline
 
-## Sections superseded without destructive history rewrite
+On explicit device `cfd09f03-2e6e-4a24-843c-8401d4a7169d`, the connected Web sessions proved:
 
-The following older sections remain useful for architecture, threat, failure and owner reasoning, but their **current ordering or action statement** is superseded here:
+- synthetic native seed list/read;
+- disposable create, separate read, one complete-preimage-checked single-file edit and exact-byte readback;
+- Unicode-preserving final file of 102 UTF-8 bytes with SHA-256 `f33c27f5cae5281248b3fe3dd17ca4c9a57ec9c8ee667316fa717b20ff3afd1f`;
+- one independently read completed process with exit `0`;
+- one independently read intentional nonzero process with exit `7`.
 
-| Artifact | Superseded section or claim | Current interpretation |
-|---|---|---|
-| `CHATGPT_LONG_RUN_LEADER_REFERENCE_ARCHITECTURE_AND_ROLLOUT_2026-09-05.md` | §16 rollout order, §18.2 read-only-only local evaluation, §20 current capability ledger, §21 primary action | FS0 and the Business Steward cockpit are parallel independently gated lanes. FS0 is an attended, disposable, bounded file/shell vertical—not an unrestricted live-seat shell. U1 source tooling is protected but production-inert. |
-| `CHATGPT_WEB_LONG_RUN_LEADER_RUNTIME_PROFILE_AND_VERTICAL_WAVE_MASTER_PLAN_2026-09-05.md` | any statement that Business read must finish before all local Workbench file/process work | Preserve separate profiles, but permit the Chairman-selected FS0 attended pilot through the existing Cockpit/Integration owner while the read-only Business lane continues independently. |
-| `CHATGPT_WEB_LONG_RUN_LEADER_EXISTING_OWNER_CROSSWALK_AND_GAP_DAG_2026-09-05.md` | any critical-path edge whose next action is U1 source publication or an unsubmitted generic Workbench wave | U1 publication is complete as source tooling only. The live product edge is package/app/install/OAuth/read/refresh/rollback for Steward and owner reconciliation/binding/real-Mac proof for FS0. |
-| `CHATGPT_LONG_RUN_LEADER_EXISTING_OWNER_HANDOFF_PACKETS_2026-09-05.md` | Packet language that treats U1 publication, read-only-only Workbench ordering or the old records lookup as active | Handoff packets are candidate templates. Do not dispatch U1 source publication or the terminal records lookup. FS0 may be originated only by the existing Personal-MCP Cockpit/Integration owner after deduplication and effect reconciliation. |
-| `CHATGPT_LONG_RUN_LEADER_CAPABILITY_CROSSWALK_2026-09-05.json` | C02, C08, C09 and C18 next-proof wording where inconsistent | See the current capability ledger below. The old rows are dated research snapshots, not action authority. |
-| `CHATGPT_PRO_LONG_RUN_LEADERS_INTEGRATION_AND_PROOF_2026-09-05.md` | any single-lane “Steward first, Workbench later” action order | Preserve its proof laws, but run FS0 and Steward as parallel bounded product lanes. Neither proves the other. |
-| `CHATGPT_WEB_GOVERNED_WORKBENCH_BLUEPRINT_2026-09-05.md` | any caller-supplied `operation_key`, caller-selected source ref or process-ref-only lost-launch reconciliation | The revision-2 machine-readable contract is authoritative for candidate semantics. |
-| PR #490 description | old head/tree, “contract unchanged,” unconsumed lookup as active, 24-task “protocol,” Steward-only immediate priority and independent-review-now instruction | Refresh from this register and the final repair head before review. |
+The exposed stream was not separately typed stdout/stderr. The checked shell edit is not a first-party patch service or cross-process compare-and-swap claim.
 
-All historical exact heads, observations and negative findings remain evidence for the time at which they were recorded. They are not silently relabeled as current.
+### Interactive process and passive visual baseline
+
+Receipt `5559187015` additionally proves:
+
+- stateful input to one isolated owned process across multiple tool calls, ending exit `0`;
+- force termination of one exact owned `sleep` process, followed by terminal readback with `exit=null` and independent process absence;
+- native application/window observation through installed Peekaboo;
+- a bounded `480x64` Finder-toolbar capture returned as actual image bytes to the Web model.
+
+It does not prove arbitrary descendant-tree cleanup, restart/cross-chat durability, active desktop mutation, browser attachment, exact ChatGPT identity, pointer isolation or unattended actuation.
+
+### Current connection does not satisfy governed isolation
+
+Receipt `5559231616` records two fresh `get_config` reads with:
+
+- `allowedDirectories: []`;
+- `telemetryEnabled: true`.
+
+A second owned synthetic control file outside the declared proof root was ordinarily readable. No private user file or credential was probed. The supported conclusion is that the current connection does **not** enforce the proposed pilot root and does not satisfy the intended telemetry posture. It is not a vulnerability claim and no global configuration was changed.
+
+### Exported surgical-edit schema is broken at a later boundary
+
+The installed local schema plus its installed converter produced the expected object requiring `file_path` with eight fields: `file_path`, `old_string`, `new_string`, `expected_replacements`, `range`, `content`, `options`, and `origin`. The model-facing connection still exposes zero-argument `edit_block`.
+
+The underlying local editor schema is therefore present. The exact registration/cache/remote-integration/client-conversion loss boundary remains `UNKNOWN`. No blind empty edit, vendor patch, restart or reinstall was performed.
+
+### Completed process evidence is transient
+
+A later read of previously successful PID `92561` returned `No session found`. The command was not rerun. Installed `dist/terminal-manager.js:350-367` retains only the last 100 completed sessions in a shared in-memory map and removes the oldest entry beyond that bound. Eviction is a supported explanation, but the exact loss cause for that PID was not established.
+
+A vendor PID is therefore not durable long-run evidence and cannot be the sole reconciliation identity. The accepted design must retain exact terminal/effect/output receipts through existing provider/Attempt and GitHub/evidence owners. Missing transient output never authorizes replay of a possible effect. Do not create a second process manager, PID ledger, log database, polling daemon or retry store.
 
 ## Current capability ledger
 
 | Capability | Current classification | Evidence and missing gate |
 |---|---|---|
-| Long-run leader product thesis and owner architecture | `SPEC_ONLY / REPAIR_IN_PROGRESS` | Strong records candidate; no independent current-head acceptance yet. |
-| Governed Workbench contract | `SPEC_ONLY / CONTRACT_BLOCKERS_REPAIRED_IN_SOURCE` | Revision 2 now excludes model-selected operation/source authority and supplies pre-effect reconciliation. No first-party implementation or contract-qualified canary. |
+| Long-run leader product thesis and owner architecture | `SPEC_ONLY / REPAIR_IN_PROGRESS` | Strong records candidate; no independent current-head architecture acceptance yet. |
+| Governed Workbench contract | `SPEC_ONLY / CONTRACT_BLOCKERS_REPAIRED_IN_SOURCE` | Revision 2 excludes model-selected operation/source authority and supplies pre-effect reconciliation. No first-party implementation or contract-qualified canary. |
 | 24-task evaluation | `TEMPLATE_ONLY / NOT_PREREGISTERED / NOT_RUN` | Twenty-four task definitions remain; no executable fixtures or authorization. |
 | Output-helper characterization | `PARTIAL_EVIDENCE` | 57 unique disposable helper cases passed once, with one identical repeat; no whole upstream build or real Workbench consumer. |
 | GitHub connector authority evidence | `PARTIAL_EVIDENCE` | One real comment write proven; effective installation/token/repository/action/stale-session scope remains unverified. |
 | U1 installation binding/enrollment tooling | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT` | PR #500 protected deterministic tooling; no package publication, install, OAuth or live read. |
 | Business Steward S1 | `PARTIAL / DRAFT_HOLD` | PR #463 has truthful partial source; current-base/release, app, auth, useful read, refresh and rollback remain. Its old builder is terminal. |
-| `WEB_CEO_FILE_SHELL_FS0` plan | `PARTIAL / ATTENDED_BASELINE_PROVEN / COMPLETE_FS0_NOT_PROVEN` | Comment `5558890710` preserves the plan/helper RED→GREEN; later immutable comment `5559023488` proves one bounded attended Remote Desktop Commander connection. |
-| FS0 source branch, implementation PR or child START | `NOT_PROVEN / PRESTART` | No public first-party FS0 source branch, implementation PR, receiver ACK or START was found at the last reconciliation. The vendor connection does not create that lifecycle. |
-| Web CEO → real Mac file/shell capability | `PARTIAL / PROVEN_LIVE_ONE_ATTENDED_VENDOR_CONNECTION / COMPLETE_FS0_NOT_PROVEN` | Comment `5559023488` proves explicit-device system/scratch reads, disposable create/update/readback, exact-byte verification and real exit-0/exit-7 shell outcomes. It does not prove path-denial, revocation, cancellation, first-party integration, Executive isolation, desktop/Chrome or unattended use. |
+| Attended vendor file/write/shell | `PROVEN_LIVE / ONE_CURRENT_CONNECTION / BOUNDED_SYNTHETIC_ONLY` | Comments `5559023488` and `5559231616` prove the listed synthetic file/edit/exit-0/exit-7 path. |
+| Attended interactive process input/cancel | `PROVEN_LIVE / ONE_CURRENT_CONNECTION / EXACT_OWNED_PROCESS_ONLY` | Comment `5559187015`; cancellation returned `exit=null`, not success, and arbitrary tree cleanup remains unproved. |
+| Attended passive Mac image delivery | `PROVEN_LIVE / ONE_CURRENT_CONNECTION / PASSIVE_CROP_ONLY` | Comment `5559187015`; no click, typing, focus, navigation, browser attachment or exact-chat action. |
+| Pilot root isolation | `UNSATISFIED_ON_CURRENT_CONNECTION` | `allowedDirectories=[]`; a second owned synthetic path outside the declared proof root was readable. |
+| Pilot telemetry posture | `UNSATISFIED_ON_CURRENT_CONNECTION` | `telemetryEnabled=true`; no setting mutation or waiver is recorded. |
+| Surgical `edit_block` tool | `BROKEN_ON_EXPOSED_CONNECTION / LOCAL_SCHEMA_PRESENT` | Local conversion yields eight fields; the connection exposes zero arguments; loss boundary unknown. |
+| Durable process-result retrieval | `PARTIAL / TRANSIENT_SHARED_MEMORY` | A completed PID later disappeared; installed manager retains only the last 100 completed sessions. |
+| FS0 source branch, implementation PR or child START | `NOT_PROVEN / PRESTART` | No public first-party FS0 implementation branch, receiver ACK or START was found. The working vendor connection does not create that lifecycle. |
+| Complete governed FS0 | `NOT_PROVEN` | No enforced isolated policy, source/Attempt binding, durable structured receipt path, lost-response proof, pilot-only revoke/reconnect or unchanged Executive proof. |
 | Exact dormant ChatGPT wake | `PARTIAL / NOT_PROVEN_END_TO_END` | Durable process/return and exact inactive-session wake remain separate claims. |
 | All-reachable-mutator stale-session fencing | `NOT_BUILT_AS_PROVEN_CAPABILITY` | Closed vocabulary and falsifier exist; complete route inventory/evidence does not. |
 | Fleet-scale multi-account autonomy | `NOT_PROVEN` | Capacity, binding, wake, permissions, review throughput and real product outcomes remain separate prerequisites. |
 
-## Current Lane A — `WEB_CEO_FILE_SHELL_FS0`
+## Current Lane A — governed Web-CEO host access
 
-**Observable mission:** one authorized Web CEO completes the exact disposable Mac file/shell journey and rollback described in the Chairman memo.
+**Observable mission:** one authorized Web CEO completes a useful, isolated, source/effect-bound file/process journey through one existing executor, with durable receipts and pilot-only revoke/readback.
 
 **Existing owner:**
 
@@ -94,16 +124,22 @@ All historical exact heads, observations and negative findings remain evidence f
 - Integration task: `01a06f72-aaae-77f1-a3fb-28f5d05c107a`
 - proposed child: `web-ceo-workbench-fs0-20260906-sol-001`
 - last verified child state: `NOT_SUBMITTED / PRESTART`
+- accessible transport pointer: `C0BSBM78V1N/1788695066.321929`, effect `NONE`.
 
-The current Slack identity cannot read that DM carrier and therefore cannot infer owner pickup or first-party child execution. A transport-only continuation pointer was posted and read back at `C0BSBM78V1N/1788695066.321929`; its effect is `NONE`. Separately, immutable PR #490 comment `5559023488` proves one attended vendor-plugin baseline on explicit device `cfd09f03-2e6e-4a24-843c-8401d4a7169d`; that evidence must not be erased merely because the DM remains unreadable.
+The current Slack identity cannot read the canonical DM carrier and therefore cannot infer owner pickup or first-party child execution. The public pointer is evidence transport only. It is not a replacement carrier.
 
-**Required owner action:** consume receipt `5559023488`, stop treating callable attended Mac file/write/shell access as absent for this Web seat, and reconcile the existing DM carrier plus any proposed child/effect. Reuse the functioning Remote Desktop Commander connection for expressly authorized attended work. Originate at most one gap-only continuation only when a remaining security/integration/product capability requires implementation after deduplication. Prefer Terra for bounded engineering; use CTO Sol only for the authority-sensitive seam. Do not create a second task, carrier, backend, branch, tunnel or watcher from the transport pointer.
+**Proven; do not repeat merely to enlarge the record:** baseline synthetic file/write/checked-edit/readback, exit `0`, exit `7`, exact-owned interactive process input, exact-owned process cancellation readback, passive bounded image delivery and the current connection's schema/configuration observations.
 
-**No-rebuild boundary:** one separately versioned Workbench capability over one existing suitable local executor and supported private MCP/tunnel machinery. Do not build both OpenClaw and DesktopCommander adapters. Do not repoint the Executive tunnel. Do not add a scheduler, permission database, process manager, lifecycle, transcript memory, cloud relay, new Mac app or browser extension in FS0.
+**Smallest remaining product composition:**
 
-**Proven on one attended vendor connection:** explicit-device Mac identification, bounded system/scratch reads, disposable create/update/readback, exact-byte comparison, one real exit-0 process and one intentional exit-7 process.
+1. **Schema delivery:** preserve the existing local editor; locate and repair the exact supported boundary that strips the exported `edit_block` schema, with discovery/readback tests.
+2. **Structured durable evidence:** expose typed launch/input/cancel/terminal/effect/output receipts, explicit retention/coverage, owner-issued pre-effect identity and loss-safe reconciliation through existing provider/Attempt and GitHub/evidence owners.
+3. **Isolated policy and revoke:** one pilot-specific nonempty root policy, synthetic traversal/symlink/out-of-scope refusals, bounded command/environment/output/timeout behavior, explicit telemetry disposition, disconnect/revoke/reconnect and proof that the existing Executive connection is unchanged.
+4. **First-party seam:** exact source/Attempt/worker binding and independent consumer readback. The working vendor connection is a provider, not the lifecycle or evidence owner.
 
-**Still required for complete FS0:** fail-closed configuration; traversal/symlink/out-of-scope refusal; stale-preimage refusal; typed/bounded output including the observed merged-stream limitation; timeout and cancellation; pre-effect identity and lost-response reconciliation; surgical edit or an explicit design rejection of the malformed `edit_block` surface; disconnect/revoke/reconnect; independent readback; unchanged Executive connection; and any separately admitted desktop/Chrome or unattended claim. Do not rerun the proven baseline merely to make the evidence look larger.
+Browser attachment and active desktop action remain separately admitted later capabilities. The passive image receipt does not authorize clicking, typing or generic mutation of the originating CEO conversation.
+
+**No-rebuild boundary:** reuse one existing suitable executor and supported private transport. Do not build both OpenClaw and DesktopCommander adapters; repoint Executive; add a scheduler, lifecycle, permission database, process manager, PID registry, log store, retry plane, transcript memory, cloud relay, new Mac app or browser extension.
 
 ## Current Lane B — authenticated Business Steward cockpit
 
@@ -112,6 +148,12 @@ The current Slack identity cannot read that DM carrier and therefore cannot infe
 **Current truth:** PR #500 protects U1 binding/enrollment tooling only. Do not commission another U1 source-publication worker. PR #463 remains the truthful partial S1 carrier; its prior writer is terminal and must not be revived.
 
 **Remaining gates:** current-base/release resolution, immutable package/app generation, publication/import/install, endpoint and OAuth/resource/subject/client configuration, useful reads, degraded states, post-expiry refresh, independent evidence acceptance and rollback/readback.
+
+## Skillpack and Agent OS boundaries
+
+The later host proof identifies a useful future cold-start rule: a Web Sol should discover currently connected host capabilities before claiming that computer/file access is unavailable. Protected PR #147 already owns an overlapping frozen Skillpack 1.1.0 candidate and a missing 16-run behavioral gate. Do not mutate or widen #147 from this carrier, do not invalidate its frozen procedure bytes, and do not create another Skillpack authority plane. Composition requires a separate current-source ruling after #147's exact state is reconciled.
+
+Macro Draft/Hold PR #6944 records the load-bearing Desktop Commander discovery in the existing Agent OS discovery plane. It has one added discovery only and no workstream-status, worker, runtime, FS0 acceptance or release effect. It must pass current Agent OS validation and independent review before any merge; its existence does not substitute for the current owner decision above.
 
 ## Terminal recovery child
 
@@ -125,8 +167,9 @@ The Executive connector visible to this Sol returned fixture/degraded state with
 
 ## Exact next action
 
-1. Finish this bounded PR #490 evidence refresh and publish one exact-head/source-continuity/check census.
-2. The existing Personal-MCP Cockpit/Integration owner consumes receipt `5559023488`, reconciles its DM carrier and any proposed child/effect, and returns a gap-only continuation ruling without duplicating the functioning vendor backend or existing owners.
-3. Existing Steward/Integration owners continue the independent one-cockpit read lane.
-4. After the records refresh is immutable and checks are terminal, obtain one exact-head independent architecture review; do not treat a plan comment or this evidence receipt as that review.
-5. Keep PR #490 Draft/Hold until independent review and release adjudication. A records merge would preserve the bounded attended proof but would not itself install, activate or extend the vendor connection; prove complete FS0, first-party Workbench/Executive integration, runtime execution, an evaluation result or production acceptance.
+1. Finish this bounded PR #490 evidence refresh and publish one exact-head/source/check/review/thread checkpoint.
+2. The existing Personal-MCP Cockpit/Integration owner consumes comments `5559023488`, `5559187015` and `5559231616`, reconciles the DM carrier and any proposed child/effect, and freezes the smallest schema-delivery + durable-terminal-evidence + isolated-policy/revoke composition over one existing executor.
+3. Validate and independently review Macro PR #6944 as a records-only Agent OS discovery without advancing workstream or FS0 status.
+4. Existing Steward/Integration owners continue the independent one-cockpit read lane.
+5. After the PR #490 records refresh is immutable and checks are terminal, obtain one exact-head independent architecture review. Do not treat an evidence comment as that review.
+6. Keep PR #490 Draft/Hold until independent review and release adjudication. A records merge would preserve evidence only; it would not install, configure, isolate, revoke, execute or accept the governed Workbench.
