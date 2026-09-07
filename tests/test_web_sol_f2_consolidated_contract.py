@@ -611,3 +611,26 @@ def test_every_post_actuation_foreground_failure_is_effect_unknown_without_repla
 ):
     completed = _run_background_scenario(scenario)
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_successful_content_harness_process_settles_without_losing_timeout():
+    node = shutil.which("node")
+    assert node is not None, "Node is required for process-settlement proof"
+    process = subprocess.Popen(
+        [node, "-e", CONTENT_HARNESS, str(CONTENT), "chatgpt.com", "normal"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate(timeout=5)
+        pytest.fail(
+            "successful content harness remained alive behind losing probe timeout",
+            pytrace=False,
+        )
+    assert process.returncode == 0, stdout + stderr
+    assert stdout.strip() == client.conversation_fingerprint(binding(host="chatgpt.com"))
+    assert stderr == ""
