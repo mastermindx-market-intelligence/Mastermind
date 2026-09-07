@@ -60,11 +60,15 @@ Each projected database reserves machine metadata fields from day one:
 
 Human-authored Chairman Notes instead use `Input State`, `Reviewed At`, and `Promoted Canonical ID`. A note is never authoritative merely because it is marked `NEW_INPUT`.
 
+Every N0 database is a single-data-source database. Reuse requires the existing database to have exactly one data source and the exact reviewed property-name/type map. A same-named database with missing, extra, or wrong-type columns is a schema mismatch and blocks all writes rather than being silently adopted.
+
 ## 4. Idempotency and correction law
 
 N0 bootstrap matching is exact and parent-scoped: `(parent_page_id, object kind, exact reviewed title)`. The manifest `key` is the stable internal contract key used to associate a planned child with later projector behavior; it is not inferred from arbitrary Notion content.
 
 The implementation enumerates children of the exact parent page. Same-title objects under another parent do not match. A page does not match a database with the same title. Multiple exact matches under the parent are an ambiguity refusal, not an invitation to pick one.
+
+Before the first write, every database selected for reuse is schema-proven through the current Notion database → data-source boundary. After creation/reconciliation, all N0 databases are proven again. The bootstrap never repairs an unknown pre-existing schema automatically.
 
 Later projection identity will be the canonical record ID (`WS:*`, `DEC:*`, `DSC:*`, repository artifact ID, etc.) plus its declared canonical owner. Notion page/database IDs are external addresses, not authority.
 
@@ -90,7 +94,9 @@ Required runtime inputs are external configuration only:
 
 The client pins `Notion-Version: 2026-03-11`. Network writes are only allowed when the explicit `--apply` flag is present. Default mode is read-only planning.
 
-The implementation follows current Notion API boundaries: a page child uses the page-only `title` property shape; a database is created under the parent page with its initial data-source property schema. No provider token is persisted by the bootstrap.
+The implementation follows current Notion API boundaries: a page child uses the page-only `title` property shape; a database is created under the parent page with its initial data-source property schema; database schema verification retrieves the container and its one data source separately. No provider token is persisted by the bootstrap.
+
+The client paces request starts at a conservative default interval rather than depending on write retries. Read-only `429` responses may honor one bounded `Retry-After`; mutating calls are never automatically retried.
 
 ## 7. Deterministic method
 
@@ -106,6 +112,7 @@ The bootstrap fails closed on:
 - parent page not visible to the connection;
 - parent mismatch;
 - duplicate exact child identities;
+- a reused database with zero/multiple data sources or a mismatched property-name/type schema;
 - 401/403 authorization refusal;
 - 404 parent/object visibility failure;
 - 429 rate limit after bounded `Retry-After` handling on reads;
@@ -113,16 +120,16 @@ The bootstrap fails closed on:
 - unsupported Notion API version or schema drift;
 - ambiguous effect after a write response cannot be reconciled.
 
-Mutating requests are never automatically retried. An effect-unknown create is reconciled by re-reading the exact parent's children. If the exact intended child is observed, the receipt records `reconciled`; otherwise the effect remains unknown and the operation stops rather than issuing another create.
+Mutating requests are never automatically retried. A transport failure, malformed success response, or non-definitive mutation HTTP response is treated as effect-unknown. The bootstrap reconciles by re-reading the exact parent's children. If the exact intended child is observed, the receipt records `reconciled`; otherwise the effect remains unknown and the operation stops rather than issuing another create.
 
 ## 9. N0 implementation order
 
 1. Freeze this architecture and the manifest.
 2. Implement pure manifest validation and plan generation.
 3. Implement a minimal Notion REST client using the pinned API version.
-4. Add exact-parent discovery and ambiguity refusal.
-5. Add `--apply` creation of missing children only.
-6. Add unit tests with no real network calls, including current request-payload shapes.
+4. Add exact-parent discovery, schema proof, and ambiguity refusal.
+5. Add paced `--apply` creation of missing children only.
+6. Add unit tests with no real network calls, including current request-payload and schema-proof behavior.
 7. Run CI and adversarial Sol review of the diff.
 8. Only after a real connection/root page is reachable: perform live dry-run, apply, rerun, and prove zero duplicate creates.
 
@@ -136,6 +143,7 @@ Repository acceptance requires:
 - exact existing child under the parent resolves to reuse;
 - same title with wrong object kind does not resolve;
 - duplicate exact matches refuse;
+- a wrong-schema reused database refuses **before any write**;
 - apply is impossible without explicit `--apply` plus required environment;
 - page/database request payloads match the pinned Notion API contract;
 - simulated effect-unknown never blindly retries a create.
@@ -143,7 +151,7 @@ Repository acceptance requires:
 `PROVEN_LIVE` additionally requires real Notion evidence:
 
 1. live dry-run against the intended parent;
-2. one live apply creates/reuses exactly the eight N0 objects;
+2. one live apply creates/reuses exactly the eight N0 objects and proves all four database schemas;
 3. immediate second live apply creates **zero** objects;
 4. human inspection confirms the workspace is usable;
 5. object IDs + parent identity are recorded in a non-secret receipt;
