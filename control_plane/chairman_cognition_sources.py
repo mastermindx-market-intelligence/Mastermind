@@ -559,7 +559,9 @@ def _agentos_brief_status(value: Any) -> tuple[bool, str | None]:
     if not _string_list(warnings):
         return False, observed_at
 
-    healthy = not degraded and not warnings and not readiness.get("degraded")
+    # Advisory warnings remain content-bound evidence.  They do not by themselves
+    # mean that an owner join is unavailable or that readiness truth is malformed.
+    healthy = not degraded and not readiness.get("degraded")
     return healthy, observed_at
 
 
