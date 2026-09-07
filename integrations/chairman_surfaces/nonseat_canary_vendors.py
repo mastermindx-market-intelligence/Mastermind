@@ -56,6 +56,7 @@ from . import mas115_multilogin_port_policy as _port_policy
 _MLX_LAUNCHER_ORIGIN = "https://launcher.mlx.yt:45001"
 _MLX_CLOUD_ORIGIN = "https://api.multilogin.com"
 _MAX_RESPONSE_BYTES = 64 * 1024
+_MAX_DECLARED_MEDIA_TYPE_BYTES = 256
 # Keep each cloud-inventory response comfortably below the independent 64 KiB
 # transport cap even when profile metadata is several KiB per row. The census
 # remains complete and bounded by `_MAX_PROFILE_CENSUS`; only its page size is
@@ -80,6 +81,7 @@ _USER_DATA_DIR_RE = re.compile(r"--user-data-dir=(\S+)")
 _WEBDRIVER_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _WEBDRIVER_MISSING = object()
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_HTTP_TOKEN_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 
 
 def _canonical_multilogin_profile_id(value):
@@ -106,7 +108,7 @@ PEER_OWNERSHIP_RECEIPT_PATH = "~/Library/Application Support/Mastermind/control-
 PEER_INTENT_SCHEMA = "mastermind.mas115_nonseat_peer_lifecycle_state.v5"
 PEER_GENESIS_WITNESS_SCHEMA = "mastermind.mas115_nonseat_peer_genesis_witness.v1"
 PEER_BOOTSTRAP_FENCE_SCHEMA = "mastermind.mas115_nonseat_peer_bootstrap_fence.v1"
-PEER_RECEIPT_SCHEMA = "mastermind.mas115_nonseat_peer_lifecycle.v2"
+PEER_RECEIPT_SCHEMA = "mastermind.mas115_nonseat_peer_lifecycle.v3"
 PEER_OWNERSHIP_FACT_SCHEMA = "mastermind.mas115_peer_downstream_ownership.v1"
 # Semantic source generation for the reviewed REALM1-C1 R4 lifecycle.  It is
 # deliberately independent of a self-referential Git commit hash, but changes
@@ -348,37 +350,164 @@ INITIAL_PEER_CENSUS_DIAGNOSTICS = frozenset({
     "PROFILE_ITEM_INVALID",
     "PAGINATION_INVALID",
 })
+INITIAL_PEER_CENSUS_STATUS_CLASSES = frozenset({
+    "NONE",
+    "HTTP_200",
+    "HTTP_3XX",
+    "HTTP_AUTH",
+    "HTTP_RATE_LIMITED",
+    "HTTP_OTHER_4XX",
+    "HTTP_5XX",
+    "HTTP_OTHER",
+})
+INITIAL_PEER_CENSUS_MEDIA_TYPE_CLASSES = frozenset({
+    "NONE", "MISSING", "JSON", "HTML", "TEXT", "OTHER",
+})
+INITIAL_PEER_CENSUS_DECODER_CLASSES = frozenset({
+    "NONE", "UNICODE_REJECTED", "JSON_VALUE_REJECTED",
+})
+_INITIAL_PEER_CENSUS_DECODE_CONTEXT_KEYS = (
+    "status_class", "declared_media_type_class", "decoder_class",
+)
+_INITIAL_PEER_CENSUS_DECODE_CONTEXT_NONE = ("NONE", "NONE", "NONE")
 _INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL = object()
+
+
+def _initial_peer_census_decode_context_tuple(value) -> tuple[str, str, str]:
+    if value is None:
+        return _INITIAL_PEER_CENSUS_DECODE_CONTEXT_NONE
+    if not isinstance(value, dict) or set(value) != set(
+        _INITIAL_PEER_CENSUS_DECODE_CONTEXT_KEYS
+    ):
+        raise ValueError("invalid initial peer census decode context")
+    context = tuple(value[key] for key in _INITIAL_PEER_CENSUS_DECODE_CONTEXT_KEYS)
+    if (
+        not isinstance(context[0], str)
+        or context[0] not in INITIAL_PEER_CENSUS_STATUS_CLASSES
+        or not isinstance(context[1], str)
+        or context[1] not in INITIAL_PEER_CENSUS_MEDIA_TYPE_CLASSES
+        or not isinstance(context[2], str)
+        or context[2] not in INITIAL_PEER_CENSUS_DECODER_CLASSES
+    ):
+        raise ValueError("invalid initial peer census decode context")
+    return context
+
+
+def _initial_peer_census_decode_context_dict(context) -> dict:
+    return dict(zip(_INITIAL_PEER_CENSUS_DECODE_CONTEXT_KEYS, context))
+
+
+def _initial_peer_census_status_class(status_code) -> str:
+    if type(status_code) is not int:
+        return "HTTP_OTHER"
+    if status_code == 200:
+        return "HTTP_200"
+    if status_code in (401, 403):
+        return "HTTP_AUTH"
+    if status_code == 429:
+        return "HTTP_RATE_LIMITED"
+    if 300 <= status_code < 400:
+        return "HTTP_3XX"
+    if 400 <= status_code < 500:
+        return "HTTP_OTHER_4XX"
+    if 500 <= status_code < 600:
+        return "HTTP_5XX"
+    return "HTTP_OTHER"
+
+
+def _initial_peer_census_media_type_class(headers) -> str:
+    try:
+        values = headers.get_list("content-type")
+    except Exception:  # noqa: BLE001 — header objects are outside this receipt contract
+        return "OTHER"
+    if not values:
+        return "MISSING"
+    if len(values) != 1:
+        return "OTHER"
+    declared = values[0]
+    if not isinstance(declared, str):
+        return "OTHER"
+    try:
+        if len(declared.encode("utf-8")) > _MAX_DECLARED_MEDIA_TYPE_BYTES:
+            return "OTHER"
+    except UnicodeError:
+        return "OTHER"
+    # A comma is ambiguous here: it may represent combined duplicate fields.
+    if "," in declared:
+        return "OTHER"
+    # HTTP media-type tokens are ASCII.  Validate the declared tokens before
+    # normalization so Unicode case folding or non-OWS whitespace cannot turn
+    # an invalid wire value into an accepted JSON declaration.
+    media_type = declared.split(";", 1)[0].strip(" \t")
+    if media_type.count("/") != 1:
+        return "OTHER"
+    major, subtype = media_type.split("/", 1)
+    if (
+        not major
+        or not subtype
+        or _HTTP_TOKEN_RE.fullmatch(major) is None
+        or _HTTP_TOKEN_RE.fullmatch(subtype) is None
+    ):
+        return "OTHER"
+    major = major.casefold()
+    subtype = subtype.casefold()
+    if major == "application" and (
+        subtype == "json"
+        or (subtype.endswith("+json") and len(subtype) > len("+json"))
+    ):
+        return "JSON"
+    if (major, subtype) == ("text", "html"):
+        return "HTML"
+    if (major, subtype) == ("text", "plain"):
+        return "TEXT"
+    return "OTHER"
 
 
 class _InitialPeerCensusDiagnosticSink:
     """Invocation-local, one-way observation capability for the first census."""
 
-    __slots__ = ("_seal", "_value")
+    __slots__ = ("_observation", "_seal")
 
     def __init__(self, seal):
         if seal is not _INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL:
             raise TypeError("initial peer census diagnostic sink is private")
         self._seal = seal
-        self._value = "NONE"
+        self._observation = (
+            "NONE", _INITIAL_PEER_CENSUS_DECODE_CONTEXT_NONE,
+        )
 
     @property
     def value(self) -> str:
-        return self._value
+        return self._observation[0]
 
-    def _record(self, diagnostic: str) -> None:
+    @property
+    def decode_context(self) -> dict:
+        return _initial_peer_census_decode_context_dict(self._observation[1])
+
+    def _record(self, diagnostic: str, *, decode_context=None) -> None:
         if diagnostic not in INITIAL_PEER_CENSUS_DIAGNOSTICS or diagnostic == "NONE":
             raise ValueError("invalid initial peer census diagnostic")
-        if self._value == "NONE":
-            self._value = diagnostic
+        if self._observation[0] != "NONE":
+            return
+        context = _initial_peer_census_decode_context_tuple(decode_context)
+        if diagnostic == "RESPONSE_DECODE_FAILURE":
+            if "NONE" in context:
+                raise ValueError("decode failure requires complete decode context")
+        elif context != _INITIAL_PEER_CENSUS_DECODE_CONTEXT_NONE:
+            raise ValueError("decode context is only valid for decode failure")
+        # One immutable observation assignment binds the first failure and its
+        # optional decode context together for this invocation.
+        self._observation = (diagnostic, context)
 
 
-def _record_initial_peer_census_diagnostic(sink, diagnostic: str) -> None:
+def _record_initial_peer_census_diagnostic(
+    sink, diagnostic: str, *, decode_context=None,
+) -> None:
     if (
         type(sink) is _InitialPeerCensusDiagnosticSink
         and sink._seal is _INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL  # noqa: SLF001
     ):
-        sink._record(diagnostic)  # noqa: SLF001
+        sink._record(diagnostic, decode_context=decode_context)  # noqa: SLF001
 
 
 def peer_profile_name(folder_id: str, anchor_profile_id: str) -> str:
@@ -395,7 +524,8 @@ def peer_profile_name(folder_id: str, anchor_profile_id: str) -> str:
 def peer_receipt(
     *, effect: str, code: str, verdict: str, digests: dict,
     removal_disposition: str = "NOT_APPLICABLE",
-    initial_peer_census_diagnostic: str = "NONE", **predicates,
+    initial_peer_census_diagnostic: str = "NONE",
+    initial_peer_census_decode_context=None, **predicates,
 ) -> dict:
     """Build one closed, redacted MAS-115 peer lifecycle receipt."""
 
@@ -412,6 +542,14 @@ def peer_receipt(
         or initial_peer_census_diagnostic not in INITIAL_PEER_CENSUS_DIAGNOSTICS
     ):
         raise ValueError("unknown initial peer census diagnostic")
+    decode_context = _initial_peer_census_decode_context_tuple(
+        initial_peer_census_decode_context,
+    )
+    if initial_peer_census_diagnostic == "RESPONSE_DECODE_FAILURE":
+        if "NONE" in decode_context:
+            raise ValueError("decode failure requires complete decode context")
+    elif decode_context != _INITIAL_PEER_CENSUS_DECODE_CONTEXT_NONE:
+        raise ValueError("decode context is only valid for decode failure")
     if not isinstance(digests, dict) or set(digests) != {"folder", "peer_name", "peer_profile", "anchor_profile"}:
         raise ValueError("peer receipt digests must carry exactly the fixed digest keys")
     for value in digests.values():
@@ -429,6 +567,9 @@ def peer_receipt(
         "schema": PEER_RECEIPT_SCHEMA,
         "operation": PEER_OPERATION_KEY,
         "initial_peer_census_diagnostic": initial_peer_census_diagnostic,
+        "initial_peer_census_decode_context": (
+            _initial_peer_census_decode_context_dict(decode_context)
+        ),
         "verdict": verdict,
         "effect": effect,
         "effect_detail": PEER_EFFECT_DETAILS[effect],
@@ -483,11 +624,20 @@ class BoundedHttpClient:
     ):
         chunks = []
         size = 0
+        status_class = "HTTP_OTHER"
+        declared_media_type_class = "OTHER"
         try:
             with self._client.stream(
                 method, origin + path, headers=headers, params=params, json=json_body,
             ) as response:
                 status_code = response.status_code
+                if diagnostic_sink is not None:
+                    status_class = _initial_peer_census_status_class(status_code)
+                    declared_media_type_class = (
+                        _initial_peer_census_media_type_class(
+                            getattr(response, "headers", None),
+                        )
+                    )
                 for chunk in response.iter_bytes():
                     size += len(chunk)
                     if size > _MAX_RESPONSE_BYTES:
@@ -503,9 +653,26 @@ class BoundedHttpClient:
             return None
         try:
             payload = json.loads(b"".join(chunks)) if chunks else None
-        except (UnicodeDecodeError, ValueError):
+        except UnicodeDecodeError:
             _record_initial_peer_census_diagnostic(
-                diagnostic_sink, "RESPONSE_DECODE_FAILURE",
+                diagnostic_sink,
+                "RESPONSE_DECODE_FAILURE",
+                decode_context={
+                    "status_class": status_class,
+                    "declared_media_type_class": declared_media_type_class,
+                    "decoder_class": "UNICODE_REJECTED",
+                },
+            )
+            return None
+        except ValueError:
+            _record_initial_peer_census_diagnostic(
+                diagnostic_sink,
+                "RESPONSE_DECODE_FAILURE",
+                decode_context={
+                    "status_class": status_class,
+                    "declared_media_type_class": declared_media_type_class,
+                    "decoder_class": "JSON_VALUE_REJECTED",
+                },
             )
             return None
         return _BoundedResponse(status_code, payload)
@@ -1430,6 +1597,9 @@ class MultiloginClient:
                 verdict=verdict,
                 digests=digests,
                 initial_peer_census_diagnostic=initial_census_diagnostic.value,
+                initial_peer_census_decode_context=(
+                    initial_census_diagnostic.decode_context
+                ),
                 **predicates,
             )
 
@@ -4618,6 +4788,9 @@ def _create_peer_profile_cli(
                 digests=receipt["digests"],
                 initial_peer_census_diagnostic=receipt[
                     "initial_peer_census_diagnostic"
+                ],
+                initial_peer_census_decode_context=receipt[
+                    "initial_peer_census_decode_context"
                 ],
                 **predicates,
             )

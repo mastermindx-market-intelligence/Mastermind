@@ -348,8 +348,11 @@ one genuinely cross-repo question below, Macro's own
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -991,6 +994,7 @@ def project_autonomy(
     declared_blockers: Mapping[str, Mapping[str, Any]] | None = None,
     unmapped_responsibilities: Sequence[Mapping[str, Any]] | None = None,
     runtime_root_candidates: Mapping[str, Sequence[str]] | None = None,
+    validity_context: _MapperValidity | None = None,
 ) -> dict[str, Any]:
     """Pure, deterministic projection of one Executive Steward snapshot.
 
@@ -1054,6 +1058,13 @@ def project_autonomy(
     source_failure_codes = frozenset(f.code for f in snapshot.source_failures)
     declared_blockers = declared_blockers or {}
     runtime_root_candidates = runtime_root_candidates or {}
+    qualified_context = (
+        isinstance(validity_context, _MapperValidity)
+        and validity_context.generated_at == generated_at
+        and validity_context.snapshot == snapshot
+        and validity_context.declared_blockers == declared_blockers
+        and validity_context.runtime_root_candidates == runtime_root_candidates
+    )
     unmapped_rows = sorted(
         (dict(row) for row in (unmapped_responsibilities or ())),
         key=lambda row: (row.get("responsibility_ref") or "", row.get("reason") or ""),
@@ -1339,6 +1350,20 @@ def project_autonomy(
             "source_receipts": _receipts_sorted(contributing_sources),
             "query_status": query_status,
         }
+        # Permission to present these dated facts as current is separate from
+        # their source-owned classifications. A naked CURRENT enum has no
+        # validity context. Dispatch and saved navigation are attached later.
+        basis = {"responsibility_ref": ref, "root_job_id": identity.root_job_id,
+                 "root_job_candidates": sorted(root_job_candidates),
+                 "accountable_seat": identity.accountable_seat.value,
+                 "state": identity.state, "owed_turn": owed_turn}
+        card["validity"] = {
+            name: _validity_component(
+                name, contributing_sources, generated_at,
+                qualified=qualified_context, eligible=freshness == Freshness.CURRENT.value,
+                basis=basis,
+            ) for name in ("card", "decision_current")
+        }
         responsibilities.append(card)
 
     responsibilities.sort(
@@ -1562,6 +1587,165 @@ def _freshness_for(observed_at: Any, reference_at: Any) -> tuple[str | None, Fre
     if age <= FRESHNESS_BUDGET:
         return observed_at, Freshness.CURRENT
     return observed_at, Freshness.STALE
+
+
+VALIDITY_SCHEMA = "mastermind.autonomy_validity.v1"
+VALIDITY_POLICY = "mapper-inclusive-48h-future-1h.v1"
+
+
+@dataclass(frozen=True)
+class _MapperValidity:
+    """Transient pairing to exact mapped inputs; never a credential or store."""
+
+    snapshot: ExecutiveStewardSnapshot
+    declared_blockers: Mapping[str, Any]
+    runtime_root_candidates: Mapping[str, Any]
+    generated_at: str
+    binding_fingerprints: tuple[str, ...]
+
+
+def build_autonomy_validity_context(**inputs: Any) -> _MapperValidity:
+    """Qualify the same pure mapper inputs beside its unchanged return type.
+
+    Reconstruction checks the actual snapshot pairing at the projector; it
+    performs no acquisition. Equality includes all mapped facts and source
+    receipts, so a context for another root/target/reference cannot enroll a
+    caller-authored CURRENT snapshot.
+    """
+    fingerprints = []
+    bindings = inputs.get("bindings")
+    for binding in bindings.get("bindings", ()) if isinstance(bindings, Mapping) else ():
+        if isinstance(binding, Mapping):
+            try:
+                fingerprints.append(binding_fingerprint(binding))
+            except (TypeError, ValueError):
+                pass
+    return _MapperValidity(
+        snapshot=build_autonomy_snapshot(**inputs),
+        declared_blockers=declared_blockers_from_agent_os_state(
+            inputs.get("agent_os_state"), inputs.get("generated_at")),
+        runtime_root_candidates=runtime_root_candidates_from_runtime_jobs(inputs.get("runtime_jobs")),
+        generated_at=inputs.get("generated_at"),
+        binding_fingerprints=tuple(sorted(fingerprints)),
+    )
+
+
+def _proof_digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=True, allow_nan=False).encode()).hexdigest()
+
+
+def _without_freshness(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {k: _without_freshness(v) for k, v in value.items() if k != "freshness"}
+    if isinstance(value, (tuple, list)):
+        return [_without_freshness(v) for v in value]
+    return value
+
+
+def binding_fingerprint(binding: Mapping[str, Any]) -> str:
+    """Equality of the complete canonical saved target; never navigation authority."""
+    return _proof_digest(dict(binding))
+
+
+def _validity_component(name: str, sources: set[SourceRef], generated_at: str, *,
+                        qualified: bool, eligible: bool, basis: Mapping[str, Any]) -> dict[str, Any]:
+    receipts = _receipts_sorted(sources)
+    return _validity_from_receipts(name, receipts, generated_at, qualified=qualified,
+                                   eligible=eligible, basis=basis)
+
+
+def _validity_from_receipts(name: str, receipts: list[dict[str, Any]], generated_at: str, *,
+                            qualified: bool, eligible: bool, basis: Mapping[str, Any]) -> dict[str, Any]:
+    # Freshness and the remaining budget depend on qualification time. They
+    # cannot turn the same source evidence into a new proof after expiry.
+    proof_sources = [{k: v for k, v in r.items() if k != "freshness"} for r in receipts]
+    proof_ref = _proof_digest({"component": name, "policy": VALIDITY_POLICY,
+                               "sources": proof_sources, "basis": _without_freshness(basis)})
+    budgets: list[int] = []
+    reference = _parse_iso8601(generated_at)
+    if qualified and eligible and receipts and reference is not None:
+        for source in receipts:
+            observed = _parse_iso8601(source.get("observed_at"))
+            _, current = _freshness_for(source.get("observed_at"), generated_at)
+            if source.get("freshness") != Freshness.CURRENT.value or current is not Freshness.CURRENT or observed is None:
+                break
+            # Integer timedelta division floors once at the policy boundary;
+            # inclusive CURRENT at exactly48h deliberately has zero permission.
+            budgets.append((FRESHNESS_BUDGET - (reference - observed)) // timedelta(milliseconds=1))
+    duration = min(budgets) if budgets and len(budgets) == len(receipts) else None
+    return {"schema": VALIDITY_SCHEMA, "policy": VALIDITY_POLICY,
+            "qualified_at": generated_at, "proof_ref": proof_ref,
+            "sources": receipts, "valid_for_ms": duration,
+            "reason": "source_budget" if duration is not None else "unqualified_source_context"}
+
+
+def _attach_navigation_validity(card: dict[str, Any], row: Mapping[str, Any] | None, *,
+                                generated_at: str, context: _MapperValidity | None,
+                                bindings: Mapping[str, Any] | None) -> None:
+    """Keep dispatch and saved-target age separate from card/decision facts."""
+    qualified = isinstance(context, _MapperValidity) and context.generated_at == generated_at
+    evidence = row.get("evidence") if row is not None else None
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    field = "w3c_source_observed_at" if evidence.get("w3c_state") is not None else "observed_at"
+    stamp, freshness = _freshness_for(evidence.get(field), generated_at)
+    # This references the exact already-validated input field and preserves
+    # its declared owners. It does not manufacture another Steward SourceRef.
+    receipt = {"input": "dispatch_evidence", "field": field, "observed_at": stamp,
+               "freshness": freshness.value,
+               "terminal_source_owner": evidence.get("w3c_terminal_source_owner"),
+               "wake_source_owner": evidence.get("w3c_wake_source_owner"),
+               "snapshot_digest": evidence.get("w3c_snapshot_digest")}
+    dispatch = _validity_from_receipts(
+        "dispatch", [receipt] if evidence else [], generated_at,
+        qualified=qualified, eligible=bool(row) and row.get("historical") is False,
+        basis={"responsibility_ref": card["responsibility_ref"], "root_job_id": card["root_job_id"],
+               "evidence": evidence},
+    )
+    validity = dict(card.get("validity") or {})
+    validity["dispatch"] = dispatch
+    seat = (card.get("owed_turn") or {}).get("seat")
+    raw_bindings = bindings.get("bindings", ()) if isinstance(bindings, Mapping) else ()
+    candidates = [b for b in raw_bindings if isinstance(b, Mapping)
+                  and b.get("work_ref") == card["responsibility_ref"] and b.get("role") == seat]
+    binding = candidates[0] if len(candidates) == 1 else None
+    binding_source = None
+    fingerprint = None
+    if binding is not None:
+        try:
+            fingerprint = binding_fingerprint(binding)
+            mapped = _surface_facts_from_bindings({"bindings": [binding]}, generated_at)
+            # Exact source membership, including target fields, must match
+            # the sidecar made from the original mapper inputs.
+            if (len(mapped) == 1 and qualified and mapped[0] in context.snapshot.surfaces
+                    and fingerprint in context.binding_fingerprints):
+                binding_source = _receipt(mapped[0].source)
+        except (TypeError, ValueError):
+            pass
+    card_component = validity.get("card", {})
+    sources = list(card_component.get("sources", ())) + list(dispatch["sources"])
+    if binding_source is not None:
+        sources.append(binding_source)
+    unsafe_dispatch = {"DELIVERY_UNCONSUMED", "WATCH_UNPROVEN",
+                       "RUNTIME_BINDING_RECONCILIATION_REQUIRED", "EFFECT_UNKNOWN", "UNKNOWN"}
+    eligible = (
+        card.get("is_actionable") is True and card.get("runtime_root_state") == "RESOLVED"
+        and row is not None and row.get("dispatch_state") not in unsafe_dispatch
+        and row.get("historical") is False and binding_source is not None
+        and card_component.get("valid_for_ms") is not None and dispatch["valid_for_ms"] is not None
+        and (card.get("placement_state") or {}).get("value") != "EFFECT_UNKNOWN"
+        and (card.get("current_worker") or {}).get("effect_state") != "effect_unknown"
+    )
+    owed = _validity_from_receipts(
+        "owed_open_age", sources, generated_at, qualified=qualified, eligible=eligible,
+        basis={"card_proof": card_component.get("proof_ref"), "dispatch_proof": dispatch["proof_ref"],
+               "responsibility_ref": card["responsibility_ref"], "root_job_id": card["root_job_id"],
+               "owed_seat": seat, "binding_fingerprint": fingerprint},
+    )
+    owed.update({"binding_id": binding.get("binding_id") if binding is not None else None,
+                 "binding_fingerprint": fingerprint, "owed_seat": seat})
+    validity["owed_open_age"] = owed
+    card["validity"] = validity
 
 
 def _attention_responsibility_ref(item: Mapping[str, Any]) -> str | None:
@@ -2943,6 +3127,9 @@ def project_dispatch_consumption(
 def attach_dispatch_consumption(
     autonomy: Mapping[str, Any],
     dispatch: Mapping[str, Any],
+    *,
+    validity_context: _MapperValidity | None = None,
+    bindings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Attach each dispatch row to its card on the EXACT join key.
 
@@ -2967,6 +3154,8 @@ def attach_dispatch_consumption(
         row = rows.get((card.get("responsibility_ref"), card.get("root_job_id")))
         if row is not None:
             merged["dispatch"] = dict(row)
+        _attach_navigation_validity(merged, row, generated_at=autonomy.get("generated_at"),
+                                    context=validity_context, bindings=bindings)
         cards.append(merged)
     out = dict(autonomy)
     out["responsibilities"] = cards
