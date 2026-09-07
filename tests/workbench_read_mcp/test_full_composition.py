@@ -38,9 +38,56 @@ RESOURCE = "https://workbench.example/mcp"
 SCOPE = "workbench.read"
 CLIENT_REF = hashlib.sha256((ISSUER + "\nclient\nfixture-client").encode("utf-8")).hexdigest()
 DEFAULT_TOKEN = object()
-OUTPUT = {"type": "object", "required": ["status", "project_ref", "content", "file_sha256"],
-          "properties": {"status": {"const": "OK"}, "project_ref": {"type": "string"},
-                         "content": {"type": "string"}, "file_sha256": {"type": "string"}}}
+OUTPUT_KEYS = frozenset({
+    "status", "project_ref", "relative_path", "context_ref", "owner_ref", "generation",
+    "view_kind", "committed_head", "file_sha256", "file_identity_digest", "file_bytes",
+    "content", "content_bytes", "total_lines", "line_start", "line_end", "truncated",
+    "next_line", "observed_at_ms", "index_status", "atomic_workspace_snapshot",
+    "observation_digest",
+})
+OUTPUT = {
+    "type": "object",
+    "required": sorted(OUTPUT_KEYS),
+    "properties": {
+        "status": {"const": "OK"},
+        "project_ref": {"type": "string"},
+        "relative_path": {"type": "string"},
+        "context_ref": {"type": "string"},
+        "owner_ref": {"type": "string"},
+        "generation": {"type": "string"},
+        "view_kind": {"type": "string"},
+        "committed_head": {"type": "string"},
+        "file_sha256": {"type": "string"},
+        "file_identity_digest": {"type": "string"},
+        "file_bytes": {"type": "integer"},
+        "content": {"type": "string"},
+        "content_bytes": {"type": "integer"},
+        "total_lines": {"type": "integer"},
+        "line_start": {"type": "integer"},
+        "line_end": {"type": "integer"},
+        "truncated": {"type": "boolean"},
+        "next_line": {"type": ["integer", "null"]},
+        "observed_at_ms": {"type": "integer"},
+        "index_status": {"type": "string"},
+        "atomic_workspace_snapshot": {"type": "boolean"},
+        "observation_digest": {"type": "string"},
+    },
+    "additionalProperties": False,
+}
+
+
+def _forged_complete_result():
+    """Schema-valid M1 result with deliberately false protected attribution."""
+    return {
+        "status": "OK", "project_ref": "alpha", "relative_path": "sentinel.txt",
+        "context_ref": "ctx-forged", "owner_ref": "owner-forged", "generation": "g-forged",
+        "view_kind": "WORKING_TREE", "committed_head": "0" * 40,
+        "file_sha256": "0" * 64, "file_identity_digest": "0" * 64,
+        "file_bytes": 7, "content": "forged\n", "content_bytes": 7,
+        "total_lines": 1, "line_start": 0, "line_end": 1, "truncated": False,
+        "next_line": None, "observed_at_ms": 1, "index_status": "NOT_OBSERVED",
+        "atomic_workspace_snapshot": False, "observation_digest": "0" * 64,
+    }
 
 
 class _Keys:
@@ -203,6 +250,7 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(tools[0]["annotations"]["readOnlyHint"])
         self.assertFalse(tools[0]["annotations"]["destructiveHint"])
         body = self.successful_data(self.result(await self.call()))
+        self.assertEqual(set(body), OUTPUT_KEYS)
         # Detects a callback returning invented bytes, metadata, or cursor fields.
         self.assertEqual(body["content"], "alpha sentinel\n"); self.assertEqual(body["project_ref"], "alpha")
         self.assertEqual(body["file_sha256"], hashlib.sha256(b"alpha sentinel\n").hexdigest())
@@ -212,6 +260,34 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.io_calls, self.executed_operations), (1, 1))
         audit = json.dumps(self.audit.events)
         self.assertNotIn("alpha-user", audit); self.assertNotIn(self.token(), audit)
+
+    async def test_full_composition_withholds_unknown_private_result_fields(self):
+        """A successful real descriptor result must not expose unowned private fields."""
+        private = {
+            "__private_raw_subject__": "raw-subject-alpha-user",
+            "__private_raw_token__": "raw-token-synthetic-sentinel",
+            "__private_root__": "/private/root/synthetic-sentinel",
+            "__private_path__": "../../private/path/synthetic-sentinel",
+        }
+        self.return_transform = lambda result: {**result, **private}
+        before_observations = self.io_calls
+
+        initialized = self.result(await self.rpc(
+            "initialize",
+            {"protocolVersion": "2025-03-26", "capabilities": {},
+             "clientInfo": {"name": "private-output-proof", "version": "1"}},
+            self.token(),
+        ))
+        self.assertIn("serverInfo", initialized)
+        tools = self.result(await self.rpc("tools/list", token=self.token()))["tools"]
+        self.assertEqual([tool["name"] for tool in tools], ["read_project_file"])
+
+        result = self.result(await self.call())
+        self.assertEqual(self.io_calls - before_observations, 1,
+                         "exactly one real descriptor observation is required")
+        self.assertTrue(result["isError"], "PRIVATE_OUTPUT_WITHHELD")
+        self.assertFalse(any(value in json.dumps(result) for value in private.values()),
+                         "PRIVATE_OUTPUT_WITHHELD")
 
     async def test_auth_project_and_model_authority_refusals_precede_io(self):
         # Detects auth/binding shortcuts and acceptance of model-selected root/principal/policy fields.
@@ -491,8 +567,14 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
 
         # M1 bypasses descriptor-port registration: context identity discriminator catches it.
         async def callback_bypass(_caller, _request):
-            return {"status": "OK", "project_ref": "alpha", "content": "forged\n", "file_sha256": "0" * 64}
-        await baseline_then(callback_bypass, lambda body: self.assertIn("context_ref", body, "M1_DISCRIMINATOR"))
+            return _forged_complete_result()
+        await baseline_then(
+            callback_bypass,
+            lambda body: self.assertEqual(
+                (body["context_ref"], body["owner_ref"], body["generation"]),
+                ("ctx-alpha", "owner-alpha", "g1"), "M1_DISCRIMINATOR",
+            ),
+        )
         # M2 bypasses off-thread executor admission while retaining the real descriptor operation.
         observed_threads = []
         async def inline(operation):
@@ -568,10 +650,14 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
         # real MCP call succeed without descriptor context, so the positive
         # context assertion intentionally fails.
         async def old_callback(_caller, _request):
-            return {"status":"OK", "project_ref":"alpha", "content":"forged", "file_sha256":"0" * 64}
+            return _forged_complete_result()
         fake = await self.one_off_call(old_callback)
         with self.assertRaises(AssertionError, msg="M1 fake callback must fail descriptor-context assertion"):
-            self.assertIn("context_ref", self.successful_data(fake))
+            body = self.successful_data(fake)
+            self.assertEqual(
+                (body["context_ref"], body["owner_ref"], body["generation"]),
+                ("ctx-alpha", "owner-alpha", "g1"), "M1_DISCRIMINATOR",
+            )
         # Control 2: an awaitable but inline executor makes a real descriptor
         # observation succeed while the bounded-submission assertion fails.
         caller = ReadCaller(self.subjects["alpha-user"], CLIENT_REF, RESOURCE, (SCOPE,), self.clock + 600)
